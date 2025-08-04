@@ -2977,3 +2977,146 @@ class ExcelProcessor:
             self.logger.error(f"Error getting strain name for product '{tag_name}': {e}")
             return None
 
+    def pythonanywhere_fast_load(self, file_path: str) -> bool:
+        """Ultra-fast loading specifically optimized for PythonAnywhere environment."""
+        try:
+            self.logger.info(f"[PYTHONANYWHERE-FAST] Loading file: {file_path}")
+            
+            # Apply PythonAnywhere-specific optimizations
+            self._apply_pythonanywhere_optimizations()
+            
+            # Clear previous data efficiently
+            if hasattr(self, 'df') and self.df is not None:
+                del self.df
+                import gc
+                gc.collect()
+            
+            # Use minimal Excel reading settings
+            dtype_dict = {
+                "Product Name*": "string",
+                "Product Type*": "string",
+                "Lineage": "string",
+                "Product Brand": "string"
+            }
+            
+            # Read with minimal processing
+            df = pd.read_excel(
+                file_path, 
+                engine='openpyxl',
+                dtype=dtype_dict,
+                na_filter=False,  # Don't filter NA values for speed
+                keep_default_na=False  # Don't use default NA values
+            )
+            
+            if df is None or df.empty:
+                self.logger.error("No data found in Excel file")
+                return False
+            
+            self.logger.info(f"[PYTHONANYWHERE-FAST] Successfully read {len(df)} rows, {len(df.columns)} columns")
+            
+            # Handle duplicate columns efficiently
+            df = handle_duplicate_columns(df)
+            
+            # Remove duplicates efficiently
+            initial_count = len(df)
+            df.drop_duplicates(inplace=True)
+            df.reset_index(drop=True, inplace=True)
+            final_count = len(df)
+            
+            if initial_count != final_count:
+                self.logger.info(f"[PYTHONANYWHERE-FAST] Removed {initial_count - final_count} duplicate rows")
+            
+            # Apply minimal processing only
+            df = self._minimal_pythonanywhere_processing(df)
+            
+            # Set the dataframe
+            self.df = df
+            self._last_loaded_file = file_path
+            
+            # Cache the result
+            self._cache_file_result(file_path, df)
+            
+            self.logger.info(f"[PYTHONANYWHERE-FAST] Fast load completed successfully")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"[PYTHONANYWHERE-FAST] Error in fast load: {e}")
+            return False
+    
+    def _apply_pythonanywhere_optimizations(self):
+        """Apply PythonAnywhere-specific optimizations."""
+        # Reduce pandas memory usage
+        pd.options.mode.chained_assignment = None
+        pd.options.mode.use_inf_as_na = True
+        
+        # Force garbage collection
+        import gc
+        gc.collect()
+        
+        # Disable product database integration for faster loading
+        self._product_db_enabled = False
+        
+        self.logger.info("[PYTHONANYWHERE-FAST] Applied PythonAnywhere optimizations")
+    
+    def _minimal_pythonanywhere_processing(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Apply minimal processing for PythonAnywhere fast loading."""
+        try:
+            # Only essential processing
+            if len(df) == 0:
+                return df
+            
+            # Ensure required columns exist
+            required_columns = ['Product Name*', 'Product Type*', 'Lineage', 'Product Brand']
+            for col in required_columns:
+                if col not in df.columns:
+                    df[col] = "Unknown"
+            
+            # Basic string cleaning for key columns
+            for col in required_columns:
+                if col in df.columns:
+                    df[col] = df[col].astype(str).str.strip()
+            
+            # Remove excluded product types (minimal check)
+            if 'Product Type*' in df.columns:
+                excluded_types = ["Samples - Educational", "Sample - Vendor", "x-DEACTIVATED 1", "x-DEACTIVATED 2"]
+                df = df[~df['Product Type*'].isin(excluded_types)]
+                df.reset_index(drop=True, inplace=True)
+            
+            self.logger.info(f"[PYTHONANYWHERE-FAST] Minimal processing completed: {len(df)} rows remaining")
+            return df
+            
+        except Exception as e:
+            self.logger.error(f"[PYTHONANYWHERE-FAST] Error in minimal processing: {e}")
+            return df
+    
+    def _cache_file_result(self, file_path: str, df: pd.DataFrame):
+        """Cache the file result for faster subsequent loads."""
+        try:
+            import hashlib
+            import pickle
+            
+            # Create cache key based on file path and modification time
+            file_mtime = os.path.getmtime(file_path)
+            cache_key = f"{file_path}_{file_mtime}"
+            
+            # Store in memory cache (limited size for PythonAnywhere)
+            if len(self._file_cache) >= 3:  # Keep only 3 files in cache
+                # Remove oldest entry
+                oldest_key = next(iter(self._file_cache))
+                del self._file_cache[oldest_key]
+            
+            self._file_cache[cache_key] = df.copy()
+            self.logger.info(f"[PYTHONANYWHERE-FAST] Cached file result for {file_path}")
+            
+        except Exception as e:
+            self.logger.warning(f"[PYTHONANYWHERE-FAST] Error caching file result: {e}")
+    
+    def enable_pythonanywhere_mode(self, enable: bool = True):
+        """Enable PythonAnywhere-specific optimizations."""
+        if enable:
+            self._product_db_enabled = False  # Disable for faster loading
+            self.logger.info("[PYTHONANYWHERE-FAST] PythonAnywhere mode enabled")
+        else:
+            self._product_db_enabled = True
+            self.logger.info("[PYTHONANYWHERE-FAST] PythonAnywhere mode disabled")
+

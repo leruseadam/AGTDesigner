@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Frontend Debug Test</title>
+</head>
+<body>
+    <h1>Frontend Debug Test</h1>
+    <div id="output"></div>
+    
+    <script>
+        async function testInitialData() {
+            const output = document.getElementById('output');
+            output.innerHTML = '<p>Testing /api/initial-data...</p>';
+            
+            try {
+                const response = await fetch('/api/initial-data');
+                const data = await response.json();
+                
+                output.innerHTML += `
+                    <h3>Response:</h3>
+                    <pre>${JSON.stringify(data, null, 2)}</pre>
+                    
+                    <h3>Analysis:</h3>
+                    <ul>
+                        <li>data.data_loaded: ${data.data_loaded}</li>
+                        <li>data.available_tags exists: ${!!data.available_tags}</li>
+                        <li>data.available_tags is array: ${Array.isArray(data.available_tags)}</li>
+                        <li>data.available_tags length: ${data.available_tags ? data.available_tags.length : 'N/A'}</li>
+                        <li>Condition check: ${data.data_loaded && data.available_tags && Array.isArray(data.available_tags) && data.available_tags.length > 0}</li>
+                    </ul>
+                `;
+            } catch (error) {
+                output.innerHTML += `<p style="color: red;">Error: ${error.message}</p>`;
+            }
+        }
+        
+        // Run test when page loads
+        testInitialData();
+    </script>
+</body>
+</html> 
