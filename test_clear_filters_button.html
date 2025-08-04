@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clear Filters Button Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin: 0;
+            padding: 20px;
+            min-height: 100vh;
+        }
+        
+        .test-container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+        
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .filter-section {
+            background: rgba(40, 30, 60, 0.95);
+            border-radius: 18px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border: 1.5px solid rgba(160, 132, 232, 0.18);
+        }
+        
+        .filter-group {
+            margin-bottom: 15px;
+        }
+        
+        .filter-label {
+            color: #fff;
+            font-weight: 600;
+            font-size: 0.9rem;
+            margin-bottom: 5px;
+            display: block;
+        }
+        
+        .filter-select {
+            background: #2a2040;
+            color: #fff;
+            border-radius: 8px;
+            border: 1.5px solid #a084e8;
+            width: 100%;
+            padding: 8px 12px;
+            font-size: 0.9rem;
+        }
+        
+        .clear-btn {
+            background: linear-gradient(135deg, rgba(220, 53, 69, 0.8), rgba(220, 53, 69, 0.6));
+            border: 1.5px solid rgba(220, 53, 69, 0.8);
+            color: #fff;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            padding: 10px 15px;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3);
+            cursor: pointer;
+            width: 100%;
+            margin-top: 10px;
+        }
+        
+        .clear-btn:hover {
+            background: linear-gradient(135deg, rgba(220, 53, 69, 1), rgba(220, 53, 69, 0.8));
+            border-color: rgba(220, 53, 69, 1);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(220, 53, 69, 0.5), 0 0 20px rgba(220, 53, 69, 0.3);
+        }
+        
+        .clear-btn:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 6px rgba(220, 53, 69, 0.4);
+        }
+        
+        .test-results {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+        
+        .test-results h3 {
+            color: #333;
+            margin-bottom: 15px;
+        }
+        
+        .result-item {
+            margin-bottom: 10px;
+            padding: 10px;
+            border-radius: 5px;
+            background: #fff;
+            border-left: 4px solid #28a745;
+        }
+        
+        .result-item.error {
+            border-left-color: #dc3545;
+            background: #f8d7da;
+        }
+        
+        .status {
+            font-weight: 600;
+            color: #28a745;
+        }
+        
+        .status.error {
+            color: #dc3545;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>Clear Filters Button Test</h1>
+        
+        <div class="filter-section">
+            <div class="filter-group">
+                <label for="vendorFilter" class="filter-label">VENDOR</label>
+                <select id="vendorFilter" class="filter-select">
+                    <option value="">All Vendors</option>
+                    <option value="Vendor A">Vendor A</option>
+                    <option value="Vendor B">Vendor B</option>
+                    <option value="Vendor C">Vendor C</option>
+                </select>
+            </div>
+            
+            <div class="filter-group">
+                <label for="brandFilter" class="filter-label">BRAND</label>
+                <select id="brandFilter" class="filter-select">
+                    <option value="">All Brands</option>
+                    <option value="Brand X">Brand X</option>
+                    <option value="Brand Y">Brand Y</option>
+                    <option value="Brand Z">Brand Z</option>
+                </select>
+            </div>
+            
+            <div class="filter-group">
+                <label for="productTypeFilter" class="filter-label">PRODUCT TYPE</label>
+                <select id="productTypeFilter" class="filter-select">
+                    <option value="">All Product Types</option>
+                    <option value="Flower">Flower</option>
+                    <option value="Concentrate">Concentrate</option>
+                    <option value="Edible">Edible</option>
+                </select>
+            </div>
+            
+            <div class="filter-group">
+                <label for="lineageFilter" class="filter-label">LINEAGE</label>
+                <select id="lineageFilter" class="filter-select">
+                    <option value="">All Lineages</option>
+                    <option value="Sativa">Sativa</option>
+                    <option value="Indica">Indica</option>
+                    <option value="Hybrid">Hybrid</option>
+                </select>
+            </div>
+            
+            <div class="filter-group">
+                <label for="weightFilter" class="filter-label">WEIGHT</label>
+                <select id="weightFilter" class="filter-select">
+                    <option value="">All Weights</option>
+                    <option value="1g">1g</option>
+                    <option value="3.5g">3.5g</option>
+                    <option value="7g">7g</option>
+                </select>
+            </div>
+            
+            <button id="clearFiltersBtn" class="clear-btn" onclick="clearAllFilters()">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline; margin-right: 5px;">
+                    <polyline points="3 6 5 6 21 6"></polyline>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                </svg>
+                Clear Filters
+            </button>
+        </div>
+        
+        <div class="test-results">
+            <h3>Test Results</h3>
+            <div id="testResults"></div>
+        </div>
+    </div>
+
+    <script>
+        // Mock TagManager for testing
+        const TagManager = {
+            clearAllFilters() {
+                console.log('Clearing all filters...');
+                
+                const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter'];
+                
+                // Clear each filter dropdown
+                filterIds.forEach(filterId => {
+                    const filterElement = document.getElementById(filterId);
+                    if (filterElement) {
+                        filterElement.value = '';
+                    }
+                });
+                
+                // Show success message
+                showTestResult('All filters cleared successfully', 'success');
+                
+                // Add visual feedback to the button
+                const clearBtn = document.getElementById('clearFiltersBtn');
+                if (clearBtn) {
+                    clearBtn.style.transform = 'scale(0.95)';
+                    setTimeout(() => {
+                        clearBtn.style.transform = 'scale(1)';
+                    }, 150);
+                }
+                
+                console.log('All filters cleared successfully');
+            }
+        };
+
+        function clearAllFilters() {
+            TagManager.clearAllFilters();
+        }
+
+        function showTestResult(message, type = 'success') {
+            const resultsContainer = document.getElementById('testResults');
+            const resultItem = document.createElement('div');
+            resultItem.className = `result-item ${type === 'error' ? 'error' : ''}`;
+            
+            const timestamp = new Date().toLocaleTimeString();
+            resultItem.innerHTML = `
+                <span class="status ${type === 'error' ? 'error' : ''}">${type.toUpperCase()}</span> - 
+                ${message} <small>(${timestamp})</small>
+            `;
+            
+            resultsContainer.appendChild(resultItem);
+            
+            // Auto-scroll to bottom
+            resultsContainer.scrollTop = resultsContainer.scrollHeight;
+        }
+
+        // Test function to set some filters
+        function setTestFilters() {
+            document.getElementById('vendorFilter').value = 'Vendor A';
+            document.getElementById('brandFilter').value = 'Brand X';
+            document.getElementById('productTypeFilter').value = 'Flower';
+            document.getElementById('lineageFilter').value = 'Sativa';
+            document.getElementById('weightFilter').value = '1g';
+            
+            showTestResult('Test filters set - try clicking Clear Filters button', 'success');
+        }
+
+        // Initialize test
+        document.addEventListener('DOMContentLoaded', function() {
+            showTestResult('Test page loaded successfully', 'success');
+            showTestResult('Click "Set Test Filters" to populate filters, then test the Clear button', 'success');
+            
+            // Add a button to set test filters
+            const testContainer = document.querySelector('.test-container');
+            const setFiltersBtn = document.createElement('button');
+            setFiltersBtn.textContent = 'Set Test Filters';
+            setFiltersBtn.style.cssText = `
+                background: linear-gradient(135deg, #007bff, #0056b3);
+                color: white;
+                border: none;
+                border-radius: 8px;
+                padding: 10px 20px;
+                margin: 10px 0;
+                cursor: pointer;
+                font-weight: 600;
+            `;
+            setFiltersBtn.onclick = setTestFilters;
+            testContainer.insertBefore(setFiltersBtn, testContainer.firstChild);
+        });
+    </script>
+</body>
+</html> 

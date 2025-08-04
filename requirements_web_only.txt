@@ -1,0 +1,27 @@
+# Minimal requirements.txt for PythonAnywhere (web-only, no GUI)
+# Use this version for deployment on PythonAnywhere
+
+# Core web framework
+Flask==2.3.3
+
+# Data processing
+pandas==2.0.3
+python-docx==0.8.11
+docxtpl==0.16.7
+docxcompose==1.4.0
+openpyxl==3.1.2
+Pillow==9.5.0
+python-dateutil==2.8.2
+
+# File monitoring
+watchdog==3.0.0
+
+# Additional dependencies
+Werkzeug==2.3.7
+Jinja2==3.1.2
+itsdangerous==2.1.2
+click==8.1.7
+MarkupSafe==2.1.3
+numpy==1.24.3
+
+# Note: PyQt6 removed - not needed for web deployment

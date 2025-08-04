@@ -1,0 +1,52 @@
+[
+  {
+    "product_name": "Blue Dream Flower",
+    "strain_name": "Blue Dream",
+    "vendor": "Sample Vendor",
+    "brand": "Sample Brand",
+    "product_type": "flower",
+    "weight": "3.5g",
+    "thc_content": "18.5%",
+    "cbd_content": "0.1%"
+  },
+  {
+    "product_name": "OG Kush Pre-Roll",
+    "strain_name": "OG Kush",
+    "vendor": "Sample Vendor",
+    "brand": "Sample Brand",
+    "product_type": "pre-roll",
+    "weight": "1g",
+    "thc_content": "22.3%",
+    "cbd_content": "0.2%"
+  },
+  {
+    "product_name": "Sour Diesel Concentrate",
+    "strain_name": "Sour Diesel",
+    "vendor": "Sample Vendor",
+    "brand": "Sample Brand",
+    "product_type": "concentrate",
+    "weight": "1g",
+    "thc_content": "85.2%",
+    "cbd_content": "0.5%"
+  },
+  {
+    "product_name": "Girl Scout Cookies Vape Cartridge",
+    "strain_name": "Girl Scout Cookies",
+    "vendor": "Sample Vendor",
+    "brand": "Sample Brand",
+    "product_type": "vape cartridge",
+    "weight": "1g",
+    "thc_content": "78.9%",
+    "cbd_content": "0.3%"
+  },
+  {
+    "product_name": "Purple Haze Edible Gummies",
+    "strain_name": "Purple Haze",
+    "vendor": "Sample Vendor",
+    "brand": "Sample Brand",
+    "product_type": "edible",
+    "weight": "100mg",
+    "thc_content": "10mg per gummy",
+    "cbd_content": "2mg per gummy"
+  }
+] 

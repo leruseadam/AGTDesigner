@@ -1,0 +1,30 @@
+# PythonAnywhere Optimized Requirements
+# Tested versions that work reliably on PythonAnywhere
+# Last updated: July 2025
+
+# Core Flask framework - stable LTS versions
+Flask==2.3.3
+Werkzeug==2.3.7
+Jinja2==3.1.2
+itsdangerous==2.1.2
+click==8.1.7
+MarkupSafe==2.1.3
+
+# Data processing - versions with pre-built wheels
+numpy==1.24.3
+pandas==2.0.3
+python-dateutil==2.8.2
+
+# Document processing - stable versions
+python-docx==0.8.11
+docxtpl==0.16.7
+openpyxl==3.1.2
+
+# Image processing - older stable version (avoids build issues)
+Pillow==9.5.0
+
+# File monitoring - stable version
+watchdog==3.0.0
+
+# Optional packages (comment out if they cause issues)
+# docxcompose==1.4.0  # May cause build issues on some systems

@@ -1,0 +1,41 @@
+{
+  "inventory_transfer_items": [
+    {
+      "product_name": "Medically Compliant - Dank Czar Rosin All-In-One - 1g",
+      "vendor": "Dank Czar",
+      "brand": "Dank Czar",
+      "strain_name": "GMO",
+      "lineage": "HYBRID",
+      "product_type": "concentrate",
+      "price": "45.00",
+      "weight": "1g",
+      "lab_result_data": {
+        "potency": [
+          {
+            "type": "thc",
+            "value": "85.5"
+          },
+          {
+            "type": "thca",
+            "value": "2.3"
+          },
+          {
+            "type": "cbd",
+            "value": "0.5"
+          }
+        ],
+        "coa": "https://example.com/coa.pdf"
+      }
+    },
+    {
+      "product_name": "Blueberry Haze Pre-Roll by Vendor - 1g",
+      "vendor": "Vendor",
+      "brand": "Vendor",
+      "strain_name": "Blueberry Haze",
+      "lineage": "SATIVA",
+      "product_type": "Pre-roll",
+      "price": "12.00",
+      "weight": "1g"
+    }
+  ]
+}

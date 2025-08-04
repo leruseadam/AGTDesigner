@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JSON Matching Fix Test</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .test-panel {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .log-entry {
+            background: white;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            padding: 10px;
+            margin: 5px 0;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .log-error { border-left: 4px solid #dc3545; }
+        .log-warning { border-left: 4px solid #ffc107; }
+        .log-info { border-left: 4px solid #0d6efd; }
+        .log-success { border-left: 4px solid #198754; }
+    </style>
+</head>
+<body>
+    <div class="container mt-4">
+        <h1>JSON Matching Fix Test</h1>
+        
+        <div class="test-panel">
+            <h3>Test Steps</h3>
+            <ol>
+                <li>Click "Test JSON Matching" to simulate JSON matching</li>
+                <li>Verify that the Available Tags list is replaced with JSON matched items</li>
+                <li>Verify that the Selected Tags list is cleared</li>
+                <li>Verify that you can select items from the Available Tags list</li>
+                <li>Check the console logs for debugging information</li>
+            </ol>
+        </div>
+
+        <div class="test-panel">
+            <h3>Test Controls</h3>
+            <div class="row">
+                <div class="col-md-6">
+                    <button class="btn btn-primary" onclick="testJsonMatching()">Test JSON Matching</button>
+                    <button class="btn btn-success" onclick="testRealJsonMatch()">Test Real JSON Match</button>
+                </div>
+                <div class="col-md-6">
+                    <button class="btn btn-info" onclick="clearLogs()">Clear Logs</button>
+                    <button class="btn btn-secondary" onclick="checkStatus()">Check Status</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-panel">
+            <h3>Status</h3>
+            <div id="statusPanel">
+                <div class="row">
+                    <div class="col-md-3">
+                        <strong>TagManager:</strong> <span id="tagManagerStatus">Checking...</span>
+                    </div>
+                    <div class="col-md-3">
+                        <strong>Available Tags:</strong> <span id="availableTagsStatus">Checking...</span>
+                    </div>
+                    <div class="col-md-3">
+                        <strong>Selected Tags:</strong> <span id="selectedTagsStatus">Checking...</span>
+                    </div>
+                    <div class="col-md-3">
+                        <strong>Test Result:</strong> <span id="testStatus">Not tested</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-panel">
+            <h3>Test Logs</h3>
+            <div id="logContainer"></div>
+        </div>
+    </div>
+
+    <!-- Include the main.js script -->
+    <script src="static/js/main.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <script>
+        let logCounter = 0;
+
+        function addLog(message, type = 'info') {
+            const logContainer = document.getElementById('logContainer');
+            const logEntry = document.createElement('div');
+            logEntry.className = `log-entry log-${type}`;
+            logEntry.innerHTML = `<strong>[${new Date().toLocaleTimeString()}]</strong> ${message}`;
+            logContainer.appendChild(logEntry);
+            logContainer.scrollTop = logContainer.scrollHeight;
+            logCounter++;
+        }
+
+        function clearLogs() {
+            document.getElementById('logContainer').innerHTML = '';
+            logCounter = 0;
+        }
+
+        function updateStatus(elementId, status, className = 'text-success') {
+            const element = document.getElementById(elementId);
+            element.textContent = status;
+            element.className = className;
+        }
+
+        function checkStatus() {
+            addLog('Checking system status...', 'info');
+            
+            // Check TagManager
+            if (window.TagManager) {
+                addLog('TagManager is available', 'success');
+                updateStatus('tagManagerStatus', 'Available', 'text-success');
+                
+                // Check available tags
+                const availableTagsContainer = document.getElementById('availableTags');
+                if (availableTagsContainer) {
+                    const availableTagsCount = availableTagsContainer.querySelectorAll('.tag-checkbox').length;
+                    addLog(`Available tags container found with ${availableTagsCount} tags`, 'success');
+                    updateStatus('availableTagsStatus', `${availableTagsCount} tags`, 'text-success');
+                } else {
+                    addLog('Available tags container not found', 'error');
+                    updateStatus('availableTagsStatus', 'Not found', 'text-danger');
+                }
+                
+                // Check selected tags
+                const selectedTagsContainer = document.getElementById('selectedTags');
+                if (selectedTagsContainer) {
+                    const selectedTagsCount = selectedTagsContainer.querySelectorAll('.tag-checkbox').length;
+                    addLog(`Selected tags container found with ${selectedTagsCount} tags`, 'success');
+                    updateStatus('selectedTagsStatus', `${selectedTagsCount} tags`, 'text-success');
+                } else {
+                    addLog('Selected tags container not found', 'error');
+                    updateStatus('selectedTagsStatus', 'Not found', 'text-danger');
+                }
+            } else {
+                addLog('TagManager is NOT available', 'error');
+                updateStatus('tagManagerStatus', 'Not Available', 'text-danger');
+            }
+        }
+
+        function testJsonMatching() {
+            addLog('Testing JSON matching simulation...', 'info');
+            
+            if (!window.TagManager) {
+                addLog('TagManager not available for testing', 'error');
+                updateStatus('testStatus', 'Failed - TagManager not available', 'text-danger');
+                return;
+            }
+            
+            // Simulate JSON matching response
+            const mockMatchResult = {
+                success: true,
+                matched_count: 5,
+                matched_names: [
+                    'Test Product 1 - HYBRID',
+                    'Test Product 2 - INDICA', 
+                    'Test Product 3 - SATIVA',
+                    'Test Product 4 - CBD',
+                    'Test Product 5 - HYBRID/INDICA'
+                ],
+                available_tags: [
+                    {
+                        'Product Name*': 'Test Product 1 - HYBRID',
+                        'Product Brand': 'Test Brand',
+                        'Vendor': 'Test Vendor',
+                        'Product Type*': 'Flower',
+                        'Weight*': '3.5g',
+                        'Price*': '45.00',
+                        'Lineage': 'HYBRID',
+                        'Source': 'JSON Match'
+                    },
+                    {
+                        'Product Name*': 'Test Product 2 - INDICA',
+                        'Product Brand': 'Test Brand',
+                        'Vendor': 'Test Vendor',
+                        'Product Type*': 'Flower',
+                        'Weight*': '3.5g',
+                        'Price*': '42.00',
+                        'Lineage': 'INDICA',
+                        'Source': 'JSON Match'
+                    },
+                    {
+                        'Product Name*': 'Test Product 3 - SATIVA',
+                        'Product Brand': 'Test Brand',
+                        'Vendor': 'Test Vendor',
+                        'Product Type*': 'Flower',
+                        'Weight*': '3.5g',
+                        'Price*': '48.00',
+                        'Lineage': 'SATIVA',
+                        'Source': 'JSON Match'
+                    },
+                    {
+                        'Product Name*': 'Test Product 4 - CBD',
+                        'Product Brand': 'Test Brand',
+                        'Vendor': 'Test Vendor',
+                        'Product Type*': 'Flower',
+                        'Weight*': '3.5g',
+                        'Price*': '35.00',
+                        'Lineage': 'CBD',
+                        'Source': 'JSON Match'
+                    },
+                    {
+                        'Product Name*': 'Test Product 5 - HYBRID/INDICA',
+                        'Product Brand': 'Test Brand',
+                        'Vendor': 'Test Vendor',
+                        'Product Type*': 'Flower',
+                        'Weight*': '3.5g',
+                        'Price*': '40.00',
+                        'Lineage': 'HYBRID/INDICA',
+                        'Source': 'JSON Match'
+                    }
+                ],
+                selected_tags: [],
+                json_matched_tags: [],
+                cache_status: 'Test Simulation',
+                filter_mode: 'json_matched'
+            };
+            
+            addLog(`Simulating JSON match with ${mockMatchResult.matched_count} products`, 'info');
+            
+            // Simulate the JSON matching completion
+            simulateJsonMatchCompletion(mockMatchResult);
+            
+            updateStatus('testStatus', 'Simulation completed', 'text-success');
+        }
+
+        function simulateJsonMatchCompletion(matchResult) {
+            addLog('Simulating JSON match completion...', 'info');
+            
+            try {
+                // For JSON matching, we want to show all matched tags in available tags
+                // Clear current selected tags first to ensure all JSON matched tags are visible
+                TagManager.state.persistentSelectedTags = [];
+                TagManager.state.selectedTags = new Set();
+                
+                addLog('Cleared selected tags state', 'success');
+                
+                // Clear the selected tags display
+                const selectedTagsContainer = document.getElementById('selectedTags');
+                if (selectedTagsContainer) {
+                    selectedTagsContainer.innerHTML = '';
+                    addLog('Cleared selected tags display', 'success');
+                } else {
+                    addLog('Selected tags container not found', 'warning');
+                }
+                
+                // Use TagManager's method to update available tags
+                // Pass the available tags as the original tags to replace the current list
+                console.log('Updating available tags with JSON matched data:', {
+                    availableTagsCount: matchResult.available_tags ? matchResult.available_tags.length : 0,
+                    matchedCount: matchResult.matched_count,
+                    sampleTags: matchResult.available_tags ? matchResult.available_tags.slice(0, 3).map(t => t['Product Name*']) : []
+                });
+                
+                addLog(`Updating available tags with ${matchResult.available_tags.length} JSON matched products`, 'info');
+                TagManager._updateAvailableTags(matchResult.available_tags, null);
+                
+                // Show a notification to the user
+                const notificationDiv = document.createElement('div');
+                notificationDiv.className = 'alert alert-success alert-dismissible fade show';
+                notificationDiv.innerHTML = `
+                    <strong>JSON Matching Complete!</strong> 
+                    ${matchResult.matched_count} products were matched and are now available in the Available Tags list. 
+                    Please review and select the items you need for your labels.
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                `;
+                
+                // Insert the notification at the top of the page
+                const container = document.querySelector('.container-fluid') || document.querySelector('.container');
+                if (container) {
+                    container.insertBefore(notificationDiv, container.firstChild);
+                    
+                    // Auto-dismiss after 10 seconds
+                    setTimeout(() => {
+                        if (notificationDiv.parentNode) {
+                            notificationDiv.remove();
+                        }
+                    }, 10000);
+                }
+                
+                addLog('JSON matching simulation completed successfully', 'success');
+                
+                // Check the results
+                setTimeout(() => {
+                    const availableTagsContainer = document.getElementById('availableTags');
+                    const selectedTagsContainer = document.getElementById('selectedTags');
+                    
+                    const availableTagsCount = availableTagsContainer ? availableTagsContainer.querySelectorAll('.tag-checkbox').length : 0;
+                    const selectedTagsCount = selectedTagsContainer ? selectedTagsContainer.querySelectorAll('.tag-checkbox').length : 0;
+                    
+                    addLog(`Results: ${availableTagsCount} available tags, ${selectedTagsCount} selected tags`, 'info');
+                    
+                    if (availableTagsCount > 0 && selectedTagsCount === 0) {
+                        addLog('✅ Test PASSED: Available tags updated, selected tags cleared', 'success');
+                        updateStatus('testStatus', 'PASSED', 'text-success');
+                    } else {
+                        addLog('❌ Test FAILED: Available tags not updated or selected tags not cleared', 'error');
+                        updateStatus('testStatus', 'FAILED', 'text-danger');
+                    }
+                }, 1000);
+                
+            } catch (error) {
+                addLog(`Error in JSON matching simulation: ${error.message}`, 'error');
+                updateStatus('testStatus', 'Failed - Error', 'text-danger');
+            }
+        }
+
+        function testRealJsonMatch() {
+            addLog('Testing real JSON matching...', 'info');
+            
+            // Test with a real JSON URL
+            const testUrl = 'https://api.cultivera.com/v1/inventory?limit=10';
+            
+            addLog(`Testing with URL: ${testUrl}`, 'info');
+            
+            // Call the real JSON matching function
+            if (window.performJsonMatch) {
+                // Set the URL in the input field
+                const jsonUrlInput = document.getElementById('jsonUrlInput');
+                if (jsonUrlInput) {
+                    jsonUrlInput.value = testUrl;
+                    addLog('Set JSON URL in input field', 'success');
+                    
+                    // Call the JSON matching function
+                    window.performJsonMatch();
+                    addLog('Called performJsonMatch function', 'success');
+                    updateStatus('testStatus', 'Real test initiated', 'text-success');
+                } else {
+                    addLog('JSON URL input field not found', 'error');
+                    updateStatus('testStatus', 'Failed - Input not found', 'text-danger');
+                }
+            } else {
+                addLog('performJsonMatch function not available', 'error');
+                updateStatus('testStatus', 'Failed - Function not available', 'text-danger');
+            }
+        }
+
+        // Override console methods to capture logs
+        const originalConsole = {
+            log: console.log,
+            error: console.error,
+            warn: console.warn,
+            info: console.info
+        };
+
+        console.log = function(...args) {
+            originalConsole.log.apply(console, args);
+            addLog(args.join(' '), 'info');
+        };
+
+        console.error = function(...args) {
+            originalConsole.error.apply(console, args);
+            addLog(args.join(' '), 'error');
+        };
+
+        console.warn = function(...args) {
+            originalConsole.warn.apply(console, args);
+            addLog(args.join(' '), 'warning');
+        };
+
+        console.info = function(...args) {
+            originalConsole.info.apply(console, args);
+            addLog(args.join(' '), 'info');
+        };
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            addLog('Page loaded, running initial checks...', 'info');
+            
+            // Run initial checks
+            setTimeout(() => {
+                checkStatus();
+            }, 1000);
+        });
+    </script>
+</body>
+</html> 

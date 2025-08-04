@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generation Splash Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin: 0;
+            padding: 20px;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .test-container {
+            background: rgba(255, 255, 255, 0.1);
+            -webkit-backdrop-filter: blur(10px);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            text-align: center;
+            color: white;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+        
+        .test-button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            color: white;
+            padding: 15px 30px;
+            border-radius: 10px;
+            font-size: 18px;
+            cursor: pointer;
+            margin: 10px;
+            transition: all 0.3s ease;
+        }
+        
+        .test-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+        }
+        
+        .status {
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.1);
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>Generation Splash Test</h1>
+        <p>Test the generation splash functionality</p>
+        
+        <button class="test-button" onclick="testSplash()">Test Generation Splash</button>
+        <button class="test-button" onclick="testSplashWithCanvas()">Test with Canvas</button>
+        <button class="test-button" onclick="hideSplash()">Hide Splash</button>
+        
+        <div class="status" id="status">Ready to test...</div>
+    </div>
+
+    <!-- Generation Splash Modal Overlay -->
+    <div id="generationSplashModal" class="generation-splash-modal" style="display:none;">
+        <div class="generation-splash-backdrop"></div>
+        <div class="container">
+            <canvas class="inner-canvas" id="generation-splash-canvas" style="width: 500px; height: 350px;"></canvas>
+        </div>
+    </div>
+
+    <style>
+        .generation-splash-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            background: rgba(30, 20, 40, 0.25);
+            pointer-events: auto;
+        }
+
+        .generation-splash-backdrop {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 520px;
+            height: 370px;
+            background: rgba(30, 20, 40, 0.85);
+            border-radius: 24px;
+            box-shadow: 0 8px 40px rgba(160,132,232,0.18), 0 0 0 8px rgba(160,132,232,0.10);
+            filter: blur(0px);
+            z-index: 1;
+        }
+
+        #generation-splash-canvas {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            border-radius: 20px;
+            background: transparent;
+            display: block;
+            width: 500px;
+            height: 350px;
+            z-index: 2;
+            box-shadow: 0 2px 24px rgba(160,132,232,0.10);
+        }
+    </style>
+
+    <script>
+        function updateStatus(message) {
+            document.getElementById('status').textContent = message;
+        }
+
+        function testSplash() {
+            updateStatus('Testing basic splash...');
+            
+            const splashModal = document.getElementById('generationSplashModal');
+            if (splashModal) {
+                splashModal.style.display = 'flex';
+                updateStatus('Splash modal shown successfully!');
+                
+                // Auto-hide after 3 seconds
+                setTimeout(() => {
+                    splashModal.style.display = 'none';
+                    updateStatus('Splash auto-hidden after 3 seconds');
+                }, 3000);
+            } else {
+                updateStatus('ERROR: Splash modal not found!');
+            }
+        }
+
+        function testSplashWithCanvas() {
+            updateStatus('Testing splash with canvas...');
+            
+            const splashModal = document.getElementById('generationSplashModal');
+            const splashCanvas = document.getElementById('generation-splash-canvas');
+            
+            if (splashModal && splashCanvas) {
+                splashModal.style.display = 'flex';
+                
+                // Test canvas drawing
+                const ctx = splashCanvas.getContext('2d');
+                if (ctx) {
+                    // Set canvas size
+                    splashCanvas.width = 500;
+                    splashCanvas.height = 350;
+                    
+                    // Draw a simple animation
+                    let frame = 0;
+                    const animate = () => {
+                        // Clear canvas
+                        ctx.clearRect(0, 0, splashCanvas.width, splashCanvas.height);
+                        
+                        // Draw background
+                        ctx.fillStyle = 'rgba(30, 20, 40, 0.9)';
+                        ctx.fillRect(0, 0, splashCanvas.width, splashCanvas.height);
+                        
+                        // Draw animated text
+                        ctx.fillStyle = '#a084e8';
+                        ctx.font = '24px Arial';
+                        ctx.textAlign = 'center';
+                        ctx.fillText('Generating Labels...', splashCanvas.width / 2, splashCanvas.height / 2);
+                        
+                        // Draw animated dots
+                        const dots = '...';
+                        const dotOffset = Math.sin(frame * 0.1) * 10;
+                        ctx.fillText(dots, splashCanvas.width / 2 + 120 + dotOffset, splashCanvas.height / 2);
+                        
+                        // Draw progress bar
+                        const progress = (frame % 100) / 100;
+                        ctx.fillStyle = '#667eea';
+                        ctx.fillRect(50, splashCanvas.height - 80, (splashCanvas.width - 100) * progress, 20);
+                        
+                        frame++;
+                        if (splashModal.style.display !== 'none') {
+                            requestAnimationFrame(animate);
+                        }
+                    };
+                    
+                    animate();
+                    updateStatus('Splash with canvas animation running!');
+                    
+                    // Auto-hide after 5 seconds
+                    setTimeout(() => {
+                        splashModal.style.display = 'none';
+                        updateStatus('Canvas splash auto-hidden after 5 seconds');
+                    }, 5000);
+                } else {
+                    updateStatus('ERROR: Canvas context not available!');
+                }
+            } else {
+                updateStatus('ERROR: Splash modal or canvas not found!');
+            }
+        }
+
+        function hideSplash() {
+            const splashModal = document.getElementById('generationSplashModal');
+            if (splashModal) {
+                splashModal.style.display = 'none';
+                updateStatus('Splash manually hidden');
+            } else {
+                updateStatus('ERROR: Splash modal not found!');
+            }
+        }
+
+        // Test on page load
+        window.addEventListener('load', () => {
+            updateStatus('Page loaded. Ready to test generation splash!');
+        });
+    </script>
+</body>
+</html> 

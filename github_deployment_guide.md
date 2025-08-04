@@ -1,6 +1,6 @@
 # GitHub Deployment to PythonAnywhere Guide
 
-This guide will help you deploy your project to PythonAnywhere using GitHub, which is more reliable than SSH or web uploads.
+This guide will help you deploy your project to PythonAnywhere using your existing AGTDesigner GitHub repository.
 
 ## Step 1: Prepare Your Local Repository
 
@@ -26,25 +26,20 @@ git commit -m "Initial commit - Label Maker project"
 git remote -v
 ```
 
-## Step 2: Create GitHub Repository
+## Step 2: Push to Your Existing AGTDesigner Repository
 
-1. **Go to GitHub:** https://github.com
-2. **Create a new repository:**
-   - Click "New repository"
-   - Name: `labelMaker` (or your preferred name)
-   - Description: "Label Maker - Excel processing and document generation"
-   - Make it **Public** (easier for PythonAnywhere)
-   - **Don't** initialize with README (we'll push existing code)
-   - Click "Create repository"
+Since you already have an AGTDesigner repository on GitHub:
 
-3. **Add GitHub as remote and push:**
 ```bash
-# Add GitHub as remote (replace YOUR_USERNAME with your GitHub username)
-git remote add origin https://github.com/YOUR_USERNAME/labelMaker.git
+# Add your existing AGTDesigner repository as remote (replace YOUR_USERNAME)
+git remote add origin https://github.com/YOUR_USERNAME/AGTDesigner.git
 
 # Push to GitHub
 git branch -M main
 git push -u origin main
+
+# If you want to force push (overwrite existing content):
+# git push -u origin main --force
 ```
 
 ## Step 3: Deploy to PythonAnywhere via GitHub
@@ -76,8 +71,8 @@ if [ -d "AGTDesigner" ]; then
     echo "Existing project backed up"
 fi
 
-# Clone from GitHub (replace YOUR_USERNAME with your GitHub username)
-git clone https://github.com/YOUR_USERNAME/labelMaker.git AGTDesigner
+# Clone from your AGTDesigner repository (replace YOUR_USERNAME)
+git clone https://github.com/YOUR_USERNAME/AGTDesigner.git AGTDesigner
 
 # Navigate to project
 cd AGTDesigner
@@ -270,10 +265,10 @@ touch /var/www/adamcordova_pythonanywhere_com_wsgi.py
 ### If Git clone fails:
 ```bash
 # Try with HTTPS
-git clone https://github.com/YOUR_USERNAME/labelMaker.git AGTDesigner
+git clone https://github.com/YOUR_USERNAME/AGTDesigner.git AGTDesigner
 
 # Or try with SSH (if you have SSH keys set up)
-git clone git@github.com:YOUR_USERNAME/labelMaker.git AGTDesigner
+git clone git@github.com:YOUR_USERNAME/AGTDesigner.git AGTDesigner
 ```
 
 ### If dependencies fail to install:

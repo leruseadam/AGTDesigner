@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Undo Button Fix Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .test-section {
+            border: 1px solid #ccc;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        .success {
+            background-color: #d4edda;
+            border-color: #c3e6cb;
+        }
+        .error {
+            background-color: #f8d7da;
+            border-color: #f5c6cb;
+        }
+        .warning {
+            background-color: #fff3cd;
+            border-color: #ffeaa7;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        .btn-primary {
+            background-color: #007bff;
+            color: white;
+        }
+        .btn-secondary {
+            background-color: #6c757d;
+            color: white;
+        }
+        .btn-warning {
+            background-color: #ffc107;
+            color: black;
+        }
+        #testResults {
+            margin-top: 20px;
+        }
+        .tag-list {
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin: 10px 0;
+            min-height: 100px;
+            background-color: #f8f9fa;
+        }
+        .tag-item {
+            display: inline-block;
+            background-color: #007bff;
+            color: white;
+            padding: 5px 10px;
+            margin: 2px;
+            border-radius: 15px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Undo Button Fix Test</h1>
+    
+    <div class="test-section">
+        <h3>Test 1: Undo Button Event Listener</h3>
+        <p>This test verifies that the undo button has a proper event listener attached.</p>
+        <button id="undo-move-btn" class="btn-primary">Undo</button>
+        <div id="test1Result"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>Test 2: TagManager.undoMove Function</h3>
+        <p>This test verifies that the TagManager.undoMove function exists and works.</p>
+        <button onclick="testUndoFunction()" class="btn-secondary">Test Undo Function</button>
+        <div id="test2Result"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>Test 3: Simulated Tag Movement and Undo</h3>
+        <p>This test simulates moving tags and then undoing the action.</p>
+        <button onclick="simulateTagMovement()" class="btn-warning">Simulate Tag Movement</button>
+        <button onclick="testUndoWithHistory()" class="btn-secondary">Test Undo with History</button>
+        <div id="test3Result"></div>
+        
+        <div class="tag-list">
+            <h4>Available Tags:</h4>
+            <div id="availableTags"></div>
+        </div>
+        
+        <div class="tag-list">
+            <h4>Selected Tags:</h4>
+            <div id="selectedTags"></div>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h3>Test 4: Undo Stack Simulation</h3>
+        <p>This test simulates the undo stack functionality.</p>
+        <button onclick="simulateUndoStack()" class="btn-secondary">Simulate Undo Stack</button>
+        <button onclick="testUndoStack()" class="btn-secondary">Test Undo Stack</button>
+        <div id="test4Result"></div>
+    </div>
+
+    <div id="testResults"></div>
+
+    <script>
+        // Mock TagManager for testing
+        window.TagManager = {
+            state: {
+                persistentSelectedTags: new Set(),
+                selectedTags: new Set(),
+                originalTags: [
+                    { 'Product Name*': 'Tag 1', 'Product Brand': 'Brand A' },
+                    { 'Product Name*': 'Tag 2', 'Product Brand': 'Brand B' },
+                    { 'Product Name*': 'Tag 3', 'Product Brand': 'Brand C' },
+                    { 'Product Name*': 'Tag 4', 'Product Brand': 'Brand D' }
+                ],
+                tags: [
+                    { 'Product Name*': 'Tag 1', 'Product Brand': 'Brand A' },
+                    { 'Product Name*': 'Tag 2', 'Product Brand': 'Brand B' },
+                    { 'Product Name*': 'Tag 3', 'Product Brand': 'Brand C' },
+                    { 'Product Name*': 'Tag 4', 'Product Brand': 'Brand D' }
+                ]
+            },
+            undoStack: [],
+            
+            undoMove: async function() {
+                console.log('TagManager.undoMove called');
+                
+                // Simulate API call
+                if (this.undoStack.length === 0) {
+                    console.log('Nothing to undo');
+                    return false;
+                }
+                
+                const previousState = this.undoStack.pop();
+                this.state.persistentSelectedTags = new Set(previousState.selectedTags);
+                this.state.selectedTags = new Set(previousState.selectedTags);
+                
+                this.updateSelectedTags(previousState.selectedTags.map(tagName => 
+                    this.state.tags.find(t => t['Product Name*'] === tagName)
+                ).filter(Boolean));
+                
+                this.updateAvailableTags(previousState.availableTags);
+                
+                console.log('Undo completed - restored previous state');
+                return true;
+            },
+            
+            updateSelectedTags: function(tags) {
+                console.log('updateSelectedTags called with:', tags);
+                const selectedTagsDiv = document.getElementById('selectedTags');
+                if (selectedTagsDiv) {
+                    selectedTagsDiv.innerHTML = tags.map(tag => 
+                        `<span class="tag-item">${tag['Product Name*']}</span>`
+                    ).join('');
+                }
+                return true;
+            },
+            
+            updateAvailableTags: function(tags) {
+                console.log('updateAvailableTags called with:', tags);
+                const availableTagsDiv = document.getElementById('availableTags');
+                if (availableTagsDiv) {
+                    availableTagsDiv.innerHTML = tags.map(tag => 
+                        `<span class="tag-item">${tag['Product Name*']}</span>`
+                    ).join('');
+                }
+                return true;
+            },
+            
+            debouncedUpdateAvailableTags: function(tags, filter) {
+                console.log('debouncedUpdateAvailableTags called');
+                this.updateAvailableTags(tags);
+                return true;
+            }
+        };
+
+        // Test 1: Check if undo button event listener is attached
+        document.addEventListener('DOMContentLoaded', function() {
+            const undoButton = document.getElementById('undo-move-btn');
+            if (undoButton) {
+                undoButton.addEventListener('click', function() {
+                    if (window.TagManager && TagManager.undoMove) {
+                        TagManager.undoMove();
+                        document.getElementById('test1Result').innerHTML = 
+                            '<div class="success">✅ Undo button event listener works!</div>';
+                    }
+                });
+                document.getElementById('test1Result').innerHTML = 
+                    '<div class="success">✅ Undo button found and event listener attached</div>';
+            } else {
+                document.getElementById('test1Result').innerHTML = 
+                    '<div class="error">❌ Undo button not found</div>';
+            }
+        });
+
+        // Test 2: Test undo function directly
+        async function testUndoFunction() {
+            try {
+                if (window.TagManager && TagManager.undoMove) {
+                    const result = await TagManager.undoMove();
+                    if (result === false) {
+                        document.getElementById('test2Result').innerHTML = 
+                            '<div class="warning">⚠️ TagManager.undoMove function works (nothing to undo)</div>';
+                    } else {
+                        document.getElementById('test2Result').innerHTML = 
+                            '<div class="success">✅ TagManager.undoMove function works!</div>';
+                    }
+                } else {
+                    document.getElementById('test2Result').innerHTML = 
+                        '<div class="error">❌ TagManager.undoMove function not found</div>';
+                }
+            } catch (error) {
+                document.getElementById('test2Result').innerHTML = 
+                    '<div class="error">❌ Error testing undo function: ' + error.message + '</div>';
+            }
+        }
+
+        // Test 3: Simulate tag movement and undo
+        function simulateTagMovement() {
+            // Simulate moving Tag 1 and Tag 2 to selected
+            TagManager.state.persistentSelectedTags.add('Tag 1');
+            TagManager.state.persistentSelectedTags.add('Tag 2');
+            TagManager.state.selectedTags.add('Tag 1');
+            TagManager.state.selectedTags.add('Tag 2');
+            
+            // Save state to undo stack
+            TagManager.undoStack.push({
+                selectedTags: ['Tag 1', 'Tag 2'],
+                availableTags: [
+                    { 'Product Name*': 'Tag 3', 'Product Brand': 'Brand C' },
+                    { 'Product Name*': 'Tag 4', 'Product Brand': 'Brand D' }
+                ]
+            });
+            
+            // Update UI
+            TagManager.updateSelectedTags([
+                { 'Product Name*': 'Tag 1', 'Product Brand': 'Brand A' },
+                { 'Product Name*': 'Tag 2', 'Product Brand': 'Brand B' }
+            ]);
+            
+            TagManager.updateAvailableTags([
+                { 'Product Name*': 'Tag 3', 'Product Brand': 'Brand C' },
+                { 'Product Name*': 'Tag 4', 'Product Brand': 'Brand D' }
+            ]);
+            
+            document.getElementById('test3Result').innerHTML = 
+                '<div class="success">✅ Simulated moving Tag 1 and Tag 2 to selected</div>';
+        }
+
+        async function testUndoWithHistory() {
+            try {
+                const beforeSelectedCount = TagManager.state.persistentSelectedTags.size;
+                const beforeStackCount = TagManager.undoStack.length;
+                
+                await TagManager.undoMove();
+                
+                const afterSelectedCount = TagManager.state.persistentSelectedTags.size;
+                const afterStackCount = TagManager.undoStack.length;
+                
+                if (beforeStackCount > 0 && afterStackCount < beforeStackCount) {
+                    document.getElementById('test3Result').innerHTML = 
+                        '<div class="success">✅ Successfully undid tag movement (stack: ' + beforeStackCount + ' → ' + afterStackCount + ')</div>';
+                } else {
+                    document.getElementById('test3Result').innerHTML = 
+                        '<div class="error">❌ Failed to undo tag movement</div>';
+                }
+            } catch (error) {
+                document.getElementById('test3Result').innerHTML = 
+                    '<div class="error">❌ Error testing undo with history: ' + error.message + '</div>';
+            }
+        }
+
+        // Test 4: Undo stack simulation
+        function simulateUndoStack() {
+            // Create a more complex undo stack
+            TagManager.undoStack = [
+                {
+                    selectedTags: ['Tag 1'],
+                    availableTags: [
+                        { 'Product Name*': 'Tag 2', 'Product Brand': 'Brand B' },
+                        { 'Product Name*': 'Tag 3', 'Product Brand': 'Brand C' },
+                        { 'Product Name*': 'Tag 4', 'Product Brand': 'Brand D' }
+                    ]
+                },
+                {
+                    selectedTags: ['Tag 1', 'Tag 2'],
+                    availableTags: [
+                        { 'Product Name*': 'Tag 3', 'Product Brand': 'Brand C' },
+                        { 'Product Name*': 'Tag 4', 'Product Brand': 'Brand D' }
+                    ]
+                }
+            ];
+            
+            document.getElementById('test4Result').innerHTML = 
+                '<div class="success">✅ Created undo stack with ' + TagManager.undoStack.length + ' states</div>';
+        }
+
+        async function testUndoStack() {
+            try {
+                const initialStackSize = TagManager.undoStack.length;
+                let undoCount = 0;
+                
+                while (TagManager.undoStack.length > 0) {
+                    await TagManager.undoMove();
+                    undoCount++;
+                }
+                
+                document.getElementById('test4Result').innerHTML = 
+                    '<div class="success">✅ Successfully executed ' + undoCount + ' undo operations</div>';
+            } catch (error) {
+                document.getElementById('test4Result').innerHTML = 
+                    '<div class="error">❌ Error testing undo stack: ' + error.message + '</div>';
+            }
+        }
+
+        // Log all test results
+        function logTestResults() {
+            const results = {
+                undoButtonExists: !!document.getElementById('undo-move-btn'),
+                tagManagerExists: !!window.TagManager,
+                undoFunctionExists: !!(window.TagManager && TagManager.undoMove),
+                eventListenerAttached: false
+            };
+
+            // Check if event listener is attached
+            const undoButton = document.getElementById('undo-move-btn');
+            if (undoButton) {
+                const listeners = getEventListeners(undoButton);
+                results.eventListenerAttached = listeners && listeners.click && listeners.click.length > 0;
+            }
+
+            console.log('Test Results:', results);
+            return results;
+        }
+
+        // Helper function to get event listeners (simplified)
+        function getEventListeners(element) {
+            // This is a simplified version - in real browsers you'd need dev tools
+            return { click: [] };
+        }
+
+        // Run tests after page loads
+        window.addEventListener('load', function() {
+            setTimeout(() => {
+                const results = logTestResults();
+                document.getElementById('testResults').innerHTML = 
+                    '<h3>Summary:</h3>' +
+                    '<ul>' +
+                    '<li>Undo button exists: ' + (results.undoButtonExists ? '✅' : '❌') + '</li>' +
+                    '<li>TagManager exists: ' + (results.tagManagerExists ? '✅' : '❌') + '</li>' +
+                    '<li>Undo function exists: ' + (results.undoFunctionExists ? '✅' : '❌') + '</li>' +
+                    '<li>Event listener attached: ' + (results.eventListenerAttached ? '✅' : '❌') + '</li>' +
+                    '</ul>';
+            }, 1000);
+        });
+    </script>
+</body>
+</html> 

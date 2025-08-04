@@ -1,0 +1,41 @@
+# PythonAnywhere Pull Commands for AGTDesigner
+# Run these commands on PythonAnywhere via SSH or console
+
+# 1. Navigate to your project directory
+cd ~/AGTDesigner
+
+# 2. Check current status
+pwd
+ls -la
+git status
+
+# 3. Pull the latest changes from GitHub
+git pull origin main
+
+# 4. Check if there are any conflicts (should be none)
+git status
+
+# 5. Activate your virtual environment
+source ~/agt-designer-venv/bin/activate
+# OR if your venv has a different name:
+# source ~/labelmaker-venv/bin/activate
+
+# 6. Update dependencies (if needed)
+pip install -r requirements_pythonanywhere.txt
+
+# 7. Clear any cached files
+find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+find . -name "*.pyc" -delete 2>/dev/null || true
+
+# 8. Set proper permissions
+chmod -R 755 . 2>/dev/null || true
+
+# 9. Reload your web app in the PythonAnywhere Web tab
+# Go to: https://www.pythonanywhere.com/user/YOUR_USERNAME/webapps/
+# Click "Reload" for your AGTDesigner web app
+
+# 10. Check the logs to verify everything is working
+# Go to: https://www.pythonanywhere.com/user/YOUR_USERNAME/files/var/log/YOUR_USERNAME.pythonanywhere.com.error.log
+
+# Optional: Test the application
+curl -s https://YOUR_USERNAME.pythonanywhere.com/api/status | python -m json.tool 

@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lineage Editor Fix Test</title>
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css">
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</head>
+<body>
+    <div class="container mt-5">
+        <h1>Lineage Editor Fix Test</h1>
+        <p>This test verifies that the Bootstrap version conflict has been resolved.</p>
+        
+        <button id="testLineageEditor" class="btn btn-primary">Test Lineage Editor</button>
+        <button id="testStrainLineageEditor" class="btn btn-secondary">Test Strain Lineage Editor</button>
+        
+        <div id="debugOutput" class="mt-3">
+            <h3>Debug Output:</h3>
+            <pre id="debugLog"></pre>
+        </div>
+    </div>
+
+    <!-- Include the lineage editor modal -->
+    <div id="lineageEditorModal" class="modal fade" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit Lineage</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="lineageEditorForm">
+                        <div class="mb-3">
+                            <label for="tagName" class="form-label">Tag Name</label>
+                            <input type="text" class="form-control" id="tagName" readonly>
+                        </div>
+                        <div class="mb-3">
+                            <label for="lineageSelect" class="form-label">Lineage</label>
+                            <select class="form-select" id="lineageSelect">
+                                <option value="SATIVA">S</option>
+                                <option value="INDICA">I</option>
+                                <option value="HYBRID">H</option>
+                                <option value="HYBRID/SATIVA">H/S</option>
+                                <option value="HYBRID/INDICA">H/I</option>
+                                <option value="CBD">CBD</option>
+                                <option value="MIXED">THC</option>
+                                <option value="PARA">P</option>
+                            </select>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="saveLineageChanges">Save Changes</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Strain Lineage Editor Modal -->
+    <div id="strainLineageEditorModal" class="modal fade" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit Strain Lineage</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        This will update the lineage for ALL products with the selected strain.
+                    </div>
+                    <form id="strainLineageEditorForm">
+                        <div class="mb-3">
+                            <label for="strainName" class="form-label">Strain Name</label>
+                            <input type="text" class="form-control" id="strainName" readonly>
+                        </div>
+                        <div class="mb-3">
+                            <label for="strainLineageSelect" class="form-label">New Lineage</label>
+                            <select class="form-select" id="strainLineageSelect">
+                                <option value="SATIVA">S</option>
+                                <option value="INDICA">I</option>
+                                <option value="HYBRID">H</option>
+                                <option value="HYBRID/SATIVA">H/S</option>
+                                <option value="HYBRID/INDICA">H/I</option>
+                                <option value="CBD">CBD</option>
+                                <option value="MIXED">THC</option>
+                                <option value="PARA">P</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Affected Products</label>
+                            <div id="affectedProductsList" class="border rounded p-3 bg-light">
+                                Test products will be listed here
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="saveStrainLineageBtn">Update All Products</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function log(message) {
+            const debugLog = document.getElementById('debugLog');
+            const timestamp = new Date().toLocaleTimeString();
+            debugLog.textContent += `[${timestamp}] ${message}\n`;
+            console.log(message);
+        }
+
+        // Test lineage editor
+        document.getElementById('testLineageEditor').addEventListener('click', function() {
+            log('Testing lineage editor...');
+            
+            // Check if Bootstrap is available
+            if (typeof bootstrap === 'undefined') {
+                log('ERROR: Bootstrap is not defined');
+                return;
+            }
+            
+            if (typeof bootstrap.Modal === 'undefined') {
+                log('ERROR: Bootstrap.Modal is not defined');
+                return;
+            }
+            
+            log('Bootstrap.Modal is available');
+            
+            // Get modal element
+            const modalElement = document.getElementById('lineageEditorModal');
+            if (!modalElement) {
+                log('ERROR: lineageEditorModal element not found');
+                return;
+            }
+            
+            log('Modal element found');
+            
+            // Create modal instance
+            try {
+                const modal = new bootstrap.Modal(modalElement);
+                log('Modal instance created successfully');
+                
+                // Set form values
+                document.getElementById('tagName').value = 'Test Product';
+                document.getElementById('lineageSelect').value = 'HYBRID';
+                
+                // Show modal
+                modal.show();
+                log('Modal.show() called');
+                
+                // Add event listeners
+                modalElement.addEventListener('shown.bs.modal', function() {
+                    log('SUCCESS: Modal shown event fired - Bootstrap 5 working correctly!');
+                });
+                
+                modalElement.addEventListener('hidden.bs.modal', function() {
+                    log('Modal hidden event fired');
+                });
+                
+            } catch (error) {
+                log('ERROR creating modal: ' + error.message);
+            }
+        });
+
+        // Test strain lineage editor
+        document.getElementById('testStrainLineageEditor').addEventListener('click', function() {
+            log('Testing strain lineage editor...');
+            
+            // Check if Bootstrap is available
+            if (typeof bootstrap === 'undefined') {
+                log('ERROR: Bootstrap is not defined');
+                return;
+            }
+            
+            if (typeof bootstrap.Modal === 'undefined') {
+                log('ERROR: Bootstrap.Modal is not defined');
+                return;
+            }
+            
+            log('Bootstrap.Modal is available');
+            
+            // Get modal element
+            const modalElement = document.getElementById('strainLineageEditorModal');
+            if (!modalElement) {
+                log('ERROR: strainLineageEditorModal element not found');
+                return;
+            }
+            
+            log('Strain modal element found');
+            
+            // Create modal instance
+            try {
+                const modal = new bootstrap.Modal(modalElement);
+                log('Strain modal instance created successfully');
+                
+                // Set form values
+                document.getElementById('strainName').value = 'Test Strain';
+                document.getElementById('strainLineageSelect').value = 'HYBRID';
+                
+                // Show modal
+                modal.show();
+                log('Strain modal.show() called');
+                
+                // Add event listeners
+                modalElement.addEventListener('shown.bs.modal', function() {
+                    log('SUCCESS: Strain modal shown event fired - Bootstrap 5 working correctly!');
+                });
+                
+                modalElement.addEventListener('hidden.bs.modal', function() {
+                    log('Strain modal hidden event fired');
+                });
+                
+            } catch (error) {
+                log('ERROR creating strain modal: ' + error.message);
+            }
+        });
+
+        // Log page load
+        document.addEventListener('DOMContentLoaded', function() {
+            log('Page loaded');
+            log('Bootstrap version: ' + (typeof bootstrap !== 'undefined' ? 'Available' : 'Not available'));
+            log('Bootstrap.Modal: ' + (typeof bootstrap !== 'undefined' && typeof bootstrap.Modal !== 'undefined' ? 'Available' : 'Not available'));
+            
+            if (typeof bootstrap !== 'undefined') {
+                log('Bootstrap version detected: ' + bootstrap.VERSION);
+            }
+        });
+    </script>
+</body>
+</html> 

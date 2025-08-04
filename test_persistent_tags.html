@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Persistent Tags</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; }
+        .success { color: green; }
+        .error { color: red; }
+        .info { color: blue; }
+    </style>
+</head>
+<body>
+    <h1>Test Persistent Selected Tags Functionality</h1>
+    
+    <div class="test-section">
+        <h2>Test Instructions</h2>
+        <ol>
+            <li>Open the main application at <a href="http://127.0.0.1:9090" target="_blank" rel="noopener">http://127.0.0.1:9090</a></li>
+            <li>Wait for the data to load</li>
+            <li>Select some tags from the available tags list</li>
+            <li>Move them to the selected tags list using the → button</li>
+            <li>Change filters (vendor, brand, etc.)</li>
+            <li>Verify that the selected tags list remains unchanged</li>
+            <li>Select more tags from different filters and move them to selected</li>
+            <li>Verify that all selected tags remain in the selected list regardless of filter changes</li>
+        </ol>
+    </div>
+
+    <div class="test-section">
+        <h2>Expected Behavior</h2>
+        <ul>
+            <li class="success">✓ Selected tags list should be independent of filter changes</li>
+            <li class="success">✓ Tags from different filters should accumulate in the selected list</li>
+            <li class="success">✓ Checkboxes in available tags should reflect persistent selection state</li>
+            <li class="success">✓ Moving tags between lists should work correctly</li>
+            <li class="success">✓ Clear button should clear all persistent selections</li>
+        </ul>
+    </div>
+
+    <div class="test-section">
+        <h2>Key Changes Made</h2>
+        <ul>
+            <li class="info">Added <code>persistentSelectedTags</code> Set to TagManager state</li>
+            <li class="info">Updated all move operations to work with persistent tags</li>
+            <li class="info">Modified checkbox state management to use persistent tags</li>
+            <li class="info">Updated generate and export functions to use persistent tags</li>
+            <li class="info">Ensured selected tags list shows all selected tags regardless of current filters</li>
+        </ul>
+    </div>
+
+    <div class="test-section">
+        <h2>Technical Details</h2>
+        <p><strong>Before:</strong> Selected tags were affected by filter changes because they were derived from the current filtered view.</p>
+        <p><strong>After:</strong> Selected tags are stored in a separate persistent Set that is independent of filter changes.</p>
+        <p><strong>Implementation:</strong> The <code>persistentSelectedTags</code> Set maintains the true selection state, while the regular <code>selectedTags</code> Set is kept in sync for backward compatibility.</p>
+    </div>
+
+    <script>
+        // Simple test to verify the TagManager state structure
+        console.log('Test page loaded. Please test the functionality in the main application.');
+        
+        // You can also test the API endpoints directly:
+        async function testAPI() {
+            try {
+                const response = await fetch('http://127.0.0.1:9090/api/available-tags');
+                const data = await response.json();
+                console.log('Available tags count:', data.length);
+                console.log('Sample tags:', data.slice(0, 3));
+            } catch (error) {
+                console.error('API test failed:', error);
+            }
+        }
+        
+        // Uncomment to test API
+        // testAPI();
+    </script>
+</body>
+</html> 

@@ -1,0 +1,322 @@
+{
+  "inventory_transfer_items": [
+    {
+      "product_name": "Core Reactor Quartz Banger",
+      "product_brand": "Test Brand",
+      "qty": 5,
+      "inventory_id": "TEST001",
+      "vendor": "Test Vendor"
+    },
+    {
+      "product_name": "Terp Slurper Quartz Banger",
+      "product_brand": "Test Brand",
+      "qty": 3,
+      "inventory_id": "TEST002",
+      "vendor": "Test Vendor"
+    },
+    {
+      "product_name": "Diamond Knot Quartz Banger",
+      "product_brand": "Test Brand",
+      "qty": 2,
+      "inventory_id": "TEST003",
+      "vendor": "Test Vendor"
+    },
+    {
+      "product_name": "Banana OG Distillate Cartridge by Hustler's Ambition - 1g",
+      "product_brand": "Hustler's Ambition",
+      "qty": 6,
+      "inventory_id": "TEST004",
+      "vendor": "1555 Industrial LLC"
+    },
+    {
+      "product_name": "Blackberry Pie Sugar Cone Infused Pre-Roll by Oleum - 0.5g x 2 Pack",
+      "product_brand": "Oleum",
+      "qty": 6,
+      "inventory_id": "TEST005",
+      "vendor": "TRIGONAL INDUSTRIES"
+    },
+    {
+      "product_name": "Fruity Pebbles Sugar Cone Infused Pre-Roll by Oleum - 0.5g x 2 Pack",
+      "product_brand": "Oleum",
+      "qty": 1,
+      "inventory_id": "TEST006",
+      "vendor": "TRIGONAL INDUSTRIES"
+    },
+    {
+      "product_name": "Blue Nerdz Liquid Diamond Disposable Vape by Oleum - 1g",
+      "product_brand": "Oleum",
+      "qty": 7,
+      "inventory_id": "TEST007",
+      "vendor": "TRIGONAL INDUSTRIES"
+    },
+    {
+      "product_name": "Gorilla Glue #4 Liquid Diamond Disposable Vape by Oleum - 1g",
+      "product_brand": "Oleum",
+      "qty": 7,
+      "inventory_id": "TEST008",
+      "vendor": "TRIGONAL INDUSTRIES"
+    },
+    {
+      "product_name": "Gummy Bearz Liquid Diamond Disposable Vape by Oleum - 1g",
+      "product_brand": "Oleum",
+      "qty": 8,
+      "inventory_id": "TEST009",
+      "vendor": "TRIGONAL INDUSTRIES"
+    },
+    {
+      "product_name": "Mochi Gelato Liquid Diamond Disposable Vape by Oleum - 1g",
+      "product_brand": "Oleum",
+      "qty": 13,
+      "inventory_id": "TEST010",
+      "vendor": "TRIGONAL INDUSTRIES"
+    },
+    {
+      "product_name": "Rainbow Runtz Liquid Diamond Disposable Vape by Oleum - 1g",
+      "product_brand": "Oleum",
+      "qty": 8,
+      "inventory_id": "TEST011",
+      "vendor": "TRIGONAL INDUSTRIES"
+    },
+    {
+      "product_name": "Peach Ringz Liquid Diamond Disposable Vape by Oleum - 1g",
+      "product_brand": "Oleum",
+      "qty": 7,
+      "inventory_id": "TEST012",
+      "vendor": "TRIGONAL INDUSTRIES"
+    },
+    {
+      "product_name": "Sour Diesel Liquid Diamond Disposable Vape by Oleum - 1g",
+      "product_brand": "Oleum",
+      "qty": 8,
+      "inventory_id": "TEST013",
+      "vendor": "TRIGONAL INDUSTRIES"
+    },
+    {
+      "product_name": "Gorilla Cookies Live Resin Disposable Vape by Oleum - 1g",
+      "product_brand": "Oleum",
+      "qty": 4,
+      "inventory_id": "TEST014",
+      "vendor": "TRIGONAL INDUSTRIES"
+    },
+    {
+      "product_name": "POM Punch Live Resin Disposable Vape by Oleum - 1g",
+      "product_brand": "Oleum",
+      "qty": 8,
+      "inventory_id": "TEST015",
+      "vendor": "TRIGONAL INDUSTRIES"
+    },
+    {
+      "product_name": "Black Runtz Live Resin Disposable Vape by Oleum - 1g",
+      "product_brand": "Oleum",
+      "qty": 9,
+      "inventory_id": "TEST016",
+      "vendor": "TRIGONAL INDUSTRIES"
+    },
+    {
+      "product_name": "GG4 Honey Crystal by Oleum - 1g",
+      "product_brand": "Oleum",
+      "qty": 6,
+      "inventory_id": "TEST017",
+      "vendor": "TRIGONAL INDUSTRIES"
+    },
+    {
+      "product_name": "Push Pop Honey Crystal by Oleum -1g",
+      "product_brand": "Oleum",
+      "qty": 5,
+      "inventory_id": "TEST018",
+      "vendor": "TRIGONAL INDUSTRIES"
+    },
+    {
+      "product_name": "Ice Cream Cake Honey Crystal by Oleum - 1g",
+      "product_brand": "Oleum",
+      "qty": 7,
+      "inventory_id": "TEST019",
+      "vendor": "TRIGONAL INDUSTRIES"
+    },
+    {
+      "product_name": "Wedding Cake Honey Crystal by Oleum - 1g",
+      "product_brand": "Oleum",
+      "qty": 3,
+      "inventory_id": "TEST020",
+      "vendor": "TRIGONAL INDUSTRIES"
+    },
+    {
+      "product_name": "Blue Dream Honey Crystal by Oleum - 1g",
+      "product_brand": "Oleum",
+      "qty": 9,
+      "inventory_id": "TEST021",
+      "vendor": "TRIGONAL INDUSTRIES"
+    },
+    {
+      "product_name": "Maui Waui Honey Crystal by Oleum - 1g",
+      "product_brand": "Oleum",
+      "qty": 1,
+      "inventory_id": "TEST022",
+      "vendor": "TRIGONAL INDUSTRIES"
+    },
+    {
+      "product_name": "Khalifa Kiwi Mini Disposable Magnetic Vape (Side A) by Ooowee - 1g",
+      "product_brand": "Ooowee",
+      "qty": 3,
+      "inventory_id": "TEST023",
+      "vendor": "TTL HOLDINGS LLC"
+    },
+    {
+      "product_name": "$70 Glass Bong by Vid",
+      "product_brand": "Paraphernalia",
+      "qty": 1,
+      "inventory_id": "TEST024",
+      "vendor": "VID INC"
+    },
+    {
+      "product_name": "$15 Silicone Venomous Pipe by Vid",
+      "product_brand": "Paraphernalia",
+      "qty": 52,
+      "inventory_id": "TEST025",
+      "vendor": "VID INC"
+    },
+    {
+      "product_name": "$15 Silicone Ice Cream Pipe by Vid",
+      "product_brand": "Paraphernalia",
+      "qty": 33,
+      "inventory_id": "TEST026",
+      "vendor": "VID INC"
+    },
+    {
+      "product_name": "$10 Regular Silicone Pipe by Vid",
+      "product_brand": "Paraphernalia",
+      "qty": 44,
+      "inventory_id": "TEST027",
+      "vendor": "VID INC"
+    },
+    {
+      "product_name": "Silicone Covered Glass Bowl - VID Inc",
+      "product_brand": "Paraphernalia",
+      "qty": 44,
+      "inventory_id": "TEST028",
+      "vendor": "VID INC"
+    },
+    {
+      "product_name": "Down Stem - VID Inc",
+      "product_brand": "Paraphernalia",
+      "qty": 82,
+      "inventory_id": "TEST029",
+      "vendor": "VID INC"
+    },
+    {
+      "product_name": "Rick Medium Bong with Disc Perc - VID Inc",
+      "product_brand": "Paraphernalia",
+      "qty": 1,
+      "inventory_id": "TEST030",
+      "vendor": "VID INC"
+    },
+    {
+      "product_name": "Small Glass Pipe - VID Inc",
+      "product_brand": "Paraphernalia",
+      "qty": 300,
+      "inventory_id": "TEST031",
+      "vendor": "VID INC"
+    },
+    {
+      "product_name": "Wood Pipe Electronic Vape",
+      "product_brand": "Paraphernalia",
+      "qty": 5,
+      "inventory_id": "TEST032",
+      "vendor": "VID INC"
+    },
+    {
+      "product_name": "Silicone/Glass Detatchable Bong - VID Inc",
+      "product_brand": "Paraphernalia",
+      "qty": 14,
+      "inventory_id": "TEST033",
+      "vendor": "VID INC"
+    },
+    {
+      "product_name": "$15 Medium Glass Pipe by Vid",
+      "product_brand": "Paraphernalia",
+      "qty": 54,
+      "inventory_id": "TEST034",
+      "vendor": "VID INC"
+    },
+    {
+      "product_name": "$10 Chillum Pack by VID INC",
+      "product_brand": "VID INC",
+      "qty": 3,
+      "inventory_id": "TEST035",
+      "vendor": "VID INC"
+    },
+    {
+      "product_name": "$10 Small Glass Pipe by Vid",
+      "product_brand": "VID INC",
+      "qty": 215,
+      "inventory_id": "TEST036",
+      "vendor": "VID INC"
+    },
+    {
+      "product_name": "Edge Concentrate Cutter",
+      "product_brand": "Paraphernalia",
+      "qty": 22,
+      "inventory_id": "TEST037",
+      "vendor": "Vuber Technologies"
+    },
+    {
+      "product_name": "Afghani Hashplant Hash Rosin by Washington Bud Company - 1g",
+      "product_brand": "Washington Bud Company",
+      "qty": 1,
+      "inventory_id": "TEST038",
+      "vendor": "WASHINGTON BUD COMPANY"
+    },
+    {
+      "product_name": "Gorilla Girl Hash Rosin by Washington Bud Company - 1g",
+      "product_brand": "Washington Bud Company",
+      "qty": 2,
+      "inventory_id": "TEST039",
+      "vendor": "WASHINGTON BUD COMPANY"
+    },
+    {
+      "product_name": "Mimosa Hash Rosin by Washington Bud Company - 1g",
+      "product_brand": "Washington Bud Company",
+      "qty": 2,
+      "inventory_id": "TEST040",
+      "vendor": "WASHINGTON BUD COMPANY"
+    },
+    {
+      "product_name": "Canis Soothing Liniment Roll On by Washington Bud Company - 20mg THC",
+      "product_brand": "Washington Bud Company",
+      "qty": 4,
+      "inventory_id": "TEST041",
+      "vendor": "WASHINGTON BUD COMPANY"
+    },
+    {
+      "product_name": "Power Trip by Washington Bud Company - 3.5g",
+      "product_brand": "Washington Bud Company",
+      "qty": 5,
+      "inventory_id": "TEST042",
+      "vendor": "WASHINGTON BUD COMPANY"
+    },
+    {
+      "product_name": "Sky Master by Washington Bud Company - 3.5g",
+      "product_brand": "Washington Bud Company",
+      "qty": 4,
+      "inventory_id": "TEST043",
+      "vendor": "WASHINGTON BUD COMPANY"
+    },
+    {
+      "product_name": "Canis Soothing Eucalyptus Salt by Washington Bud Company - 170mg THC",
+      "product_brand": "Washington Bud Company",
+      "qty": 3,
+      "inventory_id": "TEST044",
+      "vendor": "WASHINGTON BUD COMPANY"
+    },
+    {
+      "product_name": "Canis Soothing Lavender Salt by Washington Bud Company - 160mg THC",
+      "product_brand": "Washington Bud Company",
+      "qty": 4,
+      "inventory_id": "TEST045",
+      "vendor": "WASHINGTON BUD COMPANY"
+    }
+  ],
+  "from_license_name": "Test Vendor",
+  "from_license_number": "12345",
+  "est_arrival_at": "2024-01-01T00:00:00Z"
+} 

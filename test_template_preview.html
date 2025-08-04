@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Template Preview Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .test-container {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            max-width: 600px;
+            margin: 0 auto;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        select, input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .preview-container {
+            border: 1px solid #ccc;
+            padding: 15px;
+            margin-top: 20px;
+            background: #f9f9f9;
+            min-height: 150px;
+        }
+        .preview-label {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h2>Template Preview Test</h2>
+        
+        <div class="form-group">
+            <label for="templateType">Template Type:</label>
+            <select id="templateType">
+                <option value="horizontal">Horizontal</option>
+                <option value="vertical">Vertical</option>
+                <option value="mini">Mini</option>
+                <option value="double">Double</option>
+            </select>
+        </div>
+        
+        <div class="form-group">
+            <label for="fontFamily">Font Family:</label>
+            <select id="fontFamily">
+                <option value="Arial">Arial</option>
+                <option value="Helvetica">Helvetica</option>
+                <option value="Times New Roman">Times New Roman</option>
+                <option value="Georgia">Georgia</option>
+            </select>
+        </div>
+        
+        <div class="form-group">
+            <label for="scale">Scale Factor:</label>
+            <input type="number" id="scale" value="1.0" min="0.5" max="2.0" step="0.1">
+        </div>
+        
+        <div class="form-group">
+            <label for="fontSizeMode">Font Size Mode:</label>
+            <select id="fontSizeMode">
+                <option value="auto">Auto (Dynamic)</option>
+                <option value="fixed">Fixed Sizes</option>
+            </select>
+        </div>
+        
+        <div class="form-group" id="fixedSizesSection" style="display: none;">
+            <label>Fixed Font Sizes:</label>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                <div>
+                    <label for="brandSize">Brand:</label>
+                    <input type="number" id="brandSize" value="14" min="6" max="48">
+                </div>
+                <div>
+                    <label for="descriptionSize">Description:</label>
+                    <input type="number" id="descriptionSize" value="16" min="6" max="48">
+                </div>
+                <div>
+                    <label for="priceSize">Price:</label>
+                    <input type="number" id="priceSize" value="18" min="6" max="48">
+                </div>
+                <div>
+                    <label for="lineageSize">Lineage:</label>
+                    <input type="number" id="lineageSize" value="12" min="6" max="48">
+                </div>
+            </div>
+        </div>
+        
+        <div class="preview-container">
+            <div class="preview-label">Template Preview:</div>
+            <div id="templatePreview">
+                <div style="text-align: center; color: #999;">
+                    Preview will appear here
+                </div>
+            </div>
+        </div>
+        
+        <button onclick="updatePreview()" style="margin-top: 15px; padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;">
+            Update Preview
+        </button>
+    </div>
+
+    <script>
+        function updatePreview() {
+            console.log('updatePreview called');
+            
+            const templateType = document.getElementById('templateType').value;
+            const fontFamily = document.getElementById('fontFamily').value;
+            const scale = document.getElementById('scale').value;
+            const fontSizeMode = document.getElementById('fontSizeMode').value;
+            
+            console.log('Settings:', { templateType, fontFamily, scale, fontSizeMode });
+            
+            const preview = document.getElementById('templatePreview');
+            if (!preview) {
+                console.error('Preview container not found!');
+                return;
+            }
+            
+            let previewHtml = `
+                <div style="font-family: ${fontFamily}; transform: scale(${scale}); transform-origin: top left;">
+                    <div style="border: 1px solid #ccc; padding: 8px; margin: 4px; background: white;">
+                        <div style="font-weight: bold; font-size: ${fontSizeMode === 'fixed' ? document.getElementById('brandSize').value : 14}px;">Sample Brand</div>
+                        <div style="font-size: ${fontSizeMode === 'fixed' ? document.getElementById('descriptionSize').value : 16}px;">Sample Description Text</div>
+                        <div style="font-size: ${fontSizeMode === 'fixed' ? document.getElementById('priceSize').value : 18}px; font-weight: bold;">$25.00</div>
+                        <div style="font-size: ${fontSizeMode === 'fixed' ? document.getElementById('lineageSize').value : 12}px;">HYBRID</div>
+                    </div>
+                </div>
+            `;
+            
+            console.log('Setting preview HTML:', previewHtml);
+            preview.innerHTML = previewHtml;
+            console.log('Preview updated successfully');
+        }
+        
+        // Event listeners
+        document.getElementById('fontSizeMode').addEventListener('change', function() {
+            const fixedSection = document.getElementById('fixedSizesSection');
+            if (this.value === 'fixed') {
+                fixedSection.style.display = 'block';
+            } else {
+                fixedSection.style.display = 'none';
+            }
+            updatePreview();
+        });
+        
+        // Add event listeners for all form elements
+        const formElements = [
+            'templateType', 'fontFamily', 'scale', 'fontSizeMode',
+            'brandSize', 'descriptionSize', 'priceSize', 'lineageSize'
+        ];
+        
+        formElements.forEach(id => {
+            const element = document.getElementById(id);
+            if (element) {
+                element.addEventListener('change', updatePreview);
+                element.addEventListener('input', updatePreview);
+            }
+        });
+        
+        // Initial preview
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM loaded, updating preview...');
+            updatePreview();
+        });
+    </script>
+</body>
+</html> 

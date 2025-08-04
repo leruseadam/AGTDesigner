@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JSON Matching Debug Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .debug-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; border-radius: 5px; }
+        .debug-output { background: #f5f5f5; padding: 10px; border-radius: 3px; margin: 10px 0; }
+        button { margin: 5px; padding: 8px 15px; }
+        .success { color: green; }
+        .error { color: red; }
+        .warning { color: orange; }
+    </style>
+</head>
+<body>
+    <h1>JSON Matching Debug Test</h1>
+    
+    <div class="debug-section">
+        <h3>1. Check Current State</h3>
+        <button onclick="checkCurrentState()">Check Current State</button>
+        <div id="currentStateOutput" class="debug-output"></div>
+    </div>
+    
+    <div class="debug-section">
+        <h3>2. Test JSON Matching</h3>
+        <input type="text" id="jsonUrlInput" placeholder="Enter JSON URL" style="width: 300px; margin-right: 10px;">
+        <button onclick="testJsonMatching()">Test JSON Matching</button>
+        <div id="jsonMatchingOutput" class="debug-output"></div>
+    </div>
+    
+    <div class="debug-section">
+        <h3>3. Force Refresh Available Tags</h3>
+        <button onclick="forceRefresh()">Force Refresh Available Tags</button>
+        <div id="refreshOutput" class="debug-output"></div>
+    </div>
+    
+    <div class="debug-section">
+        <h3>4. Manual Update with JSON Data</h3>
+        <button onclick="manualUpdate()">Manual Update with JSON Data</button>
+        <div id="manualUpdateOutput" class="debug-output"></div>
+    </div>
+    
+    <div class="debug-section">
+        <h3>5. Check Backend State</h3>
+        <button onclick="checkBackendState()">Check Backend State</button>
+        <div id="backendStateOutput" class="debug-output"></div>
+    </div>
+
+    <script>
+        function log(elementId, message, type = 'info') {
+            const element = document.getElementById(elementId);
+            const timestamp = new Date().toLocaleTimeString();
+            const className = type === 'error' ? 'error' : type === 'success' ? 'success' : type === 'warning' ? 'warning' : '';
+            element.innerHTML += `<div class="${className}">[${timestamp}] ${message}</div>`;
+            element.scrollTop = element.scrollHeight;
+        }
+
+        function checkCurrentState() {
+            const output = document.getElementById('currentStateOutput');
+            output.innerHTML = '';
+            
+            log('currentStateOutput', 'Checking current state...');
+            
+            if (typeof TagManager === 'undefined') {
+                log('currentStateOutput', 'ERROR: TagManager not found', 'error');
+                return;
+            }
+            
+            // Check TagManager state
+            const state = {
+                tags: TagManager.state.tags ? TagManager.state.tags.length : 0,
+                originalTags: TagManager.state.originalTags ? TagManager.state.originalTags.length : 0,
+                persistentSelectedTags: TagManager.state.persistentSelectedTags ? TagManager.state.persistentSelectedTags.length : 0,
+                selectedTags: TagManager.state.selectedTags ? TagManager.state.selectedTags.size : 0
+            };
+            
+            log('currentStateOutput', `TagManager State: ${JSON.stringify(state, null, 2)}`);
+            
+            // Check for JSON matched items
+            if (TagManager.state.tags) {
+                const jsonMatchedItems = TagManager.state.tags.filter(tag => tag.Source === 'JSON Match');
+                log('currentStateOutput', `JSON Matched Items in tags: ${jsonMatchedItems.length}`);
+                if (jsonMatchedItems.length > 0) {
+                    log('currentStateOutput', `Sample JSON matched items: ${jsonMatchedItems.slice(0, 3).map(t => t['Product Name*']).join(', ')}`);
+                }
+            }
+            
+            // Check DOM state
+            const availableContainer = document.getElementById('availableTags');
+            if (availableContainer) {
+                const tagElements = availableContainer.querySelectorAll('.tag-checkbox');
+                log('currentStateOutput', `Available Tags in DOM: ${tagElements.length}`);
+            } else {
+                log('currentStateOutput', 'WARNING: availableTags container not found', 'warning');
+            }
+        }
+
+        async function testJsonMatching() {
+            const output = document.getElementById('jsonMatchingOutput');
+            output.innerHTML = '';
+            
+            const jsonUrl = document.getElementById('jsonUrlInput').value.trim();
+            if (!jsonUrl) {
+                log('jsonMatchingOutput', 'ERROR: Please enter a JSON URL', 'error');
+                return;
+            }
+            
+            log('jsonMatchingOutput', `Testing JSON matching with URL: ${jsonUrl}`);
+            
+            try {
+                const response = await fetch('/api/json-match', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: jsonUrl })
+                });
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    log('jsonMatchingOutput', `ERROR: HTTP ${response.status}: ${errorText}`, 'error');
+                    return;
+                }
+                
+                const result = await response.json();
+                log('jsonMatchingOutput', `JSON matching successful: ${result.matched_count} items matched`, 'success');
+                log('jsonMatchingOutput', `Available tags count: ${result.available_tags ? result.available_tags.length : 0}`);
+                log('jsonMatchingOutput', `Filter mode: ${result.filter_mode || 'unknown'}`);
+                
+                // Check if available tags have JSON Match source
+                if (result.available_tags) {
+                    const jsonMatchedCount = result.available_tags.filter(tag => tag.Source === 'JSON Match').length;
+                    log('jsonMatchingOutput', `JSON matched items in response: ${jsonMatchedCount}`);
+                }
+                
+                // Wait a moment and check state again
+                setTimeout(() => {
+                    log('jsonMatchingOutput', 'Checking state after JSON matching...');
+                    checkCurrentState();
+                }, 2000);
+                
+            } catch (error) {
+                log('jsonMatchingOutput', `ERROR: ${error.message}`, 'error');
+            }
+        }
+
+        function forceRefresh() {
+            const output = document.getElementById('refreshOutput');
+            output.innerHTML = '';
+            
+            log('refreshOutput', 'Forcing refresh of available tags...');
+            
+            if (typeof TagManager === 'undefined') {
+                log('refreshOutput', 'ERROR: TagManager not found', 'error');
+                return;
+            }
+            
+            if (TagManager.fetchAndUpdateAvailableTags) {
+                TagManager.fetchAndUpdateAvailableTags().then(result => {
+                    log('refreshOutput', `Refresh completed: ${result}`, 'success');
+                    setTimeout(() => checkCurrentState(), 1000);
+                }).catch(error => {
+                    log('refreshOutput', `ERROR: ${error.message}`, 'error');
+                });
+            } else {
+                log('refreshOutput', 'ERROR: fetchAndUpdateAvailableTags method not found', 'error');
+            }
+        }
+
+        function manualUpdate() {
+            const output = document.getElementById('manualUpdateOutput');
+            output.innerHTML = '';
+            
+            log('manualUpdateOutput', 'Manually updating with JSON data...');
+            
+            if (typeof TagManager === 'undefined') {
+                log('manualUpdateOutput', 'ERROR: TagManager not found', 'error');
+                return;
+            }
+            
+            if (TagManager._updateAvailableTags) {
+                const currentTags = TagManager.state.tags || [];
+                const jsonMatchedTags = currentTags.map(tag => ({
+                    ...tag,
+                    Source: 'JSON Match'
+                }));
+                
+                log('manualUpdateOutput', `Updating with ${jsonMatchedTags.length} JSON matched tags`);
+                TagManager._updateAvailableTags(jsonMatchedTags, null);
+                log('manualUpdateOutput', 'Manual update completed', 'success');
+                
+                setTimeout(() => checkCurrentState(), 1000);
+            } else {
+                log('manualUpdateOutput', 'ERROR: _updateAvailableTags method not found', 'error');
+            }
+        }
+
+        async function checkBackendState() {
+            const output = document.getElementById('backendStateOutput');
+            output.innerHTML = '';
+            
+            log('backendStateOutput', 'Checking backend state...');
+            
+            try {
+                const response = await fetch('/api/available-tags');
+                if (!response.ok) {
+                    log('backendStateOutput', `ERROR: HTTP ${response.status}`, 'error');
+                    return;
+                }
+                
+                const tags = await response.json();
+                const backendJsonMatched = tags.filter(tag => tag.Source === 'JSON Match');
+                
+                log('backendStateOutput', `Backend Available Tags: ${tags.length}`);
+                log('backendStateOutput', `Backend JSON Matched Items: ${backendJsonMatched.length}`);
+                
+                if (backendJsonMatched.length > 0) {
+                    log('backendStateOutput', `Sample backend JSON matched items: ${backendJsonMatched.slice(0, 3).map(t => t['Product Name*']).join(', ')}`);
+                }
+                
+            } catch (error) {
+                log('backendStateOutput', `ERROR: ${error.message}`, 'error');
+            }
+        }
+
+        // Auto-check state on page load
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                log('currentStateOutput', 'Auto-checking state on page load...');
+                checkCurrentState();
+            }, 1000);
+        });
+    </script>
+</body>
+</html> 

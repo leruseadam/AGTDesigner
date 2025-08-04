@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Selected Tags Click Behavior</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: #f5f5f5;
+        }
+        .test-container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .tag-row {
+            display: flex;
+            align-items: center;
+            padding: 8px;
+            margin: 4px 0;
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .tag-row.selected {
+            background: #e3f2fd;
+            border-color: #2196f3;
+        }
+        .tag-checkbox {
+            margin-right: 10px;
+        }
+        .tag-item {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            padding: 4px 8px;
+            cursor: pointer;
+        }
+        .tag-name {
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        .tag-info {
+            color: #666;
+            font-size: 0.9em;
+        }
+        .test-instructions {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .test-result {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 10px;
+            display: none;
+        }
+        .test-result.error {
+            background: #f8d7da;
+            border-color: #f5c6cb;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>Test: Selected Tags Click Behavior</h1>
+        
+        <div class="test-instructions">
+            <h3>Test Instructions:</h3>
+            <ol>
+                <li><strong>Available Tags:</strong> Clicking anywhere on the tag should toggle the checkbox</li>
+                <li><strong>Selected Tags:</strong> Only clicking the checkbox should toggle selection</li>
+                <li>Try clicking on the tag text, background, and checkbox for both sections</li>
+            </ol>
+        </div>
+
+        <div class="test-section">
+            <h3>Available Tags (should respond to any click)</h3>
+            <div id="availableTags">
+                <div class="tag-row">
+                    <input type="checkbox" class="tag-checkbox" value="Test Product 1">
+                    <div class="tag-item">
+                        <div class="tag-name">Test Product 1</div>
+                        <div class="tag-info">Brand: Test Brand | Type: Flower</div>
+                    </div>
+                </div>
+                <div class="tag-row">
+                    <input type="checkbox" class="tag-checkbox" value="Test Product 2">
+                    <div class="tag-item">
+                        <div class="tag-name">Test Product 2</div>
+                        <div class="tag-info">Brand: Test Brand | Type: Concentrate</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h3>Selected Tags (should only respond to checkbox clicks)</h3>
+            <div id="selectedTags">
+                <div class="tag-row selected">
+                    <input type="checkbox" class="tag-checkbox" value="Selected Product 1" checked>
+                    <div class="tag-item">
+                        <div class="tag-name">Selected Product 1</div>
+                        <div class="tag-info">Brand: Selected Brand | Type: Edible</div>
+                    </div>
+                </div>
+                <div class="tag-row selected">
+                    <input type="checkbox" class="tag-checkbox" value="Selected Product 2" checked>
+                    <div class="tag-item">
+                        <div class="tag-name">Selected Product 2</div>
+                        <div class="tag-info">Brand: Selected Brand | Type: Topical</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-result" id="testResult"></div>
+    </div>
+
+    <script>
+        // Simulate the TagManager behavior
+        const TagManager = {
+            state: {
+                persistentSelectedTags: new Set(['Selected Product 1', 'Selected Product 2'])
+            },
+            handleTagSelection: function(e, tag) {
+                const isChecked = e.target.checked;
+                console.log('Tag selection changed:', tag, 'checked:', isChecked);
+                
+                if (isChecked) {
+                    this.state.persistentSelectedTags.add(tag);
+                } else {
+                    this.state.persistentSelectedTags.delete(tag);
+                }
+                
+                this.updateUI();
+            },
+            updateUI: function() {
+                console.log('Selected tags:', Array.from(this.state.persistentSelectedTags));
+                this.showTestResult('Selection updated: ' + Array.from(this.state.persistentSelectedTags).join(', '));
+            },
+            showTestResult: function(message) {
+                const result = document.getElementById('testResult');
+                result.textContent = message;
+                result.style.display = 'block';
+                setTimeout(() => {
+                    result.style.display = 'none';
+                }, 3000);
+            }
+        };
+
+        // Create tag elements with the same logic as the main application
+        function createTagElement(tag, isForSelectedTags = false) {
+            const row = document.createElement('div');
+            row.className = 'tag-row';
+            if (isForSelectedTags) {
+                row.classList.add('selected');
+            }
+
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.className = 'tag-checkbox';
+            checkbox.value = tag.name;
+            checkbox.checked = TagManager.state.persistentSelectedTags.has(tag.name);
+            checkbox.addEventListener('change', (e) => TagManager.handleTagSelection(e, tag.name));
+
+            const tagElement = document.createElement('div');
+            tagElement.className = 'tag-item';
+
+            // Make the entire tag element clickable to toggle checkbox (but only for available tags)
+            // For selected tags, only allow checkbox clicking to toggle selection
+            if (!isForSelectedTags) {
+                tagElement.style.cursor = 'pointer';
+                tagElement.addEventListener('click', (e) => {
+                    // Don't trigger if clicking on the checkbox itself
+                    if (e.target === checkbox) {
+                        return;
+                    }
+                    // Toggle the checkbox
+                    checkbox.checked = !checkbox.checked;
+                    // Trigger the change event
+                    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+                });
+            } else {
+                // For selected tags, only allow checkbox clicking to toggle selection
+                tagElement.style.cursor = 'default';
+            }
+
+            const tagName = document.createElement('div');
+            tagName.className = 'tag-name';
+            tagName.textContent = tag.name;
+
+            const tagInfo = document.createElement('div');
+            tagInfo.className = 'tag-info';
+            tagInfo.textContent = `Brand: ${tag.brand} | Type: ${tag.type}`;
+
+            tagElement.appendChild(tagName);
+            tagElement.appendChild(tagInfo);
+            row.appendChild(checkbox);
+            row.appendChild(tagElement);
+
+            return row;
+        }
+
+        // Initialize the test
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Test initialized');
+            console.log('Available tags should respond to any click');
+            console.log('Selected tags should only respond to checkbox clicks');
+        });
+    </script>
+</body>
+</html> 

@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Drag and Drop Debug Console Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background: #f0f0f0;
+        }
+        .test-container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .tag-item {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            margin: 5px 0;
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            position: relative;
+            min-height: 40px;
+            padding-left: 32px;
+        }
+        .tag-checkbox {
+            margin-right: 10px;
+        }
+        .tag-text {
+            flex: 1;
+        }
+        .drag-handle {
+            position: absolute;
+            left: 4px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: rgba(79, 172, 254, 0.8);
+            opacity: 0.6;
+            transition: all 0.2s ease;
+            cursor: grab;
+            pointer-events: auto;
+            z-index: 10;
+            background: rgba(79, 172, 254, 0.1);
+            border-radius: 4px;
+            padding: 4px;
+            border: 1px solid rgba(79, 172, 254, 0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+        }
+        .drag-handle:hover {
+            opacity: 1;
+            background: rgba(79, 172, 254, 0.3);
+            transform: translateY(-50%) scale(1.1);
+        }
+        .drag-handle:active {
+            cursor: grabbing;
+        }
+        .console-output {
+            margin-top: 20px;
+            padding: 10px;
+            background: #000;
+            color: #0f0;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+            height: 200px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        .test-button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 10px 5px;
+        }
+        .test-button:hover {
+            background: #0056b3;
+        }
+        .status {
+            margin-top: 20px;
+            padding: 10px;
+            background: #e9ecef;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h2>Drag and Drop Debug Console Test</h2>
+        <p>This test verifies that drag handles are visible and functional with console debugging.</p>
+        
+        <div id="selectedTags">
+            <div class="tag-item" data-tag-id="tag-1">
+                <input type="checkbox" class="tag-checkbox" checked>
+                <div class="tag-text">Test Tag 1 - This should have a visible drag handle</div>
+            </div>
+            <div class="tag-item" data-tag-id="tag-2">
+                <input type="checkbox" class="tag-checkbox" checked>
+                <div class="tag-text">Test Tag 2 - Drag handle should be on the left</div>
+            </div>
+            <div class="tag-item" data-tag-id="tag-3">
+                <input type="checkbox" class="tag-checkbox" checked>
+                <div class="tag-text">Test Tag 3 - Try dragging this one</div>
+            </div>
+        </div>
+        
+        <div style="margin-top: 20px;">
+            <button class="test-button" onclick="testDragManager()">Test Drag Manager</button>
+            <button class="test-button" onclick="addDragHandles()">Add Drag Handles</button>
+            <button class="test-button" onclick="checkVisibility()">Check Visibility</button>
+            <button class="test-button" onclick="clearConsole()">Clear Console</button>
+        </div>
+        
+        <div class="status" id="status">
+            Status: Ready to test
+        </div>
+        
+        <div class="console-output" id="consoleOutput">
+            Console output will appear here...
+        </div>
+    </div>
+
+    <script>
+        // Override console.log to capture output
+        const originalConsoleLog = console.log;
+        const originalConsoleError = console.error;
+        const originalConsoleWarn = console.warn;
+        
+        function logToConsole(message, type = 'log') {
+            const consoleOutput = document.getElementById('consoleOutput');
+            const timestamp = new Date().toLocaleTimeString();
+            const prefix = type === 'error' ? 'ERROR' : type === 'warn' ? 'WARN' : 'LOG';
+            consoleOutput.textContent += `[${timestamp}] ${prefix}: ${message}\n`;
+            consoleOutput.scrollTop = consoleOutput.scrollHeight;
+        }
+        
+        console.log = function(...args) {
+            originalConsoleLog.apply(console, args);
+            logToConsole(args.join(' '), 'log');
+        };
+        
+        console.error = function(...args) {
+            originalConsoleError.apply(console, args);
+            logToConsole(args.join(' '), 'error');
+        };
+        
+        console.warn = function(...args) {
+            originalConsoleWarn.apply(console, args);
+            logToConsole(args.join(' '), 'warn');
+        };
+        
+        function clearConsole() {
+            document.getElementById('consoleOutput').textContent = 'Console cleared...\n';
+        }
+        
+        function testDragManager() {
+            console.log('Testing drag manager...');
+            
+            if (window.dragAndDropManager) {
+                console.log('Drag manager found:', window.dragAndDropManager);
+                console.log('Is initialized:', window.dragAndDropManager.isInitialized);
+                console.log('Is dragging:', window.dragAndDropManager.isDragging);
+                
+                // Test the drag manager
+                const result = window.dragAndDropManager.testDragAndDrop();
+                console.log('Test result:', result);
+            } else {
+                console.error('Drag manager not found!');
+            }
+        }
+        
+        function addDragHandles() {
+            console.log('Adding drag handles...');
+            const container = document.querySelector('#selectedTags');
+            const tagItems = container.querySelectorAll('.tag-item');
+            
+            console.log(`Found ${tagItems.length} tag items`);
+            
+            tagItems.forEach((tagItem, index) => {
+                // Remove existing handle
+                const existingHandle = tagItem.querySelector('.drag-handle');
+                if (existingHandle) {
+                    existingHandle.remove();
+                    console.log(`Removed existing handle from tag ${index}`);
+                }
+                
+                // Create drag handle
+                const dragHandle = document.createElement('div');
+                dragHandle.className = 'drag-handle';
+                dragHandle.innerHTML = `
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
+                    </svg>
+                `;
+                
+                tagItem.appendChild(dragHandle);
+                console.log(`Added drag handle to tag ${index}: ${tagItem.textContent.trim().substring(0, 30)}...`);
+            });
+            
+            document.getElementById('status').textContent = `Added ${tagItems.length} drag handles`;
+        }
+        
+        function checkVisibility() {
+            console.log('Checking visibility...');
+            const handles = document.querySelectorAll('.drag-handle');
+            const visibleHandles = Array.from(handles).filter(handle => {
+                const rect = handle.getBoundingClientRect();
+                const isVisible = rect.width > 0 && rect.height > 0;
+                console.log(`Handle visibility: ${isVisible}, size: ${rect.width}x${rect.height}`);
+                return isVisible;
+            });
+            
+            console.log(`Found ${handles.length} handles, ${visibleHandles.length} visible`);
+            document.getElementById('status').textContent = 
+                `Found ${handles.length} handles, ${visibleHandles.length} visible`;
+        }
+        
+        // Auto-add handles on load
+        window.addEventListener('load', () => {
+            console.log('Page loaded, initializing...');
+            setTimeout(() => {
+                addDragHandles();
+                checkVisibility();
+            }, 100);
+        });
+    </script>
+</body>
+</html> 
