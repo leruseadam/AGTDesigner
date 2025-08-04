@@ -18,29 +18,15 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='repla
 project_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, project_dir)
 
-# Try to add virtual environment to Python path
-# Check multiple possible locations for virtual environment
-venv_paths = [
-    os.path.join(project_dir, 'venv_pythonanywhere'),
-    os.path.join(os.path.expanduser('~'), 'AGTDesigner', 'venv_pythonanywhere'),
-    os.path.join(os.path.expanduser('~'), 'venv_pythonanywhere'),
-    '/var/www/venv_pythonanywhere',  # PythonAnywhere system path
-]
+# Add virtual environment to Python path - use the correct path that's working
+venv_path = os.path.join(project_dir, 'venv_pythonanywhere')
+venv_site_packages = os.path.join(venv_path, 'lib', 'python3.11', 'site-packages')
 
-venv_found = False
-for venv_path in venv_paths:
-    venv_site_packages = os.path.join(venv_path, 'lib', 'python3.11', 'site-packages')
-    if os.path.exists(venv_site_packages):
-        sys.path.insert(0, venv_site_packages)
-        print(f"✅ Virtual environment site-packages added: {venv_site_packages}")
-        venv_found = True
-        break
-
-if not venv_found:
-    print("⚠️  Virtual environment site-packages not found in common locations:")
-    for venv_path in venv_paths:
-        venv_site_packages = os.path.join(venv_path, 'lib', 'python3.11', 'site-packages')
-        print(f"   - {venv_site_packages}")
+if os.path.exists(venv_site_packages):
+    sys.path.insert(0, venv_site_packages)
+    print(f"✅ Virtual environment site-packages added: {venv_site_packages}")
+else:
+    print(f"⚠️  Virtual environment site-packages not found at: {venv_site_packages}")
     print("Continuing without virtual environment...")
 
 # Set environment variables
@@ -68,13 +54,15 @@ try:
     print("✅ Successfully imported Flask app")
 except ImportError as e:
     print(f"❌ Error importing Flask app: {e}")
-    print("Available packages:")
-    for path in sys.path:
-        print(f"  - {path}")
     raise
 
 # Create the application instance
-application = create_app()
+try:
+    application = create_app()
+    print("✅ Application created successfully")
+except Exception as e:
+    print(f"❌ Error creating application: {e}")
+    raise
 
 # Configure for production
 application.config['DEBUG'] = False
@@ -89,7 +77,4 @@ print(f"✅ Label Maker application created successfully at {datetime.now()}")
 
 # WSGI application entry point
 if __name__ == "__main__":
-    try:
-        application.run()
-    except Exception as e:
-        print(f"❌ Failed to run application: {e}") 
+    application.run() 
