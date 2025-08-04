@@ -40,10 +40,7 @@ from docx.enum.table import WD_ROW_HEIGHT_RULE
 from src.core.generation.template_processor import get_font_scheme, TemplateProcessor
 from src.core.generation.tag_generator import get_template_path
 import time
-from src.core.generation.mini_font_sizing import (
-    get_mini_font_size_by_marker,
-    set_mini_run_font_size
-)
+# Removed unused mini font sizing imports
 from src.core.data.excel_processor import ExcelProcessor, get_default_upload_file
 import random
 from flask_caching import Cache
