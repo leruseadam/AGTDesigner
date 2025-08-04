@@ -1,0 +1,52 @@
+# PythonAnywhere Requirements for Label Maker
+# Core Flask dependencies
+Flask==2.3.3
+Flask-CORS==4.0.0
+Werkzeug==2.3.7
+Jinja2==3.1.2
+MarkupSafe==2.1.3
+itsdangerous==2.1.2
+click==8.1.7
+blinker==1.6.3
+
+# Data processing
+pandas==2.0.3
+numpy==1.24.3
+openpyxl==3.1.2
+xlrd==2.0.1
+python-dateutil==2.8.2
+
+# Document generation
+python-docx==0.8.11
+docxtpl==0.16.7
+docxcompose==1.4.0
+
+# File handling
+python-magic==0.4.27
+
+# Security and utilities
+python-dotenv==1.0.0
+cryptography==41.0.4
+
+# Caching and performance
+Flask-Caching==2.3.1
+cachelib==0.13.0
+
+# Web server
+gunicorn==23.0.0
+packaging==25.0
+
+# Image processing
+Pillow==9.5.0
+
+# File watching and system utilities
+watchdog==3.0.0
+psutil==5.9.5
+
+# Additional dependencies for Label Maker
+lxml==6.0.0
+babel==2.17.0
+et-xmlfile==2.0.0
+pytz==2025.2
+tzdata==2025.2
+six==1.17.0

@@ -1,404 +1,458 @@
 #!/bin/bash
 
-# PythonAnywhere Deployment Script for Label Maker
-# This script sets up your project on PythonAnywhere
+# PythonAnywhere Deployment Script
+# This script helps deploy the fixed files to PythonAnywhere
 
-set -e  # Exit on any error
-
-echo "🚀 Starting PythonAnywhere deployment..."
+echo "🚀 PythonAnywhere File Upload Fix Deployment"
+echo "=============================================="
 
 # Configuration
-PYTHON_VERSION="3.11"
-PROJECT_NAME="labelMaker"
-GITHUB_REPO="https://github.com/leruseadam/AGTDesigner.git"
-BRANCH="restored-working-version"
+PROJECT_NAME="AGTDesigner"
+PYTHONANYWHERE_USERNAME="adamcordova"
+PYTHONANYWHERE_PROJECT_PATH="/home/$PYTHONANYWHERE_USERNAME/$PROJECT_NAME"
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# Function to print colored output
-print_status() {
-    echo -e "${BLUE}[INFO]${NC} $1"
-}
-
-print_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
-}
-
-print_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
-}
-
-print_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
+echo "📋 Configuration:"
+echo "  Username: $PYTHONANYWHERE_USERNAME"
+echo "  Project: $PROJECT_NAME"
+echo "  Path: $PYTHONANYWHERE_PROJECT_PATH"
+echo ""
 
 # Check if we're on PythonAnywhere
-if [[ "$USER" == *"pythonanywhere"* ]]; then
-    print_status "Detected PythonAnywhere environment"
-    PYTHONANYWHERE=true
+if [[ "$(hostname)" == *"pythonanywhere"* ]]; then
+    echo "✅ Running on PythonAnywhere"
+    IS_PYTHONANYWHERE=true
 else
-    print_warning "Not on PythonAnywhere - this script is designed for PythonAnywhere deployment"
-    PYTHONANYWHERE=false
+    echo "⚠️  Not running on PythonAnywhere - this script is for local preparation"
+    IS_PYTHONANYWHERE=false
 fi
 
-# Create project directory
-print_status "Setting up project directory..."
-mkdir -p ~/labelMaker
-cd ~/labelMaker
+echo ""
 
-# Clone or update repository
-if [ -d ".git" ]; then
-    print_status "Updating existing repository..."
-    git fetch origin
-    git checkout $BRANCH
-    git pull origin $BRANCH
-else
-    print_status "Cloning repository..."
-    git clone -b $BRANCH $GITHUB_REPO .
-fi
+# Step 1: Create deployment package
+echo "📦 Step 1: Creating deployment package..."
 
-print_success "Repository setup complete"
+# Create deployment directory
+DEPLOY_DIR="pythonanywhere_deployment"
+mkdir -p "$DEPLOY_DIR"
 
-# Create virtual environment
-print_status "Setting up virtual environment..."
-if [ ! -d "venv" ]; then
-    python$PYTHON_VERSION -m venv venv
-    print_success "Virtual environment created"
-else
-    print_status "Virtual environment already exists"
-fi
+# Copy essential files
+echo "  Copying essential files..."
+cp app.py "$DEPLOY_DIR/"
+cp wsgi_pythonanywhere.py "$DEPLOY_DIR/"
+cp fix_pythonanywhere_upload.py "$DEPLOY_DIR/"
+cp test_pythonanywhere_upload.py "$DEPLOY_DIR/"
+cp requirements_pythonanywhere.txt "$DEPLOY_DIR/" 2>/dev/null || cp requirements.txt "$DEPLOY_DIR/"
 
-# Activate virtual environment
-print_status "Activating virtual environment..."
-source venv/bin/activate
+# Copy configuration files
+echo "  Copying configuration files..."
+cp config_pythonanywhere.py "$DEPLOY_DIR/" 2>/dev/null || echo "  ⚠️  config_pythonanywhere.py not found"
+cp config_production.py "$DEPLOY_DIR/" 2>/dev/null || echo "  ⚠️  config_production.py not found"
 
-# Upgrade pip
-print_status "Upgrading pip..."
-pip install --upgrade pip
+# Copy source code
+echo "  Copying source code..."
+cp -r src "$DEPLOY_DIR/" 2>/dev/null || echo "  ⚠️  src directory not found"
+cp -r static "$DEPLOY_DIR/" 2>/dev/null || echo "  ⚠️  static directory not found"
+cp -r templates "$DEPLOY_DIR/" 2>/dev/null || echo "  ⚠️  templates directory not found"
 
-# Install requirements
-print_status "Installing dependencies..."
-if [ -f "requirements.txt" ]; then
-    pip install -r requirements.txt
-    print_success "Dependencies installed"
-else
-    print_warning "No requirements.txt found - installing common dependencies..."
-    pip install flask pandas openpyxl python-docx pillow
-fi
+# Create deployment instructions
+echo "  Creating deployment instructions..."
+cat > "$DEPLOY_DIR/DEPLOYMENT_INSTRUCTIONS.md" << 'EOF'
+# PythonAnywhere Deployment Instructions
 
-# Create necessary directories
-print_status "Creating necessary directories..."
-mkdir -p static/uploads
-mkdir -p logs
-mkdir -p data
+## Quick Setup
 
-# Set up environment variables
-print_status "Setting up environment variables..."
-cat > .env << EOF
-FLASK_ENV=production
-FLASK_DEBUG=False
-SECRET_KEY=$(python -c "import secrets; print(secrets.token_hex(32))")
-DATABASE_PATH=./data/product_database.db
-UPLOAD_FOLDER=./static/uploads
-LOG_LEVEL=INFO
-EOF
+1. **Upload all files** to your PythonAnywhere project directory
+2. **Open PythonAnywhere Bash Console** and run:
+   ```bash
+   cd /home/yourusername/AGTDesigner
+   python fix_pythonanywhere_upload.py
+   python test_pythonanywhere_upload.py
+   ```
+3. **Update WSGI file** with content from `wsgi_pythonanywhere.py`
+4. **Set environment variables** in Web tab:
+   - PYTHONANYWHERE=true
+   - FLASK_ENV=production
+   - FLASK_DEBUG=false
+5. **Reload web app**
 
-print_success "Environment variables configured"
-
-# Create WSGI file for PythonAnywhere
-print_status "Creating WSGI configuration..."
-cat > wsgi.py << 'EOF'
-import sys
-import os
-
-# Add the project directory to Python path
-project_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, project_dir)
-
-# Import and create the Flask app
-from app import create_app
-application = create_app()
-
-if __name__ == "__main__":
-    application.run()
-EOF
-
-print_success "WSGI file created"
-
-# Create startup script
-print_status "Creating startup script..."
-cat > start_app.sh << 'EOF'
-#!/bin/bash
-cd ~/labelMaker
-source venv/bin/activate
-python app.py
-EOF
-
-chmod +x start_app.sh
-
-# Create database initialization script
-print_status "Creating database setup script..."
-cat > setup_database.py << 'EOF'
-#!/usr/bin/env python3
-"""
-Database setup script for Label Maker
-"""
-import os
-import sqlite3
-from pathlib import Path
-
-def setup_database():
-    """Initialize the database with required tables"""
-    db_path = Path("./data/product_database.db")
-    db_path.parent.mkdir(exist_ok=True)
-    
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    
-    # Create products table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS products (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            category TEXT,
-            price REAL,
-            description TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    # Create sessions table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS sessions (
-            id TEXT PRIMARY KEY,
-            data TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    conn.commit()
-    conn.close()
-    print("✅ Database initialized successfully")
-
-if __name__ == "__main__":
-    setup_database()
-EOF
-
-# Create PythonAnywhere specific configuration
-print_status "Creating PythonAnywhere configuration..."
-cat > pythonanywhere_config.py << 'EOF'
-"""
-PythonAnywhere specific configuration
-"""
-import os
-
-# PythonAnywhere specific settings
-class PythonAnywhereConfig:
-    # Static files configuration
-    STATIC_FOLDER = '/home/yourusername/labelMaker/static'
-    UPLOAD_FOLDER = '/home/yourusername/labelMaker/static/uploads'
-    
-    # Database configuration
-    DATABASE_PATH = '/home/yourusername/labelMaker/data/product_database.db'
-    
-    # Logging configuration
-    LOG_FOLDER = '/home/yourusername/labelMaker/logs'
-    
-    # Security settings
-    SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
-    
-    # Flask settings
-    DEBUG = False
-    TESTING = False
-    
-    # File upload settings
-    MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max file size
-    ALLOWED_EXTENSIONS = {'xlsx', 'xls', 'csv'}
-
-# Update this with your actual PythonAnywhere username
-PYTHONANYWHERE_USERNAME = "yourusername"  # Replace with your actual username
-EOF
-
-print_success "PythonAnywhere configuration created"
-
-# Create deployment checklist
-print_status "Creating deployment checklist..."
-cat > DEPLOYMENT_CHECKLIST.md << 'EOF'
-# PythonAnywhere Deployment Checklist
-
-## ✅ Completed Steps
-- [x] Repository cloned/updated
-- [x] Virtual environment created
-- [x] Dependencies installed
-- [x] Environment variables configured
-- [x] WSGI file created
-- [x] Database setup script created
-
-## 🔧 Manual Steps Required
-
-### 1. Update PythonAnywhere Configuration
-Edit `pythonanywhere_config.py` and replace `yourusername` with your actual PythonAnywhere username.
-
-### 2. Set up Web App on PythonAnywhere
-1. Go to PythonAnywhere Dashboard
-2. Click "Web" tab
-3. Click "Add a new web app"
-4. Choose "Manual configuration"
-5. Select Python 3.11
-6. Set source code to: `/home/yourusername/labelMaker`
-7. Set working directory to: `/home/yourusername/labelMaker`
-8. Set WSGI configuration file to: `/var/www/yourusername_pythonanywhere_com_wsgi.py`
-
-### 3. Configure WSGI File
-Edit the WSGI file in PythonAnywhere dashboard:
-```python
-import sys
-import os
-
-# Add the project directory to Python path
-project_dir = '/home/yourusername/labelMaker'
-sys.path.insert(0, project_dir)
-
-# Import and create the Flask app
-from app import create_app
-application = create_app()
+## File Structure
+```
+/home/yourusername/AGTDesigner/
+├── app.py                          # Main application
+├── wsgi_pythonanywhere.py          # WSGI configuration
+├── fix_pythonanywhere_upload.py    # Fix script
+├── test_pythonanywhere_upload.py   # Test script
+├── src/                           # Source code
+├── static/                        # Static files
+├── templates/                     # Templates
+└── uploads/                       # Upload directory (created by fix script)
 ```
 
-### 4. Set up Static Files
-In PythonAnywhere Web app configuration:
-- Static URL: `/static/`
-- Static Directory: `/home/yourusername/labelMaker/static`
-
-### 5. Initialize Database
-Run: `python setup_database.py`
-
-### 6. Set Environment Variables
-In PythonAnywhere Web app configuration, add:
-- FLASK_ENV=production
-- SECRET_KEY=your-secret-key
-- DATABASE_PATH=/home/yourusername/labelMaker/data/product_database.db
-
-### 7. Reload Web App
-Click "Reload" in PythonAnywhere Web app configuration.
-
-## 🧪 Testing
-1. Visit your PythonAnywhere URL
-2. Test file upload functionality
-3. Test label generation
-4. Check error logs if issues occur
-
-## 📝 Troubleshooting
-- Check error logs in PythonAnywhere Web app
-- Verify file permissions
+## Troubleshooting
+- Check error logs in PythonAnywhere Web tab
+- Run test script to verify setup
 - Ensure all dependencies are installed
-- Check database file permissions
 EOF
 
-print_success "Deployment checklist created"
+echo "✅ Deployment package created in: $DEPLOY_DIR"
+echo ""
 
-# Create a simple test script
-print_status "Creating test script..."
-cat > test_deployment.py << 'EOF'
+# Step 2: Create upload script
+echo "📤 Step 2: Creating upload script..."
+
+cat > "$DEPLOY_DIR/upload_to_pythonanywhere.sh" << 'EOF'
+#!/bin/bash
+
+# Upload script for PythonAnywhere
+# Run this from your local machine
+
+echo "📤 Uploading files to PythonAnywhere..."
+
+# Configuration
+PYTHONANYWHERE_USERNAME="adamcordova"
+PROJECT_NAME="AGTDesigner"
+PYTHONANYWHERE_PROJECT_PATH="/home/$PYTHONANYWHERE_USERNAME/$PROJECT_NAME"
+
+echo "Uploading to: $PYTHONANYWHERE_PROJECT_PATH"
+
+# Upload files using scp (if you have SSH access)
+# scp -r . $PYTHONANYWHERE_USERNAME@ssh.pythonanywhere.com:$PYTHONANYWHERE_PROJECT_PATH/
+
+# Alternative: Manual upload instructions
+echo ""
+echo "📋 Manual Upload Instructions:"
+echo "1. Go to PythonAnywhere Files tab"
+echo "2. Navigate to: $PYTHONANYWHERE_PROJECT_PATH"
+echo "3. Upload all files from this directory"
+echo "4. Run the fix script on PythonAnywhere"
+echo ""
+
+echo "✅ Upload script created"
+EOF
+
+chmod +x "$DEPLOY_DIR/upload_to_pythonanywhere.sh"
+
+# Step 3: Create PythonAnywhere setup script
+echo "🔧 Step 3: Creating PythonAnywhere setup script..."
+
+cat > "$DEPLOY_DIR/setup_on_pythonanywhere.sh" << 'EOF'
+#!/bin/bash
+
+# Setup script to run on PythonAnywhere
+
+echo "🔧 Setting up Label Maker on PythonAnywhere..."
+
+# Configuration
+PROJECT_NAME="AGTDesigner"
+PROJECT_PATH="/home/$(whoami)/$PROJECT_NAME"
+
+echo "Project path: $PROJECT_PATH"
+
+# Navigate to project directory
+cd "$PROJECT_PATH" || {
+    echo "❌ Could not navigate to project directory"
+    exit 1
+}
+
+echo "✅ Navigated to project directory"
+
+# Step 1: Run the fix script
+echo "🔧 Step 1: Running fix script..."
+python fix_pythonanywhere_upload.py
+
+if [ $? -eq 0 ]; then
+    echo "✅ Fix script completed successfully"
+else
+    echo "❌ Fix script failed"
+    exit 1
+fi
+
+# Step 2: Run the test script
+echo "🧪 Step 2: Running test script..."
+python test_pythonanywhere_upload.py
+
+if [ $? -eq 0 ]; then
+    echo "✅ Test script passed"
+else
+    echo "❌ Test script failed"
+    echo "Check the error messages above"
+fi
+
+# Step 3: Install dependencies
+echo "📦 Step 3: Installing dependencies..."
+if [ -f "requirements_pythonanywhere.txt" ]; then
+    pip install -r requirements_pythonanywhere.txt
+else
+    pip install -r requirements.txt
+fi
+
+echo "✅ Dependencies installed"
+
+# Step 4: Create necessary directories
+echo "📁 Step 4: Creating directories..."
+mkdir -p uploads output cache logs temp
+chmod 755 uploads output cache logs temp
+
+echo "✅ Directories created"
+
+# Step 5: Test Flask app
+echo "🧪 Step 5: Testing Flask app..."
+python -c "from app import create_app; app = create_app(); print('✅ Flask app created successfully')"
+
+if [ $? -eq 0 ]; then
+    echo "✅ Flask app test passed"
+else
+    echo "❌ Flask app test failed"
+    exit 1
+fi
+
+echo ""
+echo "🎉 Setup completed successfully!"
+echo ""
+echo "📋 Next steps:"
+echo "1. Go to PythonAnywhere Web tab"
+echo "2. Update your WSGI file with content from wsgi_pythonanywhere.py"
+echo "3. Set environment variables:"
+echo "   - PYTHONANYWHERE=true"
+echo "   - FLASK_ENV=production"
+echo "   - FLASK_DEBUG=false"
+echo "4. Reload your web app"
+echo "5. Test file upload functionality"
+EOF
+
+chmod +x "$DEPLOY_DIR/setup_on_pythonanywhere.sh"
+
+# Step 4: Create verification script
+echo "✅ Step 4: Creating verification script..."
+
+cat > "$DEPLOY_DIR/verify_setup.py" << 'EOF'
 #!/usr/bin/env python3
+
 """
-Test script for PythonAnywhere deployment
+Verification script for PythonAnywhere setup
+Run this after setup to verify everything is working
 """
+
 import os
 import sys
-from pathlib import Path
+import subprocess
 
-def test_imports():
-    """Test that all required modules can be imported"""
-    try:
-        import flask
-        print("✅ Flask imported successfully")
-    except ImportError as e:
-        print(f"❌ Flask import failed: {e}")
-        return False
+def check_pythonanywhere_environment():
+    """Check if we're running on PythonAnywhere."""
+    print("🔍 Checking PythonAnywhere environment...")
     
-    try:
-        import pandas
-        print("✅ Pandas imported successfully")
-    except ImportError as e:
-        print(f"❌ Pandas import failed: {e}")
-        return False
+    is_pythonanywhere = os.environ.get('PYTHONANYWHERE', 'false').lower() == 'true'
+    hostname = os.uname().nodename if hasattr(os, 'uname') else 'unknown'
     
-    try:
-        import openpyxl
-        print("✅ OpenPyXL imported successfully")
-    except ImportError as e:
-        print(f"❌ OpenPyXL import failed: {e}")
-        return False
+    print(f"  Hostname: {hostname}")
+    print(f"  PYTHONANYWHERE env var: {is_pythonanywhere}")
     
-    return True
+    if 'pythonanywhere' in hostname.lower() or is_pythonanywhere:
+        print("✅ Running on PythonAnywhere")
+        return True
+    else:
+        print("⚠️  Not running on PythonAnywhere")
+        return False
 
-def test_project_structure():
-    """Test that project structure is correct"""
-    required_files = [
-        'app.py',
-        'wsgi.py',
-        'requirements.txt',
-        'src/core/data/excel_processor.py'
-    ]
+def check_directories():
+    """Check if required directories exist and have correct permissions."""
+    print("\n📁 Checking directories...")
     
-    for file_path in required_files:
-        if Path(file_path).exists():
-            print(f"✅ {file_path} exists")
+    directories = ['uploads', 'output', 'cache', 'logs', 'temp']
+    
+    for dir_name in directories:
+        if os.path.exists(dir_name):
+            stat_info = os.stat(dir_name)
+            permissions = oct(stat_info.st_mode)[-3:]
+            print(f"  ✅ {dir_name}/ - permissions: {permissions}")
+            
+            if permissions != '755':
+                print(f"    ⚠️  {dir_name}/ should have 755 permissions")
         else:
-            print(f"❌ {file_path} missing")
-            return False
-    
-    return True
+            print(f"  ❌ {dir_name}/ - directory not found")
 
-def test_database():
-    """Test database setup"""
+def check_flask_app():
+    """Check if Flask app can be imported and created."""
+    print("\n🐍 Checking Flask app...")
+    
     try:
         from app import create_app
+        print("  ✅ Flask app imported successfully")
+        
         app = create_app()
-        print("✅ Flask app created successfully")
+        print("  ✅ Flask app created successfully")
+        
+        # Check configuration
+        upload_folder = app.config.get('UPLOAD_FOLDER')
+        print(f"  ✅ Upload folder configured: {upload_folder}")
+        
         return True
     except Exception as e:
-        print(f"❌ Flask app creation failed: {e}")
+        print(f"  ❌ Flask app error: {e}")
         return False
 
-if __name__ == "__main__":
-    print("🧪 Testing PythonAnywhere deployment...")
+def check_file_upload():
+    """Test file upload functionality."""
+    print("\n📤 Testing file upload...")
     
-    tests = [
-        ("Import Tests", test_imports),
-        ("Project Structure", test_project_structure),
-        ("Database Setup", test_database)
+    upload_dir = os.path.join(os.getcwd(), 'uploads')
+    
+    try:
+        # Test file creation
+        test_file = os.path.join(upload_dir, 'test_upload.txt')
+        with open(test_file, 'w') as f:
+            f.write('Test upload functionality')
+        
+        print("  ✅ Test file created successfully")
+        
+        # Check file size
+        file_size = os.path.getsize(test_file)
+        print(f"  ✅ Test file size: {file_size} bytes")
+        
+        # Clean up
+        os.remove(test_file)
+        print("  ✅ Test file cleaned up")
+        
+        return True
+    except Exception as e:
+        print(f"  ❌ File upload test failed: {e}")
+        return False
+
+def check_dependencies():
+    """Check if required dependencies are installed."""
+    print("\n📦 Checking dependencies...")
+    
+    required_packages = [
+        'flask',
+        'pandas',
+        'openpyxl',
+        'werkzeug'
     ]
     
-    all_passed = True
-    for test_name, test_func in tests:
-        print(f"\n--- {test_name} ---")
-        if not test_func():
-            all_passed = False
+    for package in required_packages:
+        try:
+            __import__(package)
+            print(f"  ✅ {package} - installed")
+        except ImportError:
+            print(f"  ❌ {package} - not installed")
+
+def main():
+    """Main verification function."""
+    print("🧪 PythonAnywhere Setup Verification")
+    print("=" * 40)
     
-    if all_passed:
-        print("\n🎉 All tests passed! Deployment should be ready.")
+    # Check environment
+    is_pythonanywhere = check_pythonanywhere_environment()
+    
+    # Check directories
+    check_directories()
+    
+    # Check Flask app
+    flask_ok = check_flask_app()
+    
+    # Check file upload
+    upload_ok = check_file_upload()
+    
+    # Check dependencies
+    check_dependencies()
+    
+    # Summary
+    print("\n📊 Summary:")
+    print("=" * 40)
+    
+    if is_pythonanywhere:
+        print("✅ PythonAnywhere environment detected")
     else:
-        print("\n⚠️  Some tests failed. Please check the issues above.")
+        print("⚠️  Not running on PythonAnywhere")
+    
+    if flask_ok:
+        print("✅ Flask app working correctly")
+    else:
+        print("❌ Flask app has issues")
+    
+    if upload_ok:
+        print("✅ File upload working correctly")
+    else:
+        print("❌ File upload has issues")
+    
+    print("\n🎯 Next steps:")
+    if flask_ok and upload_ok:
+        print("✅ Setup appears to be working correctly!")
+        print("   You can now test the web interface")
+    else:
+        print("❌ Some issues detected")
+        print("   Check the error messages above")
+        print("   Run the fix script again if needed")
+
+if __name__ == "__main__":
+    main()
 EOF
 
-print_success "Test script created"
+chmod +x "$DEPLOY_DIR/verify_setup.py"
 
-# Final status
-print_success "PythonAnywhere deployment setup complete!"
-    echo ""
-    echo "📋 Next steps:"
-echo "1. Update pythonanywhere_config.py with your username"
-echo "2. Follow the DEPLOYMENT_CHECKLIST.md"
-echo "3. Run: python test_deployment.py"
-echo "4. Set up your web app in PythonAnywhere dashboard"
-    echo ""
-echo "📁 Project location: ~/labelMaker"
-echo "🔗 GitHub repository: $GITHUB_REPO"
-echo "�� Branch: $BRANCH" 
+# Step 5: Create summary
+echo "📋 Step 5: Creating deployment summary..."
+
+cat > "$DEPLOY_DIR/DEPLOYMENT_SUMMARY.md" << EOF
+# PythonAnywhere Deployment Summary
+
+## Files Created
+- \`app.py\` - Updated with PythonAnywhere configuration
+- \`wsgi_pythonanywhere.py\` - Optimized WSGI file
+- \`fix_pythonanywhere_upload.py\` - Fix script
+- \`test_pythonanywhere_upload.py\` - Test script
+- \`setup_on_pythonanywhere.sh\` - Setup script
+- \`verify_setup.py\` - Verification script
+
+## Quick Deployment Steps
+
+### 1. Upload Files
+Upload all files in this directory to your PythonAnywhere project.
+
+### 2. Run Setup
+\`\`\`bash
+cd /home/yourusername/AGTDesigner
+chmod +x setup_on_pythonanywhere.sh
+./setup_on_pythonanywhere.sh
+\`\`\`
+
+### 3. Verify Setup
+\`\`\`bash
+python verify_setup.py
+\`\`\`
+
+### 4. Update WSGI
+Replace your WSGI file content with \`wsgi_pythonanywhere.py\`
+
+### 5. Set Environment Variables
+- PYTHONANYWHERE=true
+- FLASK_ENV=production
+- FLASK_DEBUG=false
+
+### 6. Reload Web App
+Click "Reload" in PythonAnywhere Web tab
+
+## Expected Results
+- ✅ File upload works in web interface
+- ✅ No permission errors
+- ✅ API endpoints respond correctly
+- ✅ Uploads directory with 755 permissions
+
+## Troubleshooting
+- Check PythonAnywhere error logs
+- Run \`python verify_setup.py\` for diagnostics
+- Ensure all dependencies are installed
+- Verify file permissions on directories
+EOF
+
+echo "✅ Deployment package complete!"
+echo ""
+echo "📦 Deployment package created in: $DEPLOY_DIR"
+echo ""
+echo "📋 Next steps:"
+echo "1. Upload all files from $DEPLOY_DIR to PythonAnywhere"
+echo "2. Run: ./setup_on_pythonanywhere.sh"
+echo "3. Run: python verify_setup.py"
+echo "4. Update WSGI file and reload web app"
+echo ""
+echo "🎉 Your PythonAnywhere file upload should work after deployment!" 
