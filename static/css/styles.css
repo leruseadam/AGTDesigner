@@ -4868,3 +4868,84 @@
     transform: translateZ(0);
     will-change: transform;
   }
+
+  /* Collapsible functionality styles */
+  .collapsible-header {
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.2s ease;
+  }
+  
+  .collapsible-header:hover {
+    opacity: 0.8;
+  }
+  
+  .collapse-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: inherit;
+    opacity: 0.7;
+    transition: transform 0.2s ease, opacity 0.2s ease;
+  }
+  
+  .collapsible-header:hover .collapse-icon {
+    opacity: 1;
+  }
+  
+  .collapsible-content {
+    overflow: hidden;
+    transition: all 0.3s ease;
+    max-height: 1000px; /* Large enough to contain content */
+  }
+  
+  .collapsible-content.collapsed {
+    max-height: 0;
+    opacity: 0;
+    margin: 0;
+    padding: 0;
+  }
+  
+  /* Ensure proper spacing when collapsed */
+  .collapsible-content.collapsed + * {
+    margin-top: 0;
+  }
+  
+  /* Vendor header specific collapse styling */
+  .vendor-header .collapse-icon {
+    color: var(--primary-color);
+  }
+  
+  /* Brand header specific collapse styling */
+  .brand-header .collapse-icon {
+    color: var(--secondary-color);
+  }
+  
+  /* Product type header specific collapse styling */
+  .product-type-header .collapse-icon {
+    color: var(--accent-color);
+  }
+  
+  /* Weight header specific collapse styling */
+  .weight-header .collapse-icon {
+    color: var(--text-muted);
+  }
+  
+  /* Ensure headers remain clickable */
+  .collapsible-header * {
+    pointer-events: none;
+  }
+  
+  .collapsible-header .select-all-checkbox {
+    pointer-events: auto;
+  }
+  
+  /* Smooth transitions for all collapsible elements */
+  .vendor-section,
+  .brand-section,
+  .product-type-section,
+  .weight-section {
+    transition: all 0.3s ease;
+  }
+  
+  /* Tag group styling */
