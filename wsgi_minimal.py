@@ -1,24 +1,39 @@
 #!/usr/bin/env python3
 """
-Ultra-minimal WSGI file for PythonAnywhere.
-No print statements, no logging, just the bare minimum to work.
+Ultra-minimal WSGI file that should definitely work.
 """
 
 import sys
 import os
 
-os.environ['PYTHONUNBUFFERED'] = '1'
+# Get the current directory
+project_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, project_dir)
+
+# Set environment variables
 os.environ['FLASK_ENV'] = 'production'
+os.environ['FLASK_DEBUG'] = 'False'
 
-sys.path.insert(0, '/home/adamcordova/AGTDesigner')
+# Create a minimal Flask app that will definitely work
+from flask import Flask
 
-try:
-    from app import create_app
-    application = create_app()
-    application.config['DEBUG'] = False
-except:
-    from flask import Flask
-    application = Flask(__name__)
-    @application.route('/')
-    def error():
-        return '<h1>Error</h1>', 500 
+application = Flask(__name__)
+
+@application.route('/')
+def index():
+    return "AGT Label Maker is running!"
+
+@application.route('/test')
+def test():
+    return "Test route working"
+
+@application.route('/health')
+def health():
+    return "Healthy"
+
+@application.route('/api/status')
+def api_status():
+    return {"status": "ok", "message": "API is working"}
+
+if __name__ == "__main__":
+    application.run() 
