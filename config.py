@@ -5,11 +5,11 @@ class Config:
     """Configuration class for the Label Maker application."""
     
     # Development mode flag
-    DEVELOPMENT_MODE = True
+    DEVELOPMENT_MODE = os.environ.get('FLASK_ENV') == 'development'
     
     # Flask configuration
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'dev-secret-key-change-in-production'
-    DEBUG = True
+    DEBUG = os.environ.get('FLASK_ENV') == 'development'
     TESTING = False
     
     # Database configuration
@@ -89,7 +89,7 @@ class ProductionConfig(Config):
     """Production configuration."""
     DEBUG = False
     DEVELOPMENT_MODE = False
-    SECRET_KEY = os.environ.get('SECRET_KEY') or os.urandom(24)
+    SECRET_KEY = os.environ.get('SECRET_KEY') or 'label-maker-production-key-2024'
 
 class TestingConfig(Config):
     """Testing configuration."""
