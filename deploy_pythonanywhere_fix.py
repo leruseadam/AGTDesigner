@@ -46,19 +46,54 @@ def find_project_directory():
     return str(current_dir)
 
 def find_virtual_environment():
-    """Find the virtual environment."""
+    """Find the virtual environment more comprehensively."""
+    print("🔍 Searching for virtual environment...")
+    
+    # Check if we're currently in a virtual environment
+    if hasattr(sys, 'real_prefix') or (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix):
+        print(f"✅ Currently in virtual environment: {sys.prefix}")
+        return sys.prefix
+    
     project_dir = Path(find_project_directory())
     
-    # Common virtual environment names
-    venv_names = ['venv_pythonanywhere', 'venv', '.venv', 'env']
+    # Common virtual environment names and locations
+    search_paths = [
+        # Project directory and subdirectories
+        project_dir / 'venv_pythonanywhere',
+        project_dir / 'venv',
+        project_dir / '.venv',
+        project_dir / 'env',
+        
+        # Home directory
+        Path.home() / 'venv_pythonanywhere',
+        Path.home() / 'venv',
+        Path.home() / '.venv',
+        Path.home() / 'env',
+    ]
     
-    for venv_name in venv_names:
-        venv_path = project_dir / venv_name
-        if venv_path.exists():
-            activate_script = venv_path / 'bin' / 'activate_this.py'
+    for path in search_paths:
+        if path.exists():
+            # Check for activate_this.py
+            activate_script = path / 'bin' / 'activate_this.py'
             if activate_script.exists():
-                print(f"✅ Found virtual environment: {venv_path}")
-                return str(venv_path)
+                print(f"✅ Found virtual environment: {path}")
+                return str(path)
+    
+    # Try to find by checking which python is being used
+    try:
+        result = subprocess.run(['which', 'python'], capture_output=True, text=True)
+        if result.returncode == 0:
+            python_path = result.stdout.strip()
+            print(f"🔍 Python path: {python_path}")
+            
+            # Extract virtual environment path from python path
+            if 'venv' in python_path or 'env' in python_path:
+                venv_path = Path(python_path).parent.parent
+                if (venv_path / 'bin' / 'activate_this.py').exists():
+                    print(f"✅ Found virtual environment from Python path: {venv_path}")
+                    return str(venv_path)
+    except Exception as e:
+        print(f"⚠️  Could not determine Python path: {e}")
     
     print(f"⚠️  No virtual environment found")
     return None
