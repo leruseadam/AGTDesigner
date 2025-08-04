@@ -213,7 +213,7 @@ class TemplateProcessor:
         return buf
 
     def _expand_template_to_4x3_fixed_double(self):
-        """Expand template to 4x3 grid for double templates (4 columns, 3 rows)."""
+        """Expand template to 4x3 grid for double templates with vertical gutter using cell spacing."""
         from docx import Document
         from docx.shared import Pt
         from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT
@@ -222,11 +222,12 @@ class TemplateProcessor:
         from io import BytesIO
         from copy import deepcopy
 
-        num_cols, num_rows = 4, 3  # 4 columns, 3 rows for 12 labels total
+        num_cols, num_rows = 4, 3  # 4 columns, 3 rows (standard grid)
         
-        # Equal width columns: 1.125 inches each for a total of 4.5 inches
-        col_width_twips = str(int(1.125 * 1440))  # 1.125 inches per column
-        row_height_pts = Pt(2.5 * 72)  # 2.5 inches per row for equal height
+        # Column widths: 1.75" per column
+        label_col_width_twips = str(int(1.75 * 1440))  # 1.75 inches per label column
+        
+        row_height_pts = Pt(2.5 * 72)  # 2.5 inches per label row
         cut_line_twips = int(0.001 * 1440)
 
         template_path = self._get_template_path()
@@ -253,14 +254,23 @@ class TemplateProcessor:
         tblPr.append(layout)
         tbl._element.insert(0, tblPr)
         grid = OxmlElement('w:tblGrid')
-        for _ in range(num_cols):
+        for i in range(num_cols):
             gc = OxmlElement('w:gridCol')
-            gc.set(qn('w:w'), col_width_twips)
+            gc.set(qn('w:w'), label_col_width_twips)
             grid.append(gc)
         tbl._element.insert(0, grid)
-        for row in tbl.rows:
+        
+        # Set row heights: all rows are 2.5"
+        for i, row in enumerate(tbl.rows):
             row.height = row_height_pts
             row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+        
+        # Add vertical cell spacing to create gutter between columns 2 and 3
+        spacing = OxmlElement('w:tblCellSpacing')
+        spacing.set(qn('w:w'), str(int(0.05 * 1440)))  # 0.05" vertical spacing
+        spacing.set(qn('w:type'), 'dxa')
+        tblPr.append(spacing)
+        
         borders = OxmlElement('w:tblBorders')
         for side in ('insideH','insideV'):
             b = OxmlElement(f"w:{side}")
@@ -271,7 +281,7 @@ class TemplateProcessor:
             borders.append(b)
         tblPr.append(borders)
         
-        # Process all cells normally (no gutters)
+        # Process all cells normally (4x3 grid)
         cnt = 1
         for r in range(num_rows):
             for c in range(num_cols):
@@ -355,12 +365,21 @@ class TemplateProcessor:
                     cell._tc.append(deepcopy(el))
                 cnt += 1
                 
-        from docx.oxml.shared import OxmlElement as OE
-        tblPr2 = tbl._element.find(qn('w:tblPr'))
-        spacing = OxmlElement('w:tblCellSpacing')
-        spacing.set(qn('w:w'), str(cut_line_twips))
-        spacing.set(qn('w:type'), 'dxa')
-        tblPr2.append(spacing)
+        # Add minimal cell margins (no horizontal gutters)
+        for row in tbl.rows:
+            for cell in row.cells:
+                tc = cell._tc
+                tcPr = tc.get_or_add_tcPr()
+                tcMar = OxmlElement('w:tcMar')
+                for side in ['top', 'left', 'bottom', 'right']:
+                    margin = OxmlElement(f'w:{side}')
+                    margin.set(qn('w:w'), str(int(0.001 * 1440)))  # Minimal margin
+                    margin.set(qn('w:type'), 'dxa')
+                    tcMar.append(margin)
+                for old_mar in tcPr.findall(qn('w:tcMar')):
+                    tcPr.remove(old_mar)
+                tcPr.append(tcMar)
+        
         buf = BytesIO()
         doc.save(buf)
         buf.seek(0)
@@ -820,7 +839,7 @@ class TemplateProcessor:
             # Apply new bold label formatting for THC/CBD content
             if content.strip().startswith('THC:') and 'CBD:' in content:
                 from src.core.generation.text_processing import format_thc_cbd_bold_labels
-                content = format_thc_cbd_bold_labels(content)
+                content = format_thc_cbd_bold_labels(content, self.template_type)
             # Force line breaks for vertical and double templates
             elif self.template_type in ['vertical', 'double'] and content.strip().startswith('THC:') and 'CBD:' in content:
                 content = content.replace('THC: CBD:', 'THC:\nCBD:').replace('THC:  CBD:', 'THC:\nCBD:')
