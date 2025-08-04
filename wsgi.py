@@ -48,21 +48,21 @@ logging.getLogger('urllib3').setLevel(logging.ERROR)
 logging.getLogger('requests').setLevel(logging.ERROR)
 logging.getLogger('PIL').setLevel(logging.ERROR)
 
-# Import the Flask app
+# Import the Flask app directly - more reliable than create_app()
 try:
-    from app import create_app
-    print("✅ Successfully imported Flask app")
+    from app import app
+    print("✅ Successfully imported Flask app directly")
+    application = app
 except ImportError as e:
     print(f"❌ Error importing Flask app: {e}")
-    raise
-
-# Create the application instance
-try:
-    application = create_app()
-    print("✅ Application created successfully")
-except Exception as e:
-    print(f"❌ Error creating application: {e}")
-    raise
+    # Fallback to create_app if direct import fails
+    try:
+        from app import create_app
+        print("✅ Fallback: imported create_app")
+        application = create_app()
+    except ImportError as fallback_error:
+        print(f"❌ Both direct import and create_app failed: {fallback_error}")
+        raise
 
 # Configure for production
 application.config['DEBUG'] = False
