@@ -1337,4 +1337,4 @@ if __name__ == "__main__":
     if args.update_canonical_to_mode:
         db = ProductDatabase()
         db.update_all_canonical_lineages_to_mode()
-        print("Canonical lineages updated to mode for all strains.") 
+        # Canonical lineages updated to mode for all strains. 

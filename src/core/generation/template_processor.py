@@ -872,23 +872,23 @@ class TemplateProcessor:
             else:
                 # For classic types, try to get the strain's canonical lineage from the database
                 if product_type in classic_types and product_strain:
-                    print(f"DEBUG: Processing classic type '{product_type}' with strain '{product_strain}'")
+                    # DEBUG: Processing classic type '{product_type}' with strain '{product_strain}'
                     try:
                         from src.core.data.product_database import get_product_database
                         product_db = get_product_database()
                         strain_info = product_db.get_strain_info(product_strain)
-                        print(f"DEBUG: Strain info: {strain_info}")
+                        # DEBUG: Strain info: {strain_info}
                         if strain_info and strain_info.get('canonical_lineage'):
                             lineage_value = strain_info['canonical_lineage'].upper()
-                            print(f"DEBUG: Using database lineage: '{lineage_value}'")
+                            # DEBUG: Using database lineage: '{lineage_value}'
                         else:
                             # Fallback to Excel lineage if no database lineage found
                             lineage_value = label_context['Lineage']
-                            print(f"DEBUG: Using Excel lineage fallback: '{lineage_value}'")
+                            # DEBUG: Using Excel lineage fallback: '{lineage_value}'
                     except Exception as e:
                         # Fallback to Excel lineage if database lookup fails
                         lineage_value = label_context['Lineage']
-                        print(f"DEBUG: Using Excel lineage due to error: '{lineage_value}' (error: {e})")
+                        # DEBUG: Using Excel lineage due to error: '{lineage_value}' (error: {e})
                 else:
                     lineage_value = label_context['Lineage']
                 

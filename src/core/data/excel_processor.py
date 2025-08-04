@@ -2406,11 +2406,11 @@ class ExcelProcessor:
                     lineage_needs_centering = False  # Lineage should not be centered
                     
                     # Debug print for verification
-                    print(f"Product: {product_name}, Type: {product_type}, Lineage: '{final_lineage}', ProductStrain: '{final_product_strain}'")
+                    # Product: {product_name}, Type: {product_type}, Lineage: '{final_lineage}', ProductStrain: '{final_product_strain}'
                     
                     # Debug ProductStrain logic
                     include_product_strain = (product_type in ["rso/co2 tankers", "capsule"] or product_type not in classic_types)
-                    print(f"  ProductStrain logic: product_type='{product_type}', in special list={product_type in ['rso/co2 tankers', 'capsule']}, not in classic_types={product_type not in classic_types}, include_product_strain={include_product_strain}")
+                    # ProductStrain logic: product_type='{product_type}', in special list={product_type in ['rso/co2 tankers', 'capsule']}, not in classic_types={product_type not in classic_types}, include_product_strain={include_product_strain}")
                     
                     # Extract AI and AK column values for THC and CBD
                     # Extract THC/CBD values from actual columns
