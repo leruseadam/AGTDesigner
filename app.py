@@ -368,10 +368,11 @@ def create_app():
     
     # Enable CORS for specific origins only (security fix)
     allowed_origins = [
-        'https://yourdomain.com',  # Replace with your actual domain
-        'https://www.yourdomain.com',
+        'https://www.agtpricetags.com',  # Your actual domain
+        'https://agtpricetags.com',
         'http://localhost:9090',  # For local development
-        'http://127.0.0.1:9090'
+        'http://127.0.0.1:9090',
+        'https://adamcordova.pythonanywhere.com'  # PythonAnywhere domain
     ]
     CORS(app, resources={r"/api/*": {"origins": allowed_origins}})
     
@@ -787,6 +788,11 @@ def favicon():
     """Serve the favicon."""
     return send_from_directory(os.path.join(app.root_path, 'static'),
                                'favicon.ico', mimetype='image/vnd.microsoft.icon')
+
+@app.route('/test')
+def test():
+    """Simple test route to verify the app is working."""
+    return jsonify({'status': 'ok', 'message': 'Flask app is running'})
 
 # Auto check downloads functionality removed
 
