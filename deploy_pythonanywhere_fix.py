@@ -73,9 +73,9 @@ def find_virtual_environment():
     
     for path in search_paths:
         if path.exists():
-            # Check for activate_this.py
-            activate_script = path / 'bin' / 'activate_this.py'
-            if activate_script.exists():
+            # Check for site-packages directory
+            site_packages = path / 'lib' / 'python3.11' / 'site-packages'
+            if site_packages.exists():
                 print(f"✅ Found virtual environment: {path}")
                 return str(path)
     
@@ -89,7 +89,7 @@ def find_virtual_environment():
             # Extract virtual environment path from python path
             if 'venv' in python_path or 'env' in python_path:
                 venv_path = Path(python_path).parent.parent
-                if (venv_path / 'bin' / 'activate_this.py').exists():
+                if (venv_path / 'lib' / 'python3.11' / 'site-packages').exists():
                     print(f"✅ Found virtual environment from Python path: {venv_path}")
                     return str(venv_path)
     except Exception as e:
@@ -107,20 +107,19 @@ import os
 project_dir = '{project_dir}'
 sys.path.insert(0, project_dir)
 
-# Try to activate virtual environment if it exists
+# Try to add virtual environment to Python path
 '''
     
     if venv_path:
         wsgi_content += f'''venv_path = '{venv_path}'
-activate_this = os.path.join(venv_path, 'bin', 'activate_this.py')
+venv_site_packages = os.path.join(venv_path, 'lib', 'python3.11', 'site-packages')
 
-if os.path.exists(activate_this):
-    with open(activate_this) as file_:
-        exec(file_.read(), dict(__file__=activate_this))
-    print(f"✅ Virtual environment activated: {{venv_path}}")
+if os.path.exists(venv_site_packages):
+    sys.path.insert(0, venv_site_packages)
+    print(f"✅ Virtual environment site-packages added: {{venv_site_packages}}")
 else:
-    print(f"⚠️  Virtual environment not found at: {{venv_path}}")
-    print("Continuing without virtual environment activation...")
+    print(f"⚠️  Virtual environment site-packages not found at: {{venv_site_packages}}")
+    print("Continuing without virtual environment...")
 '''
     else:
         wsgi_content += '''# No virtual environment found
@@ -135,9 +134,12 @@ os.environ['FLASK_DEBUG'] = 'False'
 # Import the Flask app
 try:
     from app import create_app
-    print("✅ Flask app imported successfully")
+    print("✅ Successfully imported Flask app")
 except ImportError as e:
     print(f"❌ Error importing Flask app: {e}")
+    print("Available packages:")
+    for path in sys.path:
+        print(f"  - {path}")
     raise
 
 # Create the application instance

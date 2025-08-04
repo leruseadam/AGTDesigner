@@ -42,9 +42,9 @@ def find_virtual_environment():
     
     for path in search_paths:
         if path.exists():
-            # Check for activate_this.py
-            activate_script = path / 'bin' / 'activate_this.py'
-            if activate_script.exists():
+            # Check for site-packages directory
+            site_packages = path / 'lib' / 'python3.11' / 'site-packages'
+            if site_packages.exists():
                 print(f"✅ Found virtual environment: {path}")
                 return str(path)
             
@@ -64,7 +64,7 @@ def find_virtual_environment():
             # Extract virtual environment path from python path
             if 'venv' in python_path or 'env' in python_path:
                 venv_path = Path(python_path).parent.parent
-                if (venv_path / 'bin' / 'activate_this.py').exists():
+                if (venv_path / 'lib' / 'python3.11' / 'site-packages').exists():
                     print(f"✅ Found virtual environment from Python path: {venv_path}")
                     return str(venv_path)
     except Exception as e:
