@@ -1180,7 +1180,7 @@ class ExcelProcessor:
                 classic_empty_mask = classic_mask & empty_lineage_mask
                 if classic_empty_mask.any():
                     self.df.loc[classic_empty_mask, "Lineage"] = "HYBRID"
-                    self.logger.info(f"Assigned HYBRID lineage to {classic_empty_mask.sum()} classic products with empty lineage")
+                    self.logger.debug(f"Assigned HYBRID lineage to {classic_empty_mask.sum()} classic products with empty lineage")
                 
                 # For non-classic types, check for CBD content first
                 non_classic_empty_mask = ~classic_mask & empty_lineage_mask
@@ -1204,13 +1204,13 @@ class ExcelProcessor:
                         cbd_edible_empty = non_classic_empty_mask & edible_mask & cbd_edible_mask
                         if cbd_edible_empty.any():
                             self.df.loc[cbd_edible_empty, "Lineage"] = "CBD"
-                            self.logger.info(f"Assigned CBD lineage to {cbd_edible_empty.sum()} CBD-focused edible products")
+                            self.logger.debug(f"Assigned CBD lineage to {cbd_edible_empty.sum()} CBD-focused edible products")
                         
                         # All other edibles get MIXED lineage
                         non_cbd_edible_empty = non_classic_empty_mask & edible_mask & ~cbd_edible_mask
                         if non_cbd_edible_empty.any():
                             self.df.loc[non_cbd_edible_empty, "Lineage"] = "MIXED"
-                            self.logger.info(f"Assigned MIXED lineage to {non_cbd_edible_empty.sum()} edible products")
+                            self.logger.debug(f"Assigned MIXED lineage to {non_cbd_edible_empty.sum()} edible products")
                     
                     # For non-edible non-classic types, use the original logic
                     non_edible_mask = ~edible_mask
@@ -1474,7 +1474,7 @@ class ExcelProcessor:
                     # Debug: Log which products got CBD Blend from ratio
                     cbd_products = self.df[mask_cbd_ratio]
                     for idx, row in cbd_products.iterrows():
-                        self.logger.info(f"Assigned CBD Blend from ratio: {row.get('Product Name*', 'NO NAME')} (Type: {row.get('Product Type*', 'NO TYPE')})")
+                        self.logger.debug(f"Assigned CBD Blend from ratio: {row.get('Product Name*', 'NO NAME')} (Type: {row.get('Product Type*', 'NO TYPE')})")
                 
                 # If Description contains ":" or "CBD", set Product Strain to 'CBD Blend' (excluding edibles which have their own logic)
                 edible_types = {"edible (solid)", "edible (liquid)", "high cbd edible liquid", "tincture", "topical", "capsule"}
@@ -1487,7 +1487,7 @@ class ExcelProcessor:
                     # Debug: Log which products got CBD Blend from description
                     cbd_desc_products = self.df[mask_cbd_blend]
                     for idx, row in cbd_desc_products.iterrows():
-                        self.logger.info(f"Assigned CBD Blend from description: {row.get('Product Name*', 'NO NAME')} (Type: {row.get('Product Type*', 'NO TYPE')})")
+                        self.logger.debug(f"Assigned CBD Blend from description: {row.get('Product Name*', 'NO NAME')} (Type: {row.get('Product Type*', 'NO TYPE')})")
                 
                 # NEW: If no strain in column, check if product contains CBD CBN CBG or CBC, or a ":" in description
                 # This applies when Product Strain is empty, null, or "Mixed" (excluding edibles which have their own logic)
@@ -1510,16 +1510,16 @@ class ExcelProcessor:
                     # Debug: Log which products got CBD Blend from combined logic
                     combined_cbd_products = self.df[combined_cbd_mask]
                     for idx, row in combined_cbd_products.iterrows():
-                        self.logger.info(f"Assigned CBD Blend from combined logic: {row.get('Product Name*', 'NO NAME')} (Type: {row.get('Product Type*', 'NO TYPE')})")
+                        self.logger.debug(f"Assigned CBD Blend from combined logic: {row.get('Product Name*', 'NO NAME')} (Type: {row.get('Product Type*', 'NO TYPE')})")
                 
                 # Debug: Log final Product Strain values for RSO/CO2 Tankers
                 rso_co2_mask = self.df["Product Type*"].str.strip().str.lower() == "rso/co2 tankers"
                 if rso_co2_mask.any():
                     rso_co2_products = self.df[rso_co2_mask]
-                    self.logger.info(f"=== RSO/CO2 Tankers Product Strain Debug ===")
+                    self.logger.debug(f"=== RSO/CO2 Tankers Product Strain Debug ===")
                     for idx, row in rso_co2_products.iterrows():
-                        self.logger.info(f"RSO/CO2 Tanker: {row.get('Product Name*', 'NO NAME')} -> Product Strain: '{row.get('Product Strain', 'NO STRAIN')}'")
-                    self.logger.info(f"=== End RSO/CO2 Tankers Debug ===")
+                        self.logger.debug(f"RSO/CO2 Tanker: {row.get('Product Name*', 'NO NAME')} -> Product Strain: '{row.get('Product Strain', 'NO STRAIN')}'")
+                    self.logger.debug(f"=== End RSO/CO2 Tankers Debug ===")
                 
                 # RSO/CO2 Tankers: if Description contains CBD, CBG, CBC, CBN, or ":", then Product Strain is "CBD Blend", otherwise "Mixed"
                 rso_co2_mask = self.df["Product Type*"].str.strip().str.lower() == "rso/co2 tankers"
@@ -1534,13 +1534,13 @@ class ExcelProcessor:
                     rso_co2_cbd_mask = rso_co2_mask & cbd_content_mask
                     if rso_co2_cbd_mask.any():
                         self.df.loc[rso_co2_cbd_mask, "Product Strain"] = "CBD Blend"
-                        self.logger.info(f"Assigned 'CBD Blend' to {rso_co2_cbd_mask.sum()} RSO/CO2 Tankers with cannabinoid content or ':' in Description")
+                        self.logger.debug(f"Assigned 'CBD Blend' to {rso_co2_cbd_mask.sum()} RSO/CO2 Tankers with cannabinoid content or ':' in Description")
                     
                     # For RSO/CO2 Tankers without cannabinoid content or ":" in Description, set to "Mixed"
                     rso_co2_mixed_mask = rso_co2_mask & ~cbd_content_mask
                     if rso_co2_mixed_mask.any():
                         self.df.loc[rso_co2_mixed_mask, "Product Strain"] = "Mixed"
-                        self.logger.info(f"Assigned 'Mixed' to {rso_co2_mixed_mask.sum()} RSO/CO2 Tankers without cannabinoid content or ':' in Description")
+                        self.logger.debug(f"Assigned 'Mixed' to {rso_co2_mixed_mask.sum()} RSO/CO2 Tankers without cannabinoid content or ':' in Description")
 
                 # Edibles: if ProductName contains CBD, CBG, CBN, or CBC, then Product Strain is "CBD Blend", otherwise "Mixed"
                 edible_types = {"edible (solid)", "edible (liquid)", "high cbd edible liquid", "tincture", "topical", "capsule"}
@@ -1555,13 +1555,13 @@ class ExcelProcessor:
                     edible_cbd_mask = edible_mask & edible_cbd_content_mask
                     if edible_cbd_mask.any():
                         self.df.loc[edible_cbd_mask, "Product Strain"] = "CBD Blend"
-                        self.logger.info(f"Assigned 'CBD Blend' to {edible_cbd_mask.sum()} edibles with cannabinoid content in ProductName")
+                        self.logger.debug(f"Assigned 'CBD Blend' to {edible_cbd_mask.sum()} edibles with cannabinoid content in ProductName")
                     
                     # For edibles without cannabinoid content in ProductName, set to "Mixed"
                     edible_mixed_mask = edible_mask & ~edible_cbd_content_mask
                     if edible_mixed_mask.any():
                         self.df.loc[edible_mixed_mask, "Product Strain"] = "Mixed"
-                        self.logger.info(f"Assigned 'Mixed' to {edible_mixed_mask.sum()} edibles without cannabinoid content in ProductName")
+                        self.logger.debug(f"Assigned 'Mixed' to {edible_mixed_mask.sum()} edibles without cannabinoid content in ProductName")
 
             # 8.5) Convert Product Strain to categorical after all logic is complete
             if "Product Strain" in self.df.columns:
@@ -1597,7 +1597,7 @@ class ExcelProcessor:
                         if "CBD" not in self.df["Lineage"].cat.categories:
                             self.df["Lineage"] = self.df["Lineage"].cat.add_categories(["CBD"])
                         self.df.loc[combined_cbd_blend_mask, "Lineage"] = "CBD"
-                        self.logger.info(f"Assigned CBD lineage to {combined_cbd_blend_mask.sum()} products with CBD Blend strain")
+                        self.logger.debug(f"Assigned CBD lineage to {combined_cbd_blend_mask.sum()} products with CBD Blend strain")
 
                 # If Description or Product Name* contains CBD, CBG, CBN, CBC, set Lineage to 'CBD' (but protect edibles)
                 # Fix: ensure product_name_col is always a Series for .str methods
@@ -1624,7 +1624,7 @@ class ExcelProcessor:
                 # Use .any() to avoid Series boolean ambiguity
                 if combined_cbd_mask.any() and "Lineage" in self.df.columns:
                     self.df.loc[combined_cbd_mask, "Lineage"] = "CBD"
-                    self.logger.info(f"Assigned CBD lineage to {combined_cbd_mask.sum()} products with cannabinoid content")
+                    self.logger.debug(f"Assigned CBD lineage to {combined_cbd_mask.sum()} products with cannabinoid content")
 
                 # DISABLED: If Lineage is missing or empty, set to 'MIXED'
                 # empty_lineage_mask = self.df["Lineage"].isnull() | (self.df["Lineage"].astype(str).str.strip() == "")
