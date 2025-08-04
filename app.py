@@ -1865,15 +1865,8 @@ def _autosize_recursive_template_specific(element, marker_name, orientation, sca
     """
     Recursively search for and format a specific marked field within a document element using template-specific font sizing.
     """
-    from src.core.generation.font_sizing import (
-        get_thresholded_font_size,
-        get_thresholded_font_size_ratio,
-        get_thresholded_font_size_thc_cbd,
-        get_thresholded_font_size_brand,
-        get_thresholded_font_size_price,
-        get_thresholded_font_size_lineage,
-        get_thresholded_font_size_description,
-        get_thresholded_font_size_strain,
+    from src.core.generation.unified_font_sizing import (
+        get_font_size,
         set_run_font_size
     )
     from docx.enum.text import WD_ALIGN_PARAGRAPH
