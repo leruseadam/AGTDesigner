@@ -3363,7 +3363,11 @@ const TagManager = {
             
             if (response.ok) {
                 const data = await response.json();
-                if (data.success && data.available_tags && Array.isArray(data.available_tags) && data.available_tags.length > 0) {
+                console.log('Initial data response:', data);
+                console.log('data.data_loaded:', data.data_loaded);
+                console.log('data.available_tags length:', data.available_tags ? data.available_tags.length : 'undefined');
+                console.log('data.available_tags is array:', Array.isArray(data.available_tags));
+                if (data.data_loaded && data.available_tags && Array.isArray(data.available_tags) && data.available_tags.length > 0) {
                     console.log(`Found ${data.available_tags.length} existing tags, loading data...`);
                     
                     // Update splash progress for data loading
@@ -3413,6 +3417,11 @@ const TagManager = {
                     return;
                 } else {
                     console.log('No initial data available:', data.message || 'No data found');
+                    console.log('Condition check failed:');
+                    console.log('- data.data_loaded:', data.data_loaded);
+                    console.log('- data.available_tags exists:', !!data.available_tags);
+                    console.log('- data.available_tags is array:', Array.isArray(data.available_tags));
+                    console.log('- data.available_tags length > 0:', data.available_tags ? data.available_tags.length > 0 : 'N/A');
                     // Complete splash loading even if no data
                     AppLoadingSplash.stopAutoAdvance();
                     AppLoadingSplash.complete();
