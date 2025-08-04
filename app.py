@@ -1381,8 +1381,10 @@ def safe_log(logger, level, message, *args, **kwargs):
         else:
             logger.info(message, *args, **kwargs)
     except Exception as e:
-        # Fallback to print if logging fails
-        print(f"Logging error: {e} - Message: {message}")
+        # Fallback to stderr if logging fails (safer than print)
+        import sys
+        sys.stderr.write(f"Logging error: {e} - Message: {message}\n")
+        sys.stderr.flush()
 
 
 

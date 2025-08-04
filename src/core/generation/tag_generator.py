@@ -283,23 +283,23 @@ def process_chunk(args):
             
             # For classic types, try to get the strain's canonical lineage from the database
             if is_classic_type and product_strain:
-                print(f"DEBUG: Processing classic type '{product_type}' with strain '{product_strain}'")
+                # DEBUG: Processing classic type '{product_type}' with strain '{product_strain}'
                 try:
                     from src.core.data.product_database import get_product_database
                     product_db = get_product_database()
                     strain_info = product_db.get_strain_info(product_strain)
-                    print(f"DEBUG: Strain info: {strain_info}")
+                    # DEBUG: Strain info: {strain_info}
                     if strain_info and strain_info.get('canonical_lineage'):
                         lineage_val = strain_info['canonical_lineage'].upper()
-                        print(f"DEBUG: Using database lineage: '{lineage_val}'")
+                        # DEBUG: Using database lineage: '{lineage_val}'
                     else:
                         # Fallback to Excel lineage if no database lineage found
                         lineage_val = lineage_text.upper() if lineage_text else ""
-                        print(f"DEBUG: Using Excel lineage fallback: '{lineage_val}'")
+                        # DEBUG: Using Excel lineage fallback: '{lineage_val}'
                 except Exception as e:
                     # Fallback to Excel lineage if database lookup fails
                     lineage_val = lineage_text.upper() if lineage_text else ""
-                    print(f"DEBUG: Using Excel lineage due to error: '{lineage_val}' (error: {e})")
+                    # DEBUG: Using Excel lineage due to error: '{lineage_val}' (error: {e})
             elif is_edible:
                 lineage_val = product_brand.upper() if product_brand else lineage_text
             else:
@@ -363,9 +363,9 @@ def process_chunk(args):
                     combined = f"- {weight}"
             else:
                 combined = desc or weight
-            print(f"DEBUG DescAndWeight (before wrap): '{combined}'")
+            # DEBUG DescAndWeight (before wrap): '{combined}'
             label_data["DescAndWeight"] = wrap_with_marker(combined, "DESC")
-            print(f"DEBUG DescAndWeight: {repr(label_data['DescAndWeight'])}")
+            # DEBUG DescAndWeight: {repr(label_data['DescAndWeight'])}
             
             context[f"Label{i+1}"] = label_data
             if DEBUG_ENABLED:
