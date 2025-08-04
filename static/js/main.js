@@ -1527,10 +1527,11 @@ const TagManager = {
         sortedVendors.forEach(([vendor, brandGroups]) => {
             const vendorSection = document.createElement('div');
             vendorSection.className = 'vendor-section mb-3';
-            // Remove vendor label
-            // Create vendor header with integrated checkbox
+            
+            // Create vendor header with integrated checkbox and collapse functionality
             const vendorHeader = document.createElement('h5');
-            vendorHeader.className = 'vendor-header mb-2 d-flex align-items-center';
+            vendorHeader.className = 'vendor-header mb-2 d-flex align-items-center collapsible-header';
+            vendorHeader.setAttribute('data-collapse-target', 'vendor-' + vendor.replace(/[^a-zA-Z0-9]/g, '_'));
             
             const vendorCheckbox = document.createElement('input');
             vendorCheckbox.type = 'checkbox';
@@ -1570,9 +1571,41 @@ const TagManager = {
                 // Use efficient update instead of rebuilding entire DOM
                 this.efficientlyUpdateAvailableTagsDisplay();
             });
+            
+            // Add collapse/expand icon
+            const collapseIcon = document.createElement('span');
+            collapseIcon.className = 'collapse-icon me-2';
+            collapseIcon.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>';
+            collapseIcon.style.transition = 'transform 0.2s ease';
+            
             vendorHeader.appendChild(vendorCheckbox);
+            vendorHeader.appendChild(collapseIcon);
             vendorHeader.appendChild(document.createTextNode(vendor));
+            
+            // Add click handler for collapse/expand
+            vendorHeader.addEventListener('click', (e) => {
+                if (e.target.classList.contains('select-all-checkbox') || e.target.closest('.select-all-checkbox')) {
+                    return; // Don't collapse if clicking checkbox
+                }
+                const targetId = vendorHeader.getAttribute('data-collapse-target');
+                const targetSection = vendorSection.querySelector('.collapsible-content');
+                const isCollapsed = targetSection.classList.contains('collapsed');
+                
+                if (isCollapsed) {
+                    targetSection.classList.remove('collapsed');
+                    collapseIcon.style.transform = 'rotate(0deg)';
+                } else {
+                    targetSection.classList.add('collapsed');
+                    collapseIcon.style.transform = 'rotate(-90deg)';
+                }
+            });
+            
             vendorSection.appendChild(vendorHeader);
+
+            // Create collapsible content container
+            const vendorContent = document.createElement('div');
+            vendorContent.className = 'collapsible-content';
+            vendorSection.appendChild(vendorContent);
 
             // Create brand sections
             const sortedBrands = Array.from(brandGroups.entries())
@@ -1581,10 +1614,11 @@ const TagManager = {
             sortedBrands.forEach(([brand, productTypeGroups]) => {
                 const brandSection = document.createElement('div');
                 brandSection.className = 'brand-section ms-3 mb-2';
-                // Remove brand label
-                // Create brand header with integrated checkbox
+                
+                // Create brand header with integrated checkbox and collapse functionality
                 const brandHeader = document.createElement('h6');
-                brandHeader.className = 'brand-header mb-2 d-flex align-items-center';
+                brandHeader.className = 'brand-header mb-2 d-flex align-items-center collapsible-header';
+                brandHeader.setAttribute('data-collapse-target', 'brand-' + brand.replace(/[^a-zA-Z0-9]/g, '_'));
                 
                 const brandCheckbox = document.createElement('input');
                 brandCheckbox.type = 'checkbox';
@@ -1601,13 +1635,13 @@ const TagManager = {
                             if (tag) {
                                 if (isChecked) {
                                     if (!this.state.persistentSelectedTags.includes(tag['Product Name*'])) {
-                                    this.state.persistentSelectedTags.push(tag['Product Name*']);
-                                }
+                                        this.state.persistentSelectedTags.push(tag['Product Name*']);
+                                    }
                                 } else {
                                     const index = this.state.persistentSelectedTags.indexOf(tag['Product Name*']);
-                                if (index > -1) {
-                                    this.state.persistentSelectedTags.splice(index, 1);
-                                }
+                                    if (index > -1) {
+                                        this.state.persistentSelectedTags.splice(index, 1);
+                                    }
                                 }
                             }
                         }
@@ -1624,9 +1658,40 @@ const TagManager = {
                     // Use efficient update instead of rebuilding entire DOM
                     this.efficientlyUpdateAvailableTagsDisplay();
                 });
+                
+                // Add collapse/expand icon
+                const brandCollapseIcon = document.createElement('span');
+                brandCollapseIcon.className = 'collapse-icon me-2';
+                brandCollapseIcon.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>';
+                brandCollapseIcon.style.transition = 'transform 0.2s ease';
+                
                 brandHeader.appendChild(brandCheckbox);
+                brandHeader.appendChild(brandCollapseIcon);
                 brandHeader.appendChild(document.createTextNode(brand));
+                
+                // Add click handler for collapse/expand
+                brandHeader.addEventListener('click', (e) => {
+                    if (e.target.classList.contains('select-all-checkbox') || e.target.closest('.select-all-checkbox')) {
+                        return; // Don't collapse if clicking checkbox
+                    }
+                    const targetSection = brandSection.querySelector('.collapsible-content');
+                    const isCollapsed = targetSection.classList.contains('collapsed');
+                    
+                    if (isCollapsed) {
+                        targetSection.classList.remove('collapsed');
+                        brandCollapseIcon.style.transform = 'rotate(0deg)';
+                    } else {
+                        targetSection.classList.add('collapsed');
+                        brandCollapseIcon.style.transform = 'rotate(-90deg)';
+                    }
+                });
+                
                 brandSection.appendChild(brandHeader);
+
+                // Create collapsible content container for brand
+                const brandContent = document.createElement('div');
+                brandContent.className = 'collapsible-content';
+                brandSection.appendChild(brandContent);
 
                 // Create product type sections
                 const sortedProductTypes = Array.from(productTypeGroups.entries())
@@ -1635,10 +1700,11 @@ const TagManager = {
                 sortedProductTypes.forEach(([productType, weightGroups]) => {
                     const productTypeSection = document.createElement('div');
                     productTypeSection.className = 'product-type-section ms-3 mb-2';
-                    // Remove type label
-                    // Create product type header
+                    
+                    // Create product type header with integrated checkbox and collapse functionality
                     const typeHeader = document.createElement('div');
-                    typeHeader.className = 'product-type-header mb-2 d-flex align-items-center';
+                    typeHeader.className = 'product-type-header mb-2 d-flex align-items-center collapsible-header';
+                    typeHeader.setAttribute('data-collapse-target', 'type-' + productType.replace(/[^a-zA-Z0-9]/g, '_'));
                     
                     const productTypeCheckbox = document.createElement('input');
                     productTypeCheckbox.type = 'checkbox';
@@ -1655,13 +1721,13 @@ const TagManager = {
                                 if (tag) {
                                     if (isChecked) {
                                         if (!this.state.persistentSelectedTags.includes(tag['Product Name*'])) {
-                                this.state.persistentSelectedTags.push(tag['Product Name*']);
-                            };
+                                            this.state.persistentSelectedTags.push(tag['Product Name*']);
+                                        }
                                     } else {
                                         const index = this.state.persistentSelectedTags.indexOf(tag['Product Name*']);
-                            if (index > -1) {
-                                this.state.persistentSelectedTags.splice(index, 1);
-                            };
+                                        if (index > -1) {
+                                            this.state.persistentSelectedTags.splice(index, 1);
+                                        }
                                     }
                                 }
                             }
@@ -1678,9 +1744,40 @@ const TagManager = {
                         // Use efficient update instead of rebuilding entire DOM
                         this.efficientlyUpdateAvailableTagsDisplay();
                     });
+                    
+                    // Add collapse/expand icon
+                    const typeCollapseIcon = document.createElement('span');
+                    typeCollapseIcon.className = 'collapse-icon me-2';
+                    typeCollapseIcon.innerHTML = '<svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>';
+                    typeCollapseIcon.style.transition = 'transform 0.2s ease';
+                    
                     typeHeader.appendChild(productTypeCheckbox);
+                    typeHeader.appendChild(typeCollapseIcon);
                     typeHeader.appendChild(document.createTextNode(productType));
+                    
+                    // Add click handler for collapse/expand
+                    typeHeader.addEventListener('click', (e) => {
+                        if (e.target.classList.contains('select-all-checkbox') || e.target.closest('.select-all-checkbox')) {
+                            return; // Don't collapse if clicking checkbox
+                        }
+                        const targetSection = productTypeSection.querySelector('.collapsible-content');
+                        const isCollapsed = targetSection.classList.contains('collapsed');
+                        
+                        if (isCollapsed) {
+                            targetSection.classList.remove('collapsed');
+                            typeCollapseIcon.style.transform = 'rotate(0deg)';
+                        } else {
+                            targetSection.classList.add('collapsed');
+                            typeCollapseIcon.style.transform = 'rotate(-90deg)';
+                        }
+                    });
+                    
                     productTypeSection.appendChild(typeHeader);
+
+                    // Create collapsible content container for product type
+                    const productTypeContent = document.createElement('div');
+                    productTypeContent.className = 'collapsible-content';
+                    productTypeSection.appendChild(productTypeContent);
 
                     // Create weight sections
                     const sortedWeights = Array.from(weightGroups.entries())
@@ -1689,10 +1786,11 @@ const TagManager = {
                     sortedWeights.forEach(([weight, tags]) => {
                         const weightSection = document.createElement('div');
                         weightSection.className = 'weight-section ms-3 mb-1';
-                        // Remove weight label
-                        // Create weight header
+                        
+                        // Create weight header with integrated checkbox and collapse functionality
                         const weightHeader = document.createElement('div');
-                        weightHeader.className = 'weight-header mb-1 d-flex align-items-center';
+                        weightHeader.className = 'weight-header mb-1 d-flex align-items-center collapsible-header';
+                        weightHeader.setAttribute('data-collapse-target', 'weight-' + weight.replace(/[^a-zA-Z0-9]/g, '_'));
                         
                         const weightCheckbox = document.createElement('input');
                         weightCheckbox.type = 'checkbox';
@@ -1709,13 +1807,13 @@ const TagManager = {
                                     if (tag) {
                                         if (isChecked) {
                                             if (!this.state.persistentSelectedTags.includes(tag['Product Name*'])) {
-                                this.state.persistentSelectedTags.push(tag['Product Name*']);
-                            };
+                                                this.state.persistentSelectedTags.push(tag['Product Name*']);
+                                            }
                                         } else {
                                             const index = this.state.persistentSelectedTags.indexOf(tag['Product Name*']);
-                            if (index > -1) {
-                                this.state.persistentSelectedTags.splice(index, 1);
-                            };
+                                            if (index > -1) {
+                                                this.state.persistentSelectedTags.splice(index, 1);
+                                            }
                                         }
                                     }
                                 }
@@ -1732,9 +1830,41 @@ const TagManager = {
                             // Use efficient update instead of rebuilding entire DOM
                             this.efficientlyUpdateAvailableTagsDisplay();
                         });
+                        
+                        // Add collapse/expand icon
+                        const weightCollapseIcon = document.createElement('span');
+                        weightCollapseIcon.className = 'collapse-icon me-2';
+                        weightCollapseIcon.innerHTML = '<svg width="6" height="6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>';
+                        weightCollapseIcon.style.transition = 'transform 0.2s ease';
+                        
                         weightHeader.appendChild(weightCheckbox);
+                        weightHeader.appendChild(weightCollapseIcon);
                         weightHeader.appendChild(document.createTextNode(weight));
+                        
+                        // Add click handler for collapse/expand
+                        weightHeader.addEventListener('click', (e) => {
+                            if (e.target.classList.contains('select-all-checkbox') || e.target.closest('.select-all-checkbox')) {
+                                return; // Don't collapse if clicking checkbox
+                            }
+                            const targetSection = weightSection.querySelector('.collapsible-content');
+                            const isCollapsed = targetSection.classList.contains('collapsed');
+                            
+                            if (isCollapsed) {
+                                targetSection.classList.remove('collapsed');
+                                weightCollapseIcon.style.transform = 'rotate(0deg)';
+                            } else {
+                                targetSection.classList.add('collapsed');
+                                weightCollapseIcon.style.transform = 'rotate(-90deg)';
+                            }
+                        });
+                        
                         weightSection.appendChild(weightHeader);
+                        
+                        // Create collapsible content container for weight
+                        const weightContent = document.createElement('div');
+                        weightContent.className = 'collapsible-content';
+                        weightSection.appendChild(weightContent);
+                        
                         // Always render tags as leaf nodes - sort alphabetically by product name
                         if (tags && tags.length > 0) {
                             // Sort tags alphabetically by product name
@@ -1747,15 +1877,19 @@ const TagManager = {
                             sortedTags.forEach(tag => {
                                 const tagElement = this.createTagElement(tag);
                                 tagElement.querySelector('.tag-checkbox').checked = this.state.persistentSelectedTags.includes(tag['Product Name*']);
-                                weightSection.appendChild(tagElement);
+                                weightContent.appendChild(tagElement);
                             });
                         }
-                        productTypeSection.appendChild(weightSection);
+                        
+                        productTypeContent.appendChild(weightSection);
                     });
-                    brandSection.appendChild(productTypeSection);
+                    
+                    brandContent.appendChild(productTypeSection);
                 });
-                vendorSection.appendChild(brandSection);
+                
+                vendorContent.appendChild(brandSection);
             });
+            
             container.appendChild(vendorSection);
         });
 
@@ -2420,10 +2554,10 @@ const TagManager = {
             const vendorSection = document.createElement('div');
             vendorSection.className = 'vendor-section mb-3';
             
-            // Remove vendor label
-            // Create vendor header with integrated checkbox
+            // Create vendor header with integrated checkbox and collapse functionality
             const vendorHeader = document.createElement('h5');
-            vendorHeader.className = 'vendor-header mb-2 d-flex align-items-center';
+            vendorHeader.className = 'vendor-header mb-2 d-flex align-items-center collapsible-header';
+            vendorHeader.setAttribute('data-collapse-target', 'vendor-' + vendor.replace(/[^a-zA-Z0-9]/g, '_'));
             
             const vendorCheckbox = document.createElement('input');
             vendorCheckbox.type = 'checkbox';
@@ -2465,9 +2599,39 @@ const TagManager = {
                 this._updateAvailableTags(this.state.originalTags, updatedAvailableTags);
             });
             
+            // Add collapse/expand icon
+            const vendorCollapseIcon = document.createElement('span');
+            vendorCollapseIcon.className = 'collapse-icon me-2';
+            vendorCollapseIcon.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>';
+            vendorCollapseIcon.style.transition = 'transform 0.2s ease';
+            
             vendorHeader.appendChild(vendorCheckbox);
+            vendorHeader.appendChild(vendorCollapseIcon);
             vendorHeader.appendChild(document.createTextNode(vendor));
+            
+            // Add click handler for collapse/expand
+            vendorHeader.addEventListener('click', (e) => {
+                if (e.target.classList.contains('select-all-checkbox') || e.target.closest('.select-all-checkbox')) {
+                    return; // Don't collapse if clicking checkbox
+                }
+                const targetSection = vendorSection.querySelector('.collapsible-content');
+                const isCollapsed = targetSection.classList.contains('collapsed');
+                
+                if (isCollapsed) {
+                    targetSection.classList.remove('collapsed');
+                    vendorCollapseIcon.style.transform = 'rotate(0deg)';
+                } else {
+                    targetSection.classList.add('collapsed');
+                    vendorCollapseIcon.style.transform = 'rotate(-90deg)';
+                }
+            });
+            
             vendorSection.appendChild(vendorHeader);
+
+            // Create collapsible content container for vendor
+            const vendorContent = document.createElement('div');
+            vendorContent.className = 'collapsible-content';
+            vendorSection.appendChild(vendorContent);
 
             // Create brand sections
             const sortedBrands = Array.from(brandGroups.entries())
@@ -2477,10 +2641,10 @@ const TagManager = {
                 const brandSection = document.createElement('div');
                 brandSection.className = 'brand-section ms-3 mb-2';
                 
-                // Remove brand label
-                // Create brand header with integrated checkbox
+                // Create brand header with integrated checkbox and collapse functionality
                 const brandHeader = document.createElement('h6');
-                brandHeader.className = 'brand-header mb-2 d-flex align-items-center';
+                brandHeader.className = 'brand-header mb-2 d-flex align-items-center collapsible-header';
+                brandHeader.setAttribute('data-collapse-target', 'brand-' + brand.replace(/[^a-zA-Z0-9]/g, '_'));
                 
                 const brandCheckbox = document.createElement('input');
                 brandCheckbox.type = 'checkbox';
@@ -2514,11 +2678,47 @@ const TagManager = {
                     this.updateSelectedTags(Array.from(this.state.persistentSelectedTags).map(name =>
                         this.state.tags.find(t => t['Product Name*'] === name)
                     ).filter(Boolean));
+                    
+                    // Rebuild available tags display to reflect selection changes
+                    const updatedAvailableTags = this.state.originalTags.filter(tag => 
+                        !this.state.persistentSelectedTags.includes(tag['Product Name*'])
+                    );
+                    this._updateAvailableTags(this.state.originalTags, updatedAvailableTags);
                 });
                 
+                // Add collapse/expand icon
+                const brandCollapseIcon = document.createElement('span');
+                brandCollapseIcon.className = 'collapse-icon me-2';
+                brandCollapseIcon.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>';
+                brandCollapseIcon.style.transition = 'transform 0.2s ease';
+                
                 brandHeader.appendChild(brandCheckbox);
+                brandHeader.appendChild(brandCollapseIcon);
                 brandHeader.appendChild(document.createTextNode(brand));
+                
+                // Add click handler for collapse/expand
+                brandHeader.addEventListener('click', (e) => {
+                    if (e.target.classList.contains('select-all-checkbox') || e.target.closest('.select-all-checkbox')) {
+                        return; // Don't collapse if clicking checkbox
+                    }
+                    const targetSection = brandSection.querySelector('.collapsible-content');
+                    const isCollapsed = targetSection.classList.contains('collapsed');
+                    
+                    if (isCollapsed) {
+                        targetSection.classList.remove('collapsed');
+                        brandCollapseIcon.style.transform = 'rotate(0deg)';
+                    } else {
+                        targetSection.classList.add('collapsed');
+                        brandCollapseIcon.style.transform = 'rotate(-90deg)';
+                    }
+                });
+                
                 brandSection.appendChild(brandHeader);
+
+                // Create collapsible content container for brand
+                const brandContent = document.createElement('div');
+                brandContent.className = 'collapsible-content';
+                brandSection.appendChild(brandContent);
 
                 // Create product type sections
                 const sortedProductTypes = Array.from(productTypeGroups.entries())
@@ -2528,10 +2728,10 @@ const TagManager = {
                     const productTypeSection = document.createElement('div');
                     productTypeSection.className = 'product-type-section ms-3 mb-2';
                     
-                    // Remove type label
-                    // Create product type header
+                    // Create product type header with integrated checkbox and collapse functionality
                     const typeHeader = document.createElement('div');
-                    typeHeader.className = 'product-type-header mb-2 d-flex align-items-center';
+                    typeHeader.className = 'product-type-header mb-2 d-flex align-items-center collapsible-header';
+                    typeHeader.setAttribute('data-collapse-target', 'type-' + productType.replace(/[^a-zA-Z0-9]/g, '_'));
                     
                     const productTypeCheckbox = document.createElement('input');
                     productTypeCheckbox.type = 'checkbox';
@@ -2548,13 +2748,13 @@ const TagManager = {
                                 if (tag) {
                                     if (isChecked) {
                                         if (!this.state.persistentSelectedTags.includes(tag['Product Name*'])) {
-                                this.state.persistentSelectedTags.push(tag['Product Name*']);
-                            };
+                                            this.state.persistentSelectedTags.push(tag['Product Name*']);
+                                        }
                                     } else {
                                         const index = this.state.persistentSelectedTags.indexOf(tag['Product Name*']);
-                            if (index > -1) {
-                                this.state.persistentSelectedTags.splice(index, 1);
-                            };
+                                        if (index > -1) {
+                                            this.state.persistentSelectedTags.splice(index, 1);
+                                        }
                                     }
                                 }
                             }
@@ -2565,11 +2765,47 @@ const TagManager = {
                         this.updateSelectedTags(Array.from(this.state.persistentSelectedTags).map(name =>
                             this.state.tags.find(t => t['Product Name*'] === name)
                         ).filter(Boolean));
+                        
+                        // Rebuild available tags display to reflect selection changes
+                        const updatedAvailableTags = this.state.originalTags.filter(tag => 
+                            !this.state.persistentSelectedTags.includes(tag['Product Name*'])
+                        );
+                        this._updateAvailableTags(this.state.originalTags, updatedAvailableTags);
                     });
                     
+                    // Add collapse/expand icon
+                    const typeCollapseIcon = document.createElement('span');
+                    typeCollapseIcon.className = 'collapse-icon me-2';
+                    typeCollapseIcon.innerHTML = '<svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>';
+                    typeCollapseIcon.style.transition = 'transform 0.2s ease';
+                    
                     typeHeader.appendChild(productTypeCheckbox);
+                    typeHeader.appendChild(typeCollapseIcon);
                     typeHeader.appendChild(document.createTextNode(productType));
+                    
+                    // Add click handler for collapse/expand
+                    typeHeader.addEventListener('click', (e) => {
+                        if (e.target.classList.contains('select-all-checkbox') || e.target.closest('.select-all-checkbox')) {
+                            return; // Don't collapse if clicking checkbox
+                        }
+                        const targetSection = productTypeSection.querySelector('.collapsible-content');
+                        const isCollapsed = targetSection.classList.contains('collapsed');
+                        
+                        if (isCollapsed) {
+                            targetSection.classList.remove('collapsed');
+                            typeCollapseIcon.style.transform = 'rotate(0deg)';
+                        } else {
+                            targetSection.classList.add('collapsed');
+                            typeCollapseIcon.style.transform = 'rotate(-90deg)';
+                        }
+                    });
+                    
                     productTypeSection.appendChild(typeHeader);
+
+                    // Create collapsible content container for product type
+                    const productTypeContent = document.createElement('div');
+                    productTypeContent.className = 'collapsible-content';
+                    productTypeSection.appendChild(productTypeContent);
 
                     // Create weight sections
                     const sortedWeights = Array.from(weightGroups.entries())
@@ -2579,10 +2815,10 @@ const TagManager = {
                         const weightSection = document.createElement('div');
                         weightSection.className = 'weight-section ms-3 mb-1';
                         
-                        // Remove weight label
-                        // Create weight header
+                        // Create weight header with integrated checkbox and collapse functionality
                         const weightHeader = document.createElement('div');
-                        weightHeader.className = 'weight-header mb-1 d-flex align-items-center';
+                        weightHeader.className = 'weight-header mb-1 d-flex align-items-center collapsible-header';
+                        weightHeader.setAttribute('data-collapse-target', 'weight-' + weight.replace(/[^a-zA-Z0-9]/g, '_'));
                         
                         const weightCheckbox = document.createElement('input');
                         weightCheckbox.type = 'checkbox';
@@ -2599,13 +2835,13 @@ const TagManager = {
                                     if (tag) {
                                         if (isChecked) {
                                             if (!this.state.persistentSelectedTags.includes(tag['Product Name*'])) {
-                                this.state.persistentSelectedTags.push(tag['Product Name*']);
-                            };
+                                                this.state.persistentSelectedTags.push(tag['Product Name*']);
+                                            }
                                         } else {
                                             const index = this.state.persistentSelectedTags.indexOf(tag['Product Name*']);
-                            if (index > -1) {
-                                this.state.persistentSelectedTags.splice(index, 1);
-                            };
+                                            if (index > -1) {
+                                                this.state.persistentSelectedTags.splice(index, 1);
+                                            }
                                         }
                                     }
                                 }
@@ -2623,9 +2859,39 @@ const TagManager = {
                             this.efficientlyUpdateAvailableTagsDisplay();
                         });
                         
+                        // Add collapse/expand icon
+                        const weightCollapseIcon = document.createElement('span');
+                        weightCollapseIcon.className = 'collapse-icon me-2';
+                        weightCollapseIcon.innerHTML = '<svg width="6" height="6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>';
+                        weightCollapseIcon.style.transition = 'transform 0.2s ease';
+                        
                         weightHeader.appendChild(weightCheckbox);
+                        weightHeader.appendChild(weightCollapseIcon);
                         weightHeader.appendChild(document.createTextNode(weight));
+                        
+                        // Add click handler for collapse/expand
+                        weightHeader.addEventListener('click', (e) => {
+                            if (e.target.classList.contains('select-all-checkbox') || e.target.closest('.select-all-checkbox')) {
+                                return; // Don't collapse if clicking checkbox
+                            }
+                            const targetSection = weightSection.querySelector('.collapsible-content');
+                            const isCollapsed = targetSection.classList.contains('collapsed');
+                            
+                            if (isCollapsed) {
+                                targetSection.classList.remove('collapsed');
+                                weightCollapseIcon.style.transform = 'rotate(0deg)';
+                            } else {
+                                targetSection.classList.add('collapsed');
+                                weightCollapseIcon.style.transform = 'rotate(-90deg)';
+                            }
+                        });
+                        
                         weightSection.appendChild(weightHeader);
+                        
+                        // Create collapsible content container for weight
+                        const weightContent = document.createElement('div');
+                        weightContent.className = 'collapsible-content';
+                        weightSection.appendChild(weightContent);
                         
                         // Always render tags as leaf nodes - sort alphabetically by product name
                         if (tags && tags.length > 0) {
@@ -2639,20 +2905,23 @@ const TagManager = {
                             sortedTags.forEach(tag => {
                                 const tagElement = this.createTagElement(tag, true); // true = isForSelectedTags
                                 tagElement.querySelector('.tag-checkbox').checked = this.state.persistentSelectedTags.includes(tag['Product Name*']);
-                                weightSection.appendChild(tagElement);
+                                weightContent.appendChild(tagElement);
                             });
                         }
-                        productTypeSection.appendChild(weightSection);
+                        
+                        productTypeContent.appendChild(weightSection);
                     });
-
-                    brandSection.appendChild(productTypeSection);
+                    
+                    brandContent.appendChild(productTypeSection);
                 });
-
-                vendorSection.appendChild(brandSection);
+                
+                vendorContent.appendChild(brandSection);
             });
-
-            container.appendChild(vendorSection);
+            
+            vendorContent.appendChild(brandSection);
         });
+        
+        container.appendChild(vendorSection);
 
         this.updateTagCount('selected', fullTags.length);
         console.timeEnd('updateSelectedTags');
