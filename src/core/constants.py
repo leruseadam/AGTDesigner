@@ -83,7 +83,7 @@ CELL_DIMENSIONS: Dict[str, Dict[str, float]] = {
     'horizontal': {'width': 3.4, 'height': 2.4},  # Each cell is 3.4" wide, 2.4" tall
     'vertical': {'width': 2.4, 'height': 3.4},    # Each cell is 2.4" wide, 3.4" tall
     'mini': {'width': 1.75, 'height': 1.75},      # Each cell is 1.75" wide, 1.75" tall
-    'double': {'width': 1.75, 'height': 2.5},     # Each cell is 1.75" wide, 2.5" tall (with 0.5" gutter)
+    'double': {'width': 1.75, 'height': 2.5},     # Each cell is 1.75" wide, 2.5" tall (with cell spacing creating gutters)
     'inventory': {'width': 4.0, 'height': 2.0}    # Each cell is 4.0" wide, 2.0" tall
 }
 
@@ -92,7 +92,7 @@ GRID_LAYOUTS: Dict[str, Dict[str, int]] = {
     'horizontal': {'rows': 3, 'cols': 3},
     'vertical': {'rows': 3, 'cols': 3},
     'mini': {'rows': 5, 'cols': 4},  # 4 columns across, 5 rows down
-    'double': {'rows': 3, 'cols': 4},  # 3x3 grid like standard templates
+    'double': {'rows': 3, 'cols': 4},  # 3 rows, 4 columns (with vertical gutter via cell spacing)
     'inventory': {'rows': 2, 'cols': 2}
 }
 
