@@ -287,7 +287,8 @@ def get_default_upload_file() -> Optional[str]:
         import app
         DISABLE_STARTUP_FILE_LOADING = getattr(app, 'DISABLE_STARTUP_FILE_LOADING', False)
     except (ImportError, AttributeError):
-        DISABLE_STARTUP_FILE_LOADING = False
+        # Use environment variable as fallback to avoid circular import
+        DISABLE_STARTUP_FILE_LOADING = os.environ.get('DISABLE_STARTUP_FILE_LOADING', 'False').lower() == 'true'
     
     if DISABLE_DEFAULT_FOR_TESTING or DISABLE_DEFAULT_FOR_PERFORMANCE or DISABLE_STARTUP_FILE_LOADING:
         logger.info("Default file loading disabled for testing/performance optimization")
