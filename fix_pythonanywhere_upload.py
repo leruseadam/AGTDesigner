@@ -135,9 +135,9 @@ def update_app_config(project_dir):
         )
         
         # Write updated content
-        with open(app_py_path, 'w') as f:
+    with open(app_py_path, 'w') as f:
             f.write(new_content)
-        
+    
         print("✅ Updated app.py with PythonAnywhere configuration")
     else:
         print("⚠️  Could not find upload folder configuration in app.py")
@@ -164,7 +164,7 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='repla
 # Get the current directory (project root)
 project_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, project_dir)
-
+    
 # Add virtual environment to Python path
 venv_path = os.path.join(project_dir, 'venv_pythonanywhere')
 venv_site_packages = os.path.join(venv_path, 'lib', 'python3.11', 'site-packages')
@@ -298,7 +298,7 @@ def test_upload_functionality():
         test_file = os.path.join(uploads_dir, 'test_upload.txt')
         with open(test_file, 'w') as f:
             f.write('Test upload functionality')
-        
+    
         print("✅ Successfully created test file")
         
         # Clean up

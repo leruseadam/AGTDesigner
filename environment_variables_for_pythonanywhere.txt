@@ -1,0 +1,7 @@
+# Environment Variables for PythonAnywhere
+# Add these in your PythonAnywhere Web app configuration:
+
+PYTHONANYWHERE=true
+FLASK_ENV=production
+FLASK_DEBUG=false
+SECRET_KEY=label-maker-production-key-2024
