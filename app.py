@@ -1833,19 +1833,8 @@ def post_process_document(doc, font_scheme, orientation, scale_factor):
     """
     Main post-processing function, inspired by the old MAIN.py logic.
     This function finds and formats all marked fields in the document.
-    Uses template-type-specific font sizing based on the original font-sizing utilities.
+    Uses template-type-specific font sizing based on the unified font-sizing system.
     """
-    from src.core.generation.font_sizing import (
-        get_thresholded_font_size,
-        get_thresholded_font_size_ratio,
-        get_thresholded_font_size_thc_cbd,
-        get_thresholded_font_size_brand,
-        get_thresholded_font_size_price,
-        get_thresholded_font_size_lineage,
-        get_thresholded_font_size_description,
-        get_thresholded_font_size_strain,
-        set_run_font_size
-    )
 
     # Define marker processing for all template types
     markers = [
