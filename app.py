@@ -613,6 +613,11 @@ def create_app():
         """Test route for debugging."""
         return jsonify({'status': 'ok', 'message': 'Test route working'})
 
+    @app.route('/test-debug')
+    def test_debug():
+        """Test page for debugging frontend issues."""
+        return send_from_directory('.', 'test_frontend_debug.html')
+
     @app.route('/api/upload-status', methods=['GET'])
     def upload_status():
         """Get upload processing status."""
