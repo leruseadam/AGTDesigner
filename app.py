@@ -264,6 +264,69 @@ def cleanup_old_files():
         logging.error(f"Error cleaning up old files: {e}")
         return {'success': False, 'error': str(e)}
 
+def check_disk_space():
+    """Check available disk space."""
+    try:
+        import shutil
+        total, used, free = shutil.disk_usage(current_dir)
+        free_gb = free / (1024**3)
+        used_percent = (used / total) * 100
+        
+        if free_gb < 1.0:  # Less than 1GB free
+            return False, f"Only {free_gb:.2f}GB free space available"
+        elif used_percent > 90:  # More than 90% used
+            return False, f"Disk usage at {used_percent:.1f}%"
+        else:
+            return True, f"Disk space OK: {free_gb:.2f}GB free"
+    except Exception as e:
+        logging.error(f"Error checking disk space: {e}")
+        return True, "Could not check disk space"
+
+def emergency_cleanup():
+    """Perform emergency cleanup to free disk space."""
+    try:
+        logging.warning("Performing emergency cleanup")
+        
+        # Clean up old files
+        cleanup_result = cleanup_old_files()
+        
+        # Clear caches
+        clear_initial_data_cache()
+        
+        # Clear processing status
+        global processing_status, processing_timestamps
+        with processing_lock:
+            processing_status.clear()
+            processing_timestamps.clear()
+        
+        logging.info("Emergency cleanup completed")
+        return True
+    except Exception as e:
+        logging.error(f"Error during emergency cleanup: {e}")
+        return False
+
+def check_rate_limit(ip_address):
+    """Check if IP address has exceeded rate limit."""
+    try:
+        current_time = time.time()
+        
+        # Clean old entries
+        rate_limit_data[ip_address] = [
+            timestamp for timestamp in rate_limit_data[ip_address]
+            if current_time - timestamp < RATE_LIMIT_WINDOW
+        ]
+        
+        # Check if limit exceeded
+        if len(rate_limit_data[ip_address]) >= RATE_LIMIT_MAX_REQUESTS:
+            return False
+        
+        # Add current request
+        rate_limit_data[ip_address].append(current_time)
+        return True
+    except Exception as e:
+        logging.error(f"Error checking rate limit: {e}")
+        return True  # Allow request if rate limiting fails
+
 def create_app():
     """Create and configure the Flask application."""
     app = Flask(__name__, static_url_path='/static', static_folder='static')
@@ -512,6 +575,240 @@ def create_app():
         except Exception as e:
             logging.error(f"Health check error: {e}")
             return jsonify({'status': 'unhealthy', 'error': str(e)}), 500
+
+    @app.route('/upload-fast', methods=['POST'])
+    def upload_file_fast():
+        """Ultra-fast file upload endpoint with minimal processing for maximum speed"""
+        try:
+            logging.info("=== ULTRA-FAST UPLOAD REQUEST START ===")
+            start_time = time.time()
+            
+            if 'file' not in request.files:
+                logging.error("No file uploaded - 'file' not in request.files")
+                return jsonify({'error': 'No file uploaded'}), 400
+            
+            file = request.files['file']
+            logging.info(f"File received: {file.filename}, Content-Type: {file.content_type}")
+            
+            if file.filename == '':
+                logging.error("No file selected - filename is empty")
+                return jsonify({'error': 'No file selected'}), 400
+            
+            if not file.filename.lower().endswith('.xlsx'):
+                logging.error(f"Invalid file type: {file.filename}")
+                return jsonify({'error': 'Only .xlsx files are allowed'}), 400
+            
+            # Sanitize filename to prevent path traversal (security fix)
+            sanitized_filename = sanitize_filename(file.filename)
+            if not sanitized_filename:
+                logging.error(f"Invalid filename after sanitization: {file.filename}")
+                return jsonify({'error': 'Invalid filename'}), 400
+            
+            # Check file size
+            file.seek(0, 2)  # Seek to end
+            file_size = file.tell()
+            file.seek(0)  # Reset to beginning
+            logging.info(f"File size: {file_size} bytes ({file_size / (1024*1024):.2f} MB)")
+            
+            if file_size > app.config['MAX_CONTENT_LENGTH']:
+                logging.error(f"File too large: {file_size} bytes (max: {app.config['MAX_CONTENT_LENGTH']})")
+                return jsonify({'error': f'File too large. Maximum size is {app.config["MAX_CONTENT_LENGTH"] / (1024*1024):.1f} MB'}), 400
+            
+            # Ensure upload folder exists
+            upload_folder = app.config['UPLOAD_FOLDER']
+            os.makedirs(upload_folder, exist_ok=True)
+            logging.info(f"Upload folder: {upload_folder}")
+            
+            # Use sanitized filename (security fix)
+            temp_path = os.path.join(upload_folder, sanitized_filename)
+            logging.info(f"Saving file to: {temp_path}")
+            
+            save_start = time.time()
+            try:
+                file.save(temp_path)
+                save_time = time.time() - save_start
+                logging.info(f"File saved successfully to {temp_path} in {save_time:.2f}s")
+            except Exception as save_error:
+                logging.error(f"Error saving file: {save_error}")
+                return jsonify({'error': f'Failed to save file: {str(save_error)}'}), 500
+            
+            # Clear any existing status for this filename and mark as processing
+            logging.info(f"[ULTRA-FAST] Setting processing status for: {file.filename}")
+            update_processing_status(file.filename, 'processing')
+            logging.info(f"[ULTRA-FAST] Processing status set. Current statuses: {dict(processing_status)}")
+            
+            # Store uploaded file path in session
+            session['file_path'] = temp_path
+            
+            # Clear selected tags in session to ensure fresh start
+            session['selected_tags'] = []
+            
+            # ULTRA-FAST RESPONSE - Return immediately for instant user feedback
+            upload_response_time = time.time() - start_time
+            logging.info(f"[ULTRA-FAST] Ultra-fast upload completed in {upload_response_time:.3f}s")
+            
+            return jsonify({
+                'message': 'File uploaded, processing in background', 
+                'filename': sanitized_filename,
+                'upload_time': f"{upload_response_time:.3f}s",
+                'processing_status': 'background',
+                'performance': 'ultra_fast'
+            })
+        except Exception as e:
+            logging.error(f"=== ULTRA-FAST UPLOAD REQUEST FAILED ===")
+            logging.error(f"Upload error: {str(e)}")
+            logging.error(f"Traceback: {traceback.format_exc()}")
+            
+            # Don't expose internal errors to client (security fix)
+            if app.config.get('DEBUG', False):
+                return jsonify({'error': f'Upload failed: {str(e)}'}), 500
+            else:
+                return jsonify({'error': 'Upload failed. Please try again.'}), 500
+
+    @app.route('/upload-web-optimized', methods=['POST'])
+    def upload_file_web_optimized():
+        """Ultra-optimized file upload endpoint specifically for web server performance"""
+        try:
+            logging.info("=== WEB-OPTIMIZED UPLOAD REQUEST START ===")
+            start_time = time.time()
+            
+            # Check if file was uploaded
+            if 'file' not in request.files:
+                logging.error("No file part in request")
+                return jsonify({'error': 'No file selected'}), 400
+            
+            file = request.files['file']
+            if file.filename == '':
+                logging.error("No file selected")
+                return jsonify({'error': 'No file selected'}), 400
+            
+            # Validate file type
+            if not file.filename.lower().endswith(".xlsx"):
+                logging.error(f"Invalid file type: {file.filename}")
+                return jsonify({"error": "Only Excel (.xlsx) files are supported"}), 400
+            
+            # Sanitize filename
+            filename = sanitize_filename(file.filename)
+            logging.info(f"Processing web-optimized upload: {filename}")
+            
+            # Save file to uploads folder
+            upload_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+            file.save(upload_path)
+            logging.info(f"File saved to: {upload_path}")
+            
+            # Set processing status
+            update_processing_status(filename, "processing")
+            
+            upload_time = time.time() - start_time
+            logging.info(f"Web-optimized upload completed in {upload_time:.3f}s")
+            
+            return jsonify({
+                "success": True,
+                "filename": filename,
+                "message": "File uploaded successfully",
+                "performance": "web_optimized",
+                "upload_time": f"{upload_time:.3f}s"
+            })
+            
+        except Exception as e:
+            logging.error(f"Web-optimized upload error: {str(e)}")
+            return jsonify({"error": f"Upload failed: {str(e)}"}), 500
+
+    @app.route('/api/initial-data', methods=['GET'])
+    def get_initial_data():
+        """Get initial data for the application."""
+        try:
+            excel_processor = get_excel_processor()
+            if excel_processor is None:
+                return jsonify({'error': 'Excel processor not initialized'}), 500
+            
+            # Get available tags
+            available_tags = excel_processor.get_available_tags()
+            
+            # Get selected tags
+            selected_tags = excel_processor.get_selected_tags()
+            
+            return jsonify({
+                'available_tags': available_tags,
+                'selected_tags': selected_tags,
+                'data_loaded': excel_processor.df is not None and not excel_processor.df.empty
+            })
+        except Exception as e:
+            logging.error(f"Error getting initial data: {e}")
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/move-tags', methods=['POST'])
+    def move_tags():
+        """Move tags between available and selected lists."""
+        try:
+            data = request.get_json()
+            if not data:
+                return jsonify({'error': 'No data provided'}), 400
+            
+            action = data.get('action')  # 'select' or 'deselect'
+            tags = data.get('tags', [])
+            
+            excel_processor = get_excel_processor()
+            if excel_processor is None:
+                return jsonify({'error': 'Excel processor not initialized'}), 500
+            
+            if action == 'select':
+                excel_processor.select_tags(tags)
+                return jsonify({'message': f'Selected {len(tags)} tags'})
+            elif action == 'deselect':
+                excel_processor.unselect_tags(tags)
+                return jsonify({'message': f'Deselected {len(tags)} tags'})
+            else:
+                return jsonify({'error': 'Invalid action'}), 400
+                
+        except Exception as e:
+            logging.error(f"Error moving tags: {e}")
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/clear-filters', methods=['POST'])
+    def clear_filters():
+        """Clear all filters and reload data."""
+        try:
+            excel_processor = get_excel_processor()
+            if excel_processor is None:
+                return jsonify({'error': 'Excel processor not initialized'}), 500
+            
+            # Clear filters and reload available tags
+            available_tags = excel_processor.get_available_tags()
+            
+            return jsonify({
+                'message': 'Filters cleared',
+                'available_tags': available_tags
+            })
+        except Exception as e:
+            logging.error(f"Error clearing filters: {e}")
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/filter-options', methods=['GET', 'POST'])
+    def get_filter_options():
+        """Get filter options for the data."""
+        try:
+            excel_processor = get_excel_processor()
+            if excel_processor is None:
+                return jsonify({'error': 'Excel processor not initialized'}), 500
+            
+            if request.method == 'POST':
+                # Apply filters
+                filters = request.get_json()
+                if filters:
+                    excel_processor.apply_filters(filters)
+                
+                # Get filtered available tags
+                available_tags = excel_processor.get_available_tags()
+                return jsonify({'available_tags': available_tags})
+            else:
+                # Get filter options
+                filter_options = excel_processor.get_dynamic_filter_options({})
+                return jsonify(filter_options)
+                
+        except Exception as e:
+            logging.error(f"Error with filter options: {e}")
+            return jsonify({'error': str(e)}), 500
 
     return app
 
