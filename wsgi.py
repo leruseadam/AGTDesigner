@@ -24,10 +24,9 @@ venv_site_packages = os.path.join(venv_path, 'lib', 'python3.11', 'site-packages
 
 if os.path.exists(venv_site_packages):
     sys.path.insert(0, venv_site_packages)
-    print(f"✅ Virtual environment site-packages added: {venv_site_packages}")
 else:
-    print(f"⚠️  Virtual environment site-packages not found at: {venv_site_packages}")
-    print("Continuing without virtual environment...")
+    # Continue without virtual environment
+    pass
 
 # Set environment variables
 os.environ['FLASK_ENV'] = 'production'
@@ -51,17 +50,13 @@ logging.getLogger('PIL').setLevel(logging.ERROR)
 # Import the Flask app directly - more reliable than create_app()
 try:
     from app import app
-    print("✅ Successfully imported Flask app directly")
     application = app
 except ImportError as e:
-    print(f"❌ Error importing Flask app: {e}")
     # Fallback to create_app if direct import fails
     try:
         from app import create_app
-        print("✅ Fallback: imported create_app")
         application = create_app()
     except ImportError as fallback_error:
-        print(f"❌ Both direct import and create_app failed: {fallback_error}")
         raise
 
 # Configure for production
@@ -73,7 +68,7 @@ application.config['PROPAGATE_EXCEPTIONS'] = True
 if not application.secret_key or application.secret_key == 'dev':
     application.secret_key = os.environ.get('SECRET_KEY', 'label-maker-production-key-2024')
 
-print(f"✅ Label Maker application created successfully at {datetime.now()}")
+# Application created successfully
 
 # WSGI application entry point
 if __name__ == "__main__":
