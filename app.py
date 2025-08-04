@@ -327,6 +327,134 @@ def check_rate_limit(ip_address):
         logging.error(f"Error checking rate limit: {e}")
         return True  # Allow request if rate limiting fails
 
+def process_excel_background(filename, temp_path):
+    """Ultra-optimized background processing with minimal processing for instant response"""
+    try:
+        logging.info(f"[BG] ===== BACKGROUND PROCESSING START =====")
+        logging.info(f"[BG] Starting ultra-optimized file processing: {temp_path}")
+        logging.info(f"[BG] Filename: {filename}")
+        logging.info(f"[BG] Temp path: {temp_path}")
+        
+        # Set a timeout for the entire processing operation
+        start_time = time.time()
+        max_processing_time = 300  # 5 minutes max
+        
+        # Verify the file still exists before processing
+        if not os.path.exists(temp_path):
+            update_processing_status(filename, f'error: File not found at {temp_path}')
+            logging.error(f"[BG] File not found: {temp_path}")
+            return
+        
+        # Step 1: Use fast loading for immediate response
+        load_start = time.time()
+        
+        # Add timeout check
+        if time.time() - start_time > max_processing_time:
+            update_processing_status(filename, f'error: Processing timeout during file load')
+            logging.error(f"[BG] Processing timeout for {filename}")
+            return
+        
+        # Create a new ExcelProcessor instance directly
+        from src.core.data.excel_processor import ExcelProcessor
+        new_processor = ExcelProcessor()
+        
+        # Disable product database integration for faster loading
+        if hasattr(new_processor, 'enable_product_db_integration'):
+            new_processor.enable_product_db_integration(False)
+            logging.info("[BG] Product database integration disabled for upload performance")
+        
+        # Use load_file method for reliable processing
+        logging.info(f"[BG] Loading file with load_file method: {temp_path}")
+        success = new_processor.load_file(temp_path)
+        load_time = time.time() - load_start
+        
+        if not success:
+            update_processing_status(filename, f'error: Failed to load file data')
+            logging.error(f"[BG] File load failed for {filename}")
+            return
+        
+        # Verify the load was successful
+        if new_processor.df is None or new_processor.df.empty:
+            update_processing_status(filename, f'error: Failed to load file data - DataFrame is empty')
+            logging.error(f"[BG] File load failed for {filename} - DataFrame is empty")
+            return
+        
+        # Step 2: Update the global processor safely with minimal clearing
+        global _excel_processor
+        with excel_processor_lock:
+            # Clear the old processor completely
+            if _excel_processor is not None:
+                # Explicitly clear all data from old processor
+                if hasattr(_excel_processor, 'df') and _excel_processor.df is not None:
+                    del _excel_processor.df
+                    logging.info("[BG] Cleared old DataFrame from ExcelProcessor")
+                
+                if hasattr(_excel_processor, 'selected_tags'):
+                    _excel_processor.selected_tags = []
+                    logging.info("[BG] Cleared selected tags from ExcelProcessor")
+                
+                if hasattr(_excel_processor, 'dropdown_cache'):
+                    _excel_processor.dropdown_cache = {}
+                    logging.info("[BG] Cleared dropdown cache from ExcelProcessor")
+                
+                # Clear any other data attributes
+                for attr in ['data', 'original_data', 'processed_data']:
+                    if hasattr(_excel_processor, attr):
+                        delattr(_excel_processor, attr)
+                        logging.info(f"[BG] Cleared {attr} from ExcelProcessor")
+                
+                # Force garbage collection
+                import gc
+                gc.collect()
+                logging.info("[BG] Forced garbage collection to free memory")
+            
+            # Replace with the new processor
+            _excel_processor = new_processor
+            _excel_processor._last_loaded_file = temp_path
+            logging.info(f"[BG] Global Excel processor updated with new file: {temp_path}")
+        
+        # ULTRA-FAST CACHE OPTIMIZATION - Minimal clearing
+        clear_initial_data_cache()
+        
+        # Only clear the most critical caches for instant response
+        try:
+            from flask import has_request_context
+            if has_request_context():
+                # Clear only the most essential caches
+                critical_keys = ['full_excel_cache_key', 'json_matched_cache_key']
+                cleared_count = 0
+                for key in critical_keys:
+                    if cache.has(key):
+                        cache.delete(key)
+                        cleared_count += 1
+                logging.info(f"[BG] Cleared {cleared_count} critical cache entries for instant response")
+            else:
+                logging.info("[BG] Skipping Flask cache clear - not in request context")
+        except Exception as cache_error:
+            logging.warning(f"[BG] Error clearing file caches: {cache_error}")
+        
+        # Update processing status to success
+        update_processing_status(filename, 'ready')
+        logging.info(f"[BG] ===== BACKGROUND PROCESSING COMPLETE =====")
+        logging.info(f"[BG] File processing completed successfully: {filename}")
+        
+        # Step 3: Mark as ready immediately (no delay needed with fast loading)
+        logging.info(f"[BG] Marking file as ready: {filename}")
+        update_processing_status(filename, 'ready')
+        logging.info(f"[BG] File marked as ready: {filename}")
+        logging.info(f"[BG] Current processing statuses: {dict(processing_status)}")
+        
+        total_time = time.time() - start_time
+        logging.info(f"[BG] Ultra-optimized background processing completed successfully in {total_time:.2f}s")
+        logging.info(f"[BG] ===== BACKGROUND PROCESSING END =====")
+        
+    except Exception as e:
+        error_msg = f"Error processing uploaded file: {str(e)}"
+        logging.error(f"[BG] ===== BACKGROUND PROCESSING ERROR =====")
+        logging.error(f"[BG] {error_msg}")
+        logging.error(f"[BG] Traceback: {traceback.format_exc()}")
+        update_processing_status(filename, f'error: {error_msg}')
+
 def create_app():
     """Create and configure the Flask application."""
     app = Flask(__name__, static_url_path='/static', static_folder='static')
@@ -636,6 +764,21 @@ def create_app():
             logging.info(f"[ULTRA-FAST] Setting processing status for: {file.filename}")
             update_processing_status(file.filename, 'processing')
             logging.info(f"[ULTRA-FAST] Processing status set. Current statuses: {dict(processing_status)}")
+            
+            # Start background processing thread
+            try:
+                logging.info(f"[ULTRA-FAST] Starting background processing thread for {file.filename}")
+                thread = threading.Thread(target=process_excel_background, args=(file.filename, temp_path))
+                thread.daemon = True  # Make thread daemon so it doesn't block app shutdown
+                thread.start()
+                logging.info(f"[ULTRA-FAST] Background processing thread started successfully for {file.filename}")
+                
+                # Log current processing status
+                logging.info(f"[ULTRA-FAST] Current processing status after thread start: {dict(processing_status)}")
+            except Exception as thread_error:
+                logging.error(f"[ULTRA-FAST] Failed to start background thread: {thread_error}")
+                update_processing_status(file.filename, f'error: Failed to start processing')
+                return jsonify({'error': 'Failed to start file processing'}), 500
             
             # Store uploaded file path in session
             session['file_path'] = temp_path
