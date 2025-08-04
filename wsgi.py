@@ -18,17 +18,16 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='repla
 project_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, project_dir)
 
-# Try to activate virtual environment if it exists
+# Try to add virtual environment to Python path
 venv_path = os.path.join(project_dir, 'venv_pythonanywhere')
-activate_this = os.path.join(venv_path, 'bin', 'activate_this.py')
+venv_site_packages = os.path.join(venv_path, 'lib', 'python3.11', 'site-packages')
 
-if os.path.exists(activate_this):
-    with open(activate_this) as file_:
-        exec(file_.read(), dict(__file__=activate_this))
-    print(f"✅ Virtual environment activated: {venv_path}")
+if os.path.exists(venv_site_packages):
+    sys.path.insert(0, venv_site_packages)
+    print(f"✅ Virtual environment site-packages added: {venv_site_packages}")
 else:
-    print(f"⚠️  Virtual environment not found at: {venv_path}")
-    print("Continuing without virtual environment activation...")
+    print(f"⚠️  Virtual environment site-packages not found at: {venv_site_packages}")
+    print("Continuing without virtual environment...")
 
 # Set environment variables
 os.environ['FLASK_ENV'] = 'production'
@@ -52,9 +51,12 @@ logging.getLogger('PIL').setLevel(logging.ERROR)
 # Import the Flask app
 try:
     from app import create_app
-    print("✅ Flask app imported successfully")
+    print("✅ Successfully imported Flask app")
 except ImportError as e:
     print(f"❌ Error importing Flask app: {e}")
+    print("Available packages:")
+    for path in sys.path:
+        print(f"  - {path}")
     raise
 
 # Create the application instance
