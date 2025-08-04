@@ -213,7 +213,7 @@ class TemplateProcessor:
         return buf
 
     def _expand_template_to_4x3_fixed_double(self):
-        """Expand template to 4x3 grid for double templates (4 columns, 3 rows)."""
+        """Expand template to 6x5 grid for double templates (4 label columns + 2 gutter columns, 3 label rows + 2 gutter rows) with both horizontal and vertical gutters."""
         from docx import Document
         from docx.shared import Pt
         from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT
@@ -222,11 +222,14 @@ class TemplateProcessor:
         from io import BytesIO
         from copy import deepcopy
 
-        num_cols, num_rows = 4, 3  # 4 columns, 3 rows for 12 labels total
+        num_cols, num_rows = 6, 5  # 6 columns (4 label + 2 gutter), 5 rows (3 label + 2 gutter)
         
-        # Equal width columns: 1.125 inches each for a total of 4.5 inches
-        col_width_twips = str(int(1.125 * 1440))  # 1.125 inches per column
-        row_height_pts = Pt(2.5 * 72)  # 2.5 inches per row for equal height
+        # Column widths: label columns 1.125", gutter columns 0.05"
+        label_col_width_twips = str(int(1.125 * 1440))  # 1.125 inches per label column
+        gutter_col_width_twips = str(int(0.05 * 1440))  # 0.05 inches per gutter column
+        
+        row_height_pts = Pt(2.5 * 72)  # 2.5 inches per label row
+        gutter_height_pts = Pt(0.10 * 72)  # 0.10 inches per gutter row
         cut_line_twips = int(0.001 * 1440)
 
         template_path = self._get_template_path()
@@ -253,13 +256,20 @@ class TemplateProcessor:
         tblPr.append(layout)
         tbl._element.insert(0, tblPr)
         grid = OxmlElement('w:tblGrid')
-        for _ in range(num_cols):
+        for i in range(num_cols):
             gc = OxmlElement('w:gridCol')
-            gc.set(qn('w:w'), col_width_twips)
+            if i in [2, 5]:  # Gutter columns (after every second label column)
+                gc.set(qn('w:w'), gutter_col_width_twips)
+            else:  # Label columns
+                gc.set(qn('w:w'), label_col_width_twips)
             grid.append(gc)
         tbl._element.insert(0, grid)
-        for row in tbl.rows:
-            row.height = row_height_pts
+        # Set row heights: label rows are 2.5", gutter rows are 0.10"
+        for i, row in enumerate(tbl.rows):
+            if i in [1, 3]:  # Gutter rows (after every second label row)
+                row.height = gutter_height_pts
+            else:  # Label rows
+                row.height = row_height_pts
             row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
         borders = OxmlElement('w:tblBorders')
         for side in ('insideH','insideV'):
@@ -271,10 +281,18 @@ class TemplateProcessor:
             borders.append(b)
         tblPr.append(borders)
         
-        # Process all cells normally (no gutters)
+        # Process label cells (skip gutter rows and gutter columns)
         cnt = 1
         for r in range(num_rows):
+            # Skip gutter rows (rows 1 and 3)
+            if r in [1, 3]:
+                continue
+                
             for c in range(num_cols):
+                # Skip gutter columns (columns 2 and 5)
+                if c in [2, 5]:
+                    continue
+                    
                 cell = tbl.cell(r,c)
                 cell._tc.clear_content()
                 tc = deepcopy(src_tc)
@@ -820,7 +838,7 @@ class TemplateProcessor:
             # Apply new bold label formatting for THC/CBD content
             if content.strip().startswith('THC:') and 'CBD:' in content:
                 from src.core.generation.text_processing import format_thc_cbd_bold_labels
-                content = format_thc_cbd_bold_labels(content)
+                content = format_thc_cbd_bold_labels(content, self.template_type)
             # Force line breaks for vertical and double templates
             elif self.template_type in ['vertical', 'double'] and content.strip().startswith('THC:') and 'CBD:' in content:
                 content = content.replace('THC: CBD:', 'THC:\nCBD:').replace('THC:  CBD:', 'THC:\nCBD:')

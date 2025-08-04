@@ -265,11 +265,7 @@ class TemplateProcessor:
             row.height = row_height_pts
             row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
         
-        # Add vertical cell spacing to create gutter between columns 2 and 3
-        spacing = OxmlElement('w:tblCellSpacing')
-        spacing.set(qn('w:w'), str(int(0.05 * 1440)))  # 0.05" vertical spacing
-        spacing.set(qn('w:type'), 'dxa')
-        tblPr.append(spacing)
+        # No cell spacing - will use cell margins for center gutter only
         
         borders = OxmlElement('w:tblBorders')
         for side in ('insideH','insideV'):
@@ -365,17 +361,31 @@ class TemplateProcessor:
                     cell._tc.append(deepcopy(el))
                 cnt += 1
                 
-        # Add minimal cell margins (no horizontal gutters)
-        for row in tbl.rows:
-            for cell in row.cells:
+        # Add cell margins to create center vertical gutter for "double" grouping
+        for r in range(num_rows):
+            for c in range(num_cols):
+                cell = tbl.cell(r, c)
                 tc = cell._tc
                 tcPr = tc.get_or_add_tcPr()
                 tcMar = OxmlElement('w:tcMar')
+                
+                # Set margins for all sides
                 for side in ['top', 'left', 'bottom', 'right']:
                     margin = OxmlElement(f'w:{side}')
-                    margin.set(qn('w:w'), str(int(0.001 * 1440)))  # Minimal margin
+                    
+                    # Create center gutter between columns 2 and 3
+                    # Left group: columns 1-2 (extra right margin on column 2)
+                    # Right group: columns 3-4 (extra left margin on column 3)
+                    if side == 'right' and c == 1:  # Column 2 (end of left group)
+                        margin.set(qn('w:w'), str(int(0.025 * 1440)))  # 0.025" extra right margin
+                    elif side == 'left' and c == 2:  # Column 3 (start of right group)
+                        margin.set(qn('w:w'), str(int(0.025 * 1440)))  # 0.025" extra left margin
+                    else:
+                        margin.set(qn('w:w'), str(int(0.001 * 1440)))  # Minimal margin
+                    
                     margin.set(qn('w:type'), 'dxa')
                     tcMar.append(margin)
+                
                 for old_mar in tcPr.findall(qn('w:tcMar')):
                     tcPr.remove(old_mar)
                 tcPr.append(tcMar)

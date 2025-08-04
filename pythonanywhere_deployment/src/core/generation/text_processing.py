@@ -245,14 +245,11 @@ def process_doh_image(doh_value, product_type):
         logger.error(f"Error processing DOH image path: {str(e)}")
         return "" 
 
-def format_thc_cbd_bold_labels(text):
+def format_thc_cbd_bold_labels(text, template_type='vertical'):
     """
-    Format THC/CBD values with bold labels on separate lines and indented bold values.
-    Format: 
-    THC:
-      74.51%
-    CBD:
-      0.15%
+    Format THC/CBD values with bold labels.
+    For vertical/double templates: separate lines with indented values
+    For horizontal template: same line format
     """
     if not text:
         return ""
@@ -261,7 +258,10 @@ def format_thc_cbd_bold_labels(text):
     
     # Handle the default placeholder format
     if text == "THC:|BR|CBD:":
-        return "THC:\n   \nCBD:\n   "
+        if template_type == 'horizontal':
+            return "THC:   CBD:"
+        else:
+            return "THC:\n   \nCBD:\n   "
     
     # Extract THC and CBD values using regex
     import re
@@ -275,21 +275,37 @@ def format_thc_cbd_bold_labels(text):
     cbd_value = cbd_match.group(1) if cbd_match else ""
     cbd_unit = cbd_match.group(2) if cbd_match else ""
     
-    # Format with bold labels and indented values
-    result = []
-    
-    if thc_value:
-        result.append("THC:")
-        result.append(f"  {thc_value}{thc_unit}")
+    # Format based on template type
+    if template_type == 'horizontal':
+        # Horizontal template: keep on same line
+        result = []
+        if thc_value:
+            result.append(f"THC: {thc_value}{thc_unit}")
+        else:
+            result.append("THC:")
+        
+        if cbd_value:
+            result.append(f"CBD: {cbd_value}{cbd_unit}")
+        else:
+            result.append("CBD:")
+        
+        return "  ".join(result)
     else:
-        result.append("THC:")
-        result.append("  ")
-    
-    if cbd_value:
-        result.append("CBD:")
-        result.append(f"  {cbd_value}{cbd_unit}")
-    else:
-        result.append("CBD:")
-        result.append("  ")
-    
-    return "\n".join(result) 
+        # Vertical/double templates: separate lines with indented values
+        result = []
+        
+        if thc_value:
+            result.append("THC:")
+            result.append(f"  {thc_value}{thc_unit}")
+        else:
+            result.append("THC:")
+            result.append("  ")
+        
+        if cbd_value:
+            result.append("CBD:")
+            result.append(f"  {cbd_value}{cbd_unit}")
+        else:
+            result.append("CBD:")
+            result.append("  ")
+        
+        return "\n".join(result) 

@@ -2917,10 +2917,9 @@ const TagManager = {
                 
                 vendorContent.appendChild(brandSection);
             });
-            
-            // Append the vendor section to the container
-            container.appendChild(vendorSection);
         });
+        
+        container.appendChild(vendorSection);
 
         this.updateTagCount('selected', fullTags.length);
         console.timeEnd('updateSelectedTags');
