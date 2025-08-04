@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hierarchical Drag and Drop Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .test-container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .test-button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        .test-button:hover {
+            background: #0056b3;
+        }
+        .status {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        .hierarchy-example {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 10px 0;
+            font-family: monospace;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>Hierarchical Drag and Drop Test</h1>
+        
+        <div class="test-section">
+            <h3>Test Instructions</h3>
+            <p>This test verifies that drag and drop functionality respects the hierarchical structure of selected tags.</p>
+            <ol>
+                <li>Open the main application at <a href="http://127.0.0.1:9090" target="_blank" rel="noopener">http://127.0.0.1:9090</a></li>
+                <li>Select tags from different categories (e.g., different vendors, brands, product types)</li>
+                <li>Look for the hierarchical structure in the selected tags section</li>
+                <li>Try dragging tags within the same level (e.g., within the same "1G" section)</li>
+                <li>Verify that tags stay within their hierarchical level when dragged</li>
+            </ol>
+        </div>
+
+        <div class="test-section">
+            <h3>Expected Hierarchy Structure</h3>
+            <div class="hierarchy-example">
+Vendor Section (e.g., "1555 INDUSTRIAL LLC")
+├── Brand Section (e.g., "HUSTLER'S AMBITION")
+    ├── Product Type Section (e.g., "CONCENTRATE")
+        ├── Weight Section (e.g., "1G")
+            ├── Tag: Memory Loss Wax - 1g [drag handle]
+            ├── Tag: Lemon Jealousy Wax - 1g [drag handle]
+            └── Tag: Other Wax - 1g [drag handle]
+            </div>
+        <p><strong>Expected Behavior:</strong> When dragging "Memory Loss Wax - 1g", it should only be able to reorder within the "1G" section, not move up to "CONCENTRATE" or higher levels.</p>
+        </div>
+
+        <div class="test-section">
+            <h3>Test Results</h3>
+            <div id="testResults">
+                <div class="status info">Click the test buttons below to run diagnostics</div>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h3>Diagnostic Tests</h3>
+            <button class="test-button" onclick="testApplicationConnection()">Test Application Connection</button>
+            <button class="test-button" onclick="testHierarchicalStructure()">Test Hierarchical Structure</button>
+            <button class="test-button" onclick="checkConsoleLogs()">Check Console Logs</button>
+        </div>
+
+        <div class="test-section">
+            <h3>Manual Test Steps</h3>
+            <div class="status info">
+                <strong>Step 1:</strong> Open the main application<br>
+                <strong>Step 2:</strong> Select tags from different vendors/brands to create hierarchy<br>
+                <strong>Step 3:</strong> Look for the hierarchical structure in selected tags<br>
+                <strong>Step 4:</strong> Try dragging a tag within its current level (e.g., within "1G")<br>
+                <strong>Step 5:</strong> Verify the tag reorders within the same level<br>
+                <strong>Step 6:</strong> Try dragging to a different level - it should not move up the hierarchy<br>
+                <strong>Step 7:</strong> Check console logs for "Reordering within same parent container" messages
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h3>What to Look For</h3>
+            <div class="status success">
+                <strong>✓ Good:</strong><br>
+                • Tags reorder within their current level<br>
+                • Console shows "Reordering within same parent container"<br>
+                • Tags don't disappear when dragged<br>
+                • Drag handles remain visible after reordering
+            </div>
+            <div class="status error">
+                <strong>✗ Bad:</strong><br>
+                • Tags move up to higher levels in hierarchy<br>
+                • Console shows "Cannot reorder across different parent containers"<br>
+                • Tags disappear when dragged<br>
+                • Drag handles disappear after reordering
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function addStatus(message, type = 'info') {
+            const results = document.getElementById('testResults');
+            const status = document.createElement('div');
+            status.className = `status ${type}`;
+            status.textContent = message;
+            results.appendChild(status);
+        }
+
+        function clearResults() {
+            document.getElementById('testResults').innerHTML = '';
+        }
+
+        async function testApplicationConnection() {
+            clearResults();
+            addStatus('Testing application connection...', 'info');
+            
+            try {
+                const response = await fetch('http://127.0.0.1:9090');
+                if (response.ok) {
+                    addStatus('✓ Application is running and accessible', 'success');
+                } else {
+                    addStatus('✗ Application responded with error: ' + response.status, 'error');
+                }
+            } catch (error) {
+                addStatus('✗ Cannot connect to application: ' + error.message, 'error');
+            }
+        }
+
+        function testHierarchicalStructure() {
+            clearResults();
+            addStatus('Testing hierarchical structure...', 'info');
+            
+            // Open the main application in a new window
+            const testWindow = window.open('http://127.0.0.1:9090', '_blank');
+            
+            if (testWindow) {
+                addStatus('✓ Opened application in new window', 'success');
+                addStatus('Please test the hierarchical drag and drop functionality manually', 'info');
+                addStatus('Look for console messages about parent containers', 'info');
+            } else {
+                addStatus('✗ Failed to open application window', 'error');
+            }
+        }
+
+        function checkConsoleLogs() {
+            clearResults();
+            addStatus('Console log check instructions:', 'info');
+            addStatus('1. Open the main application', 'info');
+            addStatus('2. Open browser developer tools (F12)', 'info');
+            addStatus('3. Go to Console tab', 'info');
+            addStatus('4. Look for these messages when dragging:', 'info');
+            addStatus('   • "Dragged element parent: [element]"', 'info');
+            addStatus('   • "Target element parent: [element]"', 'info');
+            addStatus('   • "Reordering within same parent container"', 'info');
+            addStatus('   • "Cannot reorder across different parent containers"', 'info');
+            addStatus('5. Verify that tags stay within their hierarchical level', 'info');
+        }
+
+        // Auto-test on page load
+        window.addEventListener('load', () => {
+            setTimeout(testApplicationConnection, 1000);
+        });
+    </script>
+</body>
+</html> 

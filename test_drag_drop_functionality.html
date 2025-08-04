@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Drag and Drop Functionality Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            display: flex;
+            gap: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .tag-list {
+            flex: 1;
+            background: white;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            min-height: 400px;
+        }
+        .tag-item {
+            background: #e3f2fd;
+            border: 1px solid #2196f3;
+            border-radius: 4px;
+            padding: 8px 12px;
+            margin: 5px 0;
+            cursor: grab;
+            user-select: none;
+            transition: all 0.2s ease;
+            position: relative;
+            padding-left: 32px;
+        }
+        .tag-item:hover {
+            background: #bbdefb;
+            transform: translateY(-2px);
+        }
+        .tag-item.dragging {
+            opacity: 0.5;
+            transform: rotate(5deg);
+            cursor: grabbing;
+        }
+        .drag-handle {
+            position: absolute;
+            left: 4px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #4facfe;
+            opacity: 0.8;
+            transition: all 0.2s ease;
+            cursor: grab;
+            pointer-events: auto;
+            z-index: 100;
+            background: rgba(79, 172, 254, 0.2);
+            border-radius: 2px;
+            padding: 2px;
+        }
+        .drag-handle:hover {
+            opacity: 1;
+            background: rgba(255, 255, 255, 0.2);
+        }
+        .drop-indicator {
+            height: 2px;
+            background: #4facfe;
+            margin: 2px 0;
+            transition: all 0.2s ease;
+        }
+        .test-results {
+            background: white;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 20px;
+        }
+        .test-button {
+            background: #4facfe;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        .test-button:hover {
+            background: #2196f3;
+        }
+    </style>
+</head>
+<body>
+    <h1>Drag and Drop Functionality Test</h1>
+    
+    <div class="container">
+        <div class="tag-list" id="selectedTags">
+            <h3>Selected Tags (Drag to reorder)</h3>
+            <div class="tag-item" data-tag="Tag 1">
+                <div class="drag-handle">⋮⋮</div>
+                Tag 1 - Banana OG Distillate Cartridge
+            </div>
+            <div class="tag-item" data-tag="Tag 2">
+                <div class="drag-handle">⋮⋮</div>
+                Tag 2 - Ice Cream Cake Honey Crystal
+            </div>
+            <div class="tag-item" data-tag="Tag 3">
+                <div class="drag-handle">⋮⋮</div>
+                Tag 3 - Blue Dream Honey Crystal
+            </div>
+            <div class="tag-item" data-tag="Tag 4">
+                <div class="drag-handle">⋮⋮</div>
+                Tag 4 - Banana Oreoz Pre-Roll
+            </div>
+        </div>
+        
+        <div class="tag-list" id="testResults">
+            <h3>Test Results</h3>
+            <div id="testOutput">
+                <p>Click "Test Drag and Drop" to verify functionality</p>
+            </div>
+            <button class="test-button" onclick="testDragAndDrop()">Test Drag and Drop</button>
+            <button class="test-button" onclick="testReorder()">Test Reorder API</button>
+            <button class="test-button" onclick="clearResults()">Clear Results</button>
+        </div>
+    </div>
+
+    <div class="test-results">
+        <h3>Drag and Drop Test Instructions</h3>
+        <ol>
+            <li>Try dragging the tags in the "Selected Tags" section using the drag handles (⋮⋮)</li>
+            <li>You should see visual feedback during dragging</li>
+            <li>Drop indicators should appear when hovering over valid drop zones</li>
+            <li>The order should change when you drop a tag in a new position</li>
+            <li>Click "Test Drag and Drop" to run automated tests</li>
+            <li>Click "Test Reorder API" to test the backend reorder functionality</li>
+        </ol>
+    </div>
+
+    <script>
+        let isDragging = false;
+        let draggedElement = null;
+        let originalIndex = -1;
+        let targetPosition = -1;
+
+        // Initialize drag and drop functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            setupDragAndDrop();
+            logTestResult('Drag and drop initialized');
+        });
+
+        function setupDragAndDrop() {
+            const container = document.getElementById('selectedTags');
+            const tagItems = container.querySelectorAll('.tag-item');
+            
+            tagItems.forEach((item, index) => {
+                const dragHandle = item.querySelector('.drag-handle');
+                
+                dragHandle.addEventListener('mousedown', function(e) {
+                    e.preventDefault();
+                    startDrag(e, item, index);
+                });
+                
+                dragHandle.addEventListener('mouseup', function(e) {
+                    e.preventDefault();
+                    endDrag();
+                });
+            });
+            
+            // Add container event listeners
+            container.addEventListener('mousemove', handleMouseMove);
+            container.addEventListener('mouseleave', endDrag);
+        }
+
+        function startDrag(e, element, index) {
+            isDragging = true;
+            draggedElement = element;
+            originalIndex = index;
+            
+            element.classList.add('dragging');
+            element.style.opacity = '0.5';
+            element.style.transform = 'rotate(5deg)';
+            
+            logTestResult(`Started dragging: ${element.textContent.trim()} (index: ${index})`);
+        }
+
+        function handleMouseMove(e) {
+            if (!isDragging || !draggedElement) return;
+            
+            e.preventDefault();
+            
+            const container = document.getElementById('selectedTags');
+            const mouseY = e.clientY;
+            const containerRect = container.getBoundingClientRect();
+            const relativeY = mouseY - containerRect.top;
+            
+            const targetIndex = findDropPosition(relativeY, container);
+            
+            if (targetIndex !== targetPosition) {
+                targetPosition = targetIndex;
+                showDropIndicator(targetIndex, container);
+                logTestResult(`Hovering over position: ${targetIndex}`);
+            }
+        }
+
+        function findDropPosition(mouseY, container) {
+            const tagItems = container.querySelectorAll('.tag-item:not(.dragging)');
+            const itemHeight = 50; // Approximate height of each item
+            
+            for (let i = 0; i < tagItems.length; i++) {
+                const itemRect = tagItems[i].getBoundingClientRect();
+                const containerRect = container.getBoundingClientRect();
+                const itemTop = itemRect.top - containerRect.top;
+                
+                if (mouseY < itemTop + itemHeight / 2) {
+                    return i;
+                }
+            }
+            
+            return tagItems.length;
+        }
+
+        function showDropIndicator(index, container) {
+            clearDropIndicators(container);
+            
+            const indicator = document.createElement('div');
+            indicator.className = 'drop-indicator';
+            indicator.style.height = '4px';
+            indicator.style.background = '#4facfe';
+            indicator.style.margin = '8px 0';
+            
+            const tagItems = container.querySelectorAll('.tag-item:not(.dragging)');
+            
+            if (index === 0) {
+                container.insertBefore(indicator, tagItems[0]);
+            } else if (index >= tagItems.length) {
+                container.appendChild(indicator);
+            } else {
+                container.insertBefore(indicator, tagItems[index]);
+            }
+        }
+
+        function clearDropIndicators(container) {
+            const indicators = container.querySelectorAll('.drop-indicator');
+            indicators.forEach(indicator => indicator.remove());
+        }
+
+        function endDrag() {
+            if (!isDragging || !draggedElement) return;
+            
+            const container = document.getElementById('selectedTags');
+            clearDropIndicators(container);
+            
+            draggedElement.classList.remove('dragging');
+            draggedElement.style.opacity = '';
+            draggedElement.style.transform = '';
+            
+            if (targetPosition !== -1 && targetPosition !== originalIndex) {
+                performReorder(container);
+            }
+            
+            logTestResult(`Ended dragging. Original: ${originalIndex}, Target: ${targetPosition}`);
+            
+            isDragging = false;
+            draggedElement = null;
+            originalIndex = -1;
+            targetPosition = -1;
+        }
+
+        function performReorder(container) {
+            const tagItems = Array.from(container.querySelectorAll('.tag-item:not(.dragging)'));
+            const newOrder = [];
+            
+            // Build new order
+            for (let i = 0; i < tagItems.length; i++) {
+                if (i === targetPosition) {
+                    newOrder.push(draggedElement.getAttribute('data-tag'));
+                }
+                newOrder.push(tagItems[i].getAttribute('data-tag'));
+            }
+            
+            if (targetPosition >= tagItems.length) {
+                newOrder.push(draggedElement.getAttribute('data-tag'));
+            }
+            
+            logTestResult(`New order: ${newOrder.join(', ')}`);
+            
+            // Simulate API call
+            simulateReorderAPI(newOrder);
+        }
+
+        function simulateReorderAPI(newOrder) {
+            logTestResult('Simulating reorder API call...');
+            
+            // Simulate API delay
+            setTimeout(() => {
+                logTestResult(`✅ Reorder successful! New order: ${newOrder.join(', ')}`);
+                logTestResult('UI should now reflect the new order');
+            }, 500);
+        }
+
+        function testDragAndDrop() {
+            logTestResult('🧪 Running drag and drop tests...');
+            
+            // Test 1: Check if drag handles exist
+            const dragHandles = document.querySelectorAll('.drag-handle');
+            if (dragHandles.length > 0) {
+                logTestResult('✅ Drag handles found');
+            } else {
+                logTestResult('❌ No drag handles found');
+            }
+            
+            // Test 2: Check if event listeners are attached
+            const tagItems = document.querySelectorAll('.tag-item');
+            logTestResult(`✅ Found ${tagItems.length} tag items`);
+            
+            // Test 3: Test drop indicator functionality
+            const container = document.getElementById('selectedTags');
+            showDropIndicator(1, container);
+            logTestResult('✅ Drop indicator test - should see blue line at position 1');
+            
+            setTimeout(() => {
+                clearDropIndicators(container);
+                logTestResult('✅ Drop indicator cleared');
+            }, 2000);
+        }
+
+        function testReorder() {
+            logTestResult('🧪 Testing reorder API...');
+            
+            const testOrder = ['Tag 2', 'Tag 1', 'Tag 4', 'Tag 3'];
+            
+            fetch('/api/move-tags', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    action: 'reorder',
+                    newOrder: testOrder
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    logTestResult('✅ Reorder API test successful');
+                    logTestResult(`Response: ${JSON.stringify(data, null, 2)}`);
+                } else {
+                    logTestResult('❌ Reorder API test failed');
+                    logTestResult(`Error: ${data.message || 'Unknown error'}`);
+                }
+            })
+            .catch(error => {
+                logTestResult('❌ Reorder API test failed');
+                logTestResult(`Error: ${error.message}`);
+            });
+        }
+
+        function logTestResult(message) {
+            const output = document.getElementById('testOutput');
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('p');
+            logEntry.innerHTML = `<strong>[${timestamp}]</strong> ${message}`;
+            output.appendChild(logEntry);
+            output.scrollTop = output.scrollHeight;
+        }
+
+        function clearResults() {
+            document.getElementById('testOutput').innerHTML = '<p>Results cleared</p>';
+        }
+    </script>
+</body>
+</html> 

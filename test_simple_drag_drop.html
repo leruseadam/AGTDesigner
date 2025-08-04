@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Drag and Drop Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: #f5f5f5;
+        }
+        
+        .test-container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .tag-item {
+            background: #4facfe;
+            color: white;
+            padding: 10px 15px;
+            margin: 5px 0;
+            border-radius: 6px;
+            cursor: grab;
+            transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+            user-select: none;
+            position: relative;
+            border: 1px solid transparent;
+            padding-left: 32px !important;
+        }
+        
+        .tag-item:hover {
+            border-color: rgba(255, 255, 255, 0.3);
+            background: #3a8bfe;
+        }
+        
+        .tag-item.dragging {
+            cursor: grabbing;
+        }
+        
+        .drag-handle {
+            position: absolute;
+            left: 4px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: rgba(255, 255, 255, 0.8);
+            opacity: 0.6;
+            transition: all 0.2s ease;
+            cursor: grab;
+            pointer-events: auto;
+            z-index: 10;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            padding: 4px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+        }
+        
+        .drag-handle:hover {
+            opacity: 1 !important;
+            background: rgba(255, 255, 255, 0.2) !important;
+        }
+        
+        .log {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 10px;
+            margin: 10px 0;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        
+        .test-button {
+            background: #4facfe;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        
+        .test-button:hover {
+            background: #3a8bfe;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>Simple Drag and Drop Test</h1>
+        <p>This page tests the new simplified drag-and-drop functionality.</p>
+        
+        <div class="log" id="log">
+            <div>Log will appear here...</div>
+        </div>
+        
+        <button class="test-button" onclick="testDragAndDrop()">Test Drag and Drop</button>
+        <button class="test-button" onclick="clearLog()">Clear Log</button>
+        <button class="test-button" onclick="testMultipleClicks()">Test Multiple Clicks</button>
+        
+        <h3>Selected Tags (Drag to reorder):</h3>
+        <div id="selectedTags">
+            <div class="tag-item" data-tag="Cheesecake - 14g">
+                <div class="drag-handle">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
+                    </svg>
+                </div>
+                Cheesecake - 14g
+            </div>
+            <div class="tag-item" data-tag="Lemon Jealousy Wax - 1g">
+                <div class="drag-handle">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
+                    </svg>
+                </div>
+                Lemon Jealousy Wax - 1g
+            </div>
+            <div class="tag-item" data-tag="Memory Loss Wax - 1g">
+                <div class="drag-handle">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
+                    </svg>
+                </div>
+                Memory Loss Wax - 1g
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Simple logging function
+        function log(message) {
+            const logElement = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString();
+            logElement.innerHTML += `<div>[${timestamp}] ${message}</div>`;
+            logElement.scrollTop = logElement.scrollHeight;
+        }
+        
+        function clearLog() {
+            document.getElementById('log').innerHTML = '<div>Log cleared...</div>';
+        }
+        
+        // Test drag and drop functionality
+        function testDragAndDrop() {
+            log('Testing simple drag and drop...');
+            
+            // Check if drag handles exist
+            const dragHandles = document.querySelectorAll('.drag-handle');
+            log(`Found ${dragHandles.length} drag handles`);
+            
+            // Check if tag items exist
+            const tagItems = document.querySelectorAll('.tag-item');
+            log(`Found ${tagItems.length} tag items`);
+            
+            // Test clicking on first drag handle
+            if (dragHandles.length > 0) {
+                log('Testing click on first drag handle...');
+                dragHandles[0].click();
+            }
+        }
+        
+        // Test multiple rapid clicks
+        function testMultipleClicks() {
+            log('Testing multiple rapid clicks...');
+            
+            const dragHandle = document.querySelector('.drag-handle');
+            if (dragHandle) {
+                // Simulate 10 rapid clicks
+                for (let i = 0; i < 10; i++) {
+                    setTimeout(() => {
+                        dragHandle.click();
+                        log(`Click ${i + 1} on drag handle`);
+                    }, i * 5); // 5ms apart
+                }
+            }
+        }
+        
+        // Initialize page
+        document.addEventListener('DOMContentLoaded', function() {
+            log('Page loaded, simple drag and drop test ready');
+            
+            // Add click listeners to drag handles to test
+            document.querySelectorAll('.drag-handle').forEach(handle => {
+                handle.addEventListener('click', function(e) {
+                    log('Drag handle clicked: ' + e.target.closest('.tag-item').textContent.trim());
+                });
+            });
+        });
+    </script>
+</body>
+</html> 

@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Filter Persistence</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; }
+        .success { color: green; }
+        .error { color: red; }
+        .info { color: blue; }
+        .step { margin: 10px 0; padding: 10px; background: #f5f5f5; }
+    </style>
+</head>
+<body>
+    <h1>Test Filter Persistence with Selected Tags</h1>
+    
+    <div class="test-section">
+        <h2>Test Instructions</h2>
+        <ol>
+            <li>Open the main application at <a href="http://127.0.0.1:9090" target="_blank" rel="noopener">http://127.0.0.1:9090</a></li>
+            <li>Wait for the data to load</li>
+            <li>Follow the test steps below to verify filter persistence</li>
+        </ol>
+    </div>
+
+    <div class="test-section">
+        <h2>Test Steps</h2>
+        
+        <div class="step">
+            <h3>Step 1: Select Tags from Different Vendors</h3>
+            <p><strong>Action:</strong> Select 2-3 tags from one vendor (e.g., "A Greener Today")</p>
+            <p><strong>Expected:</strong> Tags should appear in the Selected Tags list</p>
+            <p><strong>Status:</strong> <span id="step1-status">Not tested</span></p>
+        </div>
+
+        <div class="step">
+            <h3>Step 2: Apply Vendor Filter</h3>
+            <p><strong>Action:</strong> Change the Vendor filter to a different vendor (e.g., "Mama J's")</p>
+            <p><strong>Expected:</strong> Available tags should filter to show only the selected vendor, but Selected Tags should remain unchanged</p>
+            <p><strong>Status:</strong> <span id="step2-status">Not tested</span></p>
+        </div>
+
+        <div class="step">
+            <h3>Step 3: Select More Tags from Different Vendor</h3>
+            <p><strong>Action:</strong> Select 2-3 more tags from the filtered vendor</p>
+            <p><strong>Expected:</strong> New tags should be added to Selected Tags list, keeping the previous selections</p>
+            <p><strong>Status:</strong> <span id="step3-status">Not tested</span></p>
+        </div>
+
+        <div class="step">
+            <h3>Step 4: Apply Different Filter</h3>
+            <p><strong>Action:</strong> Change to a different filter (e.g., Product Type filter)</p>
+            <p><strong>Expected:</strong> Available tags should filter again, but Selected Tags should still show all previously selected tags</p>
+            <p><strong>Status:</strong> <span id="step4-status">Not tested</span></p>
+        </div>
+
+        <div class="step">
+            <h3>Step 5: Clear All Filters</h3>
+            <p><strong>Action:</strong> Click "Clear All Filters" button</p>
+            <p><strong>Expected:</strong> All available tags should be shown, and Selected Tags should remain unchanged</p>
+            <p><strong>Status:</strong> <span id="step5-status">Not tested</span></p>
+        </div>
+
+        <div class="step">
+            <h3>Step 6: Verify Final State</h3>
+            <p><strong>Action:</strong> Check the Selected Tags list</p>
+            <p><strong>Expected:</strong> Should contain tags from multiple vendors/types that were selected during different filter states</p>
+            <p><strong>Status:</strong> <span id="step6-status">Not tested</span></p>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>Test Results</h2>
+        <div id="test-results">
+            <p class="info">Complete the test steps above and mark each step as passed or failed.</p>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>Manual Test Controls</h2>
+        <button onclick="markStep(1, 'passed')" class="success">Mark Step 1 Passed</button>
+        <button onclick="markStep(1, 'failed')" class="error">Mark Step 1 Failed</button><br><br>
+        
+        <button onclick="markStep(2, 'passed')" class="success">Mark Step 2 Passed</button>
+        <button onclick="markStep(2, 'failed')" class="error">Mark Step 2 Failed</button><br><br>
+        
+        <button onclick="markStep(3, 'passed')" class="success">Mark Step 3 Passed</button>
+        <button onclick="markStep(3, 'failed')" class="error">Mark Step 3 Failed</button><br><br>
+        
+        <button onclick="markStep(4, 'passed')" class="success">Mark Step 4 Passed</button>
+        <button onclick="markStep(4, 'failed')" class="error">Mark Step 4 Failed</button><br><br>
+        
+        <button onclick="markStep(5, 'passed')" class="success">Mark Step 5 Passed</button>
+        <button onclick="markStep(5, 'failed')" class="error">Mark Step 5 Failed</button><br><br>
+        
+        <button onclick="markStep(6, 'passed')" class="success">Mark Step 6 Passed</button>
+        <button onclick="markStep(6, 'failed')" class="error">Mark Step 6 Failed</button><br><br>
+        
+        <button onclick="generateReport()" style="background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 5px;">Generate Test Report</button>
+    </div>
+
+    <script>
+        const testResults = {
+            1: null,
+            2: null,
+            3: null,
+            4: null,
+            5: null,
+            6: null
+        };
+
+        function markStep(step, result) {
+            testResults[step] = result;
+            const statusElement = document.getElementById(`step${step}-status`);
+            if (statusElement) {
+                statusElement.textContent = result === 'passed' ? 'PASSED' : 'FAILED';
+                statusElement.className = result === 'passed' ? 'success' : 'error';
+            }
+        }
+
+        function generateReport() {
+            const resultsDiv = document.getElementById('test-results');
+            let report = '<h3>Test Report</h3>';
+            
+            const passed = Object.values(testResults).filter(r => r === 'passed').length;
+            const failed = Object.values(testResults).filter(r => r === 'failed').length;
+            const total = Object.keys(testResults).length;
+            
+            report += `<p><strong>Overall Result:</strong> ${passed}/${total} tests passed</p>`;
+            
+            if (passed === total) {
+                report += '<p class="success">✅ All tests passed! Filter persistence is working correctly.</p>';
+            } else {
+                report += '<p class="error">❌ Some tests failed. Filter persistence needs attention.</p>';
+            }
+            
+            report += '<h4>Detailed Results:</h4><ul>';
+            for (let i = 1; i <= 6; i++) {
+                const result = testResults[i];
+                const status = result ? (result === 'passed' ? '✅ PASSED' : '❌ FAILED') : '⏳ Not tested';
+                report += `<li>Step ${i}: ${status}</li>`;
+            }
+            report += '</ul>';
+            
+            resultsDiv.innerHTML = report;
+        }
+    </script>
+</body>
+</html> 

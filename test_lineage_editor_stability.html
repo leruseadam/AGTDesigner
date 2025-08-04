@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lineage Editor Stability Test</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { padding: 20px; background: #f8f9fa; }
+        .test-section { 
+            margin: 20px 0; 
+            padding: 20px; 
+            border: 1px solid #dee2e6; 
+            border-radius: 8px; 
+            background: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .test-button {
+            margin: 5px;
+            min-width: 120px;
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .status-success { background: #28a745; }
+        .status-error { background: #dc3545; }
+        .status-warning { background: #ffc107; }
+        .status-info { background: #17a2b8; }
+        .log-output {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 15px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="mb-4">🧪 Lineage Editor Stability Test</h1>
+        
+        <div class="test-section">
+            <h3>🔧 System Status</h3>
+            <div id="systemStatus">
+                <p><span class="status-indicator status-info"></span>Checking system status...</p>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h3>🎯 Core Tests</h3>
+            <div class="row">
+                <div class="col-md-6">
+                    <button class="btn btn-primary test-button" onclick="testInitialization()">
+                        Test Initialization
+                    </button>
+                    <button class="btn btn-success test-button" onclick="testModalCreation()">
+                        Test Modal Creation
+                    </button>
+                    <button class="btn btn-info test-button" onclick="testAPI()">
+                        Test API Connection
+                    </button>
+                </div>
+                <div class="col-md-6">
+                    <button class="btn btn-warning test-button" onclick="testStrainEditor()">
+                        Test Strain Editor
+                    </button>
+                    <button class="btn btn-secondary test-button" onclick="testErrorHandling()">
+                        Test Error Handling
+                    </button>
+                    <button class="btn btn-dark test-button" onclick="testScrolling()">
+                        Test Scrolling
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h3>🚀 Stress Tests</h3>
+            <div class="row">
+                <div class="col-md-6">
+                    <button class="btn btn-danger test-button" onclick="testRapidOpening()">
+                        Rapid Opening Test
+                    </button>
+                    <button class="btn btn-outline-danger test-button" onclick="testConcurrentModals()">
+                        Concurrent Modals
+                    </button>
+                </div>
+                <div class="col-md-6">
+                    <button class="btn btn-outline-warning test-button" onclick="testNetworkErrors()">
+                        Network Error Test
+                    </button>
+                    <button class="btn btn-outline-info test-button" onclick="testMemoryLeaks()">
+                        Memory Leak Test
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h3>📊 Test Results</h3>
+            <div id="testResults">
+                <p>No tests run yet. Click a test button above to start testing.</p>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h3>📝 Debug Log</h3>
+            <div id="debugLog" class="log-output">Initializing test environment...</div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/js/lineage-editor.js"></script>
+    <script>
+        let testResults = [];
+        let debugLog = [];
+
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = `[${timestamp}] ${type.toUpperCase()}: ${message}`;
+            debugLog.push(logEntry);
+            
+            const logElement = document.getElementById('debugLog');
+            logElement.textContent = debugLog.join('\n');
+            logElement.scrollTop = logElement.scrollHeight;
+            
+            console.log(logEntry);
+        }
+
+        function addTestResult(testName, success, message) {
+            const result = {
+                name: testName,
+                success: success,
+                message: message,
+                timestamp: new Date().toLocaleTimeString()
+            };
+            testResults.push(result);
+            updateTestResults();
+        }
+
+        function updateTestResults() {
+            const resultsElement = document.getElementById('testResults');
+            const successCount = testResults.filter(r => r.success).length;
+            const totalCount = testResults.length;
+            
+            let html = `<h4>Results: ${successCount}/${totalCount} tests passed</h4>`;
+            
+            testResults.forEach(result => {
+                const statusClass = result.success ? 'status-success' : 'status-error';
+                const statusText = result.success ? 'PASS' : 'FAIL';
+                html += `<p><span class="status-indicator ${statusClass}"></span><strong>${result.name}</strong> - ${statusText}: ${result.message}</p>`;
+            });
+            
+            resultsElement.innerHTML = html;
+        }
+
+        async function testInitialization() {
+            log('Testing lineage editor initialization...');
+            
+            try {
+                // Check if global instance exists
+                if (!window.strainLineageEditor) {
+                    throw new Error('Global strainLineageEditor instance not found');
+                }
+                
+                // Check if modal element exists
+                const modalElement = document.getElementById('strainLineageEditorModal');
+                if (!modalElement) {
+                    throw new Error('Modal element not found');
+                }
+                
+                log('Initialization test passed', 'success');
+                addTestResult('Initialization', true, 'Lineage editor initialized successfully');
+                
+            } catch (error) {
+                log(`Initialization test failed: ${error.message}`, 'error');
+                addTestResult('Initialization', false, error.message);
+            }
+        }
+
+        async function testModalCreation() {
+            log('Testing modal creation...');
+            
+            try {
+                // Force modal creation if it doesn't exist
+                if (!document.getElementById('strainLineageEditorModal')) {
+                    window.strainLineageEditor.createModalElement();
+                }
+                
+                const modalElement = document.getElementById('strainLineageEditorModal');
+                if (!modalElement) {
+                    throw new Error('Modal element still not found after creation');
+                }
+                
+                log('Modal creation test passed', 'success');
+                addTestResult('Modal Creation', true, 'Modal element created successfully');
+                
+            } catch (error) {
+                log(`Modal creation test failed: ${error.message}`, 'error');
+                addTestResult('Modal Creation', false, error.message);
+            }
+        }
+
+        async function testAPI() {
+            log('Testing API connection...');
+            
+            try {
+                const response = await fetch('/api/get-strain-product-count', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ strain_name: 'Test Strain' })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`API returned ${response.status}`);
+                }
+                
+                const data = await response.json();
+                log(`API test passed - received response: ${JSON.stringify(data)}`, 'success');
+                addTestResult('API Connection', true, 'API endpoint responding correctly');
+                
+            } catch (error) {
+                log(`API test failed: ${error.message}`, 'error');
+                addTestResult('API Connection', false, error.message);
+            }
+        }
+
+        async function testStrainEditor() {
+            log('Testing strain editor opening...');
+            
+            try {
+                await window.strainLineageEditor.openEditor('Test Strain', 'HYBRID');
+                
+                // Wait a bit for modal to show
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                const modalElement = document.getElementById('strainLineageEditorModal');
+                const isVisible = modalElement && (
+                    modalElement.classList.contains('show') || 
+                    modalElement.style.display === 'block'
+                );
+                
+                if (!isVisible) {
+                    throw new Error('Modal not visible after opening');
+                }
+                
+                log('Strain editor test passed', 'success');
+                addTestResult('Strain Editor', true, 'Editor opened and displayed correctly');
+                
+                // Close the modal
+                window.strainLineageEditor.closeModal();
+                
+            } catch (error) {
+                log(`Strain editor test failed: ${error.message}`, 'error');
+                addTestResult('Strain Editor', false, error.message);
+            }
+        }
+
+        async function testErrorHandling() {
+            log('Testing error handling...');
+            
+            try {
+                // Test with invalid strain name
+                await window.strainLineageEditor.openEditor('', '');
+                
+                // Wait for error handling
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                const contentElement = document.getElementById('lineageEditorContent');
+                if (contentElement && contentElement.innerHTML.includes('Error')) {
+                    log('Error handling test passed', 'success');
+                    addTestResult('Error Handling', true, 'Errors handled gracefully');
+                } else {
+                    throw new Error('Error handling not working as expected');
+                }
+                
+            } catch (error) {
+                log(`Error handling test failed: ${error.message}`, 'error');
+                addTestResult('Error Handling', false, error.message);
+            }
+        }
+
+        async function testScrolling() {
+            log('Testing scrolling behavior...');
+            
+            try {
+                await window.strainLineageEditor.openEditor('Test Strain', 'HYBRID');
+                
+                // Wait for modal to show
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                const modalBody = document.querySelector('#strainLineageEditorModal .modal-body');
+                if (modalBody) {
+                    // Simulate scrolling
+                    modalBody.scrollTop = 100;
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    
+                    // Check if modal is still visible
+                    const modalElement = document.getElementById('strainLineageEditorModal');
+                    const isVisible = modalElement && (
+                        modalElement.classList.contains('show') || 
+                        modalElement.style.display === 'block'
+                    );
+                    
+                    if (!isVisible) {
+                        throw new Error('Modal closed during scrolling');
+                    }
+                    
+                    log('Scrolling test passed', 'success');
+                    addTestResult('Scrolling', true, 'Modal remained stable during scrolling');
+                } else {
+                    throw new Error('Modal body not found');
+                }
+                
+                // Close the modal
+                window.strainLineageEditor.closeModal();
+                
+            } catch (error) {
+                log(`Scrolling test failed: ${error.message}`, 'error');
+                addTestResult('Scrolling', false, error.message);
+            }
+        }
+
+        async function testRapidOpening() {
+            log('Testing rapid opening...');
+            
+            try {
+                const promises = [];
+                for (let i = 0; i < 5; i++) {
+                    promises.push(window.strainLineageEditor.openEditor(`Test Strain ${i}`, 'HYBRID'));
+                }
+                
+                await Promise.all(promises);
+                
+                // Wait for any processing
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+                // Check if only one modal is visible
+                const visibleModals = document.querySelectorAll('#strainLineageEditorModal[style*="block"], #strainLineageEditorModal.show');
+                
+                if (visibleModals.length <= 1) {
+                    log('Rapid opening test passed', 'success');
+                    addTestResult('Rapid Opening', true, 'Handled multiple rapid requests correctly');
+                } else {
+                    throw new Error(`Multiple modals visible: ${visibleModals.length}`);
+                }
+                
+                // Close any open modals
+                window.strainLineageEditor.closeModal();
+                
+            } catch (error) {
+                log(`Rapid opening test failed: ${error.message}`, 'error');
+                addTestResult('Rapid Opening', false, error.message);
+            }
+        }
+
+        async function testConcurrentModals() {
+            log('Testing concurrent modal handling...');
+            
+            try {
+                // Try to open multiple modals simultaneously
+                const promises = [];
+                for (let i = 0; i < 3; i++) {
+                    promises.push(new Promise(async (resolve) => {
+                        try {
+                            await window.strainLineageEditor.openEditor(`Concurrent Strain ${i}`, 'HYBRID');
+                            resolve(true);
+                        } catch (error) {
+                            resolve(false);
+                        }
+                    }));
+                }
+                
+                const results = await Promise.all(promises);
+                const successCount = results.filter(r => r).length;
+                
+                if (successCount >= 1) {
+                    log('Concurrent modals test passed', 'success');
+                    addTestResult('Concurrent Modals', true, `${successCount}/3 requests handled successfully`);
+                } else {
+                    throw new Error('No concurrent requests handled successfully');
+                }
+                
+                // Close any open modals
+                window.strainLineageEditor.closeModal();
+                
+            } catch (error) {
+                log(`Concurrent modals test failed: ${error.message}`, 'error');
+                addTestResult('Concurrent Modals', false, error.message);
+            }
+        }
+
+        async function testNetworkErrors() {
+            log('Testing network error handling...');
+            
+            try {
+                // Temporarily override fetch to simulate network error
+                const originalFetch = window.fetch;
+                window.fetch = () => Promise.reject(new Error('Network error'));
+                
+                await window.strainLineageEditor.openEditor('Network Test Strain', 'HYBRID');
+                
+                // Wait for error handling
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                const contentElement = document.getElementById('lineageEditorContent');
+                if (contentElement && contentElement.innerHTML.includes('Error')) {
+                    log('Network error test passed', 'success');
+                    addTestResult('Network Errors', true, 'Network errors handled gracefully');
+                } else {
+                    throw new Error('Network error handling not working');
+                }
+                
+                // Restore original fetch
+                window.fetch = originalFetch;
+                
+            } catch (error) {
+                log(`Network error test failed: ${error.message}`, 'error');
+                addTestResult('Network Errors', false, error.message);
+            }
+        }
+
+        async function testMemoryLeaks() {
+            log('Testing for memory leaks...');
+            
+            try {
+                const initialModals = document.querySelectorAll('#strainLineageEditorModal').length;
+                
+                // Open and close modal multiple times
+                for (let i = 0; i < 10; i++) {
+                    await window.strainLineageEditor.openEditor(`Memory Test ${i}`, 'HYBRID');
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    window.strainLineageEditor.closeModal();
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                }
+                
+                const finalModals = document.querySelectorAll('#strainLineageEditorModal').length;
+                
+                if (finalModals <= initialModals + 1) {
+                    log('Memory leak test passed', 'success');
+                    addTestResult('Memory Leaks', true, 'No significant memory leaks detected');
+                } else {
+                    throw new Error(`Potential memory leak: ${finalModals} modals found`);
+                }
+                
+            } catch (error) {
+                log(`Memory leak test failed: ${error.message}`, 'error');
+                addTestResult('Memory Leaks', false, error.message);
+            }
+        }
+
+        // Initialize system status
+        async function checkSystemStatus() {
+            const statusElement = document.getElementById('systemStatus');
+            
+            try {
+                const response = await fetch('/api/health');
+                const data = await response.json();
+                
+                statusElement.innerHTML = `
+                    <p><span class="status-indicator status-success"></span>Application running on port 9090</p>
+                    <p><span class="status-indicator status-success"></span>Data loaded: ${data.application.data_loaded ? 'Yes' : 'No'}</p>
+                    <p><span class="status-indicator status-success"></span>Records: ${data.application.data_shape ? data.application.data_shape[0] : 'Unknown'}</p>
+                    <p><span class="status-indicator status-success"></span>Lineage editor ready for testing</p>
+                `;
+                
+                log('System status check completed', 'success');
+                
+            } catch (error) {
+                statusElement.innerHTML = `
+                    <p><span class="status-indicator status-error"></span>Application not responding</p>
+                    <p><span class="status-indicator status-error"></span>Error: ${error.message}</p>
+                `;
+                log(`System status check failed: ${error.message}`, 'error');
+            }
+        }
+
+        // Run system check on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            log('Test page loaded, checking system status...');
+            checkSystemStatus();
+        });
+    </script>
+</body>
+</html> 

@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JSON Match Debug Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .debug-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; border-radius: 5px; }
+        .success { background-color: #d4edda; border-color: #c3e6cb; }
+        .error { background-color: #f8d7da; border-color: #f5c6cb; }
+        .info { background-color: #d1ecf1; border-color: #bee5eb; }
+        pre { background-color: #f8f9fa; padding: 10px; border-radius: 3px; overflow-x: auto; }
+        button { padding: 10px 20px; margin: 5px; background-color: #007bff; color: white; border: none; border-radius: 3px; cursor: pointer; }
+        button:hover { background-color: #0056b3; }
+        button:disabled { background-color: #6c757d; cursor: not-allowed; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>JSON Match Debug Test</h1>
+        
+        <div class="debug-section info">
+            <h3>Test Configuration</h3>
+            <p>This test will attempt to match JSON data and verify that selected tags are properly populated.</p>
+            <button id="testJsonMatch">Test JSON Match</button>
+            <button id="clearResults">Clear Results</button>
+        </div>
+        
+        <div id="results" class="debug-section" style="display: none;">
+            <h3>Test Results</h3>
+            <div id="testOutput"></div>
+        </div>
+        
+        <div id="loading" class="debug-section" style="display: none;">
+            <h3>Loading...</h3>
+            <p>Please wait while the test is running...</p>
+        </div>
+    </div>
+
+    <script>
+        const testOutput = document.getElementById('testOutput');
+        const results = document.getElementById('results');
+        const loading = document.getElementById('loading');
+        
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.className = `debug-section ${type}`;
+            logEntry.innerHTML = `<strong>[${timestamp}]</strong> ${message}`;
+            testOutput.appendChild(logEntry);
+        }
+        
+        function clearResults() {
+            testOutput.innerHTML = '';
+            results.style.display = 'none';
+        }
+        
+        async function testJsonMatch() {
+            clearResults();
+            loading.style.display = 'block';
+            results.style.display = 'block';
+            
+            try {
+                log('Starting JSON match test...', 'info');
+                
+                // Test URL - using the local test JSON file served by our HTTP server
+                const testUrl = 'http://127.0.0.1:8000/test_products.json';
+                
+                log(`Using test URL: ${testUrl}`, 'info');
+                
+                // Make the JSON match request
+                const response = await fetch('/api/json-match', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        url: testUrl
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                log('JSON match response received:', 'success');
+                log(`Response keys: ${Object.keys(data).join(', ')}`, 'info');
+                
+                // Log the response structure
+                log('Full response:', 'info');
+                log(`<pre>${JSON.stringify(data, null, 2)}</pre>`, 'info');
+                
+                // Check if selected_tags is present
+                if (data.selected_tags) {
+                    log(`✅ Selected tags found: ${data.selected_tags.length} items`, 'success');
+                    
+                    if (data.selected_tags.length > 0) {
+                        log('Sample selected tags:', 'info');
+                        data.selected_tags.slice(0, 3).forEach((tag, index) => {
+                            if (typeof tag === 'object' && tag['Product Name*']) {
+                                log(`  ${index + 1}. ${tag['Product Name*']}`, 'info');
+                            } else {
+                                log(`  ${index + 1}. ${tag}`, 'info');
+                            }
+                        });
+                    } else {
+                        log('⚠️ Selected tags array is empty', 'error');
+                    }
+                } else {
+                    log('❌ Selected tags not found in response', 'error');
+                }
+                
+                // Check other important fields
+                if (data.matched_count !== undefined) {
+                    log(`✅ Matched count: ${data.matched_count}`, 'success');
+                }
+                
+                if (data.available_tags) {
+                    log(`✅ Available tags: ${data.available_tags.length} items`, 'success');
+                }
+                
+                if (data.success) {
+                    log('✅ JSON match was successful', 'success');
+                } else {
+                    log('❌ JSON match failed', 'error');
+                }
+                
+            } catch (error) {
+                log(`❌ Error during JSON match test: ${error.message}`, 'error');
+                console.error('Full error:', error);
+            } finally {
+                loading.style.display = 'none';
+            }
+        }
+        
+        // Event listeners
+        document.getElementById('testJsonMatch').addEventListener('click', testJsonMatch);
+        document.getElementById('clearResults').addEventListener('click', clearResults);
+        
+        // Auto-run test when page loads
+        window.addEventListener('load', () => {
+            log('Page loaded, ready for testing', 'info');
+        });
+    </script>
+</body>
+</html> 

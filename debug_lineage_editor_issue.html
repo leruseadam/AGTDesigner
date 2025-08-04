@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lineage Editor Issue Diagnostic</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .diagnostic-panel {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .log-area {
+            background: #000;
+            color: #00ff00;
+            font-family: monospace;
+            font-size: 12px;
+            padding: 15px;
+            border-radius: 4px;
+            max-height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        .status-ok { color: #28a745; }
+        .status-error { color: #dc3545; }
+        .status-warning { color: #ffc107; }
+    </style>
+</head>
+<body>
+    <div class="container mt-4">
+        <h1>Lineage Editor Issue Diagnostic</h1>
+        
+        <div class="diagnostic-panel">
+            <h3>Quick Test</h3>
+            <button class="btn btn-primary" onclick="testLineageEditor()">Test Lineage Editor</button>
+            <button class="btn btn-success" onclick="openMainApp()">Open Main App</button>
+            <button class="btn btn-warning" onclick="clearLogs()">Clear Logs</button>
+        </div>
+        
+        <div class="diagnostic-panel">
+            <h3>Live Diagnostics</h3>
+            <div id="logArea" class="log-area">Diagnostic started...\n</div>
+        </div>
+        
+        <div class="diagnostic-panel">
+            <h3>Instructions</h3>
+            <ol>
+                <li>Click "Test Lineage Editor" to run basic diagnostics</li>
+                <li>Click "Open Main App" to go to the main application</li>
+                <li>Try to open the lineage editor in the main app</li>
+                <li>Watch the logs here for any error messages</li>
+                <li>Copy any error messages and share them</li>
+            </ol>
+        </div>
+    </div>
+
+    <!-- Include the lineage editor modal -->
+    <div id="strainLineageEditorModal" class="modal fade" tabindex="-1" aria-labelledby="strainLineageEditorModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="strainLineageEditorModalLabel">Edit Strain Lineage</h5>
+                    <button type="button" class="btn-close" id="lineageEditorCloseBtn" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="lineageEditorContent">
+                        <div class="text-center">
+                            <div class="spinner-border" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <p class="mt-2">Loading lineage editor...</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" id="lineageEditorCancelBtn">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="saveStrainLineageBtn">Save Changes</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="static/js/lineage-editor.js"></script>
+    <script>
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logArea = document.getElementById('logArea');
+            const color = type === 'error' ? '#ff6b6b' : type === 'warning' ? '#ffd93d' : type === 'success' ? '#6bcf7f' : '#4dabf7';
+            logArea.innerHTML += `<span style="color: ${color}">[${timestamp}] ${message}</span>\n`;
+            logArea.scrollTop = logArea.scrollHeight;
+            console.log(`[${type.toUpperCase()}] ${message}`);
+        }
+        
+        function clearLogs() {
+            document.getElementById('logArea').innerHTML = 'Logs cleared...\n';
+        }
+        
+        function testLineageEditor() {
+            log('=== STARTING LINEAGE EDITOR DIAGNOSTIC ===', 'info');
+            
+            // Test 1: Check Bootstrap
+            log('Testing Bootstrap availability...', 'info');
+            if (typeof bootstrap !== 'undefined') {
+                log('✅ Bootstrap is available', 'success');
+            } else {
+                log('❌ Bootstrap is not available', 'error');
+                return;
+            }
+            
+            // Test 2: Check modal element
+            log('Testing modal element...', 'info');
+            const modal = document.getElementById('strainLineageEditorModal');
+            if (modal) {
+                log('✅ Modal element found', 'success');
+            } else {
+                log('❌ Modal element not found', 'error');
+                return;
+            }
+            
+            // Test 3: Check lineage editor
+            log('Testing lineage editor...', 'info');
+            if (window.strainLineageEditor) {
+                log('✅ StrainLineageEditor instance found', 'success');
+                log(`Modal state: ${window.strainLineageEditor.modalState || 'unknown'}`, 'info');
+                log(`Is loading: ${window.strainLineageEditor.isLoading || false}`, 'info');
+            } else {
+                log('❌ StrainLineageEditor instance not found', 'error');
+                log('Attempting to initialize...', 'warning');
+                
+                if (typeof StrainLineageEditor !== 'undefined') {
+                    try {
+                        window.strainLineageEditor = StrainLineageEditor.init();
+                        log('✅ StrainLineageEditor initialized', 'success');
+                    } catch (error) {
+                        log(`❌ Failed to initialize: ${error.message}`, 'error');
+                        return;
+                    }
+                } else {
+                    log('❌ StrainLineageEditor class not defined', 'error');
+                    return;
+                }
+            }
+            
+            // Test 4: Try to open editor
+            log('Attempting to open lineage editor...', 'info');
+            try {
+                window.strainLineageEditor.openEditor('Test Strain', 'HYBRID');
+                log('✅ openEditor called successfully', 'success');
+                
+                // Monitor for 5 seconds
+                let checkCount = 0;
+                const monitorInterval = setInterval(() => {
+                    checkCount++;
+                    const isVisible = modal.classList.contains('show');
+                    log(`Modal visibility check ${checkCount}: ${isVisible ? 'VISIBLE' : 'HIDDEN'}`, isVisible ? 'success' : 'warning');
+                    
+                    if (checkCount >= 5) {
+                        clearInterval(monitorInterval);
+                        log('=== DIAGNOSTIC COMPLETE ===', 'info');
+                        if (!isVisible) {
+                            log('❌ Modal closed unexpectedly - this is the issue!', 'error');
+                        } else {
+                            log('✅ Modal stayed open - working correctly', 'success');
+                        }
+                    }
+                }, 1000);
+                
+            } catch (error) {
+                log(`❌ Error opening editor: ${error.message}`, 'error');
+                log(`Stack trace: ${error.stack}`, 'error');
+            }
+        }
+        
+        function openMainApp() {
+            window.open('http://localhost:5000/', '_blank');
+            log('Opened main application in new tab', 'info');
+        }
+        
+        // Monitor for any global errors
+        window.addEventListener('error', function(event) {
+            log(`GLOBAL ERROR: ${event.message}`, 'error');
+            log(`File: ${event.filename}:${event.lineno}`, 'error');
+        });
+        
+        // Monitor for unhandled promise rejections
+        window.addEventListener('unhandledrejection', function(event) {
+            log(`UNHANDLED PROMISE REJECTION: ${event.reason}`, 'error');
+        });
+        
+        // Override console methods to capture all logs
+        const originalConsole = {
+            log: console.log,
+            error: console.error,
+            warn: console.warn
+        };
+        
+        console.log = function(...args) {
+            originalConsole.log.apply(console, args);
+            log(args.join(' '), 'info');
+        };
+        
+        console.error = function(...args) {
+            originalConsole.error.apply(console, args);
+            log(args.join(' '), 'error');
+        };
+        
+        console.warn = function(...args) {
+            originalConsole.warn.apply(console, args);
+            log(args.join(' '), 'warning');
+        };
+        
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            log('Diagnostic page loaded', 'info');
+            log('Ready to test lineage editor', 'info');
+        });
+    </script>
+</body>
+</html> 

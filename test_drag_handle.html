@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Drag Handle Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            display: flex;
+            gap: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .tag-list {
+            flex: 1;
+            background: white;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            min-height: 300px;
+        }
+        .tag-item {
+            background: #e3f2fd;
+            border: 1px solid #2196f3;
+            border-radius: 4px;
+            padding: 8px 12px 8px 32px;
+            margin: 4px 0;
+            cursor: grab;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            transition: all 0.2s ease;
+            position: relative;
+        }
+        .tag-item:hover {
+            background: #bbdefb;
+            transform: translateY(-2px);
+        }
+        .tag-item.dragging {
+            opacity: 0.5;
+            transform: rotate(5deg);
+        }
+        .drag-handle {
+            position: absolute;
+            left: 4px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: rgba(79, 172, 254, 0.8);
+            opacity: 0.6;
+            transition: all 0.2s ease;
+            cursor: grab;
+            pointer-events: auto;
+            z-index: 10;
+            background: rgba(79, 172, 254, 0.1);
+            border-radius: 4px;
+            padding: 4px;
+            border: 1px solid rgba(79, 172, 254, 0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+        }
+        .tag-item:hover .drag-handle {
+            opacity: 1;
+        }
+        .drag-handle:hover {
+            background: rgba(79, 172, 254, 0.3) !important;
+            border-color: rgba(79, 172, 254, 0.6) !important;
+            transform: translateY(-50%) scale(1.15) !important;
+        }
+        .drag-handle:active {
+            background: rgba(79, 172, 254, 0.4) !important;
+            transform: translateY(-50%) scale(1.25) !important;
+        }
+        .drop-zone {
+            border: 2px dashed #2196f3;
+            background: rgba(33, 150, 243, 0.1);
+        }
+        .drop-zone.drag-over {
+            background: rgba(33, 150, 243, 0.2);
+            border-color: #1976d2;
+        }
+        .tag-checkbox {
+            margin-left: 8px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Drag Handle Test</h1>
+    <p>Test the new drag handle functionality. You should see a drag handle (three horizontal lines) on the left side of each tag item.</p>
+    
+    <div class="container">
+        <div class="tag-list" id="availableTags">
+            <h3>Available Tags</h3>
+            <div class="tag-item">
+                <input type="checkbox" class="tag-checkbox" value="Tag 1">
+                <span>Tag 1 - Test Product</span>
+                <div class="drag-handle">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
+                    </svg>
+                </div>
+            </div>
+            <div class="tag-item">
+                <input type="checkbox" class="tag-checkbox" value="Tag 2">
+                <span>Tag 2 - Another Product</span>
+                <div class="drag-handle">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
+                    </svg>
+                </div>
+            </div>
+            <div class="tag-item">
+                <input type="checkbox" class="tag-checkbox" value="Tag 3">
+                <span>Tag 3 - Third Product</span>
+                <div class="drag-handle">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
+                    </svg>
+                </div>
+            </div>
+        </div>
+        <div class="tag-list" id="selectedTags">
+            <h3>Selected Tags</h3>
+        </div>
+    </div>
+
+    <script>
+        // Simple drag and drop implementation with drag handle
+        document.addEventListener('DOMContentLoaded', function() {
+            const availableTags = document.getElementById('availableTags');
+            const selectedTags = document.getElementById('selectedTags');
+            
+            let isDragging = false;
+            let draggedElement = null;
+            let dragStartCoords = null;
+            const dragThreshold = 5;
+            
+            // Setup mouse event listeners
+            [availableTags, selectedTags].forEach(container => {
+                container.addEventListener('mousedown', handleMouseDown);
+                container.addEventListener('dragover', handleDragOver);
+                container.addEventListener('drop', handleDrop);
+                container.addEventListener('dragenter', handleDragEnter);
+                container.addEventListener('dragleave', handleDragLeave);
+            });
+            
+            function handleMouseDown(e) {
+                const tagItem = e.target.closest('.tag-item');
+                if (!tagItem) return;
+                
+                if (e.button !== 0) return;
+                
+                // If clicking on the drag handle, start drag immediately
+                const isDragHandle = e.target.closest('.drag-handle');
+                if (isDragHandle) {
+                    console.log('Starting drag from handle for:', tagItem.textContent);
+                    startDrag(tagItem, e);
+                    return;
+                }
+                
+                dragStartCoords = { x: e.clientX, y: e.clientY };
+                
+                const handleMouseMove = (moveEvent) => {
+                    const deltaX = Math.abs(moveEvent.clientX - dragStartCoords.x);
+                    const deltaY = Math.abs(moveEvent.clientY - dragStartCoords.y);
+                    
+                    if (deltaX > dragThreshold || deltaY > dragThreshold) {
+                        console.log('Starting drag for:', tagItem.textContent);
+                        startDrag(tagItem, moveEvent);
+                        document.removeEventListener('mousemove', handleMouseMove);
+                        document.removeEventListener('mouseup', handleMouseUp);
+                    }
+                };
+                
+                const handleMouseUp = () => {
+                    document.removeEventListener('mousemove', handleMouseMove);
+                    document.removeEventListener('mouseup', handleMouseUp);
+                    dragStartCoords = null;
+                };
+                
+                document.addEventListener('mousemove', handleMouseMove, { passive: true });
+                document.addEventListener('mouseup', handleMouseUp, { passive: true });
+            }
+            
+            function startDrag(element, event) {
+                if (isDragging) return;
+                
+                isDragging = true;
+                draggedElement = element;
+                
+                element.classList.add('dragging');
+                element.style.zIndex = '10000';
+                
+                const tagName = element.querySelector('.tag-checkbox')?.value || 
+                               element.textContent.trim();
+                
+                if (event.dataTransfer) {
+                    event.dataTransfer.effectAllowed = 'move';
+                    event.dataTransfer.setData('text/plain', JSON.stringify({
+                        tagName: tagName,
+                        sourceType: getSourceType(element)
+                    }));
+                }
+                
+                console.log('Drag started for:', tagName);
+            }
+            
+            function getSourceType(element) {
+                const container = element.closest('#availableTags, #selectedTags');
+                return container?.id === 'availableTags' ? 'available' : 'selected';
+            }
+            
+            function handleDragOver(e) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+            }
+            
+            function handleDragEnter(e) {
+                e.preventDefault();
+                e.target.closest('.tag-list').classList.add('drag-over');
+            }
+            
+            function handleDragLeave(e) {
+                e.preventDefault();
+                if (!e.target.closest('.tag-list').contains(e.relatedTarget)) {
+                    e.target.closest('.tag-list').classList.remove('drag-over');
+                }
+            }
+            
+            function handleDrop(e) {
+                e.preventDefault();
+                
+                if (!isDragging) return;
+                
+                const tagName = e.dataTransfer.getData('text/plain');
+                let dragData;
+                try {
+                    dragData = JSON.parse(tagName);
+                } catch (error) {
+                    console.error('Failed to parse drag data:', error);
+                    endDrag();
+                    return;
+                }
+                
+                const dropZone = e.target.closest('.tag-list');
+                if (dropZone && draggedElement && dropZone !== draggedElement.parentElement) {
+                    console.log('Dropping:', dragData.tagName, 'to', dropZone.id);
+                    dropZone.appendChild(draggedElement);
+                }
+                
+                dropZone.classList.remove('drag-over');
+                endDrag();
+            }
+            
+            function endDrag() {
+                if (!isDragging) return;
+                
+                isDragging = false;
+                
+                if (draggedElement) {
+                    draggedElement.classList.remove('dragging');
+                    draggedElement.style.zIndex = '';
+                    draggedElement = null;
+                }
+                
+                dragStartCoords = null;
+            }
+            
+            // Add global drag end listener
+            document.addEventListener('dragend', endDrag);
+        });
+    </script>
+</body>
+</html> 

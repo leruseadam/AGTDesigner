@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Growing Selected List</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; }
+        .success { color: green; }
+        .error { color: red; }
+        .info { color: blue; }
+        .step { margin: 10px 0; padding: 10px; background: #f5f5f5; }
+        .expected { background: #e8f5e8; padding: 10px; border-left: 4px solid green; }
+    </style>
+</head>
+<body>
+    <h1>Test Growing Selected Tags List</h1>
+    
+    <div class="test-section">
+        <h2>Test Instructions</h2>
+        <ol>
+            <li>Open the main application at <a href="http://127.0.0.1:9090" target="_blank" rel="noopener">http://127.0.0.1:9090</a></li>
+            <li>Wait for the data to load</li>
+            <li>Follow the test steps below to verify the selected list keeps growing</li>
+        </ol>
+    </div>
+
+    <div class="test-section">
+        <h2>Test Steps</h2>
+        
+        <div class="step">
+            <h3>Step 1: Select Tags from First Vendor</h3>
+            <p><strong>Action:</strong> Select 2-3 tags from one vendor (e.g., "A Greener Today")</p>
+            <p><strong>Expected:</strong> Tags should appear in the Selected Tags list</p>
+            <p><strong>Status:</strong> <span id="step1-status">Not tested</span></p>
+            <div class="expected">
+                <strong>Expected Result:</strong> Selected Tags count should show (2) or (3)
+            </div>
+        </div>
+
+        <div class="step">
+            <h3>Step 2: Apply Different Vendor Filter</h3>
+            <p><strong>Action:</strong> Change the Vendor filter to a different vendor (e.g., "Mama J's")</p>
+            <p><strong>Expected:</strong> Available tags should filter, but Selected Tags should remain unchanged</p>
+            <p><strong>Status:</strong> <span id="step2-status">Not tested</span></p>
+            <div class="expected">
+                <strong>Expected Result:</strong> Selected Tags count should still show (2) or (3) - same as before
+            </div>
+        </div>
+
+        <div class="step">
+            <h3>Step 3: Add More Tags from Different Vendor</h3>
+            <p><strong>Action:</strong> Select 2-3 more tags from the filtered vendor</p>
+            <p><strong>Expected:</strong> New tags should be ADDED to Selected Tags list, keeping the previous selections</p>
+            <p><strong>Status:</strong> <span id="step3-status">Not tested</span></p>
+            <div class="expected">
+                <strong>Expected Result:</strong> Selected Tags count should now show (4) or (5) or (6) - increased from previous step
+            </div>
+        </div>
+
+        <div class="step">
+            <h3>Step 4: Apply Product Type Filter</h3>
+            <p><strong>Action:</strong> Change to a Product Type filter (e.g., "Flower")</p>
+            <p><strong>Expected:</strong> Available tags should filter again, but Selected Tags should still show all previous selections</p>
+            <p><strong>Status:</strong> <span id="step4-status">Not tested</span></p>
+            <div class="expected">
+                <strong>Expected Result:</strong> Selected Tags count should still show the same number as Step 3
+            </div>
+        </div>
+
+        <div class="step">
+            <h3>Step 5: Add More Tags from Different Product Type</h3>
+            <p><strong>Action:</strong> Select 1-2 more tags from the new filtered view</p>
+            <p><strong>Expected:</strong> New tags should be ADDED to Selected Tags list, keeping ALL previous selections</p>
+            <p><strong>Status:</strong> <span id="step5-status">Not tested</span></p>
+            <div class="expected">
+                <strong>Expected Result:</strong> Selected Tags count should increase again from Step 4
+            </div>
+        </div>
+
+        <div class="step">
+            <h3>Step 6: Clear All Filters</h3>
+            <p><strong>Action:</strong> Click "Clear All Filters" button</p>
+            <p><strong>Expected:</strong> All available tags should be shown, and Selected Tags should show ALL accumulated selections</p>
+            <p><strong>Status:</strong> <span id="step6-status">Not tested</span></p>
+            <div class="expected">
+                <strong>Expected Result:</strong> Selected Tags count should show the same number as Step 5, and you should see tags from multiple vendors/types
+            </div>
+        </div>
+
+        <div class="step">
+            <h3>Step 7: Verify Final State</h3>
+            <p><strong>Action:</strong> Check the Selected Tags list content</p>
+            <p><strong>Expected:</strong> Should contain tags from multiple vendors/types that were selected during different filter states</p>
+            <p><strong>Status:</strong> <span id="step7-status">Not tested</span></p>
+            <div class="expected">
+                <strong>Expected Result:</strong> You should see tags from at least 2 different vendors and potentially different product types, all accumulated in the list
+            </div>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>Key Test Points</h2>
+        <ul>
+            <li><strong>Growing List:</strong> The selected tags count should increase with each step where you add tags</li>
+            <li><strong>No Clearing:</strong> The list should never decrease unless you manually deselect tags</li>
+            <li><strong>Filter Independence:</strong> Changing filters should not affect the selected tags list</li>
+            <li><strong>Accumulation:</strong> Tags from different filters should accumulate in the same list</li>
+        </ul>
+    </div>
+
+    <div class="test-section">
+        <h2>Test Results</h2>
+        <div id="test-results">
+            <p class="info">Complete the test steps above and mark each step as passed or failed.</p>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>Manual Test Controls</h2>
+        <button onclick="markStep(1, 'passed')" class="success">Mark Step 1 Passed</button>
+        <button onclick="markStep(1, 'failed')" class="error">Mark Step 1 Failed</button><br><br>
+        
+        <button onclick="markStep(2, 'passed')" class="success">Mark Step 2 Passed</button>
+        <button onclick="markStep(2, 'failed')" class="error">Mark Step 2 Failed</button><br><br>
+        
+        <button onclick="markStep(3, 'passed')" class="success">Mark Step 3 Passed</button>
+        <button onclick="markStep(3, 'failed')" class="error">Mark Step 3 Failed</button><br><br>
+        
+        <button onclick="markStep(4, 'passed')" class="success">Mark Step 4 Passed</button>
+        <button onclick="markStep(4, 'failed')" class="error">Mark Step 4 Failed</button><br><br>
+        
+        <button onclick="markStep(5, 'passed')" class="success">Mark Step 5 Passed</button>
+        <button onclick="markStep(5, 'failed')" class="error">Mark Step 5 Failed</button><br><br>
+        
+        <button onclick="markStep(6, 'passed')" class="success">Mark Step 6 Passed</button>
+        <button onclick="markStep(6, 'failed')" class="error">Mark Step 6 Failed</button><br><br>
+        
+        <button onclick="markStep(7, 'passed')" class="success">Mark Step 7 Passed</button>
+        <button onclick="markStep(7, 'failed')" class="error">Mark Step 7 Failed</button><br><br>
+        
+        <button onclick="generateReport()" style="background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 5px;">Generate Test Report</button>
+    </div>
+
+    <script>
+        const testResults = {
+            1: null,
+            2: null,
+            3: null,
+            4: null,
+            5: null,
+            6: null,
+            7: null
+        };
+
+        function markStep(step, result) {
+            testResults[step] = result;
+            const statusElement = document.getElementById(`step${step}-status`);
+            if (statusElement) {
+                statusElement.textContent = result === 'passed' ? 'PASSED' : 'FAILED';
+                statusElement.className = result === 'passed' ? 'success' : 'error';
+            }
+        }
+
+        function generateReport() {
+            const resultsDiv = document.getElementById('test-results');
+            let report = '<h3>Test Report</h3>';
+            
+            const passed = Object.values(testResults).filter(r => r === 'passed').length;
+            const failed = Object.values(testResults).filter(r => r === 'failed').length;
+            const total = Object.keys(testResults).length;
+            
+            report += `<p><strong>Overall Result:</strong> ${passed}/${total} tests passed</p>`;
+            
+            if (passed === total) {
+                report += '<p class="success">✅ All tests passed! The selected tags list keeps growing correctly.</p>';
+            } else {
+                report += '<p class="error">❌ Some tests failed. The selected tags list may be getting cleared unexpectedly.</p>';
+            }
+            
+            report += '<h4>Detailed Results:</h4><ul>';
+            for (let i = 1; i <= 7; i++) {
+                const result = testResults[i];
+                const status = result ? (result === 'passed' ? '✅ PASSED' : '❌ FAILED') : '⏳ Not tested';
+                report += `<li>Step ${i}: ${status}</li>`;
+            }
+            report += '</ul>';
+            
+            if (failed > 0) {
+                report += '<h4>Potential Issues:</h4>';
+                report += '<ul>';
+                if (testResults[2] === 'failed') {
+                    report += '<li>Selected tags are being cleared when filters are applied</li>';
+                }
+                if (testResults[3] === 'failed') {
+                    report += '<li>New tags are not being added to existing selections</li>';
+                }
+                if (testResults[4] === 'failed') {
+                    report += '<li>Selected tags are being cleared when changing filter types</li>';
+                }
+                if (testResults[6] === 'failed') {
+                    report += '<li>Selected tags are being cleared when clearing filters</li>';
+                }
+                report += '</ul>';
+            }
+            
+            resultsDiv.innerHTML = report;
+        }
+    </script>
+</body>
+</html> 

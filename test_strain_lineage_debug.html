@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Strain Lineage Editor Debug</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .debug-panel {
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .test-button {
+            margin: 5px;
+        }
+        .console-output {
+            background: #000;
+            color: #0f0;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: monospace;
+            height: 300px;
+            overflow-y: auto;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-white mb-4">Strain Lineage Editor Debug</h1>
+        
+        <div class="debug-panel">
+            <h3>Test Controls</h3>
+            <div class="row">
+                <div class="col-md-6">
+                    <button class="btn btn-primary test-button" onclick="testStrainEditor()">Test Strain Editor</button>
+                    <button class="btn btn-warning test-button" onclick="debugStrainEditor()">Debug Status</button>
+                    <button class="btn btn-danger test-button" onclick="emergencyCleanup()">Emergency Cleanup</button>
+                </div>
+                <div class="col-md-6">
+                    <button class="btn btn-success test-button" onclick="fixStrainEditor()">Fix Strain Editor</button>
+                    <button class="btn btn-info test-button" onclick="checkBootstrap()">Check Bootstrap</button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="debug-panel">
+            <h3>Console Output</h3>
+            <div id="consoleOutput" class="console-output">
+                <div>Debug console output will appear here...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Include the strain lineage editor template -->
+    <div id="strainLineageEditorModal" class="modal fade" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit Strain Lineage</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        This will update the lineage for ALL products with the selected strain.
+                    </div>
+                    <form id="strainLineageEditorForm">
+                        <div class="mb-3">
+                            <label for="strainName" class="form-label">Strain Name</label>
+                            <input type="text" class="form-control" id="strainName" readonly>
+                        </div>
+                        <div class="mb-3">
+                            <label for="strainLineageSelect" class="form-label">New Lineage</label>
+                            <select class="form-select" id="strainLineageSelect">
+                                <option value="SATIVA">S</option>
+                                <option value="INDICA">I</option>
+                                <option value="HYBRID">H</option>
+                                <option value="HYBRID/SATIVA">H/S</option>
+                                <option value="HYBRID/INDICA">H/I</option>
+                                <option value="CBD">CBD</option>
+                                <option value="MIXED">THC</option>
+                                <option value="PARA">P</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Affected Products</label>
+                            <div id="affectedProductsList" class="border rounded p-3 bg-light">
+                                <p>This will affect all products with the selected strain.</p>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="saveStrainLineageBtn">Update All Products</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="static/js/lineage-editor.js"></script>
+    
+    <script>
+        // Override console.log to also display in the debug panel
+        const originalLog = console.log;
+        const originalError = console.error;
+        const originalWarn = console.warn;
+        
+        function addToConsoleOutput(message, type = 'log') {
+            const output = document.getElementById('consoleOutput');
+            const timestamp = new Date().toLocaleTimeString();
+            const color = type === 'error' ? '#ff6b6b' : type === 'warn' ? '#ffd93d' : '#0f0';
+            output.innerHTML += `<div style="color: ${color}">[${timestamp}] ${message}</div>`;
+            output.scrollTop = output.scrollHeight;
+        }
+        
+        console.log = function(...args) {
+            originalLog.apply(console, args);
+            addToConsoleOutput(args.join(' '), 'log');
+        };
+        
+        console.error = function(...args) {
+            originalError.apply(console, args);
+            addToConsoleOutput(args.join(' '), 'error');
+        };
+        
+        console.warn = function(...args) {
+            originalWarn.apply(console, args);
+            addToConsoleOutput(args.join(' '), 'warn');
+        };
+        
+        // Test functions
+        function checkBootstrap() {
+            console.log('Checking Bootstrap availability...');
+            console.log('Bootstrap available:', typeof bootstrap !== 'undefined');
+            console.log('Bootstrap.Modal available:', typeof bootstrap !== 'undefined' && typeof bootstrap.Modal !== 'undefined');
+            
+            if (typeof bootstrap !== 'undefined' && typeof bootstrap.Modal !== 'undefined') {
+                console.log('✅ Bootstrap is properly loaded');
+            } else {
+                console.error('❌ Bootstrap is not available');
+            }
+        }
+        
+        function testStrainEditor() {
+            console.log('Testing strain lineage editor...');
+            if (window.strainLineageEditor) {
+                console.log('Strain lineage editor instance found, testing...');
+                window.strainLineageEditor.openEditor('Test Strain', 'HYBRID');
+            } else {
+                console.error('Strain lineage editor not initialized');
+                // Try to initialize it
+                if (typeof StrainLineageEditor !== 'undefined') {
+                    console.log('Attempting to initialize strain lineage editor...');
+                    window.strainLineageEditor = StrainLineageEditor.init();
+                    setTimeout(() => {
+                        if (window.strainLineageEditor) {
+                            window.strainLineageEditor.openEditor('Test Strain', 'HYBRID');
+                        } else {
+                            console.error('Failed to initialize strain lineage editor');
+                        }
+                    }, 1000);
+                } else {
+                    console.error('StrainLineageEditor class not found');
+                }
+            }
+        }
+        
+        function debugStrainEditor() {
+            console.log('=== Strain Lineage Editor Debug Info ===');
+            
+            // Check if Bootstrap is available
+            console.log('Bootstrap available:', typeof bootstrap !== 'undefined');
+            console.log('Bootstrap.Modal available:', typeof bootstrap !== 'undefined' && typeof bootstrap.Modal !== 'undefined');
+            
+            // Check modal element
+            const strainModal = document.getElementById('strainLineageEditorModal');
+            console.log('Strain modal element:', strainModal);
+            
+            // Check modal instance
+            console.log('Strain lineage editor instance:', window.strainLineageEditor);
+            
+            // Check modal visibility
+            if (strainModal) {
+                console.log('Strain modal classes:', strainModal.className);
+                console.log('Strain modal display:', strainModal.style.display);
+                console.log('Strain modal z-index:', strainModal.style.zIndex);
+            }
+            
+            // Check body state
+            console.log('Body modal-open class:', document.body.classList.contains('modal-open'));
+            console.log('Body overflow:', document.body.style.overflow);
+            
+            // Check for modal backdrops
+            const backdrops = document.querySelectorAll('.modal-backdrop');
+            console.log('Modal backdrops found:', backdrops.length);
+            backdrops.forEach((backdrop, index) => {
+                console.log(`Backdrop ${index}:`, backdrop.className, backdrop.style.zIndex);
+            });
+            
+            console.log('=== End Debug Info ===');
+        }
+        
+        function emergencyCleanup() {
+            console.log('Running emergency cleanup...');
+            if (window.emergencyLineageModalCleanup) {
+                window.emergencyLineageModalCleanup();
+            } else {
+                console.log('Emergency cleanup function not available');
+            }
+        }
+        
+        function fixStrainEditor() {
+            console.log('Attempting to fix strain lineage editor...');
+            if (window.fixLineageEditor) {
+                window.fixLineageEditor();
+            } else {
+                console.log('Fix function not available');
+            }
+        }
+        
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('Debug page loaded');
+            checkBootstrap();
+        });
+    </script>
+</body>
+</html> 

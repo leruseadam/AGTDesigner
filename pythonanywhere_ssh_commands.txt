@@ -1,0 +1,56 @@
+# PythonAnywhere SSH/Console Commands
+# Run these commands on PythonAnywhere, not locally
+
+# 1. Find your project directory
+ls -la ~/
+find ~/ -name "*AGTDesigner*" -type d 2>/dev/null
+
+# 2. Navigate to your project directory (replace with actual path)
+cd ~/AGTDesigner  # or the actual directory name
+
+# 3. Check current status
+pwd
+ls -la
+
+# 4. Check Git status
+git status
+
+# 5. If there are conflicts, stash or commit local changes
+git stash  # This will save your local changes temporarily
+# OR
+git add .
+git commit -m "Local changes before pull"
+
+# 6. Pull the latest changes
+git pull origin main
+
+# 7. If you stashed changes, apply them back
+git stash pop
+
+# 8. Activate your virtual environment
+source ~/agt-designer-venv/bin/activate  # or whatever your venv is called
+
+# 9. Update dependencies
+pip install -r requirements_pythonanywhere.txt
+
+# 10. Clear cache
+find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+find . -name "*.pyc" -delete 2>/dev/null || true
+
+# 11. Set permissions
+chmod -R 755 . 2>/dev/null || true
+
+# 12. Reload your web app in the PythonAnywhere Web tab
+# Go to your PythonAnywhere dashboard -> Web tab -> Click "Reload"
+
+# Alternative: If you can't find the project directory
+# 1. Check if you need to clone the repository
+git clone https://github.com/leruseadam/AGTDesigner.git
+cd AGTDesigner
+
+# 2. Set up virtual environment
+python3 -m venv agt-designer-venv
+source agt-designer-venv/bin/activate
+pip install -r requirements_pythonanywhere.txt
+
+# 3. Configure your web app to point to this directory 

@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Drag and Drop Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            display: flex;
+            gap: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .tag-list {
+            flex: 1;
+            background: white;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            min-height: 300px;
+        }
+        .tag-item {
+            background: #e3f2fd;
+            border: 1px solid #2196f3;
+            border-radius: 4px;
+            padding: 8px 12px;
+            margin: 5px 0;
+            cursor: grab;
+            user-select: none;
+            transition: all 0.2s ease;
+        }
+        .tag-item:hover {
+            background: #bbdefb;
+            transform: translateY(-2px);
+        }
+        .tag-item.dragging {
+            opacity: 0.5;
+            transform: rotate(5deg);
+        }
+        .drop-zone {
+            border: 2px dashed #2196f3;
+            background: rgba(33, 150, 243, 0.1);
+        }
+        .drop-zone.drag-over {
+            background: rgba(33, 150, 243, 0.2);
+            border-color: #1976d2;
+        }
+    </style>
+</head>
+<body>
+    <h1>Drag and Drop Test</h1>
+    <div class="container">
+        <div class="tag-list" id="availableTags">
+            <h3>Available Tags</h3>
+            <div class="tag-item" draggable="true" data-tag="Tag 1">Tag 1</div>
+            <div class="tag-item" draggable="true" data-tag="Tag 2">Tag 2</div>
+            <div class="tag-item" draggable="true" data-tag="Tag 3">Tag 3</div>
+        </div>
+        <div class="tag-list" id="selectedTags">
+            <h3>Selected Tags</h3>
+        </div>
+    </div>
+
+    <script>
+        // Simple drag and drop implementation
+        document.addEventListener('DOMContentLoaded', function() {
+            const availableTags = document.getElementById('availableTags');
+            const selectedTags = document.getElementById('selectedTags');
+            
+            // Make all tag items draggable
+            const tagItems = document.querySelectorAll('.tag-item');
+            tagItems.forEach(item => {
+                item.addEventListener('dragstart', handleDragStart);
+                item.addEventListener('dragend', handleDragEnd);
+            });
+            
+            // Setup drop zones
+            [availableTags, selectedTags].forEach(zone => {
+                zone.addEventListener('dragover', handleDragOver);
+                zone.addEventListener('drop', handleDrop);
+                zone.addEventListener('dragenter', handleDragEnter);
+                zone.addEventListener('dragleave', handleDragLeave);
+            });
+            
+            function handleDragStart(e) {
+                console.log('Drag start:', e.target.textContent);
+                e.target.classList.add('dragging');
+                e.dataTransfer.setData('text/plain', e.target.dataset.tag);
+                e.dataTransfer.effectAllowed = 'move';
+            }
+            
+            function handleDragEnd(e) {
+                console.log('Drag end:', e.target.textContent);
+                e.target.classList.remove('dragging');
+            }
+            
+            function handleDragOver(e) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+            }
+            
+            function handleDragEnter(e) {
+                e.preventDefault();
+                e.target.closest('.tag-list').classList.add('drag-over');
+            }
+            
+            function handleDragLeave(e) {
+                e.preventDefault();
+                if (!e.target.closest('.tag-list').contains(e.relatedTarget)) {
+                    e.target.closest('.tag-list').classList.remove('drag-over');
+                }
+            }
+            
+            function handleDrop(e) {
+                e.preventDefault();
+                const tagName = e.dataTransfer.getData('text/plain');
+                const draggedElement = document.querySelector(`[data-tag="${tagName}"]`);
+                
+                if (draggedElement && e.target.closest('.tag-list') !== draggedElement.parentElement) {
+                    console.log('Dropping:', tagName, 'to', e.target.closest('.tag-list').id);
+                    e.target.closest('.tag-list').appendChild(draggedElement);
+                }
+                
+                e.target.closest('.tag-list').classList.remove('drag-over');
+            }
+        });
+    </script>
+</body>
+</html> 

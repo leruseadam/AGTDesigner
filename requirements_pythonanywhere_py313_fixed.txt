@@ -1,0 +1,37 @@
+# Requirements for Label Maker Application - PythonAnywhere Python 3.13 Fixed
+# This file contains all dependencies needed to run the application on PythonAnywhere with Python 3.13
+
+# Core Flask framework and extensions
+Flask>=2.3.0,<3.0.0
+Flask-CORS>=4.0.0,<5.0.0
+Werkzeug>=2.3.0,<3.0.0
+Jinja2>=3.1.0,<4.0.0
+itsdangerous>=2.1.0,<3.0.0
+click>=8.1.0,<9.0.0
+MarkupSafe>=2.1.0,<3.0.0
+
+# Data processing and analysis - updated for Python 3.13 compatibility
+pandas>=2.1.0,<3.0.0
+numpy>=1.26.0,<2.0.0
+python-dateutil>=2.8.0,<3.0.0
+
+# Document processing - updated versions for Python 3.13
+python-docx>=1.1.0,<2.0.0
+docxtpl>=0.16.0,<1.0.0
+docxcompose>=1.4.0,<2.0.0
+openpyxl>=3.1.0,<4.0.0
+
+# Image processing - updated for Python 3.13
+Pillow>=10.0.0,<11.0.0
+
+# File monitoring and system utilities
+watchdog>=3.0.0,<4.0.0
+
+# Additional utilities - updated for Python 3.13
+six>=1.16.0,<2.0.0
+pytz>=2023.0,<2024.0
+
+# Build tools - updated for Python 3.13 compatibility
+setuptools>=69.0.0
+wheel>=0.42.0
+pip>=23.0.0 

@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Drag and Drop Debug</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .tag-row {
+            display: flex;
+            align-items: center;
+            padding: 8px;
+            margin: 4px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: #f9f9f9;
+            position: relative;
+            padding-left: 32px;
+            cursor: grab;
+        }
+        .tag-row:hover {
+            border-color: rgba(79, 172, 254, 0.3);
+            background: rgba(79, 172, 254, 0.05);
+        }
+        .tag-row.dragging {
+            cursor: grabbing;
+            transform: rotate(2deg) scale(1.05);
+            opacity: 0.8;
+            box-shadow: 0 8px 25px rgba(79, 172, 254, 0.4);
+        }
+        .tag-checkbox {
+            margin-right: 8px;
+        }
+        .tag-item {
+            display: flex;
+            align-items: center;
+            flex-grow: 1;
+        }
+        .tag-name {
+            font-weight: bold;
+            margin-right: 8px;
+        }
+        .drag-handle {
+            position: absolute;
+            left: 4px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: rgba(79, 172, 254, 0.8);
+            opacity: 0.8;
+            cursor: grab;
+            background: rgba(79, 172, 254, 0.2);
+            border-radius: 4px;
+            padding: 4px;
+            border: 2px solid rgba(79, 172, 254, 0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            z-index: 1000;
+        }
+        .drag-handle:hover {
+            opacity: 1;
+            background: rgba(79, 172, 254, 0.4);
+        }
+        .drop-indicator {
+            position: absolute;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #4facfe, #00f2fe);
+            border-radius: 2px;
+            z-index: 9999;
+            pointer-events: none;
+        }
+        .debug-info {
+            background: #e9ecef;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .test-buttons {
+            margin: 20px 0;
+        }
+        .test-buttons button {
+            margin: 5px;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            background: #007bff;
+            color: white;
+            cursor: pointer;
+        }
+        .test-buttons button:hover {
+            background: #0056b3;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Drag and Drop Debug</h1>
+        
+        <div class="status info" id="status">
+            Initializing...
+        </div>
+        
+        <div class="test-buttons">
+            <button onclick="testDragAndDrop()">Test Drag and Drop</button>
+            <button onclick="checkDragHandles()">Check Drag Handles</button>
+            <button onclick="forceReinitializeDragAndDrop()">Reinitialize</button>
+            <button onclick="addTestTags()">Add Test Tags</button>
+            <button onclick="clearTags()">Clear Tags</button>
+            <button onclick="testManualDrag()">Test Manual Drag</button>
+        </div>
+        
+        <div class="debug-info" id="debugInfo">
+            Debug info will appear here...
+        </div>
+        
+        <h3>Selected Tags (Drag to reorder):</h3>
+        <div id="selectedTags" class="tag-list-container">
+            <!-- Test tags will be added here -->
+        </div>
+    </div>
+
+    <script>
+        // Mock TagManager for testing
+        window.TagManager = {
+            state: {
+                persistentSelectedTags: new Set(),
+                selectedTags: new Set(),
+                tags: []
+            },
+            updateSelectedTags: function(tags) {
+                console.log('TagManager.updateSelectedTags called with:', tags);
+            }
+        };
+
+        // Create test tags with the exact structure from the main app
+        function createTestTag(name, brand = 'Test Brand', vendor = 'Test Vendor') {
+            const tagRow = document.createElement('div');
+            tagRow.className = 'tag-row';
+            tagRow.setAttribute('data-tag-id', `test-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`);
+            
+            const tagItem = document.createElement('div');
+            tagItem.className = 'tag-item';
+            
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.className = 'tag-checkbox';
+            checkbox.value = name;
+            checkbox.checked = true;
+            
+            const tagName = document.createElement('div');
+            tagName.className = 'tag-name';
+            tagName.textContent = name;
+            
+            const tagInfo = document.createElement('div');
+            tagInfo.className = 'tag-info';
+            tagInfo.textContent = `${brand} - ${vendor}`;
+            
+            tagItem.appendChild(checkbox);
+            tagItem.appendChild(tagName);
+            tagItem.appendChild(tagInfo);
+            tagRow.appendChild(tagItem);
+            
+            return tagRow;
+        }
+
+        function addTestTags() {
+            const container = document.getElementById('selectedTags');
+            const testTags = [
+                'Lemon Jealousy Wax - 1g',
+                'Memory Loss Wax - 1g',
+                'Cheesecake - 14g',
+                'Churros - 14g',
+                'Blueberry Kush Infused Pre-Roll'
+            ];
+            
+            testTags.forEach(tagName => {
+                const tagElement = createTestTag(tagName);
+                container.appendChild(tagElement);
+            });
+            
+            updateStatus('Test tags added', 'success');
+            updateDebugInfo('Added test tags');
+            
+            // Reinitialize drag and drop after adding tags
+            if (window.dragAndDropManager) {
+                window.dragAndDropManager.reinitializeTagDragAndDrop();
+            }
+        }
+
+        function clearTags() {
+            const container = document.getElementById('selectedTags');
+            container.innerHTML = '';
+            updateStatus('Tags cleared', 'info');
+            updateDebugInfo('Cleared all tags');
+        }
+
+        function updateStatus(message, type = 'info') {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = `status ${type}`;
+        }
+
+        function updateDebugInfo(message) {
+            const debugInfo = document.getElementById('debugInfo');
+            const timestamp = new Date().toLocaleTimeString();
+            debugInfo.innerHTML += `<div>[${timestamp}] ${message}</div>`;
+            debugInfo.scrollTop = debugInfo.scrollHeight;
+        }
+
+        // Override console.log to also update debug info
+        const originalLog = console.log;
+        console.log = function(...args) {
+            originalLog.apply(console, args);
+            updateDebugInfo(args.join(' '));
+        };
+
+        // Test manual drag functionality
+        function testManualDrag() {
+            updateDebugInfo('Testing manual drag functionality...');
+            
+            const container = document.getElementById('selectedTags');
+            const tagRows = container.querySelectorAll('.tag-row');
+            
+            if (tagRows.length === 0) {
+                updateStatus('No tags to test', 'error');
+                return;
+            }
+            
+            updateDebugInfo(`Found ${tagRows.length} tag rows`);
+            
+            // Test if drag handles exist
+            const dragHandles = container.querySelectorAll('.drag-handle');
+            updateDebugInfo(`Found ${dragHandles.length} drag handles`);
+            
+            // Test if drag-and-drop manager is available
+            if (window.dragAndDropManager) {
+                const testResult = window.dragAndDropManager.testDragAndDrop();
+                updateDebugInfo(`Drag and drop test result: ${JSON.stringify(testResult)}`);
+            } else {
+                updateDebugInfo('Drag and drop manager not available');
+            }
+        }
+
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            updateStatus('Page loaded, initializing...', 'info');
+            updateDebugInfo('Page loaded, initializing...');
+            
+            // Wait a bit for the drag-and-drop manager to load
+            setTimeout(() => {
+                addTestTags();
+                updateStatus('Ready for testing', 'success');
+            }, 500);
+        });
+    </script>
+    
+    <!-- Include the drag and drop manager -->
+    <script src="static/js/drag-and-drop-manager.js"></script>
+</body>
+</html> 

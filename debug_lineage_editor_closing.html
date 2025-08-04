@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lineage Editor Debug</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .debug-panel {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            width: 400px;
+            max-height: 80vh;
+            background: white;
+            border: 2px solid #007bff;
+            border-radius: 8px;
+            z-index: 10000;
+            overflow-y: auto;
+        }
+        .debug-log {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 10px;
+            margin: 5px 0;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .error { color: #dc3545; }
+        .success { color: #28a745; }
+        .warning { color: #ffc107; }
+        .info { color: #17a2b8; }
+        .test-button {
+            margin: 5px;
+            padding: 8px 16px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-4">
+        <h1>Lineage Editor Debug Panel</h1>
+        <p>This page helps debug why the lineage editor modal closes immediately.</p>
+        
+        <div class="row">
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-header">
+                        <h5>Test Controls</h5>
+                    </div>
+                    <div class="card-body">
+                        <button class="btn btn-primary test-button" onclick="testBasicModal()">Test Basic Modal</button>
+                        <button class="btn btn-success test-button" onclick="testLineageEditor()">Test Lineage Editor</button>
+                        <button class="btn btn-warning test-button" onclick="testBootstrapDetection()">Test Bootstrap</button>
+                        <button class="btn btn-info test-button" onclick="testEventListeners()">Test Event Listeners</button>
+                        <button class="btn btn-danger test-button" onclick="clearLogs()">Clear Logs</button>
+                    </div>
+                </div>
+                
+                <div class="card mt-3">
+                    <div class="card-header">
+                        <h5>Environment Check</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="environmentInfo"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="debug-panel">
+                <div class="card-header bg-primary text-white">
+                    <h6>Debug Log</h6>
+                </div>
+                <div class="card-body">
+                    <div id="debugLog" class="debug-log"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Include your lineage editor script -->
+    <script src="/static/js/lineage-editor.js"></script>
+    
+    <script>
+        let logCount = 0;
+        
+        function addLog(message, type = 'info') {
+            const logDiv = document.getElementById('debugLog');
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.className = type;
+            logEntry.innerHTML = `[${timestamp}] ${message}`;
+            logDiv.appendChild(logEntry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+            logCount++;
+            
+            // Keep only last 50 logs
+            if (logCount > 50) {
+                logDiv.removeChild(logDiv.firstChild);
+            }
+        }
+        
+        function clearLogs() {
+            document.getElementById('debugLog').innerHTML = '';
+            logCount = 0;
+        }
+        
+        function checkEnvironment() {
+            const info = document.getElementById('environmentInfo');
+            const checks = [
+                { name: 'Bootstrap', check: () => typeof bootstrap !== 'undefined' },
+                { name: 'Bootstrap Modal', check: () => typeof bootstrap?.Modal !== 'undefined' },
+                { name: 'StrainLineageEditor Class', check: () => typeof StrainLineageEditor !== 'undefined' },
+                { name: 'window.strainLineageEditor', check: () => typeof window.strainLineageEditor !== 'undefined' },
+                { name: 'Modal Element', check: () => document.getElementById('strainLineageEditorModal') !== null },
+                { name: 'jQuery', check: () => typeof $ !== 'undefined' },
+                { name: 'Document Ready', check: () => document.readyState === 'complete' }
+            ];
+            
+            let html = '<ul class="list-group">';
+            checks.forEach(check => {
+                const result = check.check();
+                const status = result ? '✅' : '❌';
+                const color = result ? 'success' : 'danger';
+                html += `<li class="list-group-item list-group-item-${color}">${status} ${check.name}</li>`;
+            });
+            html += '</ul>';
+            info.innerHTML = html;
+        }
+        
+        function testBasicModal() {
+            addLog('Testing basic Bootstrap modal...', 'info');
+            
+            // Create a simple test modal
+            const testModal = document.createElement('div');
+            testModal.className = 'modal fade';
+            testModal.id = 'testModal';
+            testModal.innerHTML = `
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title">Test Modal</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <p>This is a test modal to check if Bootstrap is working.</p>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(testModal);
+            
+            try {
+                const modal = new bootstrap.Modal(testModal);
+                modal.show();
+                addLog('Basic modal created and shown successfully', 'success');
+                
+                setTimeout(() => {
+                    modal.hide();
+                    document.body.removeChild(testModal);
+                    addLog('Basic modal hidden and removed', 'info');
+                }, 3000);
+            } catch (error) {
+                addLog(`Error with basic modal: ${error.message}`, 'error');
+            }
+        }
+        
+        function testLineageEditor() {
+            addLog('Testing lineage editor...', 'info');
+            
+            if (typeof window.strainLineageEditor === 'undefined') {
+                addLog('StrainLineageEditor not available, attempting to initialize...', 'warning');
+                
+                if (typeof StrainLineageEditor !== 'undefined') {
+                    try {
+                        window.strainLineageEditor = new StrainLineageEditor();
+                        window.strainLineageEditor.init();
+                        addLog('StrainLineageEditor initialized successfully', 'success');
+                    } catch (error) {
+                        addLog(`Error initializing StrainLineageEditor: ${error.message}`, 'error');
+                        return;
+                    }
+                } else {
+                    addLog('StrainLineageEditor class not found', 'error');
+                    return;
+                }
+            }
+            
+            try {
+                addLog('Calling openEditor...', 'info');
+                window.strainLineageEditor.openEditor('Test Strain', 'HYBRID');
+                addLog('openEditor called successfully', 'success');
+            } catch (error) {
+                addLog(`Error calling openEditor: ${error.message}`, 'error');
+            }
+        }
+        
+        function testBootstrapDetection() {
+            addLog('Testing Bootstrap detection...', 'info');
+            
+            const bootstrapInfo = {
+                'typeof bootstrap': typeof bootstrap,
+                'typeof bootstrap.Modal': typeof bootstrap?.Modal,
+                'bootstrap version': bootstrap?.Modal?.VERSION || 'unknown',
+                'jQuery available': typeof $ !== 'undefined',
+                'jQuery version': $?.fn?.jquery || 'not available'
+            };
+            
+            Object.entries(bootstrapInfo).forEach(([key, value]) => {
+                addLog(`${key}: ${value}`, 'info');
+            });
+        }
+        
+        function testEventListeners() {
+            addLog('Testing event listeners...', 'info');
+            
+            const modalElement = document.getElementById('strainLineageEditorModal');
+            if (!modalElement) {
+                addLog('Modal element not found', 'error');
+                return;
+            }
+            
+            // Test if event listeners are attached
+            const events = ['show.bs.modal', 'shown.bs.modal', 'hide.bs.modal', 'hidden.bs.modal'];
+            events.forEach(event => {
+                const listeners = getEventListeners(modalElement, event);
+                addLog(`${event}: ${listeners.length} listeners`, 'info');
+            });
+        }
+        
+        function getEventListeners(element, eventType) {
+            // This is a simplified version - in real browsers you'd use devtools
+            return [];
+        }
+        
+        // Override console methods to capture logs
+        const originalConsole = {
+            log: console.log,
+            error: console.error,
+            warn: console.warn,
+            info: console.info
+        };
+        
+        console.log = function(...args) {
+            originalConsole.log.apply(console, args);
+            addLog('LOG: ' + args.join(' '), 'info');
+        };
+        
+        console.error = function(...args) {
+            originalConsole.error.apply(console, args);
+            addLog('ERROR: ' + args.join(' '), 'error');
+        };
+        
+        console.warn = function(...args) {
+            originalConsole.warn.apply(console, args);
+            addLog('WARN: ' + args.join(' '), 'warning');
+        };
+        
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            addLog('Page loaded, checking environment...', 'info');
+            checkEnvironment();
+            
+            // Check environment again after a delay
+            setTimeout(checkEnvironment, 1000);
+        });
+        
+        // Monitor for modal events
+        document.addEventListener('show.bs.modal', function(e) {
+            addLog(`Modal show event: ${e.target.id}`, 'info');
+        });
+        
+        document.addEventListener('shown.bs.modal', function(e) {
+            addLog(`Modal shown event: ${e.target.id}`, 'success');
+        });
+        
+        document.addEventListener('hide.bs.modal', function(e) {
+            addLog(`Modal hide event: ${e.target.id}`, 'warning');
+        });
+        
+        document.addEventListener('hidden.bs.modal', function(e) {
+            addLog(`Modal hidden event: ${e.target.id}`, 'info');
+        });
+    </script>
+</body>
+</html>

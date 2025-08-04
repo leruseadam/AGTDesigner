@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lineage Editor Test</title>
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- jQuery and Bootstrap JS -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.0/dist/js/bootstrap.bundle.min.js"></script>
+</head>
+<body>
+    <div class="container mt-5">
+        <h1>Lineage Editor Test</h1>
+        
+        <div class="row">
+            <div class="col-md-6">
+                <h3>Test Product Lineage Editor</h3>
+                <button class="btn btn-primary" onclick="testProductLineageEditor()">
+                    Open Product Lineage Editor
+                </button>
+            </div>
+            
+            <div class="col-md-6">
+                <h3>Test Strain Lineage Editor</h3>
+                <button class="btn btn-success" onclick="testStrainLineageEditor()">
+                    Open Strain Lineage Editor
+                </button>
+            </div>
+        </div>
+        
+        <div class="row mt-4">
+            <div class="col-12">
+                <h3>Console Output</h3>
+                <div id="console-output" class="bg-dark text-light p-3" style="height: 300px; overflow-y: auto; font-family: monospace;">
+                    <div>Console output will appear here...</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row mt-3">
+            <div class="col-12">
+                <button class="btn btn-warning" onclick="clearConsole()">Clear Console</button>
+                <button class="btn btn-danger" onclick="emergencyCleanup()">Emergency Cleanup</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Lineage Editor Modals -->
+    <div id="lineageEditorModal" class="modal fade" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit Lineage</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="lineageEditorForm">
+                        <div class="mb-3">
+                            <label for="tagName" class="form-label">Tag Name</label>
+                            <input type="text" class="form-control" id="tagName" readonly>
+                        </div>
+                        <div class="mb-3">
+                            <label for="lineageSelect" class="form-label">Lineage</label>
+                            <select class="form-select" id="lineageSelect">
+                                <option value="SATIVA">S</option>
+                                <option value="INDICA">I</option>
+                                <option value="HYBRID">H</option>
+                                <option value="HYBRID/SATIVA">H/S</option>
+                                <option value="HYBRID/INDICA">H/I</option>
+                                <option value="CBD">CBD</option>
+                                <option value="MIXED">THC</option>
+                                <option value="PARA">P</option>
+                            </select>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="saveLineageChanges">Save Changes</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Strain Lineage Editor Modal -->
+    <div id="strainLineageEditorModal" class="modal fade" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit Strain Lineage</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        This will update the lineage for ALL products with the selected strain.
+                    </div>
+                    <form id="strainLineageEditorForm">
+                        <div class="mb-3">
+                            <label for="strainName" class="form-label">Strain Name</label>
+                            <input type="text" class="form-control" id="strainName" readonly>
+                        </div>
+                        <div class="mb-3">
+                            <label for="strainLineageSelect" class="form-label">New Lineage</label>
+                            <select class="form-select" id="strainLineageSelect">
+                                <option value="SATIVA">S</option>
+                                <option value="INDICA">I</option>
+                                <option value="HYBRID">H</option>
+                                <option value="HYBRID/SATIVA">H/S</option>
+                                <option value="HYBRID/INDICA">H/I</option>
+                                <option value="CBD">CBD</option>
+                                <option value="MIXED">THC</option>
+                                <option value="PARA">P</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Affected Products</label>
+                            <div id="affectedProductsList" class="border rounded p-3 bg-light">
+                                <!-- Products will be listed here -->
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="saveStrainLineageBtn">Update All Products</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Lineage Editor JavaScript -->
+    <script src="/static/js/lineage-editor.js"></script>
+    
+    <script>
+        // Override console.log to capture output
+        const originalLog = console.log;
+        const originalError = console.error;
+        const originalWarn = console.warn;
+        
+        function logToConsole(message, type = 'log') {
+            const output = document.getElementById('console-output');
+            const timestamp = new Date().toLocaleTimeString();
+            const color = type === 'error' ? 'text-danger' : type === 'warn' ? 'text-warning' : 'text-light';
+            output.innerHTML += `<div class="${color}">[${timestamp}] ${message}</div>`;
+            output.scrollTop = output.scrollHeight;
+        }
+        
+        console.log = function(...args) {
+            originalLog.apply(console, args);
+            logToConsole(args.join(' '), 'log');
+        };
+        
+        console.error = function(...args) {
+            originalError.apply(console, args);
+            logToConsole(args.join(' '), 'error');
+        };
+        
+        console.warn = function(...args) {
+            originalWarn.apply(console, args);
+            logToConsole(args.join(' '), 'warn');
+        };
+        
+        function clearConsole() {
+            document.getElementById('console-output').innerHTML = '<div>Console cleared...</div>';
+        }
+        
+        function emergencyCleanup() {
+            console.log('Manual emergency cleanup triggered');
+            if (typeof window.emergencyLineageModalCleanup === 'function') {
+                window.emergencyLineageModalCleanup();
+            } else {
+                console.error('Emergency cleanup function not found');
+            }
+        }
+        
+        function testProductLineageEditor() {
+            console.log('Testing product lineage editor...');
+            
+            // Check if lineage editor is available
+            if (typeof window.lineageEditor !== 'undefined') {
+                console.log('LineageEditor found:', window.lineageEditor);
+                try {
+                    window.lineageEditor.openEditor('Test Product', 'HYBRID');
+                    console.log('Product lineage editor opened successfully');
+                } catch (error) {
+                    console.error('Error opening product lineage editor:', error);
+                }
+            } else {
+                console.error('LineageEditor not found in window object');
+                
+                // Try to initialize it
+                console.log('Attempting to initialize LineageEditor...');
+                if (typeof LineageEditor !== 'undefined') {
+                    try {
+                        window.lineageEditor = LineageEditor.init();
+                        console.log('LineageEditor initialized:', window.lineageEditor);
+                        window.lineageEditor.openEditor('Test Product', 'HYBRID');
+                    } catch (error) {
+                        console.error('Error initializing LineageEditor:', error);
+                    }
+                } else {
+                    console.error('LineageEditor class not found');
+                }
+            }
+        }
+        
+        function testStrainLineageEditor() {
+            console.log('Testing strain lineage editor...');
+            
+            // Check if strain lineage editor is available
+            if (typeof window.strainLineageEditor !== 'undefined') {
+                console.log('StrainLineageEditor found:', window.strainLineageEditor);
+                try {
+                    window.strainLineageEditor.openEditor('Test Strain', 'HYBRID');
+                    console.log('Strain lineage editor opened successfully');
+                } catch (error) {
+                    console.error('Error opening strain lineage editor:', error);
+                }
+            } else {
+                console.error('StrainLineageEditor not found in window object');
+                
+                // Try to initialize it
+                console.log('Attempting to initialize StrainLineageEditor...');
+                if (typeof StrainLineageEditor !== 'undefined') {
+                    try {
+                        window.strainLineageEditor = StrainLineageEditor.init();
+                        console.log('StrainLineageEditor initialized:', window.strainLineageEditor);
+                        window.strainLineageEditor.openEditor('Test Strain', 'HYBRID');
+                    } catch (error) {
+                        console.error('Error initializing StrainLineageEditor:', error);
+                    }
+                } else {
+                    console.error('StrainLineageEditor class not found');
+                }
+            }
+        }
+        
+        // Check initialization on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Page loaded, checking lineage editor initialization...');
+            
+            setTimeout(() => {
+                console.log('Checking for lineage editors after 3 seconds...');
+                console.log('window.lineageEditor:', window.lineageEditor);
+                console.log('window.strainLineageEditor:', window.strainLineageEditor);
+                console.log('LineageEditor class:', typeof LineageEditor);
+                console.log('StrainLineageEditor class:', typeof StrainLineageEditor);
+            }, 3000);
+        });
+    </script>
+</body>
+</html> 

@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lineage Editor UI Test</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .test-section {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .test-button {
+            margin: 5px;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .status.success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .status.error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        .status.info {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-4">
+        <h1>Lineage Editor UI Test</h1>
+        
+        <div class="test-section">
+            <h3>Test Instructions</h3>
+            <p>This page tests the lineage editor modal functionality. Use the buttons below to test different scenarios.</p>
+            
+            <div id="testResults"></div>
+        </div>
+        
+        <div class="test-section">
+            <h3>Basic Modal Tests</h3>
+            <button class="btn btn-primary test-button" onclick="testBasicModal()">Test Basic Modal</button>
+            <button class="btn btn-secondary test-button" onclick="testStrainModal()">Test Strain Modal</button>
+            <button class="btn btn-warning test-button" onclick="testEmergencyCleanup()">Test Emergency Cleanup</button>
+        </div>
+        
+        <div class="test-section">
+            <h3>Bootstrap Tests</h3>
+            <button class="btn btn-info test-button" onclick="testBootstrap()">Test Bootstrap Availability</button>
+            <button class="btn btn-info test-button" onclick="testModalElements()">Test Modal Elements</button>
+        </div>
+        
+        <div class="test-section">
+            <h3>Integration Tests</h3>
+            <button class="btn btn-success test-button" onclick="testLineageEditor()">Test Lineage Editor</button>
+            <button class="btn btn-success test-button" onclick="testStrainLineageEditor()">Test Strain Lineage Editor</button>
+        </div>
+    </div>
+
+    <!-- Include the lineage editor modals -->
+    <div id="lineageEditorModal" class="modal fade" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit Lineage</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="lineageEditorForm">
+                        <div class="mb-3">
+                            <label for="tagName" class="form-label">Tag Name</label>
+                            <input type="text" class="form-control" id="tagName" readonly>
+                        </div>
+                        <div class="mb-3">
+                            <label for="lineageSelect" class="form-label">Lineage</label>
+                            <select class="form-select" id="lineageSelect">
+                                <option value="SATIVA">S</option>
+                                <option value="INDICA">I</option>
+                                <option value="HYBRID">H</option>
+                                <option value="CBD">CBD</option>
+                                <option value="MIXED">THC</option>
+                            </select>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="saveLineageChanges">Save Changes</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Strain Lineage Editor Modal -->
+    <div id="strainLineageEditorModal" class="modal fade" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit Strain Lineage</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        This will update the lineage for ALL products with the selected strain.
+                    </div>
+                    <form id="strainLineageEditorForm">
+                        <div class="mb-3">
+                            <label for="strainName" class="form-label">Strain Name</label>
+                            <input type="text" class="form-control" id="strainName" readonly>
+                        </div>
+                        <div class="mb-3">
+                            <label for="strainLineageSelect" class="form-label">New Lineage</label>
+                            <select class="form-select" id="strainLineageSelect">
+                                <option value="SATIVA">S</option>
+                                <option value="INDICA">I</option>
+                                <option value="HYBRID">H</option>
+                                <option value="CBD">CBD</option>
+                                <option value="MIXED">THC</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Affected Products</label>
+                            <div id="affectedProductsList" class="border rounded p-3 bg-light">
+                                <!-- Products will be listed here -->
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="saveStrainLineageBtn">Update All Products</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="static/js/lineage-editor.js"></script>
+    <script>
+        let testResults = document.getElementById('testResults');
+        
+        function addResult(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const className = `status ${type}`;
+            testResults.innerHTML += `<div class="${className}">[${timestamp}] ${message}</div>`;
+            console.log(`[${timestamp}] ${message}`);
+        }
+        
+        function testBootstrap() {
+            addResult('Testing Bootstrap availability...', 'info');
+            
+            if (typeof bootstrap !== 'undefined') {
+                addResult('✅ Bootstrap is available', 'success');
+                addResult(`Bootstrap version: ${bootstrap.VERSION || 'unknown'}`, 'info');
+                
+                if (typeof bootstrap.Modal !== 'undefined') {
+                    addResult('✅ Bootstrap.Modal is available', 'success');
+                } else {
+                    addResult('❌ Bootstrap.Modal is NOT available', 'error');
+                }
+            } else {
+                addResult('❌ Bootstrap is NOT available', 'error');
+            }
+        }
+        
+        function testModalElements() {
+            addResult('Testing modal elements...', 'info');
+            
+            const lineageModal = document.getElementById('lineageEditorModal');
+            const strainModal = document.getElementById('strainLineageEditorModal');
+            
+            if (lineageModal) {
+                addResult('✅ Lineage editor modal element found', 'success');
+            } else {
+                addResult('❌ Lineage editor modal element not found', 'error');
+            }
+            
+            if (strainModal) {
+                addResult('✅ Strain lineage editor modal element found', 'success');
+            } else {
+                addResult('❌ Strain lineage editor modal element not found', 'error');
+            }
+        }
+        
+        function testBasicModal() {
+            addResult('Testing basic modal functionality...', 'info');
+            
+            try {
+                const modalElement = document.getElementById('lineageEditorModal');
+                if (modalElement) {
+                    const modal = new bootstrap.Modal(modalElement);
+                    modal.show();
+                    addResult('✅ Basic modal shown successfully', 'success');
+                    
+                    // Auto-hide after 3 seconds
+                    setTimeout(() => {
+                        modal.hide();
+                        addResult('✅ Basic modal hidden successfully', 'success');
+                    }, 3000);
+                } else {
+                    addResult('❌ Modal element not found', 'error');
+                }
+            } catch (error) {
+                addResult(`❌ Error testing basic modal: ${error.message}`, 'error');
+            }
+        }
+        
+        function testStrainModal() {
+            addResult('Testing strain modal functionality...', 'info');
+            
+            try {
+                const modalElement = document.getElementById('strainLineageEditorModal');
+                if (modalElement) {
+                    const modal = new bootstrap.Modal(modalElement);
+                    modal.show();
+                    addResult('✅ Strain modal shown successfully', 'success');
+                    
+                    // Auto-hide after 3 seconds
+                    setTimeout(() => {
+                        modal.hide();
+                        addResult('✅ Strain modal hidden successfully', 'success');
+                    }, 3000);
+                } else {
+                    addResult('❌ Strain modal element not found', 'error');
+                }
+            } catch (error) {
+                addResult(`❌ Error testing strain modal: ${error.message}`, 'error');
+            }
+        }
+        
+        function testEmergencyCleanup() {
+            addResult('Testing emergency cleanup...', 'info');
+            
+            try {
+                if (typeof window.emergencyLineageModalCleanup === 'function') {
+                    window.emergencyLineageModalCleanup();
+                    addResult('✅ Emergency cleanup function executed', 'success');
+                } else {
+                    addResult('❌ Emergency cleanup function not found', 'error');
+                }
+            } catch (error) {
+                addResult(`❌ Error during emergency cleanup: ${error.message}`, 'error');
+            }
+        }
+        
+        function testLineageEditor() {
+            addResult('Testing lineage editor integration...', 'info');
+            
+            try {
+                if (window.lineageEditor) {
+                    addResult('✅ Lineage editor instance found', 'success');
+                    
+                    // Test opening the editor
+                    window.lineageEditor.openEditor('Test Product', 'HYBRID');
+                    addResult('✅ Lineage editor openEditor called', 'success');
+                } else {
+                    addResult('❌ Lineage editor instance not found', 'error');
+                }
+            } catch (error) {
+                addResult(`❌ Error testing lineage editor: ${error.message}`, 'error');
+            }
+        }
+        
+        function testStrainLineageEditor() {
+            addResult('Testing strain lineage editor integration...', 'info');
+            
+            try {
+                if (window.strainLineageEditor) {
+                    addResult('✅ Strain lineage editor instance found', 'success');
+                    
+                    // Test opening the editor
+                    window.strainLineageEditor.openEditor('Test Strain', 'HYBRID');
+                    addResult('✅ Strain lineage editor openEditor called', 'success');
+                } else {
+                    addResult('❌ Strain lineage editor instance not found', 'error');
+                }
+            } catch (error) {
+                addResult(`❌ Error testing strain lineage editor: ${error.message}`, 'error');
+            }
+        }
+        
+        // Auto-test on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            addResult('Page loaded, running auto-tests...', 'info');
+            
+            // Wait a bit for everything to initialize
+            setTimeout(() => {
+                testBootstrap();
+                testModalElements();
+                
+                // Test lineage editor initialization
+                setTimeout(() => {
+                    if (window.lineageEditor) {
+                        addResult('✅ Lineage editor initialized successfully', 'success');
+                    } else {
+                        addResult('❌ Lineage editor not initialized', 'error');
+                    }
+                    
+                    if (window.strainLineageEditor) {
+                        addResult('✅ Strain lineage editor initialized successfully', 'success');
+                    } else {
+                        addResult('❌ Strain lineage editor not initialized', 'error');
+                    }
+                }, 2000);
+            }, 1000);
+        });
+    </script>
+</body>
+</html> 

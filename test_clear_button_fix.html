@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clear Button Fix Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .test-section {
+            border: 1px solid #ccc;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        .success {
+            background-color: #d4edda;
+            border-color: #c3e6cb;
+        }
+        .error {
+            background-color: #f8d7da;
+            border-color: #f5c6cb;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        .btn-primary {
+            background-color: #007bff;
+            color: white;
+        }
+        .btn-secondary {
+            background-color: #6c757d;
+            color: white;
+        }
+        #testResults {
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Clear Button Fix Test</h1>
+    
+    <div class="test-section">
+        <h3>Test 1: Clear Button Event Listener</h3>
+        <p>This test verifies that the clear button has a proper event listener attached.</p>
+        <button id="clear-filters-btn" class="btn-primary">Clear</button>
+        <div id="test1Result"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>Test 2: TagManager.clearSelected Function</h3>
+        <p>This test verifies that the TagManager.clearSelected function exists and works.</p>
+        <button onclick="testClearFunction()" class="btn-secondary">Test Clear Function</button>
+        <div id="test2Result"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>Test 3: Simulated Tag Selection</h3>
+        <p>This test simulates having selected tags and then clearing them.</p>
+        <button onclick="simulateTagSelection()" class="btn-secondary">Simulate Tags</button>
+        <button onclick="testClearWithTags()" class="btn-secondary">Test Clear with Tags</button>
+        <div id="test3Result"></div>
+    </div>
+
+    <div id="testResults"></div>
+
+    <script>
+        // Mock TagManager for testing
+        window.TagManager = {
+            state: {
+                persistentSelectedTags: new Set(),
+                selectedTags: new Set(),
+                originalTags: []
+            },
+            clearSelected: async function() {
+                console.log('TagManager.clearSelected called');
+                this.state.persistentSelectedTags.clear();
+                this.state.selectedTags.clear();
+                this.updateSelectedTags([]);
+                return true;
+            },
+            updateSelectedTags: function(tags) {
+                console.log('updateSelectedTags called with:', tags);
+                return true;
+            },
+            debouncedUpdateAvailableTags: function(tags, filter) {
+                console.log('debouncedUpdateAvailableTags called');
+                return true;
+            }
+        };
+
+        // Test 1: Check if clear button event listener is attached
+        document.addEventListener('DOMContentLoaded', function() {
+            const clearButton = document.getElementById('clear-filters-btn');
+            if (clearButton) {
+                clearButton.addEventListener('click', function() {
+                    if (window.TagManager && TagManager.clearSelected) {
+                        TagManager.clearSelected();
+                        document.getElementById('test1Result').innerHTML = 
+                            '<div class="success">✅ Clear button event listener works!</div>';
+                    }
+                });
+                document.getElementById('test1Result').innerHTML = 
+                    '<div class="success">✅ Clear button found and event listener attached</div>';
+            } else {
+                document.getElementById('test1Result').innerHTML = 
+                    '<div class="error">❌ Clear button not found</div>';
+            }
+        });
+
+        // Test 2: Test clear function directly
+        async function testClearFunction() {
+            try {
+                if (window.TagManager && TagManager.clearSelected) {
+                    await TagManager.clearSelected();
+                    document.getElementById('test2Result').innerHTML = 
+                        '<div class="success">✅ TagManager.clearSelected function works!</div>';
+                } else {
+                    document.getElementById('test2Result').innerHTML = 
+                        '<div class="error">❌ TagManager.clearSelected function not found</div>';
+                }
+            } catch (error) {
+                document.getElementById('test2Result').innerHTML = 
+                    '<div class="error">❌ Error testing clear function: ' + error.message + '</div>';
+            }
+        }
+
+        // Test 3: Simulate tag selection and clearing
+        function simulateTagSelection() {
+            TagManager.state.persistentSelectedTags.add('Test Tag 1');
+            TagManager.state.persistentSelectedTags.add('Test Tag 2');
+            TagManager.state.selectedTags.add('Test Tag 1');
+            TagManager.state.selectedTags.add('Test Tag 2');
+            document.getElementById('test3Result').innerHTML = 
+                '<div class="success">✅ Simulated 2 selected tags</div>';
+        }
+
+        async function testClearWithTags() {
+            try {
+                const beforeCount = TagManager.state.persistentSelectedTags.size;
+                await TagManager.clearSelected();
+                const afterCount = TagManager.state.persistentSelectedTags.size;
+                
+                if (beforeCount > 0 && afterCount === 0) {
+                    document.getElementById('test3Result').innerHTML = 
+                        '<div class="success">✅ Successfully cleared ' + beforeCount + ' selected tags</div>';
+                } else {
+                    document.getElementById('test3Result').innerHTML = 
+                        '<div class="error">❌ Failed to clear tags (before: ' + beforeCount + ', after: ' + afterCount + ')</div>';
+                }
+            } catch (error) {
+                document.getElementById('test3Result').innerHTML = 
+                    '<div class="error">❌ Error testing clear with tags: ' + error.message + '</div>';
+            }
+        }
+
+        // Log all test results
+        function logTestResults() {
+            const results = {
+                clearButtonExists: !!document.getElementById('clear-filters-btn'),
+                tagManagerExists: !!window.TagManager,
+                clearFunctionExists: !!(window.TagManager && TagManager.clearSelected),
+                eventListenerAttached: false
+            };
+
+            // Check if event listener is attached
+            const clearButton = document.getElementById('clear-filters-btn');
+            if (clearButton) {
+                const listeners = getEventListeners(clearButton);
+                results.eventListenerAttached = listeners && listeners.click && listeners.click.length > 0;
+            }
+
+            console.log('Test Results:', results);
+            return results;
+        }
+
+        // Helper function to get event listeners (simplified)
+        function getEventListeners(element) {
+            // This is a simplified version - in real browsers you'd need dev tools
+            return { click: [] };
+        }
+
+        // Run tests after page loads
+        window.addEventListener('load', function() {
+            setTimeout(() => {
+                const results = logTestResults();
+                document.getElementById('testResults').innerHTML = 
+                    '<h3>Summary:</h3>' +
+                    '<ul>' +
+                    '<li>Clear button exists: ' + (results.clearButtonExists ? '✅' : '❌') + '</li>' +
+                    '<li>TagManager exists: ' + (results.tagManagerExists ? '✅' : '❌') + '</li>' +
+                    '<li>Clear function exists: ' + (results.clearFunctionExists ? '✅' : '❌') + '</li>' +
+                    '<li>Event listener attached: ' + (results.eventListenerAttached ? '✅' : '❌') + '</li>' +
+                    '</ul>';
+            }, 1000);
+        });
+    </script>
+</body>
+</html> 

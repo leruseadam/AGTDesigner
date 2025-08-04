@@ -1,0 +1,26 @@
+# PythonAnywhere Update Commands
+# Run these commands in your PythonAnywhere bash console
+
+# 1. Navigate to your project directory
+cd /home/adamcordova/AGTDesigner
+
+# 2. Pull the latest changes from GitHub
+git pull origin main
+
+# 3. Check that the latest commit is pulled
+git log --oneline -3
+
+# 4. Verify the Flask context fixes are in place
+grep -n "has_request_context" app.py
+
+# 5. Reload the web app
+# Go to the Web tab in PythonAnywhere dashboard and click "Reload"
+
+# 6. Check the error logs if there are any issues
+# Go to the Web tab and check the error logs
+
+# 7. Test the application
+# Visit your PythonAnywhere URL to test file uploads
+
+# Optional: If you need to restart the web app completely
+# Go to Web tab -> Reload button 

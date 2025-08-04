@@ -1,0 +1,28 @@
+{
+  "inventory_transfer_items": [
+    {
+      "product_name": "Core Reactor Quartz Banger",
+      "product_brand": "Test Brand",
+      "qty": 5,
+      "inventory_id": "TEST001",
+      "vendor": "Test Vendor"
+    },
+    {
+      "product_name": "Terp Slurper Quartz Banger",
+      "product_brand": "Test Brand",
+      "qty": 3,
+      "inventory_id": "TEST002",
+      "vendor": "Test Vendor"
+    },
+    {
+      "product_name": "Diamond Knot Quartz Banger",
+      "product_brand": "Test Brand",
+      "qty": 2,
+      "inventory_id": "TEST003",
+      "vendor": "Test Vendor"
+    }
+  ],
+  "from_license_name": "Test Vendor",
+  "from_license_number": "12345",
+  "est_arrival_at": "2024-01-01T00:00:00Z"
+} 

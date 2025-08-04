@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Default File Loading Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .success { background-color: #d4edda; border-color: #c3e6cb; }
+        .error { background-color: #f8d7da; border-color: #f5c6cb; }
+        .info { background-color: #d1ecf1; border-color: #bee5eb; }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        .btn-primary { background-color: #007bff; color: white; }
+        .btn-success { background-color: #28a745; color: white; }
+        .btn-danger { background-color: #dc3545; color: white; }
+        #results {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+    <h1>Default File Loading Test</h1>
+    
+    <div class="test-section info">
+        <h3>Test Instructions</h3>
+        <p>This page tests the default file loading functionality. Click the buttons below to test different aspects:</p>
+    </div>
+    
+    <div class="test-section">
+        <h3>1. Test Backend API</h3>
+        <button class="btn-primary" onclick="testBackendAPI()">Test Available Tags API</button>
+        <button class="btn-primary" onclick="testInitialDataAPI()">Test Initial Data API</button>
+        <button class="btn-primary" onclick="testStatusAPI()">Test Status API</button>
+    </div>
+    
+    <div class="test-section">
+        <h3>2. Test Frontend JavaScript</h3>
+        <button class="btn-success" onclick="testTagManagerInit()">Test TagManager Init</button>
+        <button class="btn-success" onclick="testCheckForExistingData()">Test checkForExistingData</button>
+        <button class="btn-success" onclick="testUpdateAvailableTags()">Test _updateAvailableTags</button>
+    </div>
+    
+    <div class="test-section">
+        <h3>3. Test Full Integration</h3>
+        <button class="btn-danger" onclick="testFullIntegration()">Test Full Integration</button>
+    </div>
+    
+    <div id="results"></div>
+    
+    <script>
+        function log(message) {
+            const results = document.getElementById('results');
+            results.textContent += new Date().toLocaleTimeString() + ': ' + message + '\n';
+            console.log(message);
+        }
+        
+        function clearLog() {
+            document.getElementById('results').textContent = '';
+        }
+        
+        async function testBackendAPI() {
+            clearLog();
+            log('Testing Backend API...');
+            
+            try {
+                // Test available tags API
+                const response = await fetch('/api/available-tags');
+                const data = await response.json();
+                log(`✅ Available Tags API: ${data.length} tags returned`);
+                
+                // Test status API
+                const statusResponse = await fetch('/api/status');
+                const statusData = await statusResponse.json();
+                log(`✅ Status API: ${statusData.data_loaded ? 'Data loaded' : 'No data'}`);
+                
+                // Test initial data API
+                const initialResponse = await fetch('/api/initial-data');
+                const initialData = await initialResponse.json();
+                log(`✅ Initial Data API: ${initialData.success ? 'Success' : 'Failed'}`);
+                if (initialData.success) {
+                    log(`   - Available tags: ${initialData.available_tags ? initialData.available_tags.length : 0}`);
+                    log(`   - Filename: ${initialData.filename || 'N/A'}`);
+                }
+                
+            } catch (error) {
+                log(`❌ API Test Error: ${error.message}`);
+            }
+        }
+        
+        async function testInitialDataAPI() {
+            clearLog();
+            log('Testing Initial Data API...');
+            
+            try {
+                const response = await fetch('/api/initial-data');
+                const data = await response.json();
+                
+                log(`Response: ${JSON.stringify(data, null, 2)}`);
+                
+            } catch (error) {
+                log(`❌ Initial Data API Error: ${error.message}`);
+            }
+        }
+        
+        async function testStatusAPI() {
+            clearLog();
+            log('Testing Status API...');
+            
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+                
+                log(`Response: ${JSON.stringify(data, null, 2)}`);
+                
+            } catch (error) {
+                log(`❌ Status API Error: ${error.message}`);
+            }
+        }
+        
+        function testTagManagerInit() {
+            clearLog();
+            log('Testing TagManager Init...');
+            
+            if (typeof TagManager !== 'undefined') {
+                log('✅ TagManager object exists');
+                if (typeof TagManager.init === 'function') {
+                    log('✅ TagManager.init function exists');
+                    try {
+                        TagManager.init();
+                        log('✅ TagManager.init() called successfully');
+                    } catch (error) {
+                        log(`❌ TagManager.init() error: ${error.message}`);
+                    }
+                } else {
+                    log('❌ TagManager.init function not found');
+                }
+            } else {
+                log('❌ TagManager object not found');
+            }
+        }
+        
+        async function testCheckForExistingData() {
+            clearLog();
+            log('Testing checkForExistingData...');
+            
+            if (typeof TagManager !== 'undefined' && TagManager.checkForExistingData) {
+                log('✅ checkForExistingData function exists');
+                try {
+                    await TagManager.checkForExistingData();
+                    log('✅ checkForExistingData() completed');
+                } catch (error) {
+                    log(`❌ checkForExistingData() error: ${error.message}`);
+                }
+            } else {
+                log('❌ checkForExistingData function not found');
+            }
+        }
+        
+        function testUpdateAvailableTags() {
+            clearLog();
+            log('Testing _updateAvailableTags...');
+            
+            if (typeof TagManager !== 'undefined' && TagManager._updateAvailableTags) {
+                log('✅ _updateAvailableTags function exists');
+                try {
+                    const testTags = [
+                        { 'Product Name*': 'Test Product 1', 'Product Brand': 'Test Brand' },
+                        { 'Product Name*': 'Test Product 2', 'Product Brand': 'Test Brand' }
+                    ];
+                    TagManager._updateAvailableTags(testTags);
+                    log('✅ _updateAvailableTags() called with test data');
+                } catch (error) {
+                    log(`❌ _updateAvailableTags() error: ${error.message}`);
+                }
+            } else {
+                log('❌ _updateAvailableTags function not found');
+            }
+        }
+        
+        async function testFullIntegration() {
+            clearLog();
+            log('Testing Full Integration...');
+            
+            try {
+                // Test backend
+                const response = await fetch('/api/available-tags');
+                const data = await response.json();
+                log(`Backend: ${data.length} tags available`);
+                
+                // Test frontend
+                if (typeof TagManager !== 'undefined') {
+                    log('Frontend: TagManager exists');
+                    
+                    // Test initialization
+                    TagManager.init();
+                    log('Frontend: TagManager initialized');
+                    
+                    // Test data loading
+                    await TagManager.checkForExistingData();
+                    log('Frontend: Data loading completed');
+                    
+                    // Check if tags are displayed
+                    const container = document.getElementById('availableTags');
+                    if (container) {
+                        const tagElements = container.querySelectorAll('.tag-entry');
+                        log(`Frontend: ${tagElements.length} tag elements found in UI`);
+                    } else {
+                        log('Frontend: availableTags container not found');
+                    }
+                } else {
+                    log('Frontend: TagManager not found');
+                }
+                
+            } catch (error) {
+                log(`❌ Integration Test Error: ${error.message}`);
+            }
+        }
+    </script>
+</body>
+</html> 

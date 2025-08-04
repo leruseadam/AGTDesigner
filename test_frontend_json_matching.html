@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JSON Matching Frontend Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; border-radius: 5px; }
+        .success { background-color: #d4edda; border-color: #c3e6cb; }
+        .error { background-color: #f8d7da; border-color: #f5c6cb; }
+        .info { background-color: #d1ecf1; border-color: #bee5eb; }
+        button { padding: 10px 20px; margin: 5px; cursor: pointer; }
+        input { padding: 8px; margin: 5px; width: 300px; }
+        pre { background: #f8f9fa; padding: 10px; border-radius: 3px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>JSON Matching Frontend Test</h1>
+    
+    <div class="test-section info">
+        <h3>Test Configuration</h3>
+        <p>This test will verify that the frontend properly handles JSON matching responses.</p>
+        <input type="text" id="jsonUrl" value="https://files.cultivera.com/435553542D57533130383235/Interop/25/16/3EGQ3216P7YSVJCF/Cultivera_ORD-5430_422044.json" placeholder="Enter JSON URL">
+        <button onclick="testJsonMatching()">Test JSON Matching</button>
+    </div>
+    
+    <div class="test-section">
+        <h3>Test Results</h3>
+        <div id="results"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>Console Log</h3>
+        <pre id="consoleLog"></pre>
+    </div>
+
+    <script>
+        // Mock TagManager for testing
+        window.TagManager = {
+            updateSelectedTags: function(tags) {
+                log('TagManager.updateSelectedTags called with ' + tags.length + ' tags');
+                log('First few tags: ' + JSON.stringify(tags.slice(0, 3), null, 2));
+                return true;
+            },
+            fetchAndUpdateAvailableTags: function() {
+                log('TagManager.fetchAndUpdateAvailableTags called');
+                return Promise.resolve();
+            },
+            fetchAndUpdateSelectedTags: function() {
+                log('TagManager.fetchAndUpdateSelectedTags called');
+                return Promise.resolve();
+            },
+            fetchAndPopulateFilters: function() {
+                log('TagManager.fetchAndPopulateFilters called');
+                return Promise.resolve();
+            }
+        };
+
+        function log(message) {
+            const consoleLog = document.getElementById('consoleLog');
+            const timestamp = new Date().toLocaleTimeString();
+            consoleLog.textContent += `[${timestamp}] ${message}\n`;
+            consoleLog.scrollTop = consoleLog.scrollHeight;
+            console.log(message);
+        }
+
+        function addResult(message, type = 'info') {
+            const results = document.getElementById('results');
+            const div = document.createElement('div');
+            div.className = `test-section ${type}`;
+            div.innerHTML = `<p>${message}</p>`;
+            results.appendChild(div);
+        }
+
+        async function testJsonMatching() {
+            const jsonUrl = document.getElementById('jsonUrl').value;
+            if (!jsonUrl) {
+                addResult('Please enter a JSON URL', 'error');
+                return;
+            }
+
+            addResult('Starting JSON matching test...', 'info');
+            log('Testing JSON matching with URL: ' + jsonUrl);
+
+            try {
+                // Simulate the frontend JSON matching process
+                const response = await fetch('/api/json-match', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: jsonUrl })
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || 'JSON matching failed');
+                }
+
+                const matchResult = await response.json();
+                log('JSON match response received: ' + JSON.stringify(matchResult, null, 2));
+
+                addResult(`✅ JSON matching successful!`, 'success');
+                addResult(`Matched count: ${matchResult.matched_count}`, 'success');
+                addResult(`Selected tags: ${matchResult.selected_tags ? matchResult.selected_tags.length : 0}`, 'success');
+
+                // Simulate the frontend processing
+                if (typeof TagManager !== 'undefined') {
+                    log('TagManager is available, processing response...');
+                    
+                    await TagManager.fetchAndUpdateAvailableTags();
+                    
+                    if (matchResult.selected_tags && matchResult.selected_tags.length > 0) {
+                        log('Using selected tags from JSON match response: ' + matchResult.selected_tags.length + ' items');
+                        const result = TagManager.updateSelectedTags(matchResult.selected_tags);
+                        addResult(`✅ TagManager.updateSelectedTags() called successfully`, 'success');
+                    } else {
+                        log('No selected tags in response, calling fetchAndUpdateSelectedTags');
+                        await TagManager.fetchAndUpdateSelectedTags();
+                        addResult(`⚠️ No selected tags in response`, 'error');
+                    }
+                    
+                    await TagManager.fetchAndPopulateFilters();
+                    addResult(`✅ TagManager.fetchAndPopulateFilters() called successfully`, 'success');
+                } else {
+                    addResult(`❌ TagManager is not available`, 'error');
+                }
+
+            } catch (error) {
+                log('Error during JSON matching: ' + error.message);
+                addResult(`❌ JSON matching failed: ${error.message}`, 'error');
+            }
+        }
+
+        // Test TagManager availability on page load
+        window.addEventListener('load', function() {
+            if (typeof TagManager !== 'undefined') {
+                addResult('✅ TagManager is available', 'success');
+            } else {
+                addResult('❌ TagManager is not available', 'error');
+            }
+        });
+    </script>
+</body>
+</html> 

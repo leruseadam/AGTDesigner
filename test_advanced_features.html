@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Features Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .test-section {
+            background: white;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .btn {
+            padding: 10px 20px;
+            margin: 5px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            background: #007bff;
+            color: white;
+        }
+        .btn:hover {
+            background: #0056b3;
+        }
+        .error {
+            color: red;
+            background: #ffe6e6;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .success {
+            color: green;
+            background: #e6ffe6;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Advanced Features Test</h1>
+    
+    <div class="test-section">
+        <h2>Test Advanced Features Buttons</h2>
+        <p>Click the buttons below to test if the advanced features functions are working:</p>
+        
+        <button class="btn" onclick="testOpenDatabaseAnalytics()">Test Analytics</button>
+        <button class="btn" onclick="testOpenProductSimilarity()">Test Similarity</button>
+        <button class="btn" onclick="testOpenDatabaseHealth()">Test Health</button>
+        <button class="btn" onclick="testOpenAdvancedSearch()">Test Search</button>
+        <button class="btn" onclick="testOpenDatabaseBackup()">Test Backup</button>
+        <button class="btn" onclick="testOpenTrendAnalysis()">Test Trends</button>
+        <button class="btn" onclick="testOpenVendorAnalytics()">Test Vendors</button>
+        <button class="btn" onclick="testOpenDatabaseOptimization()">Test Optimize</button>
+    </div>
+    
+    <div class="test-section">
+        <h2>Test API Endpoints</h2>
+        <p>Test if the API endpoints are responding:</p>
+        
+        <button class="btn" onclick="testAPI('/api/database-stats')">Test /api/database-stats</button>
+        <button class="btn" onclick="testAPI('/api/database-vendor-stats')">Test /api/database-vendor-stats</button>
+        <button class="btn" onclick="testAPI('/api/database-analytics')">Test /api/database-analytics</button>
+        <button class="btn" onclick="testAPI('/api/available-tags')">Test /api/available-tags</button>
+    </div>
+    
+    <div id="results"></div>
+
+    <script>
+        function showResult(message, isError = false) {
+            const resultsDiv = document.getElementById('results');
+            const div = document.createElement('div');
+            div.className = isError ? 'error' : 'success';
+            div.textContent = message;
+            resultsDiv.appendChild(div);
+        }
+
+        function testAPI(endpoint) {
+            showResult(`Testing ${endpoint}...`);
+            
+            fetch(endpoint)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    showResult(`✅ ${endpoint} - Success! Data: ${JSON.stringify(data).substring(0, 100)}...`);
+                })
+                .catch(error => {
+                    showResult(`❌ ${endpoint} - Error: ${error.message}`, true);
+                });
+        }
+
+        function testOpenDatabaseAnalytics() {
+            try {
+                if (typeof openDatabaseAnalytics === 'function') {
+                    openDatabaseAnalytics();
+                    showResult('✅ openDatabaseAnalytics function exists and was called');
+                } else {
+                    showResult('❌ openDatabaseAnalytics function is not defined', true);
+                }
+            } catch (error) {
+                showResult(`❌ Error calling openDatabaseAnalytics: ${error.message}`, true);
+            }
+        }
+
+        function testOpenProductSimilarity() {
+            try {
+                if (typeof openProductSimilarity === 'function') {
+                    openProductSimilarity();
+                    showResult('✅ openProductSimilarity function exists and was called');
+                } else {
+                    showResult('❌ openProductSimilarity function is not defined', true);
+                }
+            } catch (error) {
+                showResult(`❌ Error calling openProductSimilarity: ${error.message}`, true);
+            }
+        }
+
+        function testOpenDatabaseHealth() {
+            try {
+                if (typeof openDatabaseHealth === 'function') {
+                    openDatabaseHealth();
+                    showResult('✅ openDatabaseHealth function exists and was called');
+                } else {
+                    showResult('❌ openDatabaseHealth function is not defined', true);
+                }
+            } catch (error) {
+                showResult(`❌ Error calling openDatabaseHealth: ${error.message}`, true);
+            }
+        }
+
+        function testOpenAdvancedSearch() {
+            try {
+                if (typeof openAdvancedSearch === 'function') {
+                    openAdvancedSearch();
+                    showResult('✅ openAdvancedSearch function exists and was called');
+                } else {
+                    showResult('❌ openAdvancedSearch function is not defined', true);
+                }
+            } catch (error) {
+                showResult(`❌ Error calling openAdvancedSearch: ${error.message}`, true);
+            }
+        }
+
+        function testOpenDatabaseBackup() {
+            try {
+                if (typeof openDatabaseBackup === 'function') {
+                    openDatabaseBackup();
+                    showResult('✅ openDatabaseBackup function exists and was called');
+                } else {
+                    showResult('❌ openDatabaseBackup function is not defined', true);
+                }
+            } catch (error) {
+                showResult(`❌ Error calling openDatabaseBackup: ${error.message}`, true);
+            }
+        }
+
+        function testOpenTrendAnalysis() {
+            try {
+                if (typeof openTrendAnalysis === 'function') {
+                    openTrendAnalysis();
+                    showResult('✅ openTrendAnalysis function exists and was called');
+                } else {
+                    showResult('❌ openTrendAnalysis function is not defined', true);
+                }
+            } catch (error) {
+                showResult(`❌ Error calling openTrendAnalysis: ${error.message}`, true);
+            }
+        }
+
+        function testOpenVendorAnalytics() {
+            try {
+                if (typeof openVendorAnalytics === 'function') {
+                    openVendorAnalytics();
+                    showResult('✅ openVendorAnalytics function exists and was called');
+                } else {
+                    showResult('❌ openVendorAnalytics function is not defined', true);
+                }
+            } catch (error) {
+                showResult(`❌ Error calling openVendorAnalytics: ${error.message}`, true);
+            }
+        }
+
+        function testOpenDatabaseOptimization() {
+            try {
+                if (typeof openDatabaseOptimization === 'function') {
+                    openDatabaseOptimization();
+                    showResult('✅ openDatabaseOptimization function exists and was called');
+                } else {
+                    showResult('❌ openDatabaseOptimization function is not defined', true);
+                }
+            } catch (error) {
+                showResult(`❌ Error calling openDatabaseOptimization: ${error.message}`, true);
+            }
+        }
+    </script>
+</body>
+</html> 

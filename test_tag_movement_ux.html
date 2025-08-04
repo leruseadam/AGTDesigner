@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tag Movement UX Test</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .action-splash {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            backdrop-filter: blur(10px);
+        }
+        
+        .action-splash-content {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 15px;
+            padding: 2rem;
+            text-align: center;
+            color: white;
+            backdrop-filter: blur(20px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+        
+        .tag-item {
+            transition: opacity 0.3s ease, transform 0.3s ease;
+        }
+        
+        .tag-item.removing {
+            opacity: 0;
+            transform: translateX(-20px);
+        }
+        
+        .tag-item.adding {
+            opacity: 0;
+            transform: translateX(20px);
+        }
+        
+        .tag-item.adding.show {
+            opacity: 1;
+            transform: translateX(0);
+        }
+    </style>
+</head>
+<body class="bg-dark text-light">
+    <div class="container-fluid mt-3">
+        <h2>Tag Movement UX Test</h2>
+        <p class="text-muted">Testing the new behavior where selected tags are removed from available tags for better UX</p>
+        
+        <div class="row">
+            <!-- Available Tags -->
+            <div class="col-md-6">
+                <div class="card bg-dark border-secondary">
+                    <div class="card-header">
+                        <h5>Available Tags</h5>
+                        <small class="text-muted">Select tags to move to selected</small>
+                    </div>
+                    <div class="card-body" id="availableTags" style="max-height: 400px; overflow-y: auto;">
+                        <!-- Tags will be populated here -->
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Selected Tags -->
+            <div class="col-md-6">
+                <div class="card bg-dark border-secondary">
+                    <div class="card-header">
+                        <h5>Selected Tags</h5>
+                        <small class="text-muted">Tags that have been moved to selected</small>
+                    </div>
+                    <div class="card-body" id="selectedTags" style="max-height: 400px; overflow-y: auto;">
+                        <!-- Selected tags will appear here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Action Buttons -->
+        <div class="row mt-3">
+            <div class="col-12">
+                <div class="d-flex gap-2 justify-content-center">
+                    <button class="btn btn-primary" onclick="moveToSelected()">Move to Selected</button>
+                    <button class="btn btn-secondary" onclick="moveToAvailable()">Move to Available</button>
+                    <button class="btn btn-danger" onclick="clearSelected()">Clear Selected</button>
+                    <button class="btn btn-warning" onclick="undoMove()">Undo</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Test Controls -->
+        <div class="row mt-3">
+            <div class="col-12">
+                <div class="card bg-dark border-secondary">
+                    <div class="card-header">
+                        <h6>Test Controls</h6>
+                    </div>
+                    <div class="card-body">
+                        <button class="btn btn-sm btn-outline-info" onclick="addTestTags()">Add Test Tags</button>
+                        <button class="btn btn-sm btn-outline-warning" onclick="resetTest()">Reset Test</button>
+                        <button class="btn btn-sm btn-outline-success" onclick="testBulkMove()">Test Bulk Move</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Action Splash -->
+    <div id="actionSplash" class="action-splash">
+        <div class="action-splash-content">
+            <div class="spinner-border text-primary mb-3" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <div class="action-splash-message">Processing...</div>
+        </div>
+    </div>
+
+    <script>
+        // Mock TagManager for testing
+        const TagManager = {
+            state: {
+                tags: [],
+                originalTags: [],
+                persistentSelectedTags: new Set(),
+                selectedTags: new Set()
+            },
+            
+            showActionSplash(message) {
+                const splash = document.getElementById('actionSplash');
+                const messageElement = splash.querySelector('.action-splash-message');
+                if (messageElement) {
+                    messageElement.textContent = message;
+                }
+                splash.style.display = 'flex';
+            },
+            
+            hideActionSplash() {
+                const splash = document.getElementById('actionSplash');
+                splash.style.display = 'none';
+            },
+            
+            createTagElement(tag) {
+                const tagElement = document.createElement('div');
+                tagElement.className = 'tag-item d-flex align-items-center p-2 mb-1 border border-secondary rounded';
+                tagElement.innerHTML = `
+                    <input type="checkbox" class="tag-checkbox me-2" value="${tag.name}">
+                    <span class="tag-name">${tag.name}</span>
+                    <small class="text-muted ms-2">(${tag.vendor})</small>
+                `;
+                return tagElement;
+            },
+            
+            updateSelectedTags(tags) {
+                const container = document.getElementById('selectedTags');
+                container.innerHTML = '';
+                
+                if (tags.length === 0) {
+                    container.innerHTML = '<p class="text-muted">No tags selected</p>';
+                    return;
+                }
+                
+                tags.forEach(tag => {
+                    const tagElement = this.createTagElement(tag);
+                    container.appendChild(tagElement);
+                });
+            },
+            
+            removeSelectedTagsFromAvailableDisplay(selectedTagNames) {
+                const selectedTagSet = new Set(selectedTagNames);
+                
+                const availableTagElements = document.querySelectorAll('#availableTags .tag-item');
+                availableTagElements.forEach(tagElement => {
+                    const checkbox = tagElement.querySelector('.tag-checkbox');
+                    if (checkbox && selectedTagSet.has(checkbox.value)) {
+                        tagElement.classList.add('removing');
+                        
+                        setTimeout(() => {
+                            if (tagElement.parentNode) {
+                                tagElement.parentNode.removeChild(tagElement);
+                            }
+                        }, 300);
+                    }
+                });
+            },
+            
+            addTagsToAvailableDisplay(tagNames) {
+                const container = document.getElementById('availableTags');
+                
+                tagNames.forEach(tagName => {
+                    const tag = this.state.originalTags.find(t => t.name === tagName);
+                    if (tag) {
+                        const tagElement = this.createTagElement(tag);
+                        tagElement.classList.add('adding');
+                        container.appendChild(tagElement);
+                        
+                        // Trigger animation
+                        setTimeout(() => {
+                            tagElement.classList.add('show');
+                        }, 10);
+                    }
+                });
+            },
+            
+            updateSelectAllCheckboxes() {
+                // Simplified for testing
+                console.log('Updated select all checkboxes');
+            }
+        };
+
+        // Test data
+        const testTags = [
+            { name: 'Blue Dream', vendor: 'Vendor A' },
+            { name: 'OG Kush', vendor: 'Vendor A' },
+            { name: 'Sour Diesel', vendor: 'Vendor B' },
+            { name: 'Granddaddy Purple', vendor: 'Vendor B' },
+            { name: 'White Widow', vendor: 'Vendor C' },
+            { name: 'Northern Lights', vendor: 'Vendor C' },
+            { name: 'Jack Herer', vendor: 'Vendor A' },
+            { name: 'AK-47', vendor: 'Vendor B' }
+        ];
+
+        function addTestTags() {
+            TagManager.state.originalTags = [...testTags];
+            TagManager.state.tags = [...testTags];
+            
+            const container = document.getElementById('availableTags');
+            container.innerHTML = '';
+            
+            testTags.forEach(tag => {
+                const tagElement = TagManager.createTagElement(tag);
+                container.appendChild(tagElement);
+            });
+            
+            console.log('Added test tags');
+        }
+
+        function moveToSelected() {
+            const checked = Array.from(document.querySelectorAll('#availableTags input[type="checkbox"].tag-checkbox:checked')).map(cb => cb.value);
+            if (checked.length === 0) {
+                alert('No tags selected to move');
+                return;
+            }
+            
+            TagManager.showActionSplash('Moving tags to selected...');
+            
+            // Add to selected tags
+            checked.forEach(tagName => {
+                TagManager.state.persistentSelectedTags.add(tagName);
+            });
+            TagManager.state.selectedTags = new Set(TagManager.state.persistentSelectedTags);
+            
+            // Update selected display
+            const selectedTagObjects = Array.from(TagManager.state.persistentSelectedTags).map(name =>
+                TagManager.state.originalTags.find(t => t.name === name)
+            ).filter(Boolean);
+            TagManager.updateSelectedTags(selectedTagObjects);
+            
+            // Remove from available display
+            TagManager.removeSelectedTagsFromAvailableDisplay(checked);
+            
+            setTimeout(() => {
+                TagManager.hideActionSplash();
+            }, 300);
+            
+            console.log(`Moved ${checked.length} tags to selected`);
+        }
+
+        function moveToAvailable() {
+            const checked = Array.from(document.querySelectorAll('#selectedTags input[type="checkbox"].tag-checkbox:checked')).map(cb => cb.value);
+            if (checked.length === 0) {
+                alert('No tags selected to move');
+                return;
+            }
+            
+            TagManager.showActionSplash('Moving tags to available...');
+            
+            // Remove from selected tags
+            checked.forEach(tagName => {
+                TagManager.state.persistentSelectedTags.delete(tagName);
+            });
+            TagManager.state.selectedTags = new Set(TagManager.state.persistentSelectedTags);
+            
+            // Update selected display
+            const selectedTagObjects = Array.from(TagManager.state.persistentSelectedTags).map(name =>
+                TagManager.state.originalTags.find(t => t.name === name)
+            ).filter(Boolean);
+            TagManager.updateSelectedTags(selectedTagObjects);
+            
+            // Add back to available display
+            TagManager.addTagsToAvailableDisplay(checked);
+            
+            setTimeout(() => {
+                TagManager.hideActionSplash();
+            }, 300);
+            
+            console.log(`Moved ${checked.length} tags to available`);
+        }
+
+        function clearSelected() {
+            TagManager.showActionSplash('Clearing selected tags...');
+            
+            // Get all selected tag names
+            const selectedTagNames = Array.from(TagManager.state.persistentSelectedTags);
+            
+            // Clear selected tags
+            TagManager.state.persistentSelectedTags.clear();
+            TagManager.state.selectedTags.clear();
+            TagManager.updateSelectedTags([]);
+            
+            // Add all tags back to available display
+            TagManager.addTagsToAvailableDisplay(selectedTagNames);
+            
+            setTimeout(() => {
+                TagManager.hideActionSplash();
+            }, 300);
+            
+            console.log('Cleared all selected tags');
+        }
+
+        function undoMove() {
+            TagManager.showActionSplash('Undoing last action...');
+            
+            // For testing, just clear everything
+            clearSelected();
+            
+            setTimeout(() => {
+                TagManager.hideActionSplash();
+            }, 300);
+        }
+
+        function testBulkMove() {
+            // Select all available tags
+            const checkboxes = document.querySelectorAll('#availableTags .tag-checkbox');
+            checkboxes.forEach(cb => cb.checked = true);
+            
+            // Move them all
+            setTimeout(() => {
+                moveToSelected();
+            }, 100);
+        }
+
+        function resetTest() {
+            TagManager.state.persistentSelectedTags.clear();
+            TagManager.state.selectedTags.clear();
+            TagManager.updateSelectedTags([]);
+            addTestTags();
+            console.log('Reset test');
+        }
+
+        // Initialize test
+        document.addEventListener('DOMContentLoaded', () => {
+            addTestTags();
+        });
+    </script>
+</body>
+</html> 

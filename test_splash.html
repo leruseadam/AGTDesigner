@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Splash Screen Test</title>
+    <style>
+        /* Application Loading Splash Screen */
+        .app-loading-splash {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            z-index: 9999;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: opacity 0.5s ease-out;
+        }
+
+        .app-loading-splash.fade-out {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .app-loading-container {
+            position: relative;
+            width: 600px;
+            height: 400px;
+            border-radius: 24px;
+            overflow: hidden;
+            background: rgba(22, 33, 62, 0.95);
+            border: 1px solid rgba(0, 212, 170, 0.2);
+            box-shadow: 
+                0 20px 40px rgba(0, 0, 0, 0.3),
+                0 0 0 1px rgba(0, 212, 170, 0.1);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+        }
+
+        .app-loading-content {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 60px;
+            color: white;
+            text-align: center;
+        }
+
+        .app-loading-logo {
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(135deg, #00d4aa, #0099cc);
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 36px;
+            box-shadow: 
+                0 15px 35px rgba(0, 212, 170, 0.3),
+                0 0 0 1px rgba(0, 212, 170, 0.2);
+            animation: logo-float 3s ease-in-out infinite;
+            margin-bottom: 30px;
+        }
+
+        @keyframes logo-float {
+            0%, 100% { 
+                transform: translateY(0px) scale(1);
+            }
+            50% { 
+                transform: translateY(-8px) scale(1.02);
+            }
+        }
+
+        .app-loading-title {
+            font-size: 42px;
+            font-weight: 800;
+            margin-bottom: 12px;
+            background: linear-gradient(135deg, #00d4aa, #ffffff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            letter-spacing: -0.5px;
+        }
+
+        .app-loading-subtitle {
+            font-size: 18px;
+            font-weight: 600;
+            opacity: 1;
+            margin-bottom: 40px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+
+        .app-loading-progress {
+            width: 100%;
+            max-width: 400px;
+            margin-bottom: 30px;
+        }
+
+        .app-loading-bar {
+            width: 100%;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+            overflow: hidden;
+            margin-bottom: 20px;
+            position: relative;
+        }
+
+        .app-loading-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00d4aa, #0099cc, #00d4aa);
+            border-radius: 3px;
+            width: 0%;
+            transition: width 0.3s ease;
+            position: relative;
+        }
+
+        .app-loading-text {
+            font-size: 16px;
+            font-weight: 500;
+            opacity: 0.8;
+            margin-bottom: 25px;
+            transition: opacity 0.3s ease;
+            min-height: 24px;
+        }
+
+        .app-loading-dots {
+            display: flex;
+            gap: 8px;
+            justify-content: center;
+            margin-bottom: 25px;
+        }
+
+        .app-loading-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: rgba(0, 212, 170, 0.6);
+            animation: dot-pulse 1.6s ease-in-out infinite both;
+        }
+
+        .app-loading-dot:nth-child(1) { animation-delay: -0.32s; }
+        .app-loading-dot:nth-child(2) { animation-delay: -0.16s; }
+        .app-loading-dot:nth-child(3) { animation-delay: 0s; }
+
+        @keyframes dot-pulse {
+            0%, 80%, 100% {
+                transform: scale(0.8);
+                opacity: 0.4;
+            }
+            40% {
+                transform: scale(1.2);
+                opacity: 1;
+            }
+        }
+
+        .app-loading-status {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(0, 212, 170, 0.15);
+            padding: 6px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(0, 212, 170, 0.2);
+            color: #00d4aa;
+        }
+
+        .app-loading-version {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 212, 170, 0.15);
+            padding: 6px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(0, 212, 170, 0.2);
+            color: #00d4aa;
+        }
+
+        /* Hide main content while loading */
+        .main-content {
+            opacity: 0;
+            transition: opacity 0.5s ease-in;
+        }
+
+        .main-content.loaded {
+            opacity: 1;
+        }
+
+        /* Test content styles */
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f0f0f0;
+        }
+
+        .test-content {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .test-button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+
+        .test-button:hover {
+            background: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <!-- Application Loading Splash Screen -->
+    <div id="appLoadingSplash" class="app-loading-splash">
+        <div class="app-loading-container">
+            <div class="app-loading-content">
+                <div class="app-loading-logo">🏷️</div>
+                
+                <h1 class="app-loading-title">AGT DESIGNER</h1>
+                <p class="app-loading-subtitle">Auto-Generating Tag Software</p>
+                
+                <div class="app-loading-progress">
+                    <div class="app-loading-bar">
+                        <div class="app-loading-fill" id="appLoadingFill"></div>
+                    </div>
+                </div>
+                <div class="app-loading-text" id="appLoadingText">Initializing application...</div>
+                
+                <div class="app-loading-dots">
+                    <div class="app-loading-dot"></div>
+                    <div class="app-loading-dot"></div>
+                    <div class="app-loading-dot"></div>
+                </div>
+            </div>
+            
+            <div class="app-loading-status">
+                <div class="app-loading-status-dot"></div>
+                <span id="appLoadingStatus">Initializing</span>
+            </div>
+            <div class="app-loading-version">v2.0.0</div>
+        </div>
+    </div>
+
+    <!-- Main Content (initially hidden) -->
+    <div class="main-content" id="mainContent">
+        <div class="test-content">
+            <h1>Splash Screen Test</h1>
+            <p>This is a test page to verify the splash screen functionality works correctly.</p>
+            
+            <h2>Test Controls</h2>
+            <button class="test-button" onclick="testSplash.show()">Show Splash</button>
+            <button class="test-button" onclick="testSplash.hide()">Hide Splash</button>
+            <button class="test-button" onclick="testSplash.updateProgress(50, 'Testing progress...')">Update Progress</button>
+            <button class="test-button" onclick="testSplash.complete()">Complete Loading</button>
+            <button class="test-button" onclick="testSplash.startAutoAdvance()">Start Auto Advance</button>
+            <button class="test-button" onclick="testSplash.stopAutoAdvance()">Stop Auto Advance</button>
+            
+            <h2>Test Content</h2>
+            <p>This content should be hidden while the splash screen is visible and should appear when the splash screen is hidden.</p>
+            
+            <h3>Features to Test:</h3>
+            <ul>
+                <li>Splash screen appears on page load</li>
+                <li>Progress bar updates correctly</li>
+                <li>Text changes smoothly</li>
+                <li>Auto-advance works</li>
+                <li>Main content is hidden during loading</li>
+                <li>Smooth transition when hiding splash</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        // Simplified test version of the splash manager
+        const testSplash = {
+            loadingSteps: [
+                { text: 'Initializing application...', progress: 10 },
+                { text: 'Loading templates...', progress: 25 },
+                { text: 'Preparing interface...', progress: 40 },
+                { text: 'Loading product data...', progress: 60 },
+                { text: 'Processing tags...', progress: 75 },
+                { text: 'Setting up filters...', progress: 90 },
+                { text: 'Almost ready...', progress: 95 },
+                { text: 'Welcome to AGT Designer!', progress: 100 }
+            ],
+            currentStep: 0,
+            isVisible: true,
+            autoAdvanceInterval: null,
+
+            show() {
+                this.isVisible = true;
+                this.currentStep = 0;
+                
+                const splash = document.getElementById('appLoadingSplash');
+                const mainContent = document.getElementById('mainContent');
+                
+                if (splash) {
+                    splash.style.display = 'flex';
+                    splash.classList.remove('fade-out');
+                }
+                
+                if (mainContent) {
+                    mainContent.classList.remove('loaded');
+                    mainContent.style.opacity = '0';
+                }
+                
+                this.updateProgress(0, 'Initializing application...');
+                console.log('Splash screen shown');
+            },
+
+            updateProgress(progress, text) {
+                const fillElement = document.getElementById('appLoadingFill');
+                const textElement = document.getElementById('appLoadingText');
+                const statusElement = document.getElementById('appLoadingStatus');
+                
+                if (fillElement) {
+                    fillElement.style.width = `${progress}%`;
+                }
+                
+                if (textElement) {
+                    textElement.style.opacity = '0';
+                    setTimeout(() => {
+                        textElement.textContent = text;
+                        textElement.style.opacity = '1';
+                    }, 150);
+                }
+                
+                if (statusElement) {
+                    statusElement.textContent = this.getStatusText(progress);
+                }
+                
+                console.log(`Splash progress: ${progress}% - ${text}`);
+            },
+
+            getStatusText(progress) {
+                if (progress < 25) return 'Initializing';
+                if (progress < 50) return 'Loading';
+                if (progress < 75) return 'Processing';
+                if (progress < 100) return 'Finalizing';
+                return 'Ready';
+            },
+
+            nextStep() {
+                if (this.currentStep < this.loadingSteps.length - 1) {
+                    this.currentStep++;
+                    const step = this.loadingSteps[this.currentStep];
+                    this.updateProgress(step.progress, step.text);
+                }
+            },
+
+            complete() {
+                this.updateProgress(100, 'Welcome to AGT Designer!');
+                setTimeout(() => {
+                    this.hide();
+                }, 1000);
+            },
+
+            hide() {
+                this.isVisible = false;
+                this.stopAutoAdvance();
+                
+                const splash = document.getElementById('appLoadingSplash');
+                const mainContent = document.getElementById('mainContent');
+                
+                if (splash) {
+                    splash.classList.add('fade-out');
+                    setTimeout(() => {
+                        splash.style.display = 'none';
+                    }, 500);
+                }
+                
+                if (mainContent) {
+                    setTimeout(() => {
+                        mainContent.classList.add('loaded');
+                        mainContent.style.opacity = '1';
+                    }, 100);
+                }
+                
+                console.log('Splash screen hidden');
+            },
+
+            startAutoAdvance() {
+                this.stopAutoAdvance();
+                this.autoAdvanceInterval = setInterval(() => {
+                    if (this.isVisible && this.currentStep < this.loadingSteps.length - 2) {
+                        this.nextStep();
+                    }
+                }, 800);
+            },
+
+            stopAutoAdvance() {
+                if (this.autoAdvanceInterval) {
+                    clearInterval(this.autoAdvanceInterval);
+                    this.autoAdvanceInterval = null;
+                }
+            }
+        };
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            // Simulate loading process
+            testSplash.show();
+            testSplash.startAutoAdvance();
+            
+            // Complete after 5 seconds for demo
+            setTimeout(() => {
+                testSplash.complete();
+            }, 5000);
+        });
+    </script>
+</body>
+</html> 

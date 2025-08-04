@@ -1,0 +1,22 @@
+# Minimal requirements for Label Maker Application - Python 3.13
+# Use this if the full requirements file fails
+
+# Core Flask framework
+Flask>=2.3.0
+Flask-CORS>=4.0.0
+
+# Essential data processing
+pandas>=2.1.0
+numpy>=1.26.0
+
+# Document processing
+python-docx>=1.1.0
+docxtpl>=0.16.0
+openpyxl>=3.1.0
+
+# Image processing
+Pillow>=10.0.0
+
+# Build tools
+setuptools>=68.0.0
+wheel>=0.41.0 

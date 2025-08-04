@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lineage Editor Debug - Comprehensive Test</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .debug-panel {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .log-entry {
+            background: #fff;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            padding: 10px;
+            margin: 5px 0;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .log-error { border-left: 4px solid #dc3545; }
+        .log-warning { border-left: 4px solid #ffc107; }
+        .log-success { border-left: 4px solid #28a745; }
+        .log-info { border-left: 4px solid #17a2b8; }
+        
+        .test-button {
+            margin: 5px;
+            min-width: 200px;
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .status-ok { background: #28a745; }
+        .status-error { background: #dc3545; }
+        .status-warning { background: #ffc107; }
+        .status-unknown { background: #6c757d; }
+        
+        #logContainer {
+            max-height: 400px;
+            overflow-y: auto;
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-4">
+        <h1>Lineage Editor Debug - Comprehensive Test</h1>
+        
+        <div class="debug-panel">
+            <h3>System Status</h3>
+            <div id="systemStatus">
+                <div><span class="status-indicator status-unknown" id="bootstrapStatus"></span>Bootstrap</div>
+                <div><span class="status-indicator status-unknown" id="modalStatus"></span>Modal Elements</div>
+                <div><span class="status-indicator status-unknown" id="editorStatus"></span>Lineage Editor</div>
+                <div><span class="status-indicator status-unknown" id="apiStatus"></span>API Endpoints</div>
+            </div>
+        </div>
+        
+        <div class="debug-panel">
+            <h3>Test Controls</h3>
+            <div class="row">
+                <div class="col-md-6">
+                    <button class="btn btn-primary test-button" onclick="testBootstrap()">Test Bootstrap</button>
+                    <button class="btn btn-primary test-button" onclick="testModalElements()">Test Modal Elements</button>
+                    <button class="btn btn-primary test-button" onclick="testLineageEditor()">Test Lineage Editor</button>
+                    <button class="btn btn-primary test-button" onclick="testAPIEndpoints()">Test API Endpoints</button>
+                </div>
+                <div class="col-md-6">
+                    <button class="btn btn-success test-button" onclick="openStrainSelection()">Open Strain Selection</button>
+                    <button class="btn btn-success test-button" onclick="openLineageEditorDirect()">Open Lineage Editor Direct</button>
+                    <button class="btn btn-warning test-button" onclick="clearLogs()">Clear Logs</button>
+                    <button class="btn btn-danger test-button" onclick="emergencyCleanup()">Emergency Cleanup</button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="debug-panel">
+            <h3>Live Logs</h3>
+            <div id="logContainer"></div>
+        </div>
+        
+        <div class="debug-panel">
+            <h3>Modal State Monitor</h3>
+            <div id="modalStateMonitor">
+                <div><strong>Strain Selection Modal:</strong> <span id="strainModalState">Unknown</span></div>
+                <div><strong>Lineage Editor Modal:</strong> <span id="lineageModalState">Unknown</span></div>
+                <div><strong>Active Modals:</strong> <span id="activeModals">None</span></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Include the actual lineage editor modal -->
+    <div id="strainLineageEditorModal" class="modal fade" tabindex="-1" aria-labelledby="strainLineageEditorModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="strainLineageEditorModalLabel">Edit Strain Lineage</h5>
+                    <button type="button" class="btn-close" id="lineageEditorCloseBtn" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="lineageEditorContent">
+                        <div class="text-center">
+                            <div class="spinner-border" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <p class="mt-2">Loading lineage editor...</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" id="lineageEditorCancelBtn">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="saveStrainLineageBtn">Save Changes</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Strain Selection Modal -->
+    <div id="strainSelectionModal" class="modal fade" tabindex="-1" aria-labelledby="strainSelectionModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="strainSelectionModalLabel">Select Strain to Edit</h5>
+                    <button type="button" class="btn-close" id="strainSelectionCloseBtn" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <input type="text" class="form-control" id="strainSearchInput" placeholder="Search strains...">
+                    </div>
+                    <div id="strainList" style="max-height: 400px; overflow-y: auto;">
+                        <!-- Strain list will be populated here -->
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" id="strainSelectionCancelBtn">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="static/js/lineage-editor.js"></script>
+    <script>
+        let logCount = 0;
+        
+        function addLog(message, type = 'info') {
+            logCount++;
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.className = `log-entry log-${type}`;
+            logEntry.innerHTML = `<strong>[${timestamp}]</strong> ${message}`;
+            document.getElementById('logContainer').appendChild(logEntry);
+            document.getElementById('logContainer').scrollTop = document.getElementById('logContainer').scrollHeight;
+            
+            // Also log to console
+            console.log(`[DEBUG] ${message}`);
+        }
+        
+        function clearLogs() {
+            document.getElementById('logContainer').innerHTML = '';
+            logCount = 0;
+            addLog('Logs cleared', 'info');
+        }
+        
+        function updateStatus(elementId, status, message) {
+            const element = document.getElementById(elementId);
+            element.className = `status-indicator status-${status}`;
+            addLog(`${message}`, status);
+        }
+        
+        function updateModalState() {
+            const strainModal = document.getElementById('strainSelectionModal');
+            const lineageModal = document.getElementById('strainLineageEditorModal');
+            
+            const strainState = strainModal.classList.contains('show') ? 'Open' : 'Closed';
+            const lineageState = lineageModal.classList.contains('show') ? 'Open' : 'Closed';
+            
+            document.getElementById('strainModalState').textContent = strainState;
+            document.getElementById('lineageModalState').textContent = lineageState;
+            
+            const activeModals = [];
+            if (strainModal.classList.contains('show')) activeModals.push('Strain Selection');
+            if (lineageModal.classList.contains('show')) activeModals.push('Lineage Editor');
+            
+            document.getElementById('activeModals').textContent = activeModals.length > 0 ? activeModals.join(', ') : 'None';
+        }
+        
+        // Test functions
+        function testBootstrap() {
+            addLog('Testing Bootstrap availability...', 'info');
+            
+            if (typeof bootstrap !== 'undefined') {
+                updateStatus('bootstrapStatus', 'ok', 'Bootstrap is available');
+                addLog(`Bootstrap version: ${bootstrap.Modal.VERSION || 'Unknown'}`, 'success');
+            } else {
+                updateStatus('bootstrapStatus', 'error', 'Bootstrap is not available');
+                addLog('Bootstrap is not loaded', 'error');
+            }
+        }
+        
+        function testModalElements() {
+            addLog('Testing modal elements...', 'info');
+            
+            const strainModal = document.getElementById('strainSelectionModal');
+            const lineageModal = document.getElementById('strainLineageEditorModal');
+            
+            if (strainModal) {
+                addLog('Strain selection modal found', 'success');
+            } else {
+                addLog('Strain selection modal not found', 'error');
+            }
+            
+            if (lineageModal) {
+                addLog('Lineage editor modal found', 'success');
+                updateStatus('modalStatus', 'ok', 'Modal elements are available');
+            } else {
+                addLog('Lineage editor modal not found', 'error');
+                updateStatus('modalStatus', 'error', 'Modal elements are missing');
+            }
+        }
+        
+        function testLineageEditor() {
+            addLog('Testing lineage editor...', 'info');
+            
+            if (window.strainLineageEditor) {
+                addLog('StrainLineageEditor instance found', 'success');
+                addLog(`Modal state: ${window.strainLineageEditor.modalState || 'unknown'}`, 'info');
+                addLog(`Is loading: ${window.strainLineageEditor.isLoading || false}`, 'info');
+                updateStatus('editorStatus', 'ok', 'Lineage editor is available');
+            } else {
+                addLog('StrainLineageEditor instance not found', 'error');
+                updateStatus('editorStatus', 'error', 'Lineage editor is not available');
+                
+                // Try to initialize
+                addLog('Attempting to initialize StrainLineageEditor...', 'warning');
+                if (typeof StrainLineageEditor !== 'undefined') {
+                    try {
+                        window.strainLineageEditor = StrainLineageEditor.init();
+                        addLog('StrainLineageEditor initialized successfully', 'success');
+                        updateStatus('editorStatus', 'ok', 'Lineage editor initialized');
+                    } catch (error) {
+                        addLog(`Failed to initialize StrainLineageEditor: ${error.message}`, 'error');
+                    }
+                } else {
+                    addLog('StrainLineageEditor class not defined', 'error');
+                }
+            }
+        }
+        
+        async function testAPIEndpoints() {
+            addLog('Testing API endpoints...', 'info');
+            
+            try {
+                const response = await fetch('/api/status');
+                if (response.ok) {
+                    addLog('API status endpoint is working', 'success');
+                    updateStatus('apiStatus', 'ok', 'API endpoints are working');
+                } else {
+                    addLog(`API status endpoint returned ${response.status}`, 'error');
+                    updateStatus('apiStatus', 'error', 'API endpoints are not working');
+                }
+            } catch (error) {
+                addLog(`API test failed: ${error.message}`, 'error');
+                updateStatus('apiStatus', 'error', 'API endpoints are not accessible');
+            }
+        }
+        
+        function openStrainSelection() {
+            addLog('Opening strain selection modal...', 'info');
+            
+            const modal = document.getElementById('strainSelectionModal');
+            if (!modal) {
+                addLog('Strain selection modal not found', 'error');
+                return;
+            }
+            
+            // Populate with sample strains
+            const strainList = document.getElementById('strainList');
+            const sampleStrains = ['Blue Dream', 'OG Kush', 'Sour Diesel', 'Girl Scout Cookies', 'Pineapple Express'];
+            
+            strainList.innerHTML = sampleStrains.map(strain => 
+                `<div class="list-group-item list-group-item-action" onclick="selectStrain('${strain}', 'HYBRID')">
+                    <strong>${strain}</strong> - HYBRID
+                </div>`
+            ).join('');
+            
+            const modalInstance = new bootstrap.Modal(modal);
+            modalInstance.show();
+            
+            addLog('Strain selection modal opened', 'success');
+            updateModalState();
+        }
+        
+        function selectStrain(strainName, currentLineage) {
+            addLog(`Selected strain: ${strainName} (${currentLineage})`, 'info');
+            
+            // Close strain selection modal
+            const strainModal = document.getElementById('strainSelectionModal');
+            const strainModalInstance = bootstrap.Modal.getInstance(strainModal);
+            if (strainModalInstance) {
+                strainModalInstance.hide();
+            }
+            
+            // Open lineage editor
+            setTimeout(() => {
+                openLineageEditorDirect(strainName, currentLineage);
+            }, 300);
+        }
+        
+        function openLineageEditorDirect(strainName = 'Test Strain', currentLineage = 'HYBRID') {
+            addLog(`Opening lineage editor directly for: ${strainName} (${currentLineage})`, 'info');
+            
+            if (window.strainLineageEditor) {
+                try {
+                    window.strainLineageEditor.openEditor(strainName, currentLineage);
+                    addLog('Lineage editor opened successfully', 'success');
+                } catch (error) {
+                    addLog(`Error opening lineage editor: ${error.message}`, 'error');
+                }
+            } else {
+                addLog('StrainLineageEditor not available', 'error');
+            }
+            
+            updateModalState();
+        }
+        
+        function emergencyCleanup() {
+            addLog('Performing emergency cleanup...', 'warning');
+            
+            // Close all modals
+            const modals = document.querySelectorAll('.modal');
+            modals.forEach(modal => {
+                const modalInstance = bootstrap.Modal.getInstance(modal);
+                if (modalInstance) {
+                    modalInstance.hide();
+                }
+            });
+            
+            // Reset lineage editor state
+            if (window.strainLineageEditor) {
+                window.strainLineageEditor.modalState = 'closed';
+                window.strainLineageEditor.isLoading = false;
+                window.strainLineageEditor.userRequestedClose = false;
+            }
+            
+            // Restore body scroll
+            document.body.style.overflow = '';
+            
+            addLog('Emergency cleanup completed', 'success');
+            updateModalState();
+        }
+        
+        // Monitor modal state changes
+        setInterval(updateModalState, 1000);
+        
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            addLog('Debug page loaded', 'info');
+            
+            // Run initial tests
+            setTimeout(() => {
+                testBootstrap();
+                testModalElements();
+                testLineageEditor();
+                testAPIEndpoints();
+            }, 1000);
+            
+            // Monitor for lineage editor events
+            if (window.strainLineageEditor) {
+                const originalOpenEditor = window.strainLineageEditor.openEditor;
+                window.strainLineageEditor.openEditor = function(...args) {
+                    addLog(`Lineage editor openEditor called with: ${JSON.stringify(args)}`, 'info');
+                    return originalOpenEditor.apply(this, args);
+                };
+                
+                const originalCloseModal = window.strainLineageEditor.closeModal;
+                window.strainLineageEditor.closeModal = function() {
+                    addLog('Lineage editor closeModal called', 'warning');
+                    return originalCloseModal.apply(this, arguments);
+                };
+            }
+        });
+    </script>
+</body>
+</html> 
