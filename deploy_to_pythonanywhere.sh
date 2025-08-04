@@ -253,7 +253,7 @@ def check_pythonanywhere_environment():
     else:
         print("⚠️  Not running on PythonAnywhere")
         return False
-
+    
 def check_directories():
     """Check if required directories exist and have correct permissions."""
     print("\n📁 Checking directories...")
@@ -448,11 +448,11 @@ EOF
 echo "✅ Deployment package complete!"
 echo ""
 echo "📦 Deployment package created in: $DEPLOY_DIR"
-echo ""
-echo "📋 Next steps:"
+    echo ""
+    echo "📋 Next steps:"
 echo "1. Upload all files from $DEPLOY_DIR to PythonAnywhere"
 echo "2. Run: ./setup_on_pythonanywhere.sh"
 echo "3. Run: python verify_setup.py"
 echo "4. Update WSGI file and reload web app"
-echo ""
+    echo ""
 echo "🎉 Your PythonAnywhere file upload should work after deployment!" 
