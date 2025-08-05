@@ -586,39 +586,8 @@ def get_thresholded_font_size_description(text, orientation='vertical', scale_fa
     logger.debug(f"Standard description font size: {size.pt}pt for text: {text} (complexity: {comp})")
     return size
 
-def get_thresholded_font_size_price(text, orientation='vertical', scale_factor=1.0):
-    """Calculate font size for price text."""
-    logger.debug(f"Calculating price font size: {text}")
-    
-    # Price text typically needs larger font sizes
-    base_size = 26 if orientation == 'vertical' else 34
-    min_size = 26 if orientation == 'vertical' else 14
-    max_size = 28 if orientation == 'vertical' else 36
-    
-    # Calculate size based on length and content
-    length = len(text)
-    # Remove currency symbols and spaces for length calculation
-    clean_text = text.replace('$', '').replace(' ', '')
-    length = len(clean_text)
-    
-    if length <= 5:  # Short prices like "$9.99"
-        size = base_size + 2
-    elif length <= 7:  # Medium prices like "$29.99"
-        size = base_size
-    elif length <= 9:  # Longer prices like "$129.99"
-        size = base_size - 2
-    else:  # Very long prices
-        size = base_size - 4
-    
-    # Apply scale factor
-    size = int(size * scale_factor)
-    
-    # Ensure size is within bounds
-    size = max(min_size, min(size, max_size))
-    
-    final_size = Pt(size)
-    logger.debug(f"Calculated price font size: {final_size.pt}pt")
-    return final_size
+def get_thresholded_font_size_price(*args, **kwargs):
+    raise RuntimeError("[DEPRECATED] get_thresholded_font_size_price is disabled. Use src.core.generation.unified_font_sizing.get_font_size instead.")
 
 def get_thresholded_font_size_by_word_count(text, orientation='vertical', scale_factor=1.0):
     """Wrapper function for backward compatibility."""
