@@ -17,6 +17,10 @@ from flask import (
     g  # Add this for per-request globals
 )
 from flask_cors import CORS
+try:
+    from flask_compress import Compress
+except Exception:  # pragma: no cover
+    Compress = None
 from docx import Document
 from docxtpl import DocxTemplate, InlineImage
 from io import BytesIO
@@ -432,12 +436,30 @@ def create_app():
     # Use a consistent secret key for production to maintain sessions across restarts
     # In production, this should be set via environment variable
     app.secret_key = os.environ.get('SECRET_KEY', 'label-maker-secret-key-2024-production')
+
+    # Enable gzip compression for JSON and text responses to reduce bandwidth/latency
+    if Compress is not None:
+        app.config.setdefault('COMPRESS_ALGORITHM', 'gzip')
+        app.config.setdefault('COMPRESS_LEVEL', 6)
+        app.config.setdefault('COMPRESS_MIN_SIZE', 1024)  # Only compress payloads >1KB
+        app.config.setdefault('COMPRESS_MIMETYPES', [
+            'application/json',
+            'text/html',
+            'text/css',
+            'application/javascript',
+            'text/javascript',
+            'text/plain'
+        ])
     return app
 
 app = create_app()
 
 # Initialize Flask-Caching after app creation
 cache = Cache(app, config={'CACHE_TYPE': 'SimpleCache', 'CACHE_DEFAULT_TIMEOUT': 300})
+
+# Initialize Flask-Compress after app creation (if available)
+if Compress is not None:
+    Compress(app)
 
 # Global function to check session size
 def check_session_size():
