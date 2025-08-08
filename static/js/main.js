@@ -2659,10 +2659,10 @@ const TagManager = {
         // This is crucial for drag-and-drop reordering to work properly
         tags = validTags;
         
-        // NOTE: We do NOT apply filtering to selected tags to preserve the order
-        // The backend already returns the tags in the correct order, and we want to maintain that
+        // NOTE: We do NOT apply filtering to selected tags here
+        // Display the selected tags alphabetically rather than backend/matching order
         // Filtering is only applied to available tags, not selected tags
-        console.log('Displaying selected tags in backend order (no filtering applied):', tags);
+        console.log('Displaying selected tags alphabetically (no filtering applied):', tags);
         
         if (tags.length === 0) {
             // Check if we have persistent selected tags that should be displayed
@@ -2849,15 +2849,17 @@ const TagManager = {
             this.state.selectedTags = new Set(this.state.persistentSelectedTags);
         }
 
-        // Use the tags passed from the backend to preserve the exact order
-        // This is crucial for drag-and-drop reordering to work properly
+        // Use the tags and display alphabetically instead of backend/matching order
         let fullTags = tags;
-        
-        // If backend returned tags, use them and update persistent state
         if (tags && tags.length > 0) {
-            console.log('Using backend tags for display (preserving order):', fullTags);
-            // Update persistentSelectedTags to match the backend order
-            this.state.persistentSelectedTags = tags.map(tag => tag['Product Name*']);
+            console.log('Using tags for display (alphabetical order):', tags);
+            // Sort selected tags alphabetically by product name for display
+            fullTags = [...tags].sort((a, b) => {
+                const nameA = (a['Product Name*'] || a.ProductName || a.Description || '').toLowerCase();
+                const nameB = (b['Product Name*'] || b.ProductName || b.Description || '').toLowerCase();
+                return nameA.localeCompare(nameB);
+            });
+            // Keep selectedTags set in sync with persistent without reordering
             this.state.selectedTags = new Set(this.state.persistentSelectedTags);
         } else {
             // If no backend tags, show empty selected tags list
