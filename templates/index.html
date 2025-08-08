@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AGT Label Maker - Professional Cannabis Label Generation</title>
+  <title>AGT Label Maker - Professional Cannabis Label Generation - UPDATED</title>
   
   <!-- Open Graph / Facebook -->
   <meta property="og:type" content="website">
@@ -37,7 +37,1810 @@
   <!-- jQuery and Bootstrap JS -->
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+  
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  
+  <!-- Define global functions early -->
+  <script>
+    console.log('Defining global functions early in head...');
+    
+    function generateJsonInventory() {
+      const url = document.getElementById('jsonInventoryUrlInput').value.trim();
+      if (!url) {
+        console.error('Please enter a JSON URL');
+        return;
+      }
+      
+      if (!url.toLowerCase().startsWith('http')) {
+        console.error('Please enter a valid HTTP URL');
+        return;
+      }
+      
+      // Show loading state
+      const generateBtn = document.querySelector('#jsonInventoryModal .btn-modern2');
+      const originalText = generateBtn.innerHTML;
+      generateBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Generating...';
+      generateBtn.disabled = true;
+      
+      fetch('/api/json-inventory', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ url: url })
+      })
+      .then(response => {
+        if (response.ok) {
+          // Download the file
+          return response.blob().then(blob => {
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+            a.download = `AGT_Inventory_Slips_${timestamp}.docx`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+            
+            // Inventory slips generated successfully
+            
+            // Close modal
+            const modal = bootstrap.Modal.getInstance(document.getElementById('jsonInventoryModal'));
+            if (modal) {
+              modal.hide();
+            }
+          });
+        } else {
+          return response.json().then(data => {
+            throw new Error(data.error || 'Failed to generate inventory slips');
+          });
+        }
+      })
+      .catch(error => {
+        console.error('Error generating JSON inventory:', error);
+      })
+      .finally(() => {
+        // Reset button state
+        generateBtn.innerHTML = originalText;
+        generateBtn.disabled = false;
+      });
+    }
+    
+    window.openDatabaseAnalytics = function() {
+      console.log('openDatabaseAnalytics called');
+      
+      // Prevent multiple simultaneous calls
+      if (window._analyticsLoading) {
+        console.log('Analytics already loading, skipping...');
+        return;
+      }
+      window._analyticsLoading = true;
+      
+      try {
+        const loadingHtml = `
+          <div class="text-center">
+            <div class="spinner-border text-info" role="status">
+              <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-3">Loading interactive analytics dashboard...</p>
+          </div>
+        `;
+        showDatabaseModal('Database Analytics Dashboard', loadingHtml);
+
+        // Fetch all data with individual timeout and error handling
+        const fetchWithTimeout = (url, timeout = 10000) => {
+          console.log(`Fetching: ${url}`);
+          return Promise.race([
+            fetch(url).then(r => {
+              console.log(`Response from ${url}: ${r.status}`);
+              if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText}`);
+              return r.json();
+            }),
+            new Promise((_, reject) => 
+              setTimeout(() => reject(new Error(`Timeout after ${timeout}ms`)), timeout)
+            )
+          ]);
+        };
+
+        Promise.allSettled([
+          fetchWithTimeout('/api/database-stats').catch(e => ({ error: `Stats: ${e.message}`, total_strains: 0 })),
+          fetchWithTimeout('/api/database-vendor-stats').catch(e => ({ 
+            error: `Vendor Stats: ${e.message}`, 
+            summary: { total_vendors: 0, total_brands: 0 }, 
+            vendors: [], 
+            product_types: [], 
+            vendor_brands: [] 
+          })),
+          fetchWithTimeout('/api/database-analytics').catch(e => ({ error: `Analytics: ${e.message}` })),
+          fetchWithTimeout('/api/available-tags').catch(e => { console.error('Available tags failed:', e); return []; })
+        ])
+        .then((results) => {
+          console.log('All promises settled:', results);
+          const [statsResult, vendorStatsResult, analyticsResult, availableTagsResult] = results;
+          const stats = statsResult.value || statsResult.reason || { total_strains: 0 };
+          const vendorStats = vendorStatsResult.value || vendorStatsResult.reason || { 
+            summary: { total_vendors: 0, total_brands: 0 }, 
+            vendors: [], 
+            product_types: [], 
+            vendor_brands: [] 
+          };
+          const analytics = analyticsResult.value || analyticsResult.reason || {};
+          const availableTags = availableTagsResult.value || [];
+          
+          const totalProducts = Array.isArray(availableTags) ? availableTags.length : 0;
+          const totalStrains = stats.total_strains || 0;
+          
+          console.log('Analytics data loaded:', { 
+            products: totalProducts, 
+            strains: totalStrains, 
+            vendors: vendorStats.summary?.total_vendors || 0,
+            brands: vendorStats.summary?.total_brands || 0
+          });
+        
+          const analyticsHtml = `
+            <div class="database-analytics">
+              <div class="row mb-4">
+                <div class="col-md-3">
+                  <div class="card glass-card text-center">
+                    <div class="card-body">
+                      <h3 class="text-primary">${totalProducts}</h3>
+                      <p class="mb-0">Total Products</p>
+                    </div>
+                  </div>
+                </div>
+                <div class="col-md-3">
+                  <div class="card glass-card text-center">
+                    <div class="card-body">
+                      <h3 class="text-success">${totalStrains}</h3>
+                      <p class="mb-0">Unique Strains</p>
+                    </div>
+                  </div>
+                </div>
+                <div class="col-md-3">
+                  <div class="card glass-card text-center">
+                    <div class="card-body">
+                      <h3 class="text-warning">${vendorStats.summary?.total_vendors || 0}</h3>
+                      <p class="mb-0">Active Vendors</p>
+                    </div>
+                  </div>
+                </div>
+                <div class="col-md-3">
+                  <div class="card glass-card text-center">
+                    <div class="card-body">
+                      <h3 class="text-info">${vendorStats.summary?.total_brands || 0}</h3>
+                      <p class="mb-0">Product Brands</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="row mb-4">
+                <div class="col-md-6">
+                  <div class="card glass-card">
+                    <div class="card-header">
+                      <h6 class="mb-0">Top Vendors</h6>
+                    </div>
+                    <div class="card-body" style="max-height: 300px; overflow-y: auto;">
+                      ${vendorStats.vendors && vendorStats.vendors.length > 0 ? 
+                        vendorStats.vendors.slice(0, 10).map((vendor, index) => 
+                          `<div class="d-flex justify-content-between align-items-center py-2 ${index < vendorStats.vendors.length - 1 ? 'border-bottom' : ''}">
+                            <div>
+                              <strong>${vendor.vendor || 'Unknown'}</strong>
+                              <small class="text-muted d-block">${vendor.unique_brands || 0} brands, ${vendor.unique_product_types || 0} types</small>
+                            </div>
+                            <span class="badge bg-primary">${vendor.product_count || 0}</span>
+                          </div>`
+                        ).join('') : 
+                        '<p class="text-muted">No vendor data available. Upload Excel files to see vendor statistics.</p>'
+                      }
+                    </div>
+                  </div>
+                </div>
+                <div class="col-md-6">
+                  <div class="card glass-card">
+                    <div class="card-header">
+                      <h6 class="mb-0">Top Product Types</h6>
+                    </div>
+                    <div class="card-body" style="max-height: 300px; overflow-y: auto;">
+                      ${vendorStats.product_types && vendorStats.product_types.length > 0 ? 
+                        vendorStats.product_types.slice(0, 10).map((type, index) => 
+                          `<div class="d-flex justify-content-between align-items-center py-2 ${index < vendorStats.product_types.length - 1 ? 'border-bottom' : ''}">
+                            <div>
+                              <strong>${type.product_type || 'Unknown'}</strong>
+                              <small class="text-muted d-block">${type.unique_vendors || 0} vendors, ${type.unique_brands || 0} brands</small>
+                            </div>
+                            <span class="badge bg-success">${type.product_count || 0}</span>
+                          </div>`
+                        ).join('') : 
+                        '<p class="text-muted">No product type data available. Upload Excel files to see product analytics.</p>'
+                      }
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="row">
+                <div class="col-12">
+                  <div class="card glass-card">
+                    <div class="card-header">
+                      <h6 class="mb-0">Top Vendor-Brand Combinations</h6>
+                    </div>
+                    <div class="card-body">
+                      <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                        <table class="table table-sm">
+                          <thead class="sticky-top bg-dark">
+                            <tr>
+                              <th>Vendor</th>
+                              <th>Brand</th>
+                              <th>Product Types</th>
+                              <th>Products</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            ${vendorStats.vendor_brands && vendorStats.vendor_brands.length > 0 ? 
+                              vendorStats.vendor_brands.slice(0, 20).map(combo => 
+                                `<tr>
+                                  <td><strong>${combo.vendor || 'Unknown'}</strong></td>
+                                  <td>${combo.brand || 'Unknown'}</td>
+                                  <td><span class="badge bg-info">${combo.unique_product_types || 0} types</span></td>
+                                  <td><span class="badge bg-primary">${combo.product_count || 0}</span></td>
+                                </tr>`
+                              ).join('') : 
+                              '<tr><td colspan="4" class="text-muted text-center">No vendor-brand data available. Upload Excel files to see detailed analytics.</td></tr>'
+                            }
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="row mt-4">
+                <div class="col-12">
+                  <div class="alert alert-info">
+                    <h6>Analytics Summary</h6>
+                    <p class="mb-0">
+                      ${totalProducts > 0 ? 
+                        `This comprehensive dashboard shows real-time statistics from your product database with ${totalProducts} products currently loaded. Data is automatically updated each time you upload new Excel files.` :
+                        'Upload Excel files to populate the database and unlock detailed vendor analytics, strain statistics, and performance metrics.'
+                      }
+                    </p>
+                    ${stats.error || vendorStats.error || analytics.error ? 
+                      `<small class="text-warning d-block mt-2">Some data may be limited due to: ${[stats.error, vendorStats.error, analytics.error].filter(e => e).join(', ')}</small>` : 
+                      ''
+                    }
+                  </div>
+                </div>
+              </div>
+            </div>
+          `;
+          
+          showDatabaseModal('Database Analytics Dashboard', analyticsHtml);
+          
+          // Reset loading flag
+          window._analyticsLoading = false;
+        })
+        .catch(error => {
+          console.error('Error loading database analytics:', error);
+          const errorHtml = `
+            <div class="alert alert-danger">
+              <h6>⚠️ Error Loading Analytics</h6>
+              <p>Unable to load database analytics. This might be because:</p>
+              <ul class="mb-3">
+                <li>No Excel file has been uploaded yet</li>
+                <li>Database is still being initialized</li>
+                <li>Server connectivity issues</li>
+                <li>Database endpoints are not responding</li>
+              </ul>
+              <p class="mb-0"><strong>Try:</strong> Upload an Excel file first, then wait a moment for the database to populate</p>
+              <small class="text-muted">Error: ${error.message}</small>
+            </div>
+          `;
+          showDatabaseModal('Database Analytics Dashboard', errorHtml);
+          
+          // Reset loading flag
+          window._analyticsLoading = false;
+        });
+      } catch (error) {
+        console.error('Error in openDatabaseAnalytics:', error);
+        alert('Error opening database analytics: ' + error.message);
+        
+        // Reset loading flag
+        window._analyticsLoading = false;
+      }
+    };
+    
+                window.openLineageEditor = function() {
+              console.log('Enhanced Lineage Editor called');
+              try {
+                showDatabaseModal('Strain Browser', `
+                  <div class="text-center p-4">
+                    <div class="spinner-border text-primary" role="status"></div>
+                    <p class="mt-2">Loading strain data...</p>
+                  </div>
+                `);
+                
+                // Try enhanced database version first, fallback to Excel-based version
+                fetch('/api/vendor-strain-browser')
+                .then(r => r.json())
+                .then(browserData => {
+                  if (browserData.error) {
+                    createExcelBasedLineageEditor();
+                    return;
+                  }
+                  return Promise.all([
+                    Promise.resolve(browserData),
+                    fetch('/api/database-vendor-stats').then(r => r.json())
+                  ])
+                  .then(([browserData, vendorStats]) => {
+                    const enhancedEditorHtml = createEnhancedLineageEditor(browserData, vendorStats);
+                    showDatabaseModal('Enhanced Strain Lineage Editor', enhancedEditorHtml);
+                    initializeEnhancedLineageEditor();
+                  });
+                })
+                .catch(error => {
+                  console.error('Database error, falling back to Excel-based editor:', error);
+                  createExcelBasedLineageEditor();
+                });
+              } catch (error) {
+                console.error('Error opening enhanced lineage editor:', error);
+                alert('Error opening enhanced lineage editor. Please try again.');
+              }
+            };
+    
+    // Define showDatabaseModal function early as well
+    window.showDatabaseModal = function(title, content) {
+      console.log('showDatabaseModal called with title:', title);
+      try {
+        // Create modal HTML
+        const modalHtml = `
+          <div class="modal fade" id="databaseModal" tabindex="-1">
+            <div class="modal-dialog modal-lg">
+              <div class="modal-content glass-card">
+                <div class="modal-header border-0">
+                  <h5 class="modal-title">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2 text-info">
+                      <path d="M3 3v18h18"></path>
+                      <path d="M18.7 8l-5.1 5.2-2.8-2.7L7 14.3"></path>
+                    </svg>
+                    ${title}
+                  </h5>
+                  <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                  ${content}
+                </div>
+                <div class="modal-footer border-0">
+                  <button type="button" class="btn btn-glass" data-bs-dismiss="modal">Close</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+        
+        // Remove existing modal if present
+        const existingModal = document.getElementById('databaseModal');
+        if (existingModal) {
+          const bsModal = bootstrap.Modal.getInstance(existingModal);
+          if (bsModal) {
+            bsModal.dispose();
+          }
+          existingModal.remove();
+        }
+        
+        // Add new modal to body
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        
+        // Show the modal
+        const modalElement = document.getElementById('databaseModal');
+        if (modalElement) {
+          const modal = new bootstrap.Modal(modalElement, {
+            backdrop: 'static',
+            keyboard: false
+          });
+          modal.show();
+          
+          // Store modal instance for later use
+          window._currentModal = modal;
+        } else {
+          console.error('Modal element not found');
+          alert('Error: Could not create modal');
+        }
+      } catch (error) {
+        console.error('Error in showDatabaseModal:', error);
+        alert('Error opening modal: ' + error.message);
+      }
+    };
+
+                // Enhanced Lineage Editor Functions
+            window.createEnhancedLineageEditor = function(browserData, vendorStats) {
+              const strains = browserData.strains || [];
+              const vendors = browserData.vendors || [];
+              const vendorStrains = browserData.vendor_strains || [];
+              
+              return `
+                <div class="enhanced-lineage-editor">
+                  <div class="row">
+                    <!-- Controls Panel -->
+                    <div class="col-md-4">
+                      <div class="card mb-3">
+                        <div class="card-header">
+                          <h6><i class="fas fa-search"></i> Search & Filter</h6>
+                        </div>
+                        <div class="card-body">
+                          <div class="mb-3">
+                            <label class="form-label">Search Strains</label>
+                            <input type="text" class="form-control" id="strainSearchInput" placeholder="Type strain name...">
+                          </div>
+                          <div class="mb-3">
+                            <label class="form-label">Filter by Vendor</label>
+                            <select class="form-select" id="vendorFilter">
+                              <option value="">All Vendors</option>
+                              ${vendors.map(v => `<option value="${v.vendor}">${v.vendor} (${v.total_products} products)</option>`).join('')}
+                            </select>
+                          </div>
+                          <div class="mb-3">
+                            <label class="form-label">Filter by Lineage</label>
+                            <select class="form-select" id="lineageFilter">
+                              <option value="">All Lineages</option>
+                              <option value="SATIVA">SATIVA</option>
+                              <option value="INDICA">INDICA</option>
+                              <option value="HYBRID">HYBRID</option>
+                              <option value="HYBRID/SATIVA">HYBRID/SATIVA</option>
+                              <option value="HYBRID/INDICA">HYBRID/INDICA</option>
+                              <option value="CBD">CBD</option>
+                              <option value="MIXED">MIXED</option>
+                            </select>
+                          </div>
+                          <button class="btn btn-primary w-100" onclick="searchStrains()">
+                            <i class="fas fa-search"></i> Search
+                          </button>
+                          <button class="btn btn-secondary w-100 mt-2" onclick="clearSearchFilters()">
+                            <i class="fas fa-times"></i> Clear
+                          </button>
+                        </div>
+                      </div>
+                      
+                      <div class="card mb-3">
+                        <div class="card-header">
+                          <h6><i class="fas fa-tools"></i> Bulk Actions</h6>
+                        </div>
+                        <div class="card-body">
+                          <div class="mb-3">
+                            <label class="form-label">Bulk Update Lineage</label>
+                            <select class="form-select" id="bulkLineageSelect">
+                              <option value="">Select lineage...</option>
+                              <option value="SATIVA">SATIVA</option>
+                              <option value="INDICA">INDICA</option>
+                              <option value="HYBRID">HYBRID</option>
+                              <option value="HYBRID/SATIVA">HYBRID/SATIVA</option>
+                              <option value="HYBRID/INDICA">HYBRID/INDICA</option>
+                              <option value="CBD">CBD</option>
+                              <option value="MIXED">MIXED</option>
+                            </select>
+                          </div>
+                          <button class="btn btn-warning w-100" onclick="applyBulkLineage()" disabled id="bulkUpdateBtn">
+                            <i class="fas fa-edit"></i> Update Selected (<span id="selectedCount">0</span>)
+                          </button>
+                          <button class="btn btn-outline-secondary w-100 mt-2" onclick="selectAllVisible()">
+                            <i class="fas fa-check-square"></i> Select All Visible
+                          </button>
+                          <button class="btn btn-outline-secondary w-100 mt-1" onclick="clearSelection()">
+                            <i class="fas fa-square"></i> Clear Selection
+                          </button>
+                        </div>
+                      </div>
+                      
+                      <div class="card">
+                        <div class="card-header">
+                          <h6><i class="fas fa-chart-bar"></i> Summary</h6>
+                        </div>
+                        <div class="card-body">
+                          <div class="row text-center">
+                            <div class="col-6">
+                              <div class="stat-item">
+                                <h4 class="text-primary">${strains.length}</h4>
+                                <small>Total Strains</small>
+                              </div>
+                            </div>
+                            <div class="col-6">
+                              <div class="stat-item">
+                                <h4 class="text-success">${vendors.length}</h4>
+                                <small>Vendors</small>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <!-- Strains List Panel -->
+                    <div class="col-md-8">
+                      <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                          <h6><i class="fas fa-list"></i> Strain Database</h6>
+                          <span class="badge bg-info" id="resultCount">${strains.length} strains</span>
+                        </div>
+                        <div class="card-body p-0">
+                          <div class="table-responsive" style="max-height: 600px; overflow-y: auto;">
+                            <table class="table table-hover mb-0" id="strainsTable">
+                              <thead class="table-dark sticky-top">
+                                <tr>
+                                  <th width="40">
+                                    <input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll()">
+                                  </th>
+                                  <th>Strain Name</th>
+                                  <th>Current Lineage</th>
+                                  <th>Products</th>
+                                  <th>Vendors</th>
+                                  <th>Action</th>
+                                </tr>
+                              </thead>
+                              <tbody id="strainsTableBody">
+                                ${strains.slice(0, 50).map(strain => createStrainRow(strain)).join('')}
+                              </tbody>
+                            </table>
+                          </div>
+                          <div class="p-3 border-top">
+                            <div class="d-flex justify-content-between align-items-center">
+                              <small class="text-muted">Showing first 50 results. Use search to find specific strains.</small>
+                              <button class="btn btn-sm btn-outline-primary" onclick="loadMoreStrains()">
+                                <i class="fas fa-plus"></i> Load More
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              `;
+            };
+            
+            function createStrainRow(strain) {
+              const lineage = strain.current_lineage || strain.canonical_lineage || 'Unknown';
+              const vendors = strain.vendors ? strain.vendors.split(',').slice(0, 3).join(', ') : 'N/A';
+              const vendorCount = strain.vendor_count || 0;
+              const productCount = strain.product_count || 0;
+              
+              return `
+                <tr data-strain-name="${strain.strain_name}">
+                  <td>
+                    <input type="checkbox" class="strain-checkbox" value="${strain.strain_name}" onchange="updateSelectionCount()">
+                  </td>
+                  <td>
+                    <strong>${strain.strain_name}</strong>
+                    ${strain.sovereign_lineage ? '<span class="badge bg-success ms-1" title="Manually set">Manual</span>' : ''}
+                  </td>
+                  <td>
+                    <span class="badge bg-${getLineageBadgeColor(lineage)}">${lineage}</span>
+                  </td>
+                  <td>${productCount}</td>
+                  <td title="${strain.vendors || 'N/A'}">
+                    ${vendorCount > 0 ? `${vendorCount} vendor${vendorCount > 1 ? 's' : ''}` : 'N/A'}
+                  </td>
+                  <td>
+                    <select class="form-select form-select-sm lineage-dropdown" 
+                            onchange="updateStrainLineage('${strain.strain_name}', this.value)"
+                            data-strain="${strain.strain_name}">
+                      <option value="">Quick Change...</option>
+                      <option value="SATIVA" ${lineage === 'SATIVA' ? 'selected' : ''}>SATIVA</option>
+                      <option value="INDICA" ${lineage === 'INDICA' ? 'selected' : ''}>INDICA</option>
+                      <option value="HYBRID" ${lineage === 'HYBRID' ? 'selected' : ''}>HYBRID</option>
+                      <option value="HYBRID/SATIVA" ${lineage === 'HYBRID/SATIVA' ? 'selected' : ''}>HYBRID/SATIVA</option>
+                      <option value="HYBRID/INDICA" ${lineage === 'HYBRID/INDICA' ? 'selected' : ''}>HYBRID/INDICA</option>
+                      <option value="CBD" ${lineage === 'CBD' ? 'selected' : ''}>CBD</option>
+                      <option value="MIXED" ${lineage === 'MIXED' ? 'selected' : ''}>MIXED</option>
+                    </select>
+                  </td>
+                </tr>
+              `;
+            }
+            
+            function getLineageBadgeColor(lineage) {
+              switch(lineage) {
+                case 'SATIVA': return 'danger';
+                case 'INDICA': return 'primary';
+                case 'HYBRID': return 'success';
+                case 'HYBRID/SATIVA': return 'warning';
+                case 'HYBRID/INDICA': return 'info';
+                case 'CBD': return 'secondary';
+                default: return 'dark';
+              }
+            }
+            
+            window.initializeEnhancedLineageEditor = function() {
+              // Store current data globally for functions to access
+              window.currentStrainData = [];
+              window.selectedStrains = new Set();
+              
+              // Set up event listeners and initialize functionality
+              updateSelectionCount();
+              
+              // Enable bulk update button when lineage is selected
+              document.getElementById('bulkLineageSelect').addEventListener('change', function() {
+                const selectedLineage = this.value;
+                const selectedCount = window.selectedStrains.size;
+                const bulkBtn = document.getElementById('bulkUpdateBtn');
+                
+                if (selectedLineage && selectedCount > 0) {
+                  bulkBtn.disabled = false;
+                  bulkBtn.innerHTML = `<i class="fas fa-edit"></i> Update ${selectedCount} strain${selectedCount > 1 ? 's' : ''} to ${selectedLineage}`;
+                } else {
+                  bulkBtn.disabled = true;
+                  bulkBtn.innerHTML = `<i class="fas fa-edit"></i> Update Selected (<span id="selectedCount">0</span>)`;
+                }
+              });
+            };
+            
+            // Enhanced Lineage Editor Interactive Functions
+            window.searchStrains = async function() {
+              const searchTerm = document.getElementById('strainSearchInput').value;
+              const vendorFilter = document.getElementById('vendorFilter').value;
+              const lineageFilter = document.getElementById('lineageFilter').value;
+              
+              try {
+                const response = await fetch('/api/strain-search', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    search: searchTerm,
+                    vendor: vendorFilter,
+                    lineage: lineageFilter,
+                    page: 1,
+                    per_page: 100
+                  })
+                });
+                
+                const data = await response.json();
+                if (data.strains) {
+                  updateStrainsTable(data.strains);
+                  document.getElementById('resultCount').textContent = `${data.strains.length} of ${data.pagination.total} strains`;
+                } else {
+                  console.error('Search failed:', data.error);
+                }
+              } catch (error) {
+                console.error('Error searching strains:', error);
+              }
+            };
+            
+            window.clearSearchFilters = function() {
+              document.getElementById('strainSearchInput').value = '';
+              document.getElementById('vendorFilter').value = '';
+              document.getElementById('lineageFilter').value = '';
+              
+              // Reload original data
+              window.openLineageEditor();
+            };
+            
+            window.updateStrainsTable = function(strains) {
+              const tbody = document.getElementById('strainsTableBody');
+              tbody.innerHTML = strains.map(strain => createStrainRow(strain)).join('');
+              window.currentStrainData = strains;
+              clearSelection();
+            };
+            
+            window.updateStrainLineage = async function(strainName, newLineage) {
+              if (!newLineage) return;
+              
+              try {
+                const response = await fetch('/api/set-strain-lineage', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    strain_name: strainName,
+                    lineage: newLineage
+                  })
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                  // Update the table row to reflect the change
+                  const row = document.querySelector(`tr[data-strain-name="${strainName}"]`);
+                  if (row) {
+                    const lineageCell = row.children[2];
+                    lineageCell.innerHTML = `<span class="badge bg-${getLineageBadgeColor(newLineage)}">${newLineage}</span>`;
+                    
+                    // Add manual badge if not already present
+                    const nameCell = row.children[1];
+                    if (!nameCell.querySelector('.badge')) {
+                      nameCell.innerHTML += ' <span class="badge bg-success ms-1" title="Manually set">Manual</span>';
+                    }
+                  }
+                  
+                  // Show success toast
+                  showToast(`Updated ${strainName} to ${newLineage}`, 'success');
+                } else {
+                  console.error('Failed to update strain lineage:', result.error);
+                  showToast(`Failed to update ${strainName}: ${result.error}`, 'error');
+                }
+              } catch (error) {
+                console.error('Error updating strain lineage:', error);
+                showToast(`Error updating ${strainName}: ${error.message}`, 'error');
+              }
+            };
+            
+            window.updateSelectionCount = function() {
+              const checkboxes = document.querySelectorAll('.strain-checkbox:checked');
+              window.selectedStrains = new Set(Array.from(checkboxes).map(cb => cb.value));
+              
+              const count = window.selectedStrains.size;
+              const countSpan = document.getElementById('selectedCount');
+              if (countSpan) {
+                countSpan.textContent = count;
+              }
+              
+              // Update bulk update button
+              const bulkBtn = document.getElementById('bulkUpdateBtn');
+              const bulkSelect = document.getElementById('bulkLineageSelect');
+              if (bulkBtn && bulkSelect) {
+                const selectedLineage = bulkSelect.value;
+                if (selectedLineage && count > 0) {
+                  bulkBtn.disabled = false;
+                  bulkBtn.innerHTML = `<i class="fas fa-edit"></i> Update ${count} strain${count > 1 ? 's' : ''} to ${selectedLineage}`;
+                } else {
+                  bulkBtn.disabled = true;
+                  bulkBtn.innerHTML = `<i class="fas fa-edit"></i> Update Selected (<span id="selectedCount">${count}</span>)`;
+                }
+              }
+            };
+            
+            window.toggleSelectAll = function() {
+              const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+              const strainCheckboxes = document.querySelectorAll('.strain-checkbox');
+              
+              strainCheckboxes.forEach(checkbox => {
+                checkbox.checked = selectAllCheckbox.checked;
+              });
+              
+              updateSelectionCount();
+            };
+            
+            window.selectAllVisible = function() {
+              const strainCheckboxes = document.querySelectorAll('.strain-checkbox');
+              strainCheckboxes.forEach(checkbox => {
+                checkbox.checked = true;
+              });
+              
+              updateSelectionCount();
+            };
+            
+            window.clearSelection = function() {
+              const strainCheckboxes = document.querySelectorAll('.strain-checkbox');
+              strainCheckboxes.forEach(checkbox => {
+                checkbox.checked = false;
+              });
+              
+              const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+              if (selectAllCheckbox) {
+                selectAllCheckbox.checked = false;
+              }
+              
+              updateSelectionCount();
+            };
+            
+            window.applyBulkLineage = async function() {
+              const selectedLineage = document.getElementById('bulkLineageSelect').value;
+              const selectedStrains = Array.from(window.selectedStrains);
+              
+              if (!selectedLineage || selectedStrains.length === 0) {
+                showToast('Please select a lineage and at least one strain', 'warning');
+                return;
+              }
+              
+              // Confirm bulk update
+              if (!confirm(`Are you sure you want to update ${selectedStrains.length} strain${selectedStrains.length > 1 ? 's' : ''} to ${selectedLineage}?`)) {
+                return;
+              }
+              
+              try {
+                const updates = selectedStrains.map(strainName => ({
+                  strain_name: strainName,
+                  lineage: selectedLineage
+                }));
+                
+                const response = await fetch('/api/bulk-update-lineage', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ updates })
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                  // Update the table rows
+                  result.results.forEach(update => {
+                    if (update.success) {
+                      const row = document.querySelector(`tr[data-strain-name="${update.strain_name}"]`);
+                      if (row) {
+                        const lineageCell = row.children[2];
+                        lineageCell.innerHTML = `<span class="badge bg-${getLineageBadgeColor(selectedLineage)}">${selectedLineage}</span>`;
+                        
+                        // Add manual badge
+                        const nameCell = row.children[1];
+                        if (!nameCell.querySelector('.badge')) {
+                          nameCell.innerHTML += ' <span class="badge bg-success ms-1" title="Manually set">Manual</span>';
+                        }
+                      }
+                    }
+                  });
+                  
+                  showToast(`Bulk update completed: ${result.summary.successful} successful, ${result.summary.failed} failed`, 'success');
+                  clearSelection();
+                } else {
+                  showToast(`Bulk update failed: ${result.error}`, 'error');
+                }
+              } catch (error) {
+                console.error('Error in bulk update:', error);
+                showToast(`Bulk update error: ${error.message}`, 'error');
+              }
+            };
+            
+            window.loadMoreStrains = function() {
+              // This would implement pagination - for now just show a message
+              showToast('Use search filters to find specific strains', 'info');
+            };
+            
+            window.showToast = function(message, type = 'info') {
+              // Simple toast notification - you could enhance this with a proper toast library
+              const alertClass = type === 'success' ? 'alert-success' : 
+                               type === 'error' ? 'alert-danger' : 
+                               type === 'warning' ? 'alert-warning' : 'alert-info';
+              
+              const toast = document.createElement('div');
+              toast.className = `alert ${alertClass} position-fixed`;
+              toast.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+              toast.innerHTML = `
+                ${message}
+                <button type="button" class="btn-close float-end" onclick="this.parentElement.remove()"></button>
+              `;
+              
+              document.body.appendChild(toast);
+              
+              // Auto-remove after 5 seconds
+              setTimeout(() => {
+                if (toast.parentElement) {
+                  toast.remove();
+                }
+              }, 5000);
+            };
+            
+            // Excel Strain Editor Functions
+            window.initializeExcelStrainEditor = function() {
+              console.log('Initializing Excel strain editor...');
+            };
+            
+            window.getLineageBadgeColor = function(lineage) {
+              if (!lineage) return 'secondary';
+              const l = lineage.toUpperCase();
+              if (l.includes('SATIVA')) return 'success';
+              if (l.includes('INDICA')) return 'primary';
+              if (l.includes('HYBRID')) return 'warning';
+              if (l.includes('CBD')) return 'info';
+              if (l.includes('MIXED')) return 'dark';
+              return 'secondary';
+            };
+            
+            window.filterStrainBrowser = function() {
+              const searchTerm = document.getElementById('strainBrowserSearch').value.toLowerCase();
+              const lineageFilter = document.querySelector('input[name="lineageFilter"]:checked').value;
+              const sortBy = document.querySelector('input[name="sortBy"]:checked').value;
+              const tableBody = document.getElementById('strainTableBody');
+              const filteredCounter = document.getElementById('filteredStrains');
+              
+              if (!window.excelStrainData) {
+                console.error('No Excel strain data available');
+                return;
+              }
+              
+              let filteredStrains = window.excelStrainData.filter(strain => {
+                const matchesSearch = strain.strain_name.toLowerCase().includes(searchTerm);
+                const matchesLineage = !lineageFilter || strain.current_lineage.includes(lineageFilter);
+                return matchesSearch && matchesLineage;
+              });
+              
+              // Sort strains based on selected criteria
+              filteredStrains.sort((a, b) => {
+                switch (sortBy) {
+                  case 'name':
+                    return a.strain_name.localeCompare(b.strain_name);
+                  case 'products':
+                    return b.product_count - a.product_count;
+                  case 'vendors':
+                    return b.vendor_count - a.vendor_count;
+                  default:
+                    return 0;
+                }
+              });
+              
+              // Update table content
+              tableBody.innerHTML = filteredStrains.map(strain => `
+                <tr class="strain-row" data-strain-name="${strain.strain_name.toLowerCase()}" data-lineage="${strain.current_lineage}">
+                  <td>
+                    <div class="strain-name-cell">
+                      <strong>${strain.strain_name}</strong>
+                    </div>
+                  </td>
+                  <td>
+                    <span class="badge bg-${getLineageBadgeColor(strain.current_lineage)}">${strain.current_lineage}</span>
+                  </td>
+                  <td>
+                    <div class="d-flex align-items-center">
+                      <strong>${strain.product_count}</strong>
+                    </div>
+                  </td>
+                  <td>
+                    <div class="vendor-cell" title="${strain.vendors}">
+                      <strong>${strain.vendor_count}</strong>
+                      <small class="text-muted ms-1">${strain.vendors.length > 30 ? strain.vendors.substring(0, 30) + '...' : strain.vendors}</small>
+                    </div>
+                  </td>
+                  <td>
+                    <div class="btn-group">
+                      <select class="form-select form-select-sm" style="width: 140px" onchange="quickUpdateLineage('${strain.strain_name}', this.value)">
+                        <option value="${strain.current_lineage}" selected>Set Lineage</option>
+                        <option value="SATIVA">🌿 Sativa</option>
+                        <option value="INDICA">🍇 Indica</option>
+                        <option value="HYBRID">🌺 Hybrid</option>
+                        <option value="HYBRID/SATIVA">🌺🌿 Hybrid/Sativa</option>
+                        <option value="HYBRID/INDICA">🌺🍇 Hybrid/Indica</option>
+                        <option value="CBD">💚 CBD</option>
+                        <option value="MIXED">🌈 Mixed</option>
+                      </select>
+                      <button class="btn btn-sm btn-outline-info" onclick="viewStrainDetails('${strain.strain_name}')">
+                        <i class="fas fa-eye"></i>
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              `).join('');
+              
+              // Update counters
+              filteredCounter.textContent = filteredStrains.length;
+            };
+            
+            window.clearStrainBrowserSearch = function() {
+              document.getElementById('strainBrowserSearch').value = '';
+              document.getElementById('lineageAll').checked = true;
+              document.getElementById('sortName').checked = true;
+              filterStrainBrowser();
+            };
+            
+            window.updateStrainCardsDisplay = function() {
+              const cardsGrid = document.getElementById('strainCardsGrid');
+              const loadMoreContainer = document.getElementById('loadMoreContainer');
+              const loadMoreBtn = document.getElementById('loadMoreBtn');
+              
+              const strains = window.filteredStrainData || window.excelStrainData;
+              const itemsPerPage = 24;
+              const startIndex = 0;
+              const endIndex = Math.min(itemsPerPage * (window.currentStrainPage + 1), strains.length);
+              const visibleStrains = strains.slice(startIndex, endIndex);
+              
+              cardsGrid.innerHTML = visibleStrains.map(strain => `
+                <div class="col-lg-4 col-md-6 mb-3 strain-card-item" data-strain-name="${strain.strain_name.toLowerCase()}" data-lineage="${strain.current_lineage}">
+                  <div class="card strain-card h-100 shadow-sm">
+                    <div class="card-body">
+                      <div class="d-flex justify-content-between align-items-start mb-2">
+                        <h6 class="card-title mb-0 strain-name">${strain.strain_name}</h6>
+                        <span class="badge bg-${getLineageBadgeColor(strain.current_lineage)} lineage-badge">${strain.current_lineage}</span>
+                      </div>
+                      <div class="strain-stats mb-3">
+                        <div class="row text-center">
+                          <div class="col-6">
+                            <div class="stat-box">
+                              <strong class="text-primary">${strain.product_count}</strong>
+                              <br><small class="text-muted">Products</small>
+                            </div>
+                          </div>
+                          <div class="col-6">
+                            <div class="stat-box">
+                              <strong class="text-info">${strain.vendor_count}</strong>
+                              <br><small class="text-muted">Vendors</small>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="strain-vendors mb-2">
+                        <small class="text-muted">
+                          <i class="fas fa-store"></i> 
+                          ${strain.vendors.length > 50 ? strain.vendors.substring(0, 50) + '...' : strain.vendors}
+                        </small>
+                      </div>
+                      <div class="strain-actions">
+                        <select class="form-select form-select-sm mb-2" id="lineage-${strain.strain_name.replace(/[^a-zA-Z0-9]/g, '_')}" onchange="quickUpdateLineage('${strain.strain_name}', this.value)">
+                          <option value="${strain.current_lineage}" selected>Current: ${strain.current_lineage}</option>
+                          <option value="SATIVA">🌿 Sativa</option>
+                          <option value="INDICA">🍇 Indica</option>
+                          <option value="HYBRID">🌺 Hybrid</option>
+                          <option value="HYBRID/SATIVA">🌺🌿 Hybrid/Sativa</option>
+                          <option value="HYBRID/INDICA">🌺🍇 Hybrid/Indica</option>
+                          <option value="CBD">💚 CBD</option>
+                          <option value="MIXED">🌈 Mixed</option>
+                        </select>
+                        <button class="btn btn-sm btn-outline-info w-100" onclick="viewStrainDetails('${strain.strain_name}')">
+                          <i class="fas fa-eye"></i> View Products
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              `).join('');
+              
+              // Update load more button
+              const remaining = strains.length - endIndex;
+              if (remaining > 0) {
+                loadMoreContainer.style.display = 'block';
+                loadMoreBtn.innerHTML = `<i class="fas fa-plus-circle"></i> Load More Strains (${remaining} remaining)`;
+              } else {
+                loadMoreContainer.style.display = 'none';
+              }
+            };
+            
+            window.loadMoreStrains = function() {
+              window.currentStrainPage = (window.currentStrainPage || 0) + 1;
+              
+              const strains = window.filteredStrainData || window.excelStrainData;
+              const itemsPerPage = 24;
+              const startIndex = itemsPerPage * window.currentStrainPage;
+              const endIndex = Math.min(itemsPerPage * (window.currentStrainPage + 1), strains.length);
+              const newStrains = strains.slice(startIndex, endIndex);
+              
+              const cardsGrid = document.getElementById('strainCardsGrid');
+              const loadMoreContainer = document.getElementById('loadMoreContainer');
+              const loadMoreBtn = document.getElementById('loadMoreBtn');
+              
+              // Append new cards
+              newStrains.forEach(strain => {
+                const cardHtml = `
+                  <div class="col-lg-4 col-md-6 mb-3 strain-card-item" data-strain-name="${strain.strain_name.toLowerCase()}" data-lineage="${strain.current_lineage}">
+                    <div class="card strain-card h-100 shadow-sm">
+                      <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                          <h6 class="card-title mb-0 strain-name">${strain.strain_name}</h6>
+                          <span class="badge bg-${getLineageBadgeColor(strain.current_lineage)} lineage-badge">${strain.current_lineage}</span>
+                        </div>
+                        <div class="strain-stats mb-3">
+                          <div class="row text-center">
+                            <div class="col-6">
+                              <div class="stat-box">
+                                <strong class="text-primary">${strain.product_count}</strong>
+                                <br><small class="text-muted">Products</small>
+                              </div>
+                            </div>
+                            <div class="col-6">
+                              <div class="stat-box">
+                                <strong class="text-info">${strain.vendor_count}</strong>
+                                <br><small class="text-muted">Vendors</small>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        <div class="strain-vendors mb-2">
+                          <small class="text-muted">
+                            <i class="fas fa-store"></i> 
+                            ${strain.vendors.length > 50 ? strain.vendors.substring(0, 50) + '...' : strain.vendors}
+                          </small>
+                        </div>
+                        <div class="strain-actions">
+                          <select class="form-select form-select-sm mb-2" id="lineage-${strain.strain_name.replace(/[^a-zA-Z0-9]/g, '_')}" onchange="quickUpdateLineage('${strain.strain_name}', this.value)">
+                            <option value="${strain.current_lineage}" selected>Current: ${strain.current_lineage}</option>
+                            <option value="SATIVA">🌿 Sativa</option>
+                            <option value="INDICA">🍇 Indica</option>
+                            <option value="HYBRID">🌺 Hybrid</option>
+                            <option value="HYBRID/SATIVA">🌺🌿 Hybrid/Sativa</option>
+                            <option value="HYBRID/INDICA">🌺🍇 Hybrid/Indica</option>
+                            <option value="CBD">💚 CBD</option>
+                            <option value="MIXED">🌈 Mixed</option>
+                          </select>
+                          <button class="btn btn-sm btn-outline-info w-100" onclick="viewStrainDetails('${strain.strain_name}')">
+                            <i class="fas fa-eye"></i> View Products
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                `;
+                cardsGrid.insertAdjacentHTML('beforeend', cardHtml);
+              });
+              
+              // Update load more button
+              const remaining = strains.length - endIndex;
+              if (remaining > 0) {
+                loadMoreBtn.innerHTML = `<i class="fas fa-plus-circle"></i> Load More Strains (${remaining} remaining)`;
+              } else {
+                loadMoreContainer.style.display = 'none';
+              }
+            };
+            
+            window.quickUpdateLineage = function(strainName, newLineage) {
+              if (!newLineage || newLineage.startsWith('Current:')) return;
+              
+              // Update the strain data
+              const strain = window.excelStrainData.find(s => s.strain_name === strainName);
+              if (strain) {
+                const oldLineage = strain.current_lineage;
+                strain.current_lineage = newLineage;
+                
+                // Update the badge in the card
+                const strainCard = document.querySelector(`[data-strain-name="${strainName.toLowerCase()}"]`);
+                if (strainCard) {
+                  const badge = strainCard.querySelector('.lineage-badge');
+                  if (badge) {
+                    badge.textContent = newLineage;
+                    badge.className = `badge bg-${getLineageBadgeColor(newLineage)} lineage-badge`;
+                  }
+                  
+                  // Update the dropdown to show current selection
+                  const dropdown = strainCard.querySelector('select');
+                  if (dropdown) {
+                    dropdown.options[0].text = `Current: ${newLineage}`;
+                    dropdown.options[0].value = newLineage;
+                    dropdown.selectedIndex = 0;
+                  }
+                }
+                
+                showToast(`🌿 Updated "${strainName}" from ${oldLineage} → ${newLineage}`, 'success');
+              }
+            };
+            
+            window.viewStrainDetails = function(strainName) {
+              const strain = window.excelStrainData.find(s => s.strain_name === strainName);
+              if (!strain) {
+                showToast(`Strain "${strainName}" not found`, 'error');
+                return;
+              }
+              
+              const detailsHtml = `
+                <div class="strain-details">
+                  <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h4 class="mb-0">${strain.strain_name}</h4>
+                    <span class="badge bg-${getLineageBadgeColor(strain.current_lineage)} fs-6">${strain.current_lineage}</span>
+                  </div>
+                  
+                  <div class="row mb-4">
+                    <div class="col-md-4 text-center">
+                      <div class="stat-card p-3 bg-primary text-white rounded">
+                        <h3 class="mb-0">${strain.product_count}</h3>
+                        <small>Products</small>
+                      </div>
+                    </div>
+                    <div class="col-md-4 text-center">
+                      <div class="stat-card p-3 bg-info text-white rounded">
+                        <h3 class="mb-0">${strain.vendor_count}</h3>
+                        <small>Vendors</small>
+                      </div>
+                    </div>
+                    <div class="col-md-4 text-center">
+                      <div class="stat-card p-3 bg-success text-white rounded">
+                        <h3 class="mb-0">${strain.brand_count}</h3>
+                        <small>Brands</small>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div class="mb-3">
+                    <h6><i class="fas fa-store"></i> Available from these vendors:</h6>
+                    <div class="vendor-list p-3 bg-light rounded">
+                      ${strain.vendors.split(', ').map(vendor => `<span class="badge bg-secondary me-1 mb-1">${vendor.trim()}</span>`).join('')}
+                    </div>
+                  </div>
+                  
+                  ${strain.brands && strain.brands.trim() ? `
+                    <div class="mb-3">
+                      <h6><i class="fas fa-tag"></i> Available brands:</h6>
+                      <div class="brand-list p-3 bg-light rounded">
+                        ${strain.brands.split(', ').map(brand => `<span class="badge bg-outline-primary me-1 mb-1">${brand.trim()}</span>`).join('')}
+                      </div>
+                    </div>
+                  ` : ''}
+                  
+                  <div class="mt-4">
+                    <h6>Quick Lineage Update:</h6>
+                    <select class="form-select" onchange="quickUpdateLineage('${strain.strain_name}', this.value); this.selectedIndex = 0;">
+                      <option value="">Choose new lineage...</option>
+                      <option value="SATIVA">🌿 Sativa</option>
+                      <option value="INDICA">🍇 Indica</option>
+                      <option value="HYBRID">🌺 Hybrid</option>
+                      <option value="HYBRID/SATIVA">🌺🌿 Hybrid/Sativa</option>
+                      <option value="HYBRID/INDICA">🌺🍇 Hybrid/Indica</option>
+                      <option value="CBD">💚 CBD</option>
+                      <option value="MIXED">🌈 Mixed</option>
+                    </select>
+                  </div>
+                </div>
+              `;
+              
+              showDatabaseModal(`${strain.strain_name} - Strain Details`, detailsHtml);
+            };
+            
+            window.editExcelStrainLineage = function(strainName, currentLineage) {
+              const newLineage = prompt(`Edit lineage for "${strainName}":`, currentLineage);
+              if (newLineage && newLineage !== currentLineage) {
+                quickUpdateLineage(strainName, newLineage);
+              }
+            };
+            
+            // Excel-based Lineage Editor (Fallback)
+            window.createExcelBasedLineageEditor = async function() {
+              try {
+                console.log('Fetching available tags...');
+                // Get available tags which includes strain information
+                const response = await fetch('/api/available-tags');
+                const availableTags = await response.json();
+                console.log('Available tags loaded, processing strains...');
+                
+                // Extract unique strains from the available tags
+                const strainMap = new Map();
+                availableTags.forEach(tag => {
+                  // Extract strain name from product name (remove "by [brand] - [weight]" part)
+                  const productName = tag['Product Name*'] || tag.displayName || '';
+                  const strainMatch = productName.match(/^(.+?)\s+by\s+/);
+                  const strainName = strainMatch ? strainMatch[1].trim() : productName.split(' by ')[0]?.trim();
+                  
+                  if (strainName && strainName.length > 2) {
+                    if (!strainMap.has(strainName)) {
+                      strainMap.set(strainName, {
+                        strain_name: strainName,
+                        current_lineage: tag.lineage || tag.Lineage || 'Unknown',
+                        product_count: 0,
+                        vendors: new Set(),
+                        brands: new Set()
+                      });
+                    }
+                    const strain = strainMap.get(strainName);
+                    strain.product_count++;
+                    if (tag.Vendor || tag.vendor) strain.vendors.add(tag.Vendor || tag.vendor);
+                    if (tag['Product Brand'] || tag.productBrand) strain.brands.add(tag['Product Brand'] || tag.productBrand);
+                  }
+                });
+                
+                // Convert to array and sort by product count
+                const strains = Array.from(strainMap.values()).map(strain => ({
+                  ...strain,
+                  vendor_count: strain.vendors.size,
+                  brand_count: strain.brands.size,
+                  vendors: Array.from(strain.vendors).join(', '),
+                  brands: Array.from(strain.brands).join(', ')
+                })).sort((a, b) => b.product_count - a.product_count);
+                
+                console.log('Processed', strains.length, 'unique strains, generating HTML...');
+                
+                const excelEditorHtml = `
+                  <div class="strain-browser d-flex">
+                    <!-- Sidebar with Filters -->
+                    <div class="strain-browser-sidebar">
+                      <div class="filter-section">
+                        <div class="search-box mb-3">
+                          <div class="input-group">
+                            <span class="input-group-text">
+                              <i class="fas fa-search"></i>
+                            </span>
+                            <input type="text" class="form-control" id="strainBrowserSearch" 
+                                   placeholder="Search strains..." 
+                                   onkeyup="filterStrainBrowser()">
+                            <button class="btn btn-outline-secondary" onclick="clearStrainBrowserSearch()">
+                              <i class="fas fa-times"></i>
+                            </button>
+                          </div>
+                        </div>
+
+                        <div class="filter-group mb-3">
+                          <h6 class="filter-title"><i class="fas fa-filter"></i> Lineage</h6>
+                          <div class="filter-options">
+                            <div class="form-check">
+                              <input class="form-check-input" type="radio" name="lineageFilter" id="lineageAll" value="" checked onchange="filterStrainBrowser()">
+                              <label class="form-check-label" for="lineageAll">All Lineages</label>
+                            </div>
+                            <div class="form-check">
+                              <input class="form-check-input" type="radio" name="lineageFilter" id="lineageSativa" value="SATIVA" onchange="filterStrainBrowser()">
+                              <label class="form-check-label" for="lineageSativa">🌿 Sativa</label>
+                            </div>
+                            <div class="form-check">
+                              <input class="form-check-input" type="radio" name="lineageFilter" id="lineageIndica" value="INDICA" onchange="filterStrainBrowser()">
+                              <label class="form-check-label" for="lineageIndica">🍇 Indica</label>
+                            </div>
+                            <div class="form-check">
+                              <input class="form-check-input" type="radio" name="lineageFilter" id="lineageHybrid" value="HYBRID" onchange="filterStrainBrowser()">
+                              <label class="form-check-label" for="lineageHybrid">🌺 Hybrid</label>
+                            </div>
+                            <div class="form-check">
+                              <input class="form-check-input" type="radio" name="lineageFilter" id="lineageCBD" value="CBD" onchange="filterStrainBrowser()">
+                              <label class="form-check-label" for="lineageCBD">💚 CBD</label>
+                            </div>
+                            <div class="form-check">
+                              <input class="form-check-input" type="radio" name="lineageFilter" id="lineageMixed" value="MIXED" onchange="filterStrainBrowser()">
+                              <label class="form-check-label" for="lineageMixed">🌈 Mixed</label>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div class="filter-group mb-3">
+                          <h6 class="filter-title"><i class="fas fa-sort-amount-down"></i> Sort By</h6>
+                          <div class="filter-options">
+                            <div class="form-check">
+                              <input class="form-check-input" type="radio" name="sortBy" id="sortName" value="name" checked onchange="filterStrainBrowser()">
+                              <label class="form-check-label" for="sortName">Name</label>
+                            </div>
+                            <div class="form-check">
+                              <input class="form-check-input" type="radio" name="sortBy" id="sortProducts" value="products" onchange="filterStrainBrowser()">
+                              <label class="form-check-label" for="sortProducts">Product Count</label>
+                            </div>
+                            <div class="form-check">
+                              <input class="form-check-input" type="radio" name="sortBy" id="sortVendors" value="vendors" onchange="filterStrainBrowser()">
+                              <label class="form-check-label" for="sortVendors">Vendor Count</label>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div class="stats-summary">
+                          <div class="stat-item">
+                            <small class="text-muted">Total Strains</small>
+                            <h6 class="mb-0" id="totalStrains">${strains.length}</h6>
+                          </div>
+                          <div class="stat-item">
+                            <small class="text-muted">Showing</small>
+                            <h6 class="mb-0" id="filteredStrains">${strains.length}</h6>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Main Content Area -->
+                    <div class="strain-browser-content">
+                      <div class="strain-list">
+                        <table class="table table-hover strain-table">
+                          <thead>
+                            <tr>
+                              <th>Strain Name</th>
+                              <th>Lineage</th>
+                              <th>Products</th>
+                              <th>Vendors</th>
+                              <th>Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody id="strainTableBody">
+                            ${strains.map(strain => `
+                              <tr class="strain-row" data-strain-name="${strain.strain_name.toLowerCase()}" data-lineage="${strain.current_lineage}">
+                                <td>
+                                  <div class="strain-name-cell">
+                                    <strong>${strain.strain_name}</strong>
+                                  </div>
+                                </td>
+                                <td>
+                                  <span class="badge bg-${getLineageBadgeColor(strain.current_lineage)}">${strain.current_lineage}</span>
+                                </td>
+                                <td>
+                                  <div class="d-flex align-items-center">
+                                    <strong>${strain.product_count}</strong>
+                                  </div>
+                                </td>
+                                <td>
+                                  <div class="vendor-cell" title="${strain.vendors}">
+                                    <strong>${strain.vendor_count}</strong>
+                                    <small class="text-muted ms-1">${strain.vendors.length > 30 ? strain.vendors.substring(0, 30) + '...' : strain.vendors}</small>
+                                  </div>
+                                </td>
+                                <td>
+                                  <div class="btn-group">
+                                    <select class="form-select form-select-sm" style="width: 140px" onchange="quickUpdateLineage('${strain.strain_name}', this.value)">
+                                      <option value="${strain.current_lineage}" selected>Set Lineage</option>
+                                      <option value="SATIVA">🌿 Sativa</option>
+                                      <option value="INDICA">🍇 Indica</option>
+                                      <option value="HYBRID">🌺 Hybrid</option>
+                                      <option value="HYBRID/SATIVA">🌺🌿 Hybrid/Sativa</option>
+                                      <option value="HYBRID/INDICA">🌺🍇 Hybrid/Indica</option>
+                                      <option value="CBD">💚 CBD</option>
+                                      <option value="MIXED">🌈 Mixed</option>
+                                    </select>
+                                    <button class="btn btn-sm btn-outline-info" onclick="viewStrainDetails('${strain.strain_name}')">
+                                      <i class="fas fa-eye"></i>
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            `).join('')}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                `;
+                
+                window.excelStrainData = strains;
+                console.log('Stored', strains.length, 'strains in window.excelStrainData');
+                
+                // Update modal content instead of creating new one
+                const modalBody = document.querySelector('#databaseModal .modal-body');
+                if (modalBody) {
+                  modalBody.innerHTML = excelEditorHtml;
+                  console.log('Excel strain editor initialization complete');
+                } else {
+                  console.error('Modal body not found');
+                  showDatabaseModal('Strain Browser', excelEditorHtml);
+                }
+                
+              } catch (error) {
+                console.error('Error creating Excel-based editor:', error);
+                const errorHtml = `
+                  <div class="alert alert-danger">
+                    <h6>⚠️ Error Loading Lineage Editor</h6>
+                    <p>Unable to load strain data. Please ensure Excel data is loaded.</p>
+                    <small>Error: ${error.message}</small>
+                  </div>
+                `;
+                showDatabaseModal('Lineage Editor', errorHtml);
+              }
+            };
+            
+            window.searchExcelStrains = function() {
+              const searchTerm = document.getElementById('excelStrainSearch').value.toLowerCase();
+              const filteredStrains = window.excelStrainData.filter(strain => 
+                strain.strain_name.toLowerCase().includes(searchTerm)
+              );
+              
+              const tbody = document.getElementById('excelStrainsTableBody');
+              tbody.innerHTML = filteredStrains.slice(0, 50).map(strain => `
+                <tr data-strain-name="${strain.strain_name}">
+                  <td><strong>${strain.strain_name}</strong></td>
+                  <td><span class="badge bg-${getLineageBadgeColor(strain.current_lineage)}">${strain.current_lineage}</span></td>
+                  <td>${strain.product_count}</td>
+                  <td title="${strain.vendors}">${strain.vendor_count} vendor${strain.vendor_count > 1 ? 's' : ''}</td>
+                  <td>
+                    <button class="btn btn-sm btn-outline-primary" onclick="editExcelStrainLineage('${strain.strain_name}', '${strain.current_lineage}')">
+                      <i class="fas fa-edit"></i> Edit
+                    </button>
+                  </td>
+                </tr>
+              `).join('');
+              
+              document.getElementById('excelResultCount').textContent = `${filteredStrains.length} strains`;
+            };
+            
+            window.editExcelStrainLineage = function(strainName, currentLineage) {
+              const newLineage = prompt(`Edit lineage for "${strainName}":\n\nCurrent: ${currentLineage}\n\nEnter new lineage (SATIVA, INDICA, HYBRID, HYBRID/SATIVA, HYBRID/INDICA, CBD, MIXED):`, currentLineage);
+              
+              if (newLineage && newLineage !== currentLineage) {
+                // Update via the existing strain lineage API
+                fetch('/api/set-strain-lineage', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    strain_name: strainName,
+                    lineage: newLineage
+                  })
+                })
+                .then(response => response.json())
+                .then(result => {
+                  if (result.success) {
+                    // Update the table row
+                    const row = document.querySelector(`tr[data-strain-name="${strainName}"]`);
+                    if (row) {
+                      const lineageCell = row.children[1];
+                      lineageCell.innerHTML = `<span class="badge bg-${getLineageBadgeColor(newLineage)}">${newLineage}</span>`;
+                    }
+                    showToast(`Updated ${strainName} to ${newLineage}`, 'success');
+                  } else {
+                    showToast(`Failed to update ${strainName}: ${result.error}`, 'error');
+                  }
+                })
+                .catch(error => {
+                  console.error('Error updating strain:', error);
+                  showToast(`Error updating ${strainName}: ${error.message}`, 'error');
+                });
+              }
+            };
+            
+            console.log('Global functions defined:', {
+              openDatabaseAnalytics: typeof window.openDatabaseAnalytics,
+              openLineageEditor: typeof window.openLineageEditor,
+              showDatabaseModal: typeof window.showDatabaseModal,
+              createEnhancedLineageEditor: typeof window.createEnhancedLineageEditor,
+              initializeEnhancedLineageEditor: typeof window.initializeEnhancedLineageEditor
+            });
+          </script>
   <style>
+    /* Enhanced Lineage Editor Styles */
+                /* Strain Browser Styles */
+            .strain-browser {
+              display: flex;
+              height: 75vh;
+              max-height: 800px;
+              background: #fff;
+              border-radius: 8px;
+              overflow: hidden;
+              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            }
+            
+            .strain-browser-sidebar {
+              width: 280px;
+              background: #f8f9fa;
+              border-right: 1px solid #e9ecef;
+              padding: 1.5rem;
+              overflow-y: auto;
+            }
+            
+            .strain-browser-content {
+              flex: 1;
+              overflow-y: auto;
+              background: #fff;
+            }
+            
+            .filter-section {
+              display: flex;
+              flex-direction: column;
+              gap: 1rem;
+            }
+            
+            .filter-title {
+              font-size: 0.875rem;
+              font-weight: 600;
+              color: #495057;
+              margin-bottom: 0.5rem;
+              display: flex;
+              align-items: center;
+              gap: 0.5rem;
+            }
+            
+            .filter-options {
+              display: flex;
+              flex-direction: column;
+              gap: 0.5rem;
+              padding-left: 0.5rem;
+            }
+            
+            .form-check-label {
+              font-size: 0.875rem;
+              color: #495057;
+            }
+            
+            .stats-summary {
+              margin-top: auto;
+              padding-top: 1rem;
+              border-top: 1px solid #e9ecef;
+              display: flex;
+              justify-content: space-between;
+            }
+            
+            .stats-summary .stat-item {
+              text-align: center;
+            }
+            
+            .strain-table {
+              margin: 0;
+              border-collapse: separate;
+              border-spacing: 0;
+            }
+            
+            .strain-table thead {
+              position: sticky;
+              top: 0;
+              background: #fff;
+              z-index: 1;
+            }
+            
+            .strain-table th {
+              padding: 1rem;
+              font-weight: 600;
+              color: #495057;
+              border-bottom: 2px solid #e9ecef;
+            }
+            
+            .strain-row {
+              transition: background-color 0.15s ease;
+            }
+            
+            .strain-row:hover {
+              background-color: #f8f9fa;
+            }
+            
+            .strain-row td {
+              padding: 0.75rem 1rem;
+              vertical-align: middle;
+              border-bottom: 1px solid #e9ecef;
+            }
+            
+            .strain-name-cell {
+              font-weight: 500;
+              color: #212529;
+            }
+            
+            .vendor-cell {
+              display: flex;
+              align-items: center;
+              gap: 0.5rem;
+            }
+            
+            .btn-group {
+              display: flex;
+              gap: 0.5rem;
+            }
+            
+            .form-select-sm {
+              padding: 0.25rem 0.5rem;
+              font-size: 0.875rem;
+            }
+            
+            .badge {
+              font-size: 0.75rem;
+              font-weight: 600;
+              padding: 0.35rem 0.65rem;
+              border-radius: 20px;
+            }
+            
+            /* Custom scrollbar for sidebar and content */
+            .strain-browser-sidebar::-webkit-scrollbar,
+            .strain-browser-content::-webkit-scrollbar {
+              width: 8px;
+            }
+            
+            .strain-browser-sidebar::-webkit-scrollbar-track,
+            .strain-browser-content::-webkit-scrollbar-track {
+              background: #f1f1f1;
+            }
+            
+            .strain-browser-sidebar::-webkit-scrollbar-thumb,
+            .strain-browser-content::-webkit-scrollbar-thumb {
+              background: #ccc;
+              border-radius: 4px;
+            }
+            
+            .strain-browser-sidebar::-webkit-scrollbar-thumb:hover,
+            .strain-browser-content::-webkit-scrollbar-thumb:hover {
+              background: #999;
+            }
+            
+            .enhanced-lineage-editor {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+    
+    .enhanced-lineage-editor .card {
+      border-radius: 12px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+    
+    .enhanced-lineage-editor .card-header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border-radius: 12px 12px 0 0 !important;
+      border: none;
+    }
+    
+    .enhanced-lineage-editor .card-header h6 {
+      margin: 0;
+      font-weight: 600;
+    }
+    
+    .enhanced-lineage-editor .form-control,
+    .enhanced-lineage-editor .form-select {
+      border-radius: 8px;
+      border: 1px solid #e1e5e9;
+      transition: all 0.3s ease;
+    }
+    
+    .enhanced-lineage-editor .form-control:focus,
+    .enhanced-lineage-editor .form-select:focus {
+      border-color: #667eea;
+      box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+    }
+    
+    .enhanced-lineage-editor .btn {
+      border-radius: 8px;
+      font-weight: 500;
+      transition: all 0.3s ease;
+    }
+    
+    .enhanced-lineage-editor .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border: none;
+    }
+    
+    .enhanced-lineage-editor .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    }
+    
+    .enhanced-lineage-editor .btn-warning {
+      background: linear-gradient(135deg, #ffeaa7 0%, #fab1a0 100%);
+      border: none;
+      color: #2d3436;
+    }
+    
+    .enhanced-lineage-editor .btn-warning:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(255, 234, 167, 0.4);
+    }
+    
+    .enhanced-lineage-editor .table {
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    
+    .enhanced-lineage-editor .table thead th {
+      background: #f8f9fa;
+      border: none;
+      font-weight: 600;
+      color: #2d3436;
+      padding: 1rem;
+    }
+    
+    .enhanced-lineage-editor .table tbody tr {
+      transition: all 0.2s ease;
+    }
+    
+    .enhanced-lineage-editor .table tbody tr:hover {
+      background-color: rgba(102, 126, 234, 0.05);
+    }
+    
+    .enhanced-lineage-editor .table tbody td {
+      padding: 0.75rem 1rem;
+      vertical-align: middle;
+    }
+    
+    .enhanced-lineage-editor .badge {
+      font-size: 0.75em;
+      padding: 0.375rem 0.5rem;
+      border-radius: 6px;
+    }
+    
+    .enhanced-lineage-editor .stat-item h4 {
+      margin: 0;
+      font-weight: 700;
+    }
+    
+    .enhanced-lineage-editor .stat-item small {
+      color: #6c757d;
+      font-weight: 500;
+    }
+    
+    .enhanced-lineage-editor .lineage-dropdown {
+      min-width: 140px;
+    }
+    
+    .enhanced-lineage-editor .alert {
+      border-radius: 8px;
+      border: none;
+    }
+    
+    .enhanced-lineage-editor .spinner-border {
+      color: #667eea;
+    }
+    
+    /* Responsive adjustments */
+    @media (max-width: 768px) {
+      .enhanced-lineage-editor .col-md-4,
+      .enhanced-lineage-editor .col-md-8 {
+        margin-bottom: 1rem;
+      }
+      
+      .enhanced-lineage-editor .table-responsive {
+        max-height: 400px;
+      }
+    }
+    
+    /* Custom scrollbar for table */
+    .enhanced-lineage-editor .table-responsive::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    
+    .enhanced-lineage-editor .table-responsive::-webkit-scrollbar-track {
+      background: #f1f1f1;
+      border-radius: 3px;
+    }
+    
+    .enhanced-lineage-editor .table-responsive::-webkit-scrollbar-thumb {
+      background: #667eea;
+      border-radius: 3px;
+    }
+    
+    .enhanced-lineage-editor .table-responsive::-webkit-scrollbar-thumb:hover {
+      background: #5a67d8;
+    }
+
     /* Ensure content remains readable */
     .glass-card {
       -webkit-backdrop-filter: blur(20px);
@@ -415,57 +2218,7 @@
       }
     }
 
-    /* Database Info Link Styles */
-    .database-info-link-container {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-    }
 
-    .database-info-link {
-      display: inline-flex !important;
-      align-items: center;
-      padding: 8px 16px;
-      background: linear-gradient(135deg, rgba(0, 212, 170, 0.6), rgba(139, 92, 246, 0.6)) !important;
-      border: 3px solid rgba(0, 212, 170, 0.8) !important;
-      border-radius: 12px;
-      color: #ffffff !important;
-      text-decoration: none;
-      font-size: 14px;
-      font-weight: 700;
-      transition: all 0.3s ease;
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
-      box-shadow: 0 8px 25px rgba(0, 212, 170, 0.4), 0 0 30px rgba(0, 212, 170, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2) !important;
-      text-shadow: 0 0 15px rgba(255, 255, 255, 0.8), 0 2px 4px rgba(0, 0, 0, 0.3) !important;
-      position: relative;
-      z-index: 10;
-    }
-
-    .database-info-link:hover {
-      background: linear-gradient(135deg, rgba(0, 212, 170, 0.8), rgba(139, 92, 246, 0.8)) !important;
-      border-color: rgba(0, 212, 170, 1) !important;
-      color: #ffffff !important;
-      transform: translateY(-3px) scale(1.05);
-      box-shadow: 0 12px 35px rgba(0, 212, 170, 0.6), 0 0 40px rgba(0, 212, 170, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.3) !important;
-      text-decoration: none;
-      text-shadow: 0 0 20px rgba(255, 255, 255, 1), 0 2px 4px rgba(0, 0, 0, 0.5) !important;
-    }
-
-    .database-info-link:active {
-      transform: translateY(0);
-      box-shadow: 0 4px 15px rgba(0, 212, 170, 0.3);
-    }
-
-    .database-info-link svg {
-      transition: transform 0.3s ease;
-      filter: drop-shadow(0 0 5px rgba(0, 212, 170, 0.5));
-    }
-
-    .database-info-link:hover svg {
-      transform: scale(1.1);
-      filter: drop-shadow(0 0 8px rgba(0, 212, 170, 0.8));
-    }
   </style>
 </head>
 <body>
@@ -560,54 +2313,62 @@
       </div>
     </div>
 
-    <div class="container-fluid py-2" style="z-index:1; position:relative;">
+    <div class="w-100 py-2" style="z-index:1; position:relative;">
       <!-- Title and Subtitle centered above tag panels -->
-      <div class="centerframe" style="max-width:800px; margin:0 auto; text-align:center; position:relative; left:130px;">
-        <h1 class="vibrant-title mb-1" data-text="AGT Designer">
-          AGT Designer
-        </h1>
-        <p class="vibrant-subtitle">
-          <span class="larger-letter">A</span>uto-<span class="larger-letter">G</span>enerating <span class="larger-letter">T</span>ag Designer
-        </p>
-        <p class="copyright-text">
-          ©2025 Created by Adam Cordova for A Greener Today
-        </p>
-        <div class="database-info-link-container mt-2">
-          <a href="#" class="database-info-link" onclick="openDatabaseInfo()" title="View comprehensive database information with sorting capabilities">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-              <polyline points="14 2 14 8 20 8"></polyline>
-              <line x1="16" y1="13" x2="8" y2="13"></line>
-              <line x1="16" y1="17" x2="8" y2="17"></line>
-              <polyline points="10 9 9 9 8 9"></polyline>
-            </svg>
-            Database Information & Analytics
-          </a>
-          <a href="/library" class="database-info-link ms-3" title="Browse and edit master strain data for all products">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2">
-              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
-              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
-              <path d="M9 9h1"></path>
-              <path d="M9 13h1"></path>
-              <path d="M9 17h1"></path>
-              <path d="M13 9h1"></path>
-              <path d="M13 13h1"></path>
-              <path d="M13 17h1"></path>
-            </svg>
-            Product Library Browser
-          </a>
-          <a href="#" class="database-info-link ms-3" onclick="openStrainLineageEditor()" title="Edit lineage for all products with a specific strain">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2">
-              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-            </svg>
-            Strain Lineage Editor
-          </a>
+
+      <div class="centerframe" style="width:100%; margin:0 auto; text-align:center; position:relative;">
+        <div style="display: flex; justify-content: center; align-items: center; margin-bottom: 1rem;">
+          <div style="flex: 1.5;"></div>
+          <div style="flex: 1; text-align: center; background: rgba(45, 34, 58, 0.95); backdrop-filter: blur(15px); -webkit-backdrop-filter: blur(15px); border: 2px solid rgba(160, 132, 232, 0.3); border-radius: 18px; padding: 2rem; box-shadow: 0 4px 24px rgba(80, 40, 160, 0.18);">
+            <div class="d-flex align-items-center justify-content-center gap-2 mb-1">
+              <h1 class="vibrant-title mb-0" data-text="AGT Designer">
+                AGT Designer
+              </h1>
+              <button class="big-glow-help-btn p-0" id="help-btn" title="Click for help with downloading LOTs data and using the application" data-bs-toggle="modal" data-bs-target="#helpModal">
+                <span style="font-size: 18px; font-weight: bold; color: white;">?</span>
+              </button>
+            </div>
+            <p class="vibrant-subtitle">
+              <span class="larger-letter">A</span>uto-<span class="larger-letter">G</span>enerating <span class="larger-letter">T</span>ag Designer
+            </p>
+            <p class="copyright-text">
+              ©2025 Created by Adam Cordova for A Greener Today
+            </p>
+
+            <!-- Database and Lineage Management Buttons -->
+            <div class="header-buttons-container mt-3 d-flex justify-content-center gap-3">
+              <button class="btn btn-header-action" onclick="openDatabaseAnalytics()" title="Open database analytics and management">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                  <path d="M12 8v8"></path>
+                  <path d="M8 12h8"></path>
+                </svg>
+                Database
+              </button>
+              <button class="btn btn-header-action" onclick="openLineageEditor()" title="Open lineage editor for strain management">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+                  <path d="M2 17l10 5 10-5"></path>
+                  <path d="M2 12l10 5 10-5"></path>
+                </svg>
+                Lineage Editor
+              </button>
+              <button class="btn btn-header-action" data-bs-toggle="modal" data-bs-target="#jsonMatchModal" title="Match products from JSON URL">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="7 10 12 15 17 10"></polyline>
+                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                Match JSON
+              </button>
+            </div>
+          </div>
+          <div style="flex: 1;"></div>
         </div>
       </div>
 
       <!-- Main Content Area -->
-      <div class="ps-3">
+      <div class="w-100">
         <!-- Upload bar positioned above filter column -->
         <div class="row mb-1 mt-0 fade-in" style="animation-delay: 0.2s;">
           <div class="col-lg-2 mb-1">
@@ -649,10 +2410,10 @@
         </div>
 
         <!-- Tag-list containers row (now includes filter bar for alignment) -->
-        <div class="row fade-in g-1" style="animation-delay: 0.4s;">
+        <div class="row fade-in g-1" style="animation-delay: 0.4s; display: flex; justify-content: space-between;">
           <!-- Filter Bar as a column -->
-          <div class="col-lg-2 mb-1">
-              <div class="sticky-filter-bar d-flex flex-column align-items-stretch" style="height: auto; max-width: 220px; min-width: 150px; background: rgba(40, 30, 60, 0.95); border-radius: 18px; box-shadow: 0 4px 24px rgba(80, 40, 160, 0.18); border: 1.5px solid rgba(160, 132, 232, 0.18); padding: 0.75rem 0.75rem 0.75rem 0.75rem; margin-right: 8px; margin-left: 1rem;">
+          <div class="mb-1" data-container-type="filter" style="flex: 1; margin-right: 0.5rem;">
+              <div class="sticky-filter-bar d-flex flex-column align-items-stretch" style="height: auto; width: 100%; background: rgba(40, 30, 60, 0.95); border-radius: 18px; box-shadow: 0 4px 24px rgba(80, 40, 160, 0.18); border: 1.5px solid rgba(160, 132, 232, 0.18); padding: 0.75rem; margin: 0;">
                                               <div class="d-flex flex-column gap-1" style="height: 100%;">
                   <div>
                     <label for="vendorFilter" class="filter-category-label mb-0">VENDOR</label>
@@ -710,8 +2471,8 @@
             </div>
           </div>
           <!-- Available Tags -->
-          <div class="col-lg-5 mb-1" data-container-type="available">
-            <div class="glass-card h-100 d-flex flex-column">
+          <div class="mb-1" data-container-type="available" style="flex: 1; margin-right: 0.5rem;">
+            <div class="glass-card d-flex flex-column">
               <div class="card-header border-0 bg-transparent p-2">
                 <div class="d-flex justify-content-between align-items-center mb-2">
                   <h5 class="filter-label mb-0">CURRENT INVENTORY</h5>
@@ -729,6 +2490,17 @@
                         <span class="filter-subcategory-label mb-0">SELECT ALL</span>
                       </label>
                     </div>
+                    
+                    <!-- Instructional blurb for dropdown usage -->
+                    <div id="dropdownInstructionBlurb" class="dropdown-instruction-blurb mb-3">
+                      <div class="instruction-content">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="instruction-icon">
+                          <path d="M7 10l5 5 5-5z"/>
+                        </svg>
+                        <span class="instruction-text">Click the dropdown arrows (▶) to reveal products in each category</span>
+                      </div>
+                    </div>
+                    
                     <div class="tag-entry">Loading Tags...</div>
                    
                     <!-- more tags -->
@@ -739,32 +2511,23 @@
           </div>
           
           <!-- Center Column with Controls -->
-          <div class="col-lg-2 mb-1 mt-0 d-flex flex-column justify-content-start align-items-center" style="padding-top: 0; margin-top: 0; padding-left: 0.25rem; padding-right: 0.25rem;">
-            <!-- Big Glowing Help Button -->
-            <div class="help-button-container text-center">
-              <button class="big-glow-help-btn mb-2" id="help-btn" title="Click for help with downloading LOTs data and using the application" data-bs-toggle="modal" data-bs-target="#helpModal">
-                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <circle cx="12" cy="12" r="10"></circle>
-                  <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
-                  <line x1="12" y1="17" x2="12.01" y2="17"></line>
-                </svg>
-              </button>
-              <div class="help-label">
-                <small class="text-white fw-bold">New? Start here!</small>
-              </div>
-            </div>
+          <div class="mb-1 mt-0 d-flex flex-column justify-content-start align-items-center" style="flex: 1; margin-right: 0.5rem; padding-top: 0; margin-top: 0; padding-left: 0.25rem; padding-right: 0.25rem;" data-container-type="center">
             <!-- Controls -->
             <div class="control-panel">
-              <!-- Template Controls -->
-              <div class="w-100">
+              <!-- Controls Header -->
+              <div class="d-flex flex-column w-100">
                 <label class="filter-label">Template</label>
-                <select id="templateSelect" class="form-select form-select-modern mb-2" aria-label="Template">
+                <select id="templateSelect" class="form-select form-select-modern" aria-label="Template">
                   <option value="horizontal">Horizontal</option>
                   <option value="vertical">Vertical</option>
                   <option value="mini">Mini</option>
                   <option value="double">Double</option>
                   <option value="inventory">Inventory</option>
                 </select>
+
+                <button id="generateBtn" class="btn-modern2" title="Generate labels based on selected tags" onclick="TagManager.debouncedGenerate()">
+                  Generate Tags
+                </button>
 
                 <select id="fontSelect" class="d-none" aria-label="Font">
                   <option value="Arial">Arial</option>
@@ -777,34 +2540,31 @@
                   <option value="Comic Sans MS">Comic Sans MS</option>
                 </select>
               </div>
-
-              <!-- Generate Button -->
-              <button id="generateBtn" class="btn-modern2 w-100" title="Generate labels based on selected tags" onclick="TagManager.debouncedGenerate()">
-                Generate Tags
-              </button>
-              <!-- Action Buttons -->
-              <div class="d-grid gap-3 w-100">
-                <button id="undo-move-btn" class="btn btn-glass" title="Undo last move">
+              <!-- Controls Section -->
+              <div class="mb-3">
+                <label class="filter-label">Controls</label>
+                <div class="d-grid gap-2 w-100">
+                  <button id="undo-move-btn" class="btn btn-glass btn-sm" title="Undo last move">
                   <span class="icon-btn">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <polyline points="1 4 1 10 7 10"></polyline>
                       <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
                     </svg>
                     Undo
                   </span>
                 </button>
-                <button id="clear-filters-btn" class="btn btn-glass" title="Clear selected tags">
+                <button id="clear-filters-btn" class="btn btn-glass btn-sm" title="Clear selected tags">
                   <span class="icon-btn">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <polyline points="3 6 5 6 21 6"></polyline>
                       <path d="M19 6v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
                     </svg>
                     Clear
                   </span>
                 </button>
-                <button class="btn btn-glass" onclick="TagManager.downloadExcel()" title="Download selected tags as Excel file">
+                <button class="btn btn-glass btn-sm" onclick="TagManager.downloadExcel()" title="Download selected tags as Excel file">
                   <span class="icon-btn">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                       <polyline points="7 10 12 15 17 10"></polyline>
                       <line x1="12" y1="15" x2="12" y2="3"></line>
@@ -812,120 +2572,71 @@
                     Export Data
                   </span>
                 </button>
-              </div>
-              <!-- JSON Matching Tools -->
-              <div class="d-grid gap-2 w-100 mt-3">
-                <div class="text-center mb-2">
-                  <small class="text-muted">JSON Matching</small>
+                  <button class="btn btn-glass btn-sm" data-bs-toggle="modal" data-bs-target="#editTemplateModal" title="Edit template settings">
+                    <span class="icon-btn">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                      </svg>
+                      Edit Template
+                    </span>
+                  </button>
                 </div>
-                <button class="btn btn-glass btn-sm" data-bs-toggle="modal" data-bs-target="#jsonMatchModal" title="Match products from JSON URL">
-                  <span class="icon-btn">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                      <polyline points="7 10 12 15 17 10"></polyline>
-                      <line x1="12" y1="15" x2="12" y2="3"></line>
-                    </svg>
-                    Match JSON
-                  </span>
-                </button>
-                <button class="btn btn-glass btn-sm" data-bs-toggle="modal" data-bs-target="#jsonInventoryModal" title="Generate inventory slips from JSON">
-                  <span class="icon-btn">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                      <polyline points="14 2 14 8 20 8"></polyline>
-                      <line x1="16" y1="13" x2="8" y2="13"></line>
-                      <line x1="16" y1="17" x2="8" y2="17"></line>
-                      <polyline points="10 9 9 9 8 9"></polyline>
-                    </svg>
-                    JSON Inventory
-                  </span>
-                </button>
-                <button class="btn btn-glass btn-sm" onclick="openManualProductModal()" title="Manually add a new product">
-                  <span class="icon-btn">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <path d="M12 5v14M5 12h14"></path>
-                    </svg>
-                    Add Product
-                  </span>
-                </button>
-                <button class="btn btn-glass btn-sm" onclick="clearJsonMatches()" title="Clear JSON matches">
-                  <span class="icon-btn">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <polyline points="3 6 5 6 21 6"></polyline>
-                      <path d="M19 6v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                    </svg>
-                    Clear JSON
-                  </span>
-                </button>
-                <button class="btn btn-glass btn-sm" id="jsonFilterToggleBtn" onclick="toggleJsonFilter()" title="Toggle between JSON matched items and full Excel list" style="display: none;">
-                  <span class="icon-btn">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <path d="M3 6h18"></path>
-                      <path d="M7 12h14"></path>
-                      <path d="M11 18h10"></path>
-                    </svg>
-                    <span id="jsonFilterToggleText">Toggle Filter</span>
-                  </span>
-                </button>
               </div>
-              <!-- Database Tools -->
-              <div class="d-grid gap-2 w-100 mt-3">
-                <div class="text-center mb-2">
-                  <small class="text-muted">Database Tools</small>
+
+              <!-- JSON Tools -->
+              <div class="mb-3">
+                <label class="filter-label">JSON Tools</label>
+                <div class="d-grid gap-2">
+                  <button class="btn btn-glass btn-sm" data-bs-toggle="modal" data-bs-target="#jsonInventoryModal" title="Generate inventory slips from JSON">
+                    <span class="icon-btn">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                        <line x1="16" y1="13" x2="8" y2="13"></line>
+                        <line x1="16" y1="17" x2="8" y2="17"></line>
+                        <polyline points="10 9 9 9 8 9"></polyline>
+                      </svg>
+                      JSON Inventory
+                    </span>
+                  </button>
+                  <button class="btn btn-glass btn-sm" onclick="openManualProductModal()" title="Manually add a new product">
+                    <span class="icon-btn">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 5v14M5 12h14"></path>
+                      </svg>
+                      Add Product
+                    </span>
+                  </button>
+                  <button class="btn btn-glass btn-sm" onclick="clearJsonMatches()" title="Clear JSON matches">
+                    <span class="icon-btn">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                      </svg>
+                      Clear JSON
+                    </span>
+                  </button>
+                  <button class="btn btn-glass btn-sm" id="jsonFilterToggleBtn" onclick="toggleJsonFilter()" title="Toggle between JSON matched items and full Excel list" style="display: none;">
+                    <span class="icon-btn">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 6h18"></path>
+                        <path d="M7 12h14"></path>
+                        <path d="M11 18h10"></path>
+                      </svg>
+                      <span id="jsonFilterToggleText">Toggle Filter</span>
+                    </span>
+                  </button>
                 </div>
-                <a href="#" class="btn btn-glass btn-sm" onclick="openDatabaseInfo()" title="View comprehensive database information with sorting capabilities">
-                  <span class="icon-btn">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                      <polyline points="14 2 14 8 20 8"></polyline>
-                      <line x1="16" y1="13" x2="8" y2="13"></line>
-                      <line x1="16" y1="17" x2="8" y2="17"></line>
-                      <polyline points="10 9 9 9 8 9"></polyline>
-                    </svg>
-                    Database Info
-                  </span>
-                </a>
-                <a href="/library" class="btn btn-glass btn-sm" title="Browse and edit master strain data for all products">
-                  <span class="icon-btn">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
-                      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
-                      <path d="M9 9h1"></path>
-                      <path d="M9 13h1"></path>
-                      <path d="M9 17h1"></path>
-                      <path d="M13 9h1"></path>
-                      <path d="M13 13h1"></path>
-                      <path d="M13 17h1"></path>
-                    </svg>
-                    Product Library
-                  </span>
-                </a>
-                <a href="#" class="btn btn-glass btn-sm" onclick="openStrainLineageEditor()" title="Edit lineage for all products with a specific strain">
-                  <span class="icon-btn">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                    </svg>
-                    Lineage Editor
-                  </span>
-                </a>
               </div>
-              <!-- Edit Template Button -->
-              <button class="btn btn-glass w-100" data-bs-toggle="modal" data-bs-target="#editTemplateModal" title="Edit template settings">
-                <span class="icon-btn">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                  </svg>
-                  Edit Template
-                </span>
-              </button>
+
+
             </div>
           </div>
           
           <!-- Selected Tags -->
-          <div class="col-lg-5 mb-2" data-container-type="selected">
-            <div class="glass-card h-100 d-flex flex-column">
+          <div class="mb-2" data-container-type="selected" style="flex: 1; margin-right: 0.5rem;">
+            <div class="glass-card d-flex flex-column">
               <div class="card-header border-0 bg-transparent p-2">
                 <div class="d-flex justify-content-between align-items-center mb-2">
                   <h5 class="filter-label mb-0">SELECTED TAGS</h5>
@@ -938,8 +2649,6 @@
               <div class="card-body p-2 pt-0 d-flex flex-column flex-grow-1">
                 <div id="selectedTags" class="tag-list-container">
                   <div class="tag-list">
-                    <div class="tag-entry">Blackberry Kush Infused Pre-Roll ...</div>
-                    <div class="tag-entry">Blueberry Infused Pre-Roll ...</div>
                     <!-- more tags -->
                   </div>
                 </div>
@@ -1060,29 +2769,7 @@
             </div>
           </div>
           
-          <div class="mt-4 p-3" style="background: rgba(40, 167, 69, 0.1); border-radius: 8px; border-left: 4px solid #28a745;">
-            <h6 class="text-success mb-2">🗄️ Database Features</h6>
-            <div class="row">
-              <div class="col-md-6">
-                <h6 class="text-success mb-2">Database Tools</h6>
-                <ul class="mb-0 small">
-                  <li><strong>DB Stats:</strong> View statistics about strains and products</li>
-                  <li><strong>View DB:</strong> Browse database contents in JSON format</li>
-                  <li><strong>Export DB:</strong> Download complete database as Excel file</li>
-                  <li><strong>Auto-Update:</strong> Database updates automatically on file upload</li>
-                </ul>
-              </div>
-              <div class="col-md-6">
-                <h6 class="text-success mb-2">Database Benefits</h6>
-                <ul class="mb-0 small">
-                  <li>Persistent storage of all products and strains</li>
-                  <li>Lineage tracking and validation</li>
-                  <li>Usage statistics and analytics</li>
-                  <li>Historical data preservation</li>
-                </ul>
-              </div>
-            </div>
-          </div>
+
           
           <div class="mt-4 p-3" style="background: linear-gradient(135deg, rgba(255, 193, 7, 0.15), rgba(255, 152, 0, 0.15)); border-radius: 8px; border-left: 4px solid #ffc107; border-right: 4px solid #ff9800; box-shadow: 0 4px 15px rgba(255, 193, 7, 0.2);">
             <h6 class="text-warning mb-3" style="text-align: center; font-size: 1.1rem;">
@@ -1429,6 +3116,57 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="{{ url_for('static', filename='js/main.js') }}?v={{ cache_bust }}"></script>
+  
+  <!-- Debug Script -->
+  <script>
+    // Debug script to test filter functionality
+    document.addEventListener('DOMContentLoaded', function() {
+      console.log('=== DEBUG FILTERS ===');
+      
+      // Check if filter elements exist
+      const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
+      
+      filterIds.forEach(filterId => {
+          const element = document.getElementById(filterId);
+          console.log(`${filterId}:`, element ? 'FOUND' : 'NOT FOUND');
+          if (element) {
+              console.log(`  - Value: "${element.value}"`);
+              console.log(`  - Options:`, element.options.length);
+          }
+      });
+      
+      // Test if we can attach event listeners
+      filterIds.forEach(filterId => {
+          const element = document.getElementById(filterId);
+          if (element) {
+              console.log(`Testing event listener for ${filterId}...`);
+              element.addEventListener('change', (e) => {
+                  console.log(`FILTER CHANGED: ${filterId} = "${e.target.value}"`);
+              });
+              console.log(`Event listener attached to ${filterId}`);
+          }
+      });
+      
+      // Test tag checkboxes
+      setTimeout(() => {
+        console.log('=== TESTING TAG CHECKBOXES ===');
+        const checkboxes = document.querySelectorAll('.tag-checkbox');
+        console.log(`Found ${checkboxes.length} tag checkboxes`);
+        
+        checkboxes.forEach((checkbox, index) => {
+            console.log(`Checkbox ${index}:`, checkbox.value, 'checked:', checkbox.checked);
+            checkbox.addEventListener('change', (e) => {
+                console.log(`TAG CHECKBOX CHANGED: ${checkbox.value} = ${e.target.checked}`);
+            });
+        });
+      }, 2000);
+      
+
+      
+      console.log('=== DEBUG COMPLETE ===');
+    });
+  </script>
+  
   <script src="{{ url_for('static', filename='js/enhanced-ui.js') }}"></script>
   <script src="{{ url_for('static', filename='js/generation-splash.js') }}"></script>
   <script src="{{ url_for('static', filename='js/drag-and-drop-manager.js') }}"></script>
@@ -2495,68 +4233,7 @@
       }
     });
     
-    function generateJsonInventory() {
-      const url = document.getElementById('jsonInventoryUrlInput').value.trim();
-      if (!url) {
-        console.error('Please enter a JSON URL');
-        return;
-      }
-      
-      if (!url.toLowerCase().startsWith('http')) {
-        console.error('Please enter a valid HTTP URL');
-        return;
-      }
-      
-      // Show loading state
-      const generateBtn = document.querySelector('#jsonInventoryModal .btn-modern2');
-      const originalText = generateBtn.innerHTML;
-      generateBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Generating...';
-      generateBtn.disabled = true;
-      
-      fetch('/api/json-inventory', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ url: url })
-      })
-      .then(response => {
-        if (response.ok) {
-          // Download the file
-          return response.blob().then(blob => {
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
-            a.download = `AGT_Inventory_Slips_${timestamp}.docx`;
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(url);
-            document.body.removeChild(a);
-            
-            // Inventory slips generated successfully
-            
-            // Close modal
-            const modal = bootstrap.Modal.getInstance(document.getElementById('jsonInventoryModal'));
-            if (modal) {
-              modal.hide();
-            }
-          });
-        } else {
-          return response.json().then(data => {
-            throw new Error(data.error || 'Failed to generate inventory slips');
-          });
-        }
-      })
-      .catch(error => {
-        console.error('Error generating JSON inventory:', error);
-      })
-      .finally(() => {
-        // Reset button state
-        generateBtn.innerHTML = originalText;
-        generateBtn.disabled = false;
-      });
-    }
+
     
     // Debug help button functionality
     document.addEventListener('DOMContentLoaded', function() {
@@ -3274,11 +4951,15 @@
       }
     });
 
-  <!-- Enhanced Database Functions -->
+  // Enhanced Database Functions
+  </script>
   <script>
-    // Database Analytics Dashboard
-    function openDatabaseAnalytics() {
+    // Global function definitions - ensure they're available immediately
+    console.log('Setting up global functions...');
+    
+    window.openDatabaseAnalytics = function() {
       console.log('openDatabaseAnalytics called');
+      alert('Database Analytics button clicked! Opening database dashboard...');
       try {
         const loadingHtml = `
           <div class="text-center">
@@ -4921,6 +6602,34 @@
     function repairDatabase() {
       alert('Database repair completed successfully!');
     }
+
+
+
+    window.openLineageEditor = function() {
+      console.log('openLineageEditor called');
+      alert('Lineage Editor button clicked! Opening lineage editor...');
+      // Open the lineage editor modal
+      try {
+        if (window.strainLineageEditor && typeof window.strainLineageEditor.openEditor === 'function') {
+          // Open without specific strain to show general lineage management
+          window.strainLineageEditor.openEditor('', '');
+        } else if (typeof openStrainLineageEditor === 'function') {
+          // Fallback to existing function
+          openStrainLineageEditor();
+        } else {
+          // Show available strains for lineage editing
+          alert('Lineage Editor\n\nThis feature allows you to:\n- Edit strain lineage classifications\n- Update product lineages in bulk\n- Manage strain categorization\n\nPlease select a strain from the product list to edit its lineage.');
+        }
+      } catch (error) {
+        console.error('Error opening lineage editor:', error);
+        alert('Error opening lineage editor. Please try again.');
+      }
+    }
+    
+    // Verify functions are available
+    console.log('Function verification:');
+    console.log('openDatabaseAnalytics available:', typeof window.openDatabaseAnalytics);
+    console.log('openLineageEditor available:', typeof window.openLineageEditor);
   </script>
   
   <!-- Lineage Editor Modals -->
@@ -4928,5 +6637,51 @@
   
   <!-- Lineage Editor JavaScript -->
   <script src="{{ url_for('static', filename='js/lineage-editor.js') }}"></script>
-</body>
+  
+  <!-- Database Sync JavaScript -->
+  <script src="{{ url_for('static', filename='js/database-sync.js') }}"></script>
+  <!-- Database Modal -->
+  <div class="modal fade" id="databaseModal" tabindex="-1" aria-labelledby="databaseModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="databaseModalLabel">Database Analytics</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <!-- Content will be dynamically loaded -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Success Toast -->
+  <div class="toast-container position-fixed bottom-0 end-0 p-3">
+    <div id="successToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+      <div class="toast-header bg-success text-white">
+        <i class="bi bi-check-circle me-2"></i>
+        <strong class="me-auto">Success</strong>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast" aria-label="Close"></button>
+      </div>
+      <div class="toast-body" id="successToastMessage">
+        Operation completed successfully
+      </div>
+    </div>
+  </div>
+
+  <!-- Error Toast -->
+  <div class="toast-container position-fixed bottom-0 end-0 p-3">
+    <div id="errorToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+      <div class="toast-header bg-danger text-white">
+        <i class="bi bi-exclamation-circle me-2"></i>
+        <strong class="me-auto">Error</strong>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast" aria-label="Close"></button>
+      </div>
+      <div class="toast-body" id="errorToastMessage">
+        An error occurred
+      </div>
+    </div>
+  </div>
+
+  </body>
 </html> 

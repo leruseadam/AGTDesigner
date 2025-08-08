@@ -1,4 +1,11 @@
 /* Psychedelic color palette - Trippy Theme */
+
+/* Placeholder text styling for temporary content */
+.placeholder-text {
+  color: rgba(255, 255, 255, 0.5) !important;
+  font-style: italic !important;
+  opacity: 0.7 !important;
+}
 :root {
     --primary-gradient: linear-gradient(135deg, #ff8fab 0%, #a084e8 100%);
     --secondary-gradient: linear-gradient(135deg, #8b5cf6 0%, #43e97b 100%);
@@ -20,27 +27,42 @@
   --lineage-cbd: rgba(241, 194, 50, 0.8);
   --lineage-mixed: rgba(0, 33, 245, 0.8);
     --lineage-para: rgba(255, 192, 203, 0.5);
+    
+    /* Column Width Variables - Adjust these to change layout */
+    --filter-column-width: 1.4;      /* Bootstrap columns (1-12) - can use decimals */
+    --center-column-width: 1.5;      /* Bootstrap columns (1-12) - can use decimals */
+    --tag-list-column-width: 4.25;   /* Bootstrap columns (1-12) - can use decimals */
+    
+    /* Height Variables - Adjust these to change heights */
+    --tag-list-height: 75vh;        /* Height of tag list containers */
+    --filter-height: auto;           /* Height of filter bar (auto or specific px) */
+    --center-panel-height: 90vh;     /* Height of center control panel (auto or specific px) */
   }
   
   /* Maximize space for AGT Designer UI */
   body, html {
     margin: 0 !important;
     padding: 0;
-    height: 100%;
+    min-height: 100vh !important;
+    height: auto !important;
     width: 100%;
     overflow-x: hidden;
-    overflow-y: auto;
+    overflow-y: auto !important;
   }
   
   body {
     min-height: 100vh !important;
+    height: auto !important;
     margin: 0 !important;
     padding: 0 !important;
     color: var(--text-primary);
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
     overflow-x: hidden;
+    overflow-y: auto !important;
     position: relative;
     z-index: 1;
+    /* Ensure body can always scroll */
+    pointer-events: auto !important;
   }
   
   body::before {
@@ -150,6 +172,10 @@
     filter: drop-shadow(0 6px 12px rgba(0,0,0,0.4));
     position: relative;
     line-height: 1.1;
+    text-align: center !important;
+    width: 100%;
+    left: 0 !important;
+    right: 0 !important;
   }
   
   .vibrant-title::before {
@@ -165,6 +191,8 @@
     font-size: 1.5rem;
     font-weight: 700;
     letter-spacing: 2px;
+    text-align: center !important;
+    width: 100%;
     opacity: 1;
     text-transform: uppercase;
     text-shadow: 
@@ -187,6 +215,62 @@
     text-align: center;
     text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(160,132,232,0.3);
     opacity: 0.9;
+  }
+
+  /* Header Action Buttons */
+  .btn-header-action {
+    background: rgba(33, 150, 243, 0.9) !important;
+    backdrop-filter: blur(15px);
+    -webkit-backdrop-filter: blur(15px);
+    border: 2px solid rgba(33, 150, 243, 0.7) !important;
+    border-radius: 12px;
+    color: #fff;
+    padding: 0.48rem 0.9rem;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.75px;
+    display: inline-flex;
+    align-items: center;
+    gap: 1rem;
+    transition: all 0.3s ease;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+    box-shadow: 
+      0 4px 15px rgba(33, 150, 243, 0.35),
+      0 8px 25px rgba(3, 169, 244, 0.2) !important;
+    position: relative;
+    z-index: 5;
+    transform: translateY(0);
+  }
+
+  .btn-header-action:hover {
+    background: rgba(60, 45, 80, 0.95);
+    border-color: rgba(160, 132, 232, 0.4);
+    color: #fff;
+    transform: translateY(-3px);
+    box-shadow: 
+      0 6px 20px rgba(160, 132, 232, 0.35),
+      0 12px 30px rgba(80, 40, 160, 0.25);
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+  }
+
+  .btn-header-action:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 10px rgba(160, 132, 232, 0.2);
+  }
+
+  .btn-header-action svg {
+    flex-shrink: 0;
+  }
+
+  .header-buttons-container {
+    animation: fadeIn 0.8s ease-out 0.6s both;
+    position: relative;
+    z-index: 10;
+    margin-top: 1rem;
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    gap: 4rem !important;
   }
   
   /* Header Container - Groups title, subtitle, and copyright with tight background */
@@ -291,7 +375,11 @@
     margin-bottom: 0.5rem !important;
     padding-top: 1rem !important;
     padding-bottom: 1rem !important;
-    overflow: hidden;
+    /* Allow content to be visible and scrollable */
+    overflow: visible;
+    /* Ensure full width usage */
+    width: 100% !important;
+    max-width: none !important;
   }
   
   .glass-card::before {
@@ -321,10 +409,10 @@
     background: var(--primary-gradient);
     border: none;
     color: white !important;
-    padding: 12px 24px;
-    border-radius: 12px;
+    padding: 6px 12px;
+    border-radius: 8px;
     font-weight: 700 !important;
-    font-size: 1rem;
+    font-size: 0.85rem;
     transition: all 0.3s ease;
     box-shadow: 0 2px 12px 0 rgba(160,132,232,0.10), 0 0.5px 2px rgba(0,0,0,0.08);
     text-decoration: none;
@@ -360,7 +448,7 @@
     -webkit-backdrop-filter: blur(10px);
     border: 1px solid rgba(160, 132, 232, 0.18);
     color: var(--text-primary);
-    padding: 8px 16px;
+    padding: 6px 12px;
     border-radius: 8px;
     font-weight: 500;
     transition: all 0.3s ease;
@@ -376,6 +464,12 @@
   /* Form Controls - Psychedelic */
   .form-control-modern,
   .form-select-modern {
+    /* Cross-platform consistency - remove platform-specific styling */
+    -webkit-appearance: none !important;
+    -moz-appearance: none !important;
+    appearance: none !important;
+    
+    /* Standardized styling for consistent appearance */
     background: rgba(45, 34, 58, 0.8);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
@@ -388,6 +482,12 @@
     transition: border-color 0.2s, box-shadow 0.2s;
     box-shadow: 0 1.5px 6px rgba(160,132,232,0.05);
     text-shadow: 0 1px 3px rgba(0,0,0,0.3) !important;
+    
+    /* Ensure consistent arrow across platforms */
+    background-image: url('data:image/svg+xml;utf8,<svg fill="%23a084e8" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
+    background-repeat: no-repeat !important;
+    background-position: right 14px center !important;
+    background-size: 18px 18px !important;
   }
   
   .form-control-modern:focus,
@@ -579,33 +679,303 @@
     margin-top: 0 !important;
   }
 
-  /* Remove gap from tag list items */
+  /* Add breathing room between tag list items */
   .tag-entry {
-    margin-top: 0 !important;
-    margin-bottom: 0 !important;
+    margin-top: 4px !important;
+    margin-bottom: 4px !important;
   }
 
   /* Remove gap from tag list container */
-  .tag-list {
-    margin-top: 0 !important;
-    padding-top: 0 !important;
+  #availableTags {
+    margin: 0 !important;
+    padding: 0 !important;
+    height: 80vh !important;
+    min-height: 80vh !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    display: block !important;
+    position: relative !important;
+    pointer-events: auto !important;
+  }
+  
+  /* Force all content to fill the container */
+  #availableTags * {
+    box-sizing: border-box !important;
+  }
+  
+  /* Fix selected tags container height */
+  #selectedTags {
+    margin: 0 !important;
+    padding: 0 !important;
+    height: 80vh !important;
+    min-height: 80vh !important;
+    max-height: none !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    display: block !important;
+    position: relative !important;
+    flex: 1 !important;
+    flex-grow: 1 !important;
+    flex-shrink: 0 !important;
+    pointer-events: auto !important;
+    /* Ensure empty containers don't block scrolling */
+    min-height: 0 !important;
+  }
+  
+  /* Ensure selected tags container can expand to show all content */
+  #selectedTags * {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+  
+  /* When selected tags is empty, ensure it doesn't block scrolling */
+  #selectedTags:empty,
+  #selectedTags:blank {
+    pointer-events: none !important;
+    min-height: var(--tag-list-height) !important;
+    height: auto !important;
+  }
+  
+  /* Ensure empty containers don't block scrolling anywhere */
+  .tag-list-container:empty,
+  .tag-list-container:blank,
+  .glass-card:empty,
+  .glass-card:blank {
+    pointer-events: none !important;
+    min-height: var(--tag-list-height) !important;
+    height: auto !important;
+  }
+  
+  /* Force selected tags container to show all content */
+  #selectedTags .vendor-section,
+  #selectedTags .brand-section,
+  #selectedTags .product-type-section,
+  #selectedTags .weight-section {
+    max-height: none !important;
+    overflow: visible !important;
+    height: auto !important;
+  }
+  
+  /* Ensure the last element touches the bottom */
+  #availableTags > *:last-child {
+    margin-bottom: 0 !important;
+    padding-bottom: 0 !important;
+  }
+  
+  /* Remove any bottom spacing from all vendor sections */
+  #availableTags .vendor-section,
+  #availableTags .brand-section,
+  #availableTags .product-type-section,
+  #availableTags .weight-section {
+    margin-bottom: 0 !important;
+    padding-bottom: 0 !important;
+  }
+  
+  /* Remove all padding from parent containers */
+  .card-body.p-2.pt-0 {
+    padding: 0 !important;
+    margin: 0 !important;
+    flex-grow: 0 !important;
+    height: auto !important;
+  }
+  
+  .tag-list-container {
+    margin: 0 !important;
+    padding: 0 !important;
+    position: relative !important;
+    z-index: 1 !important;
+    pointer-events: auto !important;
+  }
+  
+  /* Override flexbox constraints on glass card */
+  .glass-card.d-flex.flex-column {
+    height: auto !important;
+    flex-grow: 0 !important;
+  }
+  
+  #availableTags .tag-list {
+    margin: 0 !important;
+    padding: 0 !important;
+    min-height: 100% !important;
+    height: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+  
+  /* Force the content to fill the entire height */
+  #availableTags .tag-list > * {
+    flex-shrink: 0 !important;
+  }
+  
+  /* Make the last content area expand to fill remaining space */
+  #availableTags .tag-list > *:last-child {
+    flex-grow: 1 !important;
+    min-height: 0 !important;
+  }
+  
+  /* Force all vendor sections to fill available space */
+  #availableTags .vendor-section {
+    flex: 1 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    min-height: 0 !important;
+  }
+  
+  /* Target the specific elements created by JavaScript */
+  #availableTags div[class*="vendor"] {
+    flex: 1 !important;
+    min-height: 0 !important;
+  }
+  
+  #availableTags div[class*="brand"] {
+    flex: 1 !important;
+    min-height: 0 !important;
+  }
+  
+  #availableTags div[class*="product-type"] {
+    flex: 1 !important;
+    min-height: 0 !important;
+  }
+  
+  #availableTags div[class*="weight"] {
+    flex: 1 !important;
+    min-height: 0 !important;
+  }
+  
+  /* Force the last element to expand and fill remaining space */
+  #availableTags > *:last-child {
+    flex-grow: 1 !important;
+    min-height: 0 !important;
+  }
+  
+  /* Target any element that might be the last content */
+  #availableTags .vendor-section:last-child,
+  #availableTags .brand-section:last-child,
+  #availableTags .product-type-section:last-child,
+  #availableTags .weight-section:last-child {
+    flex-grow: 1 !important;
+    min-height: 0 !important;
+  }
+  
+  /* Force all direct children to expand */
+  #availableTags > div {
+    flex: 1 !important;
+    min-height: 0 !important;
+  }
+  
+  /* Target the actual tag entries that are displayed */
+  #availableTags .tag-entry {
+    flex-shrink: 0 !important;
+  }
+  
+  /* Make the container of tag entries expand */
+  #availableTags .tag-entry:last-child {
+    margin-bottom: 0 !important;
+  }
+  
+  /* Force the last vendor section to fill remaining space */
+  #availableTags .vendor-section:last-child .vendor-content {
+    flex-grow: 1 !important;
+    min-height: 0 !important;
+  }
+  
+  /* Ensure the last weight section expands */
+  #availableTags .weight-section:last-child .weight-content {
+    flex-grow: 1 !important;
+    min-height: 0 !important;
+  }
+  
+  #availableTags .vendor-content {
+    flex: 1 !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+  
+  #availableTags .brand-section {
+    flex: 1 !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+  
+  #availableTags .brand-content {
+    flex: 1 !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+  
+  #availableTags .product-type-section {
+    flex: 1 !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+  
+  #availableTags .product-type-content {
+    flex: 1 !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+  
+  #availableTags .weight-section {
+    flex: 1 !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+  
+  #availableTags .weight-content {
+    flex: 1 !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+  
+  /* Make the last weight content expand to fill remaining space */
+  #availableTags .weight-content:last-child {
+    flex-grow: 1 !important;
+    min-height: 0 !important;
+  }
+  
+  /* Ensure the last vendor section expands */
+  #availableTags .vendor-section:last-child {
+    flex-grow: 1 !important;
+  }
+  
+  #availableTags .vendor-content:last-child {
+    flex-grow: 1 !important;
+  }
+  
+  #availableTags .tag-entry:last-child {
+    margin-bottom: 0 !important;
+    padding-bottom: 0 !important;
   }
 
   /* Active search state */
   #availableTagsSearch.search-active,
   #selectedTagsSearch.search-active {
-    background: rgba(160, 132, 232, 0.15) !important;
-    border-color: rgba(160, 132, 232, 0.8) !important;
-    color: #2d223a !important;
-    box-shadow: 
-      0 0 0 3px rgba(160, 132, 232, 0.3),
-      0 6px 20px rgba(160, 132, 232, 0.25),
-      inset 0 1px 0 rgba(255, 255, 255, 0.9) !important;
+    background: #2d223a !important; /* Match panel color */
+    border-color: rgba(160, 132, 232, 0.4) !important;
+    color: #ffffff !important;
+    box-shadow:
+      0 1px 4px rgba(0, 0, 0, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
   }
 
   #availableTagsSearch.search-active::placeholder,
   #selectedTagsSearch.search-active::placeholder {
-    color: rgba(160, 132, 232, 0.8) !important;
+    color: rgba(255, 255, 255, 0.85) !important;
+    font-weight: 600 !important;
+  }
+
+  /* Strain search (lineage editor) - white text on blue when active */
+  #strainSearchInput.search-active {
+    background: #2d223a !important; /* Match panel color */
+    border-color: rgba(160, 132, 232, 0.4) !important;
+    color: #ffffff !important;
+    box-shadow:
+      0 1px 4px rgba(0, 0, 0, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+  }
+
+  #strainSearchInput.search-active::placeholder {
+    color: rgba(255, 255, 255, 0.85) !important;
     font-weight: 600 !important;
   }
   
@@ -652,7 +1022,7 @@
     transform: scale(1.02);
   }
   
-  /* Tag list container */
+  /* Tag list container - RESPONSIVE HEIGHT WITH SCROLLING */
   .tag-list-container {
     background: rgba(45, 34, 58, 0.92);
     backdrop-filter: blur(10px);
@@ -661,33 +1031,431 @@
     border-radius: 16px;
     padding: 0.75rem !important;
     flex: 1;
-    min-width: 320px;
-    max-width: 420px;
-    min-height: 0;
-    max-height: 120vh !important;
-    max-height: 800px;
-    overflow-y: auto;
+    min-width: 350px;
+    max-width: 450px;
+    /* Remove height restrictions to allow full expansion */
+    height: auto !important;
+    max-height: none !important;
+    min-height: 500px !important;
+    overflow-y: visible !important;
+    overflow-x: hidden !important;
     scrollbar-width: thin;
     scrollbar-color: #a084e8 #2d223a;
     box-shadow: 0 2px 16px rgba(160, 132, 232, 0.08);
+    position: relative !important;
+    display: block !important;
+    line-height: 1.4;
+    /* Ensure proper layout recalculation */
+    transform: translateZ(0);
+    will-change: height;
+  }
+  
+  /* Ensure glass-card containers can expand properly */
+  .glass-card.d-flex.flex-column {
+    height: auto !important;
+    min-height: 600px;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+  
+  /* Ensure card-body can expand properly */
+  .glass-card .card-body.d-flex.flex-column.flex-grow-1 {
+    height: auto !important;
+    min-height: 0;
+    flex: 1;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+  
+  /* Ensure glass-card containers are responsive */
+  .glass-card.d-flex.flex-column {
+    height: auto !important;
+    max-height: none !important;
+    min-height: 600px !important;
+  }
+  
+  /* Ensure card-body is responsive */
+  .glass-card .card-body.d-flex.flex-column.flex-grow-1 {
+    height: auto !important;
+    max-height: none !important;
+    min-height: 600px !important;
+  }
+  
+  /* Ensure the row is responsive */
+  .row.fade-in.g-1 {
+    height: auto !important;
+    max-height: none !important;
+    min-height: auto !important;
+  }
+  
+  /* Ensure the columns are responsive */
+  .col-lg-4[data-container-type="available"],
+  .col-lg-4[data-container-type="selected"] {
+    height: auto !important;
+    max-height: none !important;
+    min-height: 600px !important;
+  }
+
+  /* Make the main containers narrower */
+  [data-container-type="available"],
+  [data-container-type="selected"] {
+    flex: 0 0 auto !important;
+    max-width: 400px !important;
+    min-width: 350px !important;
+    width: 400px !important;
+  }
+  
+  /* Ensure tag list containers are responsive */
+  .tag-list-container {
+    max-height: none !important;
+    min-height: 600px !important;
+    height: auto !important;
+    overflow-y: visible !important;
+  }
+  
+  /* Ensure center column controls panel matches content height */
+  .control-panel {
+    max-height: none !important;
+    min-height: auto !important;
+    height: auto !important;
+    overflow-y: visible !important;
+    width: 100% !important;
+    max-width: none !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 0.5rem !important;
+    padding: 0.5rem !important;
+  }
+  
+  /* Ensure filter bar has reasonable height */
+  .sticky-filter-bar {
+    max-height: none !important;
+    min-height: 400px !important;
+    height: auto !important;
+    overflow-y: visible !important;
+  }
+  
+  /* Ensure all content is visible and scrollable */
+  .tag-list-container > * {
+    display: block;
+    width: 100%;
+    clear: both;
+    /* Ensure all direct children stay within container */
+    max-width: 100%;
+    /* Allow content to be visible and scrollable */
+    overflow: visible;
+  }
+  
+  /* Ensure vendor sections work with fixed height container */
+  .vendor-content {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    display: block !important;
+    margin-bottom: 0 !important;
+    padding-bottom: 0 !important;
+  }
+  
+  .brand-content {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    display: block !important;
+    margin-bottom: 0 !important;
+    padding-bottom: 0 !important;
+  }
+  
+  .product-type-content {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    display: block !important;
+    margin-bottom: 0 !important;
+    padding-bottom: 0 !important;
+  }
+  
+  .weight-content {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    display: block !important;
+    margin-bottom: 0 !important;
+    padding-bottom: 0 !important;
+  }
+  
+  /* Remove bottom spacing from vendor sections */
+  .vendor-section:last-child {
+    margin-bottom: 0 !important;
+    padding-bottom: 0 !important;
+  }
+  
+  .brand-section:last-child {
+    margin-bottom: 0 !important;
+    padding-bottom: 0 !important;
+  }
+  
+  .product-type-section:last-child {
+    margin-bottom: 0 !important;
+    padding-bottom: 0 !important;
+  }
+  
+  .weight-section:last-child {
+    margin-bottom: 0 !important;
+    padding-bottom: 0 !important;
+  }
+  
+  /* Ensure the tag list container has proper scrollbar styling */
+  #availableTags::-webkit-scrollbar {
+    width: 8px;
+  }
+  
+  #availableTags::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+  }
+  
+  #availableTags::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.3);
+    border-radius: 4px;
+  }
+  
+  #availableTags::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.5);
+  }
+  .vendor-section {
+    display: block !important;
+    position: relative;
+    clear: both;
+    margin-bottom: 24px !important; /* Increased from 16px */
+    width: 100%;
+    /* Allow content to be visible */
+    overflow: visible;
+  }
+  
+  /* Ensure brand sections don't get cut off */
+  .brand-section {
+    flex-shrink: 0;
+    min-height: 0;
+    display: block !important;
+    margin-bottom: 20px !important; /* Added spacing */
+  }
+  
+  /* Ensure product type sections don't get cut off */
+  .product-type-section {
+    flex-shrink: 0;
+    min-height: 0;
+    display: block !important;
+    /* Ensure product type sections stay within container */
+    position: relative;
+    width: 100%;
+    max-width: 100%;
+    /* Prevent content from breaking out but allow proper layout */
+    overflow: hidden;
+    /* Ensure proper stacking context */
+    z-index: 1;
+    /* Ensure checkboxes remain interactive */
+    pointer-events: auto;
+    margin-bottom: 18px !important; /* Added spacing */
+  }
+  
+  /* Ensure all checkboxes within product type sections are clickable */
+  .product-type-section input[type="checkbox"],
+  .product-type-section .select-all-checkbox,
+  .product-type-section .tag-checkbox {
+    pointer-events: auto !important;
+    cursor: pointer !important;
+    z-index: 10 !important;
+    position: relative !important;
+  }
+  
+  /* Ensure weight sections don't get cut off */
+  .weight-section {
+    flex-shrink: 0;
+    min-height: 0;
+    display: block !important;
+    /* Ensure weight sections stay within container */
+    position: relative;
+    width: 100%;
+    max-width: 100%;
+    /* Prevent content from breaking out but allow proper layout */
+    overflow: hidden;
+    /* Ensure proper stacking context */
+    z-index: 1;
+    margin-bottom: 16px !important; /* Added spacing */
+  }
+  
+  /* Ensure tag rows don't get cut off */
+  .tag-row {
+    flex-shrink: 0;
+    min-height: 0;
+    display: block !important;
+    /* Ensure tag rows stay within container */
+    position: relative;
+    width: 100%;
+    max-width: 100%;
+    /* Allow content to be visible */
+    overflow: visible;
+    margin-bottom: 12px !important; /* Added spacing */
   }
   
   .tag-list-container::-webkit-scrollbar {
-    width: 8px;
-    background: #2d223a;
+    width: 12px;
+    background: rgba(45, 34, 58, 0.8);
   }
   
   .tag-list-container::-webkit-scrollbar-track {
-    background: transparent;
+    background: rgba(45, 34, 58, 0.5);
+    border-radius: 6px;
   }
   
   .tag-list-container::-webkit-scrollbar-thumb {
     background: #a084e8;
-    border-radius: 8px;
+    border-radius: 6px;
+    border: 2px solid rgba(45, 34, 58, 0.8);
   }
   
   .tag-list-container::-webkit-scrollbar-thumb:hover {
     background: #8b5cf6;
+  }
+  
+  .tag-list-container::-webkit-scrollbar-corner {
+    background: rgba(45, 34, 58, 0.8);
+  }
+  
+  /* Ensure tag containers always match their inner content height */
+  .tag-list-container {
+    display: flex !important;
+    flex-direction: column !important;
+  }
+  
+  .tag-list-container .tag-list {
+    flex: 1 !important;
+    min-height: 0 !important;
+    height: 100% !important;
+  }
+  
+  /* Ensure the tag list fills the available space */
+  .tag-list {
+    display: flex !important;
+    flex-direction: column !important;
+    height: 100% !important;
+    min-height: 0 !important;
+  }
+  
+  /* Ensure tag entries expand to fill space */
+  .tag-entry {
+    flex-shrink: 0 !important;
+  }
+  
+  /* Ensure center panel content is properly spaced - COMPACT */
+  .control-panel .btn {
+    margin-bottom: 0.15rem !important;
+    min-height: 32px !important;
+    font-size: 0.75rem !important;
+    padding: 0.3rem 0.6rem !important;
+  }
+  
+  /* Ensure center panel sections have proper spacing - COMPACT */
+  .control-panel > div {
+    margin-bottom: 0.4rem !important;
+  }
+  
+  /* Ensure center panel uses full available height */
+  .control-panel {
+    justify-content: flex-start !important;
+    align-items: stretch !important;
+  }
+  
+  /* Ensure center panel content doesn't overflow */
+  .control-panel .d-grid {
+    width: 100% !important;
+  }
+  
+  /* Compact control panel buttons - EXTRA COMPACT */
+  .control-panel .btn-glass {
+    padding: 0.6rem 1rem !important;
+    font-size: 1.3rem !important;
+    font-weight: 700 !important;
+    min-height: 45px !important;
+    margin-bottom: 0.15rem !important;
+  }
+  
+  .control-panel .btn-glass .icon-btn {
+    gap: 6px !important;
+  }
+  
+  .control-panel .btn-glass svg {
+    width: 18px !important;
+    height: 18px !important;
+  }
+
+  /* Center column specific spacing reductions */
+  .help-button-container {
+    margin-bottom: 0 !important;
+  }
+  
+  .help-button-container .big-glow-help-btn {
+    margin-bottom: 0 !important;
+  }
+  
+  .help-label {
+    margin-bottom: 0 !important;
+    line-height: 1 !important;
+  }
+  
+  /* Template select spacing */
+  .control-panel .form-select-modern {
+    margin-bottom: 0 !important;
+    margin-top: 0 !important;
+    padding: 0.3rem 0.5rem !important;
+    font-size: 0.8rem !important;
+  }
+  
+  /* Generate button spacing */
+  .control-panel .btn-modern2 {
+    margin: 0.2rem 0 !important;
+    padding: 0.65rem !important;
+    font-size: 1.1rem !important;
+    font-weight: 800 !important;
+    box-shadow: 0 3px 10px rgba(33, 150, 243, 0.25), 0 6px 18px rgba(3, 169, 244, 0.15) !important;
+    transition: all 0.2s ease-in-out !important;
+  }
+  
+  /* JSON Tools section spacing */
+  .control-panel .mb-3 {
+    margin-bottom: 0.6rem !important;
+    margin-top: 0.4rem !important;
+  }
+  
+  /* d-grid spacing in center column */
+  .control-panel .d-grid {
+    gap: 0.15rem !important;
+  }
+  
+  /* Filter labels in center column */
+  .control-panel .filter-label {
+    margin-bottom: 0.2rem !important;
+    font-size: 1.1rem !important;
+  }
+
+  /* Center column container spacing */
+  .col-lg-2.mb-1.mt-0 {
+    padding-left: 0.1rem !important;
+    padding-right: 0.1rem !important;
+    margin-bottom: 0.2rem !important;
+  }
+  
+  /* Reduce spacing between elements in center column */
+  .control-panel > *:not(:last-child) {
+    margin-bottom: 0 !important;
+  }
+  
+  /* Make buttons even more compact */
+  .control-panel .btn-sm {
+    padding: 0.55rem 0.8rem !important;
+    font-size: 1.2rem !important;
+    font-weight: 700 !important;
+    min-height: 42px !important;
   }
   
   /* Tag items with dropdowns */
@@ -695,12 +1463,15 @@
     margin-bottom: 1px !important;
     padding-bottom: 0 !important;
     position: relative !important;
-    padding-left: 32px !important;
+    padding-left: 28px !important;
     cursor: grab;
     transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
     -webkit-user-select: none;
     user-select: none;
     border: 1px solid transparent;
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
   }
   
   .tag-row:hover {
@@ -709,19 +1480,23 @@
   }
   
   .tag-item {
-    border-radius: 10px !important;
-    padding: 6px 10px 6px 32px !important; /* Increased left padding for drag handle */
-    margin-bottom: 2px !important;
-    min-height: 32px !important;
+    border-radius: 8px !important;
+    padding: 8px 18px 8px 36px !important; /* Increased padding */
+    margin-bottom: 8px !important; /* Increased from 6px */
+    min-height: 36px !important; /* Increased from 32px */
     box-shadow: none !important;
     background: rgba(160, 132, 232, 0.13) !important;
-    display: flex;
-    align-items: flex-start !important;
-    flex-wrap: wrap;
-    gap: 6px;
+    display: flex !important;
+    align-items: center !important;
+    flex-wrap: nowrap !important;
+    gap: 10px !important; /* Increased from 8px */
     transition: all 0.3s ease;
     position: relative;
-    overflow: visible; /* Changed from hidden to visible for drag handles */
+    /* Ensure tag items stay within container */
+    width: 100%;
+    max-width: 95%;
+    /* Allow content to be visible */
+    overflow: visible;
   }
   
   .tag-item::before {
@@ -832,32 +1607,38 @@
   }
   
   .tag-checkbox {
-    margin-right: 6px !important;
+    margin-right: 8px !important; /* Increased from 6px */
     margin-top: 1px !important;
     flex-shrink: 0;
   }
   
   .tag-info {
-    gap: 6px !important;
-    align-items: flex-start !important;
+    gap: 6px !important; /* Increased from 4px */
+    align-items: center !important;
     flex: 1;
     min-width: 0;
+    display: flex !important;
+    flex-direction: row !important;
   }
   
   .tag-name {
-    font-size: 0.95rem !important;
-    line-height: 1.3 !important;
-    margin-right: 8px !important;
+    font-size: 0.9rem !important;
+    line-height: 1.4 !important; /* Increased from 1.3 */
+    margin-right: 8px !important; /* Increased from 6px */
     white-space: normal !important;
-    word-break: break-word !important;
-    overflow-wrap: break-word !important;
-    -webkit-hyphens: auto;
-    hyphens: auto;
+    word-break: keep-all !important; /* Prevent word breaking */
+    overflow-wrap: anywhere !important; /* Allow breaking only at word boundaries */
     color: white !important;
-    font-weight: 700 !important;
-    text-shadow: 0 2px 6px rgba(0, 0, 0, 0.5) !important;
-    letter-spacing: 0.2px !important;
+    font-weight: 600 !important;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5) !important;
+    letter-spacing: 0.1px !important;
     padding: 0 !important;
+    flex: 1 !important;
+    min-width: 0 !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    hyphens: none !important; /* Prevent automatic hyphenation */
+    word-spacing: normal !important;
   }
   
   .lineage-select {
@@ -882,6 +1663,9 @@
     box-sizing: border-box !important;
     margin-left: 0 !important;
     margin-right: 0 !important;
+    word-break: keep-all !important; /* Prevent word breaking */
+    overflow-wrap: anywhere !important; /* Allow breaking only at word boundaries */
+    hyphens: none !important; /* Prevent automatic hyphenation */
   }
   
   .lineage-select, .lineage-dropdown {
@@ -899,6 +1683,12 @@
   }
   
   .lineage-dropdown {
+    /* Cross-platform consistency - remove platform-specific styling */
+    -webkit-appearance: none !important;
+    -moz-appearance: none !important;
+    appearance: none !important;
+    
+    /* Standardized styling for consistent appearance */
     min-width: 160px;
     background: rgba(255, 255, 255, 0.15) !important;
     border: 1.5px solid rgba(160, 132, 232, 0.25) !important;
@@ -910,10 +1700,11 @@
     font-weight: 600 !important;
     font-size: 1.05em !important;
     padding: 10px 16px 10px 32px !important;
-    appearance: none !important;
     transition: all 0.3s ease !important;
     text-align: center !important;
     text-shadow: 0 2px 6px rgba(0, 0, 0, 0.5) !important;
+    
+    /* Ensure consistent arrow across platforms */
     background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='white' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m1 6 7 7 7-7'/%3e%3c/svg%3e") !important;
     background-repeat: no-repeat !important;
     background-position: left 12px center !important;
@@ -1113,71 +1904,94 @@
   /* Checkbox styling */
   .custom-checkbox,
   .brand-select-all {
-    width: 20px;
-    height: 20px;
+    width: 24px;
+    height: 24px;
     appearance: none;
-    background: rgba(255, 255, 255, 0.25);
-    border: 2px solid rgba(160, 132, 232, 0.5);
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0.1));
+    border: 2px solid rgba(160, 132, 232, 0.7);
     border-radius: 6px;
     cursor: pointer;
     position: relative;
     transition: all 0.3s ease;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+    box-shadow: 
+      inset 0 1px 3px rgba(255, 255, 255, 0.2),
+      0 2px 8px rgba(0, 0, 0, 0.3),
+      0 1px 2px rgba(160, 132, 232, 0.2);
   }
   
   .custom-checkbox:hover,
   .brand-select-all:hover {
-    background: rgba(255, 255, 255, 0.35);
-    border-color: rgba(160, 132, 232, 0.7);
-    box-shadow: 0 4px 12px rgba(160, 132, 232, 0.3);
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.2));
+    border-color: rgba(160, 132, 232, 0.9);
+    box-shadow: 
+      inset 0 1px 3px rgba(255, 255, 255, 0.3),
+      0 4px 15px rgba(160, 132, 232, 0.4),
+      0 2px 4px rgba(160, 132, 232, 0.3);
+    transform: translateY(-1px);
   }
   
   .custom-checkbox:checked,
   .brand-select-all:checked {
     background: linear-gradient(135deg, #a084e8 0%, #8b5cf6 100%);
-    border-color: transparent;
-    box-shadow: 0 4px 15px rgba(160, 132, 232, 0.5);
+    border-color: rgba(160, 132, 232, 0.9);
+    box-shadow: 
+      inset 0 2px 4px rgba(0, 0, 0, 0.2),
+      0 4px 15px rgba(160, 132, 232, 0.6),
+      0 2px 4px rgba(160, 132, 232, 0.4);
+    transform: scale(1.05);
   }
   
   .custom-checkbox:checked::after,
   .brand-select-all:checked::after {
     content: '✓';
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
+    display: block;
+    text-align: center;
     color: white;
     font-weight: bold;
-    font-size: 14px;
+    font-size: 16px;
+    line-height: 20px;
     text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
   }
   
   /* Tag checkbox styling */
   .tag-checkbox,
   input[type="checkbox"]:not(.custom-checkbox):not(.brand-select-all) {
-    width: 18px;
-    height: 18px;
+    width: 28px;
+    height: 28px;
     appearance: none;
-    background: rgba(255, 255, 255, 0.25);
-    border: 2px solid rgba(160, 132, 232, 0.5);
-    border-radius: 4px;
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0.1));
+    border: 2px solid rgba(160, 132, 232, 0.7);
+    border-radius: 8px;
     cursor: pointer;
     transition: all 0.3s ease;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+    box-shadow: 
+      inset 0 1px 3px rgba(255, 255, 255, 0.2),
+      0 2px 8px rgba(0, 0, 0, 0.3),
+      0 1px 2px rgba(160, 132, 232, 0.2);
+    position: relative;
+    margin-right: 12px;
   }
   
   .tag-checkbox:hover,
   input[type="checkbox"]:not(.custom-checkbox):not(.brand-select-all):hover {
-    background: rgba(255, 255, 255, 0.35);
-    border-color: rgba(160, 132, 232, 0.7);
-    box-shadow: 0 4px 12px rgba(160, 132, 232, 0.3);
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.2));
+    border-color: rgba(160, 132, 232, 0.9);
+    box-shadow: 
+      inset 0 1px 3px rgba(255, 255, 255, 0.3),
+      0 4px 15px rgba(160, 132, 232, 0.4),
+      0 2px 4px rgba(160, 132, 232, 0.3);
+    transform: translateY(-1px);
   }
   
   .tag-checkbox:checked,
   input[type="checkbox"]:not(.custom-checkbox):not(.brand-select-all):checked {
     background: linear-gradient(135deg, #a084e8 0%, #8b5cf6 100%);
-    border-color: transparent;
-    box-shadow: 0 4px 15px rgba(160, 132, 232, 0.5);
+    border-color: rgba(160, 132, 232, 0.9);
+    box-shadow: 
+      inset 0 2px 4px rgba(0, 0, 0, 0.2),
+      0 4px 15px rgba(160, 132, 232, 0.6),
+      0 2px 4px rgba(160, 132, 232, 0.4);
+    transform: scale(1.05);
   }
   
   .tag-checkbox:checked::after,
@@ -1187,8 +2001,8 @@
     text-align: center;
     color: white;
     font-weight: bold;
-    font-size: 12px;
-    line-height: 14px;
+    font-size: 18px;
+    line-height: 24px;
     text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
   }
   
@@ -1259,15 +2073,16 @@
   }
   
   /* Filter section */
-  .filter-label {
-    font-size: 0.9rem;
-    font-weight: 600;
-    color: var(--text-secondary);
-    margin-bottom: 0.5rem;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    display: block;
-  }
+.filter-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  display: block;
+  text-align: center;
+}
 
   /* Select All checkbox styling */
   #selectAllAvailable {
@@ -1296,7 +2111,7 @@
     box-shadow: 0 2px 8px rgba(160, 132, 232, 0.2);
     position: relative;
     overflow: hidden;
-    margin-bottom: 0 !important;
+    margin-bottom: 8px !important;
   }
 
   .select-all-container::before {
@@ -1339,19 +2154,21 @@
   
 
   
-  /* Control panel */
+  /* Control panel - COMPACT SPACING */
   .control-panel {
     background: rgba(45, 34, 58, 0.9);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
     border: 2px solid rgba(160, 132, 232, 0.25);
-    border-radius: 20px;
-    padding: 2.5rem 2rem;
+    border-radius: 16px;
+    padding: 0.75rem 0.75rem;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 2rem;
-    min-height: 450px;
+    gap: 0.5rem;
+    min-height: 400px;
+    height: auto !important;
+    max-height: none !important;
     box-shadow: 
       0 16px 48px rgba(0, 0, 0, 0.15),
       0 6px 20px rgba(160, 132, 232, 0.1);
@@ -1392,7 +2209,7 @@
   .icon-btn {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
   }
   
   /* Pulse animation for important buttons */
@@ -1510,11 +2327,15 @@
       z-index: 10;
       margin-bottom: 1rem;
       padding: 1.5rem;
-      gap: 1rem;
+    gap: 0.6rem;
     }
     
     .tag-list-container {
-      max-height: 400px;
+      /* Remove height restrictions to allow full content display on mobile */
+      min-height: 300px;
+      max-height: none !important;
+      height: auto !important;
+      overflow-y: auto !important;
     }
     
     .filter-bar {
@@ -1562,15 +2383,28 @@
     padding-left: 10px !important;
     margin-left: 0 !important;
     margin-bottom: 1.5rem;
+    /* Ensure vendor sections stay within container */
+    position: relative;
+    width: 100%;
+    max-width: 100%;
+    /* Prevent content from breaking out but allow proper layout */
+    overflow: hidden;
+    /* Ensure proper stacking context */
+    z-index: 1;
   }
   
   .vendor-header {
     color: var(--primary-color);
     font-weight: 600;
     margin-bottom: 0.75rem;
-    font-size: 1.1rem;
+    font-size: 1.4rem;
     margin-left: 0 !important;
     padding-left: 0 !important;
+    position: relative;
+    z-index: 2;
+    /* Ensure header stays above content */
+    width: 100%;
+    box-sizing: border-box;
   }
   
   .brand-section {
@@ -1578,6 +2412,14 @@
     padding-left: 10px !important;
     margin-left: 0 !important;
     margin-bottom: 1rem;
+    /* Ensure brand sections stay within container */
+    position: relative;
+    width: 100%;
+    max-width: 100%;
+    /* Prevent content from breaking out but allow proper layout */
+    overflow: hidden;
+    /* Ensure proper stacking context */
+    z-index: 1;
   }
   
   .brand-header {
@@ -1587,6 +2429,11 @@
     font-size: 1rem;
     margin-left: 0 !important;
     padding-left: 0 !important;
+    /* Ensure header stays above content */
+    position: relative;
+    z-index: 2;
+    width: 100%;
+    box-sizing: border-box;
   }
   
   .product-type-section {
@@ -1861,7 +2708,7 @@
     .filter-bar {
       position: sticky;
       top: 80px;
-      height: calc(100vh - 100px);
+      height: auto !important;
       overflow-y: auto;
     }
     
@@ -1869,6 +2716,11 @@
     .tag-list-container {
       min-width: 0;
       width: 100%;
+      /* Remove height restrictions to allow full content display */
+      min-height: 400px;
+      max-height: none !important;
+      height: auto !important;
+      overflow-y: auto !important;
     }
     
     .tag-item {
@@ -1888,6 +2740,11 @@
     
     .tag-list-container {
       width: 100%;
+      /* Remove height restrictions to allow full content display */
+      min-height: 400px;
+      max-height: none !important;
+      height: auto !important;
+      overflow-y: auto !important;
     }
   }
   
@@ -1903,6 +2760,11 @@
     
     .tag-list-container {
       width: 100%;
+      /* Remove height restrictions to allow full content display */
+      min-height: 400px;
+      max-height: none !important;
+      height: auto !important;
+      overflow-y: auto !important;
     }
   }
   
@@ -1914,6 +2776,14 @@
       min-width: 500px;
       max-width: 650px;
     }
+    
+    .tag-list-container {
+      /* Remove height restrictions to allow full content display */
+      min-height: 400px;
+      max-height: none !important;
+      height: auto !important;
+      overflow-y: auto !important;
+    }
   }
   
   /* Ultra-wide screen optimizations */
@@ -1923,6 +2793,14 @@
       flex: 1;
       min-width: 600px;
       max-width: none;
+    }
+    
+    .tag-list-container {
+      /* Remove height restrictions to allow full content display */
+      min-height: 400px;
+      max-height: none !important;
+      height: auto !important;
+      overflow-y: auto !important;
     }
   }
 
@@ -1997,6 +2875,10 @@
     border-color: rgba(132, 108, 193, 0.274);
     background: rgba(255, 255, 255, 0.32) !important; /* lighter on hover */
   }
+
+
+
+
   
   /* Modal improvements */
   .modal select,
@@ -2071,6 +2953,8 @@
     transition: all 0.3s ease !important;
     backdrop-filter: blur(10px) !important;
     -webkit-backdrop-filter: blur(10px) !important;
+    max-height: 300px !important;
+    overflow-y: auto !important;
   }
 
   .filter-bar label {
@@ -2087,6 +2971,17 @@
     padding: 6px;
     font-weight: 500 !important;
     text-shadow: 0 1px 3px rgba(0,0,0,0.3) !important;
+    max-width: 250px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  
+  .filter-bar option:disabled {
+    background: #1a1a1a !important;
+    color: #888 !important;
+    font-style: italic !important;
+    cursor: not-allowed !important;
   }
 
   /* Compact Filter Dropdowns */
@@ -2246,7 +3141,8 @@
   
   /* Maximize tag list space */
   .tag-list {
-    max-height: calc(100vh - 200px);
+    /* Remove height restrictions to allow full content display */
+    max-height: none !important;
     overflow-y: auto;
   }
   
@@ -2513,7 +3409,7 @@
     width: 100%;
     height: 100%;
     pointer-events: none;
-    z-index: -1;
+    z-index: -10;
     overflow: hidden;
   }
   
@@ -2523,6 +3419,7 @@
     filter: blur(1px);
     opacity: 0.6;
     animation: float 15s ease-in-out infinite alternate;
+    pointer-events: none;
   }
   
   .orb:nth-child(1) {
@@ -2602,7 +3499,7 @@
     width: 100%;
     height: 100%;
     pointer-events: none;
-    z-index: -1;
+    z-index: -10;
   }
   
   .particle {
@@ -2611,6 +3508,7 @@
     height: 4px;
     border-radius: 50%;
     animation: particleFloat 8s linear infinite;
+    pointer-events: none;
   }
   
   .particle:nth-child(odd) {
@@ -2827,9 +3725,11 @@
     flex-grow: 1;
     min-width: 0;
     text-align: left;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    white-space: normal !important;
+    word-break: break-word !important;
+    overflow-wrap: break-word !important;
+    line-height: 1.4 !important;
+    margin-bottom: 2px !important;
   }
   .lineage-dropdown,
   .lineage-dropdown-mini,
@@ -2858,19 +3758,29 @@
     padding-bottom: 3px !important;
     border-radius: 6px !important;
     margin-bottom: 1px !important;
-    min-height: 30px !important;
+    min-height: 24px !important;
+    display: flex !important;
+    align-items: center !important;
+    flex-wrap: nowrap !important;
+    gap: 4px !important;
   }
   .tag-name {
-    font-size: 0.97rem !important;
+    font-size: 0.85rem !important;
+    line-height: 1.3 !important;
+    white-space: normal !important;
+    word-break: break-word !important;
+    overflow-wrap: break-word !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
   }
   .lineage-dropdown,
   .lineage-dropdown-mini,
   .form-select.lineage-dropdown {
-    font-size: 0.85em !important;
-    min-width: 45px !important;
-    max-width: 55px !important;
-    width: 50px !important;
-    padding: 0 2px 0 12px !important;
+    font-size: 0.75em !important;
+    min-width: 35px !important;
+    max-width: 45px !important;
+    width: 40px !important;
+    padding: 0 1px 0 8px !important;
     background: rgba(255, 255, 255, 0.12) !important;
     color: white !important;
     border: 1px solid rgba(160, 132, 232, 0.25) !important;
@@ -2880,12 +3790,73 @@
     text-shadow: 0 2px 6px rgba(0, 0, 0, 0.5) !important;
     background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='white' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m1 6 7 7 7-7'/%3e%3c/svg%3e") !important;
     background-repeat: no-repeat !important;
-    background-position: left 4px center !important;
-    background-size: 8px !important;
+    background-position: left 2px center !important;
+    background-size: 6px !important;
   }
   .tag-info .d-flex.align-items-center {
-    gap: 0.12rem !important;
+    gap: 0.25rem !important;
+    flex-wrap: nowrap !important;
+    align-items: center !important;
   }
+  
+  /* Force tag names to wrap and not truncate */
+  .tag-item .tag-name,
+  .tag-row .tag-name,
+  .tag-info .tag-name {
+    white-space: normal !important;
+    word-break: break-word !important;
+    overflow-wrap: break-word !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    max-width: none !important;
+  }
+#databaseModal .modal-dialog {
+  max-height: 85vh;
+  margin: 0.5rem auto;
+  display: flex;
+  align-items: flex-start;
+}
+
+#databaseModal .modal-content {
+  max-height: calc(85vh - 1rem);
+  overflow-y: auto;
+}
+
+#databaseModal .modal-body {
+  overflow-y: auto;
+  padding: 0.75rem;
+}
+
+#databaseModal .card {
+  margin-bottom: 0.75rem;
+}
+
+#databaseModal .card-body {
+  height: 250px;
+  padding: 0.75rem;
+}
+
+#databaseModal .modal-header {
+  padding: 0.75rem;
+}
+
+#databaseModal .modal-footer {
+  padding: 0.5rem;
+}
+
+#databaseModal .row {
+  margin-bottom: 0.5rem;
+}
+
+#databaseModal .card-header {
+  padding: 0.5rem 0.75rem;
+}
+
+#databaseModal h6 {
+  margin-bottom: 0.5rem;
+  font-size: 0.95rem;
+}
+
   .tag-checkbox {
     width: 12px !important;
     height: 12px !important;
@@ -3029,11 +4000,21 @@
 
   /* Vendor (top-level) */
   .vendor-section > .vendor-header {
-    font-size: 1.15em;
+    font-size: 2em !important;
     font-weight: 700;
     margin-bottom: 0.4em;
     letter-spacing: 0.04em;
     color: #e0d6f6;
+  }
+
+  /* Force vendor header font size - highest priority */
+  .vendor-section > .vendor-header,
+  .vendor-section > .vendor-header h5,
+  .vendor-section > .vendor-header.d-flex,
+  .vendor-section > .vendor-header.mb-2,
+  .vendor-section > .vendor-header.cursor-pointer {
+    font-size: 2.5em !important;
+    font-weight: 700 !important;
   }
 
   /* Brand (second-level) */
@@ -3054,6 +4035,8 @@
     margin-left: 2.2em;
     letter-spacing: 0.02em;
     color: #b3a1d8;
+    /* Ensure checkboxes within product type headers are clickable */
+    pointer-events: auto;
   }
 
   /* Weight (fourth-level) */
@@ -3081,6 +4064,12 @@
   }
 
   select, .form-select, .form-select-modern {
+    /* Cross-platform consistency - remove platform-specific styling */
+    -webkit-appearance: none !important;
+    -moz-appearance: none !important;
+    appearance: none !important;
+    
+    /* Standardized styling for consistent appearance */
     background: rgba(34, 34, 51, 0.55) !important;
     color: #e0d6f6 !important;
     border: 1.5px solid rgba(160, 132, 232, 0.22) !important;
@@ -3090,8 +4079,13 @@
     box-shadow: 0 2px 12px 0 rgba(160, 132, 232, 0.10) !important;
     backdrop-filter: blur(8px) !important;
     -webkit-backdrop-filter: blur(8px) !important;
-    appearance: none !important;
     transition: border 0.2s, box-shadow 0.2s;
+    
+    /* Ensure consistent arrow across platforms */
+    background-image: url('data:image/svg+xml;utf8,<svg fill="%23a084e8" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
+    background-repeat: no-repeat !important;
+    background-position: right 14px center !important;
+    background-size: 18px 18px !important;
   }
 
   select:focus, .form-select:focus, .form-select-modern:focus {
@@ -3115,29 +4109,42 @@
 
   /* Specific style for the Template selection box */
   #templateSelect {
-    min-width: 150px !important;
-    max-width: 240px !important;
+    /* Cross-platform consistency - remove platform-specific styling */
+    -webkit-appearance: none !important;
+    -moz-appearance: none !important;
+    appearance: none !important;
+    
+    /* Standardized styling for consistent appearance */
+    min-width: 180px !important;
+    max-width: 280px !important;
     width: auto !important;
-    min-height: 38px !important;
-    height: auto !important;
-    margin: 12px auto 18px auto !important;
-    display: block !important;
+    min-height: 60px !important;
+    height: 60px !important;
+    margin: 0.5rem auto 0.75rem auto !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
     text-align: center !important;
     text-align-last: center !important;
-    padding: 10px 36px 10px 18px !important;
-    font-size: 1.08em !important;
+    padding: 12px 20px !important;
+    font-size: 1.3em !important;
     font-weight: 700 !important;
     color: #e0d6f6 !important;
-    background: rgba(34, 34, 51, 0.75) !important;
-    border: 2px solid #a084e8 !important;
+    background: rgba(34, 34, 51, 0.85) !important;
+    border: 2.5px solid #a084e8 !important;
     border-radius: 12px !important;
-    box-shadow: 0 4px 24px 0 rgba(160, 132, 232, 0.13) !important;
+    box-shadow: 0 6px 28px 0 rgba(160, 132, 232, 0.18) !important;
     backdrop-filter: blur(10px) !important;
     -webkit-backdrop-filter: blur(10px) !important;
-    appearance: none !important;
     transition: border 0.2s, box-shadow 0.2s;
     overflow: visible !important;
     white-space: normal !important;
+    
+    /* Ensure consistent arrow across platforms */
+    background-image: url('data:image/svg+xml;utf8,<svg fill="%23a084e8" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
+    background-repeat: no-repeat !important;
+    background-position: right 14px center !important;
+    background-size: 18px 18px !important;
   }
 
   #templateSelect option {
@@ -3157,30 +4164,35 @@
   }
 
   #generateBtn {
-    font-size: 1.05rem !important;
-    font-weight: 700 !important;
-    padding: 12px 0 !important;
-    border-radius: 12px !important;
-    background: linear-gradient(90deg, #6a82fb 0%, #a084e8 100%) !important; /* blue to purple */
+    min-width: 150px !important;
+    max-width: 250px !important;
+    width: auto !important;
+    min-height: 50px !important;
+    height: 50px !important;
+    margin: 0.5rem auto 0 !important;
+    padding: 8px 16px !important;
+    font-size: 1.1em !important;
+    font-weight: 600 !important;
+    border-radius: 10px !important;
+    background: rgba(33, 150, 243, 0.9) !important;
     color: #fff !important;
-    box-shadow: 0 2px 10px rgba(160, 132, 232, 0.13), 0 1.5px 8px rgba(106, 130, 251, 0.10);
-    border: none !important;
+    box-shadow: 0 4px 15px rgba(33, 150, 243, 0.35), 0 8px 25px rgba(3, 169, 244, 0.2) !important;
+    border: 2px solid rgba(33, 150, 243, 0.7) !important;
     letter-spacing: 0.3px !important;
-    transition: background 0.2s, box-shadow 0.2s, transform 0.1s;
-    margin-top: 12px;
-    margin-bottom: 12px;
-    text-shadow: 0 2px 6px rgba(0,0,0,0.12);
+    transition: all 0.3s ease;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
   }
   #generateBtn:hover, #generateBtn:focus {
-    background: linear-gradient(90deg, #a084e8 0%, #6a82fb 100%) !important;
-    box-shadow: 0 6px 18px rgba(160, 132, 232, 0.18), 0 4px 16px rgba(106,130,251,0.13);
-    transform: translateY(-1px) scale(1.02);
+    background: rgba(60, 45, 80, 0.95) !important;
+    border-color: rgba(160, 132, 232, 0.4) !important;
+    box-shadow: 0 6px 20px rgba(160, 132, 232, 0.35), 0 12px 30px rgba(80, 40, 160, 0.25) !important;
+    transform: translateY(-3px);
     color: #fff !important;
     outline: none !important;
   }
 
   .tag-list-container {
-    padding: 1.5rem !important;
+    padding: 0.75rem !important;
     border-radius: 16px;
     box-sizing: border-box;
   }
@@ -3189,10 +4201,10 @@
     margin-left: 0 !important;
     margin-right: 0 !important;
     width: 100% !important;
-    border-radius: 10px !important;
+    border-radius: 8px !important;
     box-sizing: border-box;
-    padding-left: 12px !important;
-    padding-right: 12px !important;
+    padding-left: 8px !important;
+    padding-right: 8px !important;
   }
 
   /* Ultra-compact upload bar */
@@ -3573,28 +4585,28 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 80px;
-    height: 80px;
+    width: 32px;
+    height: 32px;
     border-radius: 50%;
     background: linear-gradient(135deg, #00d4aa 0%, #0099cc 100%);
-    box-shadow: 0 0 16px 4px rgba(0, 212, 170, 0.6), 0 0 32px 8px rgba(0, 212, 170, 0.4);
-    border: 3px solid #ffffff;
+    box-shadow: 0 0 4px 1px rgba(0, 212, 170, 0.6), 0 0 8px 2px rgba(0, 212, 170, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.8);
     color: #ffffff;
-    font-size: 2.2rem;
-    margin-bottom: 1rem;
+    font-size: 0.875rem;
+    margin: 0;
     cursor: pointer;
     transition: box-shadow 0.3s, transform 0.2s;
     position: relative;
     z-index: 10;
     animation: help-glow-pulse 2s infinite alternate;
-    padding: 16px;
+    padding: 0;
   }
 
   .big-glow-help-btn svg {
-    width: 44px;
-    height: 44px;
+    width: 22px;
+    height: 22px;
     stroke: #ffffff;
-    filter: drop-shadow(0 0 4px rgba(0, 212, 170, 0.8)) drop-shadow(0 0 8px rgba(0, 212, 170, 0.6));
+    filter: drop-shadow(0 0 2px rgba(0, 212, 170, 0.8)) drop-shadow(0 0 4px rgba(0, 212, 170, 0.6));
   }
 
   .big-glow-help-btn:hover, .big-glow-help-btn:focus {
@@ -3834,7 +4846,7 @@
 
   /* Ensure the tag list container has proper scrolling */
   .tag-list {
-    max-height: 50vh;
+    max-height: none !important;
     overflow-y: auto;
     padding-top: 0.5rem;
     position: relative;
@@ -3856,7 +4868,7 @@
     }
     
     .tag-list {
-      max-height: 40vh;
+      max-height: none !important;
     }
   }
 
@@ -4010,12 +5022,12 @@
 
   /* Tag entry hierarchy */
   .tag-entry {
-    font-size: 0.65rem;
+    font-size: 0.6rem;
     font-weight: 400;
     color: rgba(255, 255, 255, 0.6) !important;
-    margin-bottom: 0.1rem !important;
-    padding: 0.2rem 0.4rem !important;
-    border-radius: 4px !important;
+    margin-bottom: 0.05rem !important;
+    padding: 0.15rem 0.3rem !important;
+    border-radius: 3px !important;
     background: rgba(160, 132, 232, 0.05) !important;
     border: 1px solid rgba(160, 132, 232, 0.1) !important;
     transition: all 0.2s ease !important;
@@ -4135,10 +5147,12 @@
   }
 
   .tag-list-container {
-    padding: 1px 0 1px 0 !important;
+    padding: 1px 0 8px 0 !important;
     margin: 0 !important;
-    max-height: 60vh;
-    min-height: 0;
+    /* Remove height restrictions to allow full expansion */
+    min-height: 400px !important;
+    max-height: none !important;
+    height: auto !important;
   }
 
   .card-body {
@@ -4166,8 +5180,378 @@
     margin-bottom: 0.3rem !important;
   }
 
+  /* Prevent container overflow in main layout */
+  .row.fade-in {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  /* Ensure columns don't exceed viewport */
+  .col-lg-3, .col-lg-4, .col-lg-5 {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+  
+  /* Custom column widths using CSS variables */
+  [data-container-type="filter"] {
+    flex: 0 0 calc(var(--filter-column-width) / 12 * 100%) !important;
+    max-width: calc(var(--filter-column-width) / 12 * 100%) !important;
+  }
+  
+  [data-container-type="center"] {
+    flex: 0 0 calc(var(--center-column-width) / 12 * 100%) !important;
+    max-width: calc(var(--center-column-width) / 12 * 100%) !important;
+  }
+  
+  [data-container-type="available"],
+  [data-container-type="selected"] {
+    flex: 0 0 calc(var(--tag-list-column-width) / 12 * 100%) !important;
+    max-width: calc(var(--tag-list-column-width) / 12 * 100%) !important;
+  }
+  
+  /* Custom heights using CSS variables */
+  [data-container-type="filter"] .sticky-filter-bar {
+    height: var(--filter-height) !important;
+    min-height: var(--filter-height) !important;
+  }
+  
+  [data-container-type="center"] .control-panel {
+    height: var(--center-panel-height) !important;
+    min-height: var(--center-panel-height) !important;
+  }
+  
+  [data-container-type="available"] #availableTags,
+  [data-container-type="selected"] #selectedTags {
+    height: var(--tag-list-height) !important;
+    max-height: var(--tag-list-height) !important;
+  }
+  
+  /* Ensure interactive elements are clickable */
+  .tag-checkbox,
+  .select-all-checkbox,
+  .form-select,
+  .form-control,
+  .btn {
+    pointer-events: auto !important;
+    z-index: 10 !important;
+    position: relative !important;
+  }
+  
+  /* Ensure filter dropdowns are clickable */
+  [data-container-type="filter"] select,
+  [data-container-type="filter"] .form-select {
+    pointer-events: auto !important;
+    z-index: 15 !important;
+    position: relative !important;
+  }
+  
+  /* Reduce wasted space between tag list headers and content */
+  [data-container-type="available"] .card-header,
+  [data-container-type="selected"] .card-header {
+    padding-bottom: 0.5rem !important;
+    margin-bottom: 0 !important;
+  }
+  
+  [data-container-type="available"] .card-body,
+  [data-container-type="selected"] .card-body {
+    padding-top: 0.5rem !important;
+    margin-top: 0 !important;
+  }
+  
+  [data-container-type="available"] .container-label,
+  [data-container-type="selected"] .container-label {
+    margin-bottom: 0.5rem !important;
+  }
+  
+  [data-container-type="available"] .search-input-container,
+  [data-container-type="selected"] .search-input-container {
+    margin-top: 0.25rem !important;
+  }
+  
+  /* Fix spacing between center column buttons */
+  [data-container-type="center"] .control-panel .btn {
+    margin-bottom: .5rem !important;
+    margin-top: 0.5rem !important;
+    min-width: 100px !important;
+    width: 100% !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    min-height: 60px !important;
+    padding: 0.75rem .75rem !important;
+    font-size: 1rem !important;
+    font-weight: 500 !important;
+  }
+  
+  [data-container-type="center"] .control-panel .d-grid {
+    margin-bottom: 2.5rem !important;
+    width: 100% !important;
+  }
+  
+  [data-container-type="center"] .control-panel .d-grid:last-child {
+    margin-bottom: 0 !important;
+  }
+  
+  [data-container-type="center"] .control-panel > div {
+    margin-bottom: 3.5rem !important;
+    width: 100% !important;
+  }
+  
+  [data-container-type="center"] .control-panel > div:last-child {
+    margin-bottom: 0 !important;
+  }
+  
+  /* Make center column wider to accommodate buttons */
+  [data-container-type="center"] {
+    min-width: 140px !important;
+  }
+
+  /* Ultra-wide monitors (32"+ / ultrawide displays) */
+  @media (min-width: 2560px) {
+    .tag-list-container {
+      max-height: none !important;
+      min-height: 700px !important;
+      width: 100% !important;
+      max-width: none !important;
+    }
+    
+    .glass-card.d-flex.flex-column {
+      max-height: none !important;
+    }
+    
+    .control-panel {
+      max-height: none !important;
+      min-height: 700px !important;
+    }
+    
+    .col-lg-3, .col-lg-4, .col-lg-5 {
+      max-height: none !important;
+    }
+  }
+
+  /* Large monitors (27"+ / 4K displays) */
+  @media (min-width: 1920px) and (max-width: 2559px) {
+    .tag-list-container {
+      max-height: none !important;
+      min-height: 600px !important;
+      width: 100% !important;
+      max-width: none !important;
+    }
+    
+    .glass-card.d-flex.flex-column {
+      max-height: none !important;
+    }
+    
+    .control-panel {
+      max-height: none !important;
+      min-height: 600px !important;
+    }
+    
+    .col-lg-3, .col-lg-4, .col-lg-5 {
+      max-height: none !important;
+    }
+  }
+
+  /* Standard laptops and desktop monitors (13"-24") */
+  @media (min-width: 1200px) and (max-width: 1919px) {
+    .tag-list-container {
+      max-height: none !important;
+      min-height: 500px !important;
+      width: 100% !important;
+      max-width: none !important;
+    }
+    
+    .glass-card.d-flex.flex-column {
+      max-height: none !important;
+    }
+    
+    .control-panel {
+      max-height: none !important;
+      min-height: 500px !important;
+    }
+    
+    .col-lg-3, .col-lg-4, .col-lg-5 {
+      max-height: none !important;
+    }
+  }
+
+  /* 13" MacBook Pro / Air optimization (1440x900, 1680x1050) */
+  @media (min-width: 1280px) and (max-width: 1680px) and (min-height: 800px) and (max-height: 1050px) {
+    .tag-list-container {
+      max-height: none !important;
+      min-height: 480px !important;
+      width: 100% !important;
+      max-width: none !important;
+    }
+    
+    .glass-card.d-flex.flex-column {
+      max-height: none !important;
+    }
+    
+    .control-panel {
+      max-height: none !important;
+      min-height: 480px !important;
+    }
+  }
+
+  /* Smaller laptops and tablets */
+  @media (max-width: 1199px) and (min-width: 992px) {
+    .tag-list-container {
+      max-height: none !important;
+      min-height: 400px !important;
+      min-width: 320px !important;
+      max-width: 380px !important;
+    }
+    
+    .glass-card.d-flex.flex-column {
+      max-height: none !important;
+    }
+    
+    .control-panel {
+      max-height: none !important;
+      min-height: 400px !important;
+    }
+    
+    .col-lg-3, .col-lg-4, .col-lg-5 {
+      max-height: none !important;
+    }
+  }
+
+  /* Small screens and tablets */
+  @media (max-width: 991px) and (min-width: 769px) {
+    .tag-list-container {
+      max-height: none !important;
+      min-height: 350px !important;
+      min-width: 300px !important;
+      max-width: 100% !important;
+    }
+    
+    .glass-card.d-flex.flex-column {
+      max-height: none !important;
+    }
+    
+    .control-panel {
+      max-height: none !important;
+      min-height: 350px !important;
+    }
+  }
+
+  /* Mobile devices */
+  @media (max-width: 768px) {
+    .tag-list-container {
+      max-height: none !important;
+      min-height: 250px !important;
+      min-width: 280px !important;
+      max-width: 100% !important;
+    }
+    
+    .glass-card.d-flex.flex-column {
+      max-height: none !important;
+    }
+    
+    .control-panel {
+      max-height: none !important;
+      min-height: 250px !important;
+    }
+    
+    .col-lg-3, .col-lg-4, .col-lg-5 {
+      max-height: none !important;
+    }
+  }
+
+  /* High-DPI / Retina display optimization */
+  @media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+    .tag-list-container {
+      /* Slightly larger on high-DPI displays for better readability */
+      min-height: 520px !important;
+      font-size: 1.05em;
+    }
+    
+    .control-panel {
+      min-height: 520px !important;
+    }
+    
+    .glass-card.d-flex.flex-column {
+      min-height: 520px !important;
+    }
+  }
+
+  /* Center column compact spacing for all screen sizes */
+  @media (max-width: 1919px) {
+    .control-panel {
+      gap: 0.2rem !important;
+      padding: 0.4rem 0.4rem !important;
+    }
+    
+    .control-panel > div {
+      margin-bottom: 0.3rem !important;
+    }
+    
+    .control-panel .btn {
+      margin-bottom: 0.1rem !important;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .control-panel {
+      gap: 0.15rem !important;
+      padding: 0.3rem 0.3rem !important;
+    }
+    
+    .control-panel .btn-glass {
+      padding: 0.2rem 0.3rem !important;
+      font-size: 0.6rem !important;
+      min-height: 24px !important;
+    }
+
+    /* Header buttons responsive */
+    .header-buttons-container {
+      flex-direction: column;
+      gap: 0.5rem !important;
+    }
+
+    .btn-header-action {
+      padding: 0.4rem 0.8rem;
+      font-size: 0.75rem;
+    }
+
+    /* Adjust title area for mobile */
+    .centerframe {
+      max-width: 95% !important;
+      text-align: center !important;
+      margin: 0 auto !important;
+    }
+  }
+
+  /* Medium screens - tablet adjustments */
+  @media (max-width: 1024px) {
+    .header-buttons-container {
+      gap: 0.75rem !important;
+    }
+
+    .btn-header-action {
+      padding: 0.45rem 0.9rem;
+      font-size: 0.8rem;
+    }
+
+    .centerframe {
+      text-align: center !important;
+      margin: 0 auto !important;
+    }
+  }
+
   .card-body {
     padding-top: 0.3rem !important;
+  }
+
+  /* Ensure centerframe is always centered */
+  .centerframe {
+    text-align: center !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    left: auto !important;
+    right: auto !important;
+    position: relative !important;
   }
 
   /* Better spacing for main content sections */
@@ -4874,6 +6258,14 @@
     cursor: pointer;
     user-select: none;
     transition: all 0.2s ease;
+    /* Ensure header stays above content */
+    position: relative;
+    z-index: 2;
+    /* Prevent header from overlapping content */
+    width: 100%;
+    box-sizing: border-box;
+    /* Ensure proper spacing */
+    margin-bottom: 8px;
   }
   
   .collapsible-header:hover {
@@ -4887,23 +6279,72 @@
     color: inherit;
     opacity: 0.7;
     transition: transform 0.2s ease, opacity 0.2s ease;
+    cursor: pointer;
+    padding: 2px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
   }
   
   .collapsible-header:hover .collapse-icon {
     opacity: 1;
+    background: rgba(255, 255, 255, 0.2);
+    border-color: rgba(255, 255, 255, 0.3);
+    transform: scale(1.05);
   }
   
-  .collapsible-content {
+  .collapsible-content,
+  .vendor-content,
+  .brand-content,
+  .product-type-content,
+  .weight-content {
     overflow: hidden;
     transition: all 0.3s ease;
     max-height: 1000px; /* Large enough to contain content */
+    display: block !important;
+    position: relative !important;
+    clear: both !important;
+    width: 100% !important;
+    float: none !important;
+    /* Ensure proper document flow */
+    margin-bottom: 8px !important;
+    min-height: 0 !important;
+  }
+
+  .collapsible-content.expanded {
+    display: block !important;
+    max-height: none !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+    transform: translateY(0) !important;
   }
   
-  .collapsible-content.collapsed {
-    max-height: 0;
-    opacity: 0;
-    margin: 0;
-    padding: 0;
+  /* Collapsed state styles */
+  .collapsible-content.collapsed,
+  .vendor-content.collapsed,
+  .brand-content.collapsed,
+  .product-type-content.collapsed,
+  .weight-content.collapsed {
+    display: none !important;
+    position: absolute !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+    transform: translateY(-10px) !important;
+    transition: all 0.3s ease !important;
+  }
+
+  .collapsible-content:not(.collapsed),
+  .vendor-content:not(.collapsed),
+  .brand-content:not(.collapsed),
+  .product-type-content:not(.collapsed),
+  .weight-content:not(.collapsed) {
+    display: block !important;
+    position: relative !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+    transform: translateY(0) !important;
+    transition: all 0.3s ease !important;
   }
   
   /* Ensure proper spacing when collapsed */
@@ -4911,41 +6352,899 @@
     margin-top: 0;
   }
   
-  /* Vendor header specific collapse styling */
-  .vendor-header .collapse-icon {
-    color: var(--primary-color);
+  /* Removed collapsible functionality - using simple scrolling instead */
+  
+  /* Force container to recalculate layout */
+  .tag-list-container:has(.collapsible-content:not(.collapsed)) {
+    height: auto !important;
+    overflow-y: auto !important;
+    /* Force layout recalculation */
+    transform: translateZ(0);
+    will-change: height;
   }
   
-  /* Brand header specific collapse styling */
-  .brand-header .collapse-icon {
-    color: var(--secondary-color);
+  /* Ensure vendor sections maintain proper flow */
+  .vendor-section {
+    display: block !important;
+    position: relative !important;
+    clear: both !important;
+    width: 100% !important;
+    margin-bottom: 8px !important;
+    /* Force layout recalculation */
+    transform: translateZ(0);
+    will-change: height;
   }
   
-  /* Product type header specific collapse styling */
-  .product-type-header .collapse-icon {
-    color: var(--accent-color);
+  /* Ensure brand sections maintain proper flow */
+  .brand-section {
+    display: block !important;
+    position: relative !important;
+    clear: both !important;
+    width: 100% !important;
+    margin-bottom: 8px !important;
+    /* Force layout recalculation */
+    transform: translateZ(0);
+    will-change: height;
   }
   
-  /* Weight header specific collapse styling */
-  .weight-header .collapse-icon {
-    color: var(--text-muted);
+  /* Ensure product type sections maintain proper flow */
+  .product-type-section {
+    display: block !important;
+    position: relative !important;
+    clear: both !important;
+    width: 100% !important;
+    margin-bottom: 8px !important;
+    /* Force layout recalculation */
+    transform: translateZ(0);
+    will-change: height;
   }
   
-  /* Ensure headers remain clickable */
+  /* Ensure weight sections maintain proper flow */
+  .weight-section {
+    display: block !important;
+    position: relative !important;
+    clear: both !important;
+    width: 100% !important;
+    margin-bottom: 8px !important;
+    /* Force layout recalculation */
+    transform: translateZ(0);
+    will-change: height;
+  }
+  
+     /* Force vendor headers to stay on top */
+   .vendor-header {
+     position: relative !important;
+     z-index: 10 !important;
+     background: rgba(45, 34, 58, 0.95) !important;
+     margin-top: 8px !important;
+     padding-top: 8px !important;
+     /* Ensure header doesn't interfere with layout */
+     clear: both !important;
+     width: 100% !important;
+   }
+   
+   /* Vendor header specific collapse styling */
+   .vendor-header .collapse-icon {
+     color: var(--primary-color);
+     font-size: 1.2em;
+     min-width: 24px;
+     min-height: 24px;
+   }
+   
+   /* Brand header specific collapse styling */
+   .brand-header .collapse-icon {
+     color: var(--secondary-color);
+   }
+   
+   /* Product type header specific collapse styling */
+   .product-type-header .collapse-icon {
+     color: var(--accent-color);
+   }
+   
+   /* Weight header specific collapse styling */
+   .weight-header .collapse-icon {
+     color: var(--text-muted);
+   }
+   
+     /* Ensure headers remain clickable */
   .collapsible-header * {
     pointer-events: none;
   }
   
+  .collapsible-header .select-all-checkbox,
+  .collapsible-header input[type="checkbox"],
+  .collapsible-header .tag-checkbox {
+    pointer-events: auto !important;
+  }
+  
+  /* Specific fix for product type checkboxes */
+  .product-type-header .select-all-checkbox,
+  .product-type-header input[type="checkbox"] {
+    pointer-events: auto !important;
+    cursor: pointer !important;
+    z-index: 10 !important;
+    position: relative !important;
+  }
+  
+  /* Ensure the header itself is clickable for collapse/expand */
+  .collapsible-header {
+    pointer-events: auto !important;
+    cursor: pointer;
+  }
+   
+   /* Smooth transitions for all collapsible elements */
+   .vendor-section,
+   .brand-section,
+   .product-type-section,
+   .weight-section {
+     transition: all 0.3s ease;
+     position: relative;
+     display: block;
+   }
+   
+  /* Ensure all content is visible and scrollable */
+  .tag-list-container > * {
+    display: block;
+    width: 100%;
+    clear: both;
+    /* Ensure all direct children stay within container */
+    max-width: 100%;
+    /* Allow content to be visible and scrollable */
+    overflow: visible;
+  }
+
+  /* Force DOH logo to be reasonable size */
+  img[src*="DOH.png"] {
+    height: 21px !important;
+    max-height: 21px !important;
+    width: auto !important;
+    vertical-align: middle !important;
+  }
+  
+  /* Enhanced 3D checkbox styling */
+  .tag-checkbox,
+  input[type="checkbox"]:not(.custom-checkbox):not(.brand-select-all) {
+    width: 24px !important;
+    height: 24px !important;
+    appearance: none !important;
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.1)) !important;
+    border: 2px solid rgba(160, 132, 232, 0.8) !important;
+    border-radius: 6px !important;
+    cursor: pointer !important;
+    transition: all 0.3s ease !important;
+    box-shadow: 
+      inset 0 2px 4px rgba(255, 255, 255, 0.3),
+      inset 0 -1px 2px rgba(0, 0, 0, 0.1),
+      0 3px 10px rgba(0, 0, 0, 0.4),
+      0 1px 3px rgba(160, 132, 232, 0.3) !important;
+    position: relative !important;
+    transform: translateZ(0) !important;
+    pointer-events: auto !important;
+  }
+  
+  .tag-checkbox:hover,
+  input[type="checkbox"]:not(.custom-checkbox):not(.brand-select-all):hover {
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.2)) !important;
+    border-color: rgba(160, 132, 232, 1) !important;
+    box-shadow: 
+      inset 0 2px 4px rgba(255, 255, 255, 0.4),
+      inset 0 -1px 2px rgba(0, 0, 0, 0.1),
+      0 5px 20px rgba(160, 132, 232, 0.5),
+      0 2px 6px rgba(160, 132, 232, 0.4) !important;
+    transform: translateY(-2px) translateZ(0) !important;
+  }
+  
+  .tag-checkbox:checked,
+  input[type="checkbox"]:not(.custom-checkbox):not(.brand-select-all):checked {
+    background: linear-gradient(135deg, #a084e8 0%, #8b5cf6 100%) !important;
+    border-color: rgba(160, 132, 232, 1) !important;
+    box-shadow: 
+      inset 0 3px 6px rgba(0, 0, 0, 0.3),
+      0 5px 20px rgba(160, 132, 232, 0.7),
+      0 2px 8px rgba(160, 132, 232, 0.5) !important;
+    transform: scale(1.1) translateZ(0) !important;
+  }
+  
+  /* Select All checkbox 3D styling */
+  .select-all-checkbox,
+  #selectAllAvailable,
+  input[type="checkbox"].brand-select-all {
+    width: 24px !important;
+    height: 24px !important;
+    appearance: none !important;
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.1)) !important;
+    border: 2px solid rgba(160, 132, 232, 0.8) !important;
+    border-radius: 6px !important;
+    cursor: pointer !important;
+    transition: all 0.3s ease !important;
+    pointer-events: auto !important;
+    z-index: 10 !important;
+    position: relative !important;
+    box-shadow: 
+      inset 0 2px 4px rgba(255, 255, 255, 0.3),
+      inset 0 -1px 2px rgba(0, 0, 0, 0.1),
+      0 3px 10px rgba(0, 0, 0, 0.4),
+      0 1px 3px rgba(160, 132, 232, 0.3) !important;
+    position: relative !important;
+    transform: translateZ(0) !important;
+  }
+  
+  .select-all-checkbox:hover,
+  #selectAllAvailable:hover,
+  input[type="checkbox"].brand-select-all:hover {
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.2)) !important;
+    border-color: rgba(160, 132, 232, 1) !important;
+    box-shadow: 
+      inset 0 2px 4px rgba(255, 255, 255, 0.4),
+      inset 0 -1px 2px rgba(0, 0, 0, 0.1),
+      0 5px 20px rgba(160, 132, 232, 0.5),
+      0 2px 6px rgba(160, 132, 232, 0.4) !important;
+    transform: translateY(-2px) translateZ(0) !important;
+  }
+  
+  .select-all-checkbox:checked,
+  #selectAllAvailable:checked,
+  input[type="checkbox"].brand-select-all:checked {
+    background: linear-gradient(135deg, #a084e8 0%, #8b5cf6 100%) !important;
+    border-color: rgba(160, 132, 232, 1) !important;
+    box-shadow: 
+      inset 0 3px 6px rgba(0, 0, 0, 0.3),
+      0 5px 20px rgba(160, 132, 232, 0.7),
+      0 2px 8px rgba(160, 132, 232, 0.5) !important;
+    transform: scale(1.1) translateZ(0) !important;
+  }
+
+  /* Force selected tags container to show all content */
+  #selectedTags .vendor-section,
+  #selectedTags .brand-section,
+  #selectedTags .product-type-section,
+  #selectedTags .weight-section {
+    max-height: none !important;
+    overflow: visible !important;
+    height: auto !important;
+  }
+
+  /* Ensure parent containers don't constrain selected tags height */
+  [data-container-type="selected"] {
+    height: auto !important;
+    min-height: var(--tag-list-height) !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  [data-container-type="selected"] .glass-card {
+    height: auto !important;
+    min-height: var(--tag-list-height) !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  [data-container-type="selected"] .card-body {
+    height: auto !important;
+    min-height: var(--tag-list-height) !important;
+    max-height: none !important;
+    overflow: visible !important;
+    flex: 1 !important;
+    flex-grow: 1 !important;
+  }
+
+  /* ULTIMATE VENDOR HEADER FONT SIZE OVERRIDE - HIGHEST PRIORITY */
+  .vendor-section > .vendor-header,
+  .vendor-section > .vendor-header h5,
+  .vendor-section > .vendor-header.d-flex,
+  .vendor-section > .vendor-header.mb-2,
+  .vendor-section > .vendor-header.cursor-pointer,
+  .vendor-section > .vendor-header.collapsible-header,
+  .vendor-section > .vendor-header.align-items-center,
+  .vendor-section > .vendor-header * {
+    font-size: 1.1em !important;
+    font-weight: 700 !important;
+    line-height: 1.2 !important;
+  }
+
+  /* Unified Font Sizing System - Prevents Word Splitting */
+  
+  /* Base font sizing variables */
+  :root {
+    --base-font-size: 12px;
+    --min-font-size: 8px;
+    --max-font-size: 24px;
+    --line-height-ratio: 1.2;
+    --word-spacing: 0.1em;
+    --letter-spacing: 0.02em;
+  }
+  
+  /* Universal text container styling */
+  .text-container,
+  .tag-name,
+  .vendor-name,
+  .brand-name,
+  .product-name,
+  .weight-text,
+  .lineage-text,
+  .price-text,
+  .description-text,
+  .label-text,
+  .header-text,
+  .title-text,
+  .subtitle-text,
+  .content-text {
+    font-size: var(--base-font-size);
+    line-height: var(--line-height-ratio);
+    word-spacing: var(--word-spacing);
+    letter-spacing: var(--letter-spacing);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    word-wrap: normal;
+    word-break: keep-all;
+    hyphens: none;
+    -webkit-hyphens: none;
+    -moz-hyphens: none;
+    -ms-hyphens: none;
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+  
+  /* Font size adjustment classes */
+  .font-size-auto {
+    font-size: clamp(var(--min-font-size), 2.5vw, var(--max-font-size)) !important;
+  }
+  
+  .font-size-small {
+    font-size: clamp(var(--min-font-size), 2vw, 14px) !important;
+  }
+  
+  .font-size-medium {
+    font-size: clamp(10px, 3vw, 16px) !important;
+  }
+  
+  .font-size-large {
+    font-size: clamp(12px, 4vw, 20px) !important;
+  }
+  
+  .font-size-xlarge {
+    font-size: clamp(14px, 5vw, var(--max-font-size)) !important;
+  }
+  
+  /* Responsive font sizing based on container width */
+  .responsive-text {
+    font-size: clamp(var(--min-font-size), 2.5vw, var(--max-font-size)) !important;
+    line-height: 1.2 !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+  
+  /* Container-specific font sizing */
+  .tag-item .text-container {
+    font-size: clamp(8px, 2vw, 14px) !important;
+    max-width: calc(100% - 40px) !important;
+    padding-right: 8px !important;
+  }
+  
+  .vendor-header .text-container {
+    font-size: clamp(10px, 2.5vw, 16px) !important;
+    font-weight: 600 !important;
+  }
+  
+  .brand-header .text-container {
+    font-size: clamp(9px, 2.2vw, 15px) !important;
+    font-weight: 500 !important;
+  }
+  
+  .product-type-header .text-container {
+    font-size: clamp(8px, 2vw, 14px) !important;
+    font-weight: 500 !important;
+  }
+  
+  .weight-header .text-container {
+    font-size: clamp(8px, 2vw, 14px) !important;
+    font-weight: 500 !important;
+  }
+  
+  /* Template-specific font sizing */
+  .template-horizontal .text-container {
+    font-size: clamp(8px, 1.8vw, 12px) !important;
+  }
+  
+  .template-vertical .text-container {
+    font-size: clamp(9px, 2.2vw, 14px) !important;
+  }
+  
+  .template-mini .text-container {
+    font-size: clamp(7px, 1.5vw, 10px) !important;
+  }
+  
+  .template-double .text-container {
+    font-size: clamp(8px, 2vw, 13px) !important;
+  }
+  
+  /* Price and weight specific sizing */
+  .price-text {
+    font-size: clamp(8px, 2.2vw, 16px) !important;
+    font-weight: 600 !important;
+  }
+  
+  .weight-text {
+    font-size: clamp(7px, 1.8vw, 12px) !important;
+    font-weight: 500 !important;
+  }
+  
+  /* Description text with multi-line support */
+  .description-text {
+    font-size: clamp(7px, 1.6vw, 11px) !important;
+    line-height: 1.3 !important;
+    white-space: normal !important;
+    word-wrap: break-word !important;
+    overflow-wrap: break-word !important;
+    -webkit-hyphens: auto !important;
+    -moz-hyphens: auto !important;
+    -ms-hyphens: auto !important;
+    hyphens: auto !important;
+  }
+  
+  /* JavaScript-powered dynamic font sizing */
+  .dynamic-font {
+    font-size: var(--dynamic-font-size, var(--base-font-size)) !important;
+    transition: font-size 0.2s ease !important;
+  }
+  
+  /* Container width breakpoints for font sizing */
+  @media (max-width: 200px) {
+    .text-container {
+      font-size: var(--min-font-size) !important;
+    }
+  }
+  
+  @media (min-width: 201px) and (max-width: 300px) {
+    .text-container {
+      font-size: clamp(8px, 2.5vw, 12px) !important;
+    }
+  }
+  
+  @media (min-width: 301px) and (max-width: 400px) {
+    .text-container {
+      font-size: clamp(9px, 2.8vw, 14px) !important;
+    }
+  }
+  
+  @media (min-width: 401px) and (max-width: 500px) {
+    .text-container {
+      font-size: clamp(10px, 3vw, 16px) !important;
+    }
+  }
+  
+  @media (min-width: 501px) {
+    .text-container {
+      font-size: clamp(11px, 3.5vw, 18px) !important;
+    }
+  }
+  
+  /* Special handling for very long text */
+  .text-container.long-text {
+    font-size: clamp(6px, 1.5vw, 10px) !important;
+    letter-spacing: 0.01em !important;
+  }
+  
+  .text-container.very-long-text {
+    font-size: clamp(5px, 1.2vw, 8px) !important;
+    letter-spacing: 0.005em !important;
+  }
+  
+  /* Ensure no text overflow in any container */
+  .no-text-overflow {
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    word-break: keep-all !important;
+    hyphens: none !important;
+  }
+  
+  /* Multi-line text with controlled wrapping */
+  .multi-line-text {
+    white-space: normal !important;
+    word-wrap: break-word !important;
+    overflow-wrap: break-word !important;
+    hyphens: auto !important;
+    -webkit-hyphens: auto !important;
+    line-height: 1.3 !important;
+  }
+  
+  /* Critical text that must always fit */
+  .critical-text {
+    font-size: clamp(var(--min-font-size), 1.8vw, 12px) !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    word-break: keep-all !important;
+    hyphens: none !important;
+  }
+  
+  /* Template-specific critical text */
+  .template-horizontal .critical-text {
+    font-size: clamp(6px, 1.5vw, 10px) !important;
+  }
+  
+  .template-mini .critical-text {
+    font-size: clamp(5px, 1.2vw, 8px) !important;
+  }
+  
+  .template-double .critical-text {
+    font-size: clamp(6px, 1.6vw, 11px) !important;
+  }
+
+  /* Comprehensive Word Protection Rules */
+  /* Prevent any full words from being split across lines */
+  .text-container,
+  .tag-text,
+  .tag-brand,
+  .tag-name,
+  .vendor-header,
+  .brand-header,
+  .product-type-header,
+  .weight-header,
+  .container-label,
+  .responsive-text,
+  .critical-text,
+  .multi-line-text,
+  .no-text-overflow,
+  .font-size-auto,
+  .font-size-small,
+  .font-size-medium,
+  .font-size-large,
+  .font-size-xlarge,
+  .price-text,
+  .weight-text,
+  .description-text,
+  .dynamic-font,
+  .template-horizontal .text-container,
+  .template-vertical .text-container,
+  .template-mini .text-container,
+  .template-double .text-container,
+  .template-horizontal .critical-text,
+  .template-vertical .critical-text,
+  .template-mini .critical-text,
+  .template-double .critical-text {
+    word-break: keep-all !important; /* Prevent word breaking */
+    overflow-wrap: anywhere !important; /* Allow breaking only at word boundaries */
+    hyphens: none !important; /* Prevent automatic hyphenation */
+    word-spacing: normal !important;
+  }
+
+  /* Enhanced spacing for tag hierarchy */
+  .tag-list-container {
+    padding: 20px !important; /* Increased padding */
+    gap: 16px !important; /* Added gap between sections */
+  }
+
+  .tag-list {
+    gap: 12px !important; /* Added gap between items */
+    padding: 16px !important; /* Increased padding */
+  }
+
+  .tag-entry {
+    margin-bottom: 10px !important; /* Increased from default */
+    padding: 8px 12px !important; /* Increased padding */
+    word-break: keep-all !important; /* Prevent word breaking */
+    overflow-wrap: anywhere !important; /* Allow breaking only at word boundaries */
+    hyphens: none !important; /* Prevent automatic hyphenation */
+  }
+
+  .vendor-content,
+  .brand-content,
+  .product-type-content,
+  .weight-content {
+    padding: 12px 16px !important; /* Increased padding */
+    margin-bottom: 12px !important; /* Added spacing */
+    word-break: keep-all !important; /* Prevent word breaking */
+    overflow-wrap: anywhere !important; /* Allow breaking only at word boundaries */
+    hyphens: none !important; /* Prevent automatic hyphenation */
+  }
+
+  /* Enhanced collapsible content spacing */
+  .collapsible-content,
+  .collapsible-content.expanded {
+    padding: 16px !important; /* Increased from default */
+    margin-top: 8px !important; /* Added spacing */
+    margin-bottom: 8px !important; /* Added spacing */
+    background: rgba(45, 34, 58, 0.3) !important;
+    border-radius: 8px !important;
+    border: 1px solid rgba(160, 132, 232, 0.2) !important;
+    transition: all 0.3s ease !important;
+    overflow: hidden !important;
+    word-break: keep-all !important; /* Prevent word breaking */
+    overflow-wrap: anywhere !important; /* Allow breaking only at word boundaries */
+    hyphens: none !important; /* Prevent automatic hyphenation */
+  }
+
+  /* Compact tag hierarchy headers */
+  .vendor-header, .brand-header, .product-type-header, .weight-header, .container-label {
+    margin-bottom: 8px !important;
+    padding: 6px 10px !important;
+    border-radius: 6px !important;
+    background: rgba(160, 132, 232, 0.10) !important;
+    border: 1px solid rgba(160, 132, 232, 0.25) !important;
+    color: white !important;
+    font-weight: 600 !important;
+    font-size: 0.85rem !important;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4) !important;
+    letter-spacing: 0.02em !important;
+    transition: background 0.2s ease, color 0.2s ease !important;
+    cursor: pointer !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 8px !important;
+    line-height: 1.2 !important;
+    word-break: keep-all !important;
+    overflow-wrap: anywhere !important;
+    hyphens: none !important;
+  }
+
+  /* Compact collapse icon */
+  .vendor-header .collapse-icon,
+  .brand-header .collapse-icon,
+  .product-type-header .collapse-icon,
+  .weight-header .collapse-icon {
+    font-size: 0.85rem !important;
+    padding: 0 4px !important;
+    min-width: 18px !important;
+    min-height: 18px !important;
+  }
+
+  /* Compact select-all checkbox size and spacing */
   .collapsible-header .select-all-checkbox {
-    pointer-events: auto;
+    transform: scale(0.9);
+    margin-right: 6px !important;
   }
-  
-  /* Smooth transitions for all collapsible elements */
-  .vendor-section,
-  .brand-section,
-  .product-type-section,
-  .weight-section {
-    transition: all 0.3s ease;
+
+  /* Responsive breakpoints with word protection */
+  @media (max-width: 200px) {
+    .text-container {
+      word-break: keep-all !important; /* Prevent word breaking */
+      overflow-wrap: anywhere !important; /* Allow breaking only at word boundaries */
+      hyphens: none !important; /* Prevent automatic hyphenation */
+      word-spacing: normal !important;
+    }
   }
-  
-  /* Tag group styling */
+
+  @media (min-width: 201px) and (max-width: 300px) {
+    .text-container {
+      word-break: keep-all !important; /* Prevent word breaking */
+      overflow-wrap: anywhere !important; /* Allow breaking only at word boundaries */
+      hyphens: none !important; /* Prevent automatic hyphenation */
+      word-spacing: normal !important;
+    }
+  }
+
+  @media (min-width: 301px) and (max-width: 400px) {
+    .text-container {
+      word-break: keep-all !important; /* Prevent word breaking */
+      overflow-wrap: anywhere !important; /* Allow breaking only at word boundaries */
+      hyphens: none !important; /* Prevent automatic hyphenation */
+      word-spacing: normal !important;
+    }
+  }
+
+  @media (min-width: 401px) and (max-width: 500px) {
+    .text-container {
+      word-break: keep-all !important; /* Prevent word breaking */
+      overflow-wrap: anywhere !important; /* Allow breaking only at word boundaries */
+      hyphens: none !important; /* Prevent automatic hyphenation */
+      word-spacing: normal !important;
+    }
+  }
+
+  @media (min-width: 501px) {
+    .text-container {
+      word-break: keep-all !important; /* Prevent word breaking */
+      overflow-wrap: anywhere !important; /* Allow breaking only at word boundaries */
+      hyphens: none !important; /* Prevent automatic hyphenation */
+      word-spacing: normal !important;
+    }
+  }
+
+  /* Cross-platform dropdown consistency fixes */
+  /* Ensure consistent dropdown appearance across PC and Mac */
+
+  /* Universal dropdown reset for all platforms */
+  select, .form-select, .form-select-modern, .lineage-dropdown, .lineage-dropdown-mini,
+  .sticky-filter-bar select, .filter-bar select, .compact-filter,
+  .strain-lineage-editor .form-select, .modal select {
+    /* Remove all platform-specific styling */
+    -webkit-appearance: none !important;
+    -moz-appearance: none !important;
+    appearance: none !important;
+    
+    /* Ensure consistent box model */
+    box-sizing: border-box !important;
+    
+    /* Standardize font rendering */
+    -webkit-font-smoothing: antialiased !important;
+    -moz-osx-font-smoothing: grayscale !important;
+    text-rendering: optimizeLegibility !important;
+  }
+
+  /* Ensure consistent arrow positioning and styling */
+  select:not(.lineage-dropdown):not(.lineage-dropdown-mini),
+  .form-select:not(.lineage-dropdown):not(.lineage-dropdown-mini),
+  .form-select-modern:not(.lineage-dropdown):not(.lineage-dropdown-mini),
+  .sticky-filter-bar select, .filter-bar select, .compact-filter,
+  .strain-lineage-editor .form-select, .modal select {
+    /* Standard arrow for right-positioned dropdowns */
+    background-image: url('data:image/svg+xml;utf8,<svg fill="%23a084e8" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
+    background-repeat: no-repeat !important;
+    background-position: right 14px center !important;
+    background-size: 18px 18px !important;
+  }
+
+  /* Special handling for lineage dropdowns with left-positioned arrows */
+  .lineage-dropdown, .lineage-dropdown-mini {
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='white' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m1 6 7 7 7-7'/%3e%3c/svg%3e") !important;
+    background-repeat: no-repeat !important;
+    background-position: left 12px center !important;
+    background-size: 12px !important;
+  }
+
+  /* Ensure consistent option styling across platforms */
+  select option, .form-select option, .form-select-modern option,
+  .lineage-dropdown option, .lineage-dropdown-mini option,
+  .sticky-filter-bar select option, .filter-bar select option,
+  .compact-filter option, .strain-lineage-editor .form-select option,
+  .modal select option {
+    /* Remove platform-specific option styling */
+    -webkit-appearance: none !important;
+    -moz-appearance: none !important;
+    appearance: none !important;
+    
+    /* Ensure consistent padding and spacing */
+    padding: 8px 12px !important;
+    margin: 0 !important;
+    
+    /* Standardize font rendering */
+    -webkit-font-smoothing: antialiased !important;
+    -moz-osx-font-smoothing: grayscale !important;
+    text-rendering: optimizeLegibility !important;
+  }
+
+  /* Platform-specific overrides for better consistency */
+  @media screen and (-webkit-min-device-pixel-ratio: 0) {
+    /* WebKit browsers (Safari, Chrome) */
+    select, .form-select, .form-select-modern, .lineage-dropdown, .lineage-dropdown-mini {
+      -webkit-appearance: none !important;
+      border-radius: inherit !important;
+    }
+  }
+
+  @media screen and (-moz-appearance: none) {
+    /* Firefox */
+    select, .form-select, .form-select-modern, .lineage-dropdown, .lineage-dropdown-mini {
+      -moz-appearance: none !important;
+      border-radius: inherit !important;
+    }
+  }
+
+  /* Mac-specific overrides to force custom styling */
+  @supports (-webkit-appearance: none) {
+    /* Target Safari and Chrome on Mac */
+    select, .form-select, .form-select-modern, .lineage-dropdown, .lineage-dropdown-mini,
+    .sticky-filter-bar select, .filter-bar select, .compact-filter,
+    .strain-lineage-editor .form-select, .modal select {
+      -webkit-appearance: none !important;
+      -moz-appearance: none !important;
+      appearance: none !important;
+      
+      /* Force remove all default Mac styling */
+      background-image: none !important;
+      background: inherit !important;
+      
+      /* Override any Mac-specific properties */
+      border: inherit !important;
+      border-radius: inherit !important;
+      padding: inherit !important;
+      font-family: inherit !important;
+      font-size: inherit !important;
+      color: inherit !important;
+      
+      /* Ensure our custom background and arrow are applied */
+      background-color: inherit !important;
+      background-repeat: inherit !important;
+      background-position: inherit !important;
+      background-size: inherit !important;
+    }
+  }
+
+  /* Additional Mac-specific selectors */
+  select::-ms-expand, .form-select::-ms-expand, .form-select-modern::-ms-expand {
+    display: none !important;
+  }
+
+  /* Force override any remaining Mac styling */
+  select:focus, .form-select:focus, .form-select-modern:focus,
+  .lineage-dropdown:focus, .lineage-dropdown-mini:focus,
+  .sticky-filter-bar select:focus, .filter-bar select:focus,
+  .compact-filter:focus, .strain-lineage-editor .form-select:focus,
+  .modal select:focus {
+    -webkit-appearance: none !important;
+    -moz-appearance: none !important;
+    appearance: none !important;
+    outline: none !important;
+  }
+
+  /* Ensure consistent focus states across platforms */
+  select:focus, .form-select:focus, .form-select-modern:focus,
+  .lineage-dropdown:focus, .lineage-dropdown-mini:focus,
+  .sticky-filter-bar select:focus, .filter-bar select:focus,
+  .compact-filter:focus, .strain-lineage-editor .form-select:focus,
+  .modal select:focus {
+    outline: none !important;
+    /* Maintain existing focus styles from individual selectors */
+  }
+
+  /* Instructional blurb styling */
+  .dropdown-instruction-blurb {
+    background: rgba(160, 132, 232, 0.1) !important;
+    border: 1px solid rgba(160, 132, 232, 0.3) !important;
+    border-radius: 8px !important;
+    padding: 12px 16px !important;
+    margin-bottom: 16px !important;
+    transition: all 0.3s ease !important;
+    backdrop-filter: blur(8px) !important;
+    -webkit-backdrop-filter: blur(8px) !important;
+  }
+
+  .dropdown-instruction-blurb .instruction-content {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    color: #e0d6f6 !important;
+    font-size: 0.9rem !important;
+    font-weight: 500 !important;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3) !important;
+  }
+
+  .dropdown-instruction-blurb .instruction-icon {
+    color: #a084e8 !important;
+    flex-shrink: 0 !important;
+  }
+
+  .dropdown-instruction-blurb .instruction-text {
+    line-height: 1.4 !important;
+  }
+
+  /* Hide the blurb when it should be removed */
+  .dropdown-instruction-blurb.hidden {
+    opacity: 0 !important;
+    transform: translateY(-10px) !important;
+    pointer-events: none !important;
+    max-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+  }
+
+  /* Mac-specific arrow overrides to force custom styling */
+  @supports (-webkit-appearance: none) {
+    /* Force our custom arrow on Mac for all dropdowns */
+    select:not(.lineage-dropdown):not(.lineage-dropdown-mini),
+    .form-select:not(.lineage-dropdown):not(.lineage-dropdown-mini),
+    .form-select-modern:not(.lineage-dropdown):not(.lineage-dropdown-mini),
+    .sticky-filter-bar select, .filter-bar select, .compact-filter,
+    .strain-lineage-editor .form-select, .modal select {
+      /* Force our custom arrow on Mac */
+      background-image: url('data:image/svg+xml;utf8,<svg fill="%23a084e8" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
+      background-repeat: no-repeat !important;
+      background-position: right 14px center !important;
+      background-size: 18px 18px !important;
+      background-color: inherit !important;
+    }
+
+    /* Special handling for lineage dropdowns (left-positioned arrows) */
+    .lineage-dropdown, .lineage-dropdown-mini {
+      background-image: url('data:image/svg+xml;utf8,<svg fill="%23ffffff" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
+      background-position: left 14px center !important;
+    }
+  }

@@ -103,6 +103,9 @@ class LibraryBrowser {
         this.currentPage = 1;
         this.renderProducts();
         this.updatePagination();
+
+        // Return boolean indicating whether any products remain after filtering
+        return this.filteredProducts.length > 0;
     }
 
     setFilter(filter) {

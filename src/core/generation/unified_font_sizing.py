@@ -27,57 +27,57 @@ def _load_font_sizing_config():
     else:
         # Fallback to built-in defaults (copied from previous FONT_SIZING_CONFIG)
         return {
-    'standard': {
-        'mini': {
-            'description': [(10, 20), (40, 18), (60, 16), (80, 14), (100, 13), (120, 12), (float('inf'), 9)],
-            'brand': [(10, 16), (20, 14), (30, 12), (40, 10), (float('inf'), 10)],
-            'price': [(20, 20), (30, 14), (40, 10), (float('inf'), 8)],
-            'lineage': [(10, 10), (20, 9), (30, 8), (40, 7), (float('inf'), 6)],
-            'ratio': [(5, 10), (8, 9), (12, 8), (20, 7), (float('inf'), 6)],
-            'thc_cbd': [(10, 8), (20, 7), (25, 6), (35, 5), (float('inf'), 4)],
-            'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
-            'weight': [(10, 16), (20, 9), (30, 8), (float('inf'), 7)],
-            'doh': [(10, 10), (20, 9), (float('inf'), 8)],
-            'vendor': [(10, 8), (20, 7), (30, 6), (40, 5), (50, 4), (float('inf'), 3)],
-            'default': [(20, 10), (40, 9), (float('inf'), 8)]
-        },
-        'double': {
-            'description': [(10, 24), (20, 22), (60, 18), (80, 16), (100, 14), (120, 12), (140, 10), (float('inf'), 10)],
-            'brand': [(10, 14), (15, 12), (20, 10), (25, 8), (float('inf'), 7.5)],
-            'price': [(3, 22), (5, 20), (12, 18), (16, 16), (float('inf'), 14)],
-            'lineage': [(15, 13), (25, 12), (35, 10), (45, 9), (float('inf'), 9)],
-            'ratio': [(1, 9), (3, 7), (5, 5.5), (float('inf'), 5)],
-            'thc_cbd': [(14, 9),(float('inf'), 8)],
-            'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
-            'weight': [(15, 16), (25, 14), (35, 12), (float('inf'), 9)],
-            'doh': [(15, 18), (25, 16), (float('inf'), 13)],
-            'vendor': [(10, 3), (20, 2), (40, 1), (70, 1),(float('inf'), 1)],
-            'default': [(20, 16), (40, 14), (60, 12), (float('inf'), 10)]
-        },
-        'vertical': {
-            'description': [(5, 34), (30, 32), (40, 28), (60, 26), (70, 24), (80, 22), (100, 20), (float('inf'), 14)],
-            'brand': [(20, 16), (30, 14), (40, 12), (float('inf'), 10)],
-            'price': [(5, 30), (8, 28), (float('inf'), 14)],
-            'lineage': [(20, 18), (40, 16), (60, 12), (float('inf'), 8)],
-            'ratio': [(10, 12), (20, 10), (30, 8), (float('inf'), 10)],
-            'thc_cbd': [(10, 11), (25, 8), (35, 7), (float('inf'), 6)],
-            'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
-            'vendor': [(10, 6), (20, 5), (40, 4), (70, 3),(float('inf'), 2)],
-            'default': [(30, 16), (60, 14), (100, 12), (float('inf'), 10)]
-        },
-        'horizontal': {
-            'description': [(10, 36), (25, 34), (30, 32), (40, 28), (45, 26), (50, 24), (100, 21), (120, 22), (140, 20), (float('inf'), 18)],
-            'brand': [(20, 18), (30, 16), (80, 14), (50, 12), (60, 10), (float('inf'), 10)],
-            'price': [(10, 34), (20, 30), (80, 20), (float('inf'), 18)],
-            'lineage': [(10, 20), (20, 18), (30, 16), (50, 12), (60, 10), (float('inf'), 10)],
-            'ratio': [(5, 14), (10, 12), (20, 9), (30, 8), (40, 7), (50, 6), (float('inf'), 10)],
-            'thc_cbd': [(10, 13), (float('inf'), 12)],
-            'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
-            'vendor': [(10, 6), (20, 5), (40, 4), (70, 3),(float('inf'), 2)],
-            'default': [(20, 18), (40, 16), (60, 14), (float('inf'), 12)]
+            'standard': {
+                'mini': {
+                    'description': [(10, 20), (40, 18), (60, 16), (80, 14), (100, 13), (120, 12), (float('inf'), 9)],
+                    'brand': [(10, 16), (20, 14), (30, 12), (40, 10), (float('inf'), 10)],
+                    'price': [(20, 20), (30, 14), (40, 10), (float('inf'), 8)],
+                    'lineage': [(10, 10), (20, 9), (30, 8), (40, 7), (float('inf'), 6)],
+                    'ratio': [(5, 10), (8, 9), (12, 8), (20, 7), (float('inf'), 6)],
+                    'thc_cbd': [(10, 8), (20, 7), (25, 6), (35, 5), (float('inf'), 4)],
+                    'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
+                    'weight': [(10, 16), (20, 9), (30, 8), (float('inf'), 7)],
+                    'doh': [(10, 10), (20, 9), (float('inf'), 8)],
+                    'vendor': [(10, 8), (20, 7), (30, 6), (40, 5), (50, 4), (float('inf'), 3)],
+                    'default': [(20, 10), (40, 9), (float('inf'), 8)]
+                },
+                'double': {
+                    'description': [(10, 24), (20, 22), (60, 18), (80, 16), (100, 14), (120, 12), (140, 10), (float('inf'), 10)],
+                    'brand': [(10, 14), (15, 12), (20, 10), (25, 8), (float('inf'), 7.5)],
+                    'price': [(3, 22), (5, 20), (12, 18), (16, 16), (float('inf'), 14)],
+                    'lineage': [(15, 13), (25, 12), (35, 10), (45, 9), (float('inf'), 9)],
+                    'ratio': [(1, 9), (3, 7), (5, 5.5), (float('inf'), 5)],
+                    'thc_cbd': [(1, 6.5),(float('inf'), 6.5)],
+                    'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
+                    'weight': [(15, 16), (25, 14), (35, 12), (float('inf'), 9)],
+                    'doh': [(15, 18), (25, 16), (float('inf'), 13)],
+                    'vendor': [(10, 3), (20, 2), (40, 1), (70, 1),(float('inf'), 1)],
+                    'default': [(20, 16), (40, 14), (60, 12), (float('inf'), 10)]
+                },
+                'vertical': {
+                    'description': [(5, 34), (30, 32), (40, 28), (60, 26), (70, 24), (80, 22), (100, 20), (float('inf'), 14)],
+                    'brand': [(20, 16), (30, 14), (40, 12), (float('inf'), 10)],
+                    'price': [(5, 30), (8, 28), (float('inf'), 14)],
+                    'lineage': [(20, 18), (40, 16), (60, 12), (float('inf'), 8)],
+                    'ratio': [(10, 12), (20, 10), (30, 8), (float('inf'), 10)],
+                    'thc_cbd': [(10, 11), (25, 8), (35, 7), (float('inf'), 6)],
+                    'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
+                    'vendor': [(10, 6), (20, 5), (40, 4), (70, 3),(float('inf'), 2)],
+                    'default': [(30, 16), (60, 14), (100, 12), (float('inf'), 10)]
+                },
+                'horizontal': {
+                    'description': [(10, 36), (25, 34), (30, 32), (40, 28), (45, 26), (50, 24), (100, 21), (120, 22), (140, 20), (float('inf'), 18)],
+                    'brand': [(20, 18), (30, 16), (80, 14), (50, 12), (60, 10), (float('inf'), 10)],
+                    'price': [(10, 34), (20, 30), (80, 20), (float('inf'), 18)],
+                    'lineage': [(10, 20), (20, 18), (30, 16), (50, 12), (60, 10), (float('inf'), 10)],
+                    'ratio': [(5, 14), (10, 12), (20, 9), (30, 8), (40, 7), (50, 6), (float('inf'), 10)],
+                    'thc_cbd': [(10, 13), (float('inf'), 12)],
+                    'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
+                    'vendor': [(10, 6), (20, 5), (40, 4), (70, 3),(float('inf'), 2)],
+                    'default': [(20, 18), (40, 16), (60, 14), (float('inf'), 12)]
+                }
+            }
         }
-    }
-}
 
 FONT_SIZING_CONFIG = _load_font_sizing_config()
 
@@ -96,6 +96,25 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
     Returns:
         Font size as Pt object
     """
+    # BULLETPROOF FIX: Force correct configuration for vertical price
+    if field_type.lower() == 'price' and orientation.lower() == 'vertical':
+        # Use hardcoded correct configuration for vertical price - BYPASS ALL OTHER SYSTEMS
+        comp = calculate_text_complexity(text)
+        
+        # Force the correct configuration regardless of any caching or other systems
+        if comp < 5:
+            final_size = 30 * scale_factor
+            logger.debug(f"BULLETPROOF: Vertical price '{text}' (complexity: {comp}) using 30pt font")
+            return Pt(final_size)
+        elif comp < 8:
+            final_size = 28 * scale_factor
+            logger.debug(f"BULLETPROOF: Vertical price '{text}' (complexity: {comp}) using 28pt font")
+            return Pt(final_size)
+        else:
+            final_size = 14 * scale_factor
+            logger.debug(f"BULLETPROOF: Vertical price '{text}' (complexity: {comp}) using 14pt font")
+            return Pt(final_size)
+    
     if not text:
         # For empty text, use the appropriate field configuration instead of default
         config = FONT_SIZING_CONFIG.get('standard', {}).get(orientation.lower(), {}).get(field_type.lower(), [])
@@ -162,31 +181,22 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
             logger.debug(f"Double template description word length rule: text='{text}' has {len(long_words)} words with 9+ chars each: {long_words}, forcing 18pt font")
             return Pt(final_size)
     
-
-    
-    # Calculate complexity
-    if field_type.lower() == 'ratio':
-        comp = len(str(text).split())
-    elif field_type.lower() == 'thc_cbd':
-        # THC_CBD content should use simpler complexity calculation like ratio
-        comp = len(str(text).split())
-    elif field_type.lower() == 'vendor':
-        # Vendor text should use character count for more predictable sizing
-        comp = len(str(text))
-    elif field_type.lower() == 'price':
-        # Price should use character count for more predictable sizing
-        comp = len(str(text))
-    else:
-        comp = calculate_text_complexity(text, complexity_type)
-    
-    # Get configuration for this field type and orientation
-    config = FONT_SIZING_CONFIG.get('standard', {}).get(orientation.lower(), {}).get(field_type.lower(), [])
+    # Get the appropriate configuration
+    config = FONT_SIZING_CONFIG.get(complexity_type, {}).get(orientation.lower(), {}).get(field_type.lower(), [])
     
     if not config:
         # Fallback to default configuration
         config = FONT_SIZING_CONFIG.get('standard', {}).get(orientation.lower(), {}).get('default', [])
     
-    # Debug logging
+    if not config:
+        # Ultimate fallback
+        fallback_size = 12 * scale_factor
+        logger.warning(f"No font configuration found for {field_type} in {orientation} template, using {fallback_size}pt")
+        return Pt(fallback_size)
+    
+    # Calculate text complexity
+    comp = calculate_text_complexity(text)
+    
     logger.debug(f"Font sizing for '{text}' (field_type: {field_type}, orientation: {orientation}, complexity: {comp})")
     logger.debug(f"Config: {config}")
     
@@ -201,6 +211,9 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
     # Fallback to smallest size - ensure price gets proper fallback
     if field_type.lower() == 'price':
         fallback_size = 12 * scale_factor  # Price should never go below 12pt
+    elif field_type.lower() == 'thc_cbd':
+        # Use the configured fallback size for THC_CBD instead of hardcoded 8pt
+        fallback_size = 6.5 * scale_factor  # Use the configured size from the config
     else:
         fallback_size = 8 * scale_factor
     return Pt(fallback_size)
@@ -369,9 +382,9 @@ def get_line_spacing_by_marker(marker_type, template_type='vertical'):
         'PRODUCTVENDOR': 1.0
     }
     
-    # Special case: Vertical template THC_CBD uses 1.25 spacing
+    # Special case: Vertical template THC_CBD uses 1.3 spacing for better readability with extra line breaks
     if marker_type.upper() == 'THC_CBD' and template_type.lower() == 'vertical':
-        return 1.25
+        return 1.3
     
     # Special case: Mini template THC_CBD uses 1.3 spacing for better readability
     if marker_type.upper() == 'THC_CBD' and template_type.lower() == 'mini':

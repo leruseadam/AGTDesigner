@@ -83,7 +83,7 @@ CELL_DIMENSIONS: Dict[str, Dict[str, float]] = {
     'horizontal': {'width': 3.4, 'height': 2.4},  # Each cell is 3.4" wide, 2.4" tall
     'vertical': {'width': 2.4, 'height': 3.4},    # Each cell is 2.4" wide, 3.4" tall
     'mini': {'width': 1.75, 'height': 1.75},      # Each cell is 1.75" wide, 1.75" tall
-    'double': {'width': 1.75, 'height': 2.5},     # Each cell is 1.75" wide, 2.5" tall (with cell spacing creating gutters)
+    'double': {'width': 1.75, 'height': 2.5},     # Each cell is 1.75" wide, 2.5" tall (with 0.10" horizontal and 0.05" vertical gutters)
     'inventory': {'width': 4.0, 'height': 2.0}    # Each cell is 4.0" wide, 2.0" tall
 }
 
@@ -92,7 +92,7 @@ GRID_LAYOUTS: Dict[str, Dict[str, int]] = {
     'horizontal': {'rows': 3, 'cols': 3},
     'vertical': {'rows': 3, 'cols': 3},
     'mini': {'rows': 5, 'cols': 4},  # 4 columns across, 5 rows down
-    'double': {'rows': 3, 'cols': 4},  # 3 rows, 4 columns (with vertical gutter via cell spacing)
+    'double': {'rows': 3, 'cols': 4},  # 3 rows, 4 columns for 12 labels total
     'inventory': {'rows': 2, 'cols': 2}
 }
 
@@ -144,21 +144,21 @@ DOCUMENT_CONSTANTS = {
 
 # Product type to emoji mapping
 PRODUCT_TYPE_EMOJIS = {
-    "flower": "🌿",
-    "pre-roll": "🚬",
-    "infused pre-roll": "💨",
-    "concentrate": "🧪",
-    "solventless concentrate": "🧊",
-    "vape cartridge": "🛢️",
-    "edible (solid)": "🍫",
-    "edible (liquid)": "🥤",
-    "capsule": "💊",
-    "tincture": "🧴",
-    "topical": "🧴",
-    "paraphernalia": "🛠️",
-    "cbd": "🟢",
-    "cbd blend": "🟢",
-    "mixed": "🔀",
-    "rso/co2 tankers": "🛢️",
+    "flower": "",
+    "pre-roll": "",
+    "infused pre-roll": "",
+    "concentrate": "",
+    "solventless concentrate": "",
+    "vape cartridge": "",
+    "edible (solid)": "",
+    "edible (liquid)": "",
+    "capsule": "",
+    "tincture": "",
+    "topical": "",
+    "paraphernalia": "",
+    "cbd": "",
+    "cbd blend": "",
+    "mixed": "",
+    "rso/co2 tankers": "",
     # Add more as needed
 }

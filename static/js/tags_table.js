@@ -115,7 +115,7 @@ class TagsTable {
       } else if (tagName.toLowerCase().includes('high thc')) {
         dohImageHtml = '<img src="/static/img/HighTHC.png" alt="High THC" title="High THC Product" style="height: 24px; width: auto; margin-left: 6px; vertical-align: middle;">';
       } else {
-        dohImageHtml = '<img src="/static/img/DOH.png" alt="DOH Compliant" title="DOH Compliant Product" style="height: 24px; width: auto; margin-left: 6px; vertical-align: middle;">';
+        dohImageHtml = '<img src="/static/img/DOH.png" alt="DOH Compliant" title="DOH Compliant Product" style="height: 21px; width: auto; margin-left: 6px; vertical-align: middle;">';
       }
     }
 

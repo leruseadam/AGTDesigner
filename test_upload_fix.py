@@ -1,131 +1,133 @@
 #!/usr/bin/env python3
 """
-Test script to verify that the upload and API endpoints are working correctly.
+Test script to verify the upload fix works correctly.
+This script tests that uploaded files are properly loaded instead of default files.
 """
 
-import requests
-import time
 import os
 import sys
+import tempfile
+import pandas as pd
+from pathlib import Path
 
-def test_api_endpoints():
-    """Test the main API endpoints to ensure they're working correctly."""
-    base_url = "http://127.0.0.1:5001"
+# Add the project root to the Python path
+project_root = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, project_root)
+
+def create_test_excel_file():
+    """Create a test Excel file with sample data."""
+    # Create test data
+    test_data = {
+        'Product Name*': ['Test Product 1', 'Test Product 2', 'Test Product 3'],
+        'Product Type*': ['Flower', 'Concentrate', 'Edible'],
+        'Product Brand': ['Test Brand 1', 'Test Brand 2', 'Test Brand 3'],
+        'Vendor': ['Test Vendor 1', 'Test Vendor 2', 'Test Vendor 3'],
+        'Lineage': ['SATIVA', 'INDICA', 'HYBRID'],
+        'Weight*': ['3.5g', '1g', '100mg'],
+        'Quantity*': ['1', '1', '1']
+    }
     
-    print("🧪 Testing API endpoints...")
+    df = pd.DataFrame(test_data)
     
-    # Test 1: Initial data endpoint
-    print("\n1. Testing /api/initial-data...")
+    # Create temporary file
+    temp_file = tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False)
+    df.to_excel(temp_file.name, index=False)
+    temp_file.close()
+    
+    print(f"Created test Excel file: {temp_file.name}")
+    return temp_file.name
+
+def test_upload_fix():
+    """Test that the upload fix works correctly."""
+    print("=== TESTING UPLOAD FIX ===")
+    
+    # Create test Excel file
+    test_file = create_test_excel_file()
+    
     try:
-        response = requests.get(f"{base_url}/api/initial-data")
-        print(f"   Status: {response.status_code}")
-        if response.status_code == 200:
-            data = response.json()
-            print(f"   Success: {data.get('success', False)}")
-            print(f"   Message: {data.get('message', 'No message')}")
-        else:
-            print(f"   Error: {response.text}")
-    except Exception as e:
-        print(f"   Error: {e}")
-    
-    # Test 2: Available tags endpoint
-    print("\n2. Testing /api/available-tags...")
-    try:
-        response = requests.get(f"{base_url}/api/available-tags")
-        print(f"   Status: {response.status_code}")
-        if response.status_code == 200:
-            data = response.json()
-            if isinstance(data, list):
-                print(f"   Tags returned: {len(data)}")
-            else:
-                print(f"   Response: {data}")
-        elif response.status_code == 202:
-            print("   File is still being processed (expected for empty state)")
-        else:
-            print(f"   Error: {response.text}")
-    except Exception as e:
-        print(f"   Error: {e}")
-    
-    # Test 3: Selected tags endpoint
-    print("\n3. Testing /api/selected-tags...")
-    try:
-        response = requests.get(f"{base_url}/api/selected-tags")
-        print(f"   Status: {response.status_code}")
-        if response.status_code == 200:
-            data = response.json()
-            if isinstance(data, list):
-                print(f"   Tags returned: {len(data)}")
-            else:
-                print(f"   Response: {data}")
-        elif response.status_code == 202:
-            print("   File is still being processed (expected for empty state)")
-        else:
-            print(f"   Error: {response.text}")
-    except Exception as e:
-        print(f"   Error: {e}")
-    
-    # Test 4: Filter options endpoint
-    print("\n4. Testing /api/filter-options...")
-    try:
-        response = requests.get(f"{base_url}/api/filter-options")
-        print(f"   Status: {response.status_code}")
-        if response.status_code == 200:
-            data = response.json()
-            print(f"   Filters: {list(data.keys())}")
-        elif response.status_code == 202:
-            print("   File is still being processed (expected for empty state)")
-        else:
-            print(f"   Error: {response.text}")
-    except Exception as e:
-        print(f"   Error: {e}")
-    
-    # Test 5: File upload endpoint
-    print("\n5. Testing file upload...")
-    try:
-        # Create a simple test file
-        test_file_path = "test_upload.xlsx"
-        if not os.path.exists(test_file_path):
-            print("   Creating test file...")
-            # Create a minimal Excel file for testing
-            import pandas as pd
-            df = pd.DataFrame({
-                'Product Name*': ['Test Product 1', 'Test Product 2'],
-                'Brand': ['Test Brand', 'Test Brand'],
-                'Product Type': ['Flower', 'Concentrate']
-            })
-            df.to_excel(test_file_path, index=False)
+        # Import the ExcelProcessor
+        from src.core.data.excel_processor import ExcelProcessor
         
-        with open(test_file_path, 'rb') as f:
-            files = {'file': (test_file_path, f, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')}
-            response = requests.post(f"{base_url}/upload", files=files)
+        # Test 1: Create processor and load test file
+        print("\n--- Test 1: Loading uploaded file ---")
+        processor = ExcelProcessor()
         
-        print(f"   Upload Status: {response.status_code}")
-        if response.status_code == 200:
-            data = response.json()
-            print(f"   Upload Success: {data.get('success', False)}")
-            print(f"   Message: {data.get('message', 'No message')}")
+        # Set the uploaded file path to prevent default loading
+        processor._last_loaded_file = test_file
+        print(f"Set _last_loaded_file to: {test_file}")
+        
+        # Load the file
+        success = processor.pythonanywhere_fast_load(test_file)
+        print(f"Load success: {success}")
+        
+        if success and processor.df is not None:
+            print(f"DataFrame shape: {processor.df.shape}")
+            print(f"DataFrame columns: {list(processor.df.columns)}")
+            print(f"First few rows:")
+            print(processor.df.head())
             
-            # Wait a moment for processing
-            time.sleep(2)
-            
-            # Test available tags again
-            print("\n6. Testing available tags after upload...")
-            response = requests.get(f"{base_url}/api/available-tags")
-            print(f"   Status: {response.status_code}")
-            if response.status_code == 200:
-                data = response.json()
-                if isinstance(data, list):
-                    print(f"   Tags returned: {len(data)}")
-                else:
-                    print(f"   Response: {data}")
+            # Test that we loaded the correct file
+            if processor._last_loaded_file == test_file:
+                print("✓ SUCCESS: Correct file loaded")
             else:
-                print(f"   Error: {response.text}")
+                print(f"✗ ERROR: Wrong file loaded. Expected {test_file}, got {processor._last_loaded_file}")
+                return False
         else:
-            print(f"   Upload Error: {response.text}")
+            print("✗ ERROR: Failed to load file")
+            return False
+        
+        # Test 2: Get available tags
+        print("\n--- Test 2: Getting available tags ---")
+        tags = processor.get_available_tags()
+        print(f"Available tags count: {len(tags)}")
+        
+        if len(tags) > 0:
+            print("✓ SUCCESS: Available tags retrieved")
+            print(f"First tag: {tags[0]}")
+        else:
+            print("✗ ERROR: No available tags found")
+            return False
+        
+        # Test 3: Verify the data matches our test file
+        print("\n--- Test 3: Verifying data content ---")
+        expected_products = ['Test Product 1', 'Test Product 2', 'Test Product 3']
+        found_products = [tag.get('Product Name*', '') for tag in tags]
+        
+        print(f"Expected products: {expected_products}")
+        print(f"Found products: {found_products}")
+        
+        if set(found_products) == set(expected_products):
+            print("✓ SUCCESS: All expected products found")
+        else:
+            print("✗ ERROR: Products don't match expected data")
+            return False
+        
+        print("\n=== ALL TESTS PASSED ===")
+        return True
+        
     except Exception as e:
-        print(f"   Error: {e}")
+        print(f"✗ ERROR: Test failed with exception: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
     
-    print("\n✅ API endpoint testing complete!")
+    finally:
+        # Clean up test file
+        try:
+            os.unlink(test_file)
+            print(f"Cleaned up test file: {test_file}")
+        except Exception as e:
+            print(f"Warning: Could not clean up test file: {e}")
 
 if __name__ == "__main__":
-    test_api_endpoints() 
+    print("Starting upload fix tests...")
+    
+    # Run tests
+    test_passed = test_upload_fix()
+    
+    if test_passed:
+        print("\n🎉 ALL TESTS PASSED! Upload fix is working correctly.")
+        sys.exit(0)
+    else:
+        print("\n❌ TESTS FAILED! Upload fix needs attention.")
+        sys.exit(1) 

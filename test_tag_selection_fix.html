@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tag Selection Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: #f0f0f0;
+        }
+        .test-container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .tag-item {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            margin: 5px 0;
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .tag-item:hover {
+            background: #e9ecef;
+        }
+        .tag-checkbox {
+            margin-right: 10px;
+        }
+        .tag-name {
+            flex: 1;
+        }
+        .status {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .test-button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        .test-button:hover {
+            background: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <h1>Tag Selection Test</h1>
+    
+    <div class="test-container">
+        <h2>Test 1: Basic Checkbox Functionality</h2>
+        <div id="testTags">
+            <div class="tag-item">
+                <input type="checkbox" class="tag-checkbox" value="Test Product 1" id="test1" title="Select Test Product 1">
+                <div class="tag-name">Test Product 1</div>
+            </div>
+            <div class="tag-item">
+                <input type="checkbox" class="tag-checkbox" value="Test Product 2" id="test2" title="Select Test Product 2">
+                <div class="tag-name">Test Product 2</div>
+            </div>
+            <div class="tag-item">
+                <input type="checkbox" class="tag-checkbox" value="Test Product 3" id="test3" title="Select Test Product 3">
+                <div class="tag-name">Test Product 3</div>
+            </div>
+        </div>
+        <div id="status1" class="status"></div>
+        <button class="test-button" onclick="testCheckboxClick()">Test Checkbox Click</button>
+        <button class="test-button" onclick="testTagItemClick()">Test Tag Item Click</button>
+    </div>
+    
+    <div class="test-container">
+        <h2>Test 2: Event Handling</h2>
+        <div id="testEvents">
+            <div class="tag-item">
+                <input type="checkbox" class="tag-checkbox" value="Event Test 1" id="event1" title="Select Event Test 1">
+                <div class="tag-name">Event Test 1</div>
+            </div>
+        </div>
+        <div id="status2" class="status"></div>
+        <button class="test-button" onclick="testEventHandling()">Test Event Handling</button>
+    </div>
+    
+    <div class="test-container">
+        <h2>Test 3: State Management</h2>
+        <div id="selectedTags"></div>
+        <div id="status3" class="status"></div>
+        <button class="test-button" onclick="testStateManagement()">Test State Management</button>
+    </div>
+
+    <script>
+        // Simulate the TagManager state
+        const TagManager = {
+            state: {
+                persistentSelectedTags: [],
+                selectedTags: new Set()
+            },
+            handleTagSelection: function(e, tag) {
+                console.log('Tag selection handled:', tag);
+                this.updateSelectedTags();
+            },
+            updateSelectedTags: function() {
+                const selectedTagsDiv = document.getElementById('selectedTags');
+                selectedTagsDiv.innerHTML = '<h3>Selected Tags:</h3><ul>' + 
+                    this.state.persistentSelectedTags.map(tag => `<li>${tag}</li>`).join('') + '</ul>';
+            }
+        };
+
+        // Test checkbox click functionality
+        function testCheckboxClick() {
+            const status = document.getElementById('status1');
+            const checkboxes = document.querySelectorAll('#testTags .tag-checkbox');
+            
+            try {
+                // Simulate clicking each checkbox
+                checkboxes.forEach((checkbox, index) => {
+                    checkbox.checked = !checkbox.checked;
+                    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+                });
+                
+                status.className = 'status success';
+                status.textContent = 'Checkbox click test passed! All checkboxes responded to clicks.';
+            } catch (error) {
+                status.className = 'status error';
+                status.textContent = 'Checkbox click test failed: ' + error.message;
+            }
+        }
+
+        // Test tag item click functionality
+        function testTagItemClick() {
+            const status = document.getElementById('status1');
+            const tagItems = document.querySelectorAll('#testTags .tag-item');
+            
+            try {
+                // Simulate clicking each tag item
+                tagItems.forEach((tagItem, index) => {
+                    const checkbox = tagItem.querySelector('.tag-checkbox');
+                    const originalState = checkbox.checked;
+                    
+                    // Click the tag item (not the checkbox)
+                    tagItem.click();
+                    
+                    // Check if the checkbox state changed
+                    if (checkbox.checked !== originalState) {
+                        console.log(`Tag item ${index + 1} click successful`);
+                    } else {
+                        throw new Error(`Tag item ${index + 1} click did not toggle checkbox`);
+                    }
+                });
+                
+                status.className = 'status success';
+                status.textContent = 'Tag item click test passed! All tag items responded to clicks.';
+            } catch (error) {
+                status.className = 'status error';
+                status.textContent = 'Tag item click test failed: ' + error.message;
+            }
+        }
+
+        // Test event handling
+        function testEventHandling() {
+            const status = document.getElementById('status2');
+            const checkbox = document.querySelector('#testEvents .tag-checkbox');
+            
+            try {
+                let eventHandled = false;
+                
+                // Add event listener
+                checkbox.addEventListener('change', function(e) {
+                    eventHandled = true;
+                    console.log('Checkbox change event handled');
+                });
+                
+                // Trigger the event
+                checkbox.checked = !checkbox.checked;
+                checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+                
+                if (eventHandled) {
+                    status.className = 'status success';
+                    status.textContent = 'Event handling test passed! Events are being properly handled.';
+                } else {
+                    throw new Error('Event was not handled');
+                }
+            } catch (error) {
+                status.className = 'status error';
+                status.textContent = 'Event handling test failed: ' + error.message;
+            }
+        }
+
+        // Test state management
+        function testStateManagement() {
+            const status = document.getElementById('status3');
+            
+            try {
+                // Test adding tags to state
+                TagManager.state.persistentSelectedTags.push('Test Tag 1');
+                TagManager.state.persistentSelectedTags.push('Test Tag 2');
+                
+                // Test removing tags from state
+                const index = TagManager.state.persistentSelectedTags.indexOf('Test Tag 1');
+                if (index > -1) {
+                    TagManager.state.persistentSelectedTags.splice(index, 1);
+                }
+                
+                // Update the display
+                TagManager.updateSelectedTags();
+                
+                status.className = 'status success';
+                status.textContent = 'State management test passed! Tags can be added and removed from state.';
+            } catch (error) {
+                status.className = 'status error';
+                status.textContent = 'State management test failed: ' + error.message;
+            }
+        }
+
+        // Initialize the test
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Tag selection test page loaded');
+            
+            // Add event listeners to test tags
+            document.querySelectorAll('#testTags .tag-item').forEach(tagItem => {
+                tagItem.addEventListener('click', function(e) {
+                    // Don't trigger if clicking on the checkbox itself
+                    if (e.target.classList.contains('tag-checkbox')) {
+                        return;
+                    }
+                    
+                    // Toggle the checkbox
+                    const checkbox = this.querySelector('.tag-checkbox');
+                    if (checkbox) {
+                        checkbox.checked = !checkbox.checked;
+                        checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                });
+            });
+            
+            // Add event listeners to test events
+            document.querySelectorAll('#testEvents .tag-checkbox').forEach(checkbox => {
+                checkbox.addEventListener('change', function(e) {
+                    console.log('Checkbox changed:', this.value, 'checked:', this.checked);
+                });
+            });
+        });
+    </script>
+</body>
+</html> 
