@@ -82,6 +82,10 @@ def get_template_path(template_type):
     # Get template directory path
     base_dir = Path(__file__).parent
     template_dir = base_dir / "templates"
+    
+    # Debug logging
+    print(f"Debug - Template lookup: type={template_type}, file={template_files[template_type]}")
+    print(f"Debug - Paths: base_dir={base_dir}, template_dir={template_dir}")
 
     # Ensure template directory exists
     if not template_dir.exists():
@@ -89,6 +93,7 @@ def get_template_path(template_type):
 
     # Build full path
     template_path = template_dir / template_files[template_type]
+    print(f"Debug - Final template path: {template_path}")
 
     # Verify template exists
     if not template_path.exists():

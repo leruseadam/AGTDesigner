@@ -82,6 +82,38 @@ class DragAndDropManager {
                 return false;
             }
         }, true);
+        
+        // Prevent click events on tag items during drag
+        document.addEventListener('click', (e) => {
+            if (e.target.closest('.tag-item') && this.isDragging) {
+                console.log('Preventing tag item click during drag operation');
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                return false;
+            }
+        }, true);
+        
+        // Add debugging for all checkbox events
+        document.addEventListener('click', (e) => {
+            if (e.target.classList.contains('tag-checkbox')) {
+                console.log('=== DRAG MANAGER: CHECKBOX CLICK DETECTED ===');
+                console.log('Is dragging:', this.isDragging);
+                console.log('Event target:', e.target);
+                console.log('Event type:', e.type);
+                console.log('Event defaultPrevented:', e.defaultPrevented);
+            }
+        }, true);
+        
+        document.addEventListener('change', (e) => {
+            if (e.target.classList.contains('tag-checkbox')) {
+                console.log('=== DRAG MANAGER: CHECKBOX CHANGE DETECTED ===');
+                console.log('Is dragging:', this.isDragging);
+                console.log('Event target:', e.target);
+                console.log('Event type:', e.type);
+                console.log('Event defaultPrevented:', e.defaultPrevented);
+            }
+        }, true);
     }
 
     setupDragZone(selector) {
@@ -858,24 +890,37 @@ class DragAndDropManager {
             // Re-enable checkbox interactions
             const checkbox = element.querySelector('.tag-checkbox');
             if (checkbox) {
-                checkbox.style.pointerEvents = '';
+                checkbox.style.pointerEvents = 'auto';
                 checkbox.removeAttribute('data-drag-disabled');
+                checkbox.removeAttribute('data-reordering');
             }
             
             // Re-enable tag-item interactions
             const tagItem = element.querySelector('.tag-item');
             if (tagItem) {
-                tagItem.style.pointerEvents = '';
+                tagItem.style.pointerEvents = 'auto';
                 tagItem.removeAttribute('data-drag-disabled');
+                tagItem.removeAttribute('data-reordering');
             }
         });
         
         // Also re-enable any checkboxes that might have been disabled during drag
         const disabledCheckboxes = document.querySelectorAll('.tag-checkbox[data-drag-disabled="true"]');
         disabledCheckboxes.forEach(checkbox => {
-            checkbox.style.pointerEvents = '';
+            checkbox.style.pointerEvents = 'auto';
             checkbox.removeAttribute('data-drag-disabled');
+            checkbox.removeAttribute('data-reordering');
         });
+        
+        // Re-enable all tag items that might have been disabled
+        const disabledTagItems = document.querySelectorAll('.tag-item[data-drag-disabled="true"]');
+        disabledTagItems.forEach(tagItem => {
+            tagItem.style.pointerEvents = 'auto';
+            tagItem.removeAttribute('data-drag-disabled');
+            tagItem.removeAttribute('data-reordering');
+        });
+        
+        console.log('Drag state reset - all checkboxes and tag items re-enabled');
         
         // Also re-enable any tag-items that might have been disabled during drag
         const disabledTagItems = document.querySelectorAll('.tag-item[data-drag-disabled="true"]');

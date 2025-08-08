@@ -4,20 +4,41 @@ from pathlib import Path
 class Config:
     """Configuration class for the Label Maker application."""
     
-    # Development mode flag
-    DEVELOPMENT_MODE = os.environ.get('FLASK_ENV') == 'development'
+    # Basic Flask settings
+    SECRET_KEY = os.environ.get('SECRET_KEY', 'label-maker-secret-key-2024-production')
+    DEBUG = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
+    DEVELOPMENT_MODE = os.environ.get('FLASK_ENV', 'production') == 'development'
     
-    # Flask configuration
-    SECRET_KEY = os.environ.get('SECRET_KEY') or 'dev-secret-key-change-in-production'
-    DEBUG = os.environ.get('FLASK_ENV') == 'development'
+    # File upload settings
+    MAX_CONTENT_LENGTH = 20 * 1024 * 1024  # 20MB max file size
+    UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
+    
+    # Session settings
+    SESSION_COOKIE_SECURE = False  # Allow HTTP in development
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SAMESITE = 'Lax'
+    SESSION_COOKIE_MAX_SIZE = 8192  # Increased browser cookie size limit
+    PERMANENT_SESSION_LIFETIME = 3600  # 1 hour session lifetime
+    SESSION_REFRESH_EACH_REQUEST = False  # Don't refresh session on every request
+    SESSION_TYPE = 'filesystem'  # Use filesystem for session storage
+    
+    # Template settings
+    TEMPLATES_AUTO_RELOAD = DEVELOPMENT_MODE
+    SEND_FILE_MAX_AGE_DEFAULT = 0 if DEVELOPMENT_MODE else 31536000  # Cache static files for 1 year in production
+    
+    # Exception handling
+    PROPAGATE_EXCEPTIONS = DEVELOPMENT_MODE
+    
+    # Testing
     TESTING = False
+    
+    # Performance settings
+    DISABLE_STARTUP_FILE_LOADING = os.environ.get('DISABLE_STARTUP_FILE_LOADING', 'False').lower() == 'true'
     
     # Database configuration
     DATABASE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'product_database.db')
     
     # File upload configuration
-    UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
-    MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max file size
     ALLOWED_EXTENSIONS = {'xlsx', 'xls'}
     
     # Template configuration
@@ -27,10 +48,6 @@ class Config:
     # Cache configuration
     CACHE_TYPE = 'simple'
     CACHE_DEFAULT_TIMEOUT = 300
-    
-    # Session configuration
-    SESSION_TYPE = 'filesystem'
-    PERMANENT_SESSION_LIFETIME = 3600  # 1 hour
     
     # Performance configuration
     LAZY_LOADING_ENABLED = True

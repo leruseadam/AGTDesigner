@@ -595,11 +595,15 @@ def get_thresholded_font_size_by_word_count(text, orientation='vertical', scale_
 
 def get_font_size(text, font_params, scale_factor=1.0):
     """Calculate font size based on text length and font parameters."""
-    length = len(text)
-    base_size = font_params["base_size"]
-    max_length = font_params["max_length"]
-    min_size = font_params["min_size"]
-    return Pt(base_size) if length <= max_length else Pt(max(min_size, base_size * (max_length / length)))
+    # DEPRECATED: This function is disabled. Use src.core.generation.unified_font_sizing.get_font_size instead.
+    raise RuntimeError("[DEPRECATED] get_font_size from font_sizing.py is disabled. Use src.core.generation.unified_font_sizing.get_font_size instead.")
+    
+    # Original code (disabled):
+    # length = len(text)
+    # base_size = font_params["base_size"]
+    # max_length = font_params["max_length"]
+    # min_size = font_params["min_size"]
+    # return Pt(base_size) if length <= max_length else Pt(max(min_size, base_size * (max_length / length)))
 
 def get_thresholded_font_size_strain(text, orientation='vertical', scale_factor=1.0):
     """Calculate font size for product strain text with consistent sizing."""

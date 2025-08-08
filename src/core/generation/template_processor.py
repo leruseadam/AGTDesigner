@@ -53,7 +53,8 @@ def get_font_scheme(template_type, base_size=12):
         'vertical': {"base_size": base_size, "min_size": 8, "max_length": 25},
         'mini': {"base_size": base_size - 2, "min_size": 6, "max_length": 15},
         'horizontal': {"base_size": base_size + 1, "min_size": 7, "max_length": 20},
-        'double': {"base_size": base_size - 1, "min_size": 8, "max_length": 30}
+        'double': {"base_size": base_size - 1, "min_size": 8, "max_length": 30},
+        'inventory': {"base_size": base_size, "min_size": 8, "max_length": 40}  # Inventory slips can handle longer text
     }
     return {
         field: {**schemes.get(template_type, schemes['default'])}
@@ -70,13 +71,20 @@ class TemplateProcessor:
         self._expanded_template_buffer = self._expand_template_if_needed()
         
         # Set chunk size based on template type with performance limits
+        self.logger.info(f"DEBUG: Setting chunk size for template_type='{self.template_type}' (type: {type(self.template_type)})")
         if self.template_type == 'mini':
             self.chunk_size = min(20, CHUNK_SIZE_LIMIT)  # Fixed: 4x5 grid = 20 labels per page
+            self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for mini template")
         elif self.template_type == 'double':
             self.chunk_size = min(12, CHUNK_SIZE_LIMIT)  # Fixed: 4x3 grid = 12 labels per page
+            self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for double template")
+        elif self.template_type == 'inventory':
+            self.chunk_size = min(4, CHUNK_SIZE_LIMIT)   # Fixed: 2x2 grid = 4 labels per page
+            self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for inventory template")
         else:
             # For standard templates (horizontal, vertical), use 3x3 grid = 9 labels per page
             self.chunk_size = min(9, CHUNK_SIZE_LIMIT)  # Fixed: 3x3 grid = 9 labels per page
+            self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for template type '{self.template_type}' (fallback to 3x3)")
         
         self.logger.info(f"Template type: {self.template_type}, Chunk size: {self.chunk_size}")
         
@@ -88,7 +96,15 @@ class TemplateProcessor:
         """Get the template path based on template type."""
         try:
             base_path = Path(__file__).resolve().parent / "templates"
-            template_name = f"{self.template_type}.docx"
+            # Map template types to filenames
+            template_files = {
+                'horizontal': 'horizontal.docx',
+                'vertical': 'vertical.docx',
+                'mini': 'mini.docx',
+                'double': 'double.docx',
+                'inventory': 'inventory.docx'
+            }
+            template_name = template_files.get(self.template_type, f"{self.template_type}.docx")
             template_path = base_path / template_name
             
             if not template_path.exists():
@@ -111,17 +127,31 @@ class TemplateProcessor:
             text = doc.element.body.xml
             matches = re.findall(r'Label(\d+)\.', text)
             
-            # Check if we have all required labels (9 for 3x3, 20 for 4x5, 12 for 4x3)
-            required_labels = 9 if self.template_type not in ['mini', 'double'] else (20 if self.template_type == 'mini' else 12)
+            # Check if we have all required labels (9 for 3x3, 20 for 4x5, 12 for 4x3, 4 for 2x2)
+            if self.template_type == 'mini':
+                required_labels = 20  # 4x5 grid
+            elif self.template_type == 'double':
+                required_labels = 12  # 4x3 grid
+            elif self.template_type == 'inventory':
+                required_labels = 4   # 2x2 grid
+            else:
+                required_labels = 9   # 3x3 grid
+            
             unique_labels = set(matches)
             
             if len(unique_labels) < required_labels or force_expand:
-                self.logger.info("Template needs expansion")
+                self.logger.info(f"Template needs expansion. Template type: '{self.template_type}', Required labels: {required_labels}, Found unique labels: {len(unique_labels)}")
                 if self.template_type == 'mini':
+                    self.logger.info("Calling 4x5 expansion method")
                     return self._expand_template_to_4x5_fixed_scaled()
                 elif self.template_type == 'double':
+                    self.logger.info("Calling 4x3 expansion method")
                     return self._expand_template_to_4x3_fixed_double()
+                elif self.template_type == 'inventory':
+                    self.logger.info("Calling 2x2 inventory expansion method")
+                    return self._expand_template_to_2x2_inventory()
                 else:
+                    self.logger.info(f"Calling 3x3 expansion method (fallback for template type: '{self.template_type}')")
                     return self._expand_template_to_3x3_fixed()
             
             return buffer
@@ -132,6 +162,81 @@ class TemplateProcessor:
     def force_re_expand_template(self):
         """Force re-expansion of template."""
         self._expanded_template_buffer = self._expand_template_if_needed(force_expand=True)
+
+    def _expand_template_to_2x2_inventory(self):
+        """Expand template to 2x2 grid for inventory slips."""
+        from docx import Document
+        from docx.shared import Pt, Inches
+        from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+        from io import BytesIO
+        from copy import deepcopy
+
+        num_cols, num_rows = 2, 2  # 2x2 grid for inventory
+        col_width_inches = 3.75  # Appropriate width for inventory slips
+        row_height_inches = 3.5   # Appropriate height for inventory slips
+        
+        col_width_twips = str(int(col_width_inches * 1440))
+        row_height_pts = Pt(row_height_inches * 72)
+        cut_line_twips = int(0.001 * 1440)
+
+        template_path = self._get_template_path()
+        doc = Document(template_path)
+        if not doc.tables:
+            raise RuntimeError("Template must contain at least one table.")
+        old = doc.tables[0]
+        src_tc = deepcopy(old.cell(0,0)._tc)
+        old._element.getparent().remove(old._element)
+
+        while doc.paragraphs and not doc.paragraphs[0].text.strip():
+            doc.paragraphs[0]._element.getparent().remove(doc.paragraphs[0]._element)
+
+        # Create new table with 2x2 grid
+        tbl = doc.add_table(rows=num_rows, cols=num_cols)
+        tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
+        
+        # Set table properties
+        tblPr = tbl._element.find(qn('w:tblPr'))
+        if tblPr is None:
+            tblPr = OxmlElement('w:tblPr')
+        layout = OxmlElement('w:tblLayout')
+        layout.set(qn('w:type'), 'fixed')
+        tblPr.append(layout)
+        tbl._element.insert(0, tblPr)
+
+        # Set column widths
+        grid = OxmlElement('w:tblGrid')
+        for _ in range(num_cols):
+            gc = OxmlElement('w:gridCol')
+            gc.set(qn('w:w'), col_width_twips)
+            grid.append(gc)
+        tbl._element.insert(0, grid)
+
+        # Set row heights and copy template cell content with proper label numbering
+        label_num = 1
+        for row in tbl.rows:
+            row.height = row_height_pts
+            row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+            for cell in row.cells:
+                new_tc = deepcopy(src_tc)
+                
+                # Update label numbering for 2x2 grid (Label1, Label2, Label3, Label4)
+                # Convert the cell XML to string, replace Label1 with current label number
+                tc_xml_str = new_tc.xml.decode('utf-8') if isinstance(new_tc.xml, bytes) else str(new_tc.xml)
+                tc_xml_str = tc_xml_str.replace('Label1', f'Label{label_num}')
+                
+                # Parse the updated XML and replace the cell
+                from lxml import etree
+                new_tc_element = etree.fromstring(tc_xml_str.encode('utf-8'))
+                cell._tc.getparent().replace(cell._tc, new_tc_element)
+                label_num += 1
+
+        # Save to buffer
+        buffer = BytesIO()
+        doc.save(buffer)
+        buffer.seek(0)
+        return buffer
 
     def _expand_template_to_4x5_fixed_scaled(self):
         """Expand template to 4x5 grid for mini templates."""
@@ -213,7 +318,7 @@ class TemplateProcessor:
         return buf
 
     def _expand_template_to_4x3_fixed_double(self):
-        """Expand template to 4x3 grid for double templates with vertical gutter using cell spacing."""
+        """Expand template to 4x3 grid for double templates (4 columns, 3 rows) with cell spacing for gutters."""
         from docx import Document
         from docx.shared import Pt
         from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT
@@ -222,12 +327,11 @@ class TemplateProcessor:
         from io import BytesIO
         from copy import deepcopy
 
-        num_cols, num_rows = 4, 3  # 4 columns, 3 rows (standard grid)
+        num_cols, num_rows = 4, 3  # 4 columns, 3 rows for 12 labels total
         
-        # Column widths: 1.75" per column
-        label_col_width_twips = str(int(1.75 * 1440))  # 1.75 inches per label column
-        
-        row_height_pts = Pt(2.5 * 72)  # 2.5 inches per label row
+        # Equal width columns: 1.75 inches each for a total of 7 inches
+        col_width_twips = str(int(1.75 * 1440))  # 1.75 inches per column
+        row_height_pts = Pt(2.5 * 72)  # 2.5 inches per row for equal height
         cut_line_twips = int(0.001 * 1440)
 
         template_path = self._get_template_path()
@@ -254,19 +358,16 @@ class TemplateProcessor:
         tblPr.append(layout)
         tbl._element.insert(0, tblPr)
         grid = OxmlElement('w:tblGrid')
-        for i in range(num_cols):
+        for _ in range(num_cols):
             gc = OxmlElement('w:gridCol')
-            gc.set(qn('w:w'), label_col_width_twips)
+            gc.set(qn('w:w'), col_width_twips)
             grid.append(gc)
         tbl._element.insert(0, grid)
         
         # Set row heights: all rows are 2.5"
-        for i, row in enumerate(tbl.rows):
+        for row in tbl.rows:
             row.height = row_height_pts
             row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
-        
-        # No cell spacing - will use cell margins for center gutter only
-        
         borders = OxmlElement('w:tblBorders')
         for side in ('insideH','insideV'):
             b = OxmlElement(f"w:{side}")
@@ -277,10 +378,11 @@ class TemplateProcessor:
             borders.append(b)
         tblPr.append(borders)
         
-        # Process all cells normally (4x3 grid)
+        # Process all cells (no gutter rows or columns)
         cnt = 1
         for r in range(num_rows):
             for c in range(num_cols):
+                    
                 cell = tbl.cell(r,c)
                 cell._tc.clear_content()
                 tc = deepcopy(src_tc)
@@ -361,35 +463,12 @@ class TemplateProcessor:
                     cell._tc.append(deepcopy(el))
                 cnt += 1
                 
-        # Add cell margins to create center vertical gutter for "double" grouping
-        for r in range(num_rows):
-            for c in range(num_cols):
-                cell = tbl.cell(r, c)
-                tc = cell._tc
-                tcPr = tc.get_or_add_tcPr()
-                tcMar = OxmlElement('w:tcMar')
-                
-                # Set margins for all sides
-                for side in ['top', 'left', 'bottom', 'right']:
-                    margin = OxmlElement(f'w:{side}')
-                    
-                    # Create center gutter between columns 2 and 3
-                    # Left group: columns 1-2 (extra right margin on column 2)
-                    # Right group: columns 3-4 (extra left margin on column 3)
-                    if side == 'right' and c == 1:  # Column 2 (end of left group)
-                        margin.set(qn('w:w'), str(int(0.025 * 1440)))  # 0.025" extra right margin
-                    elif side == 'left' and c == 2:  # Column 3 (start of right group)
-                        margin.set(qn('w:w'), str(int(0.025 * 1440)))  # 0.025" extra left margin
-                    else:
-                        margin.set(qn('w:w'), str(int(0.001 * 1440)))  # Minimal margin
-                    
-                    margin.set(qn('w:type'), 'dxa')
-                    tcMar.append(margin)
-                
-                for old_mar in tcPr.findall(qn('w:tcMar')):
-                    tcPr.remove(old_mar)
-                tcPr.append(tcMar)
-        
+        from docx.oxml.shared import OxmlElement as OE
+        tblPr2 = tbl._element.find(qn('w:tblPr'))
+        spacing = OxmlElement('w:tblCellSpacing')
+        spacing.set(qn('w:w'), str(cut_line_twips))
+        spacing.set(qn('w:type'), 'dxa')
+        tblPr2.append(spacing)
         buf = BytesIO()
         doc.save(buf)
         buf.seek(0)
@@ -644,7 +723,10 @@ class TemplateProcessor:
                 # Set current product type for brand marker processing
                 self.current_product_type = (record.get('ProductType', '').lower() or 
                                           record.get('Product Type*', '').lower())
-                label_context = self._build_label_context(record, doc)
+                if self.template_type == 'inventory':
+                    label_context = self._build_inventory_context(record)
+                else:
+                    label_context = self._build_label_context(record, doc)
                 context[f'Label{i+1}'] = label_context
                 # Debug logging to check field values and order
                 product_name = record.get('ProductName', 'Unknown')
@@ -764,6 +846,34 @@ class TemplateProcessor:
         except Exception as e:
             self.logger.error(f"Error in _process_chunk: {e}\n{traceback.format_exc()}")
             raise
+
+    def _build_inventory_context(self, record):
+        """Build context dictionary for inventory slip template."""
+        context = {}
+        
+        # Map inventory fields with proper formatting
+        context['ProductName'] = record.get('Product Name*', '')
+        context['Barcode'] = record.get('Barcode*', '')
+        context['Quantity'] = record.get('Quantity Received*', '')
+        context['AcceptedDate'] = record.get('Accepted Date', '')
+        context['Vendor'] = record.get('Vendor', '')
+        
+        # Add any additional formatting or processing needed for inventory slips
+        if context['AcceptedDate']:
+            try:
+                # Try to parse and reformat the date if needed
+                date_obj = datetime.strptime(context['AcceptedDate'], '%Y-%m-%d')
+                context['AcceptedDate'] = date_obj.strftime('%m/%d/%Y')
+            except:
+                pass  # Keep original format if parsing fails
+        
+        # Ensure all values are strings
+        for key in context:
+            if context[key] is None:
+                context[key] = ''
+            context[key] = str(context[key])
+        
+        return context
 
     def _build_label_context(self, record, doc):
         """Ultra-optimized label context building for maximum performance."""
@@ -922,7 +1032,7 @@ class TemplateProcessor:
                     lineage_value = label_context['Lineage']
                 
                 if self.template_type in {"horizontal", "vertical", "double"} and lineage_value and product_type in classic_types:
-                    lineage_value = '\u2022  ' + lineage_value
+                    lineage_value = '\u2022 ' + lineage_value
             
             label_context['Lineage'] = wrap_with_marker(unwrap_marker(lineage_value, 'LINEAGE'), 'LINEAGE')
 
@@ -996,6 +1106,11 @@ class TemplateProcessor:
         return label_context
 
     def _post_process_and_replace_content(self, doc):
+        """Post-process the document after template rendering."""
+        # Skip unnecessary processing for inventory templates
+        if self.template_type == 'inventory':
+            self.logger.info("Skipping post-processing for inventory template - just filling placeholders")
+            return doc
         """
         Ultra-optimized post-processing for maximum performance.
         """
@@ -2152,6 +2267,11 @@ class TemplateProcessor:
         """
         Get font size using the unified font sizing system.
         """
+        # Special handling for RATIO marker: if content contains THC/CBD data, use THC_CBD field type
+        if marker_name == 'RATIO' and ('THC:' in content or 'CBD:' in content):
+            # Use THC_CBD field type for THC/CBD content
+            return get_font_size(content, 'thc_cbd', self.template_type, self.scale_factor)
+        
         # Use unified font sizing with appropriate complexity type
         complexity_type = 'mini' if self.template_type == 'mini' else 'standard'
         return get_font_size_by_marker(content, marker_name, self.template_type, self.scale_factor)
@@ -2349,6 +2469,7 @@ class TemplateProcessor:
         """
         Format THC_CBD content for vertical templates with right-aligned percentages.
         Splits THC and CBD into separate lines and right-aligns the percentage values.
+        Adds extra line spacing between THC percentage and CBD line.
         """
         if not text:
             return text
@@ -2404,18 +2525,20 @@ class TemplateProcessor:
                     remaining_content = cbd_part[cbg_start:].strip()
                     cbd_part = cbd_part_only
                 
-                # Format THC part with right-alignment
-                formatted_thc = self._format_percentage_right_alignment(thc_part, max_percentage_width)
+                # Format THC part with simple formatting
+                formatted_thc = self._format_thc_cbd_simple(thc_part, max_percentage_width)
                 
-                # Format CBD part with right-alignment
-                formatted_cbd = self._format_percentage_right_alignment(cbd_part, max_percentage_width)
+                # Format CBD part with simple formatting
+                formatted_cbd = self._format_thc_cbd_simple(cbd_part, max_percentage_width)
                 
-                # Combine with line breaks
+                # Combine with line break between THC and CBD
                 if remaining_content:
                     # Format remaining content (like CBC) with right-alignment
                     formatted_remaining = self._format_percentage_right_alignment(remaining_content, max_percentage_width)
+                    # Add line break between THC and CBD
                     formatted_line = f"{formatted_thc}\n{formatted_cbd}\n{formatted_remaining}"
                 else:
+                    # Add line break between THC and CBD
                     formatted_line = f"{formatted_thc}\n{formatted_cbd}"
                 formatted_lines.append(formatted_line)
             else:
@@ -2425,6 +2548,35 @@ class TemplateProcessor:
         
         return '\n'.join(formatted_lines)
     
+    def _format_thc_cbd_simple(self, text, max_percentage_width):
+        """
+        Helper function to format THC/CBD with simple line break between values.
+        Returns format: "THC: x%\nCBD: x%"
+        """
+        if not text or '%' not in text:
+            return text
+        
+        import re
+        
+        # Split the text into parts: label, percentage, and any remaining text
+        # Pattern to match: "THC: " + percentage + "%" + remaining
+        match = re.match(r'^([^0-9]*?)([0-9.]+)%(.*)$', text)
+        if not match:
+            return text
+        
+        label = match.group(1).strip()  # e.g., "THC:"
+        percentage = match.group(2)  # e.g., "21.0"
+        remaining = match.group(3)  # e.g., " CBD: 0.25%"
+        
+        # Simple format: label and percentage on same line
+        formatted_group = f"{label} {percentage}%"
+        
+        # Add remaining content if any
+        if remaining.strip():
+            formatted_group += f"\n{remaining.strip()}"
+        
+        return formatted_group
+
     def _format_percentage_right_alignment(self, text, max_percentage_width):
         """
         Helper function to right-align percentage values in a single line.

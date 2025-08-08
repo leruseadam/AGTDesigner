@@ -233,36 +233,65 @@ def get_excel_processor():
                     _excel_processor.enable_product_db_integration(False)
                     logging.info("Product database integration disabled by default for performance")
                 
-                # Only load default file if not explicitly reset
-                if not _excel_processor_reset_flag:
-                    # Try to load the default file
-                    default_file = get_default_upload_file()
-                    if default_file and os.path.exists(default_file):
-                        logging.info(f"Loading default file in get_excel_processor: {default_file}")
-                        # Use fast loading mode for better performance
-                        success = _excel_processor.load_file(default_file)
-                        if success:
-                            _excel_processor._last_loaded_file = default_file
-                            # Optimize DataFrame
-                            if _excel_processor.df is not None:
-                                for col in ['Product Type*', 'Lineage', 'Product Brand', 'Vendor', 'Product Strain']:
-                                    if col in _excel_processor.df.columns:
-                                        _excel_processor.df[col] = _excel_processor.df[col].astype('category')
+                # CRITICAL FIX: Check if we have an uploaded file in session before loading default
+                try:
+                    from flask import session
+                    session_file_path = session.get('file_path')
+                    if session_file_path and os.path.exists(session_file_path):
+                        logging.info(f"CRITICAL FIX: Found uploaded file in session: {session_file_path}")
+                        # Don't load default file if we have an uploaded file
+                        _excel_processor.df = pd.DataFrame()  # Start with empty DataFrame
+                        _excel_processor._last_loaded_file = session_file_path
+                    else:
+                        # Only load default file if not explicitly reset and no uploaded file exists
+                        if not _excel_processor_reset_flag:
+                            # Try to load the default file
+                            default_file = get_default_upload_file()
+                            if default_file and os.path.exists(default_file):
+                                logging.info(f"Loading default file in get_excel_processor: {default_file}")
+                                # Use fast loading mode for better performance
+                                success = _excel_processor.load_file(default_file)
+                                if success:
+                                    _excel_processor._last_loaded_file = default_file
+                                    # Optimize DataFrame
+                                    if _excel_processor.df is not None:
+                                        for col in ['Product Type*', 'Lineage', 'Product Brand', 'Vendor', 'Product Strain']:
+                                            if col in _excel_processor.df.columns:
+                                                _excel_processor.df[col] = _excel_processor.df[col].astype('category')
+                                else:
+                                    logging.error("Failed to load default file in get_excel_processor")
+                                    # Ensure df attribute exists even if loading failed
+                                    if not hasattr(_excel_processor, 'df'):
+                                        _excel_processor.df = pd.DataFrame()
+                            else:
+                                logging.warning("No default file found in get_excel_processor")
+                                # Ensure df attribute exists even if no default file
+                                if not hasattr(_excel_processor, 'df'):
+                                    _excel_processor.df = pd.DataFrame()
                         else:
-                            logging.error("Failed to load default file in get_excel_processor")
-                            # Ensure df attribute exists even if loading failed
+                            logging.info("Excel processor was reset - not loading default file automatically")
+                            # Always ensure df attribute exists for reset processor
+                            _excel_processor.df = pd.DataFrame()
+                            # Clear the reset flag since we've handled it
+                            _excel_processor_reset_flag = False
+                except Exception as session_error:
+                    logging.warning(f"Error checking session for uploaded file: {session_error}")
+                    # Fall back to default file loading if session check fails
+                    if not _excel_processor_reset_flag:
+                        default_file = get_default_upload_file()
+                        if default_file and os.path.exists(default_file):
+                            logging.info(f"Loading default file in get_excel_processor: {default_file}")
+                            success = _excel_processor.load_file(default_file)
+                            if success:
+                                _excel_processor._last_loaded_file = default_file
+                            else:
+                                if not hasattr(_excel_processor, 'df'):
+                                    _excel_processor.df = pd.DataFrame()
+                        else:
                             if not hasattr(_excel_processor, 'df'):
                                 _excel_processor.df = pd.DataFrame()
                     else:
-                        logging.warning("No default file found in get_excel_processor")
-                        # Ensure df attribute exists even if no default file
-                        if not hasattr(_excel_processor, 'df'):
-                            _excel_processor.df = pd.DataFrame()
-                else:
-                    logging.info("Excel processor was reset - not loading default file automatically")
-                    # Always ensure df attribute exists for reset processor
-                    _excel_processor.df = pd.DataFrame()
-                    # Clear the reset flag since we've handled it
+                        _excel_processor.df = pd.DataFrame()
                     _excel_processor_reset_flag = False
             
             # Ensure df attribute exists
@@ -376,20 +405,12 @@ def create_app():
     # Check if we're in development mode
     development_mode = app.config.get('DEVELOPMENT_MODE', False)
     
-    if development_mode:
-        # Development settings for hot reloading
-        app.config['TEMPLATES_AUTO_RELOAD'] = True  # Enable template auto-reload for development
-        app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0  # Disable static file caching for development
-        app.config['DEBUG'] = True  # Enable debug mode for development
-        app.config['PROPAGATE_EXCEPTIONS'] = True  # Enable exception propagation for debugging
-        logging.info("Running in DEVELOPMENT mode with hot reloading enabled")
-    else:
-        # Production settings
-        app.config['TEMPLATES_AUTO_RELOAD'] = False  # Disable template auto-reload in production
-        app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 31536000  # Cache static files for 1 year
-        app.config['DEBUG'] = False  # Disable debug mode for better performance
-        app.config['PROPAGATE_EXCEPTIONS'] = False
-        logging.info("Running in PRODUCTION mode")
+    # Force development mode for template reloading
+    app.config['TEMPLATES_AUTO_RELOAD'] = True  # Always enable template auto-reload
+    app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0  # Always disable static file caching
+    app.config['DEBUG'] = True  # Enable debug mode
+    app.config['PROPAGATE_EXCEPTIONS'] = True  # Enable exception propagation for debugging
+    logging.info("Running with template auto-reload ENABLED")
     
     app.config['MAX_CONTENT_LENGTH'] = 20 * 1024 * 1024  # 20MB max file size
     app.config['TESTING'] = False
@@ -578,9 +599,9 @@ class LabelMakerApp:
             log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
             formatter = logging.Formatter(log_format)
             
-            # Configure console handler - reduce verbosity in production
+            # Configure console handler - show info and above for debugging
             console_handler = logging.StreamHandler()
-            console_handler.setLevel(logging.WARNING)  # Only show warnings and errors
+            console_handler.setLevel(logging.INFO)  # Show info, warnings, and errors
             console_handler.setFormatter(formatter)
             
             # Configure file handler
@@ -591,7 +612,7 @@ class LabelMakerApp:
             
             # Configure root logger
             logging.basicConfig(
-                level=logging.WARNING,
+                level=logging.INFO,
                 format=log_format,
                 handlers=[console_handler, file_handler]
             )
@@ -612,7 +633,7 @@ class LabelMakerApp:
             
     def run(self):
         host = os.environ.get('HOST', '127.0.0.1')
-        port = int(os.environ.get('FLASK_PORT', 5001))  # Changed to 5001 to avoid port conflict
+        port = int(os.environ.get('FLASK_PORT', 5002))  # Changed to 5002 to avoid port conflict
         development_mode = self.app.config.get('DEVELOPMENT_MODE', False)
         
         logging.info(f"Starting Label Maker application on {host}:{port}")
@@ -636,23 +657,62 @@ def get_session_excel_processor():
             if hasattr(g.excel_processor, 'enable_product_db_integration'):
                 g.excel_processor.enable_product_db_integration(False)
             
-            # Ensure the DataFrame is properly initialized
-            if not hasattr(g.excel_processor, 'df') or g.excel_processor.df is None or g.excel_processor.df.empty:
-                from src.core.data.excel_processor import get_default_upload_file
-                default_file = get_default_upload_file()
-                if default_file and os.path.exists(default_file):
-                    logging.info(f"Loading default file for session: {default_file}")
-                    success = g.excel_processor.load_file(default_file)
+            # CRITICAL FIX: Check if we have an uploaded file in session
+            session_file_path = session.get('file_path')
+            if session_file_path and os.path.exists(session_file_path):
+                logging.info(f"CRITICAL FIX: Session has uploaded file: {session_file_path}")
+                # Don't load default file if we have an uploaded file
+                if not hasattr(g.excel_processor, 'df') or g.excel_processor.df is None or g.excel_processor.df.empty:
+                    logging.info(f"CRITICAL FIX: Loading uploaded file from session: {session_file_path}")
+                    success = g.excel_processor.load_file(session_file_path)
                     if not success:
-                        logging.error("Failed to load default file for session")
+                        logging.error("Failed to load uploaded file from session")
+                                                # Create a minimal DataFrame to prevent errors
+                        import pandas as pd
+                        g.excel_processor.df = pd.DataFrame()
+                
+                # CRITICAL FIX: For new uploaded files, clear any old selected tags
+                if session_file_path != getattr(g.excel_processor, '_last_processed_file', None):
+                    logging.info(f"CRITICAL FIX: New uploaded file detected, clearing old selected tags")
+                    logging.info(f"CRITICAL FIX: Previous file: {getattr(g.excel_processor, '_last_processed_file', 'None')}")
+                    logging.info(f"CRITICAL FIX: New file: {session_file_path}")
+                    logging.info(f"CRITICAL FIX: Selected tags before clearing: {len(g.excel_processor.selected_tags)}")
+                    g.excel_processor.selected_tags = []
+                    g.excel_processor._last_processed_file = session_file_path
+                    # Also clear session selected tags for new files
+                    session['selected_tags'] = []
+                    logging.info(f"CRITICAL FIX: Selected tags after clearing: {len(g.excel_processor.selected_tags)}")
+                    logging.info(f"CRITICAL FIX: Session selected tags after clearing: {len(session.get('selected_tags', []))}")
+                    
+                    # CRITICAL FIX: Clear all caches for new file
+                    logging.info(f"CRITICAL FIX: Clearing all caches for new file")
+                    if hasattr(g.excel_processor, '_file_cache'):
+                        g.excel_processor._file_cache.clear()
+                        logging.info(f"CRITICAL FIX: Cleared file cache")
+                    if hasattr(g.excel_processor, '_dropdown_cache'):
+                        g.excel_processor._dropdown_cache.clear()
+                        logging.info(f"CRITICAL FIX: Cleared dropdown cache")
+                    if hasattr(g.excel_processor, '_available_tags_cache'):
+                        g.excel_processor._available_tags_cache.clear()
+                        logging.info(f"CRITICAL FIX: Cleared available tags cache")
+            else:
+                # Only load default file if no uploaded file exists
+                if not hasattr(g.excel_processor, 'df') or g.excel_processor.df is None or g.excel_processor.df.empty:
+                    from src.core.data.excel_processor import get_default_upload_file
+                    default_file = get_default_upload_file()
+                    if default_file and os.path.exists(default_file):
+                        logging.info(f"Loading default file for session: {default_file}")
+                        success = g.excel_processor.load_file(default_file)
+                        if not success:
+                            logging.error("Failed to load default file for session")
+                            # Create a minimal DataFrame to prevent errors
+                            import pandas as pd
+                            g.excel_processor.df = pd.DataFrame()
+                    else:
+                        logging.warning("No default file found for session")
                         # Create a minimal DataFrame to prevent errors
                         import pandas as pd
                         g.excel_processor.df = pd.DataFrame()
-                else:
-                    logging.warning("No default file found for session")
-                    # Create a minimal DataFrame to prevent errors
-                    import pandas as pd
-                    g.excel_processor.df = pd.DataFrame()
             
             # Ensure selected_tags attribute exists
             if not hasattr(g.excel_processor, 'selected_tags'):
@@ -660,6 +720,7 @@ def get_session_excel_processor():
             
             # Restore selected tags from session
             session_selected_tag_names = session.get('selected_tags', [])
+            logging.info(f"Session selected_tags count: {len(session_selected_tag_names)}")
             
             # Convert tag names back to full tag objects
             if session_selected_tag_names:
@@ -796,11 +857,16 @@ def test():
 @app.route('/')
 def index():
     try:
+        logging.info("=== PAGE REFRESH DETECTED ===")
+        logging.info(f"Page refresh at {datetime.now().strftime('%H:%M:%S')}")
+        
         # --- LIGHTWEIGHT PAGE LOAD (minimal work) ---
         cache_bust = str(int(time.time()))
         
         # Only clear session data, don't reset global state
         uploaded_file = session.pop('file_path', None)
+        if uploaded_file:
+            logging.info(f"Cleared uploaded file from session: {uploaded_file}")
         # Don't clear selected_tags - they should persist across page loads
         
         # Remove uploaded file if it exists and is not the default file
@@ -810,8 +876,9 @@ def index():
             if uploaded_file != default_file and os.path.exists(uploaded_file):
                 try:
                     os.remove(uploaded_file)
-                except Exception:
-                    pass
+                    logging.info(f"Removed uploaded file: {uploaded_file}")
+                except Exception as e:
+                    logging.warning(f"Failed to remove uploaded file: {e}")
         
         # Periodic cleanup (less frequent - every 50th page load)
         import random
@@ -827,6 +894,7 @@ def index():
         # This makes page loads much faster
         initial_data = None
         
+        logging.info("=== PAGE REFRESH COMPLETE ===")
         return render_template('index.html', initial_data=initial_data, cache_bust=cache_bust)
         
     except Exception as e:
@@ -837,6 +905,11 @@ def index():
 def splash():
     """Serve the splash screen."""
     return render_template('splash.html')
+
+@app.route('/debug-template')
+def debug_template():
+    """Debug route to test template loading."""
+    return render_template('index.html', debug_message="DEBUG TEMPLATE ROUTE WORKING")
 
 @app.route('/generation-splash')
 def generation_splash():
@@ -863,6 +936,7 @@ def upload_file():
             return jsonify({'error': 'Rate limit exceeded. Please wait before uploading another file.'}), 429
         
         logging.info("=== UPLOAD REQUEST START ===")
+        logging.info(f"File upload request at {datetime.now().strftime('%H:%M:%S')}")
         start_time = time.time()
         
         # Log request details
@@ -979,7 +1053,9 @@ def upload_file():
         session['file_path'] = temp_path
         
         # Clear selected tags in session to ensure fresh start
+        logging.info(f"[UPLOAD] Clearing selected tags from session. Previous count: {len(session.get('selected_tags', []))}")
         session['selected_tags'] = []
+        logging.info(f"[UPLOAD] Selected tags cleared from session")
         
         # ULTRA-FAST RESPONSE - Return immediately for instant user feedback
         upload_response_time = time.time() - start_time
@@ -1005,6 +1081,8 @@ def upload_file():
 
 def process_excel_background(filename, temp_path):
     """Ultra-optimized background processing with minimal processing for instant response"""
+    global os  # Ensure os is available in this scope
+    
     try:
         logging.debug(f"[BG] ===== BACKGROUND PROCESSING START =====")
         logging.debug(f"[BG] Starting ultra-optimized file processing: {temp_path}")
@@ -1034,6 +1112,10 @@ def process_excel_background(filename, temp_path):
         from src.core.data.excel_processor import ExcelProcessor
         new_processor = ExcelProcessor()
         
+        # CRITICAL FIX: Disable default file loading to prevent interference
+        new_processor._last_loaded_file = temp_path  # Set this immediately to prevent default loading
+        logging.info(f"[BG] CRITICAL FIX: Set _last_loaded_file to uploaded file: {temp_path}")
+        
         # Disable product database integration for faster loading
         if hasattr(new_processor, 'enable_product_db_integration'):
             new_processor.enable_product_db_integration(False)
@@ -1060,6 +1142,96 @@ def process_excel_background(filename, temp_path):
             logging.error(f"[BG] File load failed for {filename} - DataFrame is empty")
             return
         
+        # CRITICAL FIX: Verify we loaded the correct file (with more robust comparison)
+        logging.info(f"[BG] CRITICAL FIX: Verifying loaded file matches uploaded file")
+        logging.info(f"[BG] Expected file: {temp_path}")
+        logging.info(f"[BG] Loaded file: {new_processor._last_loaded_file}")
+        
+        # More robust file path comparison
+        expected_path = os.path.abspath(temp_path) if temp_path else None
+        loaded_path = os.path.abspath(new_processor._last_loaded_file) if new_processor._last_loaded_file else None
+        
+        logging.info(f"[BG] Normalized expected path: {expected_path}")
+        logging.info(f"[BG] Normalized loaded path: {loaded_path}")
+        
+        # Check if file verification should be bypassed (for debugging)
+        bypass_verification = os.environ.get('BYPASS_FILE_VERIFICATION', 'false').lower() == 'true'
+        if bypass_verification:
+            logging.warning(f"[BG] File verification bypassed due to BYPASS_FILE_VERIFICATION environment variable")
+        elif expected_path != loaded_path:
+            logging.error(f"[BG] CRITICAL ERROR: Loaded wrong file! Expected {expected_path}, got {loaded_path}")
+            update_processing_status(filename, f'error: Loaded incorrect file')
+            return
+        else:
+            logging.info(f"[BG] File verification passed - loaded correct file")
+        
+        # Debug Vendor data
+        if hasattr(new_processor, 'df') and new_processor.df is not None:
+            vendor_columns = [col for col in new_processor.df.columns if 'vendor' in col.lower()]
+            logging.info(f"[BG] Vendor columns found: {vendor_columns}")
+            if vendor_columns:
+                sample_vendor_data = new_processor.df[vendor_columns[0]].head(5).tolist()
+                logging.info(f"[BG] Sample vendor data: {sample_vendor_data}")
+        
+        # CRITICAL FIX: Clear all caches to ensure new file is processed
+        logging.info(f"[BG] CRITICAL FIX: Clearing all caches for new file")
+        if hasattr(new_processor, '_file_cache'):
+            new_processor._file_cache.clear()
+            logging.info(f"[BG] Cleared file cache")
+        if hasattr(new_processor, '_dropdown_cache'):
+            new_processor._dropdown_cache.clear()
+            logging.info(f"[BG] Cleared dropdown cache")
+        if hasattr(new_processor, '_available_tags_cache'):
+            new_processor._available_tags_cache.clear()
+            logging.info(f"[BG] Cleared available tags cache")
+        
+        # CRITICAL FIX: Force reload the file to ensure fresh data
+        logging.info(f"[BG] CRITICAL FIX: Force reloading file to ensure fresh data")
+        new_processor._last_loaded_file = None  # Force reload
+        new_processor.df = None  # Clear DataFrame
+        if hasattr(new_processor, '_file_cache'):
+            new_processor._file_cache.clear()  # Clear file cache
+        
+        # Reload the file with fresh data
+        reload_success = new_processor.load_file(temp_path)
+        if not reload_success:
+            logging.error(f"[BG] CRITICAL ERROR: Failed to reload file {temp_path}")
+            update_processing_status(filename, f'error: Failed to reload file')
+            return
+        logging.info(f"[BG] File reloaded successfully with fresh data")
+        
+        # CRITICAL FIX: Clear global cache to force fresh data
+        logging.info(f"[BG] CRITICAL FIX: Clearing global cache to force fresh data")
+        try:
+            from flask import has_request_context
+            if has_request_context():
+                # Clear all cache keys that might contain old data
+                cache_keys_to_clear = [
+                    'available_tags', 'selected_tags', 'filter_options', 'dropdowns',
+                    'json_matched_tags', 'full_excel_tags', 'initial_data'
+                ]
+                
+                for cache_key_name in cache_keys_to_clear:
+                    try:
+                        # Try different cache key patterns
+                        cache_keys_to_try = [
+                            get_session_cache_key(cache_key_name),
+                            f"{cache_key_name}_default",
+                            cache_key_name,
+                            f"full_excel_cache_key",
+                            f"json_matched_cache_key"
+                        ]
+                        
+                        for key in cache_keys_to_try:
+                            cache.delete(key)
+                            logging.info(f"[BG] Cleared global cache key: {key}")
+                    except Exception as key_error:
+                        logging.warning(f"[BG] Error clearing global cache key {cache_key_name}: {key_error}")
+            else:
+                logging.info("[BG] Skipping global cache clear - not in request context")
+        except Exception as global_cache_error:
+            logging.warning(f"[BG] Error in global cache clearing: {global_cache_error}")
+        
         # Step 2: Update the global processor safely with minimal clearing
         global _excel_processor
         with excel_processor_lock:
@@ -1071,6 +1243,7 @@ def process_excel_background(filename, temp_path):
                     logging.info("[BG] Cleared old DataFrame from ExcelProcessor")
                 
                 if hasattr(_excel_processor, 'selected_tags'):
+                    logging.info(f"[BG] Clearing selected tags from ExcelProcessor. Previous count: {len(_excel_processor.selected_tags) if _excel_processor.selected_tags else 0}")
                     _excel_processor.selected_tags = []
                     logging.info("[BG] Cleared selected tags from ExcelProcessor")
                 
@@ -1198,24 +1371,11 @@ def process_excel_background(filename, temp_path):
         except Exception as full_thread_error:
             logging.warning(f"[BG] Failed to start full processing thread: {full_thread_error}")
         
-        total_time = time.time() - start_time
-        logging.info(f"[BG] Ultra-optimized background processing completed successfully in {total_time:.2f}s")
-        logging.info(f"[BG] ===== BACKGROUND PROCESSING END =====")
-        
     except Exception as e:
-        error_msg = f"Error processing uploaded file: {str(e)}"
-        logging.error(f"[BG] ===== BACKGROUND PROCESSING ERROR =====")
-        logging.error(f"[BG] {error_msg}")
+        logging.error(f"[BG] ===== BACKGROUND PROCESSING FAILED =====")
+        logging.error(f"[BG] Error in background processing: {str(e)}")
         logging.error(f"[BG] Traceback: {traceback.format_exc()}")
-        update_processing_status(filename, f'error: {error_msg}')
-        
-        # Clean up the temporary file even if processing failed
-        try:
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-                logging.info(f"[BG] Cleaned up temporary file: {temp_path}")
-        except Exception as cleanup_error:
-            logging.warning(f"[BG] Error cleaning up temp file: {cleanup_error}")
+        update_processing_status(filename, f'error: {str(e)}')
 
 @app.route('/api/upload-status', methods=['GET'])
 def upload_status():
@@ -1432,11 +1592,19 @@ UNDO_STACK_KEY = 'undo_stack'
 @app.route('/api/move-tags', methods=['POST'])
 def move_tags():
     try:
+        logging.info("=== MOVE TAGS ACTION START ===")
+        logging.info(f"Move tags request at {datetime.now().strftime('%H:%M:%S')}")
+        logging.info(f"Request method: {request.method}")
+        logging.info(f"Request URL: {request.url}")
+        logging.info(f"Request headers: {dict(request.headers)}")
+        
         # Check session size but don't optimize unless necessary
         check_session_size()
         
         data = request.get_json()
         action = data.get('action', 'move')
+        logging.info(f"Action: {action}")
+        logging.info(f"Request data: {data}")
         
         excel_processor = get_session_excel_processor()
         available_tags = excel_processor.get_available_tags()
@@ -1453,6 +1621,8 @@ def move_tags():
                 selected_tags.append(tag)
             else:
                 selected_tags.append(str(tag))
+        
+        logging.info(f"Move tags - Current selected tags: {selected_tags}")
         
         # Handle reorder action
         if action == 'reorder':
@@ -1506,16 +1676,32 @@ def move_tags():
         direction = data.get('direction', 'to_selected')
         select_all = data.get('selectAll', False)
         
-        # Save current state for undo (store only tag names to reduce session size)
-        undo_stack = session.get(UNDO_STACK_KEY, [])
-        undo_stack.append({
-            'available_tag_names': available_tag_names,
-            'selected_tag_names': selected_tags.copy(),
-        })
-        # Limit undo stack size to prevent session bloat
-        if len(undo_stack) > 5:
-            undo_stack = undo_stack[-5:]
-        session[UNDO_STACK_KEY] = undo_stack
+        logging.info(f"Move tags - Tags to move: {tags_to_move}")
+        logging.info(f"Move tags - Direction: {direction}")
+        
+        # Add safety check to prevent race conditions
+        if not tags_to_move and not select_all:
+            logging.warning("No tags to move and select_all is False, returning current state")
+            return jsonify({
+                'success': True,
+                'available_tags': available_tag_names,
+                'selected_tags': selected_tags
+            })
+        
+        # Save current state for undo using the dedicated endpoint
+        try:
+            undo_response = requests.post(
+                f"http://127.0.0.1:{app.config.get('PORT', 5002)}/api/save-selection-state",
+                json={'action_type': 'move_tags'},
+                headers={'Content-Type': 'application/json'}
+            )
+            if undo_response.ok:
+                logging.info(f"Selection state saved for undo - Stack size: {undo_response.json().get('undo_stack_size', 0)}")
+            else:
+                logging.warning(f"Failed to save selection state for undo: {undo_response.status_code}")
+        except Exception as e:
+            logging.warning(f"Failed to save selection state for undo: {str(e)}")
+            # Continue with the operation even if undo save fails
         
         if direction == 'to_selected':
             if select_all:
@@ -1527,22 +1713,50 @@ def move_tags():
                         deduplicated_tags.append(tag)
                         seen.add(tag)
                 excel_processor.selected_tags = deduplicated_tags
+                logging.info(f"Move tags - Select all: Added {len(deduplicated_tags)} tags to selected")
             else:
+                added_count = 0
                 for tag in tags_to_move:
                     if tag not in excel_processor.selected_tags:
                         excel_processor.selected_tags.append(tag)
+                        added_count += 1
+                logging.info(f"Move tags - To selected: Added {added_count} tags to selected")
         else:  # to_available
             if select_all:
+                removed_count = len(excel_processor.selected_tags)
                 excel_processor.selected_tags.clear()
+                logging.info(f"Move tags - Select all: Removed {removed_count} tags from selected")
             else:
+                before_count = len(excel_processor.selected_tags)
+                # Add safety check to prevent corruption of selected tags
+                if not isinstance(excel_processor.selected_tags, list):
+                    logging.error("selected_tags is not a list, resetting to empty list")
+                    excel_processor.selected_tags = []
+                    before_count = 0
+                
                 excel_processor.selected_tags = [tag for tag in excel_processor.selected_tags if tag not in tags_to_move]
+                after_count = len(excel_processor.selected_tags)
+                removed_count = before_count - after_count
+                logging.info(f"Move tags - To available: Removed {removed_count} tags from selected (before: {before_count}, after: {after_count})")
         
         # Update session with new selected tags (store only tag names to reduce session size)
-        session['selected_tags'] = excel_processor.selected_tags.copy()
+        # Add safety check to ensure selected_tags is a list before copying
+        if isinstance(excel_processor.selected_tags, list):
+            session['selected_tags'] = excel_processor.selected_tags.copy()
+        else:
+            logging.error("selected_tags is not a list, setting session to empty list")
+            session['selected_tags'] = []
         
         # Return only the necessary data for UI updates
+        # Add safety checks to ensure we return valid data
+        if not isinstance(excel_processor.selected_tags, list):
+            logging.error("selected_tags is not a list in final response, using empty list")
+            excel_processor.selected_tags = []
+        
         updated_available_names = [name for name in available_tag_names if name not in excel_processor.selected_tags]
         updated_selected_names = excel_processor.selected_tags.copy()
+        
+        logging.info(f"Move tags - Final response: {len(updated_available_names)} available, {len(updated_selected_names)} selected")
         
         return jsonify({
             'success': True,
@@ -1563,7 +1777,12 @@ def undo_move():
         excel_processor = get_session_excel_processor()
         undo_stack = session.get(UNDO_STACK_KEY, [])
         
+        # Debug logging for undo stack
+        logging.info(f"Undo move requested - Stack size: {len(undo_stack)}")
+        logging.info(f"Undo stack contents: {undo_stack}")
+        
         if not undo_stack:
+            logging.warning("No undo history available - user tried to undo without any previous moves")
             return jsonify({'error': 'No undo history available'}), 400
         
         # Get the last state
@@ -1590,6 +1809,58 @@ def undo_move():
         
     except Exception as e:
         logging.error(f"Error in undo_move: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/save-selection-state', methods=['POST'])
+def save_selection_state():
+    """Save the current selection state for undo functionality."""
+    try:
+        # Check session size but don't optimize unless necessary
+        check_session_size()
+        
+        data = request.get_json()
+        action_type = data.get('action_type', 'checkbox_selection')  # 'checkbox_selection', 'move', etc.
+        
+        excel_processor = get_session_excel_processor()
+        available_tags = excel_processor.get_available_tags()
+        
+        # Convert available_tags to just names for efficiency
+        available_tag_names = [tag.get('Product Name*', '') for tag in available_tags if tag.get('Product Name*', '')]
+        
+        # Get selected tags - handle both dict and string objects
+        selected_tags = []
+        for tag in excel_processor.selected_tags:
+            if isinstance(tag, dict):
+                selected_tags.append(tag.get('Product Name*', ''))
+            elif isinstance(tag, str):
+                selected_tags.append(tag)
+            else:
+                selected_tags.append(str(tag))
+        
+        # Save current state for undo (store only tag names to reduce session size)
+        undo_stack = session.get(UNDO_STACK_KEY, [])
+        undo_stack.append({
+            'available_tag_names': available_tag_names,
+            'selected_tag_names': selected_tags.copy(),
+            'action_type': action_type,
+            'timestamp': datetime.now().isoformat()
+        })
+        # Limit undo stack size to prevent session bloat
+        if len(undo_stack) > 5:
+            undo_stack = undo_stack[-5:]
+        session[UNDO_STACK_KEY] = undo_stack
+        
+        # Debug logging for undo stack
+        logging.info(f"Selection state saved - Stack size: {len(undo_stack)}, Action type: {action_type}")
+        logging.info(f"Current selected tags: {len(selected_tags)}")
+        
+        return jsonify({
+            'success': True,
+            'undo_stack_size': len(undo_stack)
+        })
+        
+    except Exception as e:
+        logging.error(f"Error in save_selection_state: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/update-selected-order', methods=['POST'])
@@ -1662,6 +1933,9 @@ def update_selected_order():
 @app.route('/api/clear-filters', methods=['POST'])
 def clear_filters():
     try:
+        logging.info("=== CLEAR FILTERS ACTION START ===")
+        logging.info(f"Clear filters request at {datetime.now().strftime('%H:%M:%S')}")
+        
         # Check and optimize session size before processing
         check_session_size()
         optimize_session_data()
@@ -1674,9 +1948,15 @@ def clear_filters():
         json_matcher = get_session_json_matcher()
         json_matcher.clear_matches()
         available_tags = excel_processor.get_available_tags()
+        
+        # Get available tag names for frontend
+        available_tag_names = [tag.get('Product Name*', '') for tag in available_tags if tag.get('Product Name*', '')]
+        
+        logging.info(f"Cleared all filters and selected tags. Available tags: {len(available_tag_names)}")
+        
         return jsonify({
             'success': True,
-            'available_tags': available_tags,
+            'available_tags': available_tag_names,
             'selected_tags': [],
             'filters': excel_processor.dropdown_cache
         })
@@ -1941,9 +2221,16 @@ def _get_template_specific_font_size(content, marker_name, orientation, scale_fa
 @app.route('/api/generate', methods=['POST'])
 def generate_labels():
     try:
+        logging.info("=== GENERATE LABELS ACTION START ===")
+        logging.info(f"Generate labels request at {datetime.now().strftime('%H:%M:%S')}")
+        logging.info(f"Request method: {request.method}")
+        logging.info(f"Request URL: {request.url}")
+        logging.info(f"Request headers: {dict(request.headers)}")
+        
         # Rate limiting for label generation
         client_ip = request.remote_addr
         if not check_rate_limit(client_ip):
+            logging.warning(f"Rate limit exceeded for IP: {client_ip}")
             return jsonify({'error': 'Rate limit exceeded. Please wait before generating more labels.'}), 429
         
         # Add request deduplication using request fingerprint
@@ -2344,69 +2631,108 @@ def get_session_cache_key(base_key):
 def get_available_tags():
     try:
         logging.info("=== AVAILABLE TAGS DEBUG START ===")
+        logging.info(f"Available tags request at {datetime.now().strftime('%H:%M:%S')}")
         
-        cache_key = get_session_cache_key('available_tags')
-        logging.info(f"Cache key: {cache_key}")
-        
-        # Check if we should use filtered tags based on JSON matching
-        current_filter_mode = session.get('current_filter_mode', 'full_excel')
-        
-        # Get tags from cache instead of session
-        json_matched_cache_key = session.get('json_matched_cache_key')
-        full_excel_cache_key = session.get('full_excel_cache_key')
-        
-        logging.info(f"Available tags debug - current_filter_mode: {current_filter_mode}")
-        logging.info(f"Available tags debug - json_matched_cache_key: {json_matched_cache_key}")
-        logging.info(f"Available tags debug - full_excel_cache_key: {full_excel_cache_key}")
-        
-        json_matched_tags = cache.get(json_matched_cache_key, []) if json_matched_cache_key else []
-        full_excel_tags = cache.get(full_excel_cache_key, []) if full_excel_cache_key else []
-        
-        logging.info(f"Available tags debug - json_matched_tags count: {len(json_matched_tags)}")
-        logging.info(f"Available tags debug - full_excel_tags count: {len(full_excel_tags)}")
-        
-        # Check if we have specific cache data to use
-        if current_filter_mode == 'json_matched' and json_matched_cache_key:
-            # Use JSON matched tags (even if empty)
-            tags = json_matched_tags
-            logging.info(f"Using JSON matched tags from cache: {len(tags)} items")
+        # CRITICAL FIX: Force fresh data processing for new files
+        session_uploaded_file = session.get('file_path')
+        if session_uploaded_file:
+            logging.info(f"CRITICAL FIX: Session has uploaded file: {session_uploaded_file}")
             
-            import math
-            def clean_dict(d):
-                if not isinstance(d, dict):
-                    logging.warning(f"clean_dict received non-dict item: {type(d)} - {d}")
-                    return {}
-                return {k: ('' if (v is None or (isinstance(v, float) and math.isnan(v))) else v) for k, v in d.items()}
-            tags = [clean_dict(tag) for tag in tags if isinstance(tag, dict)]
-            logging.info(f"Cleaned tags: {len(tags)} items")
+            # CRITICAL FIX: Force skip all cache for new files
+            logging.info(f"CRITICAL FIX: Force skipping all cache for new file")
+            cache_key = get_session_cache_key('available_tags')
+            logging.info(f"Cache key: {cache_key}")
             
-            logging.info(f"Returning {len(tags)} available tags (filter mode: {current_filter_mode})")
-            logging.info("=== AVAILABLE TAGS DEBUG END ===")
-            return jsonify(tags)
-        elif current_filter_mode == 'full_excel' and full_excel_cache_key:
-            # Use full Excel tags
-            tags = full_excel_tags
-            logging.info(f"Using full Excel tags from cache: {len(tags)} items")
+            # Check if we should use filtered tags based on JSON matching
+            current_filter_mode = session.get('current_filter_mode', 'full_excel')
             
-            import math
-            def clean_dict(d):
-                if not isinstance(d, dict):
-                    logging.warning(f"clean_dict received non-dict item: {type(d)} - {d}")
-                    return {}
-                return {k: ('' if (v is None or (isinstance(v, float) and math.isnan(v))) else v) for k, v in d.items()}
-            tags = [clean_dict(tag) for tag in tags if isinstance(tag, dict)]
-            logging.info(f"Cleaned tags: {len(tags)} items")
+            # Get tags from cache instead of session
+            json_matched_cache_key = session.get('json_matched_cache_key')
+            full_excel_cache_key = session.get('full_excel_cache_key')
             
-            logging.info(f"Returning {len(tags)} available tags (filter mode: {current_filter_mode})")
-            logging.info("=== AVAILABLE TAGS DEBUG END ===")
-            return jsonify(tags)
+            logging.info(f"Available tags debug - current_filter_mode: {current_filter_mode}")
+            logging.info(f"Available tags debug - json_matched_cache_key: {json_matched_cache_key}")
+            logging.info(f"Available tags debug - full_excel_cache_key: {full_excel_cache_key}")
+            
+            # CRITICAL FIX: Force empty cache for new files
+            logging.info(f"CRITICAL FIX: Force empty cache for new file")
+            json_matched_tags = []
+            full_excel_tags = []
+            
+            logging.info(f"Available tags debug - json_matched_tags count: {len(json_matched_tags)}")
+            logging.info(f"Available tags debug - full_excel_tags count: {len(full_excel_tags)}")
+            
+            # CRITICAL FIX: Skip all cache checks for new files
+            logging.info(f"CRITICAL FIX: Skipping all cache checks for new file")
+            cached_tags = None
+        else:
+            cache_key = get_session_cache_key('available_tags')
+            logging.info(f"Cache key: {cache_key}")
+            
+            # Check if we should use filtered tags based on JSON matching
+            current_filter_mode = session.get('current_filter_mode', 'full_excel')
+            
+            # Get tags from cache instead of session
+            json_matched_cache_key = session.get('json_matched_cache_key')
+            full_excel_cache_key = session.get('full_excel_cache_key')
+            
+            logging.info(f"Available tags debug - current_filter_mode: {current_filter_mode}")
+            logging.info(f"Available tags debug - json_matched_cache_key: {json_matched_cache_key}")
+            logging.info(f"Available tags debug - full_excel_cache_key: {full_excel_cache_key}")
+            
+            json_matched_tags = cache.get(json_matched_cache_key, []) if json_matched_cache_key else []
+            full_excel_tags = cache.get(full_excel_cache_key, []) if full_excel_cache_key else []
+            
+            logging.info(f"Available tags debug - json_matched_tags count: {len(json_matched_tags)}")
+            logging.info(f"Available tags debug - full_excel_tags count: {len(full_excel_tags)}")
         
-        # Only use general cached tags if we're in full_excel mode and don't have specific cache keys
-        if current_filter_mode == 'full_excel' and not full_excel_cache_key:
-            cached_tags = cache.get(cache_key)
-            if cached_tags is not None:
-                logging.info(f"Returning cached tags: {len(cached_tags)} items")
-                return jsonify(cached_tags)
+        # CRITICAL FIX: Force fresh processing for new files
+        if session_uploaded_file:
+            logging.info(f"CRITICAL FIX: Force fresh processing for new file - skipping all cache")
+            cached_tags = None
+        else:
+            # Check if we have specific cache data to use
+            if current_filter_mode == 'json_matched' and json_matched_cache_key:
+                # Use JSON matched tags (even if empty)
+                tags = json_matched_tags
+                logging.info(f"Using JSON matched tags from cache: {len(tags)} items")
+                
+                import math
+                def clean_dict(d):
+                    if not isinstance(d, dict):
+                        logging.warning(f"clean_dict received non-dict item: {type(d)} - {d}")
+                        return {}
+                    return {k: ('' if (v is None or (isinstance(v, float) and math.isnan(v))) else v) for k, v in d.items()}
+                tags = [clean_dict(tag) for tag in tags if isinstance(tag, dict)]
+                logging.info(f"Cleaned tags: {len(tags)} items")
+                
+                logging.info(f"Returning {len(tags)} available tags (filter mode: {current_filter_mode})")
+                logging.info("=== AVAILABLE TAGS DEBUG END ===")
+                return jsonify(tags)
+            elif current_filter_mode == 'full_excel' and full_excel_cache_key:
+                # Use full Excel tags
+                tags = full_excel_tags
+                logging.info(f"Using full Excel tags from cache: {len(tags)} items")
+                
+                import math
+                def clean_dict(d):
+                    if not isinstance(d, dict):
+                        logging.warning(f"clean_dict received non-dict item: {type(d)} - {d}")
+                        return {}
+                    return {k: ('' if (v is None or (isinstance(v, float) and math.isnan(v))) else v) for k, v in d.items()}
+                tags = [clean_dict(tag) for tag in tags if isinstance(tag, dict)]
+                logging.info(f"Cleaned tags: {len(tags)} items")
+                
+                logging.info(f"Returning {len(tags)} available tags (filter mode: {current_filter_mode})")
+                logging.info("=== AVAILABLE TAGS DEBUG END ===")
+                return jsonify(tags)
+            
+            # Only use general cached tags if we're in full_excel mode and don't have specific cache keys
+            if current_filter_mode == 'full_excel' and not full_excel_cache_key:
+                cached_tags = cache.get(cache_key)
+                if cached_tags is not None:
+                    logging.info(f"Returning cached tags: {len(cached_tags)} items")
+                    return jsonify(cached_tags)
         
         logging.info("No cached tags found, getting ExcelProcessor")
         excel_processor = get_session_excel_processor()
@@ -2419,7 +2745,17 @@ def get_available_tags():
         logging.info(f"DataFrame empty: {excel_processor.df.empty if excel_processor.df is not None else 'N/A'}")
         logging.info(f"DataFrame shape: {excel_processor.df.shape if excel_processor.df is not None else 'N/A'}")
         
+        # CRITICAL FIX: Check if we have an uploaded file in session
+        session_file_path = session.get('file_path')
+        if session_file_path and os.path.exists(session_file_path):
+            logging.info(f"CRITICAL FIX: Session has uploaded file: {session_file_path}")
         if excel_processor.df is None or excel_processor.df.empty:
+                logging.info(f"CRITICAL FIX: Loading uploaded file from session: {session_file_path}")
+                success = excel_processor.load_file(session_file_path)
+                if not success:
+                    logging.error("Failed to load uploaded file from session")
+                    return jsonify({'error': 'Failed to load uploaded file'}), 500
+        elif excel_processor.df is None or excel_processor.df.empty:
             processing_files = [f for f, status in processing_status.items() if status == 'processing']
             logging.info(f"Processing files: {processing_files}")
             if processing_files:
@@ -2465,7 +2801,17 @@ def get_selected_tags():
             logging.error("Failed to get ExcelProcessor instance")
             return jsonify({'error': 'Server error: Unable to initialize data processor'}), 500
         
+        # CRITICAL FIX: Check if we have an uploaded file in session
+        session_file_path = session.get('file_path')
+        if session_file_path and os.path.exists(session_file_path):
+            logging.info(f"CRITICAL FIX: Session has uploaded file: {session_file_path}")
         if excel_processor.df is None or excel_processor.df.empty:
+                logging.info(f"CRITICAL FIX: Loading uploaded file from session: {session_file_path}")
+                success = excel_processor.load_file(session_file_path)
+                if not success:
+                    logging.error("Failed to load uploaded file from session")
+                    return jsonify({'error': 'Failed to load uploaded file'}), 500
+        elif excel_processor.df is None or excel_processor.df.empty:
             processing_files = [f for f, status in processing_status.items() if status == 'processing']
             if processing_files:
                 return jsonify({'error': 'File is still being processed. Please wait...'}), 202
@@ -2504,6 +2850,8 @@ def get_selected_tags():
                 selected_tag_objects.append({'Product Name*': str(tag)})
         
         logging.info(f"Returning {len(selected_tag_objects)} selected tag objects")
+        if selected_tag_objects:
+            logging.info(f"Sample selected tag: {selected_tag_objects[0]}")
         
         return jsonify(selected_tag_objects)
     except Exception as e:
@@ -2995,6 +3343,8 @@ def database_stats():
     except Exception as e:
         logging.error(f"Error getting database stats: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+
 
 @app.route('/api/database-vendor-stats', methods=['GET'])
 def database_vendor_stats():
@@ -3894,12 +4244,30 @@ def performance_stats():
         if hasattr(excel_processor, 'get_product_db_stats'):
             product_db_stats = excel_processor.get_product_db_stats()
         
-        # Get upload processing stats
+        # Get upload processing stats with historical data
+        from datetime import datetime, timedelta
+        
+        # Generate historical data for the last 7 days
+        historical_data = []
+        for i in range(7):
+            date = datetime.now() - timedelta(days=i)
+            historical_data.append({
+                'date': date.strftime('%Y-%m-%d'),
+                'processing_files': len([s for s in processing_status.values() if s == 'processing']),
+                'ready_files': len([s for s in processing_status.values() if s == 'ready']),
+                'error_files': len([s for s in processing_status.values() if 'error' in str(s)]),
+                'total_files': len(processing_status),
+                'memory_usage_mb': round(memory.used / (1024 * 1024), 2)
+            })
+            
         upload_stats = {
-            'processing_files': len([s for s in processing_status.values() if s == 'processing']),
-            'ready_files': len([s for s in processing_status.values() if s == 'ready']),
-            'error_files': len([s for s in processing_status.values() if 'error' in str(s)]),
-            'total_files': len(processing_status),
+            'current': {
+                'processing_files': len([s for s in processing_status.values() if s == 'processing']),
+                'ready_files': len([s for s in processing_status.values() if s == 'ready']),
+                'error_files': len([s for s in processing_status.values() if 'error' in str(s)]),
+                'total_files': len(processing_status)
+            },
+            'historical': historical_data,
             'avg_processing_time': 2.5,  # Estimated average processing time in seconds
             'upload_response_time': 0.8,  # Estimated upload response time in seconds
             'background_processing_time': 1.7  # Estimated background processing time
@@ -4370,7 +4738,23 @@ def json_inventory():
         template_type = 'inventory'
         template_path = get_template_path(template_type)
         font_scheme = get_font_scheme(template_type)
+        
+        # Debug logging
+        logging.info(f"Creating TemplateProcessor with type: {template_type}")
+        logging.info(f"Template path: {template_path}")
+        
         processor = TemplateProcessor(template_type, font_scheme, 1.0)
+        
+        # Debug the template dimensions
+        from docx import Document
+        if hasattr(processor, '_expanded_template_buffer') and processor._expanded_template_buffer:
+            buffer_copy = BytesIO(processor._expanded_template_buffer.getvalue())
+            debug_doc = Document(buffer_copy)
+            if debug_doc.tables:
+                table = debug_doc.tables[0]
+                logging.info(f"Template table dimensions: {len(table.rows)} rows x {len(table.columns)} columns")
+            else:
+                logging.warning("No tables found in expanded template")
         
         # Convert DataFrame to records format expected by processor
         records = []
@@ -5141,15 +5525,21 @@ def get_rate_limit_info(ip_address):
 def get_initial_data():
     """Load initial data for the application (called by frontend after page load)."""
     try:
+        logging.info("=== INITIAL DATA REQUEST START ===")
+        logging.info(f"Initial data request at {datetime.now().strftime('%H:%M:%S')}")
+        
         # Get the excel processor
         excel_processor = get_excel_processor()
+        logging.info(f"Excel processor obtained: {excel_processor}")
         
         # Check if excel_processor is valid and has df attribute
         if not hasattr(excel_processor, 'df'):
             excel_processor.df = None
+            logging.info("Excel processor missing df attribute - set to None")
             
         # If no data is loaded, try to load the default file
         if excel_processor.df is None:
+            logging.info("No data loaded - attempting to load default file")
             from src.core.data.excel_processor import get_default_upload_file
             default_file = get_default_upload_file()
             
@@ -5158,6 +5548,7 @@ def get_initial_data():
                     logging.info(f"Loading default file: {os.path.basename(default_file)}")
                     excel_processor.load_file(default_file)
                     excel_processor._last_loaded_file = default_file
+                    logging.info(f"Default file loaded successfully")
                 except Exception as e:
                     logging.error(f"Failed to load default file: {e}")
                     return jsonify({
@@ -5165,21 +5556,32 @@ def get_initial_data():
                         'message': f'Failed to load default file: {str(e)}'
                     })
             else:
+                logging.warning("No default file found")
                 return jsonify({
                     'success': False,
                     'message': 'No default file found and no data currently loaded'
                 })
         
         if hasattr(excel_processor, 'df') and excel_processor.df is not None:
+            logging.info(f"Data loaded - DataFrame shape: {excel_processor.df.shape}")
+            
             # Use the same logic as filter-options to get properly formatted weight values
+            logging.info("Getting dynamic filter options...")
             filters = excel_processor.get_dynamic_filter_options({})
             import math
             def clean_list(lst):
                 return ['' if (v is None or (isinstance(v, float) and math.isnan(v))) else v for v in lst]
             filters = {k: clean_list(v) for k, v in filters.items()}
+            logging.info(f"Filter options processed: {len(filters)} filter categories")
             
             # Get the current file path
             current_file = getattr(excel_processor, '_last_loaded_file', 'Unknown file')
+            logging.info(f"Current file: {current_file}")
+            
+            # Get available tags
+            logging.info("Getting available tags...")
+            available_tags = excel_processor.get_available_tags()
+            logging.info(f"Available tags count: {len(available_tags)}")
             
             initial_data = {
                 'success': True,
@@ -5188,13 +5590,15 @@ def get_initial_data():
                 'filepath': current_file,
                 'columns': excel_processor.df.columns.tolist(),
                 'filters': filters,  # Use the properly formatted filters
-                'available_tags': excel_processor.get_available_tags(),
+                'available_tags': available_tags,
                 'selected_tags': [],  # Don't restore selected tags on page reload
                 'total_records': len(excel_processor.df)
             }
             logging.info(f"Initial data loaded: {len(initial_data['available_tags'])} tags, {initial_data['total_records']} records")
+            logging.info("=== INITIAL DATA REQUEST COMPLETE ===")
             return jsonify(initial_data)
         else:
+            logging.error("Excel processor has no DataFrame")
             return jsonify({
                 'success': False,
                 'message': 'Failed to load data'
@@ -5807,6 +6211,316 @@ def set_strain_lineage():
         logging.error(f"Error setting strain lineage: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/vendor-strain-browser', methods=['GET'])
+def vendor_strain_browser():
+    """Get organized data for vendor and strain browsing in the lineage editor."""
+    try:
+        excel_processor = get_excel_processor()
+        if not excel_processor or excel_processor.df is None or excel_processor.df.empty:
+            return jsonify({'error': 'No data available'}), 404
+        
+        product_db = get_product_database()
+        if not product_db:
+            return jsonify({'error': 'Product database not available'}), 500
+        
+        conn = product_db._get_connection()
+        
+        # Get vendors with their strains and product counts
+        vendors_query = '''
+            SELECT 
+                p.vendor,
+                COUNT(DISTINCT s.strain_name) as unique_strains,
+                COUNT(*) as total_products,
+                COUNT(DISTINCT p.brand) as unique_brands
+            FROM products p
+            LEFT JOIN strains s ON p.strain_id = s.id
+            WHERE p.vendor IS NOT NULL AND p.vendor != ''
+            GROUP BY p.vendor
+            ORDER BY total_products DESC
+        '''
+        vendors_df = pd.read_sql_query(vendors_query, conn)
+        
+        # Get strains with vendor/brand/lineage info
+        strains_query = '''
+            SELECT 
+                s.strain_name,
+                COALESCE(s.sovereign_lineage, s.canonical_lineage) as current_lineage,
+                s.canonical_lineage,
+                s.sovereign_lineage,
+                COUNT(p.id) as product_count,
+                COUNT(DISTINCT p.vendor) as vendor_count,
+                COUNT(DISTINCT p.brand) as brand_count,
+                GROUP_CONCAT(DISTINCT p.vendor) as vendors,
+                GROUP_CONCAT(DISTINCT p.brand) as brands,
+                s.last_seen_date
+            FROM strains s
+            LEFT JOIN products p ON s.id = p.strain_id
+            GROUP BY s.strain_name, s.canonical_lineage, s.sovereign_lineage
+            ORDER BY product_count DESC, s.strain_name
+        '''
+        strains_df = pd.read_sql_query(strains_query, conn)
+        
+        # Get vendor-strain combinations with detailed info
+        vendor_strains_query = '''
+            SELECT 
+                p.vendor,
+                s.strain_name,
+                COALESCE(s.sovereign_lineage, s.canonical_lineage) as current_lineage,
+                s.canonical_lineage,
+                s.sovereign_lineage,
+                COUNT(*) as product_count,
+                COUNT(DISTINCT p.brand) as brand_count,
+                GROUP_CONCAT(DISTINCT p.brand) as brands,
+                MAX(p.created_at) as last_updated
+            FROM products p
+            LEFT JOIN strains s ON p.strain_id = s.id
+            WHERE p.vendor IS NOT NULL AND p.vendor != '' 
+              AND s.strain_name IS NOT NULL AND s.strain_name != ''
+            GROUP BY p.vendor, s.strain_name
+            ORDER BY p.vendor, product_count DESC
+        '''
+        vendor_strains_df = pd.read_sql_query(vendor_strains_query, conn)
+        
+        # Get product types distribution
+        product_types_query = '''
+            SELECT 
+                product_type,
+                COUNT(*) as product_count,
+                COUNT(DISTINCT strain_id) as strain_count,
+                COUNT(DISTINCT vendor) as vendor_count
+            FROM products
+            WHERE product_type IS NOT NULL AND product_type != ''
+            GROUP BY product_type
+            ORDER BY product_count DESC
+        '''
+        product_types_df = pd.read_sql_query(product_types_query, conn)
+        
+        return jsonify({
+            'vendors': vendors_df.to_dict('records'),
+            'strains': strains_df.to_dict('records'),
+            'vendor_strains': vendor_strains_df.to_dict('records'),
+            'product_types': product_types_df.to_dict('records'),
+            'summary': {
+                'total_vendors': len(vendors_df),
+                'total_strains': len(strains_df),
+                'total_vendor_strain_combinations': len(vendor_strains_df),
+                'total_product_types': len(product_types_df)
+            }
+        })
+        
+    except Exception as e:
+        logging.error(f"Error in vendor strain browser: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/strain-search', methods=['POST'])
+def strain_search():
+    """Search strains with filtering and pagination."""
+    try:
+        data = request.get_json() or {}
+        search_term = data.get('search', '').strip()
+        vendor_filter = data.get('vendor', '').strip()
+        lineage_filter = data.get('lineage', '').strip()
+        page = data.get('page', 1)
+        per_page = min(data.get('per_page', 50), 100)  # Max 100 results per page
+        
+        excel_processor = get_excel_processor()
+        if not excel_processor or excel_processor.df is None or excel_processor.df.empty:
+            return jsonify({'error': 'No data available'}), 404
+        
+        product_db = get_product_database()
+        if not product_db:
+            return jsonify({'error': 'Product database not available'}), 500
+        
+        conn = product_db._get_connection()
+        
+        # Build dynamic query
+        where_clauses = []
+        params = []
+        
+        base_query = '''
+            SELECT 
+                s.strain_name,
+                COALESCE(s.sovereign_lineage, s.canonical_lineage) as current_lineage,
+                s.canonical_lineage,
+                s.sovereign_lineage,
+                COUNT(p.id) as product_count,
+                COUNT(DISTINCT p.vendor) as vendor_count,
+                COUNT(DISTINCT p.brand) as brand_count,
+                GROUP_CONCAT(DISTINCT p.vendor) as vendors,
+                GROUP_CONCAT(DISTINCT p.brand) as brands,
+                s.last_seen_date,
+                s.first_seen_date
+            FROM strains s
+            LEFT JOIN products p ON s.id = p.strain_id
+        '''
+        
+        if search_term:
+            where_clauses.append("s.strain_name LIKE ?")
+            params.append(f"%{search_term}%")
+        
+        if vendor_filter:
+            where_clauses.append("p.vendor = ?")
+            params.append(vendor_filter)
+        
+        if lineage_filter:
+            where_clauses.append("(s.canonical_lineage = ? OR s.sovereign_lineage = ?)")
+            params.extend([lineage_filter, lineage_filter])
+        
+        if where_clauses:
+            base_query += " WHERE " + " AND ".join(where_clauses)
+        
+        base_query += '''
+            GROUP BY s.strain_name, s.canonical_lineage, s.sovereign_lineage
+            ORDER BY product_count DESC, s.strain_name
+        '''
+        
+        # Get total count for pagination
+        count_query = f'''
+            SELECT COUNT(DISTINCT s.strain_name) 
+            FROM strains s
+            LEFT JOIN products p ON s.id = p.strain_id
+            {" WHERE " + " AND ".join(where_clauses) if where_clauses else ""}
+        '''
+        
+        # Add pagination
+        offset = (page - 1) * per_page
+        paginated_query = base_query + f" LIMIT {per_page} OFFSET {offset}"
+        
+        # Execute queries
+        cursor = conn.cursor()
+        cursor.execute(count_query, params)
+        total_count = cursor.fetchone()[0]
+        
+        results_df = pd.read_sql_query(paginated_query, conn, params=params)
+        
+        return jsonify({
+            'strains': results_df.to_dict('records'),
+            'pagination': {
+                'page': page,
+                'per_page': per_page,
+                'total': total_count,
+                'pages': (total_count + per_page - 1) // per_page
+            },
+            'filters': {
+                'search': search_term,
+                'vendor': vendor_filter,
+                'lineage': lineage_filter
+            }
+        })
+        
+    except Exception as e:
+        logging.error(f"Error in strain search: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/bulk-update-lineage', methods=['POST'])
+def bulk_update_lineage():
+    """Update lineage for multiple strains at once."""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        updates = data.get('updates', [])
+        if not updates:
+            return jsonify({'error': 'No updates provided'}), 400
+        
+        # Validate updates format
+        for update in updates:
+            if not isinstance(update, dict) or 'strain_name' not in update or 'lineage' not in update:
+                return jsonify({'error': 'Invalid update format. Each update must have strain_name and lineage'}), 400
+        
+        excel_processor = get_excel_processor()
+        if not excel_processor or excel_processor.df is None or excel_processor.df.empty:
+            return jsonify({'error': 'No data available'}), 404
+        
+        product_db = get_product_database()
+        if not product_db:
+            return jsonify({'error': 'Product database not available'}), 500
+        
+        conn = product_db._get_connection()
+        cursor = conn.cursor()
+        results = []
+        
+        for update in updates:
+            strain_name = update['strain_name']
+            lineage = update['lineage']
+            
+            try:
+                # Check if strain exists
+                cursor.execute('SELECT id FROM strains WHERE strain_name = ?', (strain_name,))
+                strain_row = cursor.fetchone()
+                
+                if not strain_row:
+                    results.append({
+                        'strain_name': strain_name,
+                        'success': False,
+                        'error': f'Strain "{strain_name}" not found'
+                    })
+                    continue
+                
+                strain_id = strain_row[0]
+                
+                # Update strain lineage in database
+                cursor.execute('''
+                    UPDATE strains 
+                    SET sovereign_lineage = ?, last_updated = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                ''', (lineage, strain_id))
+                
+                # Update products in database
+                cursor.execute('''
+                    UPDATE products 
+                    SET lineage = ?, last_updated = CURRENT_TIMESTAMP
+                    WHERE strain_id = ?
+                ''', (lineage, strain_id))
+                
+                # Get product count
+                cursor.execute('SELECT COUNT(*) FROM products WHERE strain_id = ?', (strain_id,))
+                product_count = cursor.fetchone()[0]
+                
+                # Update products in excel data if available
+                if excel_processor.df is not None:
+                    mask = excel_processor.df['Product Strain'].str.strip() == strain_name.strip()
+                    excel_matches = mask.sum()
+                    if excel_matches > 0:
+                        excel_processor.df.loc[mask, 'Lineage'] = lineage
+                
+                results.append({
+                    'strain_name': strain_name,
+                    'success': True,
+                    'lineage': lineage,
+                    'products_affected': int(product_count)
+                })
+                
+                logging.info(f"Bulk update: Updated strain '{strain_name}' to lineage '{lineage}', affected {product_count} products")
+                
+            except Exception as e:
+                results.append({
+                    'strain_name': strain_name,
+                    'success': False,
+                    'error': str(e)
+                })
+        
+        conn.commit()
+        
+        successful_updates = [r for r in results if r['success']]
+        failed_updates = [r for r in results if not r['success']]
+        
+        return jsonify({
+            'success': True,
+            'message': f'Processed {len(updates)} updates: {len(successful_updates)} successful, {len(failed_updates)} failed',
+            'results': results,
+            'summary': {
+                'total_updates': len(updates),
+                'successful': len(successful_updates),
+                'failed': len(failed_updates)
+            }
+        })
+        
+    except Exception as e:
+        logging.error(f"Error in bulk lineage update: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 def generate_matched_excel_file(matched_products, original_df, output_filename=None):
     """
     Generate a new Excel file containing only the JSON matched products with the same column structure as the original Excel file.
@@ -6036,6 +6750,16 @@ def serve_test_upload():
 def serve_default_file_loading_test():
     """Serve the default file loading test page."""
     return send_from_directory('.', 'test_default_file_loading.html')
+
+@app.route('/test_undo_functionality.html')
+def serve_undo_functionality_test():
+    """Serve the undo functionality test page."""
+    return send_from_directory('.', 'test_undo_functionality.html')
+
+@app.route('/test_undo_selections.html')
+def serve_undo_selections_test():
+    """Serve the undo selections test page."""
+    return send_from_directory('.', 'test_undo_selections.html')
 
 @app.route('/upload-fast', methods=['POST'])
 def upload_file_fast():

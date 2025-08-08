@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug Tag Selection</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: #f0f0f0;
+        }
+        .debug-container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .tag-item {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            margin: 5px 0;
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .tag-checkbox {
+            margin-right: 10px;
+        }
+        .tag-name {
+            flex: 1;
+        }
+        .debug-output {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 10px;
+            margin-top: 10px;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .test-button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        .test-button:hover {
+            background: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <h1>Debug Tag Selection</h1>
+    
+    <div class="debug-container">
+        <h2>Test Tag Selection</h2>
+        <div id="testTags">
+            <div class="tag-item">
+                <input type="checkbox" class="tag-checkbox" value="Memory Loss Wax by Hustler's Ambition - 1g" id="test1" title="Select Memory Loss Wax">
+                <div class="tag-name">Memory Loss Wax by Hustler's Ambition - 1g</div>
+            </div>
+            <div class="tag-item">
+                <input type="checkbox" class="tag-checkbox" value="Test Product 2" id="test2" title="Select Test Product 2">
+                <div class="tag-name">Test Product 2</div>
+            </div>
+        </div>
+        <div id="debugOutput" class="debug-output"></div>
+        <button class="test-button" onclick="testTagSelection()">Test Tag Selection</button>
+        <button class="test-button" onclick="clearDebug()">Clear Debug</button>
+    </div>
+
+    <script>
+        // Simulate TagManager state
+        const TagManager = {
+            state: {
+                persistentSelectedTags: [],
+                selectedTags: new Set(),
+                tags: [],
+                originalTags: []
+            },
+            handleTagSelection: function(e, tag) {
+                this.logDebug('=== HANDLE TAG SELECTION CALLED ===');
+                this.logDebug('Event:', e);
+                this.logDebug('Tag:', tag);
+                this.logDebug('Persistent selected tags:', this.state.persistentSelectedTags);
+                this.updateSelectedTags();
+            },
+            updateSelectedTags: function() {
+                this.logDebug('=== UPDATE SELECTED TAGS ===');
+                this.logDebug('Tags to display:', this.state.persistentSelectedTags);
+                
+                const selectedTagsDiv = document.getElementById('selectedTags');
+                if (selectedTagsDiv) {
+                    selectedTagsDiv.innerHTML = '<h3>Selected Tags:</h3><ul>' + 
+                        this.state.persistentSelectedTags.map(tag => `<li>${tag}</li>`).join('') + '</ul>';
+                }
+            },
+            logDebug: function(message, data) {
+                const debugOutput = document.getElementById('debugOutput');
+                const timestamp = new Date().toLocaleTimeString();
+                let logMessage = `[${timestamp}] ${message}`;
+                if (data !== undefined) {
+                    logMessage += ': ' + JSON.stringify(data, null, 2);
+                }
+                debugOutput.innerHTML += logMessage + '\n';
+                debugOutput.scrollTop = debugOutput.scrollHeight;
+                console.log(message, data);
+            }
+        };
+
+        // Test tag selection
+        function testTagSelection() {
+            TagManager.logDebug('Testing tag selection...');
+            
+            // Simulate clicking the first checkbox
+            const checkbox = document.querySelector('#test1');
+            if (checkbox) {
+                checkbox.checked = !checkbox.checked;
+                checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        }
+
+        // Clear debug output
+        function clearDebug() {
+            document.getElementById('debugOutput').innerHTML = '';
+        }
+
+        // Initialize the test
+        document.addEventListener('DOMContentLoaded', function() {
+            TagManager.logDebug('Debug page loaded');
+            
+            // Add event listeners to test tags
+            document.querySelectorAll('#testTags .tag-item').forEach(tagItem => {
+                tagItem.addEventListener('click', function(e) {
+                    // Don't trigger if clicking on the checkbox itself
+                    if (e.target.classList.contains('tag-checkbox')) {
+                        return;
+                    }
+                    
+                    // Toggle the checkbox
+                    const checkbox = this.querySelector('.tag-checkbox');
+                    if (checkbox) {
+                        checkbox.checked = !checkbox.checked;
+                        checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                });
+            });
+            
+            // Add event listeners to checkboxes
+            document.querySelectorAll('#testTags .tag-checkbox').forEach(checkbox => {
+                checkbox.addEventListener('change', function(e) {
+                    TagManager.logDebug('Checkbox changed:', this.value, 'checked:', this.checked);
+                    
+                    const tagName = this.value;
+                    const isChecked = this.checked;
+                    
+                    if (isChecked) {
+                        if (!TagManager.state.persistentSelectedTags.includes(tagName)) {
+                            TagManager.state.persistentSelectedTags.push(tagName);
+                            TagManager.logDebug('Added tag to persistent selected tags:', tagName);
+                        }
+                    } else {
+                        const index = TagManager.state.persistentSelectedTags.indexOf(tagName);
+                        if (index > -1) {
+                            TagManager.state.persistentSelectedTags.splice(index, 1);
+                            TagManager.logDebug('Removed tag from persistent selected tags:', tagName);
+                        }
+                    }
+                    
+                    TagManager.logDebug('Current persistentSelectedTags:', TagManager.state.persistentSelectedTags);
+                    
+                    // Create a minimal tag object for the handler
+                    const tag = {
+                        'Product Name*': tagName,
+                        'Product Brand': 'Test Brand',
+                        'Vendor': 'Test Vendor',
+                        'Product Type*': 'Test Type',
+                        'Lineage': 'MIXED'
+                    };
+                    
+                    TagManager.handleTagSelection(e, tag);
+                });
+            });
+        });
+    </script>
+</body>
+</html> 

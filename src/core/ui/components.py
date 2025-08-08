@@ -556,7 +556,7 @@ def render_tag_row_with_emoji(parent, tag):
     """
     product_type = tag.get('productType', '').strip().lower()
     emoji = PRODUCT_TYPE_EMOJIS.get(product_type, '')
-    display_text = f"{emoji} {product_type.title()}" if emoji else product_type.title()
+    display_text = product_type.title()
     row = tk.Frame(parent)
     row.pack(fill="x", pady=2)
     # Product type label with emoji
