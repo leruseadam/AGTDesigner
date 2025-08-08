@@ -404,13 +404,16 @@ def create_app():
     
     # Check if we're in development mode
     development_mode = app.config.get('DEVELOPMENT_MODE', False)
-    
-    # Force development mode for template reloading
-    app.config['TEMPLATES_AUTO_RELOAD'] = True  # Always enable template auto-reload
-    app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0  # Always disable static file caching
-    app.config['DEBUG'] = True  # Enable debug mode
-    app.config['PROPAGATE_EXCEPTIONS'] = True  # Enable exception propagation for debugging
-    logging.info("Running with template auto-reload ENABLED")
+
+    # Respect environment: enable dev features only in development
+    app.config['TEMPLATES_AUTO_RELOAD'] = bool(development_mode)
+    app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0 if development_mode else 31536000
+    app.config['DEBUG'] = bool(app.config.get('DEBUG', development_mode))
+    app.config['PROPAGATE_EXCEPTIONS'] = bool(development_mode)
+    if development_mode:
+        logging.info("Running in DEVELOPMENT mode with template auto-reload enabled")
+    else:
+        logging.info("Running in PRODUCTION mode with static asset caching enabled")
     
     app.config['MAX_CONTENT_LENGTH'] = 20 * 1024 * 1024  # 20MB max file size
     app.config['TESTING'] = False
