@@ -1,9 +1,22 @@
 import os
+import socket
 import threading
 import time
 
 # Ensure Flask app imports correctly
 from app import LabelMakerApp
+
+def get_free_port(preferred: int = 5002) -> int:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind(('127.0.0.1', preferred))
+            return preferred
+    except OSError:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(('127.0.0.1', 0))
+            return s.getsockname()[1]
+
 
 def start_flask_in_thread(host: str = '127.0.0.1', port: int = 5002):
     app_wrapper = LabelMakerApp()
@@ -17,7 +30,8 @@ def start_flask_in_thread(host: str = '127.0.0.1', port: int = 5002):
 def main():
     # Start backend
     host = os.environ.get('HOST', '127.0.0.1')
-    port = int(os.environ.get('FLASK_PORT', 5002))
+    port = get_free_port(int(os.environ.get('FLASK_PORT', 5002)))
+    os.environ['FLASK_PORT'] = str(port)
     start_flask_in_thread(host, port)
 
     # Slight delay to ensure server is listening
