@@ -3338,6 +3338,10 @@ const TagManager = {
                 if (row) row.remove();
                 // Update counts minimally
                 this.updateTagCount('selected', this.state.persistentSelectedTags.length);
+                // Stop this change from bubbling to any global listeners that might reload data
+                if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+                e.stopPropagation();
+                e.preventDefault();
             }, { passive: true });
             Object.defineProperty(container, '_hasDeselectionHandler', { value: true, enumerable: false });
         }

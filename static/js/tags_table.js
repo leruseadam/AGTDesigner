@@ -383,8 +383,10 @@ class TagsTable {
               TagManager.updateTagCount('selected', TagManager.state.persistentSelectedTags.length);
             }
           }
-          // Keep minimal to avoid stalls
-          // TagManager.updateTagCheckboxes();
+          // Halt further propagation to avoid any global listeners that might reload data
+          if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+          e.stopPropagation();
+          e.preventDefault();
         } catch (error) {
           console.error('Error in checkbox change handler:', error);
           // Prevent the error from causing the page to exit
