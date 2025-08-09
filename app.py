@@ -1275,12 +1275,20 @@ def process_excel_background(filename, temp_path):
                 logging.info("[BG] Skipping global cache clear - not in request context")
         except Exception as global_cache_error:
             logging.warning(f"[BG] Error in global cache clearing: {global_cache_error}")
-        # Mark as ready as soon as DataFrame is loaded so frontend can proceed
+        # Precompute and cache available tags for this file to make the first frontend
+        # fetch instantaneous after status flips to 'ready'. Use a cache key derived
+        # from the file path so this is safe in background threads without session.
         try:
-            update_processing_status(filename, 'ready')
-            logging.info(f"[BG] Marked {filename} as ready (DataFrame loaded)")
-        except Exception as mark_ready_error:
-            logging.warning(f"[BG] Failed to mark ready: {mark_ready_error}")
+            from src.core.data.excel_processor import ExcelProcessor  # already imported above, safe
+            available_tags = new_processor.get_available_tags()
+            file_cache_key = get_file_cache_key('available_tags_file', temp_path)
+            try:
+                cache.set(file_cache_key, available_tags, timeout=3600)
+                logging.info(f"[BG] Precomputed and cached {len(available_tags)} available tags under key {file_cache_key}")
+            except Exception as cache_err:
+                logging.warning(f"[BG] Failed to cache precomputed available tags: {cache_err}")
+        except Exception as precompute_err:
+            logging.warning(f"[BG] Failed to precompute available tags: {precompute_err}")
 
         # Step 2: Update the global processor safely with minimal clearing
         global _excel_processor
@@ -1388,14 +1396,10 @@ def process_excel_background(filename, temp_path):
         except Exception as session_error:
             logging.warning(f"[BG] Error clearing session/g context: {session_error}")
         
-        # Update processing status to success
+        # Update processing status to success only after precompute
         update_processing_status(filename, 'ready')
         logging.info(f"[BG] ===== BACKGROUND PROCESSING COMPLETE =====")
         logging.info(f"[BG] File processing completed successfully: {filename}")
-        
-        # Step 3: Mark as ready immediately (no delay needed with fast loading)
-        logging.info(f"[BG] Marking file as ready: {filename}")
-        update_processing_status(filename, 'ready')
         logging.info(f"[BG] File marked as ready: {filename}")
         logging.info(f"[BG] Current processing statuses: {dict(processing_status)}")
         
@@ -2677,6 +2681,20 @@ def get_session_cache_key(base_key):
     key_str = f"{base_key}:{sid}:{file_path}"
     return hashlib.sha256(key_str.encode()).hexdigest()
 
+def get_file_cache_key(base_key: str, file_path: str) -> str:
+    """Build a cache key that is stable per uploaded file path.
+
+    This does not rely on a request/session context, so it can be used safely
+    from background threads. The returned key is deterministic for a given
+    file path and base key.
+    """
+    try:
+        normalized = os.path.abspath(file_path) if file_path else ''
+    except Exception:
+        normalized = file_path or ''
+    digest = hashlib.sha256(f"{base_key}:{normalized}".encode()).hexdigest()
+    return f"{base_key}_{digest}"
+
 @app.route('/api/available-tags', methods=['GET'])
 def get_available_tags():
     try:
@@ -2784,7 +2802,28 @@ def get_available_tags():
                     logging.info(f"Returning cached tags: {len(cached_tags)} items")
                     return jsonify(cached_tags)
         
-        logging.info("No cached tags found, getting ExcelProcessor")
+        logging.info("No cached tags found, checking for background precompute cache")
+        # Use precomputed per-file cache if present to avoid first-request slowness
+        session_file_for_cache = session.get('file_path')
+        if session_file_for_cache and os.path.exists(session_file_for_cache):
+            precompute_key = get_file_cache_key('available_tags_file', session_file_for_cache)
+            try:
+                precomputed = cache.get(precompute_key)
+            except Exception:
+                precomputed = None
+            if precomputed is not None:
+                logging.info(f"Serving {len(precomputed)} precomputed available tags from cache key {precompute_key}")
+                # Also store into session-scoped cache for subsequent requests
+                try:
+                    session_scoped_key = get_session_cache_key('available_tags')
+                    cache.set(session_scoped_key, precomputed, timeout=3600)
+                    logging.info(f"Warmed session cache for available tags: {session_scoped_key}")
+                except Exception as warm_err:
+                    logging.warning(f"Failed to warm session cache: {warm_err}")
+                logging.info("=== AVAILABLE TAGS DEBUG END ===")
+                return jsonify(precomputed)
+
+        logging.info("No precompute cache hit, getting ExcelProcessor")
         excel_processor = get_session_excel_processor()
         if excel_processor is None:
             logging.error("Failed to get ExcelProcessor instance")
@@ -2817,7 +2856,7 @@ def get_available_tags():
                 logging.info(f"Attempting to load default file: {default_file}")
                 success = excel_processor.load_file(default_file)
         
-        logging.info("Getting available tags from ExcelProcessor")
+        logging.info("Getting available tags from ExcelProcessor (no cache path)")
         tags = excel_processor.get_available_tags()
         logging.info(f"Raw tags obtained: {len(tags)} items")
         
