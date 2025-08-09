@@ -1046,9 +1046,6 @@ class TemplateProcessor:
                 else:
                     lineage_value = label_context['Lineage']
                 
-                # Add a subtle single space before lineage for classic types (no bullet)
-                if self.template_type in {"horizontal", "vertical", "double"} and lineage_value and product_type in classic_types:
-                    lineage_value = ' ' + lineage_value
             
             label_context['Lineage'] = wrap_with_marker(unwrap_marker(lineage_value, 'LINEAGE'), 'LINEAGE')
 
@@ -1613,12 +1610,12 @@ class TemplateProcessor:
                     ]
                     if content.upper() in classic_lineages and content.upper() != "PARAPHERNALIA":
                         paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                        if self.template_type in {"horizontal", "double", "vertical"}:
-                            paragraph.paragraph_format.left_indent = Inches(0.15)
+                        # No paragraph left indent; rely on a single leading space in the text only
+                        paragraph.paragraph_format.left_indent = Inches(0)
                     else:
                         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        if self.template_type in {"horizontal", "double", "vertical"}:
-                            paragraph.paragraph_format.left_indent = Inches(0.15)
+                        # Ensure no extra indent is applied
+                        paragraph.paragraph_format.left_indent = Inches(0)
                     continue
                 # Always center ProductBrand and ProductBrand_Center markers
                 if marker_name in ('PRODUCTBRAND', 'PRODUCTBRAND_CENTER') or 'PRODUCTBRAND' in marker_name:
@@ -2737,7 +2734,7 @@ class TemplateProcessor:
                 ]
                 if lineage_content.upper() in classic_lineages and lineage_content.upper() != "PARAPHERNALIA":
                     if self.template_type in {"horizontal", "double", "vertical"}:
-                        paragraph.paragraph_format.left_indent = Inches(0.15)
+                        paragraph.paragraph_format.left_indent = Inches(0)
             
             self.logger.debug(f"Processed combined lineage/vendor with right-aligned vendor: lineage='{lineage_content}', vendor='{vendor_content}'")
             
@@ -2808,7 +2805,7 @@ class TemplateProcessor:
                 ]
                 if lineage_content.upper() in classic_lineages and lineage_content.upper() != "PARAPHERNALIA":
                     if self.template_type in {"horizontal", "double", "vertical"}:
-                        paragraph.paragraph_format.left_indent = Inches(0.15)
+                        paragraph.paragraph_format.left_indent = Inches(0)
             
             self.logger.debug(f"Processed lineage/vendor on two lines: lineage='{lineage_content}', vendor='{vendor_content}'")
             
