@@ -3079,6 +3079,27 @@ def update_lineage():
                 except Exception as db_error:
                     logging.error(f"Error persisting lineage to database: {db_error}")
             
+            # Invalidate caches so subsequent fetches reflect the updated lineage
+            try:
+                cache_key = get_session_cache_key('available_tags')
+                cache.delete(cache_key)
+                full_excel_cache_key = session.get('full_excel_cache_key')
+                json_matched_cache_key = session.get('json_matched_cache_key')
+                if full_excel_cache_key:
+                    cache.delete(full_excel_cache_key)
+                if json_matched_cache_key:
+                    cache.delete(json_matched_cache_key)
+                logging.info("Cleared available tags caches after lineage update")
+            except Exception as cache_error:
+                logging.warning(f"Could not clear caches after lineage update: {cache_error}")
+            
+            # Optionally refresh dropdown cache to ensure lineage filter reflects changes
+            try:
+                if hasattr(excel_processor, '_cache_dropdown_values'):
+                    excel_processor._cache_dropdown_values()
+            except Exception:
+                pass
+            
             return jsonify({'success': True, 'message': f'Lineage updated to {new_lineage}'})
         else:
             return jsonify({'error': 'Product not found'}), 404
