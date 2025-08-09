@@ -3311,16 +3311,19 @@ const TagManager = {
         // Attach a delegated change handler to handle deselection within selectedTags
         // Install a single delegated deselection handler once (idempotent)
         if (!container._hasDeselectionHandler) {
-            // Prevent bubbling/click side-effects from checkboxes in selected list
+            // Toggle by clicking anywhere on the row (not on dropdowns)
             container.addEventListener('click', (e) => {
                 const t = e.target;
-                if (t && t.matches('input[type="checkbox"].tag-checkbox')) {
-                    e.stopPropagation();
-                    if (typeof e.stopImmediatePropagation === 'function') {
-                        e.stopImmediatePropagation();
-                    }
-                }
-            }, true);
+                // Ignore clicks on lineage dropdowns
+                if (t.closest('.lineage-dropdown')) return;
+                const row = t.closest('.tag-item, .tag-row');
+                if (!row) return;
+                const cb = row.querySelector('input[type="checkbox"].tag-checkbox');
+                if (!cb) return;
+                if (t === cb) return; // checkbox itself will emit change
+                cb.checked = !cb.checked;
+                cb.dispatchEvent(new Event('change', { bubbles: true }));
+            });
             container.addEventListener('change', (e) => {
                 const target = e.target;
                 if (!target || !target.matches('input[type="checkbox"].tag-checkbox')) return;

@@ -406,13 +406,9 @@ class TagsTable {
           // Find the checkbox within this tag item
           const checkbox = this.querySelector('.tag-checkbox');
           if (checkbox) {
-            // Toggle the checkbox
-            // Toggle without bubbling to parent containers
-            e.stopPropagation();
+            // Toggle and let change bubble so TagManager state sync runs
             checkbox.checked = !checkbox.checked;
-            // Trigger change on the checkbox only
-            const evt = new Event('change', { bubbles: false });
-            checkbox.dispatchEvent(evt);
+            checkbox.dispatchEvent(new Event('change', { bubbles: true }));
           }
         } catch (error) {
           console.error('Error in tag item click handler:', error);
