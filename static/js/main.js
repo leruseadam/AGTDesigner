@@ -3469,20 +3469,20 @@ const TagManager = {
             this.state.tags = [...tags];
             this.state.originalTags = [...tags]; // Store original tags for validation
             
-            // Preserve selected tags if they exist and are valid
+            // Preserve selected tags if they exist and are valid (optimized)
             const currentSelectedTags = [...this.state.persistentSelectedTags];
             this.state.persistentSelectedTags = [];
             this.state.selectedTags = new Set();
-            
-            // Validate and restore selected tags that still exist in the new data
+
             if (currentSelectedTags.length > 0) {
-                currentSelectedTags.forEach(tagName => {
-                    const tagExists = tags.some(tag => tag['Product Name*'] === tagName);
-                    if (tagExists) {
+                // Build a fast lookup map of product name -> true
+                const tagNameSet = new Set(tags.map(t => t['Product Name*']));
+                for (const tagName of currentSelectedTags) {
+                    if (tagNameSet.has(tagName)) {
                         this.state.persistentSelectedTags.push(tagName);
                         this.state.selectedTags.add(tagName);
                     }
-                });
+                }
             }
             
             this.validateSelectedTags();
