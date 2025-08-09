@@ -288,15 +288,15 @@ class TagsTable {
           // Close modal
           bootstrap.Modal.getInstance(document.getElementById('lineageEditorModal')).hide();
           
-          // Refresh available tags from backend to ensure UI shows updated lineage
-          if (typeof TagManager !== 'undefined' && TagManager.fetchAndUpdateAvailableTags) {
+          // Re-render using existing data and current filters to preserve selections and filters
+          if (typeof TagManager !== 'undefined') {
             try {
-              console.log('Refreshing available tags to show updated lineage...');
-              await TagManager.fetchAndUpdateAvailableTags();
-              console.log('Available tags refreshed successfully');
+              console.log('Re-rendering tags locally after lineage change (preserve filters and selections)');
+              if (TagManager.updateFilterOptions) await TagManager.updateFilterOptions();
+              if (TagManager.applyFilters) TagManager.applyFilters();
+              console.log('Local re-render complete');
             } catch (refreshError) {
-              console.warn('Failed to refresh available tags:', refreshError);
-              // Don't fail the lineage update if refresh fails
+              console.warn('Local re-render after lineage change failed:', refreshError);
             }
           }
           
