@@ -3309,31 +3309,24 @@ const TagManager = {
         console.timeEnd('updateSelectedTags');
 
         // Attach a delegated change handler to handle deselection within selectedTags
-        try {
-            if (!container._hasDeselectionHandler) {
-                container.addEventListener('change', (e) => {
-                    const target = e.target;
-                    if (target && target.matches('input[type="checkbox"].tag-checkbox')) {
-                        const tagName = target.value;
-                        if (!target.checked) {
-                            // Remove from persistentSelectedTags and selectedTags
-                            const idx = this.state.persistentSelectedTags.indexOf(tagName);
-                            if (idx > -1) {
-                                this.state.persistentSelectedTags.splice(idx, 1);
-                            }
-                            this.state.selectedTags.delete(tagName);
-                            // Remove the row from DOM quickly
-                            const row = target.closest('.tag-item, .tag-row');
-                            if (row) row.remove();
-                            // Update counts and any dependent UI
-                            this.updateTagCount('selected', this.state.persistentSelectedTags.length);
-                        }
-                    }
-                });
-                container._hasDeselectionHandler = true;
-            }
-        } catch (err) {
-            console.warn('Failed setting deselection handler:', err);
+        // Install a single delegated deselection handler once (idempotent)
+        if (!container._hasDeselectionHandler) {
+            container.addEventListener('change', (e) => {
+                const target = e.target;
+                if (!target || !target.matches('input[type="checkbox"].tag-checkbox')) return;
+                const tagName = target.value;
+                if (target.checked) return;
+                // Update state without triggering full re-render
+                const idx = this.state.persistentSelectedTags.indexOf(tagName);
+                if (idx > -1) this.state.persistentSelectedTags.splice(idx, 1);
+                this.state.selectedTags.delete(tagName);
+                // Remove DOM row
+                const row = target.closest('.tag-item, .tag-row');
+                if (row) row.remove();
+                // Update counts minimally
+                this.updateTagCount('selected', this.state.persistentSelectedTags.length);
+            }, { passive: true });
+            Object.defineProperty(container, '_hasDeselectionHandler', { value: true, enumerable: false });
         }
 
         // After rendering, update all select-all checkboxes to reflect the state of their descendant tag checkboxes

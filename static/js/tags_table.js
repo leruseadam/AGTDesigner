@@ -367,14 +367,24 @@ class TagsTable {
   static addEventListeners(container) {
     // Add checkbox change listeners
     container.querySelectorAll('.tag-checkbox').forEach(checkbox => {
-      checkbox.addEventListener('change', function() {
+      checkbox.addEventListener('change', function(e) {
         try {
           if (this.checked) {
             TagManager.state.selectedTags.add(this.value);
           } else {
             TagManager.state.selectedTags.delete(this.value);
+            // Also remove from persistent selections to avoid drift
+            const idx = TagManager.state.persistentSelectedTags.indexOf(this.value);
+            if (idx > -1) TagManager.state.persistentSelectedTags.splice(idx, 1);
+            // Remove DOM row when in selected list without triggering big re-render
+            const row = this.closest('.tag-item, .tag-row');
+            if (row && row.parentElement && row.parentElement.id === 'selectedTags') {
+              row.remove();
+              TagManager.updateTagCount('selected', TagManager.state.persistentSelectedTags.length);
+            }
           }
-          TagManager.updateTagCheckboxes();
+          // Keep minimal to avoid stalls
+          // TagManager.updateTagCheckboxes();
         } catch (error) {
           console.error('Error in checkbox change handler:', error);
           // Prevent the error from causing the page to exit
