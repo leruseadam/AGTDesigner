@@ -1275,7 +1275,13 @@ def process_excel_background(filename, temp_path):
                 logging.info("[BG] Skipping global cache clear - not in request context")
         except Exception as global_cache_error:
             logging.warning(f"[BG] Error in global cache clearing: {global_cache_error}")
-        
+        # Mark as ready as soon as DataFrame is loaded so frontend can proceed
+        try:
+            update_processing_status(filename, 'ready')
+            logging.info(f"[BG] Marked {filename} as ready (DataFrame loaded)")
+        except Exception as mark_ready_error:
+            logging.warning(f"[BG] Failed to mark ready: {mark_ready_error}")
+
         # Step 2: Update the global processor safely with minimal clearing
         global _excel_processor
         with excel_processor_lock:
