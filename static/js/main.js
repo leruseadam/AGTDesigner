@@ -1691,7 +1691,8 @@ const TagManager = {
             vendorCheckbox.className = 'select-all-checkbox me-2';
             vendorCheckbox.addEventListener('change', (e) => {
                 const isChecked = e.target.checked;
-                const checkboxes = vendorSection.querySelectorAll('input[type="checkbox"]');
+                // Only iterate tag checkboxes within this vendor section
+                const checkboxes = vendorSection.querySelectorAll('input.tag-checkbox');
                 checkboxes.forEach(checkbox => {
                     checkbox.checked = isChecked;
                     if (checkbox.classList.contains('tag-checkbox')) {
@@ -1764,10 +1765,11 @@ const TagManager = {
                 const brandCheckbox = document.createElement('input');
                 brandCheckbox.type = 'checkbox';
                 brandCheckbox.className = 'select-all-checkbox me-2';
-                brandCheckbox.addEventListener('change', (e) => {
-                    const isChecked = e.target.checked;
-                    const checkboxes = brandSection.querySelectorAll('input[type="checkbox"]');
-                    checkboxes.forEach(checkbox => {
+            brandCheckbox.addEventListener('change', (e) => {
+                const isChecked = e.target.checked;
+                // Only iterate tag checkboxes within this brand section
+                const checkboxes = brandSection.querySelectorAll('input.tag-checkbox');
+                checkboxes.forEach(checkbox => {
                         checkbox.checked = isChecked;
                         if (checkbox.classList.contains('tag-checkbox')) {
                             const tag = this.state.tags.find(t => t['Product Name*'] === checkbox.value);
@@ -1839,24 +1841,10 @@ const TagManager = {
                     const productTypeCheckbox = document.createElement('input');
                     productTypeCheckbox.type = 'checkbox';
                     productTypeCheckbox.className = 'select-all-checkbox me-2';
-                    productTypeCheckbox.addEventListener('change', async (e) => {
-                        // Save current state for undo before making changes
-                        try {
-                            await fetch('/api/save-selection-state', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                    action_type: 'select_all_checkbox'
-                                })
-                            });
-                            console.log('Selection state saved for undo (product type select all)');
-                        } catch (error) {
-                            console.warn('Failed to save selection state for undo:', error);
-                            // Continue with the operation even if undo save fails
-                        }
-                        
+                    productTypeCheckbox.addEventListener('change', (e) => {
                         const isChecked = e.target.checked;
-                        const checkboxes = productTypeSection.querySelectorAll('input[type="checkbox"]');
+                        // Only iterate tag checkboxes within this product type section
+                        const checkboxes = productTypeSection.querySelectorAll('input.tag-checkbox');
                         checkboxes.forEach(checkbox => {
                             checkbox.checked = isChecked;
                             if (checkbox.classList.contains('tag-checkbox')) {
