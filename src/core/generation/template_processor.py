@@ -1046,8 +1046,9 @@ class TemplateProcessor:
                 else:
                     lineage_value = label_context['Lineage']
                 
+                # Add a subtle single space before lineage for classic types (no bullet)
                 if self.template_type in {"horizontal", "vertical", "double"} and lineage_value and product_type in classic_types:
-                    lineage_value = '\u2022 ' + lineage_value
+                    lineage_value = ' ' + lineage_value
             
             label_context['Lineage'] = wrap_with_marker(unwrap_marker(lineage_value, 'LINEAGE'), 'LINEAGE')
 
