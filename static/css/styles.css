@@ -38,6 +38,15 @@
     --filter-height: auto;           /* Height of filter bar (auto or specific px) */
     --center-panel-height: 90vh;     /* Height of center control panel (auto or specific px) */
   }
+
+  /* Responsive sizing variables for center column buttons (scales across monitors) */
+  :root {
+    --center-btn-min-h: clamp(48px, 1.5vh + 1vw, 72px);
+    --center-btn-font: clamp(0.9rem, 0.45vw + 0.45vh, 1.15rem);
+    --center-btn-icon: clamp(12px, 0.55vw + 0.55vh, 18px);
+    --center-btn-pad-v: clamp(0.5rem, 0.5vh + 0.25vw, 0.9rem);
+    --center-gap: clamp(0.4rem, 0.35vh + 0.35vw, 0.8rem);
+  }
   
   /* Maximize space for AGT Designer UI */
   body, html {
@@ -1725,8 +1734,8 @@
   }
   
   .control-panel .btn-glass svg {
-    width: 18px !important;
-    height: 18px !important;
+    width: var(--center-btn-icon) !important;
+    height: var(--center-btn-icon) !important;
   }
 
   /* Center column specific spacing reductions */
@@ -5610,21 +5619,22 @@
   
   /* Fix spacing between center column buttons */
   [data-container-type="center"] .control-panel .btn {
-    margin-bottom: .5rem !important;
-    margin-top: 0.5rem !important;
-    min-width: 100px !important;
+    margin-bottom: var(--center-gap) !important;
+    margin-top: var(--center-gap) !important;
+    min-width: 120px !important;
     width: 100% !important;
     white-space: nowrap !important;
     overflow: hidden !important;
     text-overflow: ellipsis !important;
-    min-height: 60px !important;
-    padding: 0.75rem .75rem !important;
-    font-size: 1rem !important;
-    font-weight: 500 !important;
+    min-height: var(--center-btn-min-h) !important;
+    padding: var(--center-btn-pad-v) 0.8rem !important;
+    font-size: var(--center-btn-font) !important;
+    font-weight: 600 !important;
+    line-height: 1.2 !important;
   }
   
   [data-container-type="center"] .control-panel .d-grid {
-    margin-bottom: 2.5rem !important;
+    margin-bottom: calc(var(--center-gap) * 3) !important;
     width: 100% !important;
   }
   
@@ -5633,7 +5643,7 @@
   }
   
   [data-container-type="center"] .control-panel > div {
-    margin-bottom: 3.5rem !important;
+    margin-bottom: calc(var(--center-gap) * 4) !important;
     width: 100% !important;
   }
   
