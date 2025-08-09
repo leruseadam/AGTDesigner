@@ -1,3 +1,148 @@
+/* Increase spacing between the Database / Lineage Editor / Match JSON buttons */
+.header-buttons-container,
+.header-buttons-container.d-flex,
+.centerframe .header-buttons-container {
+  gap: 1.25rem !important; /* subtle increase over gap-3 (~1rem) */
+  column-gap: 1.25rem !important;
+  row-gap: 0.75rem !important;
+}
+
+/* Responsive Hardening Overrides — ensure usability across all consumer viewports */
+/* Date: 2025-08-09 */
+
+/* Fluid media to prevent overflow */
+img, video, canvas, svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Prevent long tokens from forcing horizontal scroll */
+:where(h1,h2,h3,h4,h5,h6,p,li,td,th,span,div) {
+  overflow-wrap: anywhere;
+}
+
+/* Improve table behavior on small screens (fallback when not wrapped in .table-responsive) */
+@media (max-width: 576px) {
+  .table {
+    display: block;
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .table thead, .table tbody, .table tr, .table td, .table th {
+    white-space: normal;
+  }
+}
+
+/* Ensure dropdown menus and modals fit within the viewport on mobile */
+@media (max-width: 576px) {
+  .dropdown-menu {
+    max-width: 100vw;
+    overflow-x: auto;
+  }
+  .modal-dialog {
+    margin: 0 !important;
+    max-width: 100vw !important;
+  }
+  .modal-content {
+    border-radius: 0 !important;
+  }
+}
+
+/* Allow toolbars and filter rows to wrap on narrow widths */
+@media (max-width: 768px) {
+  .header-buttons-container,
+  .btn-toolbar,
+  .button-row,
+  .filters-row,
+  .toolbar,
+  .sticky-filter-bar {
+    flex-wrap: wrap !important;
+    gap: 0.5rem !important;
+  }
+}
+
+/* Readable inputs on iOS without zooming */
+@media (max-width: 576px) {
+  input, select, textarea {
+    font-size: 16px;
+  }
+}
+
+/* Avoid hidden-overflow clipping: permit horizontal scroll inside main containers on small screens */
+@media (max-width: 768px) {
+  main,
+  .container,
+  .container-fluid,
+  .content,
+  .page-content,
+  #app {
+    overflow-x: auto;
+  }
+}
+
+/* Cards and panels should shrink to fit */
+@media (max-width: 576px) {
+  .card, .glass-card, .panel {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+}
+
+/* Account for iOS safe areas */
+@supports (padding: max(0px)) {
+  body {
+    padding-bottom: max(0px, env(safe-area-inset-bottom));
+  }
+}
+
+/* Dynamic viewport height support so layout adapts when DevTools/keyboard open */
+@supports (height: 100svh) {
+  :root {
+    --tag-list-height: 75svh;
+    --center-panel-height: 90svh;
+  }
+}
+@supports (height: 100dvh) {
+  :root {
+    --tag-list-height: 75dvh;
+    --center-panel-height: 90dvh;
+  }
+}
+
+/* Direct overrides for fixed vh panels */
+@supports (height: 1svh) {
+  #availableTags,
+  #selectedTags { height: 80svh !important; min-height: 80svh !important; }
+}
+@supports (height: 1dvh) {
+  #availableTags,
+  #selectedTags { height: 80dvh !important; min-height: 80dvh !important; }
+}
+
+/* Ensure main content respects dynamic viewport height */
+.main-content { min-height: 100vh; }
+@supports (height: 100dvh) { .main-content { min-height: 100dvh; height: auto; } }
+
+/* Short-viewport optimizations (e.g., when console is open) */
+@media (max-height: 700px) {
+  :root {
+    --tag-list-height: 60vh;
+    --center-panel-height: 70vh;
+  }
+  @supports (height: 100dvh) {
+    :root { --tag-list-height: 60dvh; --center-panel-height: 70dvh; }
+  }
+  .control-panel,
+  .center-panel,
+  #availableTags,
+  #selectedTags {
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+  .header-buttons-container { margin-top: 0.25rem !important; }
+}
+
 /* Psychedelic color palette - Trippy Theme */
 
 /* Placeholder text styling for temporary content */
@@ -29,9 +174,10 @@
     --lineage-para: rgba(255, 192, 203, 0.5);
     
     /* Column Width Variables - Adjust these to change layout */
-    --filter-column-width: 1.4;      /* Bootstrap columns (1-12) - can use decimals */
+    --canvas-max-width: 1720px;      /* shared width for filters + lists */
+    --filter-column-width: auto;      /* Bootstrap columns (1-12) - can use decimals */
     --center-column-width: 1.5;      /* Bootstrap columns (1-12) - can use decimals */
-    --tag-list-column-width: 4.25;   /* Bootstrap columns (1-12) - can use decimals */
+    --tag-list-column-width: 5.1;   /* Bootstrap columns (1-12) - can use decimals */
     
     /* Height Variables - Adjust these to change heights */
     --tag-list-height: 75vh;        /* Height of tag list containers */
@@ -234,13 +380,13 @@
     border: 2px solid rgba(33, 150, 243, 0.7) !important;
     border-radius: 12px;
     color: #fff;
-    padding: 0.38rem 0.7rem;
+    padding: 0.44rem 0.85rem;
     font-size: 0.75rem;
     font-weight: 700;
     letter-spacing: 0.75px;
     display: inline-flex;
     align-items: center;
-    gap: 0.6rem;
+    gap: 0.7rem;
     transition: all 0.3s ease;
     text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
     box-shadow: 
@@ -281,7 +427,7 @@
     display: flex !important;
     justify-content: center !important;
     align-items: center !important;
-    gap: 2rem !important;
+    gap: 2.25rem !important;
   }
   
   /* Header Container - Groups title, subtitle, and copyright with tight background */
@@ -4019,7 +4165,7 @@
     width: 16px;
     height: 16px;
   }
-  .form-select-sm, .lineage-dropdown-mini {
+  .lineage-dropdown-mini {
     font-size: 0.85em;
     padding: 2px 6px;
     min-width: 40px;
@@ -4456,23 +4602,23 @@
     background-size: 18px 18px;
   }
 
-  /* Specific style for the Template selection box */
-  #templateSelect {
+  /* Specific style for the Template selection boxes (main + modal) */
+  #templateSelect,
+  #templateSelectModal {
     /* Cross-platform consistency - remove platform-specific styling */
     -webkit-appearance: none !important;
     -moz-appearance: none !important;
     appearance: none !important;
     
     /* Standardized styling for consistent appearance */
-    min-width: 180px !important;
-    max-width: 280px !important;
-    width: auto !important;
+    display: block !important;
+    box-sizing: border-box !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
     min-height: 60px !important;
     height: 60px !important;
-    margin: 0.5rem auto 0.75rem auto !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
+    margin: 0.5rem 0 0.75rem 0 !important;
     text-align: center !important;
     text-align-last: center !important;
     padding: 12px 20px !important;
@@ -4496,16 +4642,28 @@
     background-size: 18px 18px !important;
   }
 
-  #templateSelect option {
+  #templateSelect option,
+  #templateSelectModal option {
     color: #e0d6f6 !important;
     background: rgba(34, 34, 51, 0.95) !important;
     font-weight: 500;
     text-align: center;
   }
 
-  #templateSelect:focus {
+  #templateSelect:focus,
+  #templateSelectModal:focus {
     border-color: #cbb6f6 !important;
     box-shadow: 0 0 0 2px #a084e8 !important;
+  }
+
+  /* Mobile: let the select fill the column */
+  @media (max-width: 576px) {
+    #templateSelect,
+    #templateSelectModal {
+      width: 100% !important;
+      max-width: 100% !important;
+      min-width: 0 !important;
+    }
   }
 
   .container-label, .vendor-header, .brand-header, .product-type-header, .weight-header {
@@ -5221,6 +5379,81 @@
     }
   }
 
+  /* Horizontal Filter Bar (matches sticky-filter-bar visual style) */
+  .horizontal-filter-bar {
+    background: rgba(45, 34, 58, 0.95);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 2px solid rgba(160, 132, 232, 0.2);
+    border-radius: 18px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2), 0 4px 12px rgba(160, 132, 232, 0.1);
+    padding: 0.5rem 0.75rem;
+    /* Slightly narrower so it never exceeds tag lists visual width */
+    max-width: calc(var(--canvas-max-width) - 2.5rem);
+    margin-left: auto;
+    margin-right: auto;
+  }
+  /* Even spacing between left list, center panel, right list, and page edges */
+  .tag-lists-row {
+    gap: 1.25rem !important; /* slightly bigger gutters to let wider lists breathe */
+    padding-left: 1.25rem !important;
+    padding-right: 1.25rem !important;
+    max-width: var(--canvas-max-width); /* shared with filter bar */
+    margin-left: auto !important;
+    margin-right: auto !important;
+    justify-content: center !important; /* center the three columns as a group */
+  }
+  /* Keep the title/header centered without constraining tag lists width */
+  .main-centered {
+    max-width: 1400px;
+    margin-left: auto !important;
+    margin-right: auto !important;
+  }
+  .tag-lists-row > [data-container-type] {
+    margin: 0 !important; /* rely on gap for spacing */
+  }
+  /* Match card widths with filter bar bounds visually */
+  .tag-lists-row .glass-card {
+    border-radius: 18px;
+    border: 2px solid rgba(160, 132, 232, 0.2);
+  }
+  .horizontal-filter-bar label,
+  .horizontal-filter-bar .filter-category-label {
+    color: #ffffff;
+    font-weight: 700;
+    font-size: 0.9rem;
+  }
+  .horizontal-filter-bar select,
+  .horizontal-filter-bar .form-select,
+  .horizontal-filter-bar .form-select-sm,
+  .horizontal-filter-bar .compact-filter {
+    background: #2a2040;
+    color: #fff;
+    border-radius: 8px;
+    border: 1.5px solid #a084e8;
+    height: 36px;
+    min-height: 36px;
+    padding: 6px 10px;
+    font-size: 0.95rem;
+    /* Bright blue arrow */
+    background-image: url('data:image/svg+xml;utf8,<svg fill="%2300BFFF" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
+    background-repeat: no-repeat !important;
+    background-position: right 12px center !important;
+    background-size: 16px 16px !important;
+  }
+  /* Make each filter item take an equal share of the row */
+  .horizontal-filter-bar .filter-item {
+    flex: 1 1 0;
+    min-width: 220px; /* closer to tag list column minimum */
+  }
+  .horizontal-filter-bar select:focus,
+  .horizontal-filter-bar .form-select:focus,
+  .horizontal-filter-bar .compact-filter:focus {
+    outline: none;
+    border-color: #b49cf0;
+    box-shadow: 0 0 0 0.15rem rgba(160, 132, 232, 0.25);
+  }
+
   /* Ultra-compact sidebar filter bar overrides */
   .sticky-filter-bar .form-label,
   .sticky-filter-bar label,
@@ -5284,6 +5517,7 @@
     background: rgba(45,34,58,0.85) !important;
     display: inline-flex !important;
     align-items: center !important;
+  margin-left: 0 !important; /* ensure it's not centered via auto margins */
   }
 
   /* Extra small font for ultra-compact upload bar */
