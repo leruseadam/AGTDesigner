@@ -11,3 +11,4 @@ Pillow==10.1.0
 Werkzeug==2.3.7
 
 
+pywebview==4.4
