@@ -3342,6 +3342,9 @@ const TagManager = {
                 if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
                 e.stopPropagation();
                 e.preventDefault();
+                // Sync the corresponding checkbox in availableTags (if present) so Brand rows don't reflow
+                const availCb = document.querySelector(`#availableTags .tag-checkbox[value="${CSS.escape(tagName)}"]`);
+                if (availCb) availCb.checked = false;
             }, { passive: true });
             Object.defineProperty(container, '_hasDeselectionHandler', { value: true, enumerable: false });
         }

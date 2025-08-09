@@ -94,26 +94,7 @@ class DragAndDropManager {
             }
         }, true);
         
-        // Add debugging for all checkbox events
-        document.addEventListener('click', (e) => {
-            if (e.target.classList.contains('tag-checkbox')) {
-                console.log('=== DRAG MANAGER: CHECKBOX CLICK DETECTED ===');
-                console.log('Is dragging:', this.isDragging);
-                console.log('Event target:', e.target);
-                console.log('Event type:', e.type);
-                console.log('Event defaultPrevented:', e.defaultPrevented);
-            }
-        }, true);
-        
-        document.addEventListener('change', (e) => {
-            if (e.target.classList.contains('tag-checkbox')) {
-                console.log('=== DRAG MANAGER: CHECKBOX CHANGE DETECTED ===');
-                console.log('Is dragging:', this.isDragging);
-                console.log('Event target:', e.target);
-                console.log('Event type:', e.type);
-                console.log('Event defaultPrevented:', e.defaultPrevented);
-            }
-        }, true);
+        // Remove verbose debugging listeners to avoid heavy console logging
     }
 
     setupDragZone(selector) {
