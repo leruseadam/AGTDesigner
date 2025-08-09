@@ -407,9 +407,12 @@ class TagsTable {
           const checkbox = this.querySelector('.tag-checkbox');
           if (checkbox) {
             // Toggle the checkbox
+            // Toggle without bubbling to parent containers
+            e.stopPropagation();
             checkbox.checked = !checkbox.checked;
-            // Trigger the change event
-            checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+            // Trigger change on the checkbox only
+            const evt = new Event('change', { bubbles: false });
+            checkbox.dispatchEvent(evt);
           }
         } catch (error) {
           console.error('Error in tag item click handler:', error);
