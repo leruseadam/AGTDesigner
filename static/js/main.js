@@ -1929,24 +1929,10 @@ const TagManager = {
                         const weightCheckbox = document.createElement('input');
                         weightCheckbox.type = 'checkbox';
                         weightCheckbox.className = 'select-all-checkbox me-2';
-                        weightCheckbox.addEventListener('change', async (e) => {
-                            // Save current state for undo before making changes
-                            try {
-                                await fetch('/api/save-selection-state', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({
-                                        action_type: 'select_all_checkbox'
-                                    })
-                                });
-                                console.log('Selection state saved for undo (weight select all)');
-                            } catch (error) {
-                                console.warn('Failed to save selection state for undo:', error);
-                                // Continue with the operation even if undo save fails
-                            }
-                            
+                        weightCheckbox.addEventListener('change', (e) => {
                             const isChecked = e.target.checked;
-                            const checkboxes = weightSection.querySelectorAll('input[type="checkbox"]');
+                            // Only iterate over tag checkboxes for speed
+                            const checkboxes = weightSection.querySelectorAll('input.tag-checkbox');
                             checkboxes.forEach(checkbox => {
                                 checkbox.checked = isChecked;
                                 if (checkbox.classList.contains('tag-checkbox')) {
@@ -3202,9 +3188,8 @@ const TagManager = {
                         weightCheckbox.className = 'select-all-checkbox me-2';
                         weightCheckbox.addEventListener('change', (e) => {
                             const isChecked = e.target.checked;
-                            
-                            // Select all descendant checkboxes (including subcategories and tags)
-                            const checkboxes = weightSection.querySelectorAll('input[type="checkbox"]');
+                            // Only iterate tag checkboxes for performance
+                            const checkboxes = weightSection.querySelectorAll('input.tag-checkbox');
                             
                             checkboxes.forEach(checkbox => {
                                 checkbox.checked = isChecked;
