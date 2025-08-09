@@ -309,21 +309,30 @@ function pollUploadStatus(filename) {
         }
         
         console.log('File processing complete, updating UI...');
-        
-        // Fetch updated available tags and filters
-        console.log('Fetching available tags...');
-        const availableResult = await TagManager.fetchAndUpdateAvailableTags();
-        console.log('Available tags result:', availableResult);
-        
-        // Also fetch and update selected tags (should be empty for new file)
-        console.log('Fetching selected tags...');
-        const selectedResult = await TagManager.fetchAndUpdateSelectedTags();
-        console.log('Selected tags result:', selectedResult);
-        
-        // Update filter options for the new data
-        console.log('Fetching filter options...');
-        await TagManager.fetchAndPopulateFilters();
-        console.log('Filter options updated');
+
+        // Fetch all updated data in parallel to avoid serial bottlenecks
+        console.time('post-ready-data-fetch');
+        await Promise.all([
+          // Available tags
+          (async () => {
+            console.log('Fetching available tags...');
+            const res = await TagManager.fetchAndUpdateAvailableTags();
+            console.log('Available tags result:', res);
+          })(),
+          // Selected tags
+          (async () => {
+            console.log('Fetching selected tags...');
+            const res = await TagManager.fetchAndUpdateSelectedTags();
+            console.log('Selected tags result:', res);
+          })(),
+          // Filter options
+          (async () => {
+            console.log('Fetching filter options...');
+            await TagManager.fetchAndPopulateFilters();
+            console.log('Filter options updated');
+          })()
+        ]);
+        console.timeEnd('post-ready-data-fetch');
         
         // Hide splash screen on success
         if (typeof TagManager !== 'undefined' && TagManager.hideExcelLoadingSplash) {
