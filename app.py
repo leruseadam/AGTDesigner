@@ -964,17 +964,19 @@ def upload_file():
         logging.info(f"File upload request at {datetime.now().strftime('%H:%M:%S')}")
         start_time = time.time()
         
-        # Log request details
-        logging.debug(f"Request method: {request.method}")
-        logging.debug(f"Request headers: {dict(request.headers)}")
-        logging.debug(f"Request files: {list(request.files.keys()) if request.files else 'None'}")
+        # Log request details (dev only)
+        if app.config.get('DEVELOPMENT_MODE', False):
+            logging.debug(f"Request method: {request.method}")
+            logging.debug(f"Request headers: {dict(request.headers)}")
+            logging.debug(f"Request files: {list(request.files.keys()) if request.files else 'None'}")
         
         if 'file' not in request.files:
             logging.error("No file uploaded - 'file' not in request.files")
             return jsonify({'error': 'No file uploaded'}), 400
         
         file = request.files['file']
-        logging.debug(f"File received: {file.filename}, Content-Type: {file.content_type}")
+        if app.config.get('DEVELOPMENT_MODE', False):
+            logging.debug(f"File received: {file.filename}, Content-Type: {file.content_type}")
         
         if file.filename == '':
             logging.error("No file selected - filename is empty")
@@ -994,7 +996,8 @@ def upload_file():
         file.seek(0, 2)  # Seek to end
         file_size = file.tell()
         file.seek(0)  # Reset to beginning
-        logging.debug(f"File size: {file_size} bytes ({file_size / (1024*1024):.2f} MB)")
+        if app.config.get('DEVELOPMENT_MODE', False):
+            logging.debug(f"File size: {file_size} bytes ({file_size / (1024*1024):.2f} MB)")
         
         if file_size > app.config['MAX_CONTENT_LENGTH']:
             logging.error(f"File too large: {file_size} bytes (max: {app.config['MAX_CONTENT_LENGTH']})")
@@ -1003,28 +1006,34 @@ def upload_file():
         # Ensure upload folder exists
         upload_folder = app.config['UPLOAD_FOLDER']
         os.makedirs(upload_folder, exist_ok=True)
-        logging.debug(f"Upload folder: {upload_folder}")
+        if app.config.get('DEVELOPMENT_MODE', False):
+            logging.debug(f"Upload folder: {upload_folder}")
         
         # Use sanitized filename (security fix)
         temp_path = os.path.join(upload_folder, sanitized_filename)
-        logging.debug(f"Saving file to: {temp_path}")
+        if app.config.get('DEVELOPMENT_MODE', False):
+            logging.debug(f"Saving file to: {temp_path}")
         
         save_start = time.time()
         try:
             file.save(temp_path)
             save_time = time.time() - save_start
-            logging.debug(f"File saved successfully to {temp_path} in {save_time:.2f}s")
+            if app.config.get('DEVELOPMENT_MODE', False):
+                logging.debug(f"File saved successfully to {temp_path} in {save_time:.2f}s")
         except Exception as save_error:
             logging.error(f"Error saving file: {save_error}")
             return jsonify({'error': f'Failed to save file: {str(save_error)}'}), 500
         
         # Clear any existing status for this filename and mark as processing
-        logging.debug(f"[UPLOAD] Setting processing status for: {file.filename}")
+        if app.config.get('DEVELOPMENT_MODE', False):
+            logging.debug(f"[UPLOAD] Setting processing status for: {file.filename}")
         update_processing_status(file.filename, 'processing')
-        logging.debug(f"[UPLOAD] Processing status set. Current statuses: {dict(processing_status)}")
+        if app.config.get('DEVELOPMENT_MODE', False):
+            logging.debug(f"[UPLOAD] Processing status set. Current statuses: {dict(processing_status)}")
         
         # ULTRA-FAST UPLOAD OPTIMIZATION - Minimal cache clearing
-        logging.debug(f"[UPLOAD] Performing ultra-fast upload optimization for: {sanitized_filename}")
+        if app.config.get('DEVELOPMENT_MODE', False):
+            logging.debug(f"[UPLOAD] Performing ultra-fast upload optimization for: {sanitized_filename}")
         
         # Only clear the most critical caches (preserve everything else)
         try:
@@ -1037,7 +1046,8 @@ def upload_file():
                 if cache.has(key):
                     cache.delete(key)
                     cleared_count += 1
-            logging.debug(f"[UPLOAD] Cleared {cleared_count} critical cache entries")
+            if app.config.get('DEVELOPMENT_MODE', False):
+                logging.debug(f"[UPLOAD] Cleared {cleared_count} critical cache entries")
         except Exception as cache_error:
             logging.warning(f"[UPLOAD] Error clearing critical caches: {cache_error}")
         
@@ -1045,34 +1055,41 @@ def upload_file():
         # Only clear the absolute minimum required for new file
         if 'file_path' in session:
             del session['file_path']
-            logging.debug(f"[UPLOAD] Cleared session key: file_path")
+            if app.config.get('DEVELOPMENT_MODE', False):
+                logging.debug(f"[UPLOAD] Cleared session key: file_path")
         
         # Clear global Excel processor to force complete replacement
-        logging.debug(f"[UPLOAD] Resetting Excel processor before loading new file: {sanitized_filename}")
+        if app.config.get('DEVELOPMENT_MODE', False):
+            logging.debug(f"[UPLOAD] Resetting Excel processor before loading new file: {sanitized_filename}")
         reset_excel_processor()
         
         # Clear any existing g context for this request
         if hasattr(g, 'excel_processor'):
             delattr(g, 'excel_processor')
-            logging.debug("[UPLOAD] Cleared g.excel_processor context")
+            if app.config.get('DEVELOPMENT_MODE', False):
+                logging.debug("[UPLOAD] Cleared g.excel_processor context")
         
         # Start background thread with error handling
         try:
-            logging.debug(f"[UPLOAD] Starting background processing thread for {file.filename}")
+            if app.config.get('DEVELOPMENT_MODE', False):
+                logging.debug(f"[UPLOAD] Starting background processing thread for {file.filename}")
             thread = threading.Thread(target=process_excel_background, args=(file.filename, temp_path))
             thread.daemon = True  # Make thread daemon so it doesn't block app shutdown
             thread.start()
-            logging.debug(f"[UPLOAD] Background processing thread started successfully for {file.filename}")
+            if app.config.get('DEVELOPMENT_MODE', False):
+                logging.debug(f"[UPLOAD] Background processing thread started successfully for {file.filename}")
             
             # Log current processing status
-            logging.debug(f"[UPLOAD] Current processing status after thread start: {dict(processing_status)}")
+            if app.config.get('DEVELOPMENT_MODE', False):
+                logging.debug(f"[UPLOAD] Current processing status after thread start: {dict(processing_status)}")
         except Exception as thread_error:
             logging.error(f"[UPLOAD] Failed to start background thread: {thread_error}")
             update_processing_status(file.filename, f'error: Failed to start processing')
             return jsonify({'error': 'Failed to start file processing'}), 500
         
         upload_time = time.time() - start_time
-        logging.debug(f"=== UPLOAD REQUEST COMPLETE === Time: {upload_time:.2f}s")
+        if app.config.get('DEVELOPMENT_MODE', False):
+            logging.debug(f"=== UPLOAD REQUEST COMPLETE === Time: {upload_time:.2f}s")
         
         # Store uploaded file path in session
         session['file_path'] = temp_path
@@ -1084,7 +1101,8 @@ def upload_file():
         
         # ULTRA-FAST RESPONSE - Return immediately for instant user feedback
         upload_response_time = time.time() - start_time
-        logging.debug(f"[UPLOAD] Ultra-fast upload completed in {upload_response_time:.3f}s")
+        if app.config.get('DEVELOPMENT_MODE', False):
+            logging.debug(f"[UPLOAD] Ultra-fast upload completed in {upload_response_time:.3f}s")
         
         return jsonify({
             'message': 'File uploaded, processing in background', 
@@ -1210,20 +1228,21 @@ def process_excel_background(filename, temp_path):
             new_processor._available_tags_cache.clear()
             logging.info(f"[BG] Cleared available tags cache")
         
-        # CRITICAL FIX: Force reload the file to ensure fresh data
-        logging.info(f"[BG] CRITICAL FIX: Force reloading file to ensure fresh data")
-        new_processor._last_loaded_file = None  # Force reload
-        new_processor.df = None  # Clear DataFrame
-        if hasattr(new_processor, '_file_cache'):
-            new_processor._file_cache.clear()  # Clear file cache
-        
-        # Reload the file with fresh data
-        reload_success = new_processor.load_file(temp_path)
-        if not reload_success:
-            logging.error(f"[BG] CRITICAL ERROR: Failed to reload file {temp_path}")
-            update_processing_status(filename, f'error: Failed to reload file')
-            return
-        logging.info(f"[BG] File reloaded successfully with fresh data")
+        # Avoid redundant reload after fast load on PythonAnywhere for performance
+        if os.environ.get('FORCE_RELOAD_AFTER_FAST_LOAD', 'false').lower() == 'true':
+            logging.info(f"[BG] FORCE_RELOAD_AFTER_FAST_LOAD is enabled; reloading file for verification")
+            new_processor._last_loaded_file = None
+            new_processor.df = None
+            if hasattr(new_processor, '_file_cache'):
+                new_processor._file_cache.clear()
+            reload_success = new_processor.load_file(temp_path)
+            if not reload_success:
+                logging.error(f"[BG] CRITICAL ERROR: Failed to reload file {temp_path}")
+                update_processing_status(filename, f'error: Failed to reload file')
+                return
+            logging.info(f"[BG] File reloaded successfully with fresh data")
+        else:
+            logging.info(f"[BG] Using pythonanywhere_fast_load data without redundant reload")
         
         # CRITICAL FIX: Clear global cache to force fresh data
         logging.info(f"[BG] CRITICAL FIX: Clearing global cache to force fresh data")
