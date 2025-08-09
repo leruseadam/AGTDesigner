@@ -108,6 +108,21 @@ class TemplateProcessor:
             template_path = base_path / template_name
             
             if not template_path.exists():
+                # Fallback: case-insensitive match ONLY for non-hidden files (ignore . and ~$ temp files)
+                expected_lower = template_name.lower()
+                fallback = None
+                for p in base_path.iterdir():
+                    if not p.is_file():
+                        continue
+                    name = p.name
+                    if name.startswith('.') or name.startswith('~$'):
+                        continue
+                    if name.lower() == expected_lower:
+                        fallback = p
+                        break
+                if fallback and fallback.exists():
+                    self.logger.warning(f"Using fallback template due to case-only mismatch: {fallback}")
+                    return fallback
                 self.logger.error(f"Template not found: {template_path}")
                 raise FileNotFoundError(f"Template not found: {template_path}")
             
