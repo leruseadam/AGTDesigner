@@ -2057,9 +2057,18 @@ const TagManager = {
             this.handleTagSelection(e, tag);
         };
         
-        // Remove any existing event listeners to prevent duplicates
-        checkbox.removeEventListener('change', handleCheckboxChange);
-        checkbox.addEventListener('change', handleCheckboxChange);
+        // Bind change handler only for available tags. For selected tags we use a delegated handler.
+        if (!isForSelectedTags) {
+            checkbox.removeEventListener('change', handleCheckboxChange);
+            checkbox.addEventListener('change', handleCheckboxChange);
+        } else {
+            // For selected list, prevent any per-checkbox change handlers from firing
+            checkbox.addEventListener('change', (e) => {
+                if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+                e.stopPropagation();
+                e.preventDefault();
+            }, { capture: true });
+        }
         
         // Ensure the checkbox is not disabled by drag-and-drop manager
         checkbox.style.pointerEvents = 'auto';
@@ -3324,6 +3333,7 @@ const TagManager = {
                 cb.checked = !cb.checked;
                 cb.dispatchEvent(new Event('change', { bubbles: true }));
             });
+            // Capture-phase to intercept before individual checkbox handlers
             container.addEventListener('change', (e) => {
                 const target = e.target;
                 if (!target || !target.matches('input[type="checkbox"].tag-checkbox')) return;
@@ -3345,7 +3355,7 @@ const TagManager = {
                 // Sync the corresponding checkbox in availableTags (if present) so Brand rows don't reflow
                 const availCb = document.querySelector(`#availableTags .tag-checkbox[value="${CSS.escape(tagName)}"]`);
                 if (availCb) availCb.checked = false;
-            }, { passive: true });
+            }, { capture: true });
             Object.defineProperty(container, '_hasDeselectionHandler', { value: true, enumerable: false });
         }
 
