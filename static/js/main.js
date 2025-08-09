@@ -2809,11 +2809,8 @@ const TagManager = {
                 
                 this.updateSelectedTags(selectedTagObjects);
                 
-                // Update available tags display to reflect selection changes
-                const updatedAvailableTags = this.state.originalTags.filter(tag => 
-                    !this.state.persistentSelectedTags.includes(tag['Product Name*'])
-                );
-                this._updateAvailableTags(this.state.originalTags, updatedAvailableTags);
+                // Efficiently update available tags visibility without full rebuild
+                this.efficientlyUpdateAvailableTagsDisplay();
             });
         }
 
@@ -3019,11 +3016,8 @@ const TagManager = {
                     
                     this.updateSelectedTags(selectedTagObjects);
                     
-                    // Update available tags display to reflect selection changes
-                    const updatedAvailableTags = this.state.originalTags.filter(tag => 
-                        !this.state.persistentSelectedTags.includes(tag['Product Name*'])
-                    );
-                    this._updateAvailableTags(this.state.originalTags, updatedAvailableTags);
+                    // Efficiently update available tags visibility without full rebuild
+                    this.efficientlyUpdateAvailableTagsDisplay();
                 });
                 
                 // Add collapse/expand icon (to the right of the brand name)
@@ -3120,11 +3114,8 @@ const TagManager = {
                         
                         this.updateSelectedTags(selectedTagObjects);
                         
-                        // Update available tags display to reflect selection changes
-                        const updatedAvailableTags = this.state.originalTags.filter(tag => 
-                            !this.state.persistentSelectedTags.includes(tag['Product Name*'])
-                        );
-                        this._updateAvailableTags(this.state.originalTags, updatedAvailableTags);
+                        // Efficiently update available tags visibility without full rebuild
+                        this.efficientlyUpdateAvailableTagsDisplay();
                     });
                     
                     // Add collapse/expand icon (to the right of the product type)
