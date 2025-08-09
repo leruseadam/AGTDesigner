@@ -91,12 +91,29 @@ def get_template_path(template_type):
     if not template_dir.exists():
         raise ValueError(f"Template directory not found: {template_dir}")
 
-    # Build full path
-    template_path = template_dir / template_files[template_type]
+    # Build full path (expected filename)
+    expected_filename = template_files[template_type]
+    template_path = template_dir / expected_filename
     print(f"Debug - Final template path: {template_path}")
 
-    # Verify template exists
+    # Verify template exists, with robust fallbacks for casing/hidden prefixes on some hosts
     if not template_path.exists():
+        # Fallback: case-insensitive match ONLY for non-hidden files (ignore . and ~$ temp files)
+        expected_lower = expected_filename.lower()
+        fallback = None
+        for p in template_dir.iterdir():
+            if not p.is_file():
+                continue
+            name = p.name
+            # Ignore hidden/office temp files
+            if name.startswith('.') or name.startswith('~$'):
+                continue
+            if name.lower() == expected_lower:
+                fallback = p
+                break
+        if fallback and fallback.exists():
+            print(f"Warning - Using fallback template path due to case-only mismatch: {fallback}")
+            return str(fallback)
         raise ValueError(f"Template file not found: {template_path}")
 
     return str(template_path)
