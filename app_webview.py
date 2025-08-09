@@ -1,4 +1,5 @@
 import os
+import sys
 import socket
 import threading
 import time
@@ -39,11 +40,15 @@ def main():
 
     # Import pywebview lazily to avoid hard dependency when unused
     import webview
+    # Prefer system WebKit on macOS for best compatibility
+    gui = None
+    if sys.platform == 'darwin':
+        gui = 'qt' if 'PYWEBVIEW_GUI' in os.environ and os.environ['PYWEBVIEW_GUI'] == 'qt' else None
 
     # Create a native window pointing to the local Flask URL
     window = webview.create_window('AGT Designer', f'http://{host}:{port}/')
     # Use EdgeHTML/WebKit depending on platform; defaults are fine
-    webview.start(gui=None, debug=False)
+    webview.start(gui=gui, debug=False)
 
 if __name__ == '__main__':
     main()
