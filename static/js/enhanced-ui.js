@@ -89,7 +89,7 @@ async function handleFiles(files) {
       
       // Clear UI state immediately when upload starts
       if (typeof TagManager !== 'undefined' && TagManager.clearUIStateForNewFile) {
-        TagManager.clearUIStateForNewFile();
+        TagManager.clearUIStateForNewFile(true); // Preserve filters during upload
       }
       
       const response = await fetch('/upload-fast', {
@@ -305,7 +305,7 @@ function pollUploadStatus(filename) {
         // Clear any existing UI state to ensure fresh start
         if (typeof TagManager !== 'undefined') {
           // Use the new comprehensive UI clearing function
-          TagManager.clearUIStateForNewFile();
+          TagManager.clearUIStateForNewFile(true); // Preserve filters during UI refresh
         }
         
         console.log('File processing complete, updating UI...');

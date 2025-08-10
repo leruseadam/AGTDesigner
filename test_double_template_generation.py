@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test script to generate a double template and see what font size is actually being used.
+Test script to verify that the double template can generate a document with real data.
 """
 
 import sys
@@ -8,67 +8,109 @@ import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from src.core.generation.template_processor import TemplateProcessor
-import logging
-
-# Enable debug logging
-logging.basicConfig(level=logging.DEBUG)
+from pathlib import Path
+import tempfile
 
 def test_double_template_generation():
-    """Test double template generation to see actual font sizes."""
+    """Test that the double template can generate a document with real data."""
     print("Testing Double Template Generation")
-    print("=" * 40)
-    
-    # Create a template processor for double template
-    processor = TemplateProcessor('double', 'default', 1.0)
-    
-    # Test data
-    test_data = {
-        'Ratio_or_THC_CBD': 'THC: 21.5% CBD: 0.25%',
-        'ProductBrand': 'Test Brand Name',
-        'Price': '$25.00',
-        'Description': 'Test Description',
-        'Lineage': 'HYBRID',
-        'Ratio': '1:1',
-        'ProductVendor': 'Test Vendor'
-    }
-    
-    print("Test data:")
-    for key, value in test_data.items():
-        print(f"  {key}: {value}")
-    
-    print("\nGenerating template...")
+    print("=" * 50)
     
     try:
-        # Generate the template
-        result = processor.process_records([test_data])
+        # Create template processor
+        processor = TemplateProcessor('double', {}, 1.0)
         
-        print("Template generation completed successfully!")
-        print(f"Result type: {type(result)}")
+        # Create test records
+        test_records = [
+            {
+                'ProductName': 'Test Product 1',
+                'Description': 'Test Product 1',
+                'ProductBrand': 'Test Brand 1',
+                'Price': '$25.00',
+                'Lineage': 'SATIVA',
+                'Ratio_or_THC_CBD': 'THC: 22% CBD: 1%',
+                'ProductStrain': 'Test Strain 1',
+                'DOH': 'YES',
+                'ProductType': 'flower'
+            },
+            {
+                'ProductName': 'Test Product 2',
+                'Description': 'Test Product 2',
+                'ProductBrand': 'Test Brand 2',
+                'Price': '$30.00',
+                'Lineage': 'INDICA',
+                'Ratio_or_THC_CBD': 'THC: 18% CBD: 2%',
+                'ProductStrain': 'Test Strain 2',
+                'DOH': 'NO',
+                'ProductType': 'concentrate'
+            },
+            {
+                'ProductName': 'Test Product 3',
+                'Description': 'Test Product 3',
+                'ProductBrand': 'Test Brand 3',
+                'Price': '$15.00',
+                'Lineage': 'HYBRID',
+                'Ratio_or_THC_CBD': 'THC: 20% CBD: 3%',
+                'ProductStrain': 'Test Strain 3',
+                'DOH': 'YES',
+                'ProductType': 'pre-roll'
+            }
+        ]
         
-        # Check if we can access the document
-        if hasattr(result, 'paragraphs'):
-            print(f"Document has {len(result.paragraphs)} paragraphs")
+        print(f"Created {len(test_records)} test records")
         
-        if hasattr(result, 'tables'):
-            print(f"Document has {len(result.tables)} tables")
+        # Process the records
+        print("Processing records with double template...")
+        result_doc = processor.process_records(test_records)
+        
+        if result_doc:
+            print("✓ Document generated successfully")
             
-            # Look for THC_CBD content in tables and check font sizes
-            for table_idx, table in enumerate(result.tables):
-                print(f"\nTable {table_idx}:")
-                for row_idx, row in enumerate(table.rows):
-                    for cell_idx, cell in enumerate(row.cells):
-                        if cell.text and ('THC' in cell.text or 'CBD' in cell.text):
-                            print(f"  Cell [{row_idx},{cell_idx}]: '{cell.text}'")
-                            for paragraph in cell.paragraphs:
-                                for run in paragraph.runs:
-                                    if run.text and ('THC' in run.text or 'CBD' in run.text):
-                                        font_size = run.font.size.pt if run.font.size else "No font size"
-                                        print(f"    Run: '{run.text}' - Font size: {font_size}pt")
-        
+            # Check the generated document
+            print(f"Generated document has {len(result_doc.tables)} tables")
+            
+            if result_doc.tables:
+                table = result_doc.tables[0]
+                print(f"Main table: {len(table.rows)} rows × {len(table.columns)} columns")
+                
+                # Check a few cells to see if placeholders were replaced
+                if len(table.rows) > 0 and len(table.columns) > 0:
+                    first_cell = table.cell(0, 0)
+                    print(f"First cell content: '{first_cell.text.strip()}'")
+                    
+                    # Check if placeholders were replaced
+                    if '{{Label1.' in first_cell.text:
+                        print("⚠️  Placeholders not replaced - template rendering issue")
+                    else:
+                        print("✓ Placeholders replaced with actual data")
+            
+            # Save the document to a temporary file
+            with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as tmp_file:
+                result_doc.save(tmp_file.name)
+                print(f"✓ Document saved to: {tmp_file.name}")
+                
+                # Check file size
+                file_size = Path(tmp_file.name).stat().st_size
+                print(f"Generated file size: {file_size} bytes")
+                
+                # Clean up
+                os.unlink(tmp_file.name)
+            
+            return True
+        else:
+            print("✗ Failed to generate document")
+            return False
+            
     except Exception as e:
-        print(f"Error generating template: {e}")
+        print(f"✗ Error during template generation: {e}")
         import traceback
         traceback.print_exc()
+        return False
 
 if __name__ == "__main__":
-    test_double_template_generation() 
+    success = test_double_template_generation()
+    
+    if success:
+        print("\n✅ Double template generation successful!")
+    else:
+        print("\n❌ Double template generation failed!") 

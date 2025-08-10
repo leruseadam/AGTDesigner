@@ -1,8 +1,62 @@
 import re
 from typing import Optional
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Performance optimization: disable debug logging in production
 DEBUG_ENABLED = False
+
+def _validate_and_repair_table_structure(table):
+    """
+    Validate and repair table structure to ensure it has required elements.
+    Returns True if table is valid, False if it cannot be repaired.
+    """
+    try:
+        # First, try to access table properties to see if there's an actual error
+        try:
+            _ = table.rows
+            _ = table.columns
+            # If we can access these without error, the table is fine
+            return True
+        except Exception:
+            # Only then check if we need to repair
+            pass
+        
+        # Check if table has the required tblGrid element
+        tblGrid = table._element.find(qn('w:tblGrid'))
+        if tblGrid is None:
+            # Create tblGrid element
+            tblGrid = OxmlElement('w:tblGrid')
+
+            # Get the actual number of columns from the table structure
+            # Count cells in the first row to determine column count
+            if len(table.rows) > 0:
+                first_row = table.rows[0]
+                col_count = len(first_row.cells)
+
+                # Create grid columns
+                for _ in range(col_count):
+                    gridCol = OxmlElement('w:gridCol')
+                    gridCol.set(qn('w:w'), '1440')  # Default width of 1 inch
+                    tblGrid.append(gridCol)
+
+                # Insert tblGrid at the beginning of the table element
+                table._element.insert(0, tblGrid)
+                logger.debug(f"Repaired missing tblGrid for table with {col_count} columns")
+                return True
+            else:
+                logger.warning("Cannot repair table: no rows found")
+                return False
+        else:
+            # Table already has tblGrid, don't modify it
+            return True
+        
+    except Exception as e:
+        logger.error(f"Error validating/reparing table structure: {e}")
+        return False
 
 def insert_newline_every_2nd_space(text):
     """Insert a newline after every 2nd space in the text."""
@@ -196,6 +250,10 @@ def make_nonbreaking_hyphens(text):
 def replace_placeholder_with_markers(doc, placeholder, marker_value):
     """Replace placeholder text with marked content in a document."""
     for table in doc.tables:
+        # Validate table structure before processing
+        if not _validate_and_repair_table_structure(table):
+            logger.warning(f"Skipping table with invalid structure during placeholder replacement")
+            continue
         for row in table.rows:
             for cell in row.cells:
                 for para in cell.paragraphs:

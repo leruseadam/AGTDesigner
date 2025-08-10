@@ -753,11 +753,11 @@ const TagManager = {
         }
     },
 
-    updateFilters(filters) {
+    updateFilters(filters, preserveExistingValues = true) {
         if (!filters) return;
         
         // Debug log for filters
-        console.log('Updating filters with:', filters);
+        console.log('Updating filters with:', filters, 'preserveExistingValues:', preserveExistingValues);
         
         // Store original filter options to preserve order
         if (!this.state.originalFilterOptions.vendor) {
@@ -830,11 +830,33 @@ const TagManager = {
                 }).join('')}
             `;
             
-            // Try to restore the previous selection if it's still valid
-            if (currentValue && sortedValues.includes(currentValue)) {
-                filterElement.value = currentValue;
+            // Handle value restoration based on preserveExistingValues parameter
+            if (preserveExistingValues) {
+                // Preserve existing value if it's still valid, or keep it even if not in current options
+                if (currentValue && currentValue.trim() !== '') {
+                    if (sortedValues.includes(currentValue)) {
+                        // Value is still valid, restore it
+                        filterElement.value = currentValue;
+                    } else {
+                        // Value is no longer in current options, but preserve it by adding it back
+                        console.log(`Preserving filter value "${currentValue}" for ${filterId} even though it's not in current options`);
+                        const option = document.createElement('option');
+                        option.value = currentValue;
+                        option.textContent = currentValue;
+                        option.style.color = '#666'; // Gray out to indicate it's not currently available
+                        filterElement.appendChild(option);
+                        filterElement.value = currentValue;
+                    }
+                } else {
+                    filterElement.value = '';
+                }
             } else {
-                filterElement.value = '';
+                // Only restore if value is still valid (for explicit filter clearing)
+                if (currentValue && sortedValues.includes(currentValue)) {
+                    filterElement.value = currentValue;
+                } else {
+                    filterElement.value = '';
+                }
             }
         });
     },
@@ -3300,7 +3322,6 @@ const TagManager = {
                 vendorContent.appendChild(brandSection);
             });
             
-
             
             container.appendChild(vendorSection);
         });
@@ -3585,7 +3606,7 @@ const TagManager = {
             }
             const filterOptions = await response.json();
             console.log('Fetched filter options:', filterOptions);
-            this.updateFilters(filterOptions);
+            this.updateFilters(filterOptions, true); // Preserve existing filter values
         } catch (error) {
             console.error('Error fetching filter options:', error);
             alert('Failed to load filter options');
@@ -3813,7 +3834,7 @@ const TagManager = {
             lineage: [],
             weight: []
         };
-        this.updateFilters(emptyFilters);
+        this.updateFilters(emptyFilters, false); // Don't preserve values when initializing empty state
         
         console.log('Empty state initialized');
     },
@@ -3865,7 +3886,7 @@ const TagManager = {
                         productType: [],
                         lineage: [],
                         weight: []
-                    });
+                    }, true); // Preserve existing values when loading initial data
                     
                     // Update file info text to show the loaded filename
                     if (data.filename) {
@@ -4046,7 +4067,7 @@ const TagManager = {
             };
             
             console.log('Test data filters:', filters);
-            this.updateFilters(filters);
+            this.updateFilters(filters, false); // Don't preserve values when loading test data
             
             console.log('Test data loaded successfully:', testData.length, 'tags');
             console.log('Test data sample:', testData[0]);
@@ -4933,7 +4954,7 @@ const TagManager = {
             }
         });
         
-        // Update select all checkbox states after hiding/showing tags
+        // Update select all checkboxes state after hiding/showing tags
         this.updateSelectAllCheckboxes();
     },
 
@@ -5544,6 +5565,11 @@ const TagManager = {
         this.applyFilters();
         this.renderActiveFilters();
         
+        // Also update the filter dropdowns to reflect the cleared state
+        if (this.state.originalFilterOptions.vendor) {
+            this.updateFilters(this.state.originalFilterOptions, false); // Don't preserve values when clearing
+        }
+        
         // Show success message
         if (window.Toast) {
             window.Toast.show('All filters cleared successfully', 'success');
@@ -5590,8 +5616,8 @@ const TagManager = {
     },
 
     // Clear all UI state when a new file is uploaded
-    clearUIStateForNewFile() {
-        console.log('Clearing UI state for new file upload');
+    clearUIStateForNewFile(preserveFilters = false) {
+        console.log('Clearing UI state for new file upload, preserveFilters:', preserveFilters);
         
         // Clear persistent selected tags
         this.state.persistentSelectedTags = [];
@@ -5622,11 +5648,27 @@ const TagManager = {
             }
         });
         
-        // Clear filters
-        const filterSelects = document.querySelectorAll('select[id*="Filter"]');
-        filterSelects.forEach(select => {
-            select.value = '';
-        });
+        // Only clear filters if explicitly requested (for actual new file uploads)
+        if (!preserveFilters) {
+            console.log('Clearing filter settings for new file upload');
+            const filterSelects = document.querySelectorAll('select[id*="Filter"]');
+            filterSelects.forEach(select => {
+                select.value = '';
+            });
+            
+            // Reset filter state to defaults
+            this.state.filters = {
+                vendor: 'All',
+                brand: 'All',
+                productType: 'All',
+                lineage: 'All',
+                weight: 'All',
+                doh: 'All',
+                highCbd: 'All'
+            };
+        } else {
+            console.log('Preserving filter settings during UI refresh');
+        }
         
         // Update tag counts
         this.updateTagCount('available', 0);
@@ -6913,7 +6955,7 @@ window.updateJsonFilterToggleVisibility = function() {
         })
         .catch(error => {
             console.error('Error checking filter status:', error);
-    });
+        });
 };
 
 // Global error handler to prevent page from exiting

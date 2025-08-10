@@ -24,6 +24,7 @@ from src.core.generation.docx_formatting import (
     clear_cell_margins,
     clear_table_cell_padding,
     enforce_fixed_cell_dimensions,
+    enforce_fixed_layout,
 )
 from src.core.generation.context_builders import (
     build_context,
@@ -44,6 +45,55 @@ from src.core.constants import (
 DEBUG_ENABLED = False
 
 logger = logging.getLogger(__name__)
+
+def _validate_and_repair_table_structure(table):
+    """
+    Validate and repair table structure to ensure it has required elements.
+    Returns True if table is valid, False if it cannot be repaired.
+    """
+    try:
+        # First, try to access table properties to see if there's an actual error
+        try:
+            _ = table.rows
+            _ = table.columns
+            # If we can access these without error, the table is fine
+            return True
+        except Exception:
+            # Only then check if we need to repair
+            pass
+        
+        # Check if table has the required tblGrid element
+        tblGrid = table._element.find(qn('w:tblGrid'))
+        if tblGrid is None:
+            # Create tblGrid element
+            tblGrid = OxmlElement('w:tblGrid')
+
+            # Get the actual number of columns from the table structure
+            # Count cells in the first row to determine column count
+            if len(table.rows) > 0:
+                first_row = table.rows[0]
+                col_count = len(first_row.cells)
+
+                # Create grid columns
+                for _ in range(col_count):
+                    gridCol = OxmlElement('w:gridCol')
+                    gridCol.set(qn('w:w'), '1440')  # Default width of 1 inch
+                    tblGrid.append(gridCol)
+
+                # Insert tblGrid at the beginning of the table element
+                table._element.insert(0, tblGrid)
+                logger.debug(f"Repaired missing tblGrid for table with {col_count} columns")
+                return True
+            else:
+                logger.warning("Cannot repair table: no rows found")
+                return False
+        else:
+            # Table already has tblGrid, don't modify it
+            return True
+        
+    except Exception as e:
+        logger.error(f"Error validating/reparing table structure: {e}")
+        return False
 
 PLACEHOLDER_MARKERS = {
     "Description": ("DESC_START", "DESC_END"),
@@ -643,8 +693,7 @@ def generate_multiple_label_tables(records, template_path):
                 for row in table.rows:
                     row.height = Inches(1.0)
                     row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
-                
-                # Enforce fixed cell dimensions to prevent any growth
+                # Final: enforce fixed layout for this table context
                 enforce_fixed_cell_dimensions(table)
                 
                 final_doc.add_paragraph()
@@ -738,6 +787,10 @@ def validate_and_repair_document(doc_bytes):
             
         # Check for malformed tables
         for table in doc.tables:
+            # Validate table structure before processing
+            if not _validate_and_repair_table_structure(table):
+                issues_found.append("Table has invalid structure that cannot be repaired")
+                continue
             try:
                 # Try to access table properties
                 _ = table.rows

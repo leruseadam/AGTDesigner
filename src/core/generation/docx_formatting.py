@@ -7,6 +7,55 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+def _validate_and_repair_table_structure(table):
+    """
+    Validate and repair table structure to ensure it has required elements.
+    Returns True if table is valid, False if it cannot be repaired.
+    """
+    try:
+        # First, try to access table properties to see if there's an actual error
+        try:
+            _ = table.rows
+            _ = table.columns
+            # If we can access these without error, the table is fine
+            return True
+        except Exception:
+            # Only then check if we need to repair
+            pass
+        
+        # Check if table has the required tblGrid element
+        tblGrid = table._element.find(qn('w:tblGrid'))
+        if tblGrid is None:
+            # Create tblGrid element
+            tblGrid = OxmlElement('w:tblGrid')
+
+            # Get the actual number of columns from the table structure
+            # Count cells in the first row to determine column count
+            if len(table.rows) > 0:
+                first_row = table.rows[0]
+                col_count = len(first_row.cells)
+
+                # Create grid columns
+                for _ in range(col_count):
+                    gridCol = OxmlElement('w:gridCol')
+                    gridCol.set(qn('w:w'), '1440')  # Default width of 1 inch
+                    tblGrid.append(gridCol)
+
+                # Insert tblGrid at the beginning of the table element
+                table._element.insert(0, tblGrid)
+                logger.debug(f"Repaired missing tblGrid for table with {col_count} columns")
+                return True
+            else:
+                logger.warning("Cannot repair table: no rows found")
+                return False
+        else:
+            # Table already has tblGrid, don't modify it
+            return True
+        
+    except Exception as e:
+        logger.error(f"Error validating/reparing table structure: {e}")
+        return False
+
 # Define colors for lineage
 COLORS = {
     'SATIVA': 'ED4123',
@@ -23,6 +72,16 @@ def apply_lineage_colors(doc):
     """Apply lineage colors to all cells based on keywords in cell text."""
     try:
         for table in doc.tables:
+            # Skip validation for tables that already work - only validate if there's an error
+            try:
+                # Test if table is accessible without error
+                _ = table.rows
+                _ = table.columns
+            except Exception:
+                # Only then try to repair
+                if not _validate_and_repair_table_structure(table):
+                    logger.warning(f"Skipping table with invalid structure during lineage color application")
+                    continue
             for row in table.rows:
                 for cell in row.cells:
                     text = cell.text.upper()
@@ -66,14 +125,14 @@ def apply_lineage_colors(doc):
                         color_hex = COLORS['INDICA']
                     elif "HYBRID" in text:
                         color_hex = COLORS['HYBRID']
-                    elif "CBD" in text or "CBD_BLEND" in text:
-                        color_hex = COLORS['CBD']
                     elif "MIXED" in text:
                         # For non-classic product types, Mixed should be blue
                         if not is_classic and product_type and product_type not in classic_types:
                             color_hex = COLORS['MIXED']  # Blue for non-classic Mixed
                         else:
                             color_hex = COLORS['MIXED']  # Default blue for Mixed
+                    elif "CBD" in text or "CBD_BLEND" in text:
+                        color_hex = COLORS['CBD']
                     
                     if color_hex:
                         # Set cell background color
@@ -107,6 +166,10 @@ def fix_table_row_heights(doc, template_type):
             'inventory': 2.0
         }.get(template_type, 2.4)
         for table in doc.tables:
+            # Validate table structure before processing
+            if not _validate_and_repair_table_structure(table):
+                logger.warning(f"Skipping table with invalid structure during row height fixing")
+                continue
             for row in table.rows:
                 row.height = Inches(row_height)
                 row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
@@ -126,6 +189,10 @@ def safe_fix_paragraph_spacing(doc):
             paragraph.paragraph_format.space_after = Pt(0)
             paragraph.paragraph_format.line_spacing = 1.0
         for table in doc.tables:
+            # Validate table structure before processing
+            if not _validate_and_repair_table_structure(table):
+                logger.warning(f"Skipping table with invalid structure during paragraph spacing fix")
+                continue
             for row in table.rows:
                 for cell in row.cells:
                     for paragraph in cell.paragraphs:
@@ -156,6 +223,10 @@ def apply_conditional_formatting(doc, conditions=None):
                 }
             }
         for table in doc.tables:
+            # Validate table structure before processing
+            if not _validate_and_repair_table_structure(table):
+                logger.warning(f"Skipping table with invalid structure during conditional formatting")
+                continue
             for row in table.rows:
                 for cell in row.cells:
                     for paragraph in cell.paragraphs:
@@ -388,6 +459,10 @@ def enforce_ratio_formatting(doc):
 
     # Process all tables
     for table in doc.tables:
+        # Validate table structure before processing
+        if not _validate_and_repair_table_structure(table):
+            logger.warning(f"Skipping table with invalid structure during ratio formatting")
+            continue
         for row in table.rows:
             for cell in row.cells:
                 for paragraph in cell.paragraphs:
@@ -500,6 +575,10 @@ def enforce_arial_bold_all_text(doc):
 
     # Process all tables
     for table in doc.tables:
+        # Validate table structure before processing
+        if not _validate_and_repair_table_structure(table):
+            logger.warning(f"Skipping table with invalid structure during Arial bold formatting")
+            continue
         for row in table.rows:
             for cell in row.cells:
                 for paragraph in cell.paragraphs:
@@ -554,6 +633,10 @@ def enforce_thc_cbd_bold_formatting(doc):
     
     # Process all paragraphs in tables
     for table in doc.tables:
+        # Validate table structure before processing
+        if not _validate_and_repair_table_structure(table):
+            logger.warning(f"Skipping table with invalid structure during THC/CBD bold formatting")
+            continue
         for row in table.rows:
             for cell in row.cells:
                 for paragraph in cell.paragraphs:
@@ -589,6 +672,10 @@ def cleanup_all_price_markers(doc):
 
     # Process all tables
     for table in doc.tables:
+        # Validate table structure before processing
+        if not _validate_and_repair_table_structure(table):
+            logger.warning(f"Skipping table with invalid structure during price marker cleanup")
+            continue
         for row in table.rows:
             for cell in row.cells:
                 for paragraph in cell.paragraphs:
@@ -648,6 +735,10 @@ def remove_extra_spacing(doc):
 
     # Process all tables
     for table in doc.tables:
+        # Validate table structure before processing
+        if not _validate_and_repair_table_structure(table):
+            logger.warning(f"Skipping table with invalid structure during extra spacing removal")
+            continue
         for row in table.rows:
             for cell in row.cells:
                 for paragraph in cell.paragraphs:
@@ -684,6 +775,10 @@ def apply_type_formatting(doc, product_type, template_type='vertical'):
 
     # Process all tables
     for table in doc.tables:
+        # Validate table structure before processing
+        if not _validate_and_repair_table_structure(table):
+            logger.warning(f"Skipping table with invalid structure during type formatting")
+            continue
         for row in table.rows:
             for cell in row.cells:
                 for paragraph in cell.paragraphs:
@@ -811,6 +906,63 @@ def enforce_fixed_cell_dimensions(table):
         return table
     except Exception as e:
         logger.error(f"Error enforcing fixed cell dimensions: {str(e)}")
+        raise
+
+def enforce_fixed_layout(doc, template_type='horizontal'):
+    """Apply a strict, non-expanding layout to all tables in the document.
+
+    - Disable any auto-fit behavior and force fixed layout
+    - Force all row heights to use EXACTLY height rule
+    - Standardize cell widths to template constants so content cannot expand cells
+    """
+    try:
+        # First, set explicit row heights per template
+        fix_table_row_heights(doc, template_type)
+
+        # Standardize layout and cell sizing per table
+        from src.core.constants import CELL_DIMENSIONS
+        dims = CELL_DIMENSIONS.get(template_type, {'width': 2.4, 'height': 2.4})
+        target_cell_width_twips = str(int(Inches(dims['width']).inches * 1440))
+
+        for table in doc.tables:
+            # Validate table structure before processing
+            if not _validate_and_repair_table_structure(table):
+                logger.warning(f"Skipping table with invalid structure during fixed layout enforcement")
+                continue
+            # Ensure fixed layout at table level
+            tblPr = table._element.find(qn('w:tblPr'))
+            if tblPr is None:
+                tblPr = OxmlElement('w:tblPr')
+                table._element.insert(0, tblPr)
+            tblLayout = OxmlElement('w:tblLayout')
+            tblLayout.set(qn('w:type'), 'fixed')
+            tblPr.append(tblLayout)
+
+            # Turn off autofit flags if present
+            table.autofit = False
+            if hasattr(table, 'allow_autofit'):
+                table.allow_autofit = False
+
+            # Enforce non-expanding behavior down to the cell/paragraph level
+            enforce_fixed_cell_dimensions(table)
+
+            # Apply explicit width to every cell to avoid reflow/expansion
+            for row in table.rows:
+                # Ensure height rule stays EXACTLY
+                row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+                for cell in row.cells:
+                    tcPr = cell._tc.get_or_add_tcPr()
+                    tcW = tcPr.find(qn('w:tcW'))
+                    if tcW is not None:
+                        tcPr.remove(tcW)
+                    new_tcW = OxmlElement('w:tcW')
+                    new_tcW.set(qn('w:w'), target_cell_width_twips)
+                    new_tcW.set(qn('w:type'), 'dxa')
+                    tcPr.append(new_tcW)
+        logger.debug("Enforced fixed layout across entire document")
+        return doc
+    except Exception as e:
+        logger.error(f"Error enforcing fixed layout: {str(e)}")
         raise
 
 def fix_table(doc, num_rows=3, num_cols=3, template_type='horizontal'):
@@ -957,6 +1109,10 @@ def apply_custom_formatting(doc, template_settings):
         # Apply background color to tables if specified
         if background_color != '#ffffff':
             for table in doc.tables:
+                # Validate table structure before processing
+                if not _validate_and_repair_table_structure(table):
+                    logger.warning(f"Skipping table with invalid structure during custom formatting")
+                    continue
                 for row in table.rows:
                     for cell in row.cells:
                         set_cell_background(cell, background_color)

@@ -16,7 +16,7 @@ import traceback
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK, WD_TAB_ALIGNMENT
 from docx.enum.table import WD_ALIGN_VERTICAL
 from docx.enum.section import WD_SECTION
-from docx.oxml.shared import OxmlElement, qn
+# from docx.oxml.shared import OxmlElement, qn  # Duplicate import removed
 import time
 import pandas as pd
 
@@ -28,6 +28,7 @@ from src.core.generation.docx_formatting import (
     clear_cell_background,
     clear_cell_margins,
     clear_table_cell_padding,
+    enforce_fixed_layout,
 )
 from src.core.generation.unified_font_sizing import (
     get_font_size,
@@ -154,14 +155,15 @@ class TemplateProcessor:
             
             unique_labels = set(matches)
             
-            if len(unique_labels) < required_labels or force_expand:
+            # For double template, always apply structure fix regardless of label count
+            if self.template_type == 'double':
+                self.logger.info("Double template using minimal structure fix")
+                return self._fix_double_template_structure()
+            elif len(unique_labels) < required_labels or force_expand:
                 self.logger.info(f"Template needs expansion. Template type: '{self.template_type}', Required labels: {required_labels}, Found unique labels: {len(unique_labels)}")
                 if self.template_type == 'mini':
                     self.logger.info("Calling 4x5 expansion method")
                     return self._expand_template_to_4x5_fixed_scaled()
-                elif self.template_type == 'double':
-                    self.logger.info("Calling 4x3 expansion method")
-                    return self._expand_template_to_4x3_fixed_double()
                 elif self.template_type == 'inventory':
                     self.logger.info("Calling 2x2 inventory expansion method")
                     return self._expand_template_to_2x2_inventory()
@@ -177,6 +179,121 @@ class TemplateProcessor:
     def force_re_expand_template(self):
         """Force re-expansion of template."""
         self._expanded_template_buffer = self._expand_template_if_needed(force_expand=True)
+
+    def _fix_double_template_structure(self):
+        """Fix double template structure by adding missing table grid elements without full expansion."""
+        from docx import Document
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+        from io import BytesIO
+        
+        try:
+            # Load the original template
+            template_path = self._get_template_path()
+            self.logger.info(f"Loading double template from: {template_path}")
+            doc = Document(template_path)
+            
+            # Check if template has tables
+            if not doc.tables:
+                self.logger.warning("Double template has no tables, returning original")
+                buffer = BytesIO()
+                doc.save(buffer)
+                buffer.seek(0)
+                return buffer
+            
+            self.logger.info(f"Double template has {len(doc.tables)} tables")
+            
+            # Fix each table by ensuring it has proper structure
+            for table in doc.tables:
+                # Check if table has tblGrid element
+                tbl_grid = table._element.find(qn('w:tblGrid'))
+                if tbl_grid is None:
+                    self.logger.info("Adding missing tblGrid element to double template table")
+                    
+                    # Get the number of columns from the table XML structure instead of table.columns
+                    # This avoids the error when table.columns is accessed without proper structure
+                    table_element = table._element
+                    rows = table_element.findall(qn('w:tr'))
+                    if rows:
+                        # Count columns from the first row
+                        first_row = rows[0]
+                        cells = first_row.findall(qn('w:tc'))
+                        num_cols = len(cells)
+                    else:
+                        # Fallback: assume 4 columns for double template
+                        num_cols = 4
+                    
+                    self.logger.info(f"Detected {num_cols} columns in double template table")
+                    
+                    # Create tblGrid element
+                    tbl_grid = OxmlElement('w:tblGrid')
+                    for _ in range(num_cols):
+                        gc = OxmlElement('w:gridCol')
+                        gc.set(qn('w:w'), str(int(1.75 * 1440)))  # 1.75 inches per column
+                        tbl_grid.append(gc)
+                    
+                    # Insert tblGrid at the beginning of the table element
+                    table_element.insert(0, tbl_grid)
+                    
+                    # Also ensure table has proper table properties
+                    tbl_pr = table_element.find(qn('w:tblPr'))
+                    if tbl_pr is None:
+                        tbl_pr = OxmlElement('w:tblPr')
+                        table_element.insert(0, tbl_pr)
+                    
+                    # Add table layout
+                    layout = tbl_pr.find(qn('w:tblLayout'))
+                    if layout is None:
+                        layout = OxmlElement('w:tblLayout')
+                        layout.set(qn('w:type'), 'fixed')
+                        tbl_pr.append(layout)
+                    
+                    # Ensure the table has at least one row and cell for basic structure
+                    if not table_element.findall(qn('w:tr')):
+                        self.logger.warning("Double template table has no rows, adding minimal structure")
+                        # Add a minimal row with cells
+                        row = OxmlElement('w:tr')
+                        for _ in range(num_cols):
+                            cell = OxmlElement('w:tc')
+                            # Add cell properties
+                            tc_pr = OxmlElement('w:tcPr')
+                            cell.append(tc_pr)
+                            # Add a paragraph
+                            para = OxmlElement('w:p')
+                            cell.append(para)
+                            row.append(cell)
+                        table_element.append(row)
+            
+            # Save the fixed template to buffer
+            buffer = BytesIO()
+            doc.save(buffer)
+            buffer.seek(0)
+            return buffer
+            
+        except Exception as e:
+            self.logger.error(f"Error fixing double template structure: {e}")
+            # Fallback to original template if fixing fails
+            try:
+                self.logger.info("Attempting fallback to original template")
+                with open(self._get_template_path(), 'rb') as f:
+                    buffer = BytesIO(f.read())
+                self.logger.info("Fallback successful, returning original template")
+                return buffer
+            except Exception as fallback_error:
+                self.logger.error(f"Fallback to original template also failed: {fallback_error}")
+                # Last resort: create a minimal working template
+                self.logger.warning("Creating minimal working template as last resort")
+                try:
+                    from docx import Document
+                    doc = Document()
+                    table = doc.add_table(rows=1, cols=4)
+                    buffer = BytesIO()
+                    doc.save(buffer)
+                    buffer.seek(0)
+                    return buffer
+                except Exception as create_error:
+                    self.logger.error(f"Failed to create minimal template: {create_error}")
+                    raise
 
     def _expand_template_to_2x2_inventory(self):
         """Expand template to 2x2 grid for inventory slips."""
@@ -774,30 +891,10 @@ class TemplateProcessor:
             # Apply lineage colors last to ensure they are not overwritten
             apply_lineage_colors(rendered_doc)
             
-            # Final enforcement of fixed cell dimensions to prevent any expansion
-            for table in rendered_doc.tables:
-                enforce_fixed_cell_dimensions(table)
+            # Final enforcement: prevent any cell/row expansion and force EXACT dimensions
+            enforce_fixed_layout(rendered_doc, self.template_type)
             
-            # CRITICAL: For horizontal, vertical, and double templates, explicitly override cell widths after DocxTemplate rendering
-            if self.template_type in ['horizontal', 'vertical', 'double']:
-                from src.core.constants import CELL_DIMENSIONS
-                individual_cell_width = CELL_DIMENSIONS[self.template_type]['width']
-                fixed_col_width = str(int(individual_cell_width * 1440))  # Use individual cell width directly
-                
-                for table in rendered_doc.tables:
-                    # Override each cell width
-                    for row in table.rows:
-                        for cell in row.cells:
-                            tcPr = cell._tc.get_or_add_tcPr()
-                            tcW = tcPr.find(qn('w:tcW'))
-                            if tcW is not None:
-                                tcW.getparent().remove(tcW)
-                            
-                            # Create new width property with correct value
-                            tcW = OxmlElement('w:tcW')
-                            tcW.set(qn('w:w'), fixed_col_width)
-                            tcW.set(qn('w:type'), 'dxa')
-                            tcPr.append(tcW)
+            # Cell widths already standardized by enforce_fixed_layout
             
             # Ensure proper table centering and document setup
             self._ensure_proper_centering(rendered_doc)
@@ -805,6 +902,11 @@ class TemplateProcessor:
             # FINAL ENFORCEMENT: For vertical and double templates, force appropriate line spacing for all paragraphs in any cell containing THC_CBD marker
             if self.template_type in ['vertical', 'double']:
                 for table in rendered_doc.tables:
+                    # Validate table structure before processing
+                    if not self._validate_and_repair_table_structure(table):
+                        self.logger.warning(f"Skipping table with invalid structure during THC_CBD processing")
+                        continue
+                    
                     for row in table.rows:
                         for cell in row.cells:
                             # Check for THC_CBD marker in cell text or runs
@@ -839,6 +941,11 @@ class TemplateProcessor:
             prefix_pattern = re.compile(r'^(?:[A-Z0-9_]+_)+')
             # Clean in tables
             for table in rendered_doc.tables:
+                # Validate table structure before processing
+                if not self._validate_and_repair_table_structure(table):
+                    self.logger.warning(f"Skipping table with invalid structure during marker cleanup")
+                    continue
+                
                 for row in table.rows:
                     for cell in row.cells:
                         for para in cell.paragraphs:
@@ -936,7 +1043,7 @@ class TemplateProcessor:
             image_path = process_doh_image(doh_value, product_type)
             if image_path:
                 # Fast width selection
-                width_map = {'mini': 9, 'double': 9, 'vertical': 12, 'horizontal': 12}
+                width_map = {'mini': 9, 'double': 8, 'vertical': 12, 'horizontal': 12}
                 image_width = Mm(width_map.get(self.template_type, 12))
                 label_context['DOH'] = InlineImage(doc, image_path, width=image_width)
                 # Ensure DOH image takes priority - clear any other DOH-related content
@@ -1047,6 +1154,9 @@ class TemplateProcessor:
                     lineage_value = label_context['Lineage']
                 
             
+            # Add a space before Lineage for classic types so it's not right at the edge
+            if product_type in classic_types:
+                lineage_value = ' ' + lineage_value if lineage_value else ''
             label_context['Lineage'] = wrap_with_marker(unwrap_marker(lineage_value, 'LINEAGE'), 'LINEAGE')
 
         # Fast wrapping for remaining fields
@@ -1164,6 +1274,11 @@ class TemplateProcessor:
         try:
             br_found = False
             for table in doc.tables:
+                # Validate table structure before processing
+                if not self._validate_and_repair_table_structure(table):
+                    self.logger.warning(f"Skipping table with invalid structure during BR marker conversion")
+                    continue
+                
                 for row in table.rows:
                     for cell in row.cells:
                         for paragraph in cell.paragraphs:
@@ -1197,6 +1312,11 @@ class TemplateProcessor:
         # Fast DOH image centering
         try:
             for table in doc.tables:
+                # Validate table structure before processing
+                if not self._validate_and_repair_table_structure(table):
+                    self.logger.warning(f"Skipping table with invalid structure during DOH centering")
+                    continue
+                
                 for row in table.rows:
                     for cell in row.cells:
                         # Fast check for image-only cells
@@ -1235,6 +1355,11 @@ class TemplateProcessor:
             from docx.oxml import OxmlElement
             
             for table in doc.tables:
+                # Validate table structure before processing
+                if not self._validate_and_repair_table_structure(table):
+                    self.logger.warning(f"Skipping table with invalid structure during DOH image centering")
+                    continue
+                
                 for row in table.rows:
                     for cell in row.cells:
                         # Check if this cell contains a DOH image
@@ -1317,6 +1442,11 @@ class TemplateProcessor:
         """
         try:
             for table in doc.tables:
+                # Validate table structure before processing
+                if not self._validate_and_repair_table_structure(table):
+                    self.logger.warning(f"Skipping table with invalid structure during blank cell clearing")
+                    continue
+                
                 for row in table.rows:
                     for cell in row.cells:
                         # Check if cell is essentially empty
@@ -2054,6 +2184,55 @@ class TemplateProcessor:
             self.logger.error(f"Error fixing ratio paragraph spacing: {e}")
             # Don't raise the exception - this is a formatting enhancement that shouldn't break the main process
 
+    def _validate_and_repair_table_structure(self, table):
+        """
+        Validate and repair table structure to ensure it has required elements.
+        Returns True if table is valid, False if it cannot be repaired.
+        """
+        try:
+            # First, try to access table properties to see if there's an actual error
+            try:
+                _ = table.rows
+                _ = table.columns
+                # If we can access these without error, the table is fine
+                return True
+            except Exception:
+                # Only then check if we need to repair
+                pass
+            
+            # Check if table has the required tblGrid element
+            tblGrid = table._element.find(qn('w:tblGrid'))
+            if tblGrid is None:
+                # Create tblGrid element
+                tblGrid = OxmlElement('w:tblGrid')
+                
+                # Get the actual number of columns from the table structure
+                # Count cells in the first row to determine column count
+                if len(table.rows) > 0:
+                    first_row = table.rows[0]
+                    col_count = len(first_row.cells)
+                    
+                    # Create grid columns
+                    for _ in range(col_count):
+                        gridCol = OxmlElement('w:gridCol')
+                        gridCol.set(qn('w:w'), '1440')  # Default width of 1 inch
+                        tblGrid.append(gridCol)
+                    
+                    # Insert tblGrid at the beginning of the table element
+                    table._element.insert(0, tblGrid)
+                    self.logger.debug(f"Repaired missing tblGrid for table with {col_count} columns")
+                    return True
+                else:
+                    self.logger.warning("Cannot repair table: no rows found")
+                    return False
+            else:
+                # Table already has tblGrid, don't modify it
+                return True
+                
+        except Exception as e:
+            self.logger.error(f"Error validating/repairing table structure: {e}")
+            return False
+
     def _ensure_proper_centering(self, doc):
         """
         Ensure tables are properly centered in the document with correct margins and spacing.
@@ -2082,8 +2261,19 @@ class TemplateProcessor:
             for paragraph in paragraphs_to_remove:
                 paragraph._element.getparent().remove(paragraph._element)
             
-            # Ensure all tables are properly centered
+            # Ensure all tables are properly centered and have valid structure
             for table in doc.tables:
+                # Skip validation for tables that already work - only validate if there's an error
+                try:
+                    # Test if table is accessible without error
+                    _ = table.rows
+                    _ = table.columns
+                except Exception:
+                    # Only then try to repair
+                    if not self._validate_and_repair_table_structure(table):
+                        self.logger.warning(f"Skipping table that cannot be repaired")
+                        continue
+                
                 # Set table alignment to center
                 table.alignment = WD_TABLE_ALIGNMENT.CENTER
                 
@@ -2178,6 +2368,11 @@ class TemplateProcessor:
         """
         try:
             for table in doc.tables:
+                # Validate table structure before processing
+                if not self._validate_and_repair_table_structure(table):
+                    self.logger.warning(f"Skipping table with invalid structure during weight units marker addition")
+                    continue
+                
                 for row in table.rows:
                     for cell in row.cells:
                         for paragraph in cell.paragraphs:
@@ -2240,6 +2435,11 @@ class TemplateProcessor:
             self.logger.debug(f"Processing brand markers for non-classic type: {current_product_type}")
             
             for table in doc.tables:
+                # Validate table structure before processing
+                if not self._validate_and_repair_table_structure(table):
+                    self.logger.warning(f"Skipping table with invalid structure during brand marker addition")
+                    continue
+                
                 for row in table.rows:
                     for cell in row.cells:
                         for paragraph in cell.paragraphs:

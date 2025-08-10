@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Filter Preservation Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; border-radius: 5px; }
+        .filter-group { margin: 10px 0; }
+        label { display: inline-block; width: 120px; }
+        select { padding: 5px; margin: 5px; }
+        button { padding: 10px 15px; margin: 5px; background: #007bff; color: white; border: none; border-radius: 3px; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        .log { background: #f8f9fa; padding: 10px; margin: 10px 0; border-radius: 3px; font-family: monospace; font-size: 12px; max-height: 200px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+    <h1>Filter Preservation Test</h1>
+    
+    <div class="test-section">
+        <h3>Test 1: Set Filters and Simulate Deselection</h3>
+        <div class="filter-group">
+            <label for="vendorFilter">Vendor:</label>
+            <select id="vendorFilter" aria-label="Select vendor filter">
+                <option value="">All</option>
+                <option value="Vendor A">Vendor A</option>
+                <option value="Vendor B">Vendor B</option>
+                <option value="Vendor C">Vendor C</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <label for="brandFilter">Brand:</label>
+            <select id="brandFilter" aria-label="Select brand filter">
+                <option value="">All</option>
+                <option value="Brand 1">Brand 1</option>
+                <option value="Brand 2">Brand 2</option>
+                <option value="Brand 3">Brand 3</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <label for="productTypeFilter">Product Type:</label>
+            <select id="productTypeFilter" aria-label="Select product type filter">
+                <option value="">All</option>
+                <option value="Flower">Flower</option>
+                <option value="Edible">Edible</option>
+                <option value="Concentrate">Concentrate</option>
+            </select>
+        </div>
+        
+        <button onclick="setTestFilters()">Set Test Filters</button>
+        <button onclick="simulateDeselection()">Simulate Deselection (Refresh Filters)</button>
+        <button onclick="clearAllFilters()">Clear All Filters</button>
+    </div>
+    
+    <div class="test-section">
+        <h3>Test 2: Filter State Log</h3>
+        <div id="filterLog" class="log"></div>
+        <button onclick="logFilterState()">Log Current Filter State</button>
+    </div>
+    
+    <div class="test-section">
+        <h3>Test 3: Simulate updateFilters with preserveExistingValues</h3>
+        <button onclick="testUpdateFilters(true)">updateFilters(true) - Preserve Values</button>
+        <button onclick="testUpdateFilters(false)">updateFilters(false) - Don't Preserve</button>
+    </div>
+
+    <script>
+        // Mock TagManager for testing
+        const TagManager = {
+            state: {
+                filters: {
+                    vendor: 'All',
+                    brand: 'All',
+                    productType: 'All',
+                    lineage: 'All',
+                    weight: 'All',
+                    doh: 'All',
+                    highCbd: 'All'
+                },
+                originalFilterOptions: {}
+            },
+            
+            updateFilters(filters, preserveExistingValues = true) {
+                console.log('updateFilters called with:', filters, 'preserveExistingValues:', preserveExistingValues);
+                
+                if (!filters) return;
+                
+                // Store original filter options to preserve order
+                if (!this.state.originalFilterOptions.vendor) {
+                    this.state.originalFilterOptions = { ...filters };
+                }
+                
+                // Map of filter types to their HTML IDs
+                const filterFieldMap = {
+                    vendor: 'vendorFilter',
+                    brand: 'brandFilter',
+                    productType: 'productTypeFilter',
+                    lineage: 'lineageFilter',
+                    weight: 'weightFilter',
+                    doh: 'dohFilter',
+                    highCbd: 'highCbdFilter'
+                };
+                
+                // Update each filter dropdown
+                Object.entries(filterFieldMap).forEach(([filterType, filterId]) => {
+                    const filterElement = document.getElementById(filterId);
+                    
+                    if (!filterElement) {
+                        console.warn(`Filter element not found: ${filterId}`);
+                        return;
+                    }
+                    
+                    // Get values for this filter type
+                    const fieldValues = filters[filterType] || [];
+                    const values = new Set();
+                    fieldValues.forEach(value => {
+                        if (value && value.trim() !== '') {
+                            values.add(value.trim());
+                        }
+                    });
+                    
+                    // Sort values alphabetically
+                    const sortedValues = Array.from(values).sort((a, b) => a.localeCompare(b));
+                    
+                    console.log(`Updating ${filterId} with values:`, sortedValues);
+                    
+                    // Store current value
+                    const currentValue = filterElement.value;
+                    
+                    // Update the dropdown options
+                    filterElement.innerHTML = `
+                        <option value="">All</option>
+                        ${sortedValues.map(value => `<option value="${value}">${value}</option>`).join('')}
+                    `;
+                    
+                    // Handle value restoration based on preserveExistingValues parameter
+                    if (preserveExistingValues) {
+                        // Preserve existing value if it's still valid, or keep it even if not in current options
+                        if (currentValue && currentValue.trim() !== '') {
+                            if (sortedValues.includes(currentValue)) {
+                                // Value is still valid, restore it
+                                filterElement.value = currentValue;
+                            } else {
+                                // Value is no longer in current options, but preserve it by adding it back
+                                console.log(`Preserving filter value "${currentValue}" for ${filterId} even though it's not in current options`);
+                                const option = document.createElement('option');
+                                option.value = currentValue;
+                                option.textContent = currentValue;
+                                option.style.color = '#666'; // Gray out to indicate it's not currently available
+                                filterElement.appendChild(option);
+                                filterElement.value = currentValue;
+                            }
+                        } else {
+                            filterElement.value = '';
+                        }
+                    } else {
+                        // Only restore if value is still valid (for explicit filter clearing)
+                        if (currentValue && sortedValues.includes(currentValue)) {
+                            filterElement.value = currentValue;
+                        } else {
+                            filterElement.value = '';
+                        }
+                    }
+                });
+            },
+            
+            clearAllFilters() {
+                console.log('Clearing all filters...');
+                
+                const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
+                
+                // Clear each filter dropdown
+                filterIds.forEach(filterId => {
+                    const filterElement = document.getElementById(filterId);
+                    if (filterElement) {
+                        filterElement.value = '';
+                    }
+                });
+                
+                // Also update the filter dropdowns to reflect the cleared state
+                if (this.state.originalFilterOptions.vendor) {
+                    this.updateFilters(this.state.originalFilterOptions, false); // Don't preserve values when clearing
+                }
+                
+                console.log('All filters cleared successfully');
+            }
+        };
+        
+        function setTestFilters() {
+            TagManager.state.filters.vendor = 'Vendor A';
+            TagManager.state.filters.brand = 'Brand 2';
+            TagManager.state.filters.productType = 'Flower';
+            
+            document.getElementById('vendorFilter').value = 'Vendor A';
+            document.getElementById('brandFilter').value = 'Brand 2';
+            document.getElementById('productTypeFilter').value = 'Flower';
+            
+            logFilterState();
+        }
+        
+        function simulateDeselection() {
+            // Simulate what happens when items are deselected and filters are refreshed
+            console.log('Simulating deselection - refreshing filters...');
+            
+            // Simulate reduced filter options (as if some items were deselected)
+            const reducedFilters = {
+                vendor: ['Vendor A', 'Vendor B'], // Vendor C removed
+                brand: ['Brand 1', 'Brand 2'], // Brand 3 removed
+                productType: ['Flower', 'Edible'], // Concentrate removed
+                lineage: ['SATIVA', 'INDICA'],
+                weight: ['1g', '3.5g', '7g'],
+                doh: ['GENERAL USE'],
+                highCbd: ['Non-High CBD Products']
+            };
+            
+            // This should preserve existing filter values even if they're not in the reduced options
+            TagManager.updateFilters(reducedFilters, true);
+            
+            logFilterState();
+        }
+        
+        function clearAllFilters() {
+            TagManager.clearAllFilters();
+            logFilterState();
+        }
+        
+        function testUpdateFilters(preserveValues) {
+            console.log(`Testing updateFilters with preserveExistingValues = ${preserveValues}`);
+            
+            // Simulate filter options update
+            const testFilters = {
+                vendor: ['Vendor A', 'Vendor B'],
+                brand: ['Brand 1', 'Brand 2'],
+                productType: ['Flower', 'Edible'],
+                lineage: ['SATIVA', 'INDICA'],
+                weight: ['1g', '3.5g'],
+                doh: ['GENERAL USE'],
+                highCbd: ['Non-High CBD Products']
+            };
+            
+            TagManager.updateFilters(testFilters, preserveValues);
+            logFilterState();
+        }
+        
+        function logFilterState() {
+            const logDiv = document.getElementById('filterLog');
+            const currentValues = {
+                vendor: document.getElementById('vendorFilter').value,
+                brand: document.getElementById('brandFilter').value,
+                productType: document.getElementById('productTypeFilter').value
+            };
+            
+            const logEntry = `
+[${new Date().toLocaleTimeString()}] Filter State:
+- Vendor: "${currentValues.vendor || 'All'}"
+- Brand: "${currentValues.brand || 'All'}"
+- Product Type: "${currentValues.productType || 'All'}"
+- TagManager State: ${JSON.stringify(TagManager.state.filters, null, 2)}
+---
+`;
+            
+            logDiv.innerHTML += logEntry;
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+        
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Filter preservation test initialized');
+            logFilterState();
+        });
+    </script>
+</body>
+</html> 
