@@ -5388,8 +5388,7 @@ img, video, canvas, svg {
     border-radius: 18px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2), 0 4px 12px rgba(160, 132, 232, 0.1);
     padding: 0.5rem 0.75rem;
-    /* Slightly narrower so it never exceeds tag lists visual width */
-    max-width: calc(var(--canvas-max-width) - 2.5rem);
+    max-width: calc(var(--canvas-max-width) - 2rem); /* account for gaps between columns */
     margin-left: auto;
     margin-right: auto;
   }
