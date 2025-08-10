@@ -24,6 +24,7 @@ def test_mini_blank_cells_fix():
     # Create test data with fewer records than the 20-cell grid
     test_records = [
         {
+            'ProductName': 'Test Product 1',  # Add unique ProductName
             'Description': 'Test Product 1',
             'ProductBrand': 'Test Brand',
             'Price': '$25',
@@ -35,6 +36,7 @@ def test_mini_blank_cells_fix():
             'ProductStrain': 'Test Strain 1'
         },
         {
+            'ProductName': 'Test Product 2',  # Add unique ProductName
             'Description': 'Test Product 2', 
             'ProductBrand': 'Test Brand 2',
             'Price': '$30',
@@ -46,6 +48,7 @@ def test_mini_blank_cells_fix():
             'ProductStrain': 'Test Strain 2'
         },
         {
+            'ProductName': 'Test Product 3',  # Add unique ProductName
             'Description': 'Test Product 3',
             'ProductBrand': 'Test Brand 3', 
             'Price': '$35',
@@ -128,6 +131,7 @@ def test_mini_full_grid():
     test_records = []
     for i in range(20):
         test_records.append({
+            'ProductName': f'Test Product {i+1}',  # Add unique ProductName
             'Description': f'Test Product {i+1}',
             'ProductBrand': f'Test Brand {i+1}',
             'Price': f'${20 + i}',

@@ -44,9 +44,9 @@ def _load_font_sizing_config():
                 'double': {
                     'description': [(10, 24), (20, 22), (60, 18), (80, 16), (100, 14), (120, 12), (140, 10), (float('inf'), 10)],
                     'brand': [(10, 14), (15, 12), (20, 10), (25, 8), (float('inf'), 7.5)],
-                    'price': [(3, 22), (5, 20), (12, 18), (16, 16), (float('inf'), 14)],
+                    'price': [(5, 22), (20, 18), (16, 16), (float('inf'), 14)],
                     'lineage': [(15, 13), (25, 12), (35, 10), (45, 9), (float('inf'), 9)],
-                    'ratio': [(1, 9), (3, 7), (5, 5.5), (float('inf'), 5)],
+                    'ratio': [(5, 12), (10, 10), (20, 9), (30, 8), (40, 7), (float('inf'), 6)],
                     'thc_cbd': [(1, 6.5),(float('inf'), 6.5)],
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
                     'weight': [(15, 16), (25, 14), (35, 12), (float('inf'), 9)],
@@ -59,7 +59,7 @@ def _load_font_sizing_config():
                     'brand': [(20, 16), (30, 14), (40, 12), (float('inf'), 10)],
                     'price': [(5, 30), (8, 28), (float('inf'), 14)],
                     'lineage': [(20, 18), (40, 16), (60, 12), (float('inf'), 8)],
-                    'ratio': [(10, 12), (20, 10), (30, 8), (float('inf'), 10)],
+                    'ratio': [(5, 12), (10, 10), (20, 8), (30, 7), (float('inf'), 6)],
                     'thc_cbd': [(10, 11), (25, 8), (35, 7), (float('inf'), 6)],
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
                     'vendor': [(10, 6), (20, 5), (40, 4), (70, 3),(float('inf'), 2)],
@@ -70,7 +70,7 @@ def _load_font_sizing_config():
                     'brand': [(20, 18), (30, 16), (80, 14), (50, 12), (60, 10), (float('inf'), 10)],
                     'price': [(10, 34), (20, 30), (80, 20), (float('inf'), 18)],
                     'lineage': [(10, 20), (20, 18), (30, 16), (50, 12), (60, 10), (float('inf'), 10)],
-                    'ratio': [(5, 14), (10, 12), (20, 9), (30, 8), (40, 7), (50, 6), (float('inf'), 10)],
+                    'ratio': [(5, 12), (10, 10), (20, 8), (30, 7), (40, 6), (float('inf'), 5)],
                     'thc_cbd': [(10, 13), (float('inf'), 12)],
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
                     'vendor': [(10, 6), (20, 5), (40, 4), (70, 3),(float('inf'), 2)],
@@ -181,6 +181,60 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
             logger.debug(f"Double template description word length rule: text='{text}' has {len(long_words)} words with 9+ chars each: {long_words}, forcing 18pt font")
             return Pt(final_size)
     
+    # Special rule: If ratio content is very long or complex, reduce font size for better readability
+    if field_type.lower() == 'ratio':
+        clean_text = str(text).replace('THC_CBD_START', '').replace('THC_CBD_END', '').replace('RATIO_START', '').replace('RATIO_END', '')
+        clean_text = ' '.join(clean_text.split())
+        
+        # Check if this is standard THC/CBD format
+        if 'THC:' in clean_text and 'CBD:' in clean_text:
+            # Standard THC/CBD format - can be slightly smaller for better fit
+            if orientation.lower() == 'mini':
+                final_size = 8 * scale_factor
+            elif orientation.lower() == 'vertical':
+                final_size = 10 * scale_factor
+            elif orientation.lower() == 'horizontal':
+                final_size = 10 * scale_factor
+            elif orientation.lower() == 'double':
+                final_size = 10 * scale_factor
+            else:
+                final_size = 10 * scale_factor
+            
+            logger.debug(f"Special ratio rule: Standard THC/CBD format '{text}', using {final_size}pt font")
+            return Pt(final_size)
+        
+        # Check for very long ratio content
+        if len(clean_text) > 25:
+            if orientation.lower() == 'mini':
+                final_size = 6 * scale_factor
+            elif orientation.lower() == 'vertical':
+                final_size = 6 * scale_factor
+            elif orientation.lower() == 'horizontal':
+                final_size = 5 * scale_factor
+            elif orientation.lower() == 'double':
+                final_size = 7 * scale_factor  # Double template gets better treatment
+            else:
+                final_size = 6 * scale_factor
+            
+            logger.debug(f"Special ratio rule: Very long content '{text}' ({len(clean_text)} chars), using {final_size}pt font")
+            return Pt(final_size)
+        
+        # Check for ratio format with many numbers (e.g., "10:5:2:1:1")
+        if clean_text.count(':') >= 3:
+            if orientation.lower() == 'mini':
+                final_size = 7 * scale_factor
+            elif orientation.lower() == 'vertical':
+                final_size = 7 * scale_factor
+            elif orientation.lower() == 'horizontal':
+                final_size = 6 * scale_factor
+            elif orientation.lower() == 'double':
+                final_size = 8 * scale_factor  # Double template gets better treatment
+            else:
+                final_size = 7 * scale_factor
+            
+            logger.debug(f"Special ratio rule: Complex ratio format '{text}' ({clean_text.count(':')} ratios), using {final_size}pt font")
+            return Pt(final_size)
+    
     # Get the appropriate configuration
     config = FONT_SIZING_CONFIG.get(complexity_type, {}).get(orientation.lower(), {}).get(field_type.lower(), [])
     
@@ -214,6 +268,18 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
     elif field_type.lower() == 'thc_cbd':
         # Use the configured fallback size for THC_CBD instead of hardcoded 8pt
         fallback_size = 6.5 * scale_factor  # Use the configured size from the config
+    elif field_type.lower() == 'ratio':
+        # Ensure ratio content never gets too small for readability
+        if orientation.lower() == 'mini':
+            fallback_size = 6 * scale_factor  # Mini template minimum
+        elif orientation.lower() == 'vertical':
+            fallback_size = 6 * scale_factor  # Vertical template minimum
+        elif orientation.lower() == 'horizontal':
+            fallback_size = 5 * scale_factor  # Horizontal template minimum
+        elif orientation.lower() == 'double':
+            fallback_size = 7 * scale_factor  # Double template gets better minimum
+        else:
+            fallback_size = 6 * scale_factor  # Default minimum
     else:
         fallback_size = 8 * scale_factor
     return Pt(fallback_size)
