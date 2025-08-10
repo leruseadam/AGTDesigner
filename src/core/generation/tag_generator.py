@@ -24,7 +24,6 @@ from src.core.generation.docx_formatting import (
     clear_cell_margins,
     clear_table_cell_padding,
     enforce_fixed_cell_dimensions,
-    enforce_fixed_layout,
 )
 from src.core.generation.context_builders import (
     build_context,
@@ -46,55 +45,6 @@ DEBUG_ENABLED = False
 
 logger = logging.getLogger(__name__)
 
-def _validate_and_repair_table_structure(table):
-    """
-    Validate and repair table structure to ensure it has required elements.
-    Returns True if table is valid, False if it cannot be repaired.
-    """
-    try:
-        # First, try to access table properties to see if there's an actual error
-        try:
-            _ = table.rows
-            _ = table.columns
-            # If we can access these without error, the table is fine
-            return True
-        except Exception:
-            # Only then check if we need to repair
-            pass
-        
-        # Check if table has the required tblGrid element
-        tblGrid = table._element.find(qn('w:tblGrid'))
-        if tblGrid is None:
-            # Create tblGrid element
-            tblGrid = OxmlElement('w:tblGrid')
-
-            # Get the actual number of columns from the table structure
-            # Count cells in the first row to determine column count
-            if len(table.rows) > 0:
-                first_row = table.rows[0]
-                col_count = len(first_row.cells)
-
-                # Create grid columns
-                for _ in range(col_count):
-                    gridCol = OxmlElement('w:gridCol')
-                    gridCol.set(qn('w:w'), '1440')  # Default width of 1 inch
-                    tblGrid.append(gridCol)
-
-                # Insert tblGrid at the beginning of the table element
-                table._element.insert(0, tblGrid)
-                logger.debug(f"Repaired missing tblGrid for table with {col_count} columns")
-                return True
-            else:
-                logger.warning("Cannot repair table: no rows found")
-                return False
-        else:
-            # Table already has tblGrid, don't modify it
-            return True
-        
-    except Exception as e:
-        logger.error(f"Error validating/reparing table structure: {e}")
-        return False
-
 PLACEHOLDER_MARKERS = {
     "Description": ("DESC_START", "DESC_END"),
     "WeightUnits": ("WEIGHTUNITS_START", "WEIGHTUNITS_END"),
@@ -103,8 +53,9 @@ PLACEHOLDER_MARKERS = {
     "Price": ("PRICE_START", "PRICE_END"),
     "Lineage": ("LINEAGE_START", "LINEAGE_END"),
     "DOH": ("{{Label1.DOH}}", ""),
-    "Ratio_or_THC_CBD": ("RATIO_START", "RATIO_END"),
-    "THC_CBD": ("THC_CBD_START", "THC_CBD_END"),
+    "Ratio_or_THC_CBD": ("RATIO_START", "RATIO_END"),  # Keep for backward compatibility
+    "THC_CBD": ("THC_CBD_START", "THC_CBD_END"),        # For classic types with THC/CBD content
+    "Ratio": ("RATIO_START", "RATIO_END"),               # For non-classic types or ratio content
     "ProductName": ("PRODUCTNAME_START", "PRODUCTNAME_END"),
     "ProductStrain": ("PRODUCTSTRAIN_START", "PRODUCTSTRAIN_END"),
     "ProductType": ("PRODUCTTYPE_START", "PRODUCTTYPE_END"),
@@ -379,27 +330,28 @@ def process_chunk(args):
                 
             if is_horizontal_or_double_or_vertical and lineage_val:
                 lineage_val = '\t' + lineage_val
-            label_data["Lineage"] = wrap_with_marker(lineage_val, "LINEAGE")
-            label_data["Ratio_or_THC_CBD"] = wrap_with_marker(str(row.get("Ratio", "")), "RATIO")
+            # Add a single space before Lineage in the output
+            lineage_val_with_space = f" {lineage_val}" if lineage_val else ""
+            label_data["Lineage"] = wrap_with_marker(lineage_val_with_space, "LINEAGE")
+            
+            # Determine which ratio/THC_CBD field to use
+            if is_classic_type:
+                # For classic types, use THC_CBD field
+                label_data["Ratio_or_THC_CBD"] = wrap_with_marker(str(row.get("Ratio", "")), "THC_CBD")
+                label_data["THC"] = wrap_with_marker(str(row.get("AI", "")).strip(), "THC")
+                label_data["CBD"] = wrap_with_marker(str(row.get("AK", "")).strip(), "CBD")
+            else:
+                # For non-classic types, use Ratio field
+                label_data["Ratio_or_THC_CBD"] = wrap_with_marker(str(row.get("Ratio", "")), "RATIO")
+                label_data["THC"] = "" # No THC marker for non-classic types
+                label_data["CBD"] = "" # No CBD marker for non-classic types
+            
             label_data["ProductStrain"] = wrap_with_marker(str(row.get("Product Strain", "")), "PRODUCTSTRAIN")
             # Fix: Handle NaN values in JointRatio
             joint_ratio_value = row.get("JointRatio", "")
             if pd.isna(joint_ratio_value) or str(joint_ratio_value).lower() == 'nan':
                 joint_ratio_value = ""
             label_data["JointRatio"] = wrap_with_marker(str(joint_ratio_value), "JOINT_RATIO")
-            
-            # Add THC and CBD from AI and AK columns
-            ai_value = str(row.get("AI", "")).strip()
-            ak_value = str(row.get("AK", "")).strip()
-            
-            # Clean up the values (remove 'nan', empty strings, etc.)
-            if ai_value in ['nan', 'NaN', '']:
-                ai_value = ""
-            if ak_value in ['nan', 'NaN', '']:
-                ak_value = ""
-            
-            label_data["THC"] = wrap_with_marker(ai_value, "THC")
-            label_data["CBD"] = wrap_with_marker(ak_value, "CBD")
             
             # Combine Description and WeightUnits (use JointRatio for pre-roll products)
             # Use the processed Description and WeightUnits fields from above
@@ -454,7 +406,9 @@ def process_chunk(args):
                 "Ratio_or_THC_CBD": "",
                 "ProductStrain": "",
                 "DescAndWeight": "",
-                "JointRatio": ""
+                "JointRatio": "",
+                "THC": "",
+                "CBD": ""
             }
             if DEBUG_ENABLED:
                 logger.debug(f"Created empty label data for Label{i+1}")
@@ -693,7 +647,8 @@ def generate_multiple_label_tables(records, template_path):
                 for row in table.rows:
                     row.height = Inches(1.0)
                     row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
-                # Final: enforce fixed layout for this table context
+                
+                # Enforce fixed cell dimensions to prevent any growth
                 enforce_fixed_cell_dimensions(table)
                 
                 final_doc.add_paragraph()
@@ -787,10 +742,6 @@ def validate_and_repair_document(doc_bytes):
             
         # Check for malformed tables
         for table in doc.tables:
-            # Validate table structure before processing
-            if not _validate_and_repair_table_structure(table):
-                issues_found.append("Table has invalid structure that cannot be repaired")
-                continue
             try:
                 # Try to access table properties
                 _ = table.rows

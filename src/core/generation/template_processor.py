@@ -16,7 +16,7 @@ import traceback
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK, WD_TAB_ALIGNMENT
 from docx.enum.table import WD_ALIGN_VERTICAL
 from docx.enum.section import WD_SECTION
-# from docx.oxml.shared import OxmlElement, qn  # Duplicate import removed
+from docx.oxml.shared import OxmlElement, qn
 import time
 import pandas as pd
 
@@ -28,7 +28,6 @@ from src.core.generation.docx_formatting import (
     clear_cell_background,
     clear_cell_margins,
     clear_table_cell_padding,
-    enforce_fixed_layout,
 )
 from src.core.generation.unified_font_sizing import (
     get_font_size,
@@ -42,6 +41,7 @@ from src.core.generation.text_processing import (
     format_ratio_multiline
 )
 from src.core.formatting.markers import wrap_with_marker, unwrap_marker, is_already_wrapped
+from src.core.constants import CLASSIC_TYPES
 
 # Performance settings
 MAX_PROCESSING_TIME_PER_CHUNK = 30  # 30 seconds max per chunk
@@ -155,15 +155,14 @@ class TemplateProcessor:
             
             unique_labels = set(matches)
             
-            # For double template, always apply structure fix regardless of label count
-            if self.template_type == 'double':
-                self.logger.info("Double template using minimal structure fix")
-                return self._fix_double_template_structure()
-            elif len(unique_labels) < required_labels or force_expand:
+            if len(unique_labels) < required_labels or force_expand:
                 self.logger.info(f"Template needs expansion. Template type: '{self.template_type}', Required labels: {required_labels}, Found unique labels: {len(unique_labels)}")
                 if self.template_type == 'mini':
                     self.logger.info("Calling 4x5 expansion method")
                     return self._expand_template_to_4x5_fixed_scaled()
+                elif self.template_type == 'double':
+                    self.logger.info("Calling 4x3 expansion method")
+                    return self._expand_template_to_4x3_fixed_double()
                 elif self.template_type == 'inventory':
                     self.logger.info("Calling 2x2 inventory expansion method")
                     return self._expand_template_to_2x2_inventory()
@@ -179,121 +178,6 @@ class TemplateProcessor:
     def force_re_expand_template(self):
         """Force re-expansion of template."""
         self._expanded_template_buffer = self._expand_template_if_needed(force_expand=True)
-
-    def _fix_double_template_structure(self):
-        """Fix double template structure by adding missing table grid elements without full expansion."""
-        from docx import Document
-        from docx.oxml import OxmlElement
-        from docx.oxml.ns import qn
-        from io import BytesIO
-        
-        try:
-            # Load the original template
-            template_path = self._get_template_path()
-            self.logger.info(f"Loading double template from: {template_path}")
-            doc = Document(template_path)
-            
-            # Check if template has tables
-            if not doc.tables:
-                self.logger.warning("Double template has no tables, returning original")
-                buffer = BytesIO()
-                doc.save(buffer)
-                buffer.seek(0)
-                return buffer
-            
-            self.logger.info(f"Double template has {len(doc.tables)} tables")
-            
-            # Fix each table by ensuring it has proper structure
-            for table in doc.tables:
-                # Check if table has tblGrid element
-                tbl_grid = table._element.find(qn('w:tblGrid'))
-                if tbl_grid is None:
-                    self.logger.info("Adding missing tblGrid element to double template table")
-                    
-                    # Get the number of columns from the table XML structure instead of table.columns
-                    # This avoids the error when table.columns is accessed without proper structure
-                    table_element = table._element
-                    rows = table_element.findall(qn('w:tr'))
-                    if rows:
-                        # Count columns from the first row
-                        first_row = rows[0]
-                        cells = first_row.findall(qn('w:tc'))
-                        num_cols = len(cells)
-                    else:
-                        # Fallback: assume 4 columns for double template
-                        num_cols = 4
-                    
-                    self.logger.info(f"Detected {num_cols} columns in double template table")
-                    
-                    # Create tblGrid element
-                    tbl_grid = OxmlElement('w:tblGrid')
-                    for _ in range(num_cols):
-                        gc = OxmlElement('w:gridCol')
-                        gc.set(qn('w:w'), str(int(1.75 * 1440)))  # 1.75 inches per column
-                        tbl_grid.append(gc)
-                    
-                    # Insert tblGrid at the beginning of the table element
-                    table_element.insert(0, tbl_grid)
-                    
-                    # Also ensure table has proper table properties
-                    tbl_pr = table_element.find(qn('w:tblPr'))
-                    if tbl_pr is None:
-                        tbl_pr = OxmlElement('w:tblPr')
-                        table_element.insert(0, tbl_pr)
-                    
-                    # Add table layout
-                    layout = tbl_pr.find(qn('w:tblLayout'))
-                    if layout is None:
-                        layout = OxmlElement('w:tblLayout')
-                        layout.set(qn('w:type'), 'fixed')
-                        tbl_pr.append(layout)
-                    
-                    # Ensure the table has at least one row and cell for basic structure
-                    if not table_element.findall(qn('w:tr')):
-                        self.logger.warning("Double template table has no rows, adding minimal structure")
-                        # Add a minimal row with cells
-                        row = OxmlElement('w:tr')
-                        for _ in range(num_cols):
-                            cell = OxmlElement('w:tc')
-                            # Add cell properties
-                            tc_pr = OxmlElement('w:tcPr')
-                            cell.append(tc_pr)
-                            # Add a paragraph
-                            para = OxmlElement('w:p')
-                            cell.append(para)
-                            row.append(cell)
-                        table_element.append(row)
-            
-            # Save the fixed template to buffer
-            buffer = BytesIO()
-            doc.save(buffer)
-            buffer.seek(0)
-            return buffer
-            
-        except Exception as e:
-            self.logger.error(f"Error fixing double template structure: {e}")
-            # Fallback to original template if fixing fails
-            try:
-                self.logger.info("Attempting fallback to original template")
-                with open(self._get_template_path(), 'rb') as f:
-                    buffer = BytesIO(f.read())
-                self.logger.info("Fallback successful, returning original template")
-                return buffer
-            except Exception as fallback_error:
-                self.logger.error(f"Fallback to original template also failed: {fallback_error}")
-                # Last resort: create a minimal working template
-                self.logger.warning("Creating minimal working template as last resort")
-                try:
-                    from docx import Document
-                    doc = Document()
-                    table = doc.add_table(rows=1, cols=4)
-                    buffer = BytesIO()
-                    doc.save(buffer)
-                    buffer.seek(0)
-                    return buffer
-                except Exception as create_error:
-                    self.logger.error(f"Failed to create minimal template: {create_error}")
-                    raise
 
     def _expand_template_to_2x2_inventory(self):
         """Expand template to 2x2 grid for inventory slips."""
@@ -891,10 +775,30 @@ class TemplateProcessor:
             # Apply lineage colors last to ensure they are not overwritten
             apply_lineage_colors(rendered_doc)
             
-            # Final enforcement: prevent any cell/row expansion and force EXACT dimensions
-            enforce_fixed_layout(rendered_doc, self.template_type)
+            # Final enforcement of fixed cell dimensions to prevent any expansion
+            for table in rendered_doc.tables:
+                enforce_fixed_cell_dimensions(table)
             
-            # Cell widths already standardized by enforce_fixed_layout
+            # CRITICAL: For horizontal, vertical, and double templates, explicitly override cell widths after DocxTemplate rendering
+            if self.template_type in ['horizontal', 'vertical', 'double']:
+                from src.core.constants import CELL_DIMENSIONS
+                individual_cell_width = CELL_DIMENSIONS[self.template_type]['width']
+                fixed_col_width = str(int(individual_cell_width * 1440))  # Use individual cell width directly
+                
+                for table in rendered_doc.tables:
+                    # Override each cell width
+                    for row in table.rows:
+                        for cell in row.cells:
+                            tcPr = cell._tc.get_or_add_tcPr()
+                            tcW = tcPr.find(qn('w:tcW'))
+                            if tcW is not None:
+                                tcW.getparent().remove(tcW)
+                            
+                            # Create new width property with correct value
+                            tcW = OxmlElement('w:tcW')
+                            tcW.set(qn('w:w'), fixed_col_width)
+                            tcW.set(qn('w:type'), 'dxa')
+                            tcPr.append(tcW)
             
             # Ensure proper table centering and document setup
             self._ensure_proper_centering(rendered_doc)
@@ -902,11 +806,6 @@ class TemplateProcessor:
             # FINAL ENFORCEMENT: For vertical and double templates, force appropriate line spacing for all paragraphs in any cell containing THC_CBD marker
             if self.template_type in ['vertical', 'double']:
                 for table in rendered_doc.tables:
-                    # Validate table structure before processing
-                    if not self._validate_and_repair_table_structure(table):
-                        self.logger.warning(f"Skipping table with invalid structure during THC_CBD processing")
-                        continue
-                    
                     for row in table.rows:
                         for cell in row.cells:
                             # Check for THC_CBD marker in cell text or runs
@@ -941,11 +840,6 @@ class TemplateProcessor:
             prefix_pattern = re.compile(r'^(?:[A-Z0-9_]+_)+')
             # Clean in tables
             for table in rendered_doc.tables:
-                # Validate table structure before processing
-                if not self._validate_and_repair_table_structure(table):
-                    self.logger.warning(f"Skipping table with invalid structure during marker cleanup")
-                    continue
-                
                 for row in table.rows:
                     for cell in row.cells:
                         for para in cell.paragraphs:
@@ -1043,9 +937,16 @@ class TemplateProcessor:
             image_path = process_doh_image(doh_value, product_type)
             if image_path:
                 # Fast width selection
-                width_map = {'mini': 9, 'double': 8, 'vertical': 12, 'horizontal': 12}
+                width_map = {'mini': 9, 'double': 9, 'vertical': 12, 'horizontal': 12}
                 image_width = Mm(width_map.get(self.template_type, 12))
-                label_context['DOH'] = InlineImage(doc, image_path, width=image_width)
+                
+                # Create InlineImage with minimal spacing
+                doh_image = InlineImage(doc, image_path, width=image_width)
+                
+                # Store the image path for post-processing to ensure minimal spacing
+                label_context['DOH'] = doh_image
+                label_context['_DOH_IMAGE_PATH'] = image_path  # Store path for post-processing
+                
                 # Ensure DOH image takes priority - clear any other DOH-related content
                 label_context['DOH_TEXT'] = ''  # Clear any text content
             else:
@@ -1055,51 +956,96 @@ class TemplateProcessor:
             label_context['DOH'] = ''
             label_context['DOH_TEXT'] = ''
         
-        # Fast ratio processing
-        ratio_val = label_context.get('Ratio_or_THC_CBD') or label_context.get('Ratio', '')
-        if ratio_val:
-            cleaned_ratio = ratio_val.lstrip('- ')
-            product_type = (label_context.get('ProductType', '').lower() or 
-                          label_context.get('Product Type*', '').lower())
-            
-            # Fast product type checking with sets
-            is_classic = product_type in classic_types
-            is_edible = product_type in edible_types
-            
-            # Check if this is percentage-based THC/CBD content (not mg-based)
-            is_percentage_based = '%' in cleaned_ratio and ('THC:' in cleaned_ratio or 'CBD:' in cleaned_ratio)
-            
-            if is_classic and 'mg' in cleaned_ratio.lower() and not is_percentage_based:
-                cleaned_ratio = format_ratio_multiline(cleaned_ratio)
-            elif is_edible and 'mg' in cleaned_ratio.lower() and not is_percentage_based:
-                cleaned_ratio = format_ratio_multiline(cleaned_ratio)
-            elif is_classic and not is_percentage_based:
-                cleaned_ratio = self.format_classic_ratio(cleaned_ratio, record)
-            
-            # Fast marker wrapping
-            content = cleaned_ratio.replace('|BR|', '\n')
-            # Apply new bold label formatting for THC/CBD content
-            if content.strip().startswith('THC:') and 'CBD:' in content:
-                from src.core.generation.text_processing import format_thc_cbd_bold_labels
-                content = format_thc_cbd_bold_labels(content, self.template_type)
-            # Force line breaks for vertical and double templates
-            elif self.template_type in ['vertical', 'double'] and content.strip().startswith('THC:') and 'CBD:' in content:
-                content = content.replace('THC: CBD:', 'THC:\nCBD:').replace('THC:  CBD:', 'THC:\nCBD:')
-                # For vertical template, format with right-aligned percentages
-                if self.template_type == 'vertical':
-                    content = self.format_thc_cbd_vertical_alignment(content)
-            
-            marker = 'THC_CBD' if is_classic else 'RATIO'
-            label_context['Ratio_or_THC_CBD'] = wrap_with_marker(content, marker)
-            
-            # Also add separate THC_CBD field for template processing
-            if is_classic:
+        # Fast ratio processing - properly distinguish between THC_CBD and Ratio
+        # Check for separate THC_CBD and Ratio fields first
+        thc_cbd_val = label_context.get('THC_CBD', '')
+        ratio_val = label_context.get('Ratio', '')
+        combined_val = label_context.get('Ratio_or_THC_CBD', '')
+        
+        # Determine which field to use based on availability and content
+        if thc_cbd_val:
+            # THC_CBD field is available - use it for classic products
+            cleaned_content = thc_cbd_val.lstrip('- ')
+            if cleaned_content:
+                # Apply THC/CBD specific formatting
+                content = cleaned_content.replace('|BR|', '\n')
+                # Apply new bold label formatting for THC/CBD content
+                if content.strip().startswith('THC:') and 'CBD:' in content:
+                    from src.core.generation.text_processing import format_thc_cbd_bold_labels
+                    content = format_thc_cbd_bold_labels(content, self.template_type)
+                # Force line breaks for vertical and double templates
+                elif self.template_type in ['vertical', 'double'] and content.strip().startswith('THC:') and 'CBD:' in content:
+                    content = content.replace('THC: CBD:', 'THC:\nCBD:').replace('THC:  CBD:', 'THC:\nCBD:')
+                    # For vertical template, format with right-aligned percentages
+                    if self.template_type == 'vertical':
+                        content = self.format_thc_cbd_vertical_alignment(content)
+                
+                # Mark as THC_CBD
                 label_context['THC_CBD'] = wrap_with_marker(content, 'THC_CBD')
-            else:
-                label_context['THC_CBD'] = ''
+                label_context['Ratio_or_THC_CBD'] = wrap_with_marker(content, 'THC_CBD')  # Keep for backward compatibility
+                logger.debug(f"Using THC_CBD field: {content}")
+                
+        elif ratio_val:
+            # Ratio field is available - use it for non-classic products
+            cleaned_content = ratio_val.lstrip('- ')
+            if cleaned_content:
+                if 'mg' in cleaned_content.lower():
+                    # Ratio with mg values - format for multiline display
+                    cleaned_content = format_ratio_multiline(cleaned_content)
+                
+                content = cleaned_content.replace('|BR|', '\n')
+                
+                # Mark as RATIO
+                label_context['Ratio'] = wrap_with_marker(content, 'RATIO')
+                label_context['Ratio_or_THC_CBD'] = wrap_with_marker(content, 'RATIO')  # Keep for backward compatibility
+                logger.debug(f"Using Ratio field: {content}")
+                
+        elif combined_val:
+            # Fallback to combined field - determine type based on content and product type
+            cleaned_content = combined_val.lstrip('- ')
+            if cleaned_content:
+                product_type = (label_context.get('ProductType', '').lower() or 
+                              label_context.get('Product Type*', '').lower())
+                
+                # Check if this is percentage-based THC/CBD content
+                is_percentage_based = '%' in cleaned_content and ('THC:' in cleaned_content or 'CBD:' in cleaned_content)
+                is_classic = product_type in classic_types
+                
+                if is_classic and is_percentage_based:
+                    # Classic product with percentage THC/CBD - use THC_CBD marker
+                    content = cleaned_content.replace('|BR|', '\n')
+                    # Apply THC/CBD specific formatting
+                    if content.strip().startswith('THC:') and 'CBD:' in content:
+                        from src.core.generation.text_processing import format_thc_cbd_bold_labels
+                        content = format_thc_cbd_bold_labels(content, self.template_type)
+                    # Force line breaks for vertical and double templates
+                    elif self.template_type in ['vertical', 'double'] and content.strip().startswith('THC:') and 'CBD:' in content:
+                        content = content.replace('THC: CBD:', 'THC:\nCBD:').replace('THC:  CBD:', 'THC:\nCBD:')
+                        # For vertical template, format with right-aligned percentages
+                        if self.template_type == 'vertical':
+                            content = self.format_thc_cbd_vertical_alignment(content)
+                    
+                    processed_content = wrap_with_marker(content, 'THC_CBD')
+                    label_context['THC_CBD'] = processed_content
+                    label_context['Ratio_or_THC_CBD'] = processed_content  # Keep for backward compatibility
+                    logger.debug(f"Fallback: Using THC_CBD marker for classic product: {processed_content}")
+                else:
+                    # Non-classic product or non-percentage content - use Ratio marker
+                    if 'mg' in cleaned_content.lower():
+                        # Ratio with mg values - format for multiline display
+                        cleaned_content = format_ratio_multiline(cleaned_content)
+                    
+                    content = cleaned_content.replace('|BR|', '\n')
+                    processed_content = wrap_with_marker(content, 'RATIO')
+                    label_context['Ratio'] = processed_content
+                    label_context['Ratio_or_THC_CBD'] = processed_content  # Keep for backward compatibility
+                    logger.debug(f"Fallback: Using RATIO marker for non-classic product: {processed_content}")
+        
         else:
+            # No ratio content
             label_context['Ratio_or_THC_CBD'] = ''
             label_context['THC_CBD'] = ''
+            label_context['Ratio'] = ''
 
         # Fast brand handling - exclude classic types (they should show lineage instead of brand)
         product_brand = (record.get('ProductBrand') or 
@@ -1154,10 +1100,9 @@ class TemplateProcessor:
                     lineage_value = label_context['Lineage']
                 
             
-            # Add a space before Lineage for classic types so it's not right at the edge
-            if product_type in classic_types:
-                lineage_value = ' ' + lineage_value if lineage_value else ''
-            label_context['Lineage'] = wrap_with_marker(unwrap_marker(lineage_value, 'LINEAGE'), 'LINEAGE')
+            # Add a single space before Lineage in the output
+            lineage_value_with_space = f" {lineage_value}" if lineage_value else ""
+            label_context['Lineage'] = wrap_with_marker(unwrap_marker(lineage_value_with_space, 'LINEAGE'), 'LINEAGE')
 
         # Fast wrapping for remaining fields
         if label_context.get('DescAndWeight'):
@@ -1215,16 +1160,20 @@ class TemplateProcessor:
                 formatted_val = self.format_with_soft_hyphen(val)
                 label_context[key] = wrap_with_marker(unwrap_marker(formatted_val, marker), marker)
         
-        # Fast vendor handling - always include vendor but apply right-alignment styling
+        # Fast vendor handling - only include vendor for classic types
         product_type = (label_context.get('ProductType', '').lower() or 
                        label_context.get('Product Type*', '').lower())
         
-        # Always include vendor regardless of product type
-        product_vendor = record.get('Vendor') or record.get('Vendor/Supplier*', '') or record.get('ProductVendor', '')
-        # Handle NaN values in vendor data
-        if pd.isna(product_vendor) or str(product_vendor).lower() == 'nan':
-            product_vendor = ''
-        label_context['ProductVendor'] = wrap_with_marker(product_vendor, 'PRODUCTVENDOR')
+        # Only include vendor for classic types
+        if product_type in CLASSIC_TYPES:
+            product_vendor = record.get('Vendor') or record.get('Vendor/Supplier*', '') or record.get('ProductVendor', '')
+            # Handle NaN values in vendor data
+            if pd.isna(product_vendor) or str(product_vendor).lower() == 'nan':
+                product_vendor = ''
+            label_context['ProductVendor'] = wrap_with_marker(product_vendor, 'PRODUCTVENDOR')
+        else:
+            # Skip ProductVendor for non-classic types
+            label_context['ProductVendor'] = ''
 
         return label_context
 
@@ -1274,11 +1223,6 @@ class TemplateProcessor:
         try:
             br_found = False
             for table in doc.tables:
-                # Validate table structure before processing
-                if not self._validate_and_repair_table_structure(table):
-                    self.logger.warning(f"Skipping table with invalid structure during BR marker conversion")
-                    continue
-                
                 for row in table.rows:
                     for cell in row.cells:
                         for paragraph in cell.paragraphs:
@@ -1309,14 +1253,9 @@ class TemplateProcessor:
         except Exception as e:
             self.logger.warning(f"Arial bold failed: {e}")
 
-        # Fast DOH image centering
+        # Fast DOH image centering and spacing fix
         try:
             for table in doc.tables:
-                # Validate table structure before processing
-                if not self._validate_and_repair_table_structure(table):
-                    self.logger.warning(f"Skipping table with invalid structure during DOH centering")
-                    continue
-                
                 for row in table.rows:
                     for cell in row.cells:
                         # Fast check for image-only cells
@@ -1326,7 +1265,7 @@ class TemplateProcessor:
                         # Fast inner table centering
                         for inner_table in cell.tables:
                             inner_table.alignment = WD_TABLE_ALIGNMENT.CENTER
-                        # Explicit DOH image centering - check for InlineImage objects
+                        # Explicit DOH image centering and spacing fix - check for InlineImage objects
                         for paragraph in cell.paragraphs:
                             for run in paragraph.runs:
                                 # Check if this run contains an InlineImage (DOH image)
@@ -1334,6 +1273,9 @@ class TemplateProcessor:
                                     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                                     # Also center the cell content
                                     cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+                                    
+                                    # Aggressive spacing removal for DOH images
+                                    self._remove_doh_image_whitespace(paragraph)
                                     
             # Additional comprehensive DOH centering pass
             self._ensure_doh_image_centering(doc)
@@ -1355,11 +1297,6 @@ class TemplateProcessor:
             from docx.oxml import OxmlElement
             
             for table in doc.tables:
-                # Validate table structure before processing
-                if not self._validate_and_repair_table_structure(table):
-                    self.logger.warning(f"Skipping table with invalid structure during DOH image centering")
-                    continue
-                
                 for row in table.rows:
                     for cell in row.cells:
                         # Check if this cell contains a DOH image
@@ -1393,6 +1330,9 @@ class TemplateProcessor:
                             image_paragraph.paragraph_format.space_before = Pt(0)
                             image_paragraph.paragraph_format.space_after = Pt(0)
                             image_paragraph.paragraph_format.line_spacing = 1.0
+                            
+                            # Apply aggressive whitespace removal
+                            self._remove_doh_image_whitespace(image_paragraph)
                             
                             # Set cell vertical alignment to center
                             cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
@@ -1442,11 +1382,6 @@ class TemplateProcessor:
         """
         try:
             for table in doc.tables:
-                # Validate table structure before processing
-                if not self._validate_and_repair_table_structure(table):
-                    self.logger.warning(f"Skipping table with invalid structure during blank cell clearing")
-                    continue
-                
                 for row in table.rows:
                     for cell in row.cells:
                         # Check if cell is essentially empty
@@ -2184,55 +2119,6 @@ class TemplateProcessor:
             self.logger.error(f"Error fixing ratio paragraph spacing: {e}")
             # Don't raise the exception - this is a formatting enhancement that shouldn't break the main process
 
-    def _validate_and_repair_table_structure(self, table):
-        """
-        Validate and repair table structure to ensure it has required elements.
-        Returns True if table is valid, False if it cannot be repaired.
-        """
-        try:
-            # First, try to access table properties to see if there's an actual error
-            try:
-                _ = table.rows
-                _ = table.columns
-                # If we can access these without error, the table is fine
-                return True
-            except Exception:
-                # Only then check if we need to repair
-                pass
-            
-            # Check if table has the required tblGrid element
-            tblGrid = table._element.find(qn('w:tblGrid'))
-            if tblGrid is None:
-                # Create tblGrid element
-                tblGrid = OxmlElement('w:tblGrid')
-                
-                # Get the actual number of columns from the table structure
-                # Count cells in the first row to determine column count
-                if len(table.rows) > 0:
-                    first_row = table.rows[0]
-                    col_count = len(first_row.cells)
-                    
-                    # Create grid columns
-                    for _ in range(col_count):
-                        gridCol = OxmlElement('w:gridCol')
-                        gridCol.set(qn('w:w'), '1440')  # Default width of 1 inch
-                        tblGrid.append(gridCol)
-                    
-                    # Insert tblGrid at the beginning of the table element
-                    table._element.insert(0, tblGrid)
-                    self.logger.debug(f"Repaired missing tblGrid for table with {col_count} columns")
-                    return True
-                else:
-                    self.logger.warning("Cannot repair table: no rows found")
-                    return False
-            else:
-                # Table already has tblGrid, don't modify it
-                return True
-                
-        except Exception as e:
-            self.logger.error(f"Error validating/repairing table structure: {e}")
-            return False
-
     def _ensure_proper_centering(self, doc):
         """
         Ensure tables are properly centered in the document with correct margins and spacing.
@@ -2261,19 +2147,8 @@ class TemplateProcessor:
             for paragraph in paragraphs_to_remove:
                 paragraph._element.getparent().remove(paragraph._element)
             
-            # Ensure all tables are properly centered and have valid structure
+            # Ensure all tables are properly centered
             for table in doc.tables:
-                # Skip validation for tables that already work - only validate if there's an error
-                try:
-                    # Test if table is accessible without error
-                    _ = table.rows
-                    _ = table.columns
-                except Exception:
-                    # Only then try to repair
-                    if not self._validate_and_repair_table_structure(table):
-                        self.logger.warning(f"Skipping table that cannot be repaired")
-                        continue
-                
                 # Set table alignment to center
                 table.alignment = WD_TABLE_ALIGNMENT.CENTER
                 
@@ -2368,11 +2243,6 @@ class TemplateProcessor:
         """
         try:
             for table in doc.tables:
-                # Validate table structure before processing
-                if not self._validate_and_repair_table_structure(table):
-                    self.logger.warning(f"Skipping table with invalid structure during weight units marker addition")
-                    continue
-                
                 for row in table.rows:
                     for cell in row.cells:
                         for paragraph in cell.paragraphs:
@@ -2435,11 +2305,6 @@ class TemplateProcessor:
             self.logger.debug(f"Processing brand markers for non-classic type: {current_product_type}")
             
             for table in doc.tables:
-                # Validate table structure before processing
-                if not self._validate_and_repair_table_structure(table):
-                    self.logger.warning(f"Skipping table with invalid structure during brand marker addition")
-                    continue
-                
                 for row in table.rows:
                     for cell in row.cells:
                         for paragraph in cell.paragraphs:
@@ -3062,6 +2927,68 @@ class TemplateProcessor:
         
         return False
 
+    def _remove_doh_image_whitespace(self, paragraph):
+        """
+        Aggressively remove all whitespace and spacing from DOH image paragraphs.
+        This method targets the specific whitespace issue below DOH.png logos.
+        """
+        try:
+            from docx.oxml import OxmlElement
+            from docx.oxml.ns import qn
+            from docx.shared import Pt
+            
+            # Set paragraph-level spacing to absolute minimum
+            paragraph.paragraph_format.space_before = Pt(0)
+            paragraph.paragraph_format.space_after = Pt(0)
+            paragraph.paragraph_format.line_spacing = 1.0
+            
+            # Get the paragraph properties element
+            pPr = paragraph._element.get_or_add_pPr()
+            
+            # Remove any existing spacing elements
+            for spacing_elem in pPr.findall(qn('w:spacing')):
+                pPr.remove(spacing_elem)
+            
+            # Add minimal spacing element with zero values
+            spacing = OxmlElement('w:spacing')
+            spacing.set(qn('w:before'), '0')
+            spacing.set(qn('w:after'), '0')
+            spacing.set(qn('w:line'), '240')  # Single line spacing
+            spacing.set(qn('w:lineRule'), 'auto')
+            pPr.append(spacing)
+            
+            # Remove any indentation
+            ind = pPr.find(qn('w:ind'))
+            if ind is None:
+                ind = OxmlElement('w:ind')
+                pPr.append(ind)
+            ind.set(qn('w:left'), '0')
+            ind.set(qn('w:right'), '0')
+            ind.set(qn('w:firstLine'), '0')
+            ind.set(qn('w:hanging'), '0')
+            
+            # Ensure center alignment
+            jc = pPr.find(qn('w:jc'))
+            if jc is None:
+                jc = OxmlElement('w:jc')
+                pPr.append(jc)
+            jc.set(qn('w:val'), 'center')
+            
+            # Remove any page break settings
+            page_break = pPr.find(qn('w:pageBreakBefore'))
+            if page_break is not None:
+                pPr.remove(page_break)
+            
+            # Remove any widow/orphan control
+            widow_control = pPr.find(qn('w:widowControl'))
+            if widow_control is not None:
+                pPr.remove(widow_control)
+            
+            self.logger.debug("Applied aggressive whitespace removal to DOH image paragraph")
+            
+        except Exception as e:
+            self.logger.warning(f"Error removing DOH image whitespace: {e}")
+
     def _clean_doh_cells_before_processing(self, doc):
         """
         Clean up DOH cells before processing to ensure no content interferes with image positioning.
@@ -3069,6 +2996,9 @@ class TemplateProcessor:
         """
         try:
             from docx.oxml.ns import qn
+            from docx.enum.text import WD_ALIGN_PARAGRAPH
+            from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
+            from docx.shared import Pt
             
             for table in doc.tables:
                 for row in table.rows:
