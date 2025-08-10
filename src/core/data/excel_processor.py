@@ -1358,7 +1358,7 @@ class ExcelProcessor:
                 
                 self.logger.debug(f"Sample cannabinoid content values after processing: {self.df['Ratio'].head()}")
 
-                # Set Ratio_or_THC_CBD based on product type
+                # Set Ratio_or_THC_CBD based on product type and content format
                 def set_ratio_or_thc_cbd(row):
                     product_type = str(row.get("Product Type*", "")).strip().lower()
                     ratio = str(row.get("Ratio", "")).strip()
@@ -1367,65 +1367,39 @@ class ExcelProcessor:
                     if ratio.lower() == "nan":
                         ratio = ""
                     
-                    classic_types = [
-                        "flower", "pre-roll", "infused pre-roll", "concentrate", "solventless concentrate", "vape cartridge", "rso/co2 tankers"
-                    ]
-                    # Note: capsules are NOT classic types for ratio processing - they should be treated as edibles
-                    BAD_VALUES = {"", "CBD", "THC", "CBD:", "THC:", "CBD:\n", "THC:\n", "nan"}
+                    # Define classic cannabis product types that use THC_CBD formatting
+                    classic_types = {
+                        "flower", "pre-roll", "infused pre-roll", "concentrate", 
+                        "solventless concentrate", "vape cartridge", "rso/co2 tankers"
+                    }
                     
-                    # For pre-rolls and infused pre-rolls, use JointRatio if available, otherwise default format
-                    if product_type in ["pre-roll", "infused pre-roll"]:
-                        joint_ratio = str(row.get("JointRatio", "")).strip()
-                        if joint_ratio and joint_ratio not in BAD_VALUES:
-                            # Remove leading dash if present
-                            if joint_ratio.startswith("- "):
-                                joint_ratio = joint_ratio[2:]
-                            return joint_ratio
-                        return "THC:|BR|CBD:"
+                    # Check if this is a classic cannabis product type
+                    is_classic = product_type in classic_types
                     
-                    # For solventless concentrate, check if ratio is a weight + unit format
-                    if product_type == "solventless concentrate":
-                        if not ratio or ratio in BAD_VALUES or not is_weight_with_unit(ratio):
-                            return "1g"
-                        return ratio
+                    # Determine if content is percentage-based THC/CBD
+                    is_percentage_based = '%' in ratio and ('THC:' in ratio or 'CBD:' in ratio)
                     
-                    if product_type in classic_types:
-                        if not ratio or ratio in BAD_VALUES:
-                            return "THC:|BR|CBD:"
-                        # If ratio contains THC/CBD values, use it directly
-                        if any(cannabinoid in ratio.upper() for cannabinoid in ['THC', 'CBD', 'CBC', 'CBG', 'CBN']):
-                            return ratio
-                        # If it's a valid ratio format, use it
-                        if is_real_ratio(ratio):
-                            return ratio
-                        # If it's a weight format (like "1g", "28g"), use it
-                        if is_weight_with_unit(ratio):
-                            return ratio
-                        # Otherwise, use default THC:CBD format
-                        return "THC:|BR|CBD:"
+                    # Set the appropriate field based on product type and content
+                    if is_classic and is_percentage_based:
+                        # Classic product with percentage THC/CBD - use THC_CBD field
+                        row["THC_CBD"] = ratio
+                        row["Ratio"] = ""  # Clear ratio field for classic products
+                        row["Ratio_or_THC_CBD"] = ratio  # Keep for backward compatibility
+                        logger.debug(f"Classic product '{product_type}' with THC/CBD content: {ratio}")
+                    else:
+                        # Non-classic product or non-percentage content - use Ratio field
+                        row["Ratio"] = ratio
+                        row["THC_CBD"] = ""  # Clear THC_CBD field for non-classic products
+                        row["Ratio_or_THC_CBD"] = ratio  # Keep for backward compatibility
+                        logger.debug(f"Non-classic product '{product_type}' with ratio content: {ratio}")
                     
-                    # For Edibles, Topicals, Tinctures, etc., use the ratio if it contains cannabinoid content
-                    edible_types = {"edible (solid)", "edible (liquid)", "high cbd edible liquid", "tincture", "topical", "capsule"}
-                    if product_type in edible_types:
-                        if not ratio or ratio in BAD_VALUES:
-                            return "THC:|BR|CBD:"
-                        # If ratio contains cannabinoid content, use it
-                        if any(cannabinoid in ratio.upper() for cannabinoid in ['THC', 'CBD', 'CBC', 'CBG', 'CBN']):
-                            return ratio
-                        # If it's a weight format, use it
-                        if is_weight_with_unit(ratio):
-                            return ratio
-                        # Otherwise, use default THC:CBD format
-                        return "THC:|BR|CBD:"
-                    
-                    # For any other product type, return the ratio as-is
-                    return ratio
+                    return row
 
                 # Reset index before applying to prevent duplicate labels
                 self.df.reset_index(drop=True, inplace=True)
                 # Use a safer approach for applying the ratio function
                 try:
-                    self.df["Ratio_or_THC_CBD"] = self.df.apply(set_ratio_or_thc_cbd, axis=1)
+                    self.df = self.df.apply(set_ratio_or_thc_cbd, axis=1)
                 except Exception as e:
                     self.logger.warning(f"Error applying ratio function: {e}")
                     # Fallback: use default values
@@ -2493,9 +2467,9 @@ class ExcelProcessor:
                         'WeightUnits': record.get('JointRatio', '') if product_type in {"pre-roll", "infused pre-roll"} else self._format_weight_units(record),
                         'ProductBrand': product_brand,
                         'Price': str(record.get('Price', '')).strip(),
-                        'Lineage': wrap_with_marker(unwrap_marker(str(final_lineage), "LINEAGE"), "LINEAGE"),
+                        'Lineage': wrap_with_marker(unwrap_marker(f" {str(final_lineage)}" if str(final_lineage) else "", "LINEAGE"), "LINEAGE"),
                         'DOH': doh_value,  # Keep DOH as raw value
-                        'Ratio_or_THC_CBD': ratio_text,  # Use the processed ratio_text for all product types
+                        'Ratio_or_THC_CBD': ratio_text,  # Keep for backward compatibility
                         'ProductStrain': wrap_with_marker(final_product_strain, "PRODUCTSTRAIN") if include_product_strain else '',
                         'ProductType': record.get('Product Type*', ''),
                         'Ratio': str(record.get('Ratio', '')).strip(),
@@ -2506,6 +2480,19 @@ class ExcelProcessor:
                         'AK': ak_value,  # CBDA value for CBD
                         'Vendor': vendor,  # Add vendor information
                     }
+                    
+                    # Add separate THC_CBD field based on product type and content
+                    if product_type in classic_types and ('THC:' in ratio_text and 'CBD:' in ratio_text):
+                        # Classic product with THC/CBD content
+                        processed['THC_CBD'] = ratio_text
+                        logger.debug(f"Added THC_CBD field for classic product: {ratio_text}")
+                    else:
+                        # Non-classic product or non-THC/CBD content
+                        processed['THC_CBD'] = ''
+                        logger.debug(f"No THC_CBD field added for product type: {product_type}")
+                    
+                    # THC_CBD field is already set above based on product type and content
+                    
                     # Ensure leading space before hyphen is a non-breaking space to prevent Word from stripping it
                     joint_ratio = record.get('JointRatio', '')
                     # Handle NaN values properly
