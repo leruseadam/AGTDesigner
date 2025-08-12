@@ -990,7 +990,14 @@ class ExcelProcessor:
                 self.logger.debug(f"Reading with engine: {excel_engine}")
                 
                 # Standard reading approach for both environments
-                df = pd.read_excel(file_path, engine=excel_engine, dtype=dtype_dict)
+                # Prevent pandas from converting empty cells to NaN values
+                df = pd.read_excel(
+                    file_path, 
+                    engine=excel_engine, 
+                    dtype=dtype_dict,
+                    na_filter=False,  # Don't filter NA values
+                    keep_default_na=False  # Don't use default NA values
+                )
                 
                 self.logger.info(f"Successfully read file with {excel_engine} engine: {len(df)} rows, {len(df.columns)} columns")
                     
@@ -998,7 +1005,13 @@ class ExcelProcessor:
                 self.logger.error(f"Failed to read with {excel_engine} engine: {e}")
                 # Try xlrd as fallback
                 try:
-                    df = pd.read_excel(file_path, engine='xlrd', dtype=dtype_dict)
+                    df = pd.read_excel(
+                        file_path, 
+                        engine='xlrd', 
+                        dtype=dtype_dict,
+                        na_filter=False,  # Don't filter NA values
+                        keep_default_na=False  # Don't use default NA values
+                    )
                     self.logger.info(f"Successfully read file with xlrd engine: {len(df)} rows, {len(df.columns)} columns")
                 except Exception as e2:
                     self.logger.error(f"All Excel engines failed to read file: {file_path}")
@@ -1252,8 +1265,16 @@ class ExcelProcessor:
                     if ' by ' in name:
                         return name.split(' by ')[0].strip()
                     if ' - ' in name:
-                        # Take all parts before the last hyphen
-                        return name.rsplit(' - ', 1)[0].strip()
+                        # Only split on dashes followed by weight information (numbers, decimals, units)
+                        # This preserves product names like "Pre-Roll" while removing weight parts
+                        import re
+                        # Check if the dash is followed by weight information
+                        if re.search(r' - [\d.]', name):
+                            # Remove weight part but preserve the dash in product names
+                            return re.sub(r' - [\d.].*$', '', name).strip()
+                        else:
+                            # No weight information, return the name as-is
+                            return name.strip()
                     return name.strip()
 
                 # Ensure Product Name* is string type before applying
@@ -1287,16 +1308,17 @@ class ExcelProcessor:
                         mask_by = self.df["Description"].str.contains(' by ', na=False)
                         self.df.loc[mask_by, "Description"] = self.df.loc[mask_by, "Description"].str.split(' by ').str[0].str.strip()
                         
-                        # Handle ' - ' pattern - remove weight part from Description to prevent duplication
-                        mask_dash = self.df["Description"].str.contains(' - ', na=False)
-                        # Also check for just '-' without spaces
-                        mask_single_dash = self.df["Description"].str.contains('-', na=False)
-                        # Remove weight part from Description for all types to prevent duplication
-                        # The weight will be added back in the tag generator using the WeightUnits field
-                        if mask_dash.any():
-                            self.df.loc[mask_dash, "Description"] = self.df.loc[mask_dash, "Description"].str.rsplit(' - ', n=1).str[0].str.strip()
-                        if mask_single_dash.any():
-                            self.df.loc[mask_single_dash, "Description"] = self.df.loc[mask_single_dash, "Description"].str.rsplit('-', n=1).str[0].str.strip()
+                        # Handle weight removal from Description - only remove weight parts, preserve product names with hyphens
+                        # Use regex to find dashes followed by weight information (numbers, decimals, units)
+                        mask_weight_dash = self.df["Description"].str.contains(r' - [\d.]', na=False)
+                        if mask_weight_dash.any():
+                            # Remove weight part but preserve the dash in product names like "Pre-Roll"
+                            df_temp = self.df.loc[mask_weight_dash, "Description"].copy()
+                            # Use regex to find the weight part and remove it (handles both " - 1g" and " - .5g")
+                            df_temp = df_temp.str.replace(r' - [\d.].*$', '', regex=True)
+                            self.df.loc[mask_weight_dash, "Description"] = df_temp
+                        
+
                     else:
                         # Fallback to empty descriptions
                         self.df["Description"] = ""
@@ -1358,7 +1380,7 @@ class ExcelProcessor:
                 
                 self.logger.debug(f"Sample cannabinoid content values after processing: {self.df['Ratio'].head()}")
 
-                # Set Ratio_or_THC_CBD based on product type and content format
+                # Set Ratio_or_THC_CBD based on product type
                 def set_ratio_or_thc_cbd(row):
                     product_type = str(row.get("Product Type*", "")).strip().lower()
                     ratio = str(row.get("Ratio", "")).strip()
@@ -1367,39 +1389,65 @@ class ExcelProcessor:
                     if ratio.lower() == "nan":
                         ratio = ""
                     
-                    # Define classic cannabis product types that use THC_CBD formatting
-                    classic_types = {
-                        "flower", "pre-roll", "infused pre-roll", "concentrate", 
-                        "solventless concentrate", "vape cartridge", "rso/co2 tankers"
-                    }
+                    classic_types = [
+                        "flower", "pre-roll", "infused pre-roll", "concentrate", "solventless concentrate", "vape cartridge", "rso/co2 tankers"
+                    ]
+                    # Note: capsules are NOT classic types for ratio processing - they should be treated as edibles
+                    BAD_VALUES = {"", "CBD", "THC", "CBD:", "THC:", "CBD:\n", "THC:\n", "nan"}
                     
-                    # Check if this is a classic cannabis product type
-                    is_classic = product_type in classic_types
+                    # For pre-rolls and infused pre-rolls, use JointRatio if available, otherwise default format
+                    if product_type in ["pre-roll", "infused pre-roll"]:
+                        joint_ratio = str(row.get("JointRatio", "")).strip()
+                        if joint_ratio and joint_ratio not in BAD_VALUES:
+                            # Remove leading dash if present
+                            if joint_ratio.startswith("- "):
+                                joint_ratio = joint_ratio[2:]
+                            return joint_ratio
+                        return "THC:|BR|CBD:"
                     
-                    # Determine if content is percentage-based THC/CBD
-                    is_percentage_based = '%' in ratio and ('THC:' in ratio or 'CBD:' in ratio)
+                    # For solventless concentrate, check if ratio is a weight + unit format
+                    if product_type == "solventless concentrate":
+                        if not ratio or ratio in BAD_VALUES or not is_weight_with_unit(ratio):
+                            return "1g"
+                        return ratio
                     
-                    # Set the appropriate field based on product type and content
-                    if is_classic and is_percentage_based:
-                        # Classic product with percentage THC/CBD - use THC_CBD field
-                        row["THC_CBD"] = ratio
-                        row["Ratio"] = ""  # Clear ratio field for classic products
-                        row["Ratio_or_THC_CBD"] = ratio  # Keep for backward compatibility
-                        logger.debug(f"Classic product '{product_type}' with THC/CBD content: {ratio}")
-                    else:
-                        # Non-classic product or non-percentage content - use Ratio field
-                        row["Ratio"] = ratio
-                        row["THC_CBD"] = ""  # Clear THC_CBD field for non-classic products
-                        row["Ratio_or_THC_CBD"] = ratio  # Keep for backward compatibility
-                        logger.debug(f"Non-classic product '{product_type}' with ratio content: {ratio}")
+                    if product_type in classic_types:
+                        if not ratio or ratio in BAD_VALUES:
+                            return "THC:|BR|CBD:"
+                        # If ratio contains THC/CBD values, use it directly
+                        if any(cannabinoid in ratio.upper() for cannabinoid in ['THC', 'CBD', 'CBC', 'CBG', 'CBN']):
+                            return ratio
+                        # If it's a valid ratio format, use it
+                        if is_real_ratio(ratio):
+                            return ratio
+                        # If it's a weight format (like "1g", "28g"), use it
+                        if is_weight_with_unit(ratio):
+                            return ratio
+                        # Otherwise, use default THC:CBD format
+                        return "THC:|BR|CBD:"
                     
-                    return row
+                    # For Edibles, Topicals, Tinctures, etc., use the ratio if it contains cannabinoid content
+                    edible_types = {"edible (solid)", "edible (liquid)", "high cbd edible liquid", "tincture", "topical", "capsule"}
+                    if product_type in edible_types:
+                        if not ratio or ratio in BAD_VALUES:
+                            return "THC:|BR|CBD:"
+                        # If ratio contains cannabinoid content, use it
+                        if any(cannabinoid in ratio.upper() for cannabinoid in ['THC', 'CBD', 'CBC', 'CBG', 'CBN']):
+                            return ratio
+                        # If it's a weight format, use it
+                        if is_weight_with_unit(ratio):
+                            return ratio
+                        # Otherwise, use default THC:CBD format
+                        return "THC:|BR|CBD:"
+                    
+                    # For any other product type, return the ratio as-is
+                    return ratio
 
                 # Reset index before applying to prevent duplicate labels
                 self.df.reset_index(drop=True, inplace=True)
                 # Use a safer approach for applying the ratio function
                 try:
-                    self.df = self.df.apply(set_ratio_or_thc_cbd, axis=1)
+                    self.df["Ratio_or_THC_CBD"] = self.df.apply(set_ratio_or_thc_cbd, axis=1)
                 except Exception as e:
                     self.logger.warning(f"Error applying ratio function: {e}")
                     # Fallback: use default values
@@ -1730,7 +1778,13 @@ class ExcelProcessor:
                             if weight_float == 1.0:
                                 default_joint_ratio = "1g x 1"
                             else:
-                                default_joint_ratio = f"{weight_float}g"
+                                # Ensure proper formatting for decimal weights (e.g., 0.5g not .5g)
+                                if weight_float < 1.0 and weight_float > 0:
+                                    default_joint_ratio = f"{weight_float:.2f}".rstrip("0").rstrip(".") + "g"
+                                    if default_joint_ratio.startswith('.'):
+                                        default_joint_ratio = '0' + default_joint_ratio
+                                else:
+                                    default_joint_ratio = f"{weight_float}g"
                             self.df.loc[idx, 'JointRatio'] = default_joint_ratio
                             self.logger.debug(f"Generated JointRatio for record {idx}: '{default_joint_ratio}' from Weight {weight_value}")
                         except (ValueError, TypeError):
@@ -1754,7 +1808,13 @@ class ExcelProcessor:
                         if weight_float == 1.0:
                             default_joint_ratio = "1g x 1"
                         else:
-                            default_joint_ratio = f"{weight_float}g"
+                            # Ensure proper formatting for decimal weights (e.g., 0.5g not .5g)
+                            if weight_float < 1.0 and weight_float > 0:
+                                default_joint_ratio = f"{weight_float:.2f}".rstrip("0").rstrip(".") + "g"
+                                if default_joint_ratio.startswith('.'):
+                                    default_joint_ratio = '0' + default_joint_ratio
+                            else:
+                                default_joint_ratio = f"{weight_float}g"
                         self.df.loc[idx, 'JointRatio'] = default_joint_ratio
                         self.logger.debug(f"Fixed JointRatio for record {idx}: Generated default '{default_joint_ratio}' from Weight")
                     except (ValueError, TypeError):
@@ -2469,7 +2529,7 @@ class ExcelProcessor:
                         'Price': str(record.get('Price', '')).strip(),
                         'Lineage': wrap_with_marker(unwrap_marker(f" {str(final_lineage)}" if str(final_lineage) else "", "LINEAGE"), "LINEAGE"),
                         'DOH': doh_value,  # Keep DOH as raw value
-                        'Ratio_or_THC_CBD': ratio_text,  # Keep for backward compatibility
+                        'Ratio_or_THC_CBD': ratio_text,  # Use the processed ratio_text for all product types
                         'ProductStrain': wrap_with_marker(final_product_strain, "PRODUCTSTRAIN") if include_product_strain else '',
                         'ProductType': record.get('Product Type*', ''),
                         'Ratio': str(record.get('Ratio', '')).strip(),
@@ -2480,19 +2540,6 @@ class ExcelProcessor:
                         'AK': ak_value,  # CBDA value for CBD
                         'Vendor': vendor,  # Add vendor information
                     }
-                    
-                    # Add separate THC_CBD field based on product type and content
-                    if product_type in classic_types and ('THC:' in ratio_text and 'CBD:' in ratio_text):
-                        # Classic product with THC/CBD content
-                        processed['THC_CBD'] = ratio_text
-                        logger.debug(f"Added THC_CBD field for classic product: {ratio_text}")
-                    else:
-                        # Non-classic product or non-THC/CBD content
-                        processed['THC_CBD'] = ''
-                        logger.debug(f"No THC_CBD field added for product type: {product_type}")
-                    
-                    # THC_CBD field is already set above based on product type and content
-                    
                     # Ensure leading space before hyphen is a non-breaking space to prevent Word from stripping it
                     joint_ratio = record.get('JointRatio', '')
                     # Handle NaN values properly
@@ -2587,7 +2634,15 @@ class ExcelProcessor:
 
             # Now we can safely check the values since they've been processed by safe_get_value
             if weight_val is not None and units_val:
-                weight_str = f"{weight_val:.2f}".rstrip("0").rstrip(".")
+                # Format weight to always show leading zero for decimal values (e.g., 0.5g not .5g)
+                if weight_val < 1.0 and weight_val > 0:
+                    # For decimal weights less than 1, ensure leading zero is preserved
+                    weight_str = f"{weight_val:.2f}".rstrip("0").rstrip(".")
+                    if weight_str.startswith('.'):
+                        weight_str = '0' + weight_str
+                else:
+                    # For whole numbers or weights >= 1, use normal formatting
+                    weight_str = f"{weight_val:.2f}".rstrip("0").rstrip(".")
                 result = f"{weight_str}{units_val}"
             elif weight_val is not None:
                 result = str(weight_val)
@@ -3107,4 +3162,935 @@ class ExcelProcessor:
         else:
             self._product_db_enabled = True
             self.logger.info("[PYTHONANYWHERE-FAST] PythonAnywhere mode disabled")
+
+    def repair_missing_data_for_json_matches(self, json_matched_products):
+        """
+        Intelligently repair missing data for JSON matched products using Excel data logic.
+        
+        Args:
+            json_matched_products (list): List of product dictionaries from JSON matching
+            
+        Returns:
+            list: List of repaired product dictionaries with complete data
+        """
+        if not json_matched_products:
+            logger.warning("No JSON matched products to repair")
+            return []
+        
+        logger.info(f"Starting data repair for {len(json_matched_products)} JSON matched products")
+        
+        repaired_products = []
+        
+        for product in json_matched_products:
+            try:
+                # Create a copy to avoid modifying the original
+                repaired_product = product.copy()
+                
+                # Get the product name for identification
+                product_name = (repaired_product.get('Product Name*', '') or 
+                              repaired_product.get('ProductName', '') or 
+                              repaired_product.get('product_name', '')).strip()
+                
+                if not product_name:
+                    logger.warning(f"Skipping product with no name: {product}")
+                    continue
+                
+                logger.debug(f"Repairing data for product: {product_name}")
+                
+                # Debug: Log the current state of the product
+                logger.debug(f"Current product state: {repaired_product}")
+                
+                # 1. REPAIR PRODUCT TYPE - Use intelligent matching from existing data
+                if not repaired_product.get('Product Type*') or repaired_product.get('Product Type*') == 'Unknown':
+                    logger.debug(f"Repairing Product Type* for {product_name}")
+                    inferred_type = self._infer_product_type_from_existing_data(product_name)
+                    if not inferred_type:
+                        inferred_type = self._infer_product_type(product_name)  # Fallback to pattern matching
+                    logger.debug(f"Inferred product type: {inferred_type}")
+                    repaired_product['Product Type*'] = inferred_type
+                else:
+                    logger.debug(f"Product Type* already set: {repaired_product.get('Product Type*')}")
+                
+                # 2. REPAIR PRODUCT BRAND - Use intelligent matching from existing data
+                if not repaired_product.get('Product Brand') or repaired_product.get('Product Brand') == 'Unknown':
+                    logger.debug(f"Repairing Product Brand for {product_name}")
+                    inferred_brand = self._infer_brand_from_existing_data(product_name)
+                    if not inferred_brand:
+                        inferred_brand = self._extract_brand_from_name(product_name)  # Fallback to pattern matching
+                    logger.debug(f"Inferred brand: {inferred_brand}")
+                    repaired_product['Product Brand'] = inferred_brand
+                else:
+                    logger.debug(f"Product Brand already set: {repaired_product.get('Product Brand')}")
+                
+                # 3. REPAIR VENDOR - Use intelligent matching from existing data
+                if not repaired_product.get('Vendor') or repaired_product.get('Vendor') == 'Unknown':
+                    logger.debug(f"Repairing Vendor for {product_name}")
+                    inferred_vendor = self._infer_vendor_from_existing_data(product_name)
+                    if not inferred_vendor:
+                        inferred_vendor = self._infer_vendor_from_context(product_name)  # Fallback to pattern matching
+                    logger.debug(f"Inferred vendor: {inferred_vendor}")
+                    repaired_product['Vendor'] = inferred_vendor
+                else:
+                    logger.debug(f"Vendor already set: {repaired_product.get('Vendor')}")
+                
+                # 4. REPAIR PRODUCT STRAIN - Use intelligent matching from existing data
+                if not repaired_product.get('Product Strain') or repaired_product.get('Product Strain') == 'Unknown':
+                    logger.debug(f"Repairing Product Strain for {product_name}")
+                    inferred_strain = self._infer_strain_from_existing_data(product_name)
+                    if not inferred_strain:
+                        inferred_strain = self._infer_strain_from_name(product_name)  # Fallback to pattern matching
+                    logger.debug(f"Inferred strain: {inferred_strain}")
+                    repaired_product['Product Strain'] = inferred_strain
+                else:
+                    logger.debug(f"Product Strain already set: {repaired_product.get('Product Strain')}")
+                
+                # 5. REPAIR LINEAGE - Use intelligent matching from existing data
+                if not repaired_product.get('Lineage') or repaired_product.get('Lineage') == 'MIXED':
+                    logger.debug(f"Repairing Lineage for {product_name}")
+                    inferred_lineage = self._infer_lineage_from_existing_data(product_name)
+                    if not inferred_lineage:
+                        inferred_lineage = self._infer_lineage_from_name(product_name)  # Fallback to pattern matching
+                    logger.debug(f"Inferred lineage: {inferred_lineage}")
+                    repaired_product['Lineage'] = inferred_lineage
+                else:
+                    logger.debug(f"Lineage already set: {repaired_product.get('Lineage')}")
+                
+                # 6. REPAIR PRICE
+                if not repaired_product.get('Price') or repaired_product.get('Price') == '$0':
+                    logger.debug(f"Repairing Price for {product_name}")
+                    inferred_price = self._infer_price_from_type(repaired_product['Product Type*'])
+                    logger.debug(f"Inferred price: {inferred_price}")
+                    repaired_product['Price'] = inferred_price
+                else:
+                    logger.debug(f"Price already set: {repaired_product.get('Price')}")
+                
+                # 7. REPAIR WEIGHT AND UNITS
+                if not repaired_product.get('Weight*') or repaired_product.get('Weight*') == '0':
+                    logger.debug(f"Repairing Weight and Units for {product_name}")
+                    weight_info = self._infer_weight_from_name(product_name, repaired_product['Product Type*'])
+                    logger.debug(f"Inferred weight info: {weight_info}")
+                    repaired_product['Weight*'] = weight_info['weight']
+                    repaired_product['Units'] = weight_info['units']
+                else:
+                    logger.debug(f"Weight and Units already set: {repaired_product.get('Weight*')} {repaired_product.get('Units')}")
+                
+                # 8. REPAIR THC/CBD VALUES - Use intelligent matching from existing data
+                if not repaired_product.get('THC test result') or repaired_product.get('THC test result') == 0.0:
+                    logger.debug(f"Repairing THC for {product_name}")
+                    inferred_thc = self._infer_thc_from_existing_data(product_name)
+                    if not inferred_thc:
+                        inferred_thc = self._infer_thc_from_type(repaired_product['Product Type*'])  # Fallback to type-based inference
+                    logger.debug(f"Inferred THC: {inferred_thc}")
+                    # Convert to float for proper numeric handling
+                    repaired_product['THC test result'] = float(inferred_thc)
+                else:
+                    logger.debug(f"THC already set: {repaired_product.get('THC test result')}")
+                
+                if not repaired_product.get('CBD test result') or repaired_product.get('CBD test result') == 0.0:
+                    logger.debug(f"Repairing CBD for {product_name}")
+                    inferred_cbd = self._infer_cbd_from_existing_data(product_name)
+                    if not inferred_cbd:
+                        inferred_cbd = self._infer_cbd_from_type(repaired_product['Product Type*'])  # Fallback to type-based inference
+                    logger.debug(f"Inferred CBD: {inferred_cbd}")
+                    # Convert to float for proper numeric handling
+                    repaired_product['CBD test result'] = float(inferred_cbd)
+                else:
+                    logger.debug(f"CBD already set: {repaired_product.get('CBD test result')}")
+                
+                # 9. REPAIR RATIO
+                if not repaired_product.get('Ratio') or repaired_product.get('Ratio') == '':
+                    logger.debug(f"Repairing Ratio for {product_name}")
+                    if repaired_product.get('THC test result') and repaired_product.get('CBD test result'):
+                        ratio = f"{repaired_product['THC test result']}:{repaired_product['CBD test result']}"
+                        repaired_product['Ratio'] = ratio
+                        logger.debug(f"Calculated ratio: {ratio}")
+                else:
+                    logger.debug(f"Ratio already set: {repaired_product.get('Ratio')}")
+                
+                # 10. REPAIR DESCRIPTION
+                if not repaired_product.get('Description') or repaired_product.get('Description') == '':
+                    logger.debug(f"Repairing Description for {product_name}")
+                    inferred_desc = self._infer_description_from_name(product_name, repaired_product['Product Type*'])
+                    logger.debug(f"Inferred description: {inferred_desc}")
+                    repaired_product['Description'] = inferred_desc
+                else:
+                    logger.debug(f"Description already set: {repaired_product.get('Description')}")
+                
+                # 11. REPAIR WEIGHT UNITS
+                if not repaired_product.get('WeightUnits') or repaired_product.get('WeightUnits') == '':
+                    logger.debug(f"Repairing WeightUnits for {product_name}")
+                    repaired_product['WeightUnits'] = repaired_product.get('Units', 'g')
+                    logger.debug(f"Set WeightUnits to: {repaired_product['WeightUnits']}")
+                else:
+                    logger.debug(f"WeightUnits already set: {repaired_product.get('WeightUnits')}")
+                
+                # 12. MARK AS REPAIRED
+                repaired_product['DataRepaired'] = True
+                repaired_product['RepairTimestamp'] = datetime.datetime.now().isoformat()
+                
+                repaired_products.append(repaired_product)
+                logger.debug(f"Successfully repaired product: {product_name}")
+                
+            except Exception as e:
+                logger.error(f"Error repairing product {product_name}: {e}")
+                # Add the original product even if repair failed
+                repaired_products.append(product)
+        
+        logger.info(f"Data repair completed. {len(repaired_products)} products processed")
+        return repaired_products
+    
+    def _infer_product_type(self, product_name):
+        """Infer product type from product name using intelligent pattern matching."""
+        name_lower = product_name.lower()
+        
+        # Flower types
+        if any(word in name_lower for word in ['flower', 'bud', 'nug', 'herb', 'cannabis']):
+            return 'Flower'
+        
+        # Pre-roll types
+        if any(word in name_lower for word in ['pre-roll', 'preroll', 'joint', 'roll', 'cigarette']):
+            return 'Pre-roll'
+        
+        # Concentrate types
+        if any(word in name_lower for word in ['concentrate', 'wax', 'shatter', 'live resin', 'rosin', 'budder', 'crumble']):
+            return 'Concentrate'
+        
+        # Vape types
+        if any(word in name_lower for word in ['vape', 'cartridge', 'cart', 'pen', 'disposable']):
+            return 'Vape Cartridge'
+        
+        # Edible types
+        if any(word in name_lower for word in ['edible', 'gummy', 'chocolate', 'cookie', 'brownie', 'candy', 'food']):
+            return 'Edible (Solid)'
+        
+        # Liquid edible types
+        if any(word in name_lower for word in ['tincture', 'oil', 'drops', 'liquid', 'drink', 'beverage']):
+            return 'Edible (Liquid)'
+        
+        # Topical types
+        if any(word in name_lower for word in ['topical', 'cream', 'lotion', 'salve', 'balm', 'ointment']):
+            return 'Topical'
+        
+        # Capsule types
+        if any(word in name_lower for word in ['capsule', 'pill', 'tablet', 'supplement']):
+            return 'Capsule'
+        
+        # RSO/CO2 types
+        if any(word in name_lower for word in ['rso', 'co2', 'tanker', 'syringe']):
+            return 'rso/co2 tankers'
+        
+        # Default to flower if no clear indication
+        return 'Flower'
+    
+    def _extract_brand_from_name(self, product_name):
+        """Extract brand information from product name using pattern matching."""
+        name_lower = product_name.lower()
+        
+        # Common brand patterns
+        brand_patterns = [
+            r'by\s+([A-Za-z\s&]+?)(?:\s|$)',
+            r'from\s+([A-Za-z\s&]+?)(?:\s|$)',
+            r'([A-Za-z\s&]+?)\s+strain',
+            r'([A-Za-z\s&]+?)\s+line',
+            r'([A-Za-z\s&]+?)\s+collection'
+        ]
+        
+        for pattern in brand_patterns:
+            match = re.search(pattern, name_lower)
+            if match:
+                brand = match.group(1).strip().title()
+                if len(brand) > 2:  # Avoid very short matches
+                    return brand
+        
+        # Try to extract from common brand names in the dataset
+        if self.df is not None and 'Product Brand' in self.df.columns:
+            available_brands = self.df['Product Brand'].dropna().unique()
+            for brand in available_brands:
+                if str(brand).lower() in name_lower:
+                    return str(brand)
+        
+        # Default brand based on product type
+        return 'Premium Cannabis'
+    
+    def _infer_strain_from_name(self, product_name):
+        """Infer strain information from product name."""
+        name_lower = product_name.lower()
+        
+        # Common strain patterns
+        strain_patterns = [
+            r'([A-Za-z\s]+?)\s+(?:strain|variety|cultivar)',
+            r'([A-Za-z\s]+?)\s+(?:kush|haze|diesel|og|gelato|cookies)',
+            r'([A-Za-z\s]+?)\s+(?:berry|fruit|citrus|mint|vanilla)'
+        ]
+        
+        for pattern in strain_patterns:
+            match = re.search(pattern, name_lower)
+            if match:
+                strain = match.group(1).strip().title()
+                if len(strain) > 2:
+                    return strain
+        
+        # Try to extract from common strain names in the dataset
+        if self.df is not None and 'Product Strain' in self.df.columns:
+            available_strains = self.df['Product Strain'].dropna().unique()
+            for strain in available_strains:
+                if str(strain).lower() in name_lower:
+                    return str(strain)
+        
+        # Default strain
+        return 'Premium Blend'
+    
+    def _infer_lineage_from_name(self, product_name):
+        """Infer lineage from product name and strain information."""
+        name_lower = product_name.lower()
+        
+        # Check for specific lineage indicators
+        if any(word in name_lower for word in ['sativa', 'sativa-dominant']):
+            return 'SATIVA'
+        elif any(word in name_lower for word in ['indica', 'indica-dominant']):
+            return 'INDICA'
+        elif any(word in name_lower for word in ['hybrid', 'balanced']):
+            return 'HYBRID'
+        elif any(word in name_lower for word in ['cbd', 'hemp', 'low-thc']):
+            return 'CBD'
+        
+        # Try to infer from strain name patterns
+        strain = self._infer_strain_from_name(product_name)
+        strain_lower = strain.lower()
+        
+        # Known sativa strains
+        sativa_strains = ['haze', 'diesel', 'jack', 'lemon', 'sour', 'durban', 'maui', 'hawaiian']
+        if any(s in strain_lower for s in sativa_strains):
+            return 'SATIVA'
+        
+        # Known indica strains
+        indica_strains = ['kush', 'og', 'purple', 'granddaddy', 'afghani', 'hash', 'northern']
+        if any(s in strain_lower for s in indica_strains):
+            return 'INDICA'
+        
+        # Default to hybrid
+        return 'HYBRID'
+    
+    def _infer_vendor_from_context(self, product_name):
+        """Infer vendor information from context and available data."""
+        # Try to find vendor from existing data
+        if self.df is not None and 'Vendor' in self.df.columns:
+            available_vendors = self.df['Vendor'].dropna().unique()
+            if len(available_vendors) > 0:
+                # Return the most common vendor
+                vendor_counts = self.df['Vendor'].value_counts()
+                return str(vendor_counts.index[0])
+        
+        # Default vendor
+        return 'Premium Supplier'
+    
+    def _infer_price_from_type(self, product_type):
+        """Infer price based on product type and market standards."""
+        price_ranges = {
+            'Flower': '$45.00',
+            'Pre-roll': '$12.00',
+            'Concentrate': '$35.00',
+            'Vape Cartridge': '$25.00',
+            'Edible (Solid)': '$20.00',
+            'Edible (Liquid)': '$30.00',
+            'Topical': '$25.00',
+            'Capsule': '$25.00',
+            'rso/co2 tankers': '$40.00'
+        }
+        
+        return price_ranges.get(product_type, '$25.00')
+    
+    def _infer_weight_from_name(self, product_name, product_type):
+        """Infer weight and units from product name and type."""
+        name_lower = product_name.lower()
+        
+        # Extract weight from name patterns
+        weight_patterns = [
+            r'(\d+(?:\.\d+)?)\s*(g|gram|grams|oz|ounce|ounces)',
+            r'(\d+(?:\.\d+)?)\s*(pack|packs|pk)',
+            r'(\d+(?:\.\d+)?)\s*(piece|pieces)',
+            r'(\d+(?:\.\d+)?)\s*(roll|rolls)'
+        ]
+        
+        for pattern in weight_patterns:
+            match = re.search(pattern, name_lower)
+            if match:
+                weight = match.group(1)
+                unit = match.group(2)
+                
+                # Standardize units
+                if unit in ['g', 'gram', 'grams']:
+                    return {'weight': weight, 'units': 'g'}
+                elif unit in ['oz', 'ounce', 'ounces']:
+                    return {'weight': weight, 'units': 'oz'}
+                elif unit in ['pack', 'packs', 'pk']:
+                    return {'weight': weight, 'units': 'pack'}
+                elif unit in ['piece', 'pieces']:
+                    return {'weight': weight, 'units': 'piece'}
+                elif unit in ['roll', 'rolls']:
+                    return {'weight': weight, 'units': 'roll'}
+        
+        # Default weights by product type
+        default_weights = {
+            'Flower': {'weight': '3.5', 'units': 'g'},
+            'Pre-roll': {'weight': '1', 'units': 'pack'},
+            'Concentrate': {'weight': '1', 'units': 'g'},
+            'Vape Cartridge': {'weight': '1', 'units': 'piece'},
+            'Edible (Solid)': {'weight': '1', 'units': 'piece'},
+            'Edible (Liquid)': {'weight': '30', 'units': 'ml'},
+            'Topical': {'weight': '1', 'units': 'oz'},
+            'Capsule': {'weight': '30', 'units': 'piece'},
+            'rso/co2 tankers': {'weight': '1', 'units': 'g'}
+        }
+        
+        return default_weights.get(product_type, {'weight': '1', 'units': 'piece'})
+    
+    def _infer_thc_from_type(self, product_type):
+        """Infer THC content based on product type."""
+        thc_ranges = {
+            'Flower': '18.5',
+            'Pre-roll': '20.0',
+            'Concentrate': '75.0',
+            'Vape Cartridge': '85.0',
+            'Edible (Solid)': '10.0',
+            'Edible (Liquid)': '15.0',
+            'Topical': '0.0',
+            'Capsule': '25.0',
+            'rso/co2 tankers': '80.0'
+        }
+        
+        return thc_ranges.get(product_type, '20.0')
+    
+    def _infer_cbd_from_type(self, product_type):
+        """Infer CBD content based on product type."""
+        cbd_ranges = {
+            'Flower': '0.5',
+            'Pre-roll': '0.8',
+            'Concentrate': '2.0',
+            'Vape Cartridge': '1.5',
+            'Edible (Solid)': '5.0',
+            'Edible (Liquid)': '8.0',
+            'Topical': '100.0',
+            'Capsule': '25.0',
+            'rso/co2 tankers': '5.0'
+        }
+        
+        return cbd_ranges.get(product_type, '1.0')
+    
+    def _infer_ratio_from_thc_cbd(self, thc_value, cbd_value):
+        """Infer THC:CBD ratio from THC and CBD values."""
+        try:
+            thc = float(thc_value) if thc_value else 0
+            cbd = float(cbd_value) if cbd_value else 0
+            
+            if thc > 0 and cbd > 0:
+                ratio = thc / cbd
+                if ratio >= 10:
+                    return f"{thc:.0f}:1"
+                elif ratio >= 2:
+                    return f"{ratio:.1f}:1"
+                elif ratio >= 0.5:
+                    return f"1:{1/ratio:.1f}"
+                else:
+                    return f"1:{1/ratio:.0f}"
+            elif thc > 0:
+                return f"{thc:.0f}:0"
+            elif cbd > 0:
+                return f"0:{cbd:.0f}"
+            else:
+                return "0:0"
+        except:
+            return "20:1"  # Default ratio
+    
+    def _generate_description(self, product_name, product_type, product_brand):
+        """Generate a descriptive description for the product."""
+        descriptions = {
+            'Flower': f"Premium {product_brand} cannabis flower featuring {product_name}. Hand-crafted and carefully cultivated for exceptional quality and potency.",
+            'Pre-roll': f"Convenient {product_brand} pre-roll featuring {product_name}. Perfect for on-the-go consumption with premium cannabis quality.",
+            'Concentrate': f"High-potency {product_brand} concentrate featuring {product_name}. Extracted using advanced methods for maximum terpene preservation.",
+            'Vape Cartridge': f"Premium {product_brand} vape cartridge featuring {product_name}. Clean, smooth vaping experience with authentic cannabis flavor.",
+            'Edible (Solid)': f"Delicious {product_brand} edible featuring {product_name}. Carefully dosed for consistent effects and great taste.",
+            'Edible (Liquid)': f"Premium {product_brand} liquid edible featuring {product_name}. Fast-acting and precisely dosed for optimal results.",
+            'Topical': f"Effective {product_brand} topical featuring {product_name}. Formulated for targeted relief and skin nourishment.",
+            'Capsule': f"Convenient {product_brand} capsule featuring {product_name}. Consistent dosing in an easy-to-take format.",
+            'rso/co2 tankers': f"High-potency {product_brand} extract featuring {product_name}. Full-spectrum benefits in a concentrated form."
+        }
+        
+        return descriptions.get(product_type, f"Premium {product_brand} product featuring {product_name}.")
+
+    def _infer_product_type_from_existing_data(self, product_name):
+        """
+        Intelligently infer product type by finding similar products in existing Excel data.
+        This method uses enhanced matching strategies to find more similar products.
+        """
+        try:
+            # Use the enhanced matching system with comprehensive strategy
+            similar_products = self._find_similar_products(product_name, search_strategy='comprehensive')
+            
+            # If we found similar products, use their product type
+            if similar_products:
+                # Get the most common product type from similar products
+                product_types = []
+                for product in similar_products:
+                    product_type = product.get('Product Type*', '') or product.get('ProductType', '')
+                    if product_type and product_type != 'nan':
+                        product_types.append(str(product_type).strip())
+                
+                if product_types:
+                    # Return the most common product type
+                    from collections import Counter
+                    type_counter = Counter(product_types)
+                    most_common_type = type_counter.most_common(1)[0][0]
+                    logger.debug(f"Found {len(similar_products)} similar products, using most common type: {most_common_type}")
+                    return most_common_type
+            
+            # If no similar products found, try to infer from the name itself
+            logger.debug(f"No similar products found for {product_name}, falling back to pattern matching")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error in intelligent product type inference: {e}")
+            return None
+    
+    def _infer_brand_from_existing_data(self, product_name):
+        """
+        Intelligently infer product brand by finding similar products in existing Excel data.
+        """
+        try:
+            # Use the enhanced matching system with comprehensive strategy
+            similar_products = self._find_similar_products(product_name, search_strategy='comprehensive')
+            
+            # If we found similar products, use their brand
+            if similar_products:
+                # Get the most common brand from similar products
+                brands = []
+                for product in similar_products:
+                    brand = product.get('Product Brand', '') or product.get('Brand', '')
+                    if brand and brand != 'nan':
+                        brands.append(str(brand).strip())
+                
+                if brands:
+                    # Return the most common brand
+                    from collections import Counter
+                    brand_counter = Counter(brands)
+                    most_common_brand = brand_counter.most_common(1)[0][0]
+                    logger.debug(f"Found {len(similar_products)} similar products, using most common brand: {most_common_brand}")
+                    return most_common_brand
+            
+            # If no similar products found, try to extract brand from name
+            logger.debug(f"No similar products found for {product_name}, falling back to pattern matching")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error in intelligent brand inference: {e}")
+            return None
+    
+    def _infer_vendor_from_existing_data(self, product_name):
+        """
+        Intelligently infer vendor by finding similar products in existing Excel data.
+        """
+        try:
+            # Use the enhanced matching system with comprehensive strategy
+            similar_products = self._find_similar_products(product_name, search_strategy='comprehensive')
+            
+            # If we found similar products, use their vendor
+            if similar_products:
+                # Get the most common vendor from similar products
+                vendors = []
+                for product in similar_products:
+                    vendor = product.get('Vendor', '') or product.get('Supplier*', '')
+                    if vendor and vendor != 'nan':
+                        vendors.append(str(vendor).strip())
+                
+                if vendors:
+                    # Return the most common vendor
+                    from collections import Counter
+                    vendor_counter = Counter(vendors)
+                    most_common_vendor = vendor_counter.most_common(1)[0][0]
+                    logger.debug(f"Found {len(similar_products)} similar products, using most common vendor: {most_common_vendor}")
+                    return most_common_vendor
+            
+            # If no similar products found, try to infer from context
+            logger.debug(f"No similar products found for {product_name}, falling back to pattern matching")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error in intelligent vendor inference: {e}")
+            return None
+
+    def _infer_description_from_name(self, product_name, product_type):
+        """
+        Infer description from product name and type.
+        """
+        try:
+            # Basic description generation based on product type
+            descriptions = {
+                'Flower': f'Premium {product_type} featuring {product_name}',
+                'Pre-roll': f'Handcrafted {product_type} with {product_name}',
+                'Concentrate': f'High-potency {product_type} extract of {product_name}',
+                'Edible': f'Delicious {product_type} infused with {product_name}',
+                'Vape': f'Smooth {product_type} cartridge with {product_name}',
+                'Tincture': f'Potent {product_type} tincture of {product_name}',
+                'Topical': f'Soothing {product_type} with {product_name}'
+            }
+            
+            return descriptions.get(product_type, f'Premium {product_type} product featuring {product_name}.')
+            
+        except Exception as e:
+            logger.error(f"Error inferring description: {e}")
+            return f'Premium {product_type} product'
+    
+    def _infer_weight_from_name(self, product_name, product_type):
+        """
+        Infer weight and units from product name.
+        """
+        try:
+            import re
+            
+            # Look for weight patterns in the name
+            weight_pattern = r'(\d+\.?\d*)\s*(g|gram|grams|ml|oz|ounce|ounces)'
+            match = re.search(weight_pattern, product_name.lower())
+            
+            if match:
+                weight = match.group(1)
+                units = match.group(2)
+                
+                # Normalize units
+                if units in ['g', 'gram', 'grams']:
+                    units = 'g'
+                elif units in ['ml']:
+                    units = 'ml'
+                elif units in ['oz', 'ounce', 'ounces']:
+                    units = 'oz'
+                
+                return {'weight': weight, 'units': units}
+            
+            # Default weights based on product type
+            default_weights = {
+                'Flower': {'weight': '3.5', 'units': 'g'},
+                'Pre-roll': {'weight': '1.0', 'units': 'g'},
+                'Concentrate': {'weight': '1.0', 'units': 'g'},
+                'Edible': {'weight': '10', 'units': 'mg'},
+                'Vape': {'weight': '0.5', 'units': 'g'},
+                'Tincture': {'weight': '30', 'units': 'ml'},
+                'Topical': {'weight': '30', 'units': 'ml'}
+            }
+            
+            return default_weights.get(product_type, {'weight': '1.0', 'units': 'g'})
+            
+        except Exception as e:
+            logger.error(f"Error inferring weight: {e}")
+            return {'weight': '1.0', 'units': 'g'}
+    
+    def _infer_thc_from_type(self, product_type):
+        """
+        Infer THC content based on product type.
+        """
+        try:
+            # Default THC values based on product type
+            default_thc = {
+                'Flower': 18.0,
+                'Pre-roll': 20.0,
+                'Concentrate': 80.0,
+                'Edible': 10.0,
+                'Vape': 70.0,
+                'Tincture': 25.0,
+                'Topical': 0.0
+            }
+            
+            return default_thc.get(product_type, 15.0)
+            
+        except Exception as e:
+            logger.error(f"Error inferring THC: {e}")
+            return 15.0
+    
+    def _infer_cbd_from_type(self, product_type):
+        """
+        Infer CBD content based on product type.
+        """
+        try:
+            # Default CBD values based on product type
+            default_cbd = {
+                'Flower': 0.5,
+                'Pre-roll': 0.8,
+                'Concentrate': 5.0,
+                'Edible': 5.0,
+                'Vape': 2.0,
+                'Tincture': 15.0,
+                'Topical': 50.0
+            }
+            
+            return default_cbd.get(product_type, 0.5)
+            
+        except Exception as e:
+            logger.error(f"Error inferring CBD: {e}")
+            return 0.5
+
+    def _infer_lineage_from_existing_data(self, product_name):
+        """
+        Intelligently infer lineage by finding similar products in existing Excel data.
+        """
+        try:
+            # Use the enhanced matching system with comprehensive strategy
+            similar_products = self._find_similar_products(product_name, search_strategy='comprehensive')
+            
+            # If we found similar products, use their lineage
+            if similar_products:
+                # Get the most common lineage from similar products
+                lineages = []
+                for product in similar_products:
+                    lineage = product.get('Lineage', '') or product.get('lineage', '')
+                    if lineage and lineage != 'nan' and lineage != 'MIXED':
+                        lineages.append(str(lineage).strip())
+                
+                if lineages:
+                    # Return the most common lineage
+                    from collections import Counter
+                    lineage_counter = Counter(lineages)
+                    most_common_lineage = lineage_counter.most_common(1)[0][0]
+                    logger.debug(f"Found {len(similar_products)} similar products, using most common lineage: {most_common_lineage}")
+                    return most_common_lineage
+            
+            # If no similar products found, try to infer from the name itself
+            logger.debug(f"No similar products found for {product_name}, falling back to pattern matching")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error in intelligent lineage inference: {e}")
+            return None
+
+    def _infer_strain_from_existing_data(self, product_name):
+        """
+        Intelligently infer product strain by finding similar products in existing Excel data.
+        """
+        try:
+            # Use the enhanced matching system with comprehensive strategy
+            similar_products = self._find_similar_products(product_name, search_strategy='comprehensive')
+            
+            # If we found similar products, use their strain
+            if similar_products:
+                # Get the most common strain from similar products
+                strains = []
+                for product in similar_products:
+                    strain = product.get('Product Strain', '') or product.get('Strain', '')
+                    if strain and strain != 'nan':
+                        strains.append(str(strain).strip())
+                
+                if strains:
+                    # Return the most common strain
+                    from collections import Counter
+                    strain_counter = Counter(strains)
+                    most_common_strain = strain_counter.most_common(1)[0][0]
+                    logger.debug(f"Found {len(similar_products)} similar products, using most common strain: {most_common_strain}")
+                    return most_common_strain
+            
+            # If no similar products found, try to infer from the name itself
+            logger.debug(f"No similar products found for {product_name}, falling back to pattern matching")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error in intelligent strain inference: {e}")
+            return None
+
+    def _find_similar_products(self, product_name, search_strategy='comprehensive'):
+        """
+        Enhanced method to find similar products using multiple strategies.
+        
+        Args:
+            product_name (str): The product name to find matches for
+            search_strategy (str): Strategy to use - 'comprehensive', 'aggressive', or 'conservative'
+            
+        Returns:
+            list: List of similar product rows
+        """
+        if not self.df is not None or self.df.empty:
+            logger.warning("No Excel data available for product matching")
+            return []
+        
+        try:
+            # Normalize the product name for comparison
+            normalized_name = product_name.lower().strip()
+            normalized_words = set(word for word in normalized_name.split() if len(word) > 2)  # Filter out short words
+            
+            # Look for exact or partial matches in existing product names
+            product_name_col = 'Product Name*' if 'Product Name*' in self.df.columns else 'ProductName'
+            if product_name_col not in self.df.columns:
+                return []
+            
+            similar_products = []
+            
+            for _, row in self.df.iterrows():
+                existing_name = str(row.get(product_name_col, '')).lower().strip()
+                if existing_name and existing_name != 'nan':
+                    existing_words = set(word for word in existing_name.split() if len(word) > 2)
+                    
+                    # Strategy 1: Exact matches
+                    if normalized_name == existing_name:
+                        similar_products.append(row)
+                        continue
+                    
+                    # Strategy 2: High similarity matches (comprehensive strategy)
+                    if search_strategy in ['comprehensive', 'aggressive']:
+                        # Check for significant word overlap
+                        word_overlap = len(normalized_words.intersection(existing_words))
+                        total_unique_words = len(normalized_words.union(existing_words))
+                        
+                        if total_unique_words > 0:
+                            similarity_score = word_overlap / total_unique_words
+                            
+                            # Comprehensive: 30% word overlap, Aggressive: 20% word overlap
+                            threshold = 0.3 if search_strategy == 'comprehensive' else 0.2
+                            if similarity_score >= threshold:
+                                similar_products.append(row)
+                                continue
+                    
+                    # Strategy 3: Brand/type matching
+                    if search_strategy in ['comprehensive', 'aggressive']:
+                        # Check if brand names match
+                        brand_col = 'Product Brand' if 'Product Brand' in self.df.columns else 'Brand'
+                        if brand_col in self.df.columns:
+                            existing_brand = str(row.get(brand_col, '')).lower().strip()
+                            if existing_brand and existing_brand != 'nan':
+                                # Check if any brand word appears in the product name
+                                brand_words = set(word for word in existing_brand.split() if len(word) > 2)
+                                if brand_words.intersection(normalized_words):
+                                    similar_products.append(row)
+                                    continue
+                    
+                    # Strategy 4: Weight/size matching
+                    if search_strategy in ['comprehensive', 'aggressive']:
+                        import re
+                        weight_pattern = r'(\d+\.?\d*)\s*(g|gram|grams|ml|oz|ounce|ounces)'
+                        new_weight_match = re.search(weight_pattern, normalized_name)
+                        existing_weight_match = re.search(weight_pattern, existing_name)
+                        
+                        if new_weight_match and existing_weight_match:
+                            new_weight = float(new_weight_match.group(1))
+                            existing_weight = float(existing_weight_match.group(1))
+                            # More flexible weight matching
+                            weight_tolerance = 0.5 if search_strategy == 'aggressive' else 0.1
+                            if abs(new_weight - existing_weight) <= weight_tolerance:
+                                similar_products.append(row)
+                                continue
+                    
+                    # Strategy 5: Product type matching
+                    if search_strategy in ['comprehensive', 'aggressive']:
+                        # Check if product types are similar
+                        type_col = 'Product Type*' if 'Product Type*' in self.df.columns else 'ProductType'
+                        if type_col in self.df.columns:
+                            existing_type = str(row.get(type_col, '')).lower().strip()
+                            if existing_type and existing_type != 'nan':
+                                # Check if product type words appear in the product name
+                                type_words = set(word for word in existing_type.split() if len(word) > 2)
+                                if type_words.intersection(normalized_words):
+                                    similar_products.append(row)
+                                    continue
+                    
+                    # Strategy 6: Strain name matching
+                    if search_strategy in ['comprehensive', 'aggressive']:
+                        strain_col = 'Product Strain' if 'Product Strain' in self.df.columns else 'Strain'
+                        if strain_col in self.df.columns:
+                            existing_strain = str(row.get(strain_col, '')).lower().strip()
+                            if existing_strain and existing_strain != 'nan':
+                                # Check if strain names match or are similar
+                                strain_words = set(word for word in existing_strain.split() if len(word) > 2)
+                                if strain_words.intersection(normalized_words):
+                                    similar_products.append(row)
+                                    continue
+                    
+                    # Strategy 7: Partial substring matching (aggressive only)
+                    if search_strategy == 'aggressive':
+                        # Check if any significant word from the new product appears in existing names
+                        for word in normalized_words:
+                            if len(word) > 3 and word in existing_name:  # Only longer words
+                                similar_products.append(row)
+                                break
+            
+            # Remove duplicates while preserving order
+            seen = set()
+            unique_products = []
+            for product in similar_products:
+                product_id = str(product.get(product_name_col, ''))
+                if product_id not in seen:
+                    seen.add(product_id)
+                    unique_products.append(product)
+            
+            logger.debug(f"Found {len(unique_products)} similar products for '{product_name}' using {search_strategy} strategy")
+            return unique_products
+            
+        except Exception as e:
+            logger.error(f"Error in enhanced product matching: {e}")
+            return []
+
+    def _infer_thc_from_existing_data(self, product_name):
+        """
+        Intelligently infer THC content by finding similar products in existing Excel data.
+        """
+        try:
+            # Use the enhanced matching system with comprehensive strategy
+            similar_products = self._find_similar_products(product_name, search_strategy='comprehensive')
+            
+            # If we found similar products, use their THC values
+            if similar_products:
+                # Get the most common THC value from similar products
+                thc_values = []
+                for product in similar_products:
+                    thc = product.get('THC test result', '') or product.get('THC', '')
+                    if thc and thc != 'nan' and thc != 0:
+                        try:
+                            thc_float = float(thc)
+                            if thc_float > 0:
+                                thc_values.append(thc_float)
+                        except (ValueError, TypeError):
+                            continue
+                
+                if thc_values:
+                    # Return the average THC value from similar products
+                    avg_thc = sum(thc_values) / len(thc_values)
+                    logger.debug(f"Found {len(similar_products)} similar products, using average THC: {avg_thc:.1f}%")
+                    return round(avg_thc, 1)
+            
+            # If no similar products found, fall back to type-based inference
+            logger.debug(f"No similar products found for {product_name}, falling back to type-based inference")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error in intelligent THC inference: {e}")
+            return None
+
+    def _infer_cbd_from_existing_data(self, product_name):
+        """
+        Intelligently infer CBD content by finding similar products in existing Excel data.
+        """
+        try:
+            # Use the enhanced matching system with comprehensive strategy
+            similar_products = self._find_similar_products(product_name, search_strategy='comprehensive')
+            
+            # If we found similar products, use their CBD values
+            if similar_products:
+                # Get the most common CBD value from similar products
+                cbd_values = []
+                for product in similar_products:
+                    cbd = product.get('CBD test result', '') or product.get('CBD', '')
+                    if cbd and cbd != 'nan' and cbd != 0:
+                        try:
+                            cbd_float = float(cbd)
+                            if cbd_float > 0:
+                                cbd_values.append(cbd_float)
+                        except (ValueError, TypeError):
+                            continue
+                
+                if cbd_values:
+                    # Return the average CBD value from similar products
+                    avg_cbd = sum(cbd_values) / len(cbd_values)
+                    logger.debug(f"Found {len(similar_products)} similar products, using average CBD: {avg_cbd:.1f}%")
+                    return round(avg_cbd, 1)
+            
+            # If no similar products found, fall back to type-based inference
+            logger.debug(f"No similar products found for {product_name}, falling back to type-based inference")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error in intelligent CBD inference: {e}")
+            return None
 
