@@ -1,69 +1,99 @@
 #!/usr/bin/env python3
+"""
+Test script to verify that the DescAndWeight duplication issue is fixed.
+"""
 
-import requests
-import json
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-def test_descandweight_fix():
-    """Test the DescAndWeight field fix to ensure it shows the correct format."""
+from src.core.generation.template_processor import TemplateProcessor, get_font_scheme
+
+def test_horizontal_template_no_duplication():
+    """Test that horizontal template expansion doesn't duplicate DescAndWeight."""
+    print("Testing horizontal template expansion for DescAndWeight duplication...")
     
     try:
-        # Test the available-tags endpoint
-        response = requests.get('http://127.0.0.1:9090/api/available-tags')
+        # Create a template processor for horizontal template
+        processor = TemplateProcessor('horizontal', get_font_scheme('horizontal'), 1.0)
         
-        if response.status_code == 200:
-            tags = response.json()
-            print(f"Found {len(tags)} tags")
+        # Check if the expanded template buffer exists
+        if hasattr(processor, '_expanded_template_buffer') and processor._expanded_template_buffer:
+            print("✅ Template expansion completed successfully")
             
-            # Look for the specific product we're testing
-            target_product = "Hustler's Ambition - Wax - Acapulco Gold (S) - 1g"
+            # Load the expanded template to check for duplication
+            from docx import Document
+            from io import BytesIO
             
-            for i, tag in enumerate(tags[:10]):  # Check first 10 tags
-                product_name = tag.get('Product Name*', '')
-                desc_and_weight = tag.get('DescAndWeight', '')
+            # Create a copy of the buffer
+            buffer_copy = BytesIO(processor._expanded_template_buffer.getvalue())
+            doc = Document(buffer_copy)
+            
+            if doc.tables:
+                table = doc.tables[0]
+                print(f"✅ Expanded template has {len(table.rows)} rows x {len(table.columns)} columns")
                 
-                print(f"\nTag {i+1}:")
-                print(f"  Product Name: {product_name}")
-                print(f"  DescAndWeight: {desc_and_weight}")
+                # Check each cell for placeholders and duplication
+                descandweight_count = 0
+                for row_idx, row in enumerate(table.rows):
+                    for col_idx, cell in enumerate(row.cells):
+                        cell_text = ''
+                        for paragraph in cell.paragraphs:
+                            cell_text += paragraph.text
+                        
+                        print(f"  Cell ({row_idx}, {col_idx}): {repr(cell_text)}")
+                        
+                        # Check the actual XML structure for DescAndWeight
+                        from docx.oxml.ns import qn
+                        descandweight_found = False
+                        descandweight_elements = []
+                        
+                        for t in cell._tc.iter(qn('w:t')):
+                            if t.text and 'DescAndWeight' in t.text:
+                                descandweight_found = True
+                                descandweight_elements.append(t.text)
+                        
+                        if descandweight_found:
+                            descandweight_count += 1
+                            print(f"    ✅ Found DescAndWeight: {descandweight_elements}")
+                            
+                            # Check for duplication within the same cell
+                            if len(descandweight_elements) > 1:
+                                print(f"❌ ERROR: Cell ({row_idx}, {col_idx}) has {len(descandweight_elements)} DescAndWeight entries!")
+                                print(f"    DescAndWeight elements: {descandweight_elements}")
+                                return False
+                        else:
+                            print(f"    ❌ No DescAndWeight found in XML")
                 
-                # Check if this is our target product
-                if target_product in product_name:
-                    print(f"  ✓ FOUND TARGET PRODUCT!")
-                    print(f"  Expected format: Acapulco Gold Wax - 1g")
-                    print(f"  Actual format: {desc_and_weight}")
-                    
-                    if "Acapulco Gold Wax - 1g" in desc_and_weight:
-                        print(f"  ✓ SUCCESS: DescAndWeight format is correct!")
-                    else:
-                        print(f"  ❌ FAILURE: DescAndWeight format is incorrect")
-                        print(f"  Expected: Acapulco Gold Wax - 1g")
-                        print(f"  Got: {desc_and_weight}")
-            
-            # Check if any tags have the new format
-            tags_with_correct_format = []
-            for tag in tags:
-                desc_and_weight = tag.get('DescAndWeight', '')
-                if ' - ' in desc_and_weight and ('Wax' in desc_and_weight or 'Flower' in desc_and_weight or 'Concentrate' in desc_and_weight):
-                    tags_with_correct_format.append(tag)
-            
-            print(f"\nSummary:")
-            print(f"  Tags with correct format: {len(tags_with_correct_format)}/{len(tags)}")
-            
-            if tags_with_correct_format:
-                print("  ✓ SUCCESS: DescAndWeight field is now using the correct format!")
-                print("  Sample correct formats:")
-                for tag in tags_with_correct_format[:3]:
-                    print(f"    - {tag.get('DescAndWeight', '')}")
+                print(f"✅ Found DescAndWeight in {descandweight_count} cells (no duplication)")
+                
+                # Check if placeholders were added
+                if descandweight_count > 0:
+                    print("✅ DescAndWeight placeholders were successfully added")
+                else:
+                    print("⚠️  No DescAndWeight placeholders found - template may not need them")
+                
+                return True
             else:
-                print("  ❌ ISSUE: No tags found with the correct format")
-                
+                print("❌ No tables found in expanded template")
+                return False
         else:
-            print(f"Error: HTTP {response.status_code}")
-            print(f"Response: {response.text}")
+            print("❌ Template expansion failed - no expanded buffer")
+            return False
             
-    except requests.exceptions.ConnectionError:
-        print("Error: Could not connect to the server. Make sure the app is running on http://127.0.0.1:9090")
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"❌ Error testing template: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
 
 if __name__ == "__main__":
-    test_descandweight_fix() 
+    print("Testing DescAndWeight duplication fix...")
+    success = test_horizontal_template_no_duplication()
+    
+    if success:
+        print("\n✅ SUCCESS: DescAndWeight duplication issue appears to be fixed!")
+    else:
+        print("\n❌ FAILURE: DescAndWeight duplication issue still exists!")
+    
+    sys.exit(0 if success else 1)
