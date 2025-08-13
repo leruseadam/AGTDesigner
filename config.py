@@ -2,29 +2,42 @@ import os
 from pathlib import Path
 
 class Config:
-    """Configuration class for the Label Maker application."""
+    # Development settings
+    DEVELOPMENT_MODE = True  # Enable development mode for auto-reloading
+    DEBUG = True  # Enable debug mode
+    TEMPLATES_AUTO_RELOAD = True  # Auto-reload templates
+    SEND_FILE_MAX_AGE_DEFAULT = 0  # Don't cache static files in development
     
-    # Basic Flask settings
-    SECRET_KEY = os.environ.get('SECRET_KEY', 'label-maker-secret-key-2024-production')
-    DEBUG = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
-    DEVELOPMENT_MODE = os.environ.get('FLASK_ENV', 'production') == 'development'
+    # Flask settings
+    SECRET_KEY = os.environ.get('SECRET_KEY', 'label-maker-secret-key-2024-development')
     
     # File upload settings
     MAX_CONTENT_LENGTH = 20 * 1024 * 1024  # 20MB max file size
-    UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
     
     # Session settings
+    SESSION_REFRESH_EACH_REQUEST = False
+    PERMANENT_SESSION_LIFETIME = 3600  # 1 hour
     SESSION_COOKIE_SECURE = False  # Allow HTTP in development
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = 'Lax'
-    SESSION_COOKIE_MAX_SIZE = 8192  # Increased browser cookie size limit
-    PERMANENT_SESSION_LIFETIME = 3600  # 1 hour session lifetime
-    SESSION_REFRESH_EACH_REQUEST = False  # Don't refresh session on every request
-    SESSION_TYPE = 'filesystem'  # Use filesystem for session storage
+    SESSION_COOKIE_MAX_SIZE = 8192
     
-    # Template settings
-    TEMPLATES_AUTO_RELOAD = DEVELOPMENT_MODE
-    SEND_FILE_MAX_AGE_DEFAULT = 0 if DEVELOPMENT_MODE else 31536000  # Cache static files for 1 year in production
+    # Caching
+    CACHE_TYPE = 'SimpleCache'
+    CACHE_DEFAULT_TIMEOUT = 300
+    
+    # Compression
+    COMPRESS_ALGORITHM = 'gzip'
+    COMPRESS_LEVEL = 6
+    COMPRESS_MIN_SIZE = 1024
+    COMPRESS_MIMETYPES = [
+        'application/json',
+        'text/html',
+        'text/css',
+        'application/javascript',
+        'text/javascript',
+        'text/plain'
+    ]
     
     # Exception handling
     PROPAGATE_EXCEPTIONS = DEVELOPMENT_MODE

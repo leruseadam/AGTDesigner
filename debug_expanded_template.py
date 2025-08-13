@@ -1,64 +1,80 @@
 #!/usr/bin/env python3
 """
-Debug script to see what the expanded double template contains
+Debug script to examine the expanded template after expansion to see what placeholders it contains.
 """
 
 import sys
 import os
-from pathlib import Path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-# Add the src directory to the Python path
-sys.path.insert(0, str(Path(__file__).parent / 'src'))
-
-from src.core.generation.template_processor import TemplateProcessor
+from src.core.generation.template_processor import TemplateProcessor, get_font_scheme
 from docx import Document
-from io import BytesIO
 
 def debug_expanded_template():
-    """Debug what the expanded double template contains."""
-    print("=== Debugging Expanded Double Template ===")
+    """Debug the expanded template after expansion to see what placeholders it contains."""
+    
+    print("Debug Expanded Template After Expansion")
+    print("=" * 50)
     
     try:
-        # Create processor for double template
-        processor = TemplateProcessor('double', {}, 1.0)
+        font_scheme = get_font_scheme('mini')
+        processor = TemplateProcessor('mini', font_scheme, 1.0)
         
-        # Get the expanded template buffer
-        buffer = processor._expanded_template_buffer
-        buffer.seek(0)
-        doc = Document(buffer)
+        print(f"Template type: {processor.template_type}")
         
-        print("\n=== Expanded Template Content ===")
-        for table_idx, table in enumerate(doc.tables):
-            print(f"\nTable {table_idx + 1}:")
-            for row_idx, row in enumerate(table.rows):
-                for col_idx, cell in enumerate(row.cells):
-                    cell_text = cell.text.strip()
-                    if cell_text:
-                        print(f"  Cell ({row_idx},{col_idx}): {repr(cell_text)}")
+        # The template should already be expanded from initialization
+        # Just check the current expanded template buffer
         
-        # Check for all placeholders
-        print("\n=== All Placeholders Found ===")
-        all_placeholders = set()
-        for table in doc.tables:
-            for row in table.rows:
-                for cell in row.cells:
-                    for paragraph in cell.paragraphs:
-                        text = paragraph.text
-                        # Find all placeholders
-                        import re
-                        placeholders = re.findall(r'\{\{Label\d+\.[^}]+\}\}', text)
-                        all_placeholders.update(placeholders)
-        
-        for placeholder in sorted(all_placeholders):
-            print(f"  {placeholder}")
-        
-        return True
-        
+        # Check the expanded template buffer
+        if hasattr(processor, '_expanded_template_buffer'):
+            processor._expanded_template_buffer.seek(0)
+            doc = Document(processor._expanded_template_buffer)
+            
+            if doc.tables:
+                table = doc.tables[0]
+                print(f"Expanded template table dimensions: {len(table.rows)}x{len(table.columns)}")
+                
+                # Check a few cells to see what placeholders they contain
+                cells_to_check = [
+                    (0, 0),  # First cell
+                    (0, 1),  # Second cell
+                    (1, 0),  # First cell of second row
+                    (2, 0),  # First cell of third row
+                ]
+                
+                for row, col in cells_to_check:
+                    if row < len(table.rows) and col < len(table.rows[row].cells):
+                        cell = table.rows[row].cells[col]
+                        print(f"\n=== Cell ({row}, {col}) ===")
+                        print(f"Cell text: '{cell.text}'")
+                        
+                        # Check for template variables
+                        if '{{Label' in cell.text:
+                            print("✅ Template variables found")
+                            # Extract all template variables
+                            import re
+                            variables = re.findall(r'\{\{Label(\d+)\.(\w+)\}\}', cell.text)
+                            print(f"Template variables: {variables}")
+                        else:
+                            print("❌ No template variables found")
+                            
+                        # Check paragraph structure
+                        print(f"Paragraphs in cell: {len(cell.paragraphs)}")
+                        for i, para in enumerate(cell.paragraphs):
+                            if para.text.strip():  # Only show non-empty paragraphs
+                                print(f"  Paragraph {i}: '{para.text}'")
+                                print(f"    Runs in paragraph {i}: {len(para.runs)}")
+                                for j, run in enumerate(para.runs):
+                                    print(f"      Run {j}: '{run.text}'")
+            else:
+                print("❌ No tables found in expanded template")
+        else:
+            print("❌ No expanded template buffer found")
+            
     except Exception as e:
-        print(f"❌ Error during debug: {e}")
+        print(f"❌ ERROR: {e}")
         import traceback
         traceback.print_exc()
-        return False
 
 if __name__ == "__main__":
     debug_expanded_template() 

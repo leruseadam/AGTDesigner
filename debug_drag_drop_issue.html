@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug Drag and Drop Issue</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .debug-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background: #f9f9f9;
+        }
+        .tag-row {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            margin: 5px 0;
+            background: #e3f2fd;
+            border: 1px solid #2196f3;
+            border-radius: 5px;
+            position: relative;
+        }
+        .tag-checkbox {
+            margin-right: 10px;
+        }
+        .tag-info {
+            flex-grow: 1;
+        }
+        .drag-handle {
+            position: absolute;
+            left: 6px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #4facfe;
+            cursor: grab;
+            padding: 6px;
+            background: rgba(79, 172, 254, 0.25);
+            border-radius: 6px;
+            border: 2px solid rgba(79, 172, 254, 0.6);
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .drag-handle:hover {
+            background: rgba(79, 172, 254, 0.5);
+            transform: translateY(-50%) scale(1.1);
+        }
+        .btn {
+            background: #2196f3;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        .btn:hover {
+            background: #1976d2;
+        }
+        .log {
+            background: #333;
+            color: #fff;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: monospace;
+            max-height: 300px;
+            overflow-y: auto;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Debug Drag and Drop Issue</h1>
+        
+        <div class="debug-section">
+            <h3>Test Controls</h3>
+            <button class="btn" onclick="testDragAndDrop()">Test Drag and Drop</button>
+            <button class="btn" onclick="checkDragHandles()">Check Drag Handles</button>
+            <button class="btn" onclick="forceReinitialize()">Force Reinitialize</button>
+            <button class="btn" onclick="addTestTags()">Add Test Tags</button>
+            <button class="btn" onclick="clearLog()">Clear Log</button>
+        </div>
+        
+        <div class="debug-section">
+            <h3>Selected Tags Container</h3>
+            <div id="selectedTags">
+                <!-- Test tags will be added here -->
+            </div>
+        </div>
+        
+        <div class="debug-section">
+            <h3>Console Log</h3>
+            <div id="log" class="log"></div>
+        </div>
+    </div>
+
+    <script>
+        // Simple logging function
+        function log(message) {
+            const logDiv = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString();
+            logDiv.innerHTML += `[${timestamp}] ${message}\n`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(message);
+        }
+
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+        }
+
+        // Create test tags
+        function addTestTags() {
+            const container = document.getElementById('selectedTags');
+            container.innerHTML = '';
+            
+            const testTags = [
+                { name: 'Test Product 1', strain: 'Sativa' },
+                { name: 'Test Product 2', strain: 'Indica' },
+                { name: 'Test Product 3', strain: 'Hybrid' }
+            ];
+            
+            testTags.forEach((tag, index) => {
+                const tagRow = document.createElement('div');
+                tagRow.className = 'tag-row';
+                tagRow.setAttribute('data-tag-id', `test-${index}`);
+                
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.className = 'tag-checkbox';
+                checkbox.checked = true;
+                
+                const tagInfo = document.createElement('div');
+                tagInfo.className = 'tag-info';
+                tagInfo.innerHTML = `
+                    <strong>${tag.name}</strong>
+                    <span style="color: #666; margin-left: 10px;">(${tag.strain})</span>
+                `;
+                
+                tagRow.appendChild(checkbox);
+                tagRow.appendChild(tagInfo);
+                container.appendChild(tagRow);
+            });
+            
+            log(`Added ${testTags.length} test tags`);
+        }
+
+        // Test drag and drop functionality
+        function testDragAndDrop() {
+            log('Testing drag and drop functionality...');
+            
+            if (window.dragAndDropManager) {
+                log('✓ DragAndDropManager found');
+                log(`Is initialized: ${window.dragAndDropManager.isInitialized}`);
+                log(`Is dragging: ${window.dragAndDropManager.isDragging}`);
+                
+                // Test setupTagDragAndDrop
+                try {
+                    window.dragAndDropManager.setupTagDragAndDrop();
+                    log('✓ setupTagDragAndDrop called successfully');
+                } catch (error) {
+                    log(`✗ Error calling setupTagDragAndDrop: ${error.message}`);
+                }
+                
+                // Test addDragHandles
+                const container = document.getElementById('selectedTags');
+                if (container) {
+                    try {
+                        window.dragAndDropManager.addDragHandles(container);
+                        log('✓ addDragHandles called successfully');
+                    } catch (error) {
+                        log(`✗ Error calling addDragHandles: ${error.message}`);
+                    }
+                } else {
+                    log('✗ Selected tags container not found');
+                }
+            } else {
+                log('✗ DragAndDropManager not found');
+            }
+        }
+
+        // Check drag handles
+        function checkDragHandles() {
+            log('Checking drag handles...');
+            
+            const handles = document.querySelectorAll('.drag-handle');
+            const visibleHandles = Array.from(handles).filter(handle => {
+                const rect = handle.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0;
+            });
+            
+            log(`Found ${handles.length} drag handles, ${visibleHandles.length} visible`);
+            
+            const tagRows = document.querySelectorAll('.tag-row');
+            log(`Found ${tagRows.length} tag rows`);
+            
+            tagRows.forEach((row, index) => {
+                const hasCheckbox = !!row.querySelector('.tag-checkbox');
+                const hasHandle = !!row.querySelector('.drag-handle');
+                log(`Tag row ${index}: checkbox=${hasCheckbox}, handle=${hasHandle}`);
+            });
+        }
+
+        // Force reinitialize
+        function forceReinitialize() {
+            log('Forcing reinitialization...');
+            
+            if (window.dragAndDropManager) {
+                try {
+                    window.dragAndDropManager.reinitializeTagDragAndDrop();
+                    log('✓ Reinitialization successful');
+                } catch (error) {
+                    log(`✗ Error during reinitialization: ${error.message}`);
+                }
+            } else {
+                log('✗ DragAndDropManager not available');
+            }
+        }
+
+        // Page load
+        document.addEventListener('DOMContentLoaded', () => {
+            log('Page loaded');
+            addTestTags();
+            
+            // Check if DragAndDropManager is available
+            setTimeout(() => {
+                if (window.dragAndDropManager) {
+                    log('✓ DragAndDropManager available after page load');
+                    testDragAndDrop();
+                } else {
+                    log('✗ DragAndDropManager not available after page load');
+                }
+            }, 1000);
+        });
+
+        // Override console.log to capture messages
+        const originalLog = console.log;
+        console.log = function(...args) {
+            originalLog.apply(console, args);
+            log(args.join(' '));
+        };
+    </script>
+
+    <!-- Load the drag and drop manager -->
+    <script src="static/js/drag-and-drop-manager.js"></script>
+</body>
+</html>

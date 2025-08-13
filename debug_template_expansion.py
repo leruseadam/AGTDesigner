@@ -1,87 +1,76 @@
 #!/usr/bin/env python3
 """
-Debug script to understand template expansion and DOH placeholder addition.
+Debug script to test template expansion and placeholder creation
 """
 
-import sys
 import os
-import logging
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+import sys
+from pathlib import Path
 
-# Enable debug logging
-logging.basicConfig(level=logging.DEBUG)
+# Add the src directory to the path
+sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from src.core.generation.template_processor import TemplateProcessor
-from src.core.constants import FONT_SCHEME_DOUBLE
 from docx import Document
-from docx.shared import Inches
-from docx.enum.table import WD_TABLE_ALIGNMENT, WD_CELL_VERTICAL_ALIGNMENT
-from docx.oxml.ns import qn
 from io import BytesIO
 
-def debug_template_expansion():
-    """Debug template expansion process."""
-    print("Debugging Template Expansion")
-    print("=" * 50)
+def test_template_expansion():
+    """Test template expansion to see what placeholders are created."""
     
-    # Create a test record with DOH image
-    test_record = {
-        'Description': 'Test Product with DOH',
-        'WeightUnits': '1g',
-        'ProductBrand': 'Test Brand',
-        'Price': '$10.00',
-        'Lineage': 'Test Lineage',
-        'THC_CBD': 'THC: 20% CBD: 2%',
-        'ProductStrain': 'Test Strain',
-        'DOH': 'YES',  # This should trigger DOH image
-        'Product Type*': 'classic'  # This should use regular DOH image
-    }
+    print("Testing template expansion...")
     
-    # Test double template specifically
-    processor = TemplateProcessor('double', FONT_SCHEME_DOUBLE)
-    
-    # Check the original template
-    template_path = processor._get_template_path()
-    print(f"Template path: {template_path}")
-    
-    original_doc = Document(template_path)
-    print(f"Original template has {len(original_doc.tables)} tables")
-    
-    if original_doc.tables:
-        original_cell = original_doc.tables[0].cell(0, 0)
-        print(f"Original cell text: '{original_cell.text}'")
+    try:
+        # Create a template processor
+        tp = TemplateProcessor(template_type='vertical', font_scheme='Arial')
         
-        # Check for DOH placeholder in original template
-        if 'DOH' in original_cell.text:
-            print("✓ DOH placeholder found in original template")
-        else:
-            print("✗ DOH placeholder NOT found in original template")
-    
-    # Process the record
-    result_doc = processor.process_records([test_record])
-    
-    if not result_doc:
-        print("ERROR: Failed to process test record")
-        return
-    
-    print(f"\nProcessed document has {len(result_doc.tables)} tables")
-    
-    # Check the first few cells for DOH placeholders
-    if result_doc.tables:
-        table = result_doc.tables[0]
-        print(f"Processed table: {len(table.rows)} rows, {len(table.columns)} columns")
-        
-        # Check first few cells
-        for i in range(min(3, len(table.rows))):
-            for j in range(min(3, len(table.columns))):
-                cell = table.cell(i, j)
-                cell_text = cell.text.strip()
-                print(f"Cell ({i}, {j}): '{cell_text}'")
+        # Check if the expanded template buffer exists
+        if hasattr(tp, '_expanded_template_buffer') and tp._expanded_template_buffer:
+            print("✅ Template expansion successful")
+            
+            # Load the expanded template
+            if hasattr(tp._expanded_template_buffer, 'seek'):
+                tp._expanded_template_buffer.seek(0)
+                doc = Document(tp._expanded_template_buffer)
+            else:
+                print("❌ Expanded template buffer is not seekable")
+                return
+            
+            # Check what placeholders are in the expanded template
+            print("\nChecking expanded template for placeholders:")
+            placeholders_found = set()
+            
+            for table_idx, table in enumerate(doc.tables):
+                print(f"\nTable {table_idx + 1}:")
+                for row_idx, row in enumerate(table.rows):
+                    for col_idx, cell in enumerate(row.cells):
+                        cell_text = cell.text.strip()
+                        if cell_text:
+                            print(f"  Cell ({row_idx + 1}, {col_idx + 1}): '{cell_text}'")
+                            
+                            # Find placeholders in this cell
+                            import re
+                            placeholder_matches = re.findall(r'\{\{.*?\}\}', cell_text)
+                            for match in placeholder_matches:
+                                placeholders_found.add(match)
+                                print(f"    → Found placeholder: {match}")
+            
+            print(f"\nSummary of placeholders found:")
+            for placeholder in sorted(placeholders_found):
+                print(f"  - {placeholder}")
+            
+            # Check if DescAndWeight placeholder is present
+            if any('DescAndWeight' in p for p in placeholders_found):
+                print("✅ DescAndWeight placeholder found - preroll descriptions should work")
+            else:
+                print("❌ DescAndWeight placeholder NOT found - this is why preroll descriptions aren't working")
                 
-                if 'DOH' in cell_text:
-                    print(f"  ✓ DOH placeholder found in cell ({i}, {j})")
-                else:
-                    print(f"  ✗ DOH placeholder NOT found in cell ({i}, {j})")
+        else:
+            print("❌ Template expansion failed - no expanded template buffer")
+            
+    except Exception as e:
+        print(f"❌ Error during testing: {e}")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
-    debug_template_expansion() 
+    test_template_expansion() 

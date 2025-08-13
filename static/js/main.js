@@ -887,7 +887,7 @@ const TagManager = {
             const filteredTags = tagsToFilter.filter(tag => {
                 // Check vendor filter - only apply if not empty and not "All"
                 if (currentFilters.vendor && currentFilters.vendor.trim() !== '' && currentFilters.vendor.toLowerCase() !== 'all') {
-                    const tagVendor = (tag.vendor || '').trim();
+                    const tagVendor = (tag.vendor || '').toString().trim();
                     if (tagVendor.toLowerCase() !== currentFilters.vendor.toLowerCase()) {
                         return false;
                     }
@@ -895,7 +895,7 @@ const TagManager = {
                 
                 // Check brand filter - only apply if not empty and not "All"
                 if (currentFilters.brand && currentFilters.brand.trim() !== '' && currentFilters.brand.toLowerCase() !== 'all') {
-                    const tagBrand = (tag.productBrand || '').trim();
+                    const tagBrand = (tag.productBrand || '').toString().trim();
                     if (tagBrand.toLowerCase() !== currentFilters.brand.toLowerCase()) {
                         return false;
                     }
@@ -903,7 +903,7 @@ const TagManager = {
                 
                 // Check product type filter - only apply if not empty and not "All"
                 if (currentFilters.productType && currentFilters.productType.trim() !== '' && currentFilters.productType.toLowerCase() !== 'all') {
-                    const tagProductType = (tag.productType || '').trim();
+                    const tagProductType = (tag.productType || '').toString().trim();
                     if (tagProductType.toLowerCase() !== currentFilters.productType.toLowerCase()) {
                         return false;
                     }
@@ -911,14 +911,14 @@ const TagManager = {
                 
                 // Check lineage filter - only apply if not empty and not "All"
                 if (currentFilters.lineage && currentFilters.lineage.trim() !== '' && currentFilters.lineage.toLowerCase() !== 'all') {
-                    const tagLineage = (tag.lineage || '').trim();
+                    const tagLineage = (tag.lineage || '').toString().trim();
                     if (tagLineage.toLowerCase() !== currentFilters.lineage.toLowerCase()) {
                         return false;
                     }
                 }
                 
                 // Check weight filter - only apply if not empty and not "All"
-                if (currentFilters.weight && currentFilters.weight.trim() !== '' && currentFilters.weight.toLowerCase() !== 'all') {
+                if (currentFilters.weight && currentFilters.weight.toString().trim() !== '' && currentFilters.weight.toString().toLowerCase() !== 'all') {
                     const tagWeightWithUnits = (tag.weightWithUnits || tag.weight || tag.WeightUnits || '').toString().trim().toLowerCase();
                     const filterWeight = currentFilters.weight.toString().trim().toLowerCase();
                     if (tagWeightWithUnits !== filterWeight) {
@@ -939,10 +939,10 @@ const TagManager = {
             };
 
             filteredTags.forEach(tag => {
-                if (tag.vendor) availableOptions.vendor.add(tag.vendor.trim());
-                if (tag.productBrand) availableOptions.brand.add(tag.productBrand.trim());
-                if (tag.productType) availableOptions.productType.add(tag.productType.trim());
-                if (tag.lineage) availableOptions.lineage.add(tag.lineage.trim());
+                if (tag.vendor) availableOptions.vendor.add((tag.vendor || '').toString().trim());
+                if (tag.productBrand) availableOptions.brand.add((tag.productBrand || '').toString().trim());
+                if (tag.productType) availableOptions.productType.add((tag.productType || '').toString().trim());
+                if (tag.lineage) availableOptions.lineage.add((tag.lineage || '').toString().trim());
                 if (tag.weightWithUnits || tag.WeightUnits || tag.weight) {
                     // Always use the combined value for display and filtering
                     const combined = (tag.weightWithUnits || tag.WeightUnits || tag.weight).toString().trim();
@@ -1091,7 +1091,7 @@ const TagManager = {
         const filteredTags = tagsToFilter.filter(tag => {
             // Check vendor filter - only apply if not empty and not "All"
             if (vendorFilter && vendorFilter.trim() !== '' && vendorFilter.toLowerCase() !== 'all') {
-                const tagVendor = (tag.Vendor || tag.vendor || '').trim();
+                const tagVendor = (tag.Vendor || tag.vendor || '').toString().trim();
                 if (tagVendor.toLowerCase() !== vendorFilter.toLowerCase()) {
                     return false;
                 }
@@ -1099,7 +1099,7 @@ const TagManager = {
             
             // Check brand filter - only apply if not empty and not "All"
             if (brandFilter && brandFilter.trim() !== '' && brandFilter.toLowerCase() !== 'all') {
-                const tagBrand = (tag['Product Brand'] || tag.productBrand || '').trim();
+                const tagBrand = (tag['Product Brand'] || tag.productBrand || '').toString().trim();
                 if (tagBrand.toLowerCase() !== brandFilter.toLowerCase()) {
                     return false;
                 }
@@ -1107,7 +1107,7 @@ const TagManager = {
             
             // Check product type filter - only apply if not empty and not "All"
             if (productTypeFilter && productTypeFilter.trim() !== '' && productTypeFilter.toLowerCase() !== 'all') {
-                const tagProductType = (tag['Product Type*'] || tag.productType || '').trim();
+                const tagProductType = (tag['Product Type*'] || tag.productType || '').toString().trim();
                 const normalizedTagProductType = normalizeProductType(tagProductType);
                 if (normalizedTagProductType.toLowerCase() !== productTypeFilter.toLowerCase()) {
                     return false;
@@ -1116,7 +1116,7 @@ const TagManager = {
             
             // Check lineage filter - only apply if not empty and not "All"
             if (lineageFilter && lineageFilter.trim() !== '' && lineageFilter.toLowerCase() !== 'all') {
-                const tagLineage = (tag.Lineage || tag.lineage || '').trim();
+                const tagLineage = (tag.Lineage || tag.lineage || '').toString().trim();
                 if (tagLineage.toLowerCase() !== lineageFilter.toLowerCase()) {
                     return false;
                 }
@@ -1369,8 +1369,8 @@ const TagManager = {
               ? normalizedProductType.split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' ')
               : 'Unknown Type';
             const lineage = tag.lineage || tag['Lineage'] || 'MIXED';
-            const weight = tag.weight || tag['Weight*'] || tag['Weight'] || tag['WeightUnits'] || '';
-            const weightWithUnits = tag.weightWithUnits || weight || tag['WeightUnits'] || '';
+            const weight = (tag.weight || tag['Weight*'] || tag['Weight'] || tag['WeightUnits'] || '').toString().trim();
+            const weightWithUnits = (tag.weightWithUnits || weight || tag['WeightUnits'] || '').toString().trim();
 
             // If no vendor found, try to extract from product name
             if (!vendor) {
@@ -1395,12 +1395,12 @@ const TagManager = {
             // Normalize the tag data
             const normalizedTag = {
                 ...tag,
-                vendor: this.capitalizeVendorName(vendor.trim()),
-                brand: this.capitalizeBrandName(brand.trim()),
+                vendor: this.capitalizeVendorName((vendor || '').toString().trim()),
+                brand: this.capitalizeBrandName((brand || '').toString().trim()),
                 productType: productType,
-                lineage: (lineage || '').trim().toUpperCase(), // always uppercase for color
-                weight: weight.trim(),
-                weightWithUnits: weightWithUnits.trim(),
+                lineage: (lineage || '').toString().trim().toUpperCase(), // always uppercase for color
+                weight: weight,
+                weightWithUnits: weightWithUnits,
                 displayName: tag['Product Name*'] || tag.ProductName || tag.Description || 'Unknown Product'
             };
 
@@ -2200,6 +2200,17 @@ const TagManager = {
         tagName.textContent = cleanedName;
         tagInfo.appendChild(tagName);
         
+        // Add Product Strain information if available
+        if (tag['Product Strain'] && tag['Product Strain'].trim()) {
+            const strainInfo = document.createElement('div');
+            strainInfo.className = 'strain-info d-inline-block me-2';
+            strainInfo.style.fontSize = '0.85rem';
+            strainInfo.style.color = 'rgba(255, 255, 255, 0.8)';
+            strainInfo.style.fontStyle = 'italic';
+            strainInfo.textContent = `(${tag['Product Strain'].trim()})`;
+            tagInfo.appendChild(strainInfo);
+        }
+        
         // Add DOH and High CBD images if applicable
         const dohValue = (tag.DOH || '').toString().toUpperCase();
         const productType = (tag['Product Type*'] || '').toString().toLowerCase();
@@ -2476,6 +2487,9 @@ const TagManager = {
                         tagElement.style.display = 'block';
                     }
                 }
+                
+                // Clear corresponding filters when tag is deselected
+                this.clearFiltersForDeselectedTag(tag);
                 
                 // For JSON matched items, also ensure they appear in available tags
                 // This is important for items that might not exist in the original Excel data
@@ -3406,6 +3420,14 @@ const TagManager = {
         
         // Dispatch event to notify drag and drop manager that tag updates are complete
         document.dispatchEvent(new CustomEvent('updateSelectedTagsComplete'));
+        
+        // Also directly reinitialize drag and drop to ensure it's working
+        if (window.dragAndDropManager) {
+            setTimeout(() => {
+                console.log('Reinitializing drag and drop after updateSelectedTags');
+                window.dragAndDropManager.reinitializeTagDragAndDrop();
+            }, 100);
+        }
     },
 
     updateTagCount(type, count) {
@@ -3585,6 +3607,15 @@ const TagManager = {
             
             console.log(`Fetched ${selectedTags.length} selected tags:`, selectedTags.map(tag => tag['Product Name*']));
             this.updateSelectedTags(selectedTags);
+            
+            // Ensure drag and drop is working after fetching tags
+            if (window.dragAndDropManager && selectedTags.length > 0) {
+                setTimeout(() => {
+                    console.log('Reinitializing drag and drop after fetchAndUpdateSelectedTags');
+                    window.dragAndDropManager.reinitializeTagDragAndDrop();
+                }, 300);
+            }
+            
             return true;
         } catch (error) {
             console.error('Error fetching selected tags:', error);
@@ -5797,6 +5828,103 @@ const TagManager = {
         
         // Return true if any filter is not empty and not "All"
         return filters.some(filter => filter && filter.trim() !== '' && filter.toLowerCase() !== 'all');
+    },
+
+    clearFiltersForDeselectedTag(tag) {
+        /**
+         * Clear filters that match the deselected tag's properties.
+         * This ensures that when a tag is deselected, the corresponding
+         * filters in Current Inventory are also cleared.
+         */
+        console.log('Clearing filters for deselected tag:', tag['Product Name*']);
+        
+        let filtersCleared = false;
+        
+        // Check and clear vendor filter if it matches the deselected tag
+        const vendorFilter = document.getElementById('vendorFilter');
+        if (vendorFilter && vendorFilter.value && vendorFilter.value.trim() !== '') {
+            const tagVendor = (tag.Vendor || tag.vendor || '').toString().trim();
+            if (tagVendor.toLowerCase() === vendorFilter.value.toLowerCase()) {
+                console.log(`Clearing vendor filter: ${vendorFilter.value} (matches deselected tag)`);
+                vendorFilter.value = '';
+                filtersCleared = true;
+            }
+        }
+        
+        // Check and clear brand filter if it matches the deselected tag
+        const brandFilter = document.getElementById('brandFilter');
+        if (brandFilter && brandFilter.value && brandFilter.value.trim() !== '') {
+            const tagBrand = (tag['Product Brand'] || tag.productBrand || '').toString().trim();
+            if (tagBrand.toLowerCase() === brandFilter.value.toLowerCase()) {
+                console.log(`Clearing brand filter: ${brandFilter.value} (matches deselected tag)`);
+                brandFilter.value = '';
+                filtersCleared = true;
+            }
+        }
+        
+        // Check and clear product type filter if it matches the deselected tag
+        const productTypeFilter = document.getElementById('productTypeFilter');
+        if (productTypeFilter && productTypeFilter.value && productTypeFilter.value.trim() !== '') {
+            const tagProductType = (tag['Product Type*'] || tag.productType || '').toString().trim();
+            if (tagProductType.toLowerCase() === productTypeFilter.value.toLowerCase()) {
+                console.log(`Clearing product type filter: ${productTypeFilter.value} (matches deselected tag)`);
+                productTypeFilter.value = '';
+                filtersCleared = true;
+            }
+        }
+        
+        // Check and clear lineage filter if it matches the deselected tag
+        const lineageFilter = document.getElementById('lineageFilter');
+        if (lineageFilter && lineageFilter.value && lineageFilter.value.trim() !== '') {
+            const tagLineage = (tag.Lineage || tag.lineage || '').toString().trim();
+            if (tagLineage.toLowerCase() === lineageFilter.value.toLowerCase()) {
+                console.log(`Clearing lineage filter: ${lineageFilter.value} (matches deselected tag)`);
+                lineageFilter.value = '';
+                filtersCleared = true;
+            }
+        }
+        
+        // Check and clear weight filter if it matches the deselected tag
+        const weightFilter = document.getElementById('weightFilter');
+        if (weightFilter && weightFilter.value && weightFilter.value.trim() !== '') {
+            const tagWeight = (tag.WeightUnits || tag.weightUnits || '').toString().trim();
+            if (tagWeight.toLowerCase() === weightFilter.value.toLowerCase()) {
+                console.log(`Clearing weight filter: ${weightFilter.value} (matches deselected tag)`);
+                weightFilter.value = '';
+                filtersCleared = true;
+            }
+        }
+        
+        // Check and clear DOH filter if it matches the deselected tag
+        const dohFilter = document.getElementById('dohFilter');
+        if (dohFilter && dohFilter.value && dohFilter.value.trim() !== '') {
+            const tagDoh = (tag.DOH || tag.doh || '').toString().toUpperCase();
+            const filterDoh = dohFilter.value.toUpperCase();
+            if (tagDoh === filterDoh) {
+                console.log(`Clearing DOH filter: ${dohFilter.value} (matches deselected tag)`);
+                dohFilter.value = '';
+                filtersCleared = true;
+            }
+        }
+        
+        // Check and clear High CBD filter if it matches the deselected tag
+        const highCbdFilter = document.getElementById('highCbdFilter');
+        if (highCbdFilter && highCbdFilter.value && highCbdFilter.value.trim() !== '') {
+            const tagProductType = (tag['Product Type*'] || tag.productType || '').toString().toLowerCase();
+            const filterHighCbd = highCbdFilter.value.toLowerCase();
+            if (tagProductType.startsWith('high cbd') && filterHighCbd === 'yes') {
+                console.log(`Clearing High CBD filter: ${highCbdFilter.value} (matches deselected tag)`);
+                highCbdFilter.value = '';
+                filtersCleared = true;
+            }
+        }
+        
+        // If any filters were cleared, apply the updated filters to refresh the inventory
+        if (filtersCleared) {
+            console.log('Filters cleared, applying updated filters to refresh inventory...');
+            this.applyFilters();
+            this.renderActiveFilters();
+        }
     },
 
     ensureProperScrolling() {

@@ -1,43 +1,35 @@
 #!/usr/bin/env python3
 """
-Development runner for Label Maker application.
-This script ensures the app runs in development mode with hot reloading enabled.
+Development startup script for Label Maker app.
+This script enables auto-reloading so you don't have to restart manually.
 """
 
 import os
 import sys
-import logging
 
 # Set development environment variables
 os.environ['FLASK_ENV'] = 'development'
 os.environ['FLASK_DEBUG'] = '1'
+os.environ['DEVELOPMENT_MODE'] = 'true'
 
-# Configure logging for development
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Add current directory to Python path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-def main():
-    """Run the application in development mode."""
+if __name__ == '__main__':
+    print("🚀 Starting Label Maker in DEVELOPMENT mode with auto-reloading...")
+    print("📝 Changes to Python files will automatically restart the server")
+    print("🌐 Server will be available at: http://127.0.0.1:5002")
+    print("⏹️  Press Ctrl+C to stop the server")
+    print("-" * 60)
+    
+    # Import and run the app
+    from app import LabelMakerApp
+    
     try:
-        # Import and run the app
-        from app import LabelMakerApp
-        
-        print("🚀 Starting Label Maker in DEVELOPMENT mode...")
-        print("📝 Hot reloading enabled - changes will auto-refresh")
-        print("🔧 Debug mode enabled")
-        print("📁 Watching for file changes...")
-        print("-" * 50)
-        
         app = LabelMakerApp()
         app.run()
-        
     except KeyboardInterrupt:
         print("\n👋 Development server stopped by user")
     except Exception as e:
         print(f"❌ Error starting development server: {e}")
-        sys.exit(1)
-
-if __name__ == '__main__':
-    main() 
+        sys.exit(1) 

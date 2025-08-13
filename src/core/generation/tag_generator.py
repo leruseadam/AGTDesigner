@@ -53,9 +53,8 @@ PLACEHOLDER_MARKERS = {
     "Price": ("PRICE_START", "PRICE_END"),
     "Lineage": ("LINEAGE_START", "LINEAGE_END"),
     "DOH": ("{{Label1.DOH}}", ""),
-    "Ratio_or_THC_CBD": ("RATIO_START", "RATIO_END"),  # Keep for backward compatibility
-    "THC_CBD": ("THC_CBD_START", "THC_CBD_END"),        # For classic types with THC/CBD content
-    "Ratio": ("RATIO_START", "RATIO_END"),               # For non-classic types or ratio content
+    "Ratio_or_THC_CBD": ("RATIO_START", "RATIO_END"),
+    "THC_CBD": ("THC_CBD_START", "THC_CBD_END"),
     "ProductName": ("PRODUCTNAME_START", "PRODUCTNAME_END"),
     "ProductStrain": ("PRODUCTSTRAIN_START", "PRODUCTSTRAIN_END"),
     "ProductType": ("PRODUCTTYPE_START", "PRODUCTTYPE_END"),
@@ -157,8 +156,8 @@ def expand_template_to_4x5_fixed_scaled(template_path, scale_factor=1.0):
     from copy import deepcopy
 
     num_cols, num_rows = 4, 5
-    col_width_twips = str(int(1.75 * 1440))  # 1.75 inches per column for equal width
-    row_height_pts  = Pt(2.0 * 72)  # 2.0 inches per row for equal height
+    col_width_twips = str(int(1.5 * 1440))   # 1.5 inches per column for equal width
+    row_height_pts  = Pt(1.5 * 72)           # 1.5 inches per row for equal height
     cut_line_twips  = int(0.001 * 1440)
 
     doc = Document(template_path)
@@ -222,7 +221,7 @@ def expand_template_to_4x5_fixed_scaled(template_path, scale_factor=1.0):
 def process_chunk(args):
     """Process a chunk of records to generate labels."""
     chunk, base_template, font_scheme, orientation, scale_factor = args
-    # Always expand to 4x5 grid for mini
+    # Mini template expands to 4x5 grid
     if orientation == "mini":
         local_template_buffer = expand_template_to_4x5_fixed_scaled(base_template, scale_factor=scale_factor)
         num_labels = 20  # Fixed: 4x5 grid = 20 labels per page
@@ -333,25 +332,26 @@ def process_chunk(args):
             # Add a single space before Lineage in the output
             lineage_val_with_space = f" {lineage_val}" if lineage_val else ""
             label_data["Lineage"] = wrap_with_marker(lineage_val_with_space, "LINEAGE")
-            
-            # Determine which ratio/THC_CBD field to use
-            if is_classic_type:
-                # For classic types, use THC_CBD field
-                label_data["Ratio_or_THC_CBD"] = wrap_with_marker(str(row.get("Ratio", "")), "THC_CBD")
-                label_data["THC"] = wrap_with_marker(str(row.get("AI", "")).strip(), "THC")
-                label_data["CBD"] = wrap_with_marker(str(row.get("AK", "")).strip(), "CBD")
-            else:
-                # For non-classic types, use Ratio field
-                label_data["Ratio_or_THC_CBD"] = wrap_with_marker(str(row.get("Ratio", "")), "RATIO")
-                label_data["THC"] = "" # No THC marker for non-classic types
-                label_data["CBD"] = "" # No CBD marker for non-classic types
-            
+            label_data["Ratio_or_THC_CBD"] = wrap_with_marker(str(row.get("Ratio", "")), "RATIO")
             label_data["ProductStrain"] = wrap_with_marker(str(row.get("Product Strain", "")), "PRODUCTSTRAIN")
             # Fix: Handle NaN values in JointRatio
             joint_ratio_value = row.get("JointRatio", "")
             if pd.isna(joint_ratio_value) or str(joint_ratio_value).lower() == 'nan':
                 joint_ratio_value = ""
             label_data["JointRatio"] = wrap_with_marker(str(joint_ratio_value), "JOINT_RATIO")
+            
+            # Add THC and CBD from AI and AK columns
+            ai_value = str(row.get("AI", "")).strip()
+            ak_value = str(row.get("AK", "")).strip()
+            
+            # Clean up the values (remove 'nan', empty strings, etc.)
+            if ai_value in ['nan', 'NaN', '']:
+                ai_value = ""
+            if ak_value in ['nan', 'NaN', '']:
+                ak_value = ""
+            
+            label_data["THC"] = wrap_with_marker(ai_value, "THC")
+            label_data["CBD"] = wrap_with_marker(ak_value, "CBD")
             
             # Combine Description and WeightUnits (use JointRatio for pre-roll products)
             # Use the processed Description and WeightUnits fields from above
@@ -381,8 +381,20 @@ def process_chunk(args):
             if desc and weight:
                 lines = desc.splitlines()
                 if lines:
-                    # Always put JointRatio on a new line
-                    combined = "\n".join(lines) + f"\n- {weight}"
+                    # For Pre-rolls and Infused Pre-rolls, ensure joint ratio stays together
+                    if product_type in {"pre-roll", "infused pre-roll"}:
+                        # Check if the last line of description would cause joint ratio to split
+                        last_line = lines[-1]
+                        # If the last line is long enough that adding joint ratio would cause wrapping,
+                        # move joint ratio to a completely new line (but keep the hyphen)
+                        if len(last_line) + len(weight) > 40:  # Threshold for line length
+                            combined = "\n".join(lines) + f"\n- {weight}"
+                        else:
+                            # If there's enough space, keep the current format
+                            combined = "\n".join(lines) + f"\n- {weight}"
+                    else:
+                        # For other products, use the standard format
+                        combined = "\n".join(lines) + f"\n- {weight}"
                 else:
                     combined = f"- {weight}"
             else:
@@ -406,9 +418,7 @@ def process_chunk(args):
                 "Ratio_or_THC_CBD": "",
                 "ProductStrain": "",
                 "DescAndWeight": "",
-                "JointRatio": "",
-                "THC": "",
-                "CBD": ""
+                "JointRatio": ""
             }
             if DEBUG_ENABLED:
                 logger.debug(f"Created empty label data for Label{i+1}")
@@ -649,7 +659,19 @@ def generate_multiple_label_tables(records, template_path):
                     row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
                 
                 # Enforce fixed cell dimensions to prevent any growth
-                enforce_fixed_cell_dimensions(table)
+                try:
+                    # Safety check: ensure table has valid structure
+                    if table and table.rows and len(table.rows) > 0:
+                        first_row = table.rows[0]
+                        if hasattr(first_row, '_element') and hasattr(first_row._element, 'tc_lst'):
+                            enforce_fixed_cell_dimensions(table)
+                        else:
+                            logger.warning(f"Skipping table with invalid XML structure in tag generator")
+                    else:
+                        logger.warning(f"Skipping empty or invalid table in tag generator")
+                except Exception as e:
+                    logger.warning(f"Error enforcing fixed cell dimensions in tag generator: {e}")
+                    continue
                 
                 final_doc.add_paragraph()
         # Center all tables in the final document

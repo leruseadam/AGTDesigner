@@ -5195,6 +5195,9 @@ img, video, canvas, svg {
     padding: 1.5rem;
     transition: all 0.3s ease;
     position: relative;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: space-between !important;
   }
 
   /* Removed ugly blue line from sticky filter bar */
@@ -5288,6 +5291,28 @@ img, video, canvas, svg {
   .sticky-filter-bar .col {
     padding: 0.5rem;
     position: relative;
+  }
+
+  /* Horizontal filter bar specific styling */
+  .sticky-filter-bar.d-flex.flex-row {
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+  }
+
+  .sticky-filter-bar.d-flex.flex-row > div {
+    flex-shrink: 0 !important;
+    min-width: auto !important;
+    width: auto !important;
+    margin: 0 0.5rem !important;
+  }
+
+  .sticky-filter-bar.d-flex.flex-row > div:first-child {
+    margin-left: 0 !important;
+  }
+
+  .sticky-filter-bar.d-flex.flex-row > div:last-child {
+    margin-right: 0 !important;
   }
 
   .sticky-filter-bar .col:not(:last-child)::after {
@@ -7092,6 +7117,11 @@ img, video, canvas, svg {
     max-height: 21px !important;
     width: auto !important;
     vertical-align: middle !important;
+    display: inline-block !important;
+    position: relative !important;
+    top: -1px !important;
+    margin: 0 !important;
+    padding: 0 !important;
   }
   
   /* Enhanced 3D checkbox styling */

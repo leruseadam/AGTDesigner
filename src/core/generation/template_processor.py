@@ -974,11 +974,11 @@ class TemplateProcessor:
                 cell = tbl.cell(r,c)
                 cell._tc.clear_content()
                 
-                # Build cell text from the original template to check what placeholders exist
+                # Build cell text from the current cell to check what placeholders exist
+                # This ensures we're checking the actual cell content, not the template
                 cell_text = ''
-                for t in src_tc.iter(qn('w:t')):
-                    if t.text:
-                        cell_text += t.text
+                for paragraph in cell.paragraphs:
+                    cell_text += paragraph.text
                 
                 # ProductBrand placeholder will be added after copying elements to avoid duplication
                 
@@ -997,53 +997,54 @@ class TemplateProcessor:
                 
                 # Now add any missing placeholders directly to the cell
                 # This prevents duplication since we're not modifying the template cell
-                if '{{Label1.ProductBrand}}' not in cell_text and 'ProductBrand' not in cell_text:
-                    # Add ProductBrand placeholder after Lineage
-                    new_text = OxmlElement('w:t')
-                    new_text.text = f'\n{{{{Label{cnt}.ProductBrand}}}}'
-                    # Find the Lineage placeholder and add after it
-                    last_text = None
-                    for t in cell._tc.iter(qn('w:t')):
-                        if t.text and '{{Label' in t.text and 'Lineage}}' in t.text:
-                            last_text = t
-                            break
-                    if last_text:
-                        last_text.getparent().insert(
-                            last_text.getparent().index(last_text) + 1, 
-                            new_text
-                        )
+                # Update the existing paragraphs to include all placeholders
+                # This ensures cell.text can see all the placeholders
                 
-                if '{{Label1.DescAndWeight}}' not in cell_text and 'DescAndWeight' not in cell_text:
-                    # Add DescAndWeight placeholder after Lineage
-                    new_text = OxmlElement('w:t')
-                    new_text.text = f'\n{{{{Label{cnt}.DescAndWeight}}}}'
-                    # Find the Lineage placeholder and add after it
-                    last_text = None
-                    for t in cell._tc.iter(qn('w:t')):
-                        if t.text and '{{Label' in t.text and 'Lineage}}' in t.text:
-                            last_text = t
-                            break
-                    if last_text:
-                        last_text.getparent().insert(
-                            last_text.getparent().index(last_text) + 1, 
-                            new_text
-                        )
+                # Get the paragraphs in the cell
+                paragraphs = list(cell.paragraphs)
                 
-                if '{{Label1.DOH}}' not in cell_text and 'DOH' not in cell_text:
-                    # Add DOH placeholder after ProductStrain
-                    new_text = OxmlElement('w:t')
-                    new_text.text = f'\n{{{{Label{cnt}.DOH}}}}'
-                    # Find the ProductStrain placeholder and add after it
-                    last_text = None
-                    for t in cell._tc.iter(qn('w:t')):
-                        if t.text and '{{Label' in t.text and 'ProductStrain}}' in t.text:
-                            last_text = t
-                            break
-                    if last_text:
-                        last_text.getparent().insert(
-                            last_text.getparent().index(last_text) + 1, 
-                            new_text
-                        )
+                if len(paragraphs) >= 2:
+                    # First paragraph: Lineage and ProductVendor
+                    if '{{Label1.Lineage}}' in paragraphs[0].text:
+                        paragraphs[0].text = f'{{{{Label{cnt}.Lineage}}}} {{{{Label{cnt}.ProductVendor}}}}'
+                    
+                    # Second paragraph: ProductStrain
+                    if '{{Label1.ProductStrain}}' in paragraphs[1].text:
+                        paragraphs[1].text = f'{{{{Label{cnt}.ProductStrain}}}}'
+                    
+                    # Check if we need to add missing placeholders
+                    # Only add them if they don't already exist in the cell
+                    if '{{Label1.DescAndWeight}}' not in cell_text and 'DescAndWeight' not in cell_text:
+                        # Third paragraph: DescAndWeight (create if doesn't exist)
+                        if len(paragraphs) >= 3:
+                            paragraphs[2].text = f'{{{{Label{cnt}.DescAndWeight}}}}'
+                        else:
+                            new_para = cell.add_paragraph()
+                            new_para.text = f'{{{{Label{cnt}.DescAndWeight}}}}'
+                    
+                    if '{{Label1.Price}}' not in cell_text and 'Price' not in cell_text:
+                        # Fourth paragraph: Price (create if doesn't exist)
+                        if len(paragraphs) >= 4:
+                            paragraphs[3].text = f'{{{{Label{cnt}.Price}}}}'
+                        else:
+                            new_para = cell.add_paragraph()
+                            new_para.text = f'{{{{Label{cnt}.Price}}}}'
+                    
+                    if '{{Label1.DOH}}' not in cell_text and 'DOH' not in cell_text:
+                        # Fifth paragraph: DOH (create if doesn't exist)
+                        if len(paragraphs) >= 5:
+                            paragraphs[4].text = f'{{{{Label{cnt}.DOH}}}}'
+                        else:
+                            new_para = cell.add_paragraph()
+                            new_para.text = f'{{{{Label{cnt}.DOH}}}}'
+                    
+                    if '{{Label1.Ratio_or_THC_CBD}}' not in cell_text and 'Ratio_or_THC_CBD' not in cell_text:
+                        # Sixth paragraph: Ratio_or_THC_CBD (create if doesn't exist)
+                        if len(paragraphs) >= 6:
+                            paragraphs[5].text = f'{{{{Label{cnt}.Ratio_or_THC_CBD}}}}'
+                        else:
+                            new_para = cell.add_paragraph()
+                            new_para.text = f'{{{{Label{cnt}.Ratio_or_THC_CBD}}}}'
                 cnt += 1
         from docx.oxml.shared import OxmlElement as OE
         tblPr2 = tbl._element.find(qn('w:tblPr'))
