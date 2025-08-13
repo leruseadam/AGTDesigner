@@ -138,22 +138,63 @@
             position: relative;
         }
         
-        /* Main title */
+        /* Main title - using vibrant-title styling */
         .app-title {
-            font-size: 32px;
-            font-weight: 700;
+            color: #fff !important;
+            background: none !important;
+            -webkit-background-clip: initial !important;
+            -webkit-text-fill-color: initial !important;
+            background-clip: initial !important;
+            font-weight: 900;
+            letter-spacing: 3px;
+            font-size: 2.5rem;
             margin-bottom: 8px;
-            color: #cccccc;
-            letter-spacing: -0.5px;
+            text-shadow: 
+                0 4px 12px rgba(0,0,0,0.5),
+                0 6px 20px rgba(0,0,0,0.4),
+                0 2px 4px rgba(160,132,232,0.4),
+                0 0 30px rgba(160,132,232,0.3);
+            filter: drop-shadow(0 6px 12px rgba(0,0,0,0.4));
+            position: relative;
+            line-height: 1.1;
+            text-align: center !important;
+            width: 100%;
         }
         
-        /* Subtitle */
+        /* Subtitle - using vibrant-subtitle styling */
         .app-subtitle {
-            font-size: 14px;
-            font-weight: 400;
-            color: #cccccc;
-            margin-bottom: 30px;
-            letter-spacing: 0.5px;
+            color: #fff !important;
+            background: none !important;
+            -webkit-background-clip: initial !important;
+            -webkit-text-fill-color: initial !important;
+            background-clip: initial !important;
+            font-size: 1rem;
+            font-weight: 700;
+            letter-spacing: 2px;
+            text-align: center !important;
+            width: 100%;
+            opacity: 1;
+            text-transform: uppercase;
+            text-shadow: 
+                0 3px 8px rgba(0,0,0,0.5),
+                0 4px 16px rgba(0,0,0,0.4),
+                0 2px 4px rgba(139,92,246,0.4),
+                0 0 20px rgba(139,92,246,0.3);
+            filter: drop-shadow(0 3px 6px rgba(0,0,0,0.4));
+            margin-bottom: 20px;
+            line-height: 1.2;
+        }
+        
+        .copyright-text {
+            font-size: 0.9rem;
+            color: rgba(255, 255, 255, 0.8);
+            margin-top: 0.5rem;
+            font-weight: 500;
+            letter-spacing: 1px;
+            text-align: center;
+            text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(160,132,232,0.3);
+            opacity: 0.9;
+            margin-bottom: 20px;
         }
         
         /* Progress bar */
@@ -233,11 +274,11 @@
             }
             
             .app-title {
-                font-size: 28px;
+                font-size: 2rem;
             }
             
             .app-subtitle {
-                font-size: 12px;
+                font-size: 0.9rem;
             }
             
             .main-icon {
@@ -273,7 +314,7 @@
             <h1 class="app-title">AGT DESIGNER</h1>
             
             <!-- Subtitle -->
-            <p class="app-subtitle">AUTO-GENERATING TAG SOFTWARE</p>
+            <p class="app-subtitle">AUTO-GENERATING TAG DESIGNER</p>
             
             <!-- Progress bar -->
             <div class="progress-container">
@@ -282,6 +323,9 @@
                 </div>
                 <div class="loading-text">Loading templates...</div>
             </div>
+            
+            <!-- Copyright text matching title card -->
+            <p class="copyright-text">©2025 Created by Adam Cordova for A Greener Today</p>
             
             <!-- Bottom dots -->
             <div class="bottom-dots">

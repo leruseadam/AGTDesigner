@@ -157,37 +157,60 @@
         }
         
         .app-title {
-            font-size: 42px;
-            font-weight: 800;
+            color: #fff !important;
+            background: none !important;
+            -webkit-background-clip: initial !important;
+            -webkit-text-fill-color: initial !important;
+            background-clip: initial !important;
+            font-weight: 900;
+            letter-spacing: 3px;
+            font-size: 3.5rem;
             margin-bottom: 12px;
-            background: linear-gradient(135deg, #00d4aa, #ffffff);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            letter-spacing: -0.5px;
-            /* Match main page title styling */
             text-shadow: 
-                0 2px 8px rgba(0,0,0,0.4),
-                0 4px 16px rgba(0,0,0,0.3),
-                0 1px 2px rgba(160,132,232,0.3),
-                0 0 20px rgba(160,132,232,0.2);
-            filter: drop-shadow(0 4px 8px rgba(0,0,0,0.3));
+                0 4px 12px rgba(0,0,0,0.5),
+                0 6px 20px rgba(0,0,0,0.4),
+                0 2px 4px rgba(160,132,232,0.4),
+                0 0 30px rgba(160,132,232,0.3);
+            filter: drop-shadow(0 6px 12px rgba(0,0,0,0.4));
+            position: relative;
+            line-height: 1.1;
+            text-align: center !important;
+            width: 100%;
         }
         
         .app-subtitle {
-            font-size: 18px;
-            font-weight: 600;
+            color: #fff !important;
+            background: none !important;
+            -webkit-background-clip: initial !important;
+            -webkit-text-fill-color: initial !important;
+            background-clip: initial !important;
+            font-size: 1.5rem;
+            font-weight: 700;
+            letter-spacing: 2px;
+            text-align: center !important;
+            width: 100%;
             opacity: 1;
-            margin-bottom: 40px;
-            letter-spacing: 1px;
             text-transform: uppercase;
-            /* Match main page subtitle styling */
             text-shadow: 
-                0 2px 6px rgba(0,0,0,0.4),
-                0 3px 12px rgba(0,0,0,0.3),
-                0 1px 2px rgba(139,92,246,0.3),
-                0 0 15px rgba(139,92,246,0.2);
-            filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
+                0 3px 8px rgba(0,0,0,0.5),
+                0 4px 16px rgba(0,0,0,0.4),
+                0 2px 4px rgba(139,92,246,0.4),
+                0 0 20px rgba(139,92,246,0.3);
+            filter: drop-shadow(0 3px 6px rgba(0,0,0,0.4));
+            margin-bottom: 20px;
+            line-height: 1.2;
+        }
+        
+        .copyright-text {
+            font-size: 1.1rem;
+            color: rgba(255, 255, 255, 0.8);
+            margin-top: 0.5rem;
+            font-weight: 500;
+            letter-spacing: 1px;
+            text-align: center;
+            text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(160,132,232,0.3);
+            opacity: 0.9;
+            margin-bottom: 20px;
         }
         
         .loading-container {
@@ -376,8 +399,8 @@
         <div class="splash-content">
             <div class="logo-container"></div>
             
-            <h1 class="app-title">LABEL MAKER</h1>
-            <p class="app-subtitle">Professional Label Generation System</p>
+            <h1 class="app-title">AGT DESIGNER</h1>
+            <p class="app-subtitle">AUTO-GENERATING TAG DESIGNER</p>
             
             <div class="loading-container">
                 <div class="loading-bar">
@@ -391,6 +414,9 @@
                 <div class="dot"></div>
                 <div class="dot"></div>
             </div>
+            
+            <!-- Copyright text matching title card -->
+            <p class="copyright-text">©2025 Created by Adam Cordova for A Greener Today</p>
             
             <div class="features">
                 <div class="feature">

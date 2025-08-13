@@ -79,17 +79,17 @@ def get_mini_font_size_brand(text, scale_factor=1.0):
     """
     comp = _complexity(text)
     
-    # Mini-specific brand sizing
+    # Mini-specific brand sizing - reduced sizes for better fit
     if comp < 8:
-        size = 12
+        size = 10  # Reduced from 12
     elif comp < 15:
-        size = 10
+        size = 9   # Reduced from 10
     elif comp < 25:
-        size = 9
+        size = 8   # Reduced from 9
     elif comp < 35:
-        size = 8
+        size = 7   # Reduced from 8
     else:
-        size = 7
+        size = 6   # Reduced from 7
     
     return Pt(size * scale_factor)
 

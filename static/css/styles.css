@@ -4699,9 +4699,12 @@ img, video, canvas, svg {
   }
 
   .tag-list-container {
-    padding: 0.75rem !important;
+    padding: 1rem !important; /* Increased padding from 0.75rem */
     border-radius: 16px;
     box-sizing: border-box;
+    /* Add horizontal margins for better spacing */
+    margin-left: 0.5rem !important;
+    margin-right: 0.5rem !important;
   }
 
   .tag-item {
@@ -5145,7 +5148,10 @@ img, video, canvas, svg {
     margin-top: 2rem !important;
     padding-top: 0 !important;
     align-items: flex-start !important;
-    gap: 1.5rem !important;
+    gap: 2rem !important; /* Increased gap between tag lists */
+    /* Add horizontal padding for better spacing */
+    padding-left: 1rem !important;
+    padding-right: 1rem !important;
   }
 
   .main-content {
@@ -5157,6 +5163,9 @@ img, video, canvas, svg {
     position: relative;
     padding-top: 0 !important;
     margin-top: 0 !important;
+    /* Add bigger left and right margins for better spacing */
+    padding-left: 2rem !important;
+    padding-right: 2rem !important;
   }
 
   .center-panel {
@@ -5178,44 +5187,177 @@ img, video, canvas, svg {
     width: 100%;
   }
 
-  /* Sticky Filter Bar */
+  /* Sticky Filter Bar - Updated to match tag column styling */
   .sticky-filter-bar {
     position: sticky;
     top: 0;
     z-index: 100;
-    background: rgba(45, 34, 58, 0.95);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border: 2px solid rgba(160, 132, 232, 0.2);
-    border-radius: 18px;
+    background: rgba(45, 34, 58, 0.85) !important; /* Match glass-card background */
+    backdrop-filter: blur(20px) !important;
+    -webkit-backdrop-filter: blur(20px) !important;
+    border: 2px solid rgba(160, 132, 232, 0.2) !important; /* Match glass-card border */
+    border-radius: 24px !important; /* Match glass-card border-radius */
     box-shadow: 
-      0 8px 24px rgba(0, 0, 0, 0.2),
-      0 4px 12px rgba(160, 132, 232, 0.1);
+      0 12px 40px rgba(0,0,0,0.15), 
+      0 4px 16px rgba(160,132,232,0.1),
+      0 2px 8px rgba(160,132,232,0.08) !important; /* Match glass-card shadows */
     margin: 0;
     padding: 1.5rem;
-    transition: all 0.3s ease;
+    transition: all 0.3s cubic-bezier(0.4,0,0.2,1) !important; /* Match glass-card transition */
     position: relative;
     flex-direction: row !important;
     align-items: center !important;
     justify-content: space-between !important;
   }
 
-  /* Removed ugly blue line from sticky filter bar */
-
+  /* Hover effect to match glass-card */
   .sticky-filter-bar:hover {
-    background: rgba(255, 255, 255, 0.98);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 16px 48px rgba(160,132,232,0.13), 0 4px 24px rgba(0,0,0,0.13) !important;
+    border-color: rgba(160,132,232,0.25) !important;
+    transform: scale(1.008) !important;
   }
 
-  /* Sticky state styling */
+  /* Sticky state styling - maintain glass-card appearance */
   .sticky-filter-bar.is-sticky {
-    background: rgba(255, 255, 255, 0.98);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
-    border-bottom: 2px solid #a084e8;
+    background: rgba(45, 34, 58, 0.9) !important;
+    box-shadow: 0 16px 48px rgba(160,132,232,0.13), 0 4px 24px rgba(0,0,0,0.13) !important;
+    border-color: rgba(160,132,232,0.25) !important;
   }
 
-  /* Removed ugly blue line from sticky filter bar when sticky */
-  
+  /* Filter column styling - updated to match glass-card aesthetic and equal sizing */
+  .sticky-filter-bar .filter-column {
+    padding: 1rem !important;
+    margin: 0 0.5rem !important;
+    background: rgba(255, 255, 255, 0.08) !important; /* Subtle white overlay like glass-card */
+    border-radius: 12px !important; /* Slightly smaller than parent */
+    border: 1px solid rgba(160, 132, 232, 0.15) !important;
+    transition: all 0.3s cubic-bezier(0.4,0,0.2,1) !important;
+    flex: 1 1 0 !important; /* Equal flex distribution */
+    min-width: 0 !important; /* Allow shrinking */
+    max-width: none !important; /* Remove max-width constraints */
+  }
+
+  .sticky-filter-bar .filter-column:hover {
+    background: rgba(255, 255, 255, 0.12) !important;
+    border-color: rgba(160, 132, 232, 0.25) !important;
+    box-shadow: 0 4px 16px rgba(160,132,232,0.1) !important;
+    transform: scale(1.02) !important;
+  }
+
+  /* Filter labels styling - updated to match tag column headers */
+  .sticky-filter-bar .form-label,
+  .sticky-filter-bar .filter-category-label {
+    font-size: 0.875rem !important;
+    font-weight: 700 !important; /* Match tag column header weight */
+    color: #ffffff !important; /* Match tag column header color */
+    margin-bottom: 0.75rem !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.5px !important;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7) !important; /* Match tag column styling */
+    white-space: nowrap !important; /* Prevent label wrapping */
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+
+  /* Filter dropdowns styling - updated to match overall theme and equal sizing */
+  .sticky-filter-bar .form-select,
+  .sticky-filter-bar .compact-filter {
+    background: rgba(42, 32, 64, 0.9) !important; /* Darker background for contrast */
+    color: #ffffff !important;
+    border-radius: 8px !important;
+    border: 1.5px solid rgba(160, 132, 232, 0.3) !important;
+    transition: all 0.3s cubic-bezier(0.4,0,0.2,1) !important;
+    padding: 0.5rem 0.75rem !important;
+    backdrop-filter: blur(10px) !important;
+    -webkit-backdrop-filter: blur(10px) !important;
+    width: 100% !important; /* Full width of container */
+    min-width: 0 !important; /* Allow shrinking */
+    max-width: none !important; /* Remove max-width constraints */
+    flex-shrink: 1 !important; /* Allow shrinking */
+    box-sizing: border-box !important;
+  }
+
+  .sticky-filter-bar .form-select:focus,
+  .sticky-filter-bar .compact-filter:focus {
+    border-color: rgba(160, 132, 232, 0.5) !important;
+    box-shadow: 0 0 0 0.2rem rgba(160, 132, 232, 0.25) !important;
+    background: rgba(42, 32, 64, 0.95) !important;
+  }
+
+  .sticky-filter-bar .form-select:hover,
+  .sticky-filter-bar .compact-filter:hover {
+    border-color: rgba(160, 132, 232, 0.4) !important;
+    background: rgba(42, 32, 64, 0.92) !important;
+  }
+
+  /* Ensure filter container has equal distribution */
+  .sticky-filter-bar .d-flex.flex-row.gap-3 {
+    width: 100% !important;
+    justify-content: space-between !important;
+    gap: 0.75rem !important; /* Consistent gap */
+  }
+
+  .sticky-filter-bar .d-flex.flex-row.gap-3 > div {
+    flex: 1 1 0 !important; /* Equal flex distribution */
+    min-width: 0 !important; /* Allow shrinking */
+    max-width: none !important; /* Remove max-width constraints */
+  }
+
+  /* Clear filters button - updated to match glass-card button styling and consistent sizing */
+  .sticky-filter-bar .btn {
+    background: rgba(45, 34, 58, 0.8) !important;
+    backdrop-filter: blur(10px) !important;
+    -webkit-backdrop-filter: blur(10px) !important;
+    border: 1px solid rgba(160, 132, 232, 0.18) !important;
+    color: #ffffff !important;
+    border-radius: 8px !important;
+    font-weight: 500 !important;
+    transition: all 0.3s cubic-bezier(0.4,0,0.2,1) !important;
+    min-height: 36px !important;
+    width: 100% !important; /* Full width of container */
+    flex-shrink: 1 !important; /* Allow shrinking */
+  }
+
+  .sticky-filter-bar .btn:hover {
+    background: rgba(45, 34, 58, 0.9) !important;
+    border-color: rgba(160, 132, 232, 0.25) !important;
+    transform: translateY(-1px) !important;
+    box-shadow: 0 4px 16px rgba(160,132,232,0.15) !important;
+  }
+
+  /* Horizontal Filter Bar - updated to match sticky filter bar */
+  .horizontal-filter-bar {
+    background: rgba(45, 34, 58, 0.85) !important; /* Match glass-card background */
+    backdrop-filter: blur(20px) !important;
+    -webkit-backdrop-filter: blur(20px) !important;
+    border: 2px solid rgba(160, 132, 232, 0.2) !important; /* Match glass-card border */
+    border-radius: 24px !important; /* Match glass-card border-radius */
+    box-shadow: 0 12px 40px rgba(0,0,0,0.15), 0 4px 16px rgba(160,132,232,0.1), 0 2px 8px rgba(160,132,232,0.08) !important; /* Match glass-card shadows */
+    padding: 1.5rem !important; /* Match sticky filter bar padding */
+    max-width: calc(var(--canvas-max-width) - 2rem);
+    margin-left: auto;
+    margin-right: auto;
+    transition: all 0.3s cubic-bezier(0.4,0,0.2,1) !important;
+  }
+
+  .horizontal-filter-bar:hover {
+    box-shadow: 0 16px 48px rgba(160,132,232,0.13), 0 4px 24px rgba(0,0,0,0.13) !important;
+    border-color: rgba(160,132,232,0.25) !important;
+    transform: scale(1.005) !important;
+  }
+
+  /* Match card widths with filter bar bounds visually */
+  .tag-lists-row .glass-card {
+    border-radius: 24px !important; /* Match filter bar border-radius */
+    border: 2px solid rgba(160, 132, 232, 0.2) !important; /* Match filter bar border */
+    transition: all 0.3s cubic-bezier(0.4,0,0.2,1) !important; /* Match filter bar transition */
+  }
+
+  .tag-lists-row .glass-card:hover {
+    border-color: rgba(160,132,232,0.25) !important;
+    transform: scale(1.008) !important;
+  }
+
   /* Database Info Modal - White Text for Better Legibility */
   .database-comprehensive-info {
     color: #ffffff !important;
@@ -5329,16 +5471,20 @@ img, video, canvas, svg {
   .sticky-filter-bar .filter-column {
     padding: 1rem !important;
     margin: 0 0.5rem !important;
-    background: rgba(255, 255, 255, 0.5);
-    border-radius: 8px;
-    border: 1px solid rgba(160, 132, 232, 0.1);
-    transition: all 0.2s ease;
+    background: rgba(255, 255, 255, 0.08) !important; /* Subtle white overlay like glass-card */
+    border-radius: 12px !important; /* Slightly smaller than parent */
+    border: 1px solid rgba(160, 132, 232, 0.15) !important;
+    transition: all 0.3s cubic-bezier(0.4,0,0.2,1) !important;
+    flex: 1 1 0 !important; /* Equal flex distribution */
+    min-width: 0 !important; /* Allow shrinking */
+    max-width: none !important; /* Remove max-width constraints */
   }
 
   .sticky-filter-bar .filter-column:hover {
-    background: rgba(255, 255, 255, 0.8);
-    border-color: rgba(160, 132, 232, 0.3);
-    box-shadow: 0 2px 8px rgba(160, 132, 232, 0.1);
+    background: rgba(255, 255, 255, 0.12) !important;
+    border-color: rgba(160, 132, 232, 0.25) !important;
+    box-shadow: 0 4px 16px rgba(160,132,232,0.1) !important;
+    transform: scale(1.02) !important;
   }
 
   .sticky-filter-bar .filter-column:not(:last-child) {
@@ -5466,10 +5612,11 @@ img, video, canvas, svg {
     background-size: 16px 16px !important;
   }
   /* Make each filter item take an equal share of the row */
-  .horizontal-filter-bar .filter-item {
-    flex: 1 1 0;
-    min-width: 220px; /* closer to tag list column minimum */
-  }
+.horizontal-filter-bar .filter-item {
+  flex: 1 1 0 !important;
+  min-width: 0 !important; /* Remove fixed min-width to allow equal distribution */
+  max-width: none !important; /* Remove max-width constraints */
+}
   .horizontal-filter-bar select:focus,
   .horizontal-filter-bar .form-select:focus,
   .horizontal-filter-bar .compact-filter:focus {

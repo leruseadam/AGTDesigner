@@ -684,8 +684,24 @@ def get_session_excel_processor():
             
             # CRITICAL FIX: Check if we have an uploaded file in session
             session_file_path = session.get('file_path')
+            session_store = session.get('file_store', '')
+            current_store = session.get('selected_store', '')
+            
             if session_file_path and os.path.exists(session_file_path):
                 logging.info(f"CRITICAL FIX: Session has uploaded file: {session_file_path}")
+                logging.info(f"CRITICAL FIX: File store context: {session_store}, Current store: {current_store}")
+                
+                # Check if store context matches current store selection
+                if session_store and current_store and session_store != current_store:
+                    logging.warning(f"CRITICAL FIX: Store mismatch! File was uploaded for {session_store}, but current store is {current_store}")
+                    logging.warning(f"CRITICAL FIX: Clearing file data to prevent cross-store data leakage")
+                    session.pop('file_path', None)
+                    session.pop('file_store', None)
+                    session.pop('selected_tags', None)
+                    g.excel_processor.df = pd.DataFrame()
+                    g.excel_processor.selected_tags = []
+                    return g.excel_processor
+                
                 # Don't load default file if we have an uploaded file
                 if not hasattr(g.excel_processor, 'df') or g.excel_processor.df is None or g.excel_processor.df.empty:
                     logging.info(f"CRITICAL FIX: Loading uploaded file from session: {session_file_path}")
@@ -791,6 +807,20 @@ def get_session_excel_processor():
             import pandas as pd
             g.excel_processor.df = pd.DataFrame()
         
+        # Validate store context to prevent cross-store data access
+        current_store = session.get('selected_store', '')
+        if hasattr(g.excel_processor, '_store_context') and g.excel_processor._store_context:
+            if current_store and g.excel_processor._store_context != current_store:
+                logging.warning(f"Store context mismatch! Processor has {g.excel_processor._store_context}, but session has {current_store}")
+                logging.warning("Clearing processor data to prevent cross-store access")
+                g.excel_processor.df = pd.DataFrame()
+                g.excel_processor.selected_tags = []
+                g.excel_processor._store_context = current_store
+            elif not current_store:
+                logging.warning("No store selected in session - clearing processor data")
+                g.excel_processor.df = pd.DataFrame()
+                g.excel_processor.selected_tags = []
+        
         return g.excel_processor
         
     except Exception as e:
@@ -859,7 +889,9 @@ def api_status():
             'last_loaded_file': getattr(excel_processor, '_last_loaded_file', None),
             'selected_tags_count': len(excel_processor.selected_tags) if hasattr(excel_processor, 'selected_tags') else 0,
             'session_stats': session_stats,
-            'has_pending_changes': has_pending_changes
+            'has_pending_changes': has_pending_changes,
+            'current_store': session.get('selected_store', ''),
+            'file_store': session.get('file_store', '')
         }
         return jsonify(status)
     except Exception as e:
@@ -1094,6 +1126,14 @@ def upload_file():
         # Store uploaded file path in session
         session['file_path'] = temp_path
         
+        # Store store context with the file
+        current_store = session.get('selected_store', '')
+        if current_store:
+            session['file_store'] = current_store
+            logging.info(f"[UPLOAD] File associated with store: {current_store}")
+        else:
+            logging.warning("[UPLOAD] No store selected - file will be processed without store context")
+        
         # Clear selected tags in session to ensure fresh start
         logging.info(f"[UPLOAD] Clearing selected tags from session. Previous count: {len(session.get('selected_tags', []))}")
         session['selected_tags'] = []
@@ -1315,6 +1355,19 @@ def process_excel_background(filename, temp_path):
             # Replace with the new processor
             _excel_processor = new_processor
             _excel_processor._last_loaded_file = temp_path
+            
+            # Store store context in the processor for validation
+            try:
+                from flask import session
+                current_store = session.get('selected_store', '')
+                if current_store:
+                    _excel_processor._store_context = current_store
+                    logging.info(f"[BG] Store context set for processor: {current_store}")
+                else:
+                    logging.warning("[BG] No store context available for processor")
+            except Exception as store_error:
+                logging.warning(f"[BG] Error setting store context: {store_error}")
+            
             logging.info(f"[BG] Global Excel processor updated with new file: {temp_path}")
         
         # ULTRA-FAST CACHE OPTIMIZATION - Minimal clearing
@@ -1650,6 +1703,15 @@ def move_tags():
         
         # Check session size but don't optimize unless necessary
         check_session_size()
+        
+        # Store validation to prevent cross-store data access
+        current_store = session.get('selected_store', '')
+        file_store = session.get('file_store', '')
+        
+        if file_store and current_store and file_store != current_store:
+            logging.warning(f"Store mismatch! File was uploaded for {file_store}, but current store is {current_store}")
+            logging.warning("Returning error to prevent cross-store data access")
+            return jsonify({'error': 'Store mismatch detected. Please select the correct store for this file.'}), 400
         
         data = request.get_json()
         action = data.get('action', 'move')
@@ -1990,6 +2052,15 @@ def clear_filters():
         check_session_size()
         optimize_session_data()
         
+        # Store validation to prevent cross-store data access
+        current_store = session.get('selected_store', '')
+        file_store = session.get('file_store', '')
+        
+        if file_store and current_store and file_store != current_store:
+            logging.warning(f"Store mismatch! File was uploaded for {file_store}, but current store is {current_store}")
+            logging.warning("Returning error to prevent cross-store data access")
+            return jsonify({'error': 'Store mismatch detected. Please select the correct store for this file.'}), 400
+        
         excel_processor = get_session_excel_processor()
         excel_processor.selected_tags.clear()
         session['selected_tags'] = []
@@ -2056,6 +2127,85 @@ def get_session_stats():
         })
     except Exception as e:
         logging.error(f"Error getting session stats: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/set-store', methods=['POST'])
+def set_store():
+    """Set the store for the current session."""
+    try:
+        data = request.get_json()
+        if not data or 'store' not in data:
+            return jsonify({'error': 'Store selection is required'}), 400
+        
+        store_value = data['store']
+        
+        # Validate store selection
+        valid_stores = [
+            'AGT_Bothell', 'AGT_Burien', 'AGT_Goldbar', 'AGT_Lynnwood',
+            'AGT_Shoreline', 'AGT_Seattle', 'AGT_Walla_Walla'
+        ]
+        
+        if store_value not in valid_stores:
+            return jsonify({'error': 'Invalid store selection'}), 400
+        
+        # Store the selected store in session
+        session['selected_store'] = store_value
+        
+        # Clear any existing data to ensure fresh start with new store
+        session.pop('file_path', None)
+        session.pop('file_store', None)
+        session.pop('selected_tags', None)
+        
+        # Clear global Excel processor to force reload with new store context
+        reset_excel_processor()
+        
+        # Clear any cached data that might contain old store information
+        try:
+            cache_keys_to_clear = [
+                'available_tags', 'selected_tags', 'filter_options', 'dropdowns',
+                'json_matched_tags', 'full_excel_tags', 'initial_data'
+            ]
+            
+            for cache_key_name in cache_keys_to_clear:
+                try:
+                    cache_keys_to_try = [
+                        get_session_cache_key(cache_key_name),
+                        f"{cache_key_name}_default",
+                        cache_key_name
+                    ]
+                    
+                    for key in cache_keys_to_try:
+                        if cache.has(key):
+                            cache.delete(key)
+                            logging.info(f"Cleared cache key: {key}")
+                except Exception as key_error:
+                    logging.warning(f"Error clearing cache key {cache_key_name}: {key_error}")
+        except Exception as cache_error:
+            logging.warning(f"Error clearing caches: {cache_error}")
+        
+        logging.info(f"Store set to: {store_value} for session")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Store set to {store_value}',
+            'store': store_value
+        })
+        
+    except Exception as e:
+        logging.error(f"Error setting store: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/get-store', methods=['GET'])
+def get_store():
+    """Get the current store for the session."""
+    try:
+        current_store = session.get('selected_store', '')
+        return jsonify({
+            'success': True,
+            'store': current_store
+        })
+    except Exception as e:
+        logging.error(f"Error getting store: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/clear-session', methods=['POST'])
@@ -2451,6 +2601,14 @@ def generate_labels():
         font_scheme = get_font_scheme(template_type)
         processor = TemplateProcessor(template_type, font_scheme, saved_scale_factor)
         
+        # Pass the number of selected tags to the template processor for dynamic grid sizing
+        if hasattr(processor, '_expand_template_if_needed'):
+            # Force re-expansion with the actual number of selected tags
+            processor._expanded_template_buffer = processor._expand_template_if_needed(
+                force_expand=True, 
+                num_selected_tags=len(records)
+            )
+        
         # Apply custom template settings if they exist
         if template_settings:
             # Apply custom font sizes if in fixed mode
@@ -2714,6 +2872,15 @@ def get_available_tags():
         logging.info("=== AVAILABLE TAGS DEBUG START ===")
         logging.info(f"Available tags request at {datetime.now().strftime('%H:%M:%S')}")
         
+        # Store validation to prevent cross-store data access
+        current_store = session.get('selected_store', '')
+        file_store = session.get('file_store', '')
+        
+        if file_store and current_store and file_store != current_store:
+            logging.warning(f"Store mismatch! File was uploaded for {file_store}, but current store is {current_store}")
+            logging.warning("Returning empty tags to prevent cross-store data access")
+            return jsonify([])
+        
         # CRITICAL FIX: Force fresh data processing for new files
         session_uploaded_file = session.get('file_path')
         if session_uploaded_file:
@@ -2877,6 +3044,15 @@ def get_available_tags():
 @app.route('/api/selected-tags', methods=['GET'])
 def get_selected_tags():
     try:
+        # Store validation to prevent cross-store data access
+        current_store = session.get('selected_store', '')
+        file_store = session.get('file_store', '')
+        
+        if file_store and current_store and file_store != current_store:
+            logging.warning(f"Store mismatch! File was uploaded for {file_store}, but current store is {current_store}")
+            logging.warning("Returning empty tags to prevent cross-store data access")
+            return jsonify([])
+        
         excel_processor = get_session_excel_processor()
         if excel_processor is None:
             logging.error("Failed to get ExcelProcessor instance")
@@ -4961,6 +5137,14 @@ def json_inventory():
         logging.info(f"Template path: {template_path}")
         
         processor = TemplateProcessor(template_type, font_scheme, 1.0)
+        
+        # Pass the number of selected tags to the template processor for dynamic grid sizing
+        if hasattr(processor, '_expand_template_if_needed'):
+            # Force re-expansion with the actual number of selected tags
+            processor._expanded_template_buffer = processor._expand_template_if_needed(
+                force_expand=True, 
+                num_selected_tags=len(records)
+            )
         
         # Debug the template dimensions
         from docx import Document

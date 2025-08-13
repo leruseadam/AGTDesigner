@@ -839,10 +839,37 @@ def enforce_fixed_cell_dimensions(table, template_type=None):
         
         # If template_type is provided, enforce the correct dimensions
         if template_type:
-            # Skip dimension enforcement for mini templates since they are already properly sized
+            # For mini templates, enforce the exact 1.5" x 1.5" dimensions
             if template_type == 'mini':
-                logger.info("Skipping dimension enforcement for mini template - already properly sized")
-                return table
+                logger.info("Enforcing exact 1.5\" x 1.5\" dimensions for mini template")
+                try:
+                    from src.core.constants import CELL_DIMENSIONS
+                    cell_dims = CELL_DIMENSIONS.get(template_type)
+                    if cell_dims and table.rows:
+                        # Set column widths based on template type
+                        tblGrid = table._element.find(qn('w:tblGrid'))
+                        if tblGrid is not None:
+                            # Remove existing grid
+                            tblGrid.getparent().remove(tblGrid)
+                        
+                        # Create new grid with correct dimensions
+                        tblGrid = OxmlElement('w:tblGrid')
+                        # Use the actual number of columns in the table, not table.columns
+                        num_cols = len(table.rows[0].cells) if table.rows else 0
+                        if num_cols > 0:
+                            for _ in range(num_cols):
+                                gridCol = OxmlElement('w:gridCol')
+                                gridCol.set(qn('w:w'), str(int(cell_dims['width'] * 1440)))
+                                tblGrid.append(gridCol)
+                            table._element.insert(0, tblGrid)
+                            
+                            # Set row heights based on template type
+                            for row in table.rows:
+                                row.height = Inches(cell_dims['height'])
+                                row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+                except Exception as e:
+                    logger.warning(f"Could not enforce mini template dimensions: {e}")
+                    # Continue with general dimension enforcement
             
             try:
                 from src.core.constants import CELL_DIMENSIONS
@@ -927,6 +954,23 @@ def enforce_fixed_cell_dimensions(table, template_type=None):
             except Exception as row_error:
                 logger.warning(f"Error processing row: {row_error}")
                 continue
+        
+        # CRITICAL: Final autofit disabling to ensure no expansion
+        table.autofit = False
+        if hasattr(table, 'allow_autofit'):
+            table.allow_autofit = False
+        
+        # CRITICAL: Verify table layout is fixed
+        tblPr = table._element.find(qn('w:tblPr'))
+        if tblPr is not None:
+            tblLayout = tblPr.find(qn('w:tblLayout'))
+            if tblLayout is None or tblLayout.get(qn('w:type')) != 'fixed':
+                # Force fixed layout
+                if tblLayout is not None:
+                    tblLayout.getparent().remove(tblLayout)
+                tblLayout = OxmlElement('w:tblLayout')
+                tblLayout.set(qn('w:type'), 'fixed')
+                tblPr.append(tblLayout)
         
         logger.debug(f"Enforced fixed cell dimensions for table (template: {template_type})")
         return table
