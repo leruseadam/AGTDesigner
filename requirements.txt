@@ -6,11 +6,8 @@ pandas==2.1.4
 openpyxl==3.1.2
 python-docx==1.1.0
 docxtpl==0.16.7
-docxcompose==1.4.0
+docxcompose==1.4.1
 Pillow==10.1.0
 Werkzeug==2.3.7
 
 
-pywebview==4.4
-pyobjc-framework-Cocoa>=10.0
-pyobjc-framework-WebKit>=10.0

@@ -103,7 +103,7 @@ def extract_products_from_manifest(manifest_json):
         cannabinoids = extract_cannabinoids(lab_result_data)
         product.update(cannabinoids)
         products.append(product)
-    return product
+    return products  # Fixed: was returning 'product' instead of 'products'
 
 # Example usage:
 # products = extract_products_from_manifest(manifest_json)
@@ -161,9 +161,21 @@ def normalize_product_name(name):
     
     name = strip_medically_compliant_prefix(name)
     name = name.lower().strip()
+    
+    # Remove weight/measurement suffixes (e.g., " - 1g", " - 3.5g", " - 7g", etc.)
+    weight_patterns = [
+        r'\s*-\s*\d+(?:\.\d+)?\s*(?:g|gram|grams|mg|oz|ounce|ounces|pk|pack|packs|piece|pieces|roll|rolls|stix|stick|sticks)\b',
+        r'\s*\d+(?:\.\d+)?\s*(?:g|gram|grams|mg|oz|ounce|ounces|pk|pack|packs|piece|pieces|roll|rolls|stix|stick|sticks)\b',
+        r'\s*-\s*\d+(?:\.\d+)?\s*$',  # Just numbers at the end
+        r'\s+\d+(?:\.\d+)?\s*$',  # Numbers at the end without dash
+    ]
+    
+    for pattern in weight_patterns:
+        name = re.sub(pattern, '', name, flags=re.IGNORECASE)
+    
     name = re.sub(r'[^\w\s-]', '', name)  # remove non-alphanumeric except hyphen/space
     name = re.sub(r'[-\s]+', ' ', name)  # collapse hyphens and spaces
-    return name
+    return name.strip()
 
 class JSONMatcher:
     """Handles JSON URL fetching and product matching functionality."""
@@ -326,17 +338,25 @@ class JSONMatcher:
             # Ensure input is a string
             name = str(name or "")
             name_lower = name.lower()
-            words = set(name_lower.replace('-', ' ').replace('_', ' ').split())
+            
+            # Split on both spaces and hyphens to break compound terms
+            words = set()
+            for part in name_lower.replace('_', ' ').split():
+                # Split each part on hyphens as well
+                sub_parts = part.split('-')
+                for sub_part in sub_parts:
+                    if sub_part.strip():  # Only add non-empty parts
+                        words.add(sub_part.strip())
             
             # Common words to exclude
             common_words = {
-                'medically', 'compliant', 'all', 'in', 'one', '1g', '2g', '3.5g', '7g', '14g', '28g', 'oz', 'gram', 'grams',
+                'medically', 'compliant', '1g', '2g', '3.5g', '7g', '14g', '28g', 'oz', 'gram', 'grams',
                 'pk', 'pack', 'packs', 'piece', 'pieces', 'roll', 'rolls', 'stix', 'stick', 'sticks', 'brand', 'vendor', 'product',
                 'the', 'and', 'or', 'with', 'for', 'of', 'by', 'from', 'to', 'in', 'on', 'at', 'a', 'an', 'mg', 'thc', 'cbd'
             }
             
-            # Filter out common words and short words (less than 3 characters)
-            key_terms = {word for word in words if word not in common_words and len(word) >= 3}
+            # Filter out common words and short words (less than 2 characters for words like "all", "in", "one")
+            key_terms = {word for word in words if word not in common_words and len(word) >= 2}
             
             # Add product type indicators for better matching
             product_types = {
@@ -364,25 +384,13 @@ class JSONMatcher:
                 if word in strain_indicators:
                     key_terms.add(word)
             
-            # Add multi-word terms for better matching
-            name_parts = name_lower.split()
-            for i in range(len(name_parts) - 1):
-                bigram = f"{name_parts[i]} {name_parts[i+1]}"
-                if len(bigram) >= 6:  # Only add meaningful bigrams
-                    key_terms.add(bigram)
-            
             # Add vendor/brand terms (but exclude common prefixes)
             vendor_prefixes = {'medically', 'compliant', 'by'}
             name_parts = name_lower.split()
             for i, part in enumerate(name_parts):
                 if part not in vendor_prefixes and len(part) >= 3:
-                    # Add single vendor words
+                    # Add single vendor words only
                     key_terms.add(part)
-                    # Add vendor bigrams (but skip if first word is a prefix)
-                    if i > 0 and name_parts[i-1] not in vendor_prefixes:
-                        bigram = f"{name_parts[i-1]} {part}"
-                        if len(bigram) >= 6:
-                            key_terms.add(bigram)
                   
             return key_terms
         except Exception as e:
@@ -916,180 +924,55 @@ class JSONMatcher:
                 logging.warning("No inventory transfer items found in JSON")
                 return []
                 
+            # Deduplicate items based on product name and vendor to prevent duplicate processing
             logging.info(f"Processing {len(items)} JSON items for Excel-based matching")
             
-            # Extract vendor information from root level if available
-            root_vendor = None
-            try:
-                # Try to get vendor from root level fields (only if payload is a dict)
-                if isinstance(payload, dict):
-                    root_vendor = payload.get("from_license_name") or payload.get("vendor") or payload.get("brand")
-                    if root_vendor:
-                        root_vendor = str(root_vendor).strip()
-                        logging.info(f"Found root-level vendor: {root_vendor}")
-            except Exception as e:
-                logging.warning(f"Error extracting root vendor: {e}")
+            # Create a set to track unique items based on product name + vendor
+            seen_items = set()
+            unique_items = []
+            duplicate_count = 0
             
-            # Debug: Check the type of items
-            if items:
-                logging.debug(f"First item type: {type(items[0])}")
-                logging.debug(f"First item content: {items[0]}")
-            
-            matched_names = []
-            matched_tags = []
-            
-            # Process each JSON item
-            for i, item in enumerate(items):
-                try:
-                    # Safety check: ensure item is a dictionary
-                    if not isinstance(item, dict):
-                        logging.warning(f"Item {i+1} is not a dictionary (type: {type(item)}), skipping: {item}")
-                        continue
-                    
-                    # Add root vendor information to item if it doesn't have vendor/brand fields
-                    if root_vendor and not item.get("vendor") and not item.get("brand"):
-                        item["vendor"] = root_vendor
-                        logging.debug(f"Added root vendor '{root_vendor}' to item {i+1}")
-                    
-                    # Find candidates for this JSON item
-                    candidates = self._find_candidates_optimized(item)
-                    
-                    if candidates:
-                        # Get the best match
-                        best_candidate = candidates[0]
-                        candidate_idx = best_candidate["idx"]
-                        
-                        # Get the original data from Excel
-                        if hasattr(self.excel_processor, 'df') and self.excel_processor.df is not None:
-                            try:
-                                # Convert idx back to original type if needed
-                                if isinstance(candidate_idx, str) and candidate_idx.isdigit():
-                                    candidate_idx = int(candidate_idx)
-                                
-                                if candidate_idx in self.excel_processor.df.index:
-                                    excel_row = self.excel_processor.df.iloc[candidate_idx]
-                                    excel_data = excel_row.to_dict()
-                                    
-                                    # Add the matched name
-                                    product_name = excel_data.get('Product Name*', '') or excel_data.get('ProductName', '')
-                                    if product_name:
-                                        matched_names.append(product_name)
-                                        matched_tags.append(excel_data)
-                                        
-                                        logging.debug(f"Matched JSON item {i+1}: '{item.get('product_name', 'Unknown')}' -> '{product_name}'")
-                                    else:
-                                        logging.warning(f"No product name found for matched item {i+1}")
-                                else:
-                                    logging.warning(f"Index {candidate_idx} not found in DataFrame")
-                            except Exception as excel_error:
-                                logging.error(f"Error accessing Excel data for item {i+1}: {excel_error}")
-                        else:
-                            logging.warning("No Excel DataFrame available for matching")
-                            
-                except Exception as item_error:
-                    logging.error(f"Error processing JSON item {i+1}: {item_error}")
+            for item in items:
+                if not isinstance(item, dict):
                     continue
-            
-            # Store results for later retrieval
-            self.json_matched_names = matched_names
-            self.json_matched_tags = matched_tags
-            
-            # Ensure all stored data is JSON serializable
-            def ensure_serializable(obj):
-                if isinstance(obj, dict):
-                    return {str(k): ensure_serializable(v) for k, v in obj.items()}
-                elif isinstance(obj, list):
-                    return [ensure_serializable(item) for item in obj]
-                elif isinstance(obj, (int, str, bool, type(None))):
-                    return obj
-                elif isinstance(obj, float):
-                    # Handle NaN and infinity values
-                    import math
-                    if math.isnan(obj) or math.isinf(obj):
-                        return ''
-                    return obj
-                else:
-                    return str(obj)
-            
-            # Clean the stored data
-            self.json_matched_names = [str(name) for name in matched_names]
-            self.json_matched_tags = ensure_serializable(matched_tags)
-            
-            logging.info(f"JSON matching completed: {len(matched_names)} matches found")
-            return matched_names
-            
-        except Exception as e:
-            logging.error(f"Error in fetch_and_match: {e}")
-            raise 
-
-    def fetch_and_match_with_product_db(self, url: str) -> List[Dict]:
-        """
-        Fetch JSON from URL and match products against the product database.
-        This method works independently of Excel data.
-        
-        Args:
-            url: URL to fetch JSON data from
-            
-        Returns:
-            List of matched product dictionaries
-        """
-        if not url.lower().startswith("http"):
-            raise ValueError("Please provide a valid HTTP URL")
-            
-        try:
-            # Use the proxy endpoint to handle authentication and CORS
-            import requests
-            
-            # Prepare the request to our proxy endpoint
-            proxy_data = {
-                'url': url,
-                'headers': {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                    'Accept': 'application/json',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Accept-Encoding': 'gzip, deflate, br',
-                    'Connection': 'keep-alive',
-                    'Upgrade-Insecure-Requests': '1'
-                }
-            }
-            
-            # Add authentication headers if they're in the URL or if we detect they're needed
-            if 'api-trace.getbamboo.com' in url:
-                # For Bamboo API, we might need specific headers
-                # You can add specific authentication headers here if needed
-                pass
-            
-            # Try to make the request directly first (for external URLs)
-            try:
-                response = requests.get(url, headers=proxy_data['headers'], timeout=60)  # Increased timeout
-                response.raise_for_status()
-                payload = response.json()
-            except (requests.exceptions.RequestException, ValueError) as direct_error:
-                logging.info(f"Direct request failed, trying proxy: {direct_error}")
-                # Fallback to proxy endpoint if direct request fails
-                import os
-                base_url = os.environ.get('FLASK_BASE_URL', 'http://127.0.0.1:9090')
-                response = requests.post(f'{base_url}/api/proxy-json', 
-                                       json=proxy_data, 
-                                       timeout=60)  # Increased timeout
-                response.raise_for_status()
-                payload = response.json()
+                    
+                # Create a unique key based on product name and vendor
+                product_name = str(item.get("product_name", "")).strip().lower()
+                vendor = str(item.get("vendor", "")).strip().lower()
                 
-            # Handle both list and dictionary payloads
-            if isinstance(payload, list):
-                items = payload
-            elif isinstance(payload, dict):
-                items = payload.get("inventory_transfer_items", [])
-            else:
-                logging.warning(f"Unexpected payload type: {type(payload)}")
-                return []
+                if not product_name:
+                    continue
+                    
+                # Create a unique identifier for this item
+                item_key = f"{product_name}|{vendor}"
                 
-            if not items:
-                logging.warning("No inventory transfer items found in JSON")
-                return []
-                
-            logging.info(f"Processing {len(items)} JSON items for matching")
+                if item_key in seen_items:
+                    duplicate_count += 1
+                    logging.debug(f"Skipping duplicate item: {product_name} by {vendor}")
+                    continue
+                    
+                seen_items.add(item_key)
+                unique_items.append(item)
             
+            if duplicate_count > 0:
+                logging.info(f"Removed {duplicate_count} duplicate items, processing {len(unique_items)} unique items")
+            
+            # Use the deduplicated items for processing
+            items = unique_items
+                
+            # Extract vendor information from root level if available
+            vendor_meta = "Unknown Vendor"
+            if isinstance(payload, dict) and "from_license_number" in payload and "from_license_name" in payload:
+                vendor_meta = f"{payload.get('from_license_number', '')} – {payload.get('from_license_name', '')}"
+            elif isinstance(payload, dict) and "from_license_number" in payload:
+                vendor_meta = f"{payload.get('from_license_number', '')}"
+            elif isinstance(payload, dict) and "from_license_name" in payload:
+                vendor_meta = f"{payload.get('from_license_name', '')}"
+                
+            raw_date = datetime.now().strftime("%Y-%m-%d")
+            if isinstance(payload, dict) and "est_arrival_at" in payload:
+                raw_date = payload.get("est_arrival_at", "").split("T")[0]
+                
             matched_idxs = set()
             match_scores = {}  # Track scores for debugging
             fallback_tags = []  # Collect fallback tags for unmatched products
@@ -1467,6 +1350,244 @@ class JSONMatcher:
 
         except Exception as e:
             logging.error(f"Error in fetch_and_match: {e}")
+            return []
+            
+    def fetch_and_match_with_product_db(self, url: str) -> List[Dict]:
+        """
+        Fetch JSON from URL and create product tags directly from JSON data.
+        This method works independently of Excel data.
+        
+        Args:
+            url: URL to fetch JSON data from
+            
+        Returns:
+            List of product dictionaries
+        """
+        if not url.lower().startswith("http"):
+            raise ValueError("Please provide a valid HTTP URL")
+            
+        try:
+            # Use the proxy endpoint to handle authentication and CORS
+            import requests
+            
+            # Prepare the request to our proxy endpoint
+            proxy_data = {
+                'url': url,
+                'headers': {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                    'Accept': 'application/json',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'Connection': 'keep-alive',
+                    'Upgrade-Insecure-Requests': '1'
+                }
+            }
+            
+            # Try to make the request directly first (for external URLs)
+            try:
+                response = requests.get(url, headers=proxy_data['headers'], timeout=60)
+                response.raise_for_status()
+                payload = response.json()
+            except (requests.exceptions.RequestException, ValueError) as direct_error:
+                logging.info(f"Direct request failed, trying proxy: {direct_error}")
+                # Fallback to proxy endpoint if direct request fails
+                import os
+                base_url = os.environ.get('FLASK_BASE_URL', 'http://127.0.0.1:9090')
+                response = requests.post(f'{base_url}/api/proxy-json', 
+                                       json=proxy_data, 
+                                       timeout=60)
+                response.raise_for_status()
+                payload = response.json()
+                
+            # Handle both list and dictionary payloads
+            if isinstance(payload, list):
+                items = payload
+            elif isinstance(payload, dict):
+                items = payload.get("inventory_transfer_items", [])
+            else:
+                logging.warning(f"Unexpected payload type: {type(payload)}")
+                return []
+                
+            if not items:
+                logging.warning("No inventory transfer items found in JSON")
+                return []
+                
+            # Deduplicate items based on product name and vendor to prevent duplicate processing
+            logging.info(f"Processing {len(items)} JSON items for product database matching")
+            
+            # Create a set to track unique items based on product name + vendor
+            seen_items = set()
+            unique_items = []
+            duplicate_count = 0
+            
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                    
+                # Create a unique key based on product name and vendor
+                product_name = str(item.get("product_name", "")).strip().lower()
+                vendor = str(item.get("vendor", "")).strip().lower()
+                
+                if not product_name:
+                    continue
+                    
+                # Create a unique identifier for this item
+                item_key = f"{product_name}|{vendor}"
+                
+                if item_key in seen_items:
+                    duplicate_count += 1
+                    logging.debug(f"Skipping duplicate item: {product_name} by {vendor}")
+                    continue
+                    
+                seen_items.add(item_key)
+                unique_items.append(item)
+            
+            if duplicate_count > 0:
+                logging.info(f"Removed {duplicate_count} duplicate items, processing {len(unique_items)} unique items")
+            
+            # Use the deduplicated items for processing
+            items = unique_items
+                
+            # Process each JSON item to create product tags
+            all_tags = []
+            
+            for i, item in enumerate(items):
+                try:
+                    # Safety check: ensure item is a dictionary
+                    if not isinstance(item, dict):
+                        logging.warning(f"Item {i+1} is not a dictionary (type: {type(item)}), skipping: {item}")
+                        continue
+                    
+                    # Extract product information
+                    product_name = str(item.get("product_name", "")).strip()
+                    if not product_name:
+                        continue
+                        
+                    # Extract vendor information
+                    vendor = str(item.get("vendor", "")).strip()
+                    brand = str(item.get("brand", "")).strip()
+                    
+                    # Extract product type
+                    product_type = str(item.get("product_type", "")).strip()
+                    if not product_type:
+                        # Try to infer product type from name
+                        name_lower = product_name.lower()
+                        if any(x in name_lower for x in ["rosin", "wax", "shatter", "live resin", "distillate"]):
+                            product_type = "concentrate"
+                        elif any(x in name_lower for x in ["pre-roll", "pre roll", "joint"]):
+                            product_type = "pre-roll"
+                        elif any(x in name_lower for x in ["cartridge", "vape"]):
+                            product_type = "vape cartridge"
+                        elif any(x in name_lower for x in ["flower", "bud"]):
+                            product_type = "flower"
+                        else:
+                            product_type = "concentrate"  # Default
+                    
+                    # Extract weight and quantity
+                    weight = str(item.get("weight", "")).strip()
+                    quantity = str(item.get("quantity", "1")).strip()
+                    units = str(item.get("units", "g")).strip()
+                    
+                    # Extract price
+                    price = str(item.get("price", "")).strip()
+                    if not price:
+                        # Estimate price based on product type
+                        if "pre-roll" in product_type.lower():
+                            price = "20"
+                        elif "flower" in product_type.lower():
+                            price = "35"
+                        elif "concentrate" in product_type.lower():
+                            price = "50"
+                        else:
+                            price = "25"
+                    
+                    # Extract strain information
+                    strain = str(item.get("strain_name", "")).strip()
+                    if not strain:
+                        # Try to extract strain from product name
+                        name_parts = product_name.lower().split()
+                        strain_keywords = ["og", "haze", "kush", "diesel", "cookies", "runtz", "gelato", "wedding cake"]
+                        for keyword in strain_keywords:
+                            if keyword in name_parts:
+                                strain = keyword.title()
+                                break
+                    
+                    # Determine lineage
+                    lineage = "HYBRID"  # Default
+                    if strain:
+                        # You could add logic here to determine lineage based on strain
+                        pass
+                    
+                    # Create product tag
+                    tag = {
+                        'Product Name*': product_name,
+                        'ProductName': product_name,
+                        'Description': product_name,
+                        'Product Type*': product_type,
+                        'Product Type': product_type,
+                        'Vendor': vendor,
+                        'Vendor/Supplier*': vendor,
+                        'Product Brand': brand,
+                        'ProductBrand': brand,
+                        'Product Strain': strain,
+                        'Strain Name': strain,
+                        'Lineage': lineage,
+                        'Weight*': weight,
+                        'Weight': weight,
+                        'Quantity*': quantity,
+                        'Quantity': quantity,
+                        'Units': units,
+                        'Price': price,
+                        'Price* (Tier Name for Bulk)': price,
+                        'State': 'active',
+                        'Is Sample? (yes/no)': 'no',
+                        'Is MJ product?(yes/no)': 'yes',
+                        'Discountable? (yes/no)': 'yes',
+                        'Room*': 'Default',
+                        'Medical Only (Yes/No)': 'No',
+                        'DOH': 'No',
+                        'Source': 'JSON Match - Product Database',
+                        # Additional fields for consistency
+                        'Quantity Received*': quantity,
+                        'Weight Unit* (grams/gm or ounces/oz)': units,
+                        'DOH Compliant (Yes/No)': 'No',
+                        'Concentrate Type': product_type if "concentrate" in product_type.lower() else '',
+                        'Ratio': '',
+                        'Joint Ratio': '',
+                        'JointRatio': '',
+                        'CombinedWeight': weight,
+                        'Description_Complexity': '1',
+                        'Test result unit (% or mg)': '%',
+                        'THC test result': '',
+                        'CBD test result': '',
+                        'Ratio_or_THC_CBD': '',
+                        'displayName': product_name,
+                        'weightWithUnits': f"{weight} {units}" if weight and units else weight,
+                        'WeightWithUnits': f"{weight} {units}" if weight and units else weight,
+                        'WeightUnits': f"{weight} {units}" if weight and units else weight,
+                        'vendor': vendor,
+                        'productBrand': brand,
+                        'lineage': lineage,
+                        'productType': product_type,
+                        'weight': weight,
+                        'quantity': quantity
+                    }
+                    
+                    all_tags.append(tag)
+                    
+                except Exception as item_error:
+                    logging.error(f"Error processing JSON item {i+1}: {item_error}")
+                    continue
+            
+            # Store the results for later retrieval
+            self.json_matched_tags = all_tags
+            self.json_matched_names = [tag.get('Product Name*', '') for tag in all_tags if tag.get('Product Name*')]
+            
+            logging.info(f"Product database JSON matching completed: {len(all_tags)} products created")
+            return all_tags
+            
+        except Exception as e:
+            logging.error(f"Error in fetch_and_match_with_product_db: {e}")
             return []
             
     def _get_cache_item_name(self, idx_str: str) -> str:

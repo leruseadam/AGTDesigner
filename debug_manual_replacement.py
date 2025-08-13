@@ -1,92 +1,132 @@
 #!/usr/bin/env python3
 """
-Debug script to test manual placeholder replacement
+Debug script to test the manual replacement method step by step.
 """
 
 import sys
 import os
-from pathlib import Path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-# Add the src directory to the Python path
-sys.path.insert(0, str(Path(__file__).parent / 'src'))
-
-from src.core.generation.template_processor import TemplateProcessor
-from docx import Document
-from io import BytesIO
+from src.core.generation.template_processor import TemplateProcessor, get_font_scheme
 
 def debug_manual_replacement():
-    """Debug the manual placeholder replacement."""
-    print("=== Debugging Manual Placeholder Replacement ===")
+    """Debug the manual replacement method step by step."""
     
-    # Create test records
+    print("Debug Manual Replacement Method")
+    print("=" * 50)
+    
+    # Test data
     test_records = [
         {
-            'ProductName': 'Test Product 1',
-            'ProductBrand': 'Test Brand 1',
-            'Price': '$25.99',
-            'Description': 'Test Description 1',
-            'WeightUnits': '3.5g',
-            'Lineage': 'Test Lineage 1',
-            'Ratio_or_THC_CBD': 'THC: 25% CBD: 2%',
-            'DOH': 'YES',
-            'ProductStrain': 'Test Strain 1',
-            'ProductType': 'flower',
-            'Vendor': 'Test Vendor 1'
+            'ProductName': 'Grape Moonshot',
+            'Description': 'Grape Moonshot',
+            'WeightUnits': '1.7oz',
+            'Price': '$15',
+            'DOH': '100mg THC',
+            'ProductBrand': 'Test Brand',
+            'ProductType': 'edible',
+            'Lineage': 'HYBRID',
+            'ProductStrain': 'Grape Moonshot'
         }
     ]
     
     try:
-        # Create processor for double template
-        processor = TemplateProcessor('double', {}, 1.0)
+        font_scheme = get_font_scheme('mini')
+        processor = TemplateProcessor('mini', font_scheme, 1.0)
         
-        # Get the expanded template buffer
-        buffer = processor._expanded_template_buffer
-        buffer.seek(0)
-        doc = Document(buffer)
+        print(f"Template type: {processor.template_type}")
         
-        # Create context
+        # Build context for the first record
+        label_context = processor._build_label_context(test_records[0], None)
+        
+        print("\n=== Context for Label1 ===")
+        for key, value in label_context.items():
+            print(f"{key}: {repr(value)}")
+        
+        # Create full context
         context = {}
         for i, record in enumerate(test_records):
-            label_context = processor._build_label_context(record, doc)
+            label_context = processor._build_label_context(record, None)
             context[f'Label{i+1}'] = label_context
         
-        # Fill remaining labels with empty context
-        for i in range(len(test_records), processor.chunk_size):
-            context[f'Label{i+1}'] = {}
-        
-        print("Context:")
+        print(f"\n=== Full Context ===")
         for label_key, label_context in context.items():
-            print(f"  {label_key}: {label_context}")
+            print(f"{label_key}: {list(label_context.keys())}")
         
-        print("\nBefore manual replacement:")
-        for table in doc.tables:
-            for row in table.rows:
-                for cell in row.cells:
-                    for paragraph in cell.paragraphs:
-                        text = paragraph.text
-                        if text.strip():
-                            print(f"  Cell content: {repr(text)}")
+        # Test manual replacement step by step
+        print(f"\n=== Testing Manual Replacement Step by Step ===")
         
-        # Test manual replacement
-        print("\nRunning manual replacement...")
-        processor._manual_replace_placeholders(doc, context)
+        # Load the expanded template
+        processor.force_re_expand_template()
+        processor._expanded_template_buffer.seek(0)
+        from docx import Document
+        doc = Document(processor._expanded_template_buffer)
         
-        print("\nAfter manual replacement:")
-        for table in doc.tables:
-            for row in table.rows:
-                for cell in row.cells:
-                    for paragraph in cell.paragraphs:
-                        text = paragraph.text
-                        if text.strip():
-                            print(f"  Cell content: {repr(text)}")
+        # Check first cell before replacement
+        first_cell = doc.tables[0].cell(0, 0)
+        print(f"First cell before replacement: {repr(first_cell.text)}")
         
-        return True
+        # Check paragraph structure
+        print(f"\nParagraphs in first cell: {len(first_cell.paragraphs)}")
+        for i, para in enumerate(first_cell.paragraphs):
+            print(f"Paragraph {i}: {repr(para.text)}")
+            print(f"  Runs in paragraph {i}: {len(para.runs)}")
+            for j, run in enumerate(para.runs):
+                print(f"    Run {j}: {repr(run.text)}")
         
+        # Test the regex pattern on the actual cell text
+        import re
+        cell_text = first_cell.text
+        pattern = r'\{\{Label(\d+)\.DOH\s*\}\}'
+        matches = re.findall(pattern, cell_text)
+        print(f"\nRegex matches in cell text: {matches}")
+        
+        # Test the replacement logic manually
+        print(f"\n=== Testing Replacement Logic Manually ===")
+        
+        for label_key, label_context in context.items():
+            if isinstance(label_context, dict):
+                print(f"Processing {label_key}: {label_context}")
+                
+                # Check if DOH field exists
+                if 'DOH' in label_context:
+                    doh_value = label_context['DOH']
+                    print(f"  DOH value: {repr(doh_value)}")
+                    
+                    # Check if _DOH_IMAGE_PATH exists
+                    if '_DOH_IMAGE_PATH' in label_context:
+                        doh_image_path = label_context['_DOH_IMAGE_PATH']
+                        print(f"  _DOH_IMAGE_PATH: {repr(doh_image_path)}")
+                        
+                        if doh_image_path:
+                            print(f"  Would replace with image placeholder")
+                        else:
+                            print(f"  Would replace with DOH text: {doh_value}")
+                    else:
+                        print(f"  No _DOH_IMAGE_PATH found")
+                else:
+                    print(f"  No DOH field found")
+        
+        # Apply manual replacement
+        print(f"\n=== Applying Manual Replacement ===")
+        
+        # Call the method directly
+        doc = processor._manual_replace_placeholders(doc, context)
+        
+        # Check first cell after replacement
+        first_cell = doc.tables[0].cell(0, 0)
+        print(f"First cell after replacement: {repr(first_cell.text)}")
+        
+        # Check if DOH placeholder was replaced
+        if '{{Label1.DOH' in first_cell.text:
+            print("❌ DOH placeholder still present")
+        else:
+            print("✅ DOH placeholder replaced")
+            
     except Exception as e:
-        print(f"❌ Error during debug: {e}")
+        print(f"Error: {e}")
         import traceback
         traceback.print_exc()
-        return False
 
 if __name__ == "__main__":
     debug_manual_replacement() 

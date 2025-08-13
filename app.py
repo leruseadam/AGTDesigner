@@ -1,4 +1,5 @@
 import os
+
 import sys  # Add this import
 import logging
 import threading
@@ -1274,20 +1275,12 @@ def process_excel_background(filename, temp_path):
                 logging.info("[BG] Skipping global cache clear - not in request context")
         except Exception as global_cache_error:
             logging.warning(f"[BG] Error in global cache clearing: {global_cache_error}")
-        # Precompute and cache available tags for this file to make the first frontend
-        # fetch instantaneous after status flips to 'ready'. Use a cache key derived
-        # from the file path so this is safe in background threads without session.
+        # Mark as ready as soon as DataFrame is loaded so frontend can proceed
         try:
-            from src.core.data.excel_processor import ExcelProcessor  # already imported above, safe
-            available_tags = new_processor.get_available_tags()
-            file_cache_key = get_file_cache_key('available_tags_file', temp_path)
-            try:
-                cache.set(file_cache_key, available_tags, timeout=3600)
-                logging.info(f"[BG] Precomputed and cached {len(available_tags)} available tags under key {file_cache_key}")
-            except Exception as cache_err:
-                logging.warning(f"[BG] Failed to cache precomputed available tags: {cache_err}")
-        except Exception as precompute_err:
-            logging.warning(f"[BG] Failed to precompute available tags: {precompute_err}")
+            update_processing_status(filename, 'ready')
+            logging.info(f"[BG] Marked {filename} as ready (DataFrame loaded)")
+        except Exception as mark_ready_error:
+            logging.warning(f"[BG] Failed to mark ready: {mark_ready_error}")
 
         # Step 2: Update the global processor safely with minimal clearing
         global _excel_processor
@@ -1395,10 +1388,14 @@ def process_excel_background(filename, temp_path):
         except Exception as session_error:
             logging.warning(f"[BG] Error clearing session/g context: {session_error}")
         
-        # Update processing status to success only after precompute
+        # Update processing status to success
         update_processing_status(filename, 'ready')
         logging.info(f"[BG] ===== BACKGROUND PROCESSING COMPLETE =====")
         logging.info(f"[BG] File processing completed successfully: {filename}")
+        
+        # Step 3: Mark as ready immediately (no delay needed with fast loading)
+        logging.info(f"[BG] Marking file as ready: {filename}")
+        update_processing_status(filename, 'ready')
         logging.info(f"[BG] File marked as ready: {filename}")
         logging.info(f"[BG] Current processing statuses: {dict(processing_status)}")
         
@@ -2155,7 +2152,18 @@ def rebuild_3x3_grid_from_template(doc, template_path):
         row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
     
     # Enforce fixed cell dimensions to prevent any growth
-    enforce_fixed_cell_dimensions(table)
+    try:
+        # Safety check: ensure table has valid structure
+        if table and table.rows and len(table.rows) > 0:
+            first_row = table.rows[0]
+            if hasattr(first_row, '_element') and hasattr(first_row._element, 'tc_lst'):
+                enforce_fixed_cell_dimensions(table, 'horizontal')  # Default to horizontal for 3x3 grids
+            else:
+                print("Warning: Skipping table with invalid XML structure in app.py")
+        else:
+            print("Warning: Skipping empty or invalid table in app.py")
+    except Exception as e:
+        print(f"Warning: Error enforcing fixed cell dimensions in app.py: {e}")
     
     return table
 
@@ -2242,10 +2250,30 @@ def _autosize_recursive_template_specific(element, marker_name, orientation, sca
 
     if hasattr(element, 'tables'):
         for table in element.tables:
-            for row in table.rows:
-                for cell in row.cells:
-                    # Continue the recursion into cells
-                    _autosize_recursive_template_specific(cell, marker_name, orientation, scale_factor)
+            try:
+                # Safety check: ensure table has valid structure
+                if table and table.rows and len(table.rows) > 0:
+                    first_row = table.rows[0]
+                    if hasattr(first_row, '_element') and hasattr(first_row._element, 'tc_lst'):
+                        for row in table.rows:
+                            try:
+                                for cell in row.cells:
+                                    try:
+                                        # Continue the recursion into cells
+                                        _autosize_recursive_template_specific(cell, marker_name, orientation, scale_factor)
+                                    except Exception as cell_error:
+                                        print(f"Warning: Error processing cell: {cell_error}")
+                                        continue
+                            except Exception as row_error:
+                                print(f"Warning: Error processing row: {row_error}")
+                                continue
+                    else:
+                        print("Warning: Skipping table with invalid XML structure in app.py recursion")
+                else:
+                    print("Warning: Skipping empty or invalid table in app.py recursion")
+            except Exception as table_error:
+                print(f"Warning: Error processing table in app.py recursion: {table_error}")
+                continue
 
 def _get_template_specific_font_size(content, marker_name, orientation, scale_factor):
     """
@@ -2680,20 +2708,6 @@ def get_session_cache_key(base_key):
     key_str = f"{base_key}:{sid}:{file_path}"
     return hashlib.sha256(key_str.encode()).hexdigest()
 
-def get_file_cache_key(base_key: str, file_path: str) -> str:
-    """Build a cache key that is stable per uploaded file path.
-
-    This does not rely on a request/session context, so it can be used safely
-    from background threads. The returned key is deterministic for a given
-    file path and base key.
-    """
-    try:
-        normalized = os.path.abspath(file_path) if file_path else ''
-    except Exception:
-        normalized = file_path or ''
-    digest = hashlib.sha256(f"{base_key}:{normalized}".encode()).hexdigest()
-    return f"{base_key}_{digest}"
-
 @app.route('/api/available-tags', methods=['GET'])
 def get_available_tags():
     try:
@@ -2801,28 +2815,7 @@ def get_available_tags():
                     logging.info(f"Returning cached tags: {len(cached_tags)} items")
                     return jsonify(cached_tags)
         
-        logging.info("No cached tags found, checking for background precompute cache")
-        # Use precomputed per-file cache if present to avoid first-request slowness
-        session_file_for_cache = session.get('file_path')
-        if session_file_for_cache and os.path.exists(session_file_for_cache):
-            precompute_key = get_file_cache_key('available_tags_file', session_file_for_cache)
-            try:
-                precomputed = cache.get(precompute_key)
-            except Exception:
-                precomputed = None
-            if precomputed is not None:
-                logging.info(f"Serving {len(precomputed)} precomputed available tags from cache key {precompute_key}")
-                # Also store into session-scoped cache for subsequent requests
-                try:
-                    session_scoped_key = get_session_cache_key('available_tags')
-                    cache.set(session_scoped_key, precomputed, timeout=3600)
-                    logging.info(f"Warmed session cache for available tags: {session_scoped_key}")
-                except Exception as warm_err:
-                    logging.warning(f"Failed to warm session cache: {warm_err}")
-                logging.info("=== AVAILABLE TAGS DEBUG END ===")
-                return jsonify(precomputed)
-
-        logging.info("No precompute cache hit, getting ExcelProcessor")
+        logging.info("No cached tags found, getting ExcelProcessor")
         excel_processor = get_session_excel_processor()
         if excel_processor is None:
             logging.error("Failed to get ExcelProcessor instance")
@@ -2855,7 +2848,7 @@ def get_available_tags():
                 logging.info(f"Attempting to load default file: {default_file}")
                 success = excel_processor.load_file(default_file)
         
-        logging.info("Getting available tags from ExcelProcessor (no cache path)")
+        logging.info("Getting available tags from ExcelProcessor")
         tags = excel_processor.get_available_tags()
         logging.info(f"Raw tags obtained: {len(tags)} items")
         
@@ -4510,16 +4503,54 @@ def json_match():
                     cache.set(cache_key, available_tags, timeout=3600)  # 1 hour timeout
                     logging.info(f"Updated available tags cache with {len(available_tags)} items")
                     
-                    # Clear selected tags - user will manually select what they want
-                    session['selected_tags'] = []
-                    excel_processor.selected_tags = []
-                    logging.info(f"Cleared selected tags - user will manually select from {len(available_tag_objects)} available JSON matched products")
+                    # REPAIR MISSING DATA FOR PRODUCT DATABASE MATCHES
+                    if available_tag_objects:
+                        logging.info(f"Repairing missing data for {len(available_tag_objects)} product database matched products")
+                        try:
+                            # Use the Excel processor's data repair system
+                            repaired_products = excel_processor.repair_missing_data_for_json_matches(available_tag_objects)
+                            logging.info(f"Data repair completed. {len(repaired_products)} products repaired")
+                            
+                            # Update the available_tag_objects with repaired data
+                            available_tag_objects = repaired_products
+                            
+                            # Extract product names for selected tags from repaired products
+                            selected_product_names = []
+                            for tag in repaired_products:
+                                if isinstance(tag, dict):
+                                    product_name = tag.get('Product Name*', tag.get('ProductName', ''))
+                                    if product_name:
+                                        selected_product_names.append(product_name)
+                            
+                            # Set selected tags in both session and Excel processor
+                            session['selected_tags'] = selected_product_names
+                            excel_processor.selected_tags = selected_product_names
+                            logging.info(f"Automatically selected {len(selected_product_names)} repaired product database matched products for output generation")
+                            
+                        except Exception as repair_error:
+                            logging.error(f"Error during data repair: {repair_error}")
+                            # Fallback to original selection without repair
+                            selected_product_names = []
+                            for tag in available_tag_objects:
+                                if isinstance(tag, dict):
+                                    product_name = tag.get('Product Name*', tag.get('ProductName', ''))
+                                    if product_name:
+                                        selected_product_names.append(product_name)
+                            
+                            session['selected_tags'] = selected_product_names
+                            excel_processor.selected_tags = selected_product_names
+                            logging.info(f"Fallback: selected {len(selected_product_names)} product database matched products without repair")
+                    else:
+                        # Clear selected tags if no matches found
+                        session['selected_tags'] = []
+                        excel_processor.selected_tags = []
+                        logging.info(f"Cleared selected tags - no matched products found")
                     
                     # Force session to be saved
                     session.modified = True
                     
                     # Update cache status
-                    cache_status = f"JSON Generated Excel ({len(available_tag_objects)} products in Available)"
+                    cache_status = f"JSON Generated Excel ({len(available_tag_objects)} products Auto-Selected)"
                 except Exception as excel_error:
                     logging.error(f"Error generating/uploading Excel file: {excel_error}")
                     # Fallback to available tags behavior
@@ -4532,13 +4563,52 @@ def json_match():
                         cache.set(cache_key, available_tag_objects, timeout=3600)  # 1 hour timeout
                         logging.info(f"Updated available tags cache with {len(available_tag_objects)} items")
                         
-                        session['selected_tags'] = []
-                        excel_processor.selected_tags = []
-                        logging.info(f"Cleared selected tags - user will manually select from {len(available_tag_objects)} available JSON matched products")
+                        # REPAIR MISSING DATA FOR FALLBACK PRODUCT DATABASE MATCHES
+                        if available_tag_objects:
+                            logging.info(f"Repairing missing data for {len(available_tag_objects)} fallback product database matched products")
+                            try:
+                                # Use the Excel processor's data repair system
+                                repaired_products = excel_processor.repair_missing_data_for_json_matches(available_tag_objects)
+                                logging.info(f"Data repair completed. {len(repaired_products)} products repaired")
+                                
+                                # Update the available_tag_objects with repaired data
+                                available_tag_objects = repaired_products
+                                
+                                # Extract product names for selected tags from repaired products
+                                selected_product_names = []
+                                for tag in repaired_products:
+                                    if isinstance(tag, dict):
+                                        product_name = tag.get('Product Name*', tag.get('ProductName', ''))
+                                        if product_name:
+                                            selected_product_names.append(product_name)
+                                
+                                # Set selected tags in both session and Excel processor
+                                session['selected_tags'] = selected_product_names
+                                excel_processor.selected_tags = selected_product_names
+                                logging.info(f"Automatically selected {len(selected_product_names)} repaired fallback product database matched products for output generation")
+                                
+                            except Exception as repair_error:
+                                logging.error(f"Error during data repair: {repair_error}")
+                                # Fallback to original selection without repair
+                                selected_product_names = []
+                                for tag in available_tag_objects:
+                                    if isinstance(tag, dict):
+                                        product_name = tag.get('Product Name*', tag.get('ProductName', ''))
+                                        if product_name:
+                                            selected_product_names.append(product_name)
+                                
+                                session['selected_tags'] = selected_product_names
+                                excel_processor.selected_tags = selected_product_names
+                                logging.info(f"Fallback: selected {len(selected_product_names)} fallback product database matched products without repair")
+                        else:
+                            # Clear selected tags if no matches found
+                            session['selected_tags'] = []
+                            excel_processor.selected_tags = []
+                            logging.info(f"Cleared selected tags - no matched products found")
                         
                         # Force session to be saved
                         session.modified = True
-                    cache_status = "Product Database (Fallback - Available)"
+                        cache_status = "Product Database (Fallback - Auto-Selected)"
             else:
                 selected_tag_objects = []
                 cache_status = "Product Database (No Matches)"
@@ -4682,16 +4752,54 @@ def json_match():
         cache.set(cache_key, available_tags, timeout=3600)  # 1 hour timeout
         logging.info(f"Updated available tags cache with {len(available_tags)} items")
         
-        # Clear selected tags since JSON matched items are now in available tags for customization
-        session['selected_tags'] = []
-        excel_processor.selected_tags = []
-        logging.info(f"Cleared selected tags - JSON matched products are in available tags for manual selection")
+        # REPAIR MISSING DATA FOR JSON MATCHED PRODUCTS
+        if json_matched_tags:
+            logging.info(f"Repairing missing data for {len(json_matched_tags)} JSON matched products")
+            try:
+                    # Use the Excel processor's data repair system
+                    repaired_products = excel_processor.repair_missing_data_for_json_matches(json_matched_tags)
+                    logging.info(f"Data repair completed. {len(repaired_products)} products repaired")
+                    
+                    # Update the json_matched_tags with repaired data
+                    json_matched_tags = repaired_products
+                    
+                    # Extract product names for selected tags from repaired products
+                    selected_product_names = []
+                    for tag in repaired_products:
+                        if isinstance(tag, dict):
+                            product_name = tag.get('Product Name*', tag.get('ProductName', ''))
+                            if product_name:
+                                selected_product_names.append(product_name)
+                    
+                    # Set selected tags in both session and Excel processor
+                    session['selected_tags'] = selected_product_names
+                    excel_processor.selected_tags = selected_product_names
+                    logging.info(f"Automatically selected {len(selected_product_names)} repaired JSON matched products for output generation")
+                    
+            except Exception as repair_error:
+                logging.error(f"Error during data repair: {repair_error}")
+                # Fallback to original selection without repair
+                selected_product_names = []
+                for tag in json_matched_tags:
+                    if isinstance(tag, dict):
+                        product_name = tag.get('Product Name*', tag.get('ProductName', ''))
+                        if product_name:
+                            selected_product_names.append(product_name)
+                
+                session['selected_tags'] = selected_product_names
+                excel_processor.selected_tags = selected_product_names
+                logging.info(f"Fallback: selected {len(selected_product_names)} JSON matched products without repair")
+        else:
+            # Clear selected tags if no JSON matches found
+            session['selected_tags'] = []
+            excel_processor.selected_tags = []
+            logging.info(f"Cleared selected tags - no JSON matches found")
         
         # Force session to be saved
         session.modified = True
         
         # Update cache status
-        cache_status = f"JSON Matched Products in Available ({len(json_matched_tags)} products)"
+        cache_status = f"JSON Matched Products Auto-Selected ({len(json_matched_tags)} products)"
         
         # Store filter mode and use cache for large data instead of session
         session['current_filter_mode'] = 'json_matched'  # Start with JSON matched items

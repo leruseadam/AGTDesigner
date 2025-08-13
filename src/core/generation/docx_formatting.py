@@ -7,55 +7,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def _validate_and_repair_table_structure(table):
-    """
-    Validate and repair table structure to ensure it has required elements.
-    Returns True if table is valid, False if it cannot be repaired.
-    """
-    try:
-        # First, try to access table properties to see if there's an actual error
-        try:
-            _ = table.rows
-            _ = table.columns
-            # If we can access these without error, the table is fine
-            return True
-        except Exception:
-            # Only then check if we need to repair
-            pass
-        
-        # Check if table has the required tblGrid element
-        tblGrid = table._element.find(qn('w:tblGrid'))
-        if tblGrid is None:
-            # Create tblGrid element
-            tblGrid = OxmlElement('w:tblGrid')
-
-            # Get the actual number of columns from the table structure
-            # Count cells in the first row to determine column count
-            if len(table.rows) > 0:
-                first_row = table.rows[0]
-                col_count = len(first_row.cells)
-
-                # Create grid columns
-                for _ in range(col_count):
-                    gridCol = OxmlElement('w:gridCol')
-                    gridCol.set(qn('w:w'), '1440')  # Default width of 1 inch
-                    tblGrid.append(gridCol)
-
-                # Insert tblGrid at the beginning of the table element
-                table._element.insert(0, tblGrid)
-                logger.debug(f"Repaired missing tblGrid for table with {col_count} columns")
-                return True
-            else:
-                logger.warning("Cannot repair table: no rows found")
-                return False
-        else:
-            # Table already has tblGrid, don't modify it
-            return True
-        
-    except Exception as e:
-        logger.error(f"Error validating/reparing table structure: {e}")
-        return False
-
 # Define colors for lineage
 COLORS = {
     'SATIVA': 'ED4123',
@@ -72,16 +23,6 @@ def apply_lineage_colors(doc):
     """Apply lineage colors to all cells based on keywords in cell text."""
     try:
         for table in doc.tables:
-            # Skip validation for tables that already work - only validate if there's an error
-            try:
-                # Test if table is accessible without error
-                _ = table.rows
-                _ = table.columns
-            except Exception:
-                # Only then try to repair
-                if not _validate_and_repair_table_structure(table):
-                    logger.warning(f"Skipping table with invalid structure during lineage color application")
-                    continue
             for row in table.rows:
                 for cell in row.cells:
                     text = cell.text.upper()
@@ -125,14 +66,14 @@ def apply_lineage_colors(doc):
                         color_hex = COLORS['INDICA']
                     elif "HYBRID" in text:
                         color_hex = COLORS['HYBRID']
+                    elif "CBD" in text or "CBD_BLEND" in text:
+                        color_hex = COLORS['CBD']
                     elif "MIXED" in text:
                         # For non-classic product types, Mixed should be blue
                         if not is_classic and product_type and product_type not in classic_types:
                             color_hex = COLORS['MIXED']  # Blue for non-classic Mixed
                         else:
                             color_hex = COLORS['MIXED']  # Default blue for Mixed
-                    elif "CBD" in text or "CBD_BLEND" in text:
-                        color_hex = COLORS['CBD']
                     
                     if color_hex:
                         # Set cell background color
@@ -162,14 +103,10 @@ def fix_table_row_heights(doc, template_type):
         row_height = {
             'horizontal': 2.4,
             'vertical': 3.4,
-            'mini': 1.75,
+            'mini': 1.5,
             'inventory': 2.0
         }.get(template_type, 2.4)
         for table in doc.tables:
-            # Validate table structure before processing
-            if not _validate_and_repair_table_structure(table):
-                logger.warning(f"Skipping table with invalid structure during row height fixing")
-                continue
             for row in table.rows:
                 row.height = Inches(row_height)
                 row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
@@ -189,10 +126,6 @@ def safe_fix_paragraph_spacing(doc):
             paragraph.paragraph_format.space_after = Pt(0)
             paragraph.paragraph_format.line_spacing = 1.0
         for table in doc.tables:
-            # Validate table structure before processing
-            if not _validate_and_repair_table_structure(table):
-                logger.warning(f"Skipping table with invalid structure during paragraph spacing fix")
-                continue
             for row in table.rows:
                 for cell in row.cells:
                     for paragraph in cell.paragraphs:
@@ -223,10 +156,6 @@ def apply_conditional_formatting(doc, conditions=None):
                 }
             }
         for table in doc.tables:
-            # Validate table structure before processing
-            if not _validate_and_repair_table_structure(table):
-                logger.warning(f"Skipping table with invalid structure during conditional formatting")
-                continue
             for row in table.rows:
                 for cell in row.cells:
                     for paragraph in cell.paragraphs:
@@ -459,10 +388,6 @@ def enforce_ratio_formatting(doc):
 
     # Process all tables
     for table in doc.tables:
-        # Validate table structure before processing
-        if not _validate_and_repair_table_structure(table):
-            logger.warning(f"Skipping table with invalid structure during ratio formatting")
-            continue
         for row in table.rows:
             for cell in row.cells:
                 for paragraph in cell.paragraphs:
@@ -517,43 +442,40 @@ def enforce_ratio_formatting(doc):
     return doc
 
 def enforce_arial_bold_all_text(doc):
-    """Enforce Arial Bold font for all text in the document while preserving font sizes."""
+    """Enforce Arial Bold font for ALL text in the document - NO EXCEPTIONS."""
     from docx.shared import Pt
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
 
     def process_run(run):
-        """Apply Arial Bold formatting to a single run while preserving font size."""
-        # Store existing font size and bold state
+        """Apply Arial Bold formatting to a single run - NO EXCEPTIONS."""
+        # Store existing font size only (we don't care about existing bold state)
         existing_size = run.font.size
-        existing_bold = run.font.bold
         
-        # Check if this run contains vendor markers (only check for actual markers)
-        run_text = run.text.strip()
-        is_vendor_marker = (
-            'PRODUCTVENDOR_START' in run_text or 
-            'PRODUCTVENDOR_END' in run_text or
-            '{{Label' in run_text and 'ProductVendor}}' in run_text
-        )
-        
-        # Set font properties at Python level
+        # FORCE Arial Bold for EVERYTHING - NO EXCEPTIONS
         run.font.name = "Arial"
+        run.font.bold = True
         
-        # Only make vendor markers non-bold, everything else should be bold
-        if is_vendor_marker:
-            run.font.bold = False
-        else:
-            # Make everything else bold
-            run.font.bold = True
+        # Remove any italic formatting
+        run.font.italic = False
+        
+        # Remove any other font properties that might interfere
+        if hasattr(run.font, 'underline'):
+            run.font.underline = None
         
         # Restore font size if it existed
         if existing_size:
             run.font.size = existing_size
 
-        # Force Arial at XML level for maximum compatibility
+        # Force Arial at XML level for maximum compatibility - NO EXCEPTIONS
         rPr = run._element.get_or_add_rPr()
         
-        # Set font family
+        # Remove any existing font properties
+        for element in list(rPr):
+            if element.tag.endswith('}rFonts') or element.tag.endswith('}b') or element.tag.endswith('}i'):
+                rPr.remove(element)
+        
+        # Set font family - FORCE Arial
         rFonts = OxmlElement('w:rFonts')
         rFonts.set(qn('w:ascii'), 'Arial')
         rFonts.set(qn('w:hAnsi'), 'Arial')
@@ -561,35 +483,52 @@ def enforce_arial_bold_all_text(doc):
         rFonts.set(qn('w:cs'), 'Arial')
         rPr.append(rFonts)
         
-        # Force bold only if it should be bold
-        if run.font.bold:
-            b = OxmlElement('w:b')
-            b.set(qn('w:val'), '1')
-            rPr.append(b)
+        # Force bold - NO EXCEPTIONS
+        b = OxmlElement('w:b')
+        b.set(qn('w:val'), '1')
+        rPr.append(b)
+        
+        # Remove italic at XML level
+        i = OxmlElement('w:i')
+        i.set(qn('w:val'), '0')
+        rPr.append(i)
         
         # Set font size at XML level if it exists
         if existing_size:
             sz = OxmlElement('w:sz')
-            sz.set(qn('w:val'), str(int(existing_size.pt * 2)))  # Word uses half-points
+            sz.set(qn('w:w'), str(int(existing_size.pt * 2)))  # Word uses half-points
             rPr.append(sz)
+            
+            szCs = OxmlElement('w:szCs')
+            szCs.set(qn('w:w'), str(int(existing_size.pt * 2)))
+            rPr.append(szCs)
 
-    # Process all tables
+    # Process ALL runs in ALL paragraphs in ALL tables - NO EXCEPTIONS
     for table in doc.tables:
-        # Validate table structure before processing
-        if not _validate_and_repair_table_structure(table):
-            logger.warning(f"Skipping table with invalid structure during Arial bold formatting")
-            continue
         for row in table.rows:
             for cell in row.cells:
                 for paragraph in cell.paragraphs:
                     for run in paragraph.runs:
+                        # Process ALL runs regardless of text content - NO EXCEPTIONS
                         process_run(run)
-
-    # Process all paragraphs outside tables
+    
+    # Process ALL runs in ALL paragraphs outside tables - NO EXCEPTIONS
     for paragraph in doc.paragraphs:
         for run in paragraph.runs:
+            # Process ALL runs regardless of text content - NO EXCEPTIONS
             process_run(run)
-
+    
+    # Process ALL runs in ALL headers and footers - NO EXCEPTIONS
+    for section in doc.sections:
+        for header in section.header.paragraphs:
+            for run in header.runs:
+                # Process ALL runs regardless of text content - NO EXCEPTIONS
+                process_run(run)
+        for footer in section.footer.paragraphs:
+            for run in footer.runs:
+                # Process ALL runs regardless of text content - NO EXCEPTIONS
+                process_run(run)
+    
     return doc
 
 def enforce_thc_cbd_bold_formatting(doc):
@@ -633,10 +572,6 @@ def enforce_thc_cbd_bold_formatting(doc):
     
     # Process all paragraphs in tables
     for table in doc.tables:
-        # Validate table structure before processing
-        if not _validate_and_repair_table_structure(table):
-            logger.warning(f"Skipping table with invalid structure during THC/CBD bold formatting")
-            continue
         for row in table.rows:
             for cell in row.cells:
                 for paragraph in cell.paragraphs:
@@ -672,10 +607,6 @@ def cleanup_all_price_markers(doc):
 
     # Process all tables
     for table in doc.tables:
-        # Validate table structure before processing
-        if not _validate_and_repair_table_structure(table):
-            logger.warning(f"Skipping table with invalid structure during price marker cleanup")
-            continue
         for row in table.rows:
             for cell in row.cells:
                 for paragraph in cell.paragraphs:
@@ -701,8 +632,8 @@ def remove_extra_spacing(doc):
         # Store existing font sizes for each run
         existing_sizes = []
         for run in paragraph.runs:
-            if run.text.strip():
-                existing_sizes.append(run.font.size)
+            # Process ALL runs regardless of text content - NO EXCEPTIONS
+            existing_sizes.append(run.font.size)
         
         # Clear and reset paragraph
         paragraph.clear()
@@ -735,10 +666,6 @@ def remove_extra_spacing(doc):
 
     # Process all tables
     for table in doc.tables:
-        # Validate table structure before processing
-        if not _validate_and_repair_table_structure(table):
-            logger.warning(f"Skipping table with invalid structure during extra spacing removal")
-            continue
         for row in table.rows:
             for cell in row.cells:
                 for paragraph in cell.paragraphs:
@@ -775,10 +702,6 @@ def apply_type_formatting(doc, product_type, template_type='vertical'):
 
     # Process all tables
     for table in doc.tables:
-        # Validate table structure before processing
-        if not _validate_and_repair_table_structure(table):
-            logger.warning(f"Skipping table with invalid structure during type formatting")
-            continue
         for row in table.rows:
             for cell in row.cells:
                 for paragraph in cell.paragraphs:
@@ -793,6 +716,9 @@ def apply_type_formatting(doc, product_type, template_type='vertical'):
 def create_3x3_grid(doc, template_type='vertical'):
     """Create a 3x3 grid table for label layout."""
     try:
+        # Fix page margins first to ensure the grid fits
+        doc = fix_page_margins_for_3x3_grid(doc)
+        
         # Remove existing tables
         for table in doc.tables:
             table._element.getparent().remove(table._element)
@@ -815,8 +741,15 @@ def create_3x3_grid(doc, template_type='vertical'):
         tblPr.append(tblLayout)
         table._element.insert(0, tblPr)
         
+        # Calculate optimal column width based on available space
+        # Standard letter paper is 8.5" wide, with 0.25" margins = 8.0" available
+        # We need 3 columns, so each column should be about 2.6" wide
+        # Leave some space for borders and spacing
+        available_width = 8.0  # 8.5" - 0.5" total margins
+        col_width_inches = min(2.6, available_width / 3)  # Don't exceed available space
+        
         # Set column widths
-        col_width = Inches(3.3 / 3)  # 3.5 inches divided by 3 columns
+        col_width = Inches(col_width_inches)
         tblGrid = OxmlElement('w:tblGrid')
         for _ in range(3):
             gridCol = OxmlElement('w:gridCol')
@@ -824,16 +757,24 @@ def create_3x3_grid(doc, template_type='vertical'):
             tblGrid.append(gridCol)
         table._element.insert(0, tblGrid)
         
+        # Calculate optimal row height based on available space
+        # Standard letter paper is 11" tall, with 0.25" margins = 10.5" available
+        # We need 3 rows, so each row should fit within available space
+        available_height = 10.5  # 11" - 0.5" total margins
+        # Leave minimal buffer space for borders and spacing
+        usable_height = available_height - 0.1  # 0.1" buffer for borders/spacing
+        row_height_inches = min(3.47, usable_height / 3)  # Ensure total height fits with minimal buffer
+        
         # Set row heights
-        row_height = Inches(2.25)  
+        row_height = Inches(row_height_inches)
         for row in table.rows:
             row.height = row_height
             row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
         
         # Enforce fixed cell dimensions to prevent any growth
-        enforce_fixed_cell_dimensions(table)
+        enforce_fixed_cell_dimensions(table, template_type)
         
-        logger.debug("Created 3x3 grid table")
+        logger.debug(f"Created 3x3 grid table with {col_width_inches:.2f}\" columns and {row_height_inches:.2f}\" rows")
         return table
     except Exception as e:
         logger.error(f"Error creating 3x3 grid: {str(e)}")
@@ -854,10 +795,29 @@ def disable_autofit(table):
         logger.error(f"Error disabling autofit: {str(e)}")
         raise
 
-def enforce_fixed_cell_dimensions(table):
+def enforce_fixed_cell_dimensions(table, template_type=None):
     """Enforce fixed cell dimensions to prevent any cell growth with text."""
     try:
         from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
+        from docx.shared import Inches
+        from docx.enum.table import WD_ROW_HEIGHT_RULE
+        
+        # Safety check: ensure table has valid structure
+        if not table or not table.rows or len(table.rows) == 0:
+            logger.warning("Cannot enforce dimensions on empty or invalid table")
+            return table
+        
+        # Additional safety check: ensure table has valid XML structure
+        try:
+            # Test if we can access the first row's cells safely
+            if table.rows and len(table.rows) > 0:
+                test_row = table.rows[0]
+                if not hasattr(test_row, '_element') or not hasattr(test_row._element, 'tc_lst'):
+                    logger.warning("Table row missing required XML structure, attempting to repair")
+                    return table  # Return table as-is if we can't repair it
+        except Exception as e:
+            logger.warning(f"Table structure validation failed: {e}, returning table as-is")
+            return table
         
         # Disable autofit
         disable_autofit(table)
@@ -877,92 +837,101 @@ def enforce_fixed_cell_dimensions(table):
         if hasattr(table, 'allow_autofit'):
             table.allow_autofit = False
         
+        # If template_type is provided, enforce the correct dimensions
+        if template_type:
+            # Skip dimension enforcement for mini templates since they are already properly sized
+            if template_type == 'mini':
+                logger.info("Skipping dimension enforcement for mini template - already properly sized")
+                return table
+            
+            try:
+                from src.core.constants import CELL_DIMENSIONS
+                cell_dims = CELL_DIMENSIONS.get(template_type)
+                if cell_dims and table.rows:
+                    # Set column widths based on template type
+                    tblGrid = table._element.find(qn('w:tblGrid'))
+                    if tblGrid is not None:
+                        # Remove existing grid
+                        tblGrid.getparent().remove(tblGrid)
+                    
+                    # Create new grid with correct dimensions
+                    tblGrid = OxmlElement('w:tblGrid')
+                    # Use the actual number of columns in the table, not table.columns
+                    num_cols = len(table.rows[0].cells) if table.rows else 0
+                    if num_cols > 0:
+                        for _ in range(num_cols):
+                            gridCol = OxmlElement('w:gridCol')
+                            gridCol.set(qn('w:w'), str(int(cell_dims['width'] * 1440)))
+                            tblGrid.append(gridCol)
+                        table._element.insert(0, tblGrid)
+                        
+                        # Set row heights based on template type
+                        for row in table.rows:
+                            row.height = Inches(cell_dims['height'])
+                            row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+            except Exception as e:
+                logger.warning(f"Could not enforce template-specific dimensions for {template_type}: {e}")
+                # Continue with general dimension enforcement
+        
+        # Ensure table has a valid tblGrid before processing cells
+        tblGrid = table._element.find(qn('w:tblGrid'))
+        if tblGrid is None:
+            # Create tblGrid if it doesn't exist
+            tblGrid = OxmlElement('w:tblGrid')
+            if table.rows and len(table.rows) > 0:
+                num_cols = len(table.rows[0]._element.tc_lst)
+                for _ in range(num_cols):
+                    gridCol = OxmlElement('w:gridCol')
+                    gridCol.set(qn('w:w'), '1440')  # Default width
+                    tblGrid.append(gridCol)
+                table._element.insert(0, tblGrid)
+        
         # Process each cell to enforce fixed dimensions
         for row in table.rows:
-            # Set exact row height rule
-            row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
-            
-            for cell in row.cells:
-                # Set cell vertical alignment to top to prevent content from expanding cell
-                cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
+            try:
+                # Set exact row height rule if not already set
+                if not template_type:
+                    row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
                 
-                # Clear any cell margins that might allow expansion
-                clear_cell_margins(cell)
-                
-                # Process paragraphs in the cell to prevent text overflow
-                for paragraph in cell.paragraphs:
-                    # Set paragraph spacing to minimum
-                    paragraph.paragraph_format.space_before = Pt(0)
-                    paragraph.paragraph_format.space_after = Pt(0)
-                    paragraph.paragraph_format.line_spacing = 1.0
-                    
-                    # Ensure text doesn't wrap beyond cell boundaries
-                    for run in paragraph.runs:
-                        # Set font properties to prevent text expansion
-                        if not run.font.size:
-                            run.font.size = Pt(12)  # Set default size if none
+                # Use _element.tc_lst to safely access cells
+                if hasattr(row, '_element') and hasattr(row._element, 'tc_lst'):
+                    for cell_element in row._element.tc_lst:
+                        try:
+                            cell = row.cells[cell_element._index] if hasattr(cell_element, '_index') else None
+                            if cell is None:
+                                continue
+                                
+                            # Set cell vertical alignment to top to prevent content from expanding cell
+                            cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
+                            
+                            # Clear any cell margins that might allow expansion
+                            clear_cell_margins(cell)
+                            
+                            # Process paragraphs in the cell to prevent text overflow
+                            for paragraph in cell.paragraphs:
+                                # Set paragraph spacing to minimum
+                                paragraph.paragraph_format.space_before = Pt(0)
+                                paragraph.paragraph_format.space_after = Pt(0)
+                                paragraph.paragraph_format.line_spacing = 1.0
+                                
+                                # Ensure text doesn't wrap beyond cell boundaries
+                                for run in paragraph.runs:
+                                    # Set font properties to prevent text expansion
+                                    if not run.font.size:
+                                        run.font.size = Pt(12)  # Set default size if none
+                        except Exception as cell_error:
+                            logger.warning(f"Error processing cell in row: {cell_error}")
+                            continue
+                else:
+                    logger.warning(f"Row missing required XML structure: {row}")
+            except Exception as row_error:
+                logger.warning(f"Error processing row: {row_error}")
+                continue
         
-        logger.debug("Enforced fixed cell dimensions for table")
+        logger.debug(f"Enforced fixed cell dimensions for table (template: {template_type})")
         return table
     except Exception as e:
         logger.error(f"Error enforcing fixed cell dimensions: {str(e)}")
-        raise
-
-def enforce_fixed_layout(doc, template_type='horizontal'):
-    """Apply a strict, non-expanding layout to all tables in the document.
-
-    - Disable any auto-fit behavior and force fixed layout
-    - Force all row heights to use EXACTLY height rule
-    - Standardize cell widths to template constants so content cannot expand cells
-    """
-    try:
-        # First, set explicit row heights per template
-        fix_table_row_heights(doc, template_type)
-
-        # Standardize layout and cell sizing per table
-        from src.core.constants import CELL_DIMENSIONS
-        dims = CELL_DIMENSIONS.get(template_type, {'width': 2.4, 'height': 2.4})
-        target_cell_width_twips = str(int(Inches(dims['width']).inches * 1440))
-
-        for table in doc.tables:
-            # Validate table structure before processing
-            if not _validate_and_repair_table_structure(table):
-                logger.warning(f"Skipping table with invalid structure during fixed layout enforcement")
-                continue
-            # Ensure fixed layout at table level
-            tblPr = table._element.find(qn('w:tblPr'))
-            if tblPr is None:
-                tblPr = OxmlElement('w:tblPr')
-                table._element.insert(0, tblPr)
-            tblLayout = OxmlElement('w:tblLayout')
-            tblLayout.set(qn('w:type'), 'fixed')
-            tblPr.append(tblLayout)
-
-            # Turn off autofit flags if present
-            table.autofit = False
-            if hasattr(table, 'allow_autofit'):
-                table.allow_autofit = False
-
-            # Enforce non-expanding behavior down to the cell/paragraph level
-            enforce_fixed_cell_dimensions(table)
-
-            # Apply explicit width to every cell to avoid reflow/expansion
-            for row in table.rows:
-                # Ensure height rule stays EXACTLY
-                row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
-                for cell in row.cells:
-                    tcPr = cell._tc.get_or_add_tcPr()
-                    tcW = tcPr.find(qn('w:tcW'))
-                    if tcW is not None:
-                        tcPr.remove(tcW)
-                    new_tcW = OxmlElement('w:tcW')
-                    new_tcW.set(qn('w:w'), target_cell_width_twips)
-                    new_tcW.set(qn('w:type'), 'dxa')
-                    tcPr.append(new_tcW)
-        logger.debug("Enforced fixed layout across entire document")
-        return doc
-    except Exception as e:
-        logger.error(f"Error enforcing fixed layout: {str(e)}")
         raise
 
 def fix_table(doc, num_rows=3, num_cols=3, template_type='horizontal'):
@@ -1010,7 +979,7 @@ def fix_table(doc, num_rows=3, num_cols=3, template_type='horizontal'):
         row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
     
     # Enforce fixed cell dimensions to prevent any growth
-    enforce_fixed_cell_dimensions(table)
+    enforce_fixed_cell_dimensions(table, template_type)
     
     return table
 
@@ -1059,7 +1028,7 @@ def rebuild_3x3_grid(doc, template_type='horizontal'):
         row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
     
     # Enforce fixed cell dimensions to prevent any growth
-    enforce_fixed_cell_dimensions(table)
+    enforce_fixed_cell_dimensions(table, template_type)
     
     return table 
 
@@ -1109,10 +1078,6 @@ def apply_custom_formatting(doc, template_settings):
         # Apply background color to tables if specified
         if background_color != '#ffffff':
             for table in doc.tables:
-                # Validate table structure before processing
-                if not _validate_and_repair_table_structure(table):
-                    logger.warning(f"Skipping table with invalid structure during custom formatting")
-                    continue
                 for row in table.rows:
                     for cell in row.cells:
                         set_cell_background(cell, background_color)
@@ -1149,3 +1114,102 @@ def apply_custom_formatting(doc, template_settings):
         logger.error(f"Error applying custom formatting: {str(e)}")
         # Fall back to default formatting
         enforce_arial_bold_all_text(doc) 
+
+def fix_page_margins_for_3x3_grid(doc):
+    """Fix page margins to ensure 3x3 grid fits properly."""
+    try:
+        from docx.shared import Inches
+        
+        # Get the first section (or create one if none exists)
+        if not doc.sections:
+            section = doc.add_section()
+        else:
+            section = doc.sections[0]
+        
+        # Set minimal margins to maximize available space for the 3x3 grid
+        # Standard letter paper is 8.5" x 11"
+        # We need space for: 3 columns × 3.4" = 10.2" total width
+        # So we need very small margins
+        section.left_margin = Inches(0.25)   # 0.25" left margin
+        section.right_margin = Inches(0.25)  # 0.25" right margin
+        section.top_margin = Inches(0.25)    # 0.25" top margin
+        section.bottom_margin = Inches(0.25) # 0.25" bottom margin
+        
+        # REMOVE ANY HEADERS AND FOOTERS that might be taking up space
+        # This ensures the full page area is available for the 3x3 grid
+        if hasattr(section, 'header') and section.header:
+            # Clear header content by removing all child elements
+            for child in list(section.header._element):
+                section.header._element.remove(child)
+        if hasattr(section, 'footer') and section.footer:
+            # Clear footer content by removing all child elements
+            for child in list(section.footer._element):
+                section.footer._element.remove(child)
+        # Ensure no header/footer spacing
+        section.header_distance = 0
+        section.footer_distance = 0
+        
+        # Calculate available space (convert twips to inches for logging)
+        # 1 inch = 1440 twips
+        available_width_inches = (section.page_width - section.left_margin - section.right_margin) / 1440
+        available_height_inches = (section.page_height - section.top_margin - section.bottom_margin) / 1440
+        
+        logger.debug(f"Page dimensions: {section.page_width/1440:.2f}\" x {section.page_height/1440:.2f}\"")
+        logger.debug(f"Margins: L={section.left_margin.inches:.2f}\", R={section.right_margin.inches:.2f}\", T={section.top_margin.inches:.2f}\", B={section.bottom_margin.inches:.2f}\"")
+        logger.debug(f"Available space: {available_width_inches:.2f}\" x {available_height_inches:.2f}\"")
+        
+        return doc
+    except Exception as e:
+        logger.error(f"Error fixing page margins: {e}")
+        return doc
+
+def fix_page_margins_for_horizontal_3x3_grid(doc):
+    """Fix page margins and enforce landscape orientation for horizontal 3x3 grid."""
+    try:
+        from docx.shared import Inches
+        from docx.enum.section import WD_ORIENT
+        
+        # Get the first section (or create one if none exists)
+        if not doc.sections:
+            section = doc.add_section()
+        else:
+            section = doc.sections[0]
+        
+        # ENFORCE LANDSCAPE ORIENTATION for horizontal templates
+        section.orientation = WD_ORIENT.LANDSCAPE
+        
+        # Set optimized margins for landscape 3x3 grid with exact cell dimensions
+        # Landscape: 11" x 8.5" (rotated from 8.5" x 11")
+        # Required: 3 columns × 3.4" = 10.2" width, 3 rows × 2.4" = 7.2" height
+        # Available: 11" - 0.4" margins = 10.6" width, 8.5" - 0.65" margins = 7.85" height
+        section.left_margin = Inches(0.2)    # 0.2" left margin
+        section.right_margin = Inches(0.2)   # 0.2" right margin
+        section.top_margin = Inches(0.325)   # 0.325" top margin
+        section.bottom_margin = Inches(0.325) # 0.325" bottom margin
+        
+        # REMOVE ANY HEADERS AND FOOTERS that might be taking up space
+        # This ensures the full page area is available for the 3x3 grid
+        if hasattr(section, 'header') and section.header:
+            # Clear header content by removing all child elements
+            for child in list(section.header._element):
+                section.header._element.remove(child)
+        if hasattr(section, 'footer') and section.footer:
+            # Clear footer content by removing all child elements
+            for child in list(section.footer._element):
+                section.footer._element.remove(child)
+        # Ensure no header/footer spacing
+        section.header_distance = 0
+        section.footer_distance = 0
+        
+        # Calculate available space in landscape mode
+        available_width_inches = (section.page_width - section.left_margin - section.right_margin) / 1440
+        available_height_inches = (section.page_height - section.top_margin - section.bottom_margin) / 1440
+        
+        logger.debug(f"LANDSCAPE Page dimensions: {section.page_width/1440:.2f}\" x {section.page_height/1440:.2f}\"")
+        logger.debug(f"LANDSCAPE Margins: L={section.left_margin.inches:.2f}\", R={section.right_margin.inches:.2f}\", T={section.top_margin.inches:.2f}\", B={section.bottom_margin.inches:.2f}\"")
+        logger.debug(f"LANDSCAPE Available space: {available_width_inches:.2f}\" x {available_height_inches:.2f}\"")
+        
+        return doc
+    except Exception as e:
+        logger.error(f"Error fixing horizontal page margins: {e}")
+        return doc 

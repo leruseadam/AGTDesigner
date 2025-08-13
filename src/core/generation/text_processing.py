@@ -1,62 +1,8 @@
 import re
 from typing import Optional
-from docx.oxml import OxmlElement
-from docx.oxml.ns import qn
-import logging
-
-logger = logging.getLogger(__name__)
 
 # Performance optimization: disable debug logging in production
 DEBUG_ENABLED = False
-
-def _validate_and_repair_table_structure(table):
-    """
-    Validate and repair table structure to ensure it has required elements.
-    Returns True if table is valid, False if it cannot be repaired.
-    """
-    try:
-        # First, try to access table properties to see if there's an actual error
-        try:
-            _ = table.rows
-            _ = table.columns
-            # If we can access these without error, the table is fine
-            return True
-        except Exception:
-            # Only then check if we need to repair
-            pass
-        
-        # Check if table has the required tblGrid element
-        tblGrid = table._element.find(qn('w:tblGrid'))
-        if tblGrid is None:
-            # Create tblGrid element
-            tblGrid = OxmlElement('w:tblGrid')
-
-            # Get the actual number of columns from the table structure
-            # Count cells in the first row to determine column count
-            if len(table.rows) > 0:
-                first_row = table.rows[0]
-                col_count = len(first_row.cells)
-
-                # Create grid columns
-                for _ in range(col_count):
-                    gridCol = OxmlElement('w:gridCol')
-                    gridCol.set(qn('w:w'), '1440')  # Default width of 1 inch
-                    tblGrid.append(gridCol)
-
-                # Insert tblGrid at the beginning of the table element
-                table._element.insert(0, tblGrid)
-                logger.debug(f"Repaired missing tblGrid for table with {col_count} columns")
-                return True
-            else:
-                logger.warning("Cannot repair table: no rows found")
-                return False
-        else:
-            # Table already has tblGrid, don't modify it
-            return True
-        
-    except Exception as e:
-        logger.error(f"Error validating/reparing table structure: {e}")
-        return False
 
 def insert_newline_every_2nd_space(text):
     """Insert a newline after every 2nd space in the text."""
@@ -250,10 +196,6 @@ def make_nonbreaking_hyphens(text):
 def replace_placeholder_with_markers(doc, placeholder, marker_value):
     """Replace placeholder text with marked content in a document."""
     for table in doc.tables:
-        # Validate table structure before processing
-        if not _validate_and_repair_table_structure(table):
-            logger.warning(f"Skipping table with invalid structure during placeholder replacement")
-            continue
         for row in table.rows:
             for cell in row.cells:
                 for para in cell.paragraphs:
@@ -333,6 +275,21 @@ def format_thc_cbd_bold_labels(text, template_type='vertical'):
     cbd_value = cbd_match.group(1) if cbd_match else ""
     cbd_unit = cbd_match.group(2) if cbd_match else ""
     
+    # Round percentage values to 1 decimal place
+    if thc_value and thc_unit == '%':
+        try:
+            thc_float = float(thc_value)
+            thc_value = f"{thc_float:.1f}"
+        except (ValueError, TypeError):
+            pass
+    
+    if cbd_value and cbd_unit == '%':
+        try:
+            cbd_float = float(cbd_value)
+            cbd_value = f"{cbd_float:.1f}"
+        except (ValueError, TypeError):
+            pass
+    
     # Format based on template type
     if template_type == 'horizontal':
         # Horizontal template: keep on same line
@@ -358,6 +315,9 @@ def format_thc_cbd_bold_labels(text, template_type='vertical'):
         else:
             result.append("THC:")
             result.append("  ")
+        
+        # Add extra blank line for better spacing between THC and CBD
+        result.append("")
         
         if cbd_value:
             result.append("CBD:")
