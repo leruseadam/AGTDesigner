@@ -4750,8 +4750,8 @@ const TagManager = {
                         <div class="logo-icon" style="width: 60px; height: 60px; background: linear-gradient(135deg, #00d4aa, #0099cc); border-radius: 15px; display: flex; align-items: center; justify-content: center; font-size: 28px; box-shadow: 0 15px 35px rgba(0, 212, 170, 0.3), 0 0 0 1px rgba(0, 212, 170, 0.2); animation: logo-float 3s ease-in-out infinite; position: relative;">🏷️</div>
                     </div>
                     
-                    <h1 class="app-title" style="font-size: 32px; font-weight: 800; margin-bottom: 8px; background: linear-gradient(135deg, #00d4aa, #ffffff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; letter-spacing: -0.5px; text-shadow: 0 2px 8px rgba(0,0,0,0.4), 0 4px 16px rgba(0,0,0,0.3), 0 1px 2px rgba(160,132,232,0.3), 0 0 20px rgba(160,132,232,0.2); filter: drop-shadow(0 4px 8px rgba(0,0,0,0.3));">AUTO GENERATING TAG DESIGNER</h1>
-                    <p class="app-subtitle" style="font-size: 14px; font-weight: 600; opacity: 1; margin-bottom: 25px; letter-spacing: 1px; text-transform: uppercase; text-shadow: 0 2px 6px rgba(0,0,0,0.4), 0 3px 12px rgba(0,0,0,0.3), 0 1px 2px rgba(139,92,246,0.3), 0 0 15px rgba(139,92,246,0.2); filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));">Generating Labels...</p>
+                    <h1 class="app-title" style="color: #fff; font-weight: 900; letter-spacing: 3px; font-size: 2.5rem; margin-bottom: 12px; text-shadow: 0 4px 12px rgba(0,0,0,0.5), 0 6px 20px rgba(0,0,0,0.4), 0 2px 4px rgba(160,132,232,0.4), 0 0 30px rgba(160,132,232,0.3); filter: drop-shadow(0 6px 12px rgba(0,0,0,0.4));">AGT DESIGNER</h1>
+                    <p class="app-subtitle" style="color: #fff; font-size: 1.2rem; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 20px; text-shadow: 0 3px 8px rgba(0,0,0,0.5), 0 4px 16px rgba(0,0,0,0.4), 0 2px 4px rgba(139,92,246,0.4), 0 0 20px rgba(139,92,246,0.3); filter: drop-shadow(0 3px 6px rgba(0,0,0,0.4));">AUTO-GENERATING TAG DESIGNER</p>
                     
                     <div class="loading-container" style="width: 100%; max-width: 300px; margin-bottom: 20px;">
                         <div class="loading-bar" style="width: 100%; height: 6px; background: rgba(255, 255, 255, 0.1); border-radius: 3px; overflow: hidden; margin-bottom: 15px; position: relative;">
@@ -4766,6 +4766,9 @@ const TagManager = {
                         <div class="dot" style="width: 6px; height: 6px; border-radius: 50%; background: rgba(0, 212, 170, 0.6); animation: dot-pulse 1.6s ease-in-out infinite both; animation-delay: -0.16s;"></div>
                         <div class="dot" style="width: 6px; height: 6px; border-radius: 50%; background: rgba(0, 212, 170, 0.6); animation: dot-pulse 1.6s ease-in-out infinite both; animation-delay: -0.32s;"></div>
                     </div>
+                    
+                    <!-- Copyright text matching title card -->
+                    <p style="font-size: 0.9rem; color: rgba(255, 255, 255, 0.8); margin-top: 0.5rem; font-weight: 500; letter-spacing: 1px; text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(160,132,232,0.3); opacity: 0.9; margin-bottom: 15px;">©2025 Created by Adam Cordova for A Greener Today</p>
                     
                     <div class="features" style="display: flex; gap: 20px; margin-top: 10px;">
                         <div class="feature" style="text-align: center; opacity: 0.6;">
@@ -4912,10 +4915,12 @@ const TagManager = {
         splashModal.style.display = 'flex';
         splashModal.innerHTML = `
             <div class="generation-splash-popup" style="background: rgba(22, 33, 62, 0.95); border-radius: 24px; padding: 40px; text-align: center; color: white; border: 1px solid rgba(0, 212, 170, 0.2); box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(0, 212, 170, 0.1);">
-                <h2 style="color: #00d4aa; margin-bottom: 20px;">AUTO GENERATING TAG DESIGNER</h2>
+                <h1 style="color: #fff; font-weight: 900; letter-spacing: 3px; font-size: 2.5rem; margin-bottom: 12px; text-shadow: 0 4px 12px rgba(0,0,0,0.5), 0 6px 20px rgba(0,0,0,0.4), 0 2px 4px rgba(160,132,232,0.4), 0 0 30px rgba(160,132,232,0.3); filter: drop-shadow(0 6px 12px rgba(0,0,0,0.4));">AGT DESIGNER</h1>
+                <p style="color: #fff; font-size: 1.2rem; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 20px; text-shadow: 0 3px 8px rgba(0,0,0,0.5), 0 4px 16px rgba(0,0,0,0.4), 0 2px 4px rgba(139,92,246,0.4), 0 0 20px rgba(139,92,246,0.3); filter: drop-shadow(0 3px 6px rgba(0,0,0,0.4));">AUTO-GENERATING TAG DESIGNER</p>
                 <p style="margin-bottom: 15px;">Generating Labels...</p>
                 <p style="margin-bottom: 15px;">Template: ${templateType.toUpperCase()}</p>
                 <p style="margin-bottom: 20px;">Labels: ${labelCount}</p>
+                <p style="font-size: 1rem; color: rgba(255, 255, 255, 0.8); margin-top: 0.5rem; font-weight: 500; letter-spacing: 1px; text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(160,132,232,0.3); opacity: 0.9; margin-bottom: 20px;">©2025 Created by Adam Cordova for A Greener Today</p>
                 <div style="margin: 20px 0;">
                     <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px;">
                         <div style="width: 100%; height: 100%; background: linear-gradient(90deg, #00d4aa, #0099cc); border-radius: 3px; animation: progress 2s ease-in-out infinite;"></div>

@@ -46,6 +46,100 @@
   <script>
     console.log('Defining global functions early in head...');
     
+    // Store Management Functions
+    function changeStore(storeValue) {
+      if (!storeValue) {
+        updateStoreStatus('Please select a store', 'inactive');
+        return;
+      }
+      
+      // Save store selection to localStorage
+      localStorage.setItem('selectedStore', storeValue);
+      
+      // Update store status
+      updateStoreStatus(`Store: ${storeValue.replace(/_/g, ' ')}`, 'active');
+      
+      // Send store selection to backend
+      fetch('/api/set-store', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ store: storeValue })
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.success) {
+          console.log('Store selection saved to backend:', storeValue);
+          // Clear any existing data to ensure fresh start with new store
+          clearExistingData();
+        } else {
+          console.error('Failed to save store selection:', data.error);
+          updateStoreStatus('Failed to save store selection', 'inactive');
+        }
+      })
+      .catch(error => {
+        console.error('Error saving store selection:', error);
+        updateStoreStatus('Error saving store selection', 'inactive');
+      });
+    }
+    
+    function updateStoreStatus(message, status) {
+      const statusElement = document.getElementById('storeStatus');
+      if (statusElement) {
+        statusElement.textContent = message;
+        statusElement.className = `store-status ${status}`;
+      }
+    }
+    
+    function clearExistingData() {
+      // Clear selected tags
+      if (window.excelProcessor && window.excelProcessor.selected_tags) {
+        window.excelProcessor.selected_tags = [];
+      }
+      
+      // Clear session data
+      sessionStorage.removeItem('selectedTags');
+      
+      // Clear any cached data
+      if (window.clearJsonMatches) {
+        window.clearJsonMatches();
+      }
+      
+      console.log('Cleared existing data for new store selection');
+    }
+    
+    function loadSavedStore() {
+      const savedStore = localStorage.getItem('selectedStore');
+      if (savedStore) {
+        const storeSelect = document.getElementById('storeSelect');
+        if (storeSelect) {
+          storeSelect.value = savedStore;
+          changeStore(savedStore);
+        }
+      }
+      
+      // Also check backend for current store status
+      updateStoreStatusFromBackend();
+    }
+    
+    function updateStoreStatusFromBackend() {
+      fetch('/api/get-store')
+        .then(response => response.json())
+        .then(data => {
+          if (data.success && data.store) {
+            const storeSelect = document.getElementById('storeSelect');
+            if (storeSelect && storeSelect.value !== data.store) {
+              storeSelect.value = data.store;
+              updateStoreStatus(`Store: ${data.store.replace(/_/g, ' ')}`, 'active');
+            }
+          }
+        })
+        .catch(error => {
+          console.log('No store set in backend yet');
+        });
+    }
+    
     function generateJsonInventory() {
       const url = document.getElementById('jsonInventoryUrlInput').value.trim();
       if (!url) {
@@ -1543,6 +1637,63 @@
             });
           </script>
   <style>
+    /* Store Selection Styles */
+    .store-selection-container {
+      text-align: center;
+      margin: 0 auto;
+      max-width: 400px;
+    }
+    
+    .store-label {
+      display: block;
+      color: #e0e0e0;
+      font-size: 0.9rem;
+      font-weight: 500;
+      margin-bottom: 0.5rem;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    }
+    
+    .store-select {
+      background: rgba(45, 34, 58, 0.9);
+      border: 2px solid rgba(160, 132, 232, 0.4);
+      border-radius: 12px;
+      color: #e0e0e0;
+      font-size: 0.9rem;
+      padding: 0.6rem 1rem;
+      transition: all 0.3s ease;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+    
+    .store-select:focus {
+      background: rgba(45, 34, 58, 0.95);
+      border-color: rgba(160, 132, 232, 0.8);
+      box-shadow: 0 0 0 0.2rem rgba(160, 132, 232, 0.25);
+      color: #ffffff;
+      outline: none;
+    }
+    
+    .store-select option {
+      background: rgba(45, 34, 58, 0.95);
+      color: #e0e0e0;
+      padding: 0.5rem;
+    }
+    
+    .store-status {
+      margin-top: 0.5rem;
+      font-size: 0.8rem;
+      color: #a0a0a0;
+      min-height: 1.2rem;
+    }
+    
+    .store-status.active {
+      color: #4ade80;
+    }
+    
+    .store-status.inactive {
+      color: #f87171;
+    }
+
     /* Enhanced Lineage Editor Styles */
                 /* Strain Browser Styles */
             .strain-browser {
@@ -2336,6 +2487,22 @@
               ©2025 Created by Adam Cordova for A Greener Today
             </p>
 
+            <!-- Store Selection -->
+            <div class="store-selection-container mt-3 mb-3">
+              <label for="storeSelect" class="store-label">Select Your Store:</label>
+              <select id="storeSelect" class="form-select store-select" onchange="changeStore(this.value)">
+                <option value="">-- Select Store --</option>
+                <option value="AGT_Bothell">AGT Bothell</option>
+                <option value="AGT_Burien">AGT Burien</option>
+                <option value="AGT_Goldbar">AGT Goldbar</option>
+                <option value="AGT_Lynnwood">AGT Lynnwood</option>
+                <option value="AGT_Shoreline">AGT Shoreline</option>
+                <option value="AGT_Seattle">AGT Seattle</option>
+                <option value="AGT_Walla_Walla">AGT Walla Walla</option>
+              </select>
+              <div class="store-status" id="storeStatus"></div>
+            </div>
+
             <!-- Database and Lineage Management Buttons -->
             <div class="header-buttons-container mt-3 d-flex justify-content-center gap-3">
               <button class="btn btn-header-action" onclick="openDatabaseAnalytics()" title="Open database analytics and management">
@@ -2413,50 +2580,8 @@
         <div class="row fade-in g-1" style="animation-delay: 0.4s; display: flex; justify-content: space-between;">
           <!-- Filter Bar as a column -->
           <div class="mb-1" data-container-type="filter" style="flex: 1; margin-right: 0.5rem;">
-              <div class="sticky-filter-bar d-flex flex-row align-items-center justify-content-between" style="height: auto; width: 100%; background: rgba(40, 30, 60, 0.95); border-radius: 18px; box-shadow: 0 4px 24px rgba(80, 40, 160, 0.18); border: 1.5px solid rgba(160, 132, 232, 0.18); padding: 0.75rem; margin: 0;">
+              <div class="sticky-filter-bar d-flex flex-row align-items-center justify-content-between" style="height: auto; width: 100%; border-radius: 24px; padding: 1.5rem; margin: 0;">
                                               <div class="d-flex flex-row gap-3" style="height: 100%; align-items: center;">
-                  <div>
-                    <label for="vendorFilter" class="filter-category-label mb-0">VENDOR</label>
-                    <select id="vendorFilter" class="form-select form-select-sm compact-filter" aria-label="Filter by vendor" style="background: #2a2040; color: #fff; border-radius: 8px; border: 1.5px solid #a084e8; width: 100%;">
-                      <option value="All">All Vendors</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label for="brandFilter" class="filter-category-label mb-0">BRAND</label>
-                    <select id="brandFilter" class="form-select form-select-sm compact-filter" aria-label="Filter by brand" style="background: #2a2040; color: #fff; border-radius: 8px; border: 1.5px solid #a084e8; width: 100%;">
-                      <option value="All">All Brands</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label for="productTypeFilter" class="filter-category-label mb-0">PRODUCT TYPE</label>
-                    <select id="productTypeFilter" class="form-select form-select-sm compact-filter" aria-label="Filter by product type" style="background: #2a2040; color: #fff; border-radius: 8px; border: 1.5px solid #a084e8; width: 100%;">
-                      <option value="All">All Product Types</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label for="lineageFilter" class="filter-category-label mb-0">LINEAGE</label>
-                    <select id="lineageFilter" class="form-select form-select-sm compact-filter" aria-label="Filter by lineage" style="background: #2a2040; color: #fff; border-radius: 8px; border: 1.5px solid #a084e8; width: 100%;">
-                      <option value="All">All Lineages</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label for="weightFilter" class="filter-category-label mb-0">WEIGHT</label>
-                    <select id="weightFilter" class="form-select form-select-sm compact-filter" aria-label="Filter by weight" style="background: #2a2040; color: #fff; border-radius: 8px; border: 1.5px solid #a084e8; width: 100%;">
-                      <option value="All">All Weights</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label for="dohFilter" class="filter-category-label mb-0">DOH COMPLIANCE</label>
-                    <select id="dohFilter" class="form-select form-select-sm compact-filter" aria-label="Filter by DOH compliance" style="background: #2a2040; color: #fff; border-radius: 8px; border: 1.5px solid #a084e8; width: 100%;">
-                      <option value="All">All Products</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label for="highCbdFilter" class="filter-category-label mb-0">HIGH CBD</label>
-                    <select id="highCbdFilter" class="form-select form-select-sm compact-filter" aria-label="Filter by High CBD products" style="background: #2a2040; color: #fff; border-radius: 8px; border: 1.5px solid #a084e8; width: 100%;">
-                      <option value="All">All Products</option>
-                    </select>
-                  </div>
                   <!-- Clear Filters Button -->
                   <div class="mt-3">
                     <button id="clearFiltersBtn" class="btn btn-sm w-100" onclick="TagManager.clearAllFilters()" title="Clear all filters" style="background: linear-gradient(135deg, rgba(220, 53, 69, 0.8), rgba(220, 53, 69, 0.6)); border: 1.5px solid rgba(220, 53, 69, 0.8); color: #fff; border-radius: 8px; font-size: 0.8rem; font-weight: 600; padding: 0.4rem 0.6rem; transition: all 0.3s ease; box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3);">
@@ -2466,6 +2591,48 @@
                       </svg>
                       Clear Filters
                     </button>
+                  </div>
+                  <div>
+                    <label for="vendorFilter" class="filter-category-label mb-0">VENDOR</label>
+                    <select id="vendorFilter" class="form-select form-select-sm compact-filter" aria-label="Filter by vendor" style="width: 100%;">
+                      <option value="All">All Vendors</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label for="brandFilter" class="filter-category-label mb-0">BRAND</label>
+                    <select id="brandFilter" class="form-select form-select-sm compact-filter" aria-label="Filter by brand" style="width: 100%;">
+                      <option value="All">All Brands</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label for="productTypeFilter" class="filter-category-label mb-0">PRODUCT TYPE</label>
+                    <select id="productTypeFilter" class="form-select form-select-sm compact-filter" aria-label="Filter by product type" style="width: 100%;">
+                      <option value="All">All Product Types</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label for="lineageFilter" class="filter-category-label mb-0">LINEAGE</label>
+                    <select id="lineageFilter" class="form-select form-select-sm compact-filter" aria-label="Filter by lineage" style="width: 100%;">
+                      <option value="All">All Lineages</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label for="weightFilter" class="filter-category-label mb-0">WEIGHT</label>
+                    <select id="weightFilter" class="form-select form-select-sm compact-filter" aria-label="Filter by weight" style="width: 100%;">
+                      <option value="All">All Weights</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label for="dohFilter" class="filter-category-label mb-0">DOH COMPLIANCE</label>
+                    <select id="dohFilter" class="form-select form-select-sm compact-filter" aria-label="Filter by DOH compliance" style="width: 100%;">
+                      <option value="All">All Products</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label for="highCbdFilter" class="filter-category-label mb-0">HIGH CBD</label>
+                    <select id="highCbdFilter" class="form-select form-select-sm compact-filter" aria-label="Filter by High CBD products" style="background: #2a2040; color: #fff; border-radius: 8px; border: 1.5px solid #a084e8; width: 100%;">
+                      <option value="All">All Products</option>
+                    </select>
                   </div>
               </div>
             </div>
@@ -3240,6 +3407,12 @@
     
     document.addEventListener('DOMContentLoaded', function () {
       TagManager.init();
+      
+      // Load saved store selection
+      loadSavedStore();
+      
+      // Periodically check store status from backend
+      setInterval(updateStoreStatusFromBackend, 30000); // Check every 30 seconds
       
       // Add attention animation to help buttons on page load
       const helpButtons = document.querySelectorAll('.btn-help-modern, .btn-help-header');
