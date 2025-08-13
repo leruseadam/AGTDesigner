@@ -83,10 +83,13 @@ class TemplateProcessor:
             if self.template_type == 'mini':
                 # Mini templates need to be expanded to 4x5 grid first, then use manual placeholder replacement
                 self.logger.info("Mini template detected - expanding to 4x5 grid, will use manual placeholder replacement")
-                # Force expansion to 4x5 grid for mini templates - bypass _expand_template_if_needed
+                # Use the original mini.docx template and expand it to 4x5 grid
                 try:
-                    self._expanded_template_buffer = self._expand_template_to_4x5_fixed_scaled()
-                    self.logger.info("Successfully expanded mini template to 4x5 grid")
+                    self._expanded_template_buffer = self._expand_original_mini_template_to_4x5()
+                    if self._expanded_template_buffer:
+                        self.logger.info("Successfully expanded original mini.docx template to 4x5 grid")
+                    else:
+                        raise RuntimeError("Original mini template expansion failed")
                 except Exception as e:
                     self.logger.error(f"Failed to expand mini template: {e}")
                     # Fallback to original template if expansion fails
@@ -176,7 +179,7 @@ class TemplateProcessor:
             self.logger.error(f"Error getting template path: {e}")
             raise
 
-    def _expand_template_if_needed(self, force_expand=False):
+    def _expand_template_if_needed(self, force_expand=False, num_selected_tags=None):
         """Expand template if needed and return buffer."""
         try:
             with open(self._template_path, 'rb') as f:
@@ -187,39 +190,51 @@ class TemplateProcessor:
             text = doc.element.body.xml
             matches = re.findall(r'Label(\d+)\.', text)
             
-            # Check if we have all required labels (9 for 3x3, 20 for 4x5, 12 for 4x3, 4 for 2x2)
+            # Determine required labels based on template type and actual selected tags
             if self.template_type == 'single':
                 required_labels = 1  # Single label, no expansion needed
             elif self.template_type == 'mini':
-                required_labels = 20  # 4x5 grid for mini templates
+                # For mini templates, always use 4x5 grid (20 labels) as they're designed for bulk printing
+                required_labels = 20
             elif self.template_type == 'double':
-                required_labels = 12  # 4x3 grid
+                # For double templates, use actual number of tags or default to 12
+                if num_selected_tags is not None:
+                    required_labels = min(num_selected_tags, 12)  # Cap at 12 for double template
+                else:
+                    required_labels = 12  # Default 4x3 grid
             elif self.template_type == 'inventory':
-                required_labels = 4   # 2x2 grid
+                # For inventory, use actual number of tags or default to 4
+                if num_selected_tags is not None:
+                    required_labels = min(num_selected_tags, 4)  # Cap at 4 for inventory template
+                else:
+                    required_labels = 4   # Default 2x2 grid
             else:
-                required_labels = 9   # 3x3 grid
+                # For standard templates (horizontal, vertical), use actual number of tags or default to 9
+                if num_selected_tags is not None:
+                    required_labels = min(num_selected_tags, 9)  # Cap at 9 for 3x3 grid
+                else:
+                    required_labels = 9   # Default 3x3 grid
             
             unique_labels = set(matches)
             
             if len(unique_labels) < required_labels or force_expand:
-                self.logger.info(f"Template needs expansion. Template type: '{self.template_type}', Required labels: {required_labels}, Found unique labels: {len(unique_labels)}")
+                self.logger.info(f"Template needs expansion. Template type: '{self.template_type}', Required labels: {required_labels}, Found unique labels: {len(unique_labels)}, Selected tags: {num_selected_tags}")
                 if self.template_type == 'single':
                     self.logger.info("Single template - no expansion needed")
                     return buffer
                 elif self.template_type == 'mini':
-                    # Mini templates should NEVER use template expansion - they use manual placeholder replacement
-                    # Return the original buffer to prevent any general template pipeline processing
-                    self.logger.info("Mini template - skipping expansion, will use manual placeholder replacement")
-                    return buffer
+                    # Mini templates should use the original mini.docx template and expand it to 4x5
+                    self.logger.info("Mini template - using original mini.docx template and expanding to 4x5 grid")
+                    return self._expand_original_mini_template_to_4x5()
                 elif self.template_type == 'double':
-                    self.logger.info("Calling 4x3 expansion method")
-                    return self._expand_template_to_4x3_fixed_double()
+                    self.logger.info(f"Calling 4x3 expansion method for {required_labels} labels")
+                    return self._expand_template_to_4x3_fixed_double(num_labels=required_labels)
                 elif self.template_type == 'inventory':
-                    self.logger.info("Calling 2x2 inventory expansion method")
-                    return self._expand_template_to_2x2_inventory()
+                    self.logger.info(f"Calling 2x2 inventory expansion method for {required_labels} labels")
+                    return self._expand_template_to_2x2_inventory(num_labels=required_labels)
                 else:
-                    self.logger.info(f"Calling 3x3 expansion method")
-                    return self._expand_template_to_3x3_fixed()
+                    self.logger.info(f"Calling 3x3 expansion method for {required_labels} labels")
+                    return self._expand_template_to_3x3_fixed(num_labels=required_labels)
             
             return buffer
         except Exception as e:
@@ -231,8 +246,8 @@ class TemplateProcessor:
         self._expanded_template_buffer = self._expand_template_if_needed(force_expand=True)
         return self._expanded_template_buffer
 
-    def _expand_template_to_2x2_inventory(self):
-        """Expand template to 2x2 grid for inventory slips."""
+    def _expand_template_to_2x2_inventory(self, num_labels=None):
+        """Expand template to dynamic grid for inventory slips based on number of labels."""
         from docx import Document
         from docx.shared import Pt, Inches
         from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT
@@ -241,7 +256,18 @@ class TemplateProcessor:
         from io import BytesIO
         from copy import deepcopy
 
-        num_cols, num_rows = 2, 2  # 2x2 grid for inventory
+        # Calculate grid dimensions based on number of labels
+        if num_labels is None:
+            num_labels = 4  # Default to 2x2 grid
+        
+        # Calculate optimal grid dimensions for inventory template
+        if num_labels <= 2:
+            num_cols, num_rows = num_labels, 1  # Single row
+        elif num_labels <= 4:
+            num_cols, num_rows = 2, 2  # 2x2 grid
+        else:
+            num_cols, num_rows = 2, 2  # Cap at 2x2 grid
+            num_labels = 4
         col_width_inches = 3.75  # Appropriate width for inventory slips
         row_height_inches = 3.5   # Appropriate height for inventory slips
         
@@ -287,6 +313,10 @@ class TemplateProcessor:
             row.height = row_height_pts
             row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
             for cell in row.cells:
+                # Stop creating cells if we've reached the number of labels needed
+                if label_num > num_labels:
+                    break
+                    
                 new_tc = deepcopy(src_tc)
                 
                 # Update label numbering for 2x2 grid (Label1, Label2, Label3, Label4)
@@ -307,62 +337,82 @@ class TemplateProcessor:
         return buffer
 
     def _expand_template_to_4x5_fixed_scaled(self):
-        """Expand template to 4x5 grid for mini templates - CREATES PROPER MINI TEMPLATE FROM SCRATCH."""
+        """Expand template to 4x5 grid for mini templates while COMPLETELY preserving original design and colors."""
         try:
             from docx import Document
             from docx.shared import Pt
             from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT
+            from docx.enum.text import WD_ALIGN_PARAGRAPH
             from docx.oxml import OxmlElement
             from docx.oxml.ns import qn
             from io import BytesIO
             from copy import deepcopy
-
-            self.logger.info("Starting 4x5 expansion for mini template")
+            
+            self.logger.info("Starting 4x5 expansion for mini template with design preservation")
             num_cols, num_rows = 4, 5
-            col_width_twips = str(int(1.5 * 1440))  # 1.5 inches per column (FIXED)
-            row_height_twips = int(1.5 * 1440)  # 1.5 inches per row in twips (FIXED)
-            cut_line_twips = int(0.001 * 1440)
-
-            # Create a new document from scratch instead of using corrupted mini template
-            self.logger.info("Creating new mini template from scratch with correct dimensions")
+            
+            # CRITICAL: Load the original mini.docx template to preserve ALL formatting
+            template_path = self._get_template_path()
+            self.logger.info(f"Loading original mini template from: {template_path}")
+            
+            # Load the original document to extract design elements
+            original_doc = Document(template_path)
+            if not original_doc.tables:
+                raise RuntimeError("Original mini template must contain at least one table.")
+            
+            original_table = original_doc.tables[0]
+            self.logger.info(f"Original mini template has {len(original_table.rows)} rows and {len(original_table.rows[0].cells) if original_table.rows else 0} columns")
+            
+            # CRITICAL: Extract the original cell structure and ALL formatting
+            # This preserves navy/grey colors, borders, styling, and any custom formatting
+            original_cell = deepcopy(original_table.rows[0].cells[0]._tc)
+            
+            # Create a new document for the expanded template
             doc = Document()
             
-            # Create the 4x5 table with proper dimensions
+            # Create the 4x5 table
             tbl = doc.add_table(rows=num_rows, cols=num_cols)
             tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
             
-            # Set table properties
-            tblPr = tbl._element.find(qn('w:tblPr')) or OxmlElement('w:tblPr')
-            layout = OxmlElement('w:tblLayout')
-            layout.set(qn('w:type'), 'fixed')
-            tblPr.append(layout)
-            tbl._element.insert(0, tblPr)
+            # CRITICAL: Copy ALL table properties from the original table
+            # This preserves borders, colors, styling, and any custom formatting
+            tblPr = tbl._element.find(qn('w:tblPr'))
+            if tblPr is not None:
+                tblPr.getparent().remove(tblPr)
+            
+            # Copy the original table properties (including borders and colors)
+            original_tblPr = original_table._element.find(qn('w:tblPr'))
+            if original_tblPr is not None:
+                tbl._element.insert(0, deepcopy(original_tblPr))
+            
+            # Copy the original table grid (column widths)
+            original_grid = original_table._element.find(qn('w:tblGrid'))
+            if original_grid is not None:
+                # Remove the default grid
+                default_grid = tbl._element.find(qn('w:tblGrid'))
+                if default_grid is not None:
+                    default_grid.getparent().remove(default_grid)
+                # Insert the original grid
+                tbl._element.insert(0, deepcopy(original_grid))
+            
+            # CRITICAL: Set exact dimensions for 1.5" x 1.5" cells
+            col_width_twips = str(int(1.5 * 1440))  # 1.5 inches per column
+            row_height_twips = int(1.5 * 1440)  # 1.5 inches per row in twips
             
             # Set column widths to exactly 1.5 inches each
-            grid = OxmlElement('w:tblGrid')
-            for _ in range(num_cols):
-                gc = OxmlElement('w:gridCol')
-                gc.set(qn('w:w'), col_width_twips)
-                grid.append(gc)
-            tbl._element.insert(0, grid)
-            
-            # Force the table to respect the grid by setting autofit to false
-            autofit = OxmlElement('w:tblLayout')
-            autofit.set(qn('w:type'), 'fixed')
-            tblPr.append(autofit)
-            
-            # CRITICAL: Force the table to respect the grid by setting the table width
-            # This ensures the grid dimensions are properly applied
-            table_width_twips = int(1.5 * 4 * 1440)  # 1.5" * 4 columns
-            # Set table width property properly
-            tblW = tblPr.find(qn('w:tblW'))
-            if tblW is None:
-                tblW = OxmlElement('w:tblW')
-                tblPr.append(tblW)
-            tblW.set(qn('w:w'), str(table_width_twips))  # Set width value
-            tblW.set(qn('w:type'), 'dxa')  # Set width type to fixed width
-            
-
+            grid = tbl._element.find(qn('w:tblGrid'))
+            if grid is not None:
+                # Update existing grid columns to 1.5 inches
+                for gc in grid.findall(qn('w:gridCol')):
+                    gc.set(qn('w:w'), col_width_twips)
+            else:
+                # Create new grid if none exists
+                grid = OxmlElement('w:tblGrid')
+                for _ in range(num_cols):
+                    gc = OxmlElement('w:gridCol')
+                    gc.set(qn('w:w'), col_width_twips)
+                    grid.append(gc)
+                tbl._element.insert(0, grid)
             
             # Set row heights to exactly 1.5 inches each
             for i, row in enumerate(tbl.rows):
@@ -372,122 +422,107 @@ class TemplateProcessor:
                 row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
                 self.logger.debug(f"Set row {i} height to {row_height_pts:.1f} points ({row_height_twips/1440:.2f} inches)")
             
-            # Explicitly set cell dimensions to ensure they are exactly 1.5" x 1.5"
-            for row in tbl.rows:
-                for cell in row.cells:
-                    # Set cell width to 1.5 inches using proper XML properties
-                    tcPr = cell._tc.get_or_add_tcPr()
-                    tcW = tcPr.find(qn('w:tcW'))
-                    if tcW is None:
-                        tcW = OxmlElement('w:tcW')
-                        tcPr.append(tcW)
-                    tcW.set(qn('w:w'), str(int(1.5 * 1440)))  # Set width value in twips
-                    tcW.set(qn('w:type'), 'dxa')  # Set width type to fixed width
-                    # Note: cell height is controlled by row height, which is already set above
-            
-            self.logger.info(f"Created {num_rows}x{num_cols} table with 1.5\" x 1.5\" cells")
-            
-            # Create a basic cell structure with placeholders
+            # CRITICAL: Populate all cells with the original formatting preserved
+            cnt = 1
             for r in range(num_rows):
                 for c in range(num_cols):
                     cell = tbl.cell(r, c)
+                    
+                    # CRITICAL: Clear the default cell content completely
                     cell._tc.clear_content()
                     
-                    # Add basic placeholders for mini template
-                    from docx.oxml import OxmlElement as OE
+                    # CRITICAL: Copy the original cell structure with ALL formatting preserved
+                    # This includes borders, colors, text formatting, and styling
+                    # Copy ALL elements including cell properties to preserve colors
+                    for element in original_cell:
+                        if element.tag.endswith('}tcPr'):
+                            # For cell properties, we need to merge them properly
+                            existing_tcPr = cell._tc.find(qn('w:tcPr'))
+                            if existing_tcPr is not None:
+                                # Remove existing cell properties
+                                existing_tcPr.getparent().remove(existing_tcPr)
+                            # Copy the original cell properties
+                            copied_tcPr = deepcopy(element)
+                            cell._tc.append(copied_tcPr)
+                            
+                            # CRITICAL: Override the cell width to exactly 1.5" while preserving colors
+                            tcW = copied_tcPr.find(qn('w:tcW'))
+                            if tcW is not None:
+                                tcW.set(qn('w:w'), str(int(1.5 * 1440)))  # 1.5 inches in twips
+                                tcW.set(qn('w:type'), 'dxa')
+                            else:
+                                # Create cell width property if it doesn't exist
+                                tcW = OxmlElement('w:tcW')
+                                tcW.set(qn('w:w'), str(int(1.5 * 1440)))  # 1.5 inches in twips
+                                tcW.set(qn('w:type'), 'dxa')
+                                copied_tcPr.append(tcW)
+                        else:
+                            # Copy other elements normally
+                            cell._tc.append(deepcopy(element))
                     
-                    # Create paragraph with placeholders
-                    para = OxmlElement('w:p')
+                    # CRITICAL: Force cell width constraint to prevent expansion
+                    # This ensures the cell stays exactly 1.5" wide
+                    cell_tcPr = cell._tc.get_or_add_tcPr()
+                    cell_tcW = cell_tcPr.find(qn('w:tcW'))
+                    if cell_tcW is None:
+                        cell_tcW = OxmlElement('w:tcW')
+                        cell_tcPr.append(cell_tcW)
+                    cell_tcW.set(qn('w:w'), str(int(1.5 * 1440)))  # 1.5 inches in twips
+                    cell_tcW.set(qn('w:type'), 'dxa')
                     
-                    # Add ProductBrand placeholder
-                    brand_run = OxmlElement('w:r')
-                    brand_text = OxmlElement('w:t')
-                    brand_text.text = f'{{{{Label{r*num_cols + c + 1}.ProductBrand}}}}'
-                    brand_run.append(brand_text)
-                    para.append(brand_run)
+                    # CRITICAL: Replace Label1 with LabelX in the copied cell
+                    # Look for text in both direct text elements and paragraph text elements
+                    for t in cell._tc.iter(qn('w:t')):
+                        if t.text and 'Label1' in t.text:
+                            t.text = t.text.replace('Label1', f'Label{cnt}')
                     
-                    # Add line break
-                    br = OxmlElement('w:br')
-                    para.append(br)
+                    # Also check paragraph text for Label1 references
+                    for para in cell.paragraphs:
+                        if 'Label1' in para.text:
+                            para.text = para.text.replace('Label1', f'Label{cnt}')
                     
-                    # Add ProductStrain placeholder
-                    strain_run = OxmlElement('w:r')
-                    strain_text = OxmlElement('w:t')
-                    strain_text.text = f'{{{{Label{r*num_cols + c + 1}.ProductStrain}}}}'
-                    strain_run.append(strain_text)
-                    para.append(strain_run)
+                    # CRITICAL: Ensure the cell has at least one paragraph with the label placeholder
+                    # This prevents empty cells from appearing in the grid
+                    if not cell.paragraphs or not any(para.text.strip() for para in cell.paragraphs):
+                        # Create a default paragraph with the label placeholder if the cell is empty
+                        default_para = cell.add_paragraph()
+                        default_para.text = f"{{{{{f'Label{cnt}'}.ProductBrand}}}}"
+                        self.logger.debug(f"Added default placeholder for Label{cnt} in empty cell")
                     
-                    # Add line break
-                    br2 = OxmlElement('w:br')
-                    para.append(br2)
+                    # CRITICAL: Always add the DOH field as a new paragraph for mini templates
+                    # This ensures DOH images are properly inserted
+                    doh_para = cell.add_paragraph()
+                    doh_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    doh_run = doh_para.add_run(f"{{{{{f'Label{cnt}'}.DOH}}}}")
+                    doh_run.font.name = 'Arial'
+                    doh_run.font.size = Pt(8)
+                    self.logger.debug(f"Added DOH placeholder for Label{cnt} in mini template")
                     
-                    # Add Price placeholder
-                    price_run = OxmlElement('w:r')
-                    price_text = OxmlElement('w:t')
-                    price_text.text = f'{{{{Label{r*num_cols + c + 1}.Price}}}}'
-                    price_run.append(price_text)
-                    para.append(price_run)
-                    
-                    # Add line break
-                    br3 = OxmlElement('w:br')
-                    para.append(br3)
-                    
-                    # Add Lineage placeholder
-                    lineage_run = OxmlElement('w:r')
-                    lineage_text = OxmlElement('w:t')
-                    lineage_text.text = f'{{{{Label{r*num_cols + c + 1}.Lineage}}}}'
-                    lineage_run.append(lineage_text)
-                    para.append(lineage_run)
-                    
-                    # Add line break
-                    br4 = OxmlElement('w:br')
-                    para.append(br4)
-                    
-                    # Add Ratio/THC_CBD placeholder
-                    ratio_run = OxmlElement('w:r')
-                    ratio_text = OxmlElement('w:t')
-                    ratio_text.text = f'{{{{Label{r*num_cols + c + 1}.Ratio_or_THC_CBD}}}}'
-                    ratio_run.append(ratio_text)
-                    para.append(ratio_run)
-                    
-                    # Add line break
-                    br5 = OxmlElement('w:br')
-                    para.append(br5)
-                    
-                    # Add DOH placeholder
-                    doh_run = OxmlElement('w:r')
-                    doh_text = OxmlElement('w:t')
-                    doh_text.text = f'{{{{Label{r*num_cols + c + 1}.DOH}}}}'
-                    doh_run.append(doh_text)
-                    para.append(doh_run)
-                    
-                    # Add the paragraph to the cell
-                    cell._tc.append(para)
-                    
-                    self.logger.debug(f"Created cell ({r}, {c}) with Label{r*num_cols + c + 1} placeholders")
+                    cnt += 1
             
-            self.logger.info(f"Finished creating mini template with {num_rows*num_cols} cells")
+            self.logger.info(f"Created {num_rows}x{num_cols} table with 1.5\" x 1.5\" cells while preserving original design")
             
-            # Save the document to a buffer
+            # Save the expanded template to a buffer
             buffer = BytesIO()
             doc.save(buffer)
             buffer.seek(0)
             
-            self.logger.info("Mini template created successfully and saved to buffer")
+            self.logger.info("Mini template expanded successfully with design preservation")
             return buffer
         
         except Exception as e:
-            self.logger.error(f"Error in 4x5 expansion: {e}")
+            self.logger.error(f"Error in 4x5 expansion with design preservation: {e}")
             import traceback
             self.logger.error(f"Traceback: {traceback.format_exc()}")
             raise
-    
+
     def _expand_mini_template_preserve_design(self, doc, context):
         """Expand mini template to 4x5 grid while preserving mini.docx design completely."""
         try:
             from docx import Document
             from docx.shared import Pt
             from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT
+            from docx.enum.text import WD_ALIGN_PARAGRAPH
             from docx.oxml import OxmlElement
             from docx.oxml.ns import qn
             from copy import deepcopy
@@ -519,27 +554,56 @@ class TemplateProcessor:
             # This preserves ALL original formatting including navy and grey colors
             new_table = doc.add_table(rows=num_rows, cols=num_cols)
             
-            # CRITICAL: Copy ALL table properties from the original table
-            # This preserves borders, colors, styling, and any custom formatting
+            # CRITICAL: Disable autofit completely to prevent cell expansion
+            new_table.autofit = False
+            if hasattr(new_table, 'allow_autofit'):
+                new_table.allow_autofit = False
+            
+            # CRITICAL: Set table layout to fixed to prevent any auto-sizing
             tblPr = new_table._element.find(qn('w:tblPr'))
-            if tblPr is not None:
-                # Remove the default table properties
-                tblPr.getparent().remove(tblPr)
+            if tblPr is None:
+                tblPr = OxmlElement('w:tblPr')
+                new_table._element.insert(0, tblPr)
+            
+            # Force fixed layout - this prevents cells from expanding
+            tblLayout = OxmlElement('w:tblLayout')
+            tblLayout.set(qn('w:type'), 'fixed')
+            tblPr.append(tblLayout)
             
             # Copy the original table properties (including borders and colors)
             original_tblPr = original_table_xml.find(qn('w:tblPr'))
             if original_tblPr is not None:
+                # Remove the default table properties we just created
+                tblPr.getparent().remove(tblPr)
+                # Copy the original table properties
                 new_table._element.insert(0, deepcopy(original_tblPr))
+                
+                # CRITICAL: Override the table layout to fixed while preserving other properties
+                tblPr = new_table._element.find(qn('w:tblPr'))
+                if tblPr is not None:
+                    # Remove any existing layout property
+                    existing_layout = tblPr.find(qn('w:tblLayout'))
+                    if existing_layout is not None:
+                        existing_layout.getparent().remove(existing_layout)
+                    
+                    # Force fixed layout
+                    tblLayout = OxmlElement('w:tblLayout')
+                    tblLayout.set(qn('w:type'), 'fixed')
+                    tblPr.append(tblLayout)
             
-            # Copy the original table grid (column widths)
-            original_grid = original_table_xml.find(qn('w:tblGrid'))
-            if original_grid is not None:
-                # Remove the default grid
-                default_grid = new_table._element.find(qn('w:tblGrid'))
-                if default_grid is not None:
-                    default_grid.getparent().remove(default_grid)
-                # Insert the original grid
-                new_table._element.insert(0, deepcopy(original_grid))
+            # CRITICAL: Create a fixed grid with exact 1.5 inch column widths
+            # Remove any existing grid
+            existing_grid = new_table._element.find(qn('w:tblGrid'))
+            if existing_grid is not None:
+                existing_grid.getparent().remove(existing_grid)
+            
+            # Create new grid with fixed 1.5 inch column widths
+            tblGrid = OxmlElement('w:tblGrid')
+            for _ in range(num_cols):
+                gridCol = OxmlElement('w:gridCol')
+                gridCol.set(qn('w:w'), col_width_twips)
+                tblGrid.append(gridCol)
+            new_table._element.insert(0, tblGrid)
             
             # Set row heights while preserving original formatting
             for row in new_table.rows:
@@ -578,22 +642,111 @@ class TemplateProcessor:
                     # CRITICAL: Clear the default cell content completely
                     cell._tc.clear_content()
                     
-                    # Copy the original cell structure with ALL formatting preserved
-                    # This includes borders, colors, text formatting, and styling
-                    cell._tc.append(deepcopy(original_cell))
+                    # CRITICAL: Copy the original cell content properly, not the entire cell structure
+                    # This preserves borders, colors, text formatting, and styling without corruption
+                    for element in original_cell:
+                        if element.tag.endswith('}tcPr'):
+                            # For cell properties, we need to merge them properly
+                            existing_tcPr = cell._tc.find(qn('w:tcPr'))
+                            if existing_tcPr is not None:
+                                # Remove existing cell properties
+                                existing_tcPr.getparent().remove(existing_tcPr)
+                            # Copy the original cell properties
+                            copied_tcPr = deepcopy(element)
+                            cell._tc.append(copied_tcPr)
+                            
+                            # CRITICAL: Override the cell width to exactly 1.5" while preserving colors
+                            tcW = copied_tcPr.find(qn('w:tcW'))
+                            if tcW is not None:
+                                tcW.set(qn('w:w'), col_width_twips)  # 1.5 inches in twips
+                                tcW.set(qn('w:type'), 'dxa')
+                            else:
+                                # Create cell width property if it doesn't exist
+                                tcW = OxmlElement('w:tcW')
+                                tcW.set(qn('w:w'), col_width_twips)  # 1.5 inches in twips
+                                tcW.set(qn('w:type'), 'dxa')
+                                copied_tcPr.append(tcW)
+                        elif element.tag.endswith('}tbl'):
+                            # CRITICAL: Handle nested tables properly - copy the content, not the structure
+                            # Extract text content from the nested table
+                            nested_text_elements = list(element.iter(qn('w:t')))
+                            if nested_text_elements:
+                                self.logger.debug(f"Found {len(nested_text_elements)} text elements in nested table for cell ({r}, {c})")
+                                # Create a paragraph to hold the text content
+                                p = OxmlElement('w:p')
+                                for text_elem in nested_text_elements:
+                                    if text_elem.text and text_elem.text.strip():
+                                        # Create a run for each text element
+                                        r_elem = OxmlElement('w:r')
+                                        t_elem = OxmlElement('w:t')
+                                        t_elem.text = text_elem.text
+                                        r_elem.append(t_elem)
+                                        p.append(r_elem)
+                                        self.logger.debug(f"Copied text: {repr(text_elem.text)} to cell ({r}, {c})")
+                                if len(p):
+                                    cell._tc.append(p)
+                        else:
+                            # Copy other elements normally
+                            copied_element = deepcopy(element)
+                            cell._tc.append(copied_element)
                     
-                                # Replace Label1 with LabelX in the copied cell
-            # Look for text in both direct text elements and paragraph text elements
-            for t in cell._tc.iter(qn('w:t')):
-                if t.text and 'Label1' in t.text:
-                    t.text = t.text.replace('Label1', f'Label{cnt}')
-            
-            # Also check paragraph text for Label1 references
-            for para in cell.paragraphs:
-                if 'Label1' in para.text:
-                    para.text = para.text.replace('Label1', f'Label{cnt}')
+                    # CRITICAL: Debug - verify cell content after copying
+                    text_elements = list(cell._tc.iter(qn('w:t')))
+                    if text_elements:
+                        self.logger.debug(f"Cell ({r}, {c}) has {len(text_elements)} text elements after copying")
+                        for i, t in enumerate(text_elements):
+                            self.logger.debug(f"  Text element {i}: {repr(t.text)}")
+                    else:
+                        self.logger.warning(f"Cell ({r}, {c}) has NO text elements after copying")
+                    
+                    # CRITICAL: Force cell width constraint to prevent expansion
+                    # This ensures the cell stays exactly 1.5" wide
+                    cell_tcPr = cell._tc.get_or_add_tcPr()
+                    cell_tcW = cell_tcPr.find(qn('w:tcW'))
+                    if cell_tcW is None:
+                        cell_tcW = OxmlElement('w:tcW')
+                        cell_tcPr.append(cell_tcW)
+                    cell_tcW.set(qn('w:w'), col_width_twips)  # 1.5 inches in twips
+                    cell_tcW.set(qn('w:type'), 'dxa')
+                    
+                    # CRITICAL: Replace Label1 with LabelX in the copied cell
+                    # Look for text in both direct text elements and paragraph text elements
+                    for t in cell._tc.iter(qn('w:t')):
+                        if t.text and 'Label1' in t.text:
+                            t.text = t.text.replace('Label1', f'Label{cnt}')
+                    
+                    # Also check paragraph text for Label1 references
+                    for para in cell.paragraphs:
+                        if 'Label1' in para.text:
+                            para.text = para.text.replace('Label1', f'Label{cnt}')
+                    
+                    # CRITICAL: Always add the DOH field as a new paragraph for mini templates
+                    # This ensures DOH images are properly inserted
+                    doh_para = cell.add_paragraph()
+                    doh_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    doh_run = doh_para.add_run(f"{{{{{f'Label{cnt}'}.DOH}}}}")
+                    doh_run.font.name = 'Arial'
+                    doh_run.font.size = Pt(8)
+                    self.logger.debug(f"Added DOH placeholder for Label{cnt} in mini template")
                     
                     cnt += 1
+            
+            # CRITICAL: Final autofit disabling to ensure no expansion
+            new_table.autofit = False
+            if hasattr(new_table, 'allow_autofit'):
+                new_table.allow_autofit = False
+            
+            # CRITICAL: Verify table layout is fixed
+            tblPr = new_table._element.find(qn('w:tblPr'))
+            if tblPr is not None:
+                tblLayout = tblPr.find(qn('w:tblLayout'))
+                if tblLayout is None or tblLayout.get(qn('w:type')) != 'fixed':
+                    # Force fixed layout
+                    if tblLayout is not None:
+                        tblLayout.getparent().remove(tblLayout)
+                    tblLayout = OxmlElement('w:tblLayout')
+                    tblLayout.set(qn('w:type'), 'fixed')
+                    tblPr.append(tblLayout)
             
             # Debug: Log the final table structure
             self.logger.debug(f"Created {num_rows}x{num_cols} table with {len(new_table.rows)} rows and {len(new_table.rows[0].cells) if new_table.rows else 0} columns")
@@ -602,7 +755,7 @@ class TemplateProcessor:
             # This ensures mini templates NEVER use the general template pipeline
             rendered_doc = self._manual_replace_placeholders(doc, context)
             
-            self.logger.info(f"Successfully expanded mini template to 4x5 grid while COMPLETELY preserving mini.docx formatting (navy/grey colors, borders, styling) using manual placeholder replacement")
+            self.logger.info(f"Successfully expanded mini template to 4x5 grid while COMPLETELY preserving mini.docx formatting (navy/grey colors, borders, styling) using manual placeholder replacement and FIXED DIMENSIONS")
             return rendered_doc
             
         except Exception as e:
@@ -613,11 +766,18 @@ class TemplateProcessor:
             raise
 
     def _apply_mini_template_formatting(self, table):
-        """Apply minimal formatting to mini template table while preserving original colors and styling."""
+        """Apply comprehensive formatting to mini template table while preserving original colors and styling."""
         try:
             from docx.enum.text import WD_ALIGN_PARAGRAPH
             from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
             from docx.shared import Pt
+            from src.core.generation.unified_font_sizing import get_mini_font_size_by_marker
+            from src.core.generation.docx_formatting import enforce_fixed_cell_dimensions
+            
+            self.logger.info("Applying comprehensive mini template formatting with color preservation")
+            
+            # CRITICAL: Enforce fixed cell dimensions to prevent expansion
+            enforce_fixed_cell_dimensions(table, 'mini')
             
             for row in table.rows:
                 for cell in row.cells:
@@ -629,73 +789,112 @@ class TemplateProcessor:
                         # Center alignment (preserves original formatting)
                         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                         
-                        # Set minimal paragraph spacing (preserves original formatting)
-                        paragraph.paragraph_format.space_before = Pt(2)
-                        paragraph.paragraph_format.space_after = Pt(2)
-                        paragraph.paragraph_format.line_spacing = 1.15
+                        # Set optimal paragraph spacing for mini templates
+                        paragraph.paragraph_format.space_before = Pt(1)
+                        paragraph.paragraph_format.space_after = Pt(1)
+                        paragraph.paragraph_format.line_spacing = 1.0
                         
-                        # CRITICAL: Apply font formatting to ALL runs to ensure consistency
-                        # This preserves the original navy and grey colors while ensuring bold text
+                        # CRITICAL: Apply intelligent font sizing based on content type
+                        # This preserves the original navy and grey colors while optimizing readability
                         for run in paragraph.runs:
-                            # Always set Arial font for consistency
-                            run.font.name = 'Arial'
-                            # Always set bold to ensure all text is bolded
-                            run.font.bold = True
-                            
-                            # Set font size if not already defined
-                            if not run.font.size:
-                                run.font.size = Pt(10)
-                            
-                            # Remove unwanted formatting without affecting colors
-                            run.font.italic = False
-                            run.font.underline = None
-                            
-                            # CRITICAL: Apply XML formatting carefully to preserve colors
-                            try:
-                                rPr = run._element.get_or_add_rPr()
+                            if run.text and run.text.strip():
+                                # Determine the marker type from the text content
+                                marker_type = self._identify_marker_type(run.text)
                                 
-                                # Only clear font properties if we're setting new ones
-                                # This preserves existing color and styling information
-                                if not run.font.name:
-                                    # Clear existing font properties
+                                # Get appropriate font size for mini tags using the mini font sizing system
+                                font_size = get_mini_font_size_by_marker(run.text, marker_type, self.scale_factor)
+                                
+                                # Always set Arial font for consistency
+                                run.font.name = 'Arial'
+                                # Always set bold to ensure all text is bolded
+                                run.font.bold = True
+                                # Apply the calculated font size
+                                run.font.size = font_size
+                                
+                                # Remove unwanted formatting without affecting colors
+                                run.font.italic = False
+                                run.font.underline = None
+                                
+                                # CRITICAL: Apply XML formatting carefully to preserve colors
+                                try:
+                                    rPr = run._element.get_or_add_rPr()
+                                    
+                                    # Only clear font properties if we're setting new ones
+                                    # This preserves existing color and styling information
+                                    if not run.font.name:
+                                        # Clear existing font properties
+                                        for element in list(rPr):
+                                            if element.tag.endswith('}rFonts'):
+                                                rPr.remove(element)
+                                        
+                                        # Set Arial font
+                                        rFonts = OxmlElement('w:rFonts')
+                                        rFonts.set(qn('w:ascii'), 'Arial')
+                                        rFonts.set(qn('w:hAnsi'), 'Arial')
+                                        rFonts.set(qn('w:eastAsia'), 'Arial')
+                                        rFonts.set(qn('w:cs'), 'Arial')
+                                        rPr.append(rFonts)
+                                    
+                                    # Always set bold to ensure consistency
+                                    # Clear existing bold property
                                     for element in list(rPr):
-                                        if element.tag.endswith('}rFonts'):
+                                        if element.tag.endswith('}b'):
                                             rPr.remove(element)
                                     
-                                    # Set Arial font
-                                    rFonts = OxmlElement('w:rFonts')
-                                    rFonts.set(qn('w:ascii'), 'Arial')
-                                    rFonts.set(qn('w:hAnsi'), 'Arial')
-                                    rFonts.set(qn('w:eastAsia'), 'Arial')
-                                    rFonts.set(qn('w:cs'), 'Arial')
-                                    rPr.append(rFonts)
-                                
-                                # Always set bold to ensure consistency
-                                # Clear existing bold property
-                                for element in list(rPr):
-                                    if element.tag.endswith('}b'):
-                                        rPr.remove(element)
-                                
-                                # Force bold
-                                b = OxmlElement('w:b')
-                                b.set(qn('w:val'), '1')
-                                rPr.append(b)
-                                
-                                # Remove italic
-                                i = OxmlElement('w:i')
-                                i.set(qn('w:val'), '0')
-                                rPr.append(i)
-                            except Exception as e:
-                                self.logger.debug(f"Error applying XML formatting: {e}")
+                                    # Force bold
+                                    b = OxmlElement('w:b')
+                                    b.set(qn('w:val'), '1')
+                                    rPr.append(b)
+                                    
+                                    # Remove italic
+                                    i = OxmlElement('w:i')
+                                    i.set(qn('w:val'), '0')
+                                    rPr.append(i)
+                                    
+                                    # Set font size if exists
+                                    if font_size:
+                                        sz = OxmlElement('w:sz')
+                                        sz.set(qn('w:w'), str(int(font_size.pt * 2)))
+                                        rPr.append(sz)
+                                        
+                                        szCs = OxmlElement('w:szCs')
+                                        szCs.set(qn('w:w'), str(int(font_size.pt * 2)))
+                                        rPr.append(szCs)
+                                        
+                                except Exception as e:
+                                    self.logger.debug(f"Error applying XML formatting: {e}")
+                                    
+                                self.logger.debug(f"Applied mini formatting: {font_size.pt}pt Arial Bold for '{run.text[:20]}...' (marker: {marker_type})")
             
-            self.logger.info("Applied minimal formatting to mini template table while preserving original colors and styling")
+            self.logger.info("Applied comprehensive mini template formatting with color preservation and intelligent font sizing")
         except Exception as e:
             self.logger.warning(f"Error applying mini template formatting: {e}")
     
+    def _identify_marker_type(self, text):
+        """Identify the marker type from text content for proper font sizing."""
+        text_upper = text.upper()
+        
+        # Check for specific content patterns
+        if any(word in text_upper for word in ['THC', 'CBD', 'RATIO', ':', '%']):
+            return 'RATIO'
+        elif any(word in text_upper for word in ['SATIVA', 'INDICA', 'HYBRID', 'MIXED', 'PARA']):
+            return 'LINEAGE'
+        elif any(word in text_upper for word in ['$', 'PRICE', 'COST']):
+            return 'PRICE'
+        elif any(word in text_upper for word in ['BRAND', 'COMPANY']):
+            return 'BRAND'
+        elif any(word in text_upper for word in ['STRAIN', 'VARIETY']):
+            return 'STRAIN'
+        elif any(word in text_upper for word in ['DOH', 'DEPARTMENT']):
+            return 'DOH'
+        elif any(word in text_upper for word in ['GRAM', 'OUNCE', 'POUND', 'ML', 'MG']):
+            return 'WEIGHT'
+        else:
+            # Default to description for longer text
+            return 'DESCRIPTION'
 
-
-    def _expand_template_to_4x3_fixed_double(self):
-        """Expand template to 4x3 grid for double templates (4 columns, 3 rows) with cell spacing for gutters."""
+    def _expand_template_to_4x3_fixed_double(self, num_labels=None):
+        """Expand template to dynamic grid for double templates based on number of labels."""
         from docx import Document
         from docx.shared import Pt
         from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT
@@ -704,7 +903,20 @@ class TemplateProcessor:
         from io import BytesIO
         from copy import deepcopy
 
-        num_cols, num_rows = 4, 3  # 4 columns, 3 rows for 12 labels total
+        # Calculate grid dimensions based on number of labels
+        if num_labels is None:
+            num_labels = 12  # Default to 4x3 grid
+        
+        # Calculate optimal grid dimensions for double template
+        if num_labels <= 4:
+            num_cols, num_rows = num_labels, 1  # Single row
+        elif num_labels <= 8:
+            num_cols, num_rows = 4, 2  # 4x2 grid
+        elif num_labels <= 12:
+            num_cols, num_rows = 4, 3  # 4x3 grid
+        else:
+            num_cols, num_rows = 4, 3  # Cap at 4x3 grid
+            num_labels = 12
         
         # Equal width columns: 1.75 inches each for a total of 7 inches
         col_width_twips = str(int(1.75 * 1440))  # 1.75 inches per column
@@ -760,6 +972,9 @@ class TemplateProcessor:
         cnt = 1
         for r in range(num_rows):
             for c in range(num_cols):
+                # Stop creating cells if we've reached the number of labels needed
+                if cnt > num_labels:
+                    break
                     
                 cell = tbl.cell(r,c)
                 cell._tc.clear_content()
@@ -852,8 +1067,8 @@ class TemplateProcessor:
         buf.seek(0)
         return buf
 
-    def _expand_template_to_3x3_fixed(self):
-        """Expand template to 3x3 grid for standard templates."""
+    def _expand_template_to_3x3_fixed(self, num_labels=None):
+        """Expand template to dynamic grid for standard templates based on number of labels."""
         from docx import Document
         from docx.shared import Pt
         from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT
@@ -862,7 +1077,20 @@ class TemplateProcessor:
         from io import BytesIO
         from copy import deepcopy
 
-        num_cols, num_rows = 3, 3
+        # Calculate grid dimensions based on number of labels
+        if num_labels is None:
+            num_labels = 9  # Default to 3x3 grid
+        
+        # Calculate optimal grid dimensions
+        if num_labels <= 3:
+            num_cols, num_rows = num_labels, 1  # Single row
+        elif num_labels <= 6:
+            num_cols, num_rows = 3, 2  # 3x2 grid
+        elif num_labels <= 9:
+            num_cols, num_rows = 3, 3  # 3x3 grid
+        else:
+            num_cols, num_rows = 3, 3  # Cap at 3x3 grid
+            num_labels = 9
         
         # Set dimensions based on template type - use constants for consistency
         from src.core.constants import CELL_DIMENSIONS
@@ -971,6 +1199,10 @@ class TemplateProcessor:
         cnt = 1
         for r in range(num_rows):
             for c in range(num_cols):
+                # Stop creating cells if we've reached the number of labels needed
+                if cnt > num_labels:
+                    break
+                    
                 cell = tbl.cell(r,c)
                 cell._tc.clear_content()
                 
@@ -1159,6 +1391,7 @@ class TemplateProcessor:
             # This ensures that templates expecting more labels than provided in the chunk won't fail
             for j in range(len(chunk), self.chunk_size):
                 # Create a default context with empty strings instead of empty dict
+                # CRITICAL: Use special marker to indicate this label should be completely cleared
                 default_context = {
                     'ProductBrand': '',
                     'ProductStrain': '',
@@ -1171,7 +1404,8 @@ class TemplateProcessor:
                     'DOH_TEXT': '',
                     'Ratio': '',
                     'WeightUnits': '',
-                    'Description': ''
+                    'Description': '',
+                    '_IS_EMPTY_LABEL': True  # Special marker to indicate this label should be cleared
                 }
                 context[f'Label{j+1}'] = default_context
             
@@ -1216,10 +1450,13 @@ class TemplateProcessor:
             # Apply lineage colors last to ensure they are not overwritten
             apply_lineage_colors(rendered_doc)
             
-            # For mini and double templates, process DOH images after document creation
-            # For other templates, DOH images are handled by DocxTemplate during rendering
+            # For mini and double templates, process DOH images BEFORE empty label clearing
+            # This ensures DOH placeholders are not cleared before image insertion
             if self.template_type in ['mini', 'double']:
                 self._process_doh_images_for_templates(rendered_doc, context)
+            
+            # CRITICAL: Clear content and styling for empty labels to prevent showing placeholder text and colors
+            self._clear_empty_labels(rendered_doc, context)
             
             # Final enforcement of fixed cell dimensions to prevent any expansion
             for table in rendered_doc.tables:
@@ -1438,27 +1675,42 @@ class TemplateProcessor:
                           record.get('ProductType') or 
                           record.get('Product Type*') or '')
 
-            image_path = process_doh_image(doh_value, product_type)
-            if image_path:
-                # For all templates, defer InlineImage creation to avoid the current_rendering_part error
-                # Store the image path for later processing
-                label_context['DOH'] = ''  # Will be processed later
-                label_context['_DOH_IMAGE_PATH'] = image_path
-                label_context['_DOH_IMAGE_WIDTH'] = 9 if self.template_type in ['mini', 'double'] else 12
-                # Ensure DOH image takes priority - clear any other DOH-related content
-                label_context['DOH_TEXT'] = ''  # Clear any text content
-            else:
-                if self.template_type == 'mini':
-                    # For mini templates, preserve the DOH text value when no image is available
-                    label_context['DOH'] = doh_value
-                    label_context['_DOH_IMAGE_PATH'] = ''
-                    label_context['DOH_TEXT'] = doh_value
+            # For mini templates, always process DOH values to show either image or nothing
+            if self.template_type == 'mini':
+                image_path = process_doh_image(doh_value, product_type)
+                if image_path:
+                    # Store the image path for later processing
+                    label_context['DOH'] = '[DOH_IMAGE_PLACEHOLDER]'  # Use placeholder for image
+                    label_context['_DOH_IMAGE_PATH'] = image_path
+                    label_context['_DOH_IMAGE_WIDTH'] = 9 if self.template_type in ['mini', 'double'] else 12
+                    label_context['DOH_TEXT'] = ''  # Clear any text content
+                    self.logger.debug(f"Mini template DOH='YES' -> image path: {image_path}")
                 else:
+                    # For mini templates, when DOH is not 'YES', show nothing
+                    label_context['DOH'] = ''  # Clear DOH field completely
+                    label_context['_DOH_IMAGE_PATH'] = ''
+                    label_context['_DOH_IMAGE_WIDTH'] = 0
+                    label_context['DOH_TEXT'] = ''  # Clear any text content
+                    self.logger.debug(f"Mini template DOH='{doh_value}' -> cleared (no image, no text)")
+            else:
+                # For other templates, use standard DOH processing
+                image_path = process_doh_image(doh_value, product_type)
+                if image_path:
+                    # Store the image path for later processing
+                    label_context['DOH'] = ''  # Will be processed later
+                    label_context['_DOH_IMAGE_PATH'] = image_path
+                    label_context['_DOH_IMAGE_WIDTH'] = 9 if self.template_type in ['mini', 'double'] else 12
+                    label_context['DOH_TEXT'] = ''  # Clear any text content
+                else:
+                    # When DOH is not 'YES', show nothing
                     label_context['DOH'] = ''
                     label_context['_DOH_IMAGE_PATH'] = ''
+                    label_context['_DOH_IMAGE_WIDTH'] = 0
                     label_context['DOH_TEXT'] = ''
         else:
             label_context['DOH'] = ''
+            label_context['_DOH_IMAGE_PATH'] = ''
+            label_context['_DOH_IMAGE_WIDTH'] = 0
             label_context['DOH_TEXT'] = ''
         
         # Fast ratio processing - properly distinguish between THC_CBD and Ratio
@@ -1518,21 +1770,28 @@ class TemplateProcessor:
             if cleaned_content:
                 content = cleaned_content.replace('|BR|', '\n')
                 
-                # For mini templates with classic types, skip THC/CBD content EXCEPT for prerolls
+                # For mini templates, always show THC/CBD content regardless of product type
                 product_type = (label_context.get('ProductType', '').lower() or 
                               label_context.get('Product Type*', '').lower())
                 is_classic = product_type in classic_types
-                is_preroll = product_type in {"pre-roll", "infused pre-roll"}
                 
-                if self.template_type == 'mini' and is_classic and not is_preroll:
-                    self.logger.debug(f"Skipping THC/CBD content for mini template with classic type (non-preroll): {product_type}")
-                    label_context['THC_CBD'] = ''
-                    label_context['Ratio_or_THC_CBD'] = ''
-                else:
-                    # Mark as THC_CBD - include prerolls even in mini templates
+                if self.template_type == 'mini':
+                    # Mini templates should always show THC/CBD content
                     label_context['THC_CBD'] = wrap_with_marker(content, 'THC_CBD')
                     label_context['Ratio_or_THC_CBD'] = wrap_with_marker(content, 'THC_CBD')  # Keep for backward compatibility
-                    self.logger.debug(f"Using THC_CBD field: {content}")
+                    self.logger.debug(f"Mini template: Using THC_CBD field: {content}")
+                else:
+                    # For other templates, skip THC/CBD content for classic types (non-preroll)
+                    is_preroll = product_type in {"pre-roll", "infused pre-roll"}
+                    if is_classic and not is_preroll:
+                        self.logger.debug(f"Skipping THC/CBD content for non-mini template with classic type (non-preroll): {product_type}")
+                        label_context['THC_CBD'] = ''
+                        label_context['Ratio_or_THC_CBD'] = ''
+                    else:
+                        # Mark as THC_CBD - include prerolls even in non-mini templates
+                        label_context['THC_CBD'] = wrap_with_marker(content, 'THC_CBD')
+                        label_context['Ratio_or_THC_CBD'] = wrap_with_marker(content, 'THC_CBD')  # Keep for backward compatibility
+                        self.logger.debug(f"Using THC_CBD field: {content}")
                 
         elif ratio_val:
             # Ratio field is available - use it for non-classic products
@@ -1547,17 +1806,25 @@ class TemplateProcessor:
                     content = self.format_classic_ratio(cleaned_content, record)
                     content = content.replace('|BR|', '\n')
                     
-                    # For mini templates with classic types, skip THC/CBD content EXCEPT for prerolls
-                    is_preroll = product_type in {"pre-roll", "infused pre-roll"}
-                    if self.template_type == 'mini' and not is_preroll:
-                        self.logger.debug(f"Skipping THC/CBD content for mini template with classic type (non-preroll): {product_type}")
-                        label_context['THC_CBD'] = ''
-                        label_context['Ratio_or_THC_CBD'] = ''
-                    else:
+                    # For mini templates, always show THC/CBD content regardless of product type
+                    if self.template_type == 'mini':
+                        # Mini templates should always show THC/CBD content
                         processed_content = wrap_with_marker(content, 'THC_CBD')
                         label_context['THC_CBD'] = processed_content
                         label_context['Ratio_or_THC_CBD'] = processed_content  # Keep for backward compatibility
-                        self.logger.debug(f"Using Ratio field with extracted THC/CBD values: {processed_content}")
+                        self.logger.debug(f"Mini template: Using Ratio field with extracted THC/CBD values: {processed_content}")
+                    else:
+                        # For other templates, skip THC/CBD content for classic types (non-preroll)
+                        is_preroll = product_type in {"pre-roll", "infused pre-roll"}
+                        if not is_preroll:
+                            self.logger.debug(f"Skipping THC/CBD content for non-mini template with classic type (non-preroll): {product_type}")
+                            label_context['THC_CBD'] = ''
+                            label_context['Ratio_or_THC_CBD'] = ''
+                        else:
+                            processed_content = wrap_with_marker(content, 'THC_CBD')
+                            label_context['THC_CBD'] = processed_content
+                            label_context['Ratio_or_THC_CBD'] = processed_content  # Keep for backward compatibility
+                            self.logger.debug(f"Using Ratio field with extracted THC/CBD values: {processed_content}")
                 elif 'mg' in cleaned_content.lower():
                     # Ratio with mg values - format for multiline display
                     cleaned_content = format_ratio_multiline(cleaned_content)
@@ -1593,33 +1860,49 @@ class TemplateProcessor:
                     # Classic product with percentage THC/CBD - use THC_CBD marker
                     content = cleaned_content.replace('|BR|', '\n')
                     
-                    # For mini templates with classic types, skip THC/CBD content EXCEPT for prerolls
-                    is_preroll = product_type in {"pre-roll", "infused pre-roll"}
-                    if self.template_type == 'mini' and not is_preroll:
-                        self.logger.debug(f"Fallback: Skipping THC/CBD content for mini template with classic type (non-preroll): {product_type}")
-                        label_context['THC_CBD'] = ''
-                        label_context['Ratio_or_THC_CBD'] = ''
-                    else:
+                    # For mini templates, always show THC/CBD content regardless of product type
+                    if self.template_type == 'mini':
+                        # Mini templates should always show THC/CBD content
                         processed_content = wrap_with_marker(content, 'THC_CBD')
                         label_context['THC_CBD'] = processed_content
                         label_context['Ratio_or_THC_CBD'] = processed_content  # Keep for backward compatibility
-                        self.logger.debug(f"Fallback: Using THC_CBD marker for classic product: {processed_content}")
+                        self.logger.debug(f"Mini template: Fallback: Using THC_CBD marker for classic product: {processed_content}")
+                    else:
+                        # For other templates, skip THC/CBD content for classic types (non-preroll)
+                        is_preroll = product_type in {"pre-roll", "infused pre-roll"}
+                        if not is_preroll:
+                            self.logger.debug(f"Fallback: Skipping THC/CBD content for non-mini template with classic type (non-preroll): {product_type}")
+                            label_context['THC_CBD'] = ''
+                            label_context['Ratio_or_THC_CBD'] = ''
+                        else:
+                            processed_content = wrap_with_marker(content, 'THC_CBD')
+                            label_context['THC_CBD'] = processed_content
+                            label_context['Ratio_or_THC_CBD'] = processed_content  # Keep for backward compatibility
+                            self.logger.debug(f"Fallback: Using THC_CBD marker for classic product: {processed_content}")
                 elif is_classic and cleaned_content == "THC:|BR|CBD:":
                     # Classic product with default THC:|BR|CBD: format - extract actual values
                     content = self.format_classic_ratio(cleaned_content, record)
                     content = content.replace('|BR|', '\n')
                     
-                    # For mini templates with classic types, skip THC/CBD content EXCEPT for prerolls
-                    is_preroll = product_type in {"pre-roll", "infused pre-roll"}
-                    if self.template_type == 'mini' and not is_preroll:
-                        self.logger.debug(f"Fallback: Skipping THC/CBD content for mini template with classic type (non-preroll): {product_type}")
-                        label_context['THC_CBD'] = ''
-                        label_context['Ratio_or_THC_CBD'] = ''
-                    else:
+                    # For mini templates, always show THC/CBD content regardless of product type
+                    if self.template_type == 'mini':
+                        # Mini templates should always show THC/CBD content
                         processed_content = wrap_with_marker(content, 'THC_CBD')
                         label_context['THC_CBD'] = processed_content
                         label_context['Ratio_or_THC_CBD'] = processed_content  # Keep for backward compatibility
-                        self.logger.debug(f"Fallback: Using THC_CBD marker for classic product with extracted values: {processed_content}")
+                        self.logger.debug(f"Mini template: Fallback: Using THC_CBD marker for classic product with extracted values: {processed_content}")
+                    else:
+                        # For other templates, skip THC/CBD content for classic types (non-preroll)
+                        is_preroll = product_type in {"pre-roll", "infused pre-roll"}
+                        if not is_preroll:
+                            self.logger.debug(f"Fallback: Skipping THC/CBD content for non-mini template with classic type (non-preroll): {product_type}")
+                            label_context['THC_CBD'] = processed_content
+                            label_context['Ratio_or_THC_CBD'] = processed_content  # Keep for backward compatibility
+                        else:
+                            processed_content = wrap_with_marker(content, 'THC_CBD')
+                            label_context['THC_CBD'] = processed_content
+                            label_context['Ratio_or_THC_CBD'] = processed_content  # Keep for backward compatibility
+                            self.logger.debug(f"Fallback: Using THC_CBD marker for classic product with extracted values: {processed_content}")
                 else:
                     # Non-classic product or non-percentage content - use Ratio marker
                     if 'mg' in cleaned_content.lower():
@@ -1638,7 +1921,7 @@ class TemplateProcessor:
             label_context['THC_CBD'] = ''
             label_context['Ratio'] = ''
 
-        # Fast brand handling - exclude classic types (they should show lineage instead of brand)
+        # Fast brand handling - for mini templates, show brands for all product types
         product_brand = (record.get('ProductBrand') or 
                         record.get('Product Brand') or 
                         record.get('product_brand') or 
@@ -1648,17 +1931,22 @@ class TemplateProcessor:
         product_type = (label_context.get('ProductType', '').lower() or 
                        label_context.get('Product Type*', '').lower())
         
-        # Only add brand for non-classic types
-        if product_brand and product_type not in classic_types:
+        # For mini templates, always show brand if available (regardless of product type)
+        # For other templates, exclude classic types (they should show lineage instead of brand)
+        if product_brand:
             # Prevent text breaking in brand names
             product_brand = self.prevent_text_breaking(product_brand)
             if self.template_type == 'mini':
-                # For mini templates, provide raw values
+                # For mini templates, provide raw values for all product types
                 label_context['ProductBrand'] = product_brand
                 label_context['ProductBrand_Center'] = product_brand
-            else:
+            elif product_type not in classic_types:
+                # For other templates, only show brand for non-classic types
                 label_context['ProductBrand'] = wrap_with_marker(unwrap_marker(product_brand, 'PRODUCTBRAND_CENTER'), 'PRODUCTBRAND_CENTER')
                 label_context['ProductBrand_Center'] = wrap_with_marker(unwrap_marker(product_brand, 'PRODUCTBRAND_CENTER'), 'PRODUCTBRAND_CENTER')
+            else:
+                label_context['ProductBrand'] = ''
+                label_context['ProductBrand_Center'] = ''
         else:
             label_context['ProductBrand'] = ''
             label_context['ProductBrand_Center'] = ''
@@ -3856,17 +4144,106 @@ class TemplateProcessor:
             from docx.shared import Mm
             from docx.enum.text import WD_ALIGN_PARAGRAPH
             
+            self.logger.info(f"Processing DOH images for {self.template_type} template")
+            self.logger.info(f"Context keys: {list(context.keys())}")
+            
+            # First, find all labels that need DOH images
+            doh_labels = {}
+            for label_key, label_context in context.items():
+                if (isinstance(label_context, dict) and 
+                    label_context.get('DOH') == '[DOH_IMAGE_PLACEHOLDER]' and
+                    label_context.get('_DOH_IMAGE_PATH')):
+                    doh_labels[label_key] = label_context
+                    self.logger.info(f"Found DOH label: {label_key} with image path: {label_context.get('_DOH_IMAGE_PATH')}")
+            
+            if not doh_labels:
+                self.logger.info("No DOH labels found that need image insertion")
+                return
+            
             # Process DOH images for mini and double templates only
-            for table in doc.tables:
-                for row in table.rows:
-                    for cell in row.cells:
-                        # Look for placeholder markers
+            for table_idx, table in enumerate(doc.tables):
+                self.logger.debug(f"Processing table {table_idx} with {len(table.rows)} rows")
+                for row_idx, row in enumerate(table.rows):
+                    for col_idx, cell in enumerate(row.cells):
+                        # Look for placeholder markers in both cell text and paragraph text
                         cell_text = cell.text.strip()
+                        self.logger.debug(f"Checking cell ({row_idx}, {col_idx}) for DOH placeholder. Content: '{cell_text[:100]}'")
+                        
                         if '[DOH_IMAGE_PLACEHOLDER]' in cell_text:
-                            self._insert_doh_image_in_cell(cell, context)
+                            self.logger.info(f"Found DOH image placeholder in cell ({row_idx}, {col_idx}): {cell_text[:50]}...")
+                            # Find which label this cell belongs to and get its context
+                            label_context = self._find_label_context_for_cell(cell, context, row_idx, col_idx)
+                            if label_context:
+                                self.logger.info(f"Found label context for DOH cell ({row_idx}, {col_idx}): {label_context.get('ProductName', 'Unknown')}")
+                                self._insert_doh_image_in_cell(cell, label_context)
+                            else:
+                                self.logger.warning(f"Could not find label context for DOH cell ({row_idx}, {col_idx})")
+                        else:
+                            # Also check individual paragraphs for the placeholder
+                            for para_idx, para in enumerate(cell.paragraphs):
+                                para_text = para.text.strip()
+                                if '[DOH_IMAGE_PLACEHOLDER]' in para_text:
+                                    self.logger.info(f"Found DOH image placeholder in paragraph {para_idx} of cell ({row_idx}, {col_idx}): {para_text[:50]}...")
+                                    # Find which label this cell belongs to and get its context
+                                    label_context = self._find_label_context_for_cell(cell, context, row_idx, col_idx)
+                                    if label_context:
+                                        self.logger.info(f"Found label context for DOH cell ({row_idx}, {col_idx}): {label_context.get('ProductName', 'Unknown')}")
+                                        self._insert_doh_image_in_cell(cell, label_context)
+                                    else:
+                                        self.logger.warning(f"Could not find label context for DOH cell ({row_idx}, {col_idx})")
+                                    break
                                             
         except Exception as e:
             self.logger.error(f"Error processing DOH images: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _find_label_context_for_cell(self, cell, context, row_idx, col_idx):
+        """Find the label context for a given cell based on its position and content."""
+        try:
+            # First, check if this cell contains a DOH image placeholder
+            cell_text = cell.text.strip()
+            if '[DOH_IMAGE_PLACEHOLDER]' in cell_text:
+                # This cell needs a DOH image, find the label that has the DOH image path
+                for label_key, label_context in context.items():
+                    if (isinstance(label_context, dict) and 
+                        label_context.get('DOH') == '[DOH_IMAGE_PLACEHOLDER]' and
+                        label_context.get('_DOH_IMAGE_PATH')):
+                        self.logger.debug(f"Found DOH label context {label_key} for DOH cell ({row_idx}, {col_idx})")
+                        return label_context
+            
+            # Try to find the label based on cell position in the grid
+            # For a 4x5 grid, the first 20 cells (0-19) correspond to Label1-Label20
+            cell_index = row_idx * 4 + col_idx  # Assuming 4 columns
+            
+            if cell_index < 20:  # Only process the first 20 cells
+                label_key = f"Label{cell_index + 1}"
+                if label_key in context:
+                    label_context = context[label_key]
+                    self.logger.debug(f"Found label context {label_key} for cell ({row_idx}, {col_idx})")
+                    return label_context
+            
+            # Fallback: search through context to find which label has DOH image path
+            for label_key, label_context in context.items():
+                if (isinstance(label_context, dict) and 
+                    '_DOH_IMAGE_PATH' in label_context and 
+                    label_context['_DOH_IMAGE_PATH']):
+                    self.logger.debug(f"Found DOH image path in {label_key}")
+                    return label_context
+            
+            # Additional fallback: search for any label with DOH image path
+            for label_key, label_context in context.items():
+                if (isinstance(label_context, dict) and 
+                    label_context.get('DOH') == '[DOH_IMAGE_PLACEHOLDER]'):
+                    self.logger.debug(f"Found DOH image placeholder in {label_key}")
+                    return label_context
+            
+            self.logger.warning(f"Could not find label context for cell ({row_idx}, {col_idx})")
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"Error finding label context for cell: {e}")
+            return None
     
     def _insert_doh_image_in_cell(self, cell, context):
         """Helper method to insert DOH image into a cell."""
@@ -3875,40 +4252,51 @@ class TemplateProcessor:
             from docx.shared import Mm
             from docx.enum.text import WD_ALIGN_PARAGRAPH
             
-            # Find the label that has a DOH image path
-            for label_key, label_context in context.items():
-                if (isinstance(label_context, dict) and 
-                    '_DOH_IMAGE_PATH' in label_context and 
-                    label_context['_DOH_IMAGE_PATH']):
+            # Context here is the specific label_context for the DOH image
+            self.logger.info(f"Inserting DOH image into cell for label: {context.get('ProductName', 'Unknown')}")
+            
+            if (isinstance(context, dict) and
+                '_DOH_IMAGE_PATH' in context and
+                context['_DOH_IMAGE_PATH']):
+                
+                image_path = context['_DOH_IMAGE_PATH']
+                image_width = context.get('_DOH_IMAGE_WIDTH', 12)
+                
+                self.logger.info(f"Found DOH image path: {image_path}")
+                
+                if image_path and os.path.exists(image_path):
+                    self.logger.info(f"Image path exists, inserting image with width {image_width}mm")
                     
-                    image_path = label_context['_DOH_IMAGE_PATH']
-                    image_width = label_context.get('_DOH_IMAGE_WIDTH', 12)
+                    # Clear the cell content
+                    cell._tc.clear_content()
                     
-                    if image_path and os.path.exists(image_path):
-                        # Clear the cell content
-                        cell._tc.clear_content()
-                        
-                        # Add a paragraph for the image
-                        paragraph = cell.add_paragraph()
-                        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        
-                        # Insert the DOH image using the document's add_picture method
-                        try:
-                            run = paragraph.add_run()
-                            run.add_picture(image_path, width=Mm(image_width))
-                            self.logger.debug(f"Inserted DOH image for {label_key}: {image_path}")
-                            return  # Successfully inserted image, exit
-                        except Exception as e:
-                            self.logger.warning(f"Failed to insert DOH image for {label_key}: {e}")
-                            # Fallback: add text placeholder
-                            paragraph.add_run("DOH")
-                            return
-                    else:
-                        self.logger.warning(f"DOH image path not found or invalid for {label_key}: {image_path}")
+                    # Add a paragraph for the image
+                    paragraph = cell.add_paragraph()
+                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    
+                    # Insert the DOH image using the document's add_picture method
+                    try:
+                        run = paragraph.add_run()
+                        run.add_picture(image_path, width=Mm(image_width))
+                        self.logger.info(f"Successfully inserted DOH image for {context.get('ProductName', 'Unknown')}: {image_path}")
+                        return  # Successfully inserted image, exit
+                    except Exception as e:
+                        self.logger.warning(f"Failed to insert DOH image for {context.get('ProductName', 'Unknown')}: {e}")
+                         # Fallback: add text placeholder
+                        paragraph.add_run("DOH")
                         return
+                else:
+                    self.logger.warning(f"DOH image path not found or invalid: {image_path}")
+                    if image_path:
+                        self.logger.warning(f"Image path exists: {os.path.exists(image_path)}")
+                    return
+            else:
+                self.logger.debug(f"Context does not have DOH image path or is not a dict")
                         
         except Exception as e:
             self.logger.error(f"Error inserting DOH image: {e}")
+            import traceback
+            traceback.print_exc()
     
     def _prepare_doh_images_for_docxtemplate(self, doc_template, context):
         """Prepare DOH images for DocxTemplate rendering by creating InlineImage objects."""
@@ -3937,15 +4325,32 @@ class TemplateProcessor:
         """Manually replace placeholders in the document when DocxTemplate fails."""
         try:
             from docx.shared import Pt
+            from src.core.generation.unified_font_sizing import get_mini_font_size_by_marker
+            
             self.logger.info(f"Starting manual placeholder replacement with context keys: {list(context.keys())}")
             replacements_made = 0
             
             # Field name mapping for mini templates - map template placeholders to context fields
             field_mapping = {
                 'THC_CBD': 'Ratio_or_THC_CBD',
-                'DescAndWeight': 'DescAndWeight',  # Fixed mapping
-                'DOH': 'DOH'  # Handle DOH placeholders
+                'DescAndWeight': 'Description',  # Map DescAndWeight to Description field
+                'DOH': 'DOH',  # Handle DOH placeholders
+                'ProductBrand': 'ProductBrand',
+                'ProductStrain': 'ProductStrain',
+                'Price': 'Price',
+                'Lineage': 'Lineage',
+                'Ratio_or_THC_CBD': 'Ratio_or_THC_CBD'
             }
+            
+            # Debug: Log available context fields for first label
+            if context:
+                first_label = list(context.keys())[0]
+                first_context = context[first_label]
+                if isinstance(first_context, dict):
+                    self.logger.info(f"Available fields for {first_label}: {list(first_context.keys())}")
+                    if 'DOH' in first_context:
+                        self.logger.info(f"DOH field value: '{first_context['DOH']}'")
+                        self.logger.info(f"_DOH_IMAGE_PATH: '{first_context.get('_DOH_IMAGE_PATH', 'NOT_FOUND')}'")
             
             def process_cell_recursively(cell):
                 """Recursively process all content in a cell, including nested tables."""
@@ -3958,13 +4363,11 @@ class TemplateProcessor:
                         text = run.text
                         original_text = text
                         
-
-                        
                         # First, handle direct replacements with flexible matching (including quoted placeholders)
                         for label_key, label_context in context.items():
                             if isinstance(label_context, dict):
                                 for field_key, field_value in label_context.items():
-                                                                        # Handle quoted placeholders directly (including those with extra spaces)
+                                    # Handle quoted placeholders directly (including those with extra spaces)
                                     quoted_patterns = [
                                         "'{{" + label_key + "." + field_key + "}}'",  # Exact match (double braces)
                                         "'{{" + label_key + "." + field_key + " }}'",  # With space before closing brace
@@ -3974,7 +4377,14 @@ class TemplateProcessor:
                                     quoted_found = False
                                     for quoted_placeholder in quoted_patterns:
                                         if quoted_placeholder in text:
-                                            if field_key == 'DOH' and self.template_type == 'mini':
+                                            # CRITICAL: Check if this is an empty label that should be completely cleared
+                                            if label_context.get('_IS_EMPTY_LABEL', False):
+                                                text = text.replace(quoted_placeholder, '')  # Clear the content completely
+                                                replacements_made += 1
+                                                self.logger.debug(f"Cleared empty label quoted placeholder {quoted_placeholder}")
+                                                quoted_found = True
+                                                break
+                                            elif field_key == 'DOH' and self.template_type == 'mini':
                                                 if label_context.get('_DOH_IMAGE_PATH'):
                                                     text = text.replace(quoted_placeholder, "[DOH_IMAGE_PLACEHOLDER]")
                                                     replacements_made += 1
@@ -3992,10 +4402,11 @@ class TemplateProcessor:
                                     
                                     # Try unquoted placeholder as fallback if no quoted pattern was found
                                     if not quoted_found:
-                                        # Try triple braces first (original format)
-                                        unquoted_placeholder = "{{{" + label_key + "." + field_key + "}}}"
-                                        if unquoted_placeholder in text:
-                                            if field_key == 'DOH' and self.template_type == 'mini':
+                                        # CRITICAL: Handle DOH placeholders FIRST before empty label logic
+                                        if field_key == 'DOH' and self.template_type == 'mini':
+                                            # Try triple braces first (original format)
+                                            unquoted_placeholder = "{{{" + label_key + "." + field_key + "}}}"
+                                            if unquoted_placeholder in text:
                                                 if label_context.get('_DOH_IMAGE_PATH'):
                                                     text = text.replace(unquoted_placeholder, "[DOH_IMAGE_PLACEHOLDER]")
                                                     replacements_made += 1
@@ -4003,16 +4414,17 @@ class TemplateProcessor:
                                                 else:
                                                     text = text.replace(unquoted_placeholder, str(field_value))
                                                     replacements_made += 1
-                                                    self.logger.debug(f"Replaced triple braces {unquoted_placeholder} with {field_value}")
-                                            else:
-                                                text = text.replace(unquoted_placeholder, str(field_value))
-                                                replacements_made += 1
-                                                self.logger.debug(f"Replaced triple braces {unquoted_placeholder} with {field_value}")
-                                        else:
-                                            # Try double braces (our expanded template format)
-                                            double_braces_placeholder = "{{" + label_key + "." + field_key + "}}"
-                                            if double_braces_placeholder in text:
-                                                if field_key == 'DOH' and self.template_type == 'mini':
+                                                    self.logger.debug(f"Replaced triple braces {unquoted_placeholder} with DOH text: {field_value}")
+                                                continue  # Skip to next field
+                                            
+                                            # Try double braces (our expanded template format) - handle both with and without extra space
+                                            double_braces_patterns = [
+                                                "{{" + label_key + "." + field_key + "}}",  # Exact match
+                                                "{{" + label_key + "." + field_key + " }}",  # With space before closing brace (common in DOH)
+                                            ]
+                                            
+                                            for double_braces_placeholder in double_braces_patterns:
+                                                if double_braces_placeholder in text:
                                                     if label_context.get('_DOH_IMAGE_PATH'):
                                                         text = text.replace(double_braces_placeholder, "[DOH_IMAGE_PLACEHOLDER]")
                                                         replacements_made += 1
@@ -4020,23 +4432,97 @@ class TemplateProcessor:
                                                     else:
                                                         text = text.replace(double_braces_placeholder, str(field_value))
                                                         replacements_made += 1
-                                                        self.logger.debug(f"Replaced double braces {double_braces_placeholder} with {field_value}")
-                                                else:
-                                                    text = text.replace(double_braces_placeholder, str(field_value))
-                                                    replacements_made += 1
-                                                    self.logger.debug(f"Replaced double braces {double_braces_placeholder} with {field_value}")
+                                                        self.logger.debug(f"Replaced double braces {double_braces_placeholder} with DOH text: {field_value}")
+                                                    continue  # Skip to next field
+                                        
+                                        # Try triple braces first (original format) for non-DOH fields
+                                        unquoted_placeholder = "{{{" + label_key + "." + field_key + "}}}"
+                                        if unquoted_placeholder in text:
+                                            # CRITICAL: Check if this is an empty label that should be completely cleared
+                                            # BUT preserve DOH image placeholders
+                                            if label_context.get('_IS_EMPTY_LABEL', False):
+                                                # Don't clear DOH image placeholders
+                                                if field_key == 'DOH' and '[DOH_IMAGE_PLACEHOLDER]' in text:
+                                                    self.logger.debug(f"Preserving DOH image placeholder in empty label")
+                                                    continue
+                                                text = text.replace(unquoted_placeholder, '')  # Clear the content completely
+                                                replacements_made += 1
+                                                self.logger.debug(f"Cleared empty label placeholder {unquoted_placeholder}")
                                             else:
-                                                # CRITICAL: Also check for basic double braces format (mini template format)
-                                                basic_double_braces = "{{" + label_key + "." + field_key + "}}"
-                                                if basic_double_braces in text:
-                                                    text = text.replace(basic_double_braces, str(field_value))
-                                                    replacements_made += 1
-                                                    self.logger.debug(f"Replaced basic double braces {basic_double_braces} with {field_value}")
+                                                text = text.replace(unquoted_placeholder, str(field_value))
+                                                replacements_made += 1
+                                                self.logger.debug(f"Replaced triple braces {unquoted_placeholder} with {field_value}")
+                                        else:
+                                            # Try double braces (our expanded template format) - handle both with and without extra space
+                                            double_braces_patterns = [
+                                                "{{" + label_key + "." + field_key + "}}",  # Exact match
+                                                "{{" + label_key + "." + field_key + " }}",  # With space before closing brace (common in DOH)
+                                            ]
+                                            
+                                            double_braces_found = False
+                                            for double_braces_placeholder in double_braces_patterns:
+                                                if double_braces_placeholder in text:
+                                                    # CRITICAL: Check if this is an empty label that should be completely cleared
+                                                    # BUT preserve DOH image placeholders
+                                                    if label_context.get('_IS_EMPTY_LABEL', False):
+                                                        # Don't clear DOH image placeholders
+                                                        if field_key == 'DOH' and '[DOH_IMAGE_PLACEHOLDER]' in text:
+                                                            self.logger.debug(f"Preserving DOH image placeholder in empty label")
+                                                            double_braces_found = True
+                                                            break
+                                                        text = text.replace(double_braces_placeholder, '')  # Clear the content completely
+                                                        replacements_made += 1
+                                                        self.logger.debug(f"Cleared empty label placeholder {double_braces_placeholder}")
+                                                    else:
+                                                        text = text.replace(double_braces_placeholder, str(field_value))
+                                                        replacements_made += 1
+                                                        self.logger.debug(f"Replaced double braces {double_braces_placeholder} with {field_value}")
+                                                    double_braces_found = True
+                                                    break
                         
                         # Apply the replaced text back to the run
                         if text != original_text:
-                            run.text = text
-                            self.logger.debug(f"Updated run text from '{original_text}' to '{text}'")
+                            # CRITICAL: Only update if we have actual content to avoid clearing
+                            if text and text.strip():
+                                run.text = text
+                                self.logger.debug(f"Updated run text from '{original_text}' to '{text}'")
+                            elif original_text and original_text.strip():
+                                # If the replacement would result in empty text, keep the original
+                                self.logger.debug(f"Keeping original text '{original_text}' to avoid clearing")
+                                continue
+                            
+                            # CRITICAL: Apply intelligent font sizing for mini templates
+                            if self.template_type == 'mini' and text.strip():
+                                # Determine the marker type from the text content
+                                marker_type = self._identify_marker_type(text)
+                                
+                                # Get appropriate font size for mini tags using the mini font sizing system
+                                font_size = get_mini_font_size_by_marker(text, marker_type, self.scale_factor)
+                                
+                                # Apply the calculated font size
+                                run.font.size = font_size
+                                self.logger.debug(f"Applied mini font sizing: {font_size.pt}pt for '{text[:20]}...' (marker: {marker_type})")
+                            
+                            # CRITICAL: Apply bold formatting to ensure all text is bolded
+                            # This fixes the issue where random products aren't being bolded
+                            run.font.name = "Arial"
+                            run.font.bold = True
+                            
+                            # Set font size if not already defined
+                            if not run.font.size:
+                                run.font.size = Pt(10)
+                            
+                            # CRITICAL: Apply intelligent font sizing for mini templates
+                            if self.template_type == 'mini' and text.strip():
+                                # Determine the marker type from the text content
+                                marker_type = self._identify_marker_type(text)
+                                
+                                # Get appropriate font size for mini tags using the mini font sizing system
+                                font_size = get_mini_font_size_by_marker(text, marker_type, self.scale_factor)
+                                
+                                # Apply the calculated font size
+                                run.font.size = font_size
+                                self.logger.debug(f"Applied mini font sizing: {font_size.pt}pt for '{text[:20]}...' (marker: {marker_type})")
                             
                             # CRITICAL: Apply bold formatting to ensure all text is bolded
                             # This fixes the issue where random products aren't being bolded
@@ -4049,18 +4535,37 @@ class TemplateProcessor:
                         
                         # DOH handling is now done by the main replacement logic above
                         
-                        # Special direct DOH replacement for mini templates (fallback)
-                        if self.template_type == 'mini' and 'DOH' in text:
+                        # Special direct replacement for mini templates (fallback)
+                        if self.template_type == 'mini':
                             for label_key, label_context in context.items():
                                 if isinstance(label_context, dict):
-                                    # Look for the exact DOH placeholder format
-                                    doh_placeholder = "'{{" + label_key + ".DOH }}'"
-                                    if doh_placeholder in text:
-                                        doh_value = label_context.get('DOH', '') or label_context.get('DOH_TEXT', '')
-                                        if doh_value:
-                                            text = text.replace(doh_placeholder, str(doh_value))
-                                            replacements_made += 1
-                                            self.logger.debug(f"Direct DOH replacement: {doh_placeholder} -> {doh_value}")
+                                    # Direct replacement for common fields
+                                    direct_mappings = {
+                                        'DOH': 'DOH',
+                                        'DescAndWeight': 'Description',
+                                        'ProductBrand': 'ProductBrand',
+                                        'Price': 'Price',
+                                        'Lineage': 'Lineage',
+                                        'Ratio_or_THC_CBD': 'Ratio_or_THC_CBD'
+                                    }
+                                    
+                                    for template_field, data_field in direct_mappings.items():
+                                        if data_field in label_context:
+                                            # Look for various placeholder formats
+                                            placeholder_formats = [
+                                                f"'{{{{{label_key}.{template_field}}}}}'",  # Quoted double braces
+                                                f"{{{{{label_key}.{template_field}}}}}",   # Triple braces
+                                                f"{{{{Label{label_key.split('Label')[1]}.{template_field}}}}}"  # LabelX format
+                                            ]
+                                            
+                                            for placeholder in placeholder_formats:
+                                                if placeholder in text:
+                                                    value = label_context[data_field]
+                                                    if value:
+                                                        text = text.replace(placeholder, str(value))
+                                                        replacements_made += 1
+                                                        self.logger.debug(f"Direct replacement: {placeholder} -> {value}")
+                                                        break
                         
                         # Then, handle template placeholder mappings
                         for label_key, label_context in context.items():
@@ -4116,6 +4621,20 @@ class TemplateProcessor:
                     # Apply paragraph-level replacements
                     if paragraph_text != original_para_text:
                         paragraph.text = paragraph_text
+                        
+                        # CRITICAL: Apply intelligent font sizing for mini templates after replacement
+                        if self.template_type == 'mini':
+                            for run in paragraph.runs:
+                                if run.text and run.text.strip():
+                                    # Determine the marker type from the text content
+                                    marker_type = self._identify_marker_type(run.text)
+                                    
+                                    # Get appropriate font size for mini tags using the mini font sizing system
+                                    font_size = get_mini_font_size_by_marker(run.text, marker_type, self.scale_factor)
+                                    
+                                    # Apply the calculated font size
+                                    run.font.size = font_size
+                                    self.logger.debug(f"Applied mini font sizing after replacement: {font_size.pt}pt for '{run.text[:20]}...' (marker: {marker_type})")
                         
                         # CRITICAL: Apply bold formatting to all runs in the paragraph after replacement
                         # This ensures all text gets bolded, fixing the random products issue
@@ -4259,11 +4778,45 @@ class TemplateProcessor:
                 for paragraph in cell.paragraphs:
                     for run in paragraph.runs:
                         if run.text.strip():  # Only process non-empty runs
-                            # FORCE Arial Bold - NO EXCEPTIONS
-                            run.font.name = "Arial"
-                            run.font.bold = True
-                            run.font.italic = False
-                            self.logger.info(f"🎯 FORCED Arial Bold on run: '{run.text}' - Font: {run.font.name}, Bold: {run.font.bold}")
+                            # CRITICAL: Preserve text content before applying formatting
+                            existing_text = run.text
+                            
+                            # FORCE Arial Bold - NO EXCEPTIONS using XML approach to avoid clearing text
+                            if hasattr(run, '_element') and run._element is not None:
+                                rPr = run._element.find(qn('w:rPr'))
+                                if rPr is None:
+                                    rPr = OxmlElement('w:rPr')
+                                    run._element.insert(0, rPr)
+                                
+                                # Force font name
+                                rFonts = rPr.find(qn('w:rFonts'))
+                                if rFonts is None:
+                                    rFonts = OxmlElement('w:rFonts')
+                                    rPr.append(rFonts)
+                                rFonts.set(qn('w:ascii'), 'Arial')
+                                rFonts.set(qn('w:hAnsi'), 'Arial')
+                                rFonts.set(qn('w:eastAsia'), 'Arial')
+                                
+                                # Force bold
+                                b = rPr.find(qn('w:b'))
+                                if b is None:
+                                    b = OxmlElement('w:b')
+                                    rPr.append(b)
+                                b.set(qn('w:val'), 'true')
+                                
+                                # Force not italic
+                                i = rPr.find(qn('w:i'))
+                                if i is None:
+                                    i = OxmlElement('w:i')
+                                    rPr.append(i)
+                                i.set(qn('w:val'), 'false')
+                            
+                            # CRITICAL: Ensure text content is preserved after formatting
+                            if run.text != existing_text:
+                                run.text = existing_text
+                                self.logger.debug(f"Restored text content: '{existing_text}' after formatting")
+                            
+                            self.logger.info(f"🎯 FORCED Arial Bold on run: '{run.text}' - Font: Arial, Bold: True")
                 
                 # Recursively process nested tables in this cell
                 for nested_table in cell.tables:
@@ -4296,11 +4849,18 @@ class TemplateProcessor:
                 for paragraph in cell.paragraphs:
                     # Process all runs in the paragraph
                     for run in paragraph.runs:
-                        if run.text and run.text.strip():
+                        # CRITICAL: Preserve existing text content while applying formatting
+                        existing_text = run.text
+                        if existing_text and existing_text.strip():
                             # FORCE Arial Bold - ABSOLUTELY NO EXCEPTIONS
                             run.font.name = "Arial"
                             run.font.bold = True
                             run.font.italic = False
+                            
+                            # CRITICAL: Ensure text content is preserved after formatting
+                            if run.text != existing_text:
+                                run.text = existing_text
+                                self.logger.debug(f"Preserved text content: '{existing_text}' after formatting")
                             
                             # Also force the underlying XML to ensure it sticks
                             if hasattr(run, '_element') and run._element is not None:
@@ -4359,29 +4919,112 @@ class TemplateProcessor:
             
         text = str(text).strip()
         
-        # Add non-breaking spaces for vendor names and company names
-        # This prevents "1555 Industrial LLC" from breaking into "1555 Industrial rial LLC LLC"
+        # Use actual non-breaking space character
+        nbsp = '\u00A0'
         
         # Pattern 1: Company names with numbers (e.g., "1555 Industrial LLC")
-        text = re.sub(r'(\d+)\s+([A-Za-z]+)', r'\1 ' + chr(0x00A0) + r'\2', text)
+        # Only apply to company names, NOT to weight units like "5g"
+        text = re.sub(r'(\d{3,})\s+([A-Za-z]+)', r'\1' + nbsp + r'\2', text)  # Only 3+ digit numbers for company names
         
         # Pattern 2: Common business suffixes that should stay together
         business_suffixes = ['LLC', 'Inc', 'Corp', 'Company', 'Co', 'Ltd', 'Limited']
         for suffix in business_suffixes:
             # Add non-breaking space before business suffixes
-            text = re.sub(r'\s+(' + re.escape(suffix) + r')\b', chr(0x00A0) + r'\1', text, flags=re.IGNORECASE)
+            text = re.sub(r'\s+(' + re.escape(suffix) + r')\b', nbsp + r'\1', text, flags=re.IGNORECASE)
         
         # Pattern 3: Prevent breaking of "x" in ratios (e.g., "1g x 2 Pack")
-        text = re.sub(r'(\d+g)\s+x\s+(\d+)', r'\1' + chr(0x00A0) + 'x' + chr(0x00A0) + r'\2', text)
+        text = re.sub(r'(\d+g)\s+x\s+(\d+)', r'\1' + nbsp + 'x' + nbsp + r'\2', text)
         
         # Pattern 4: Prevent breaking of percentages (e.g., "THC: 20.71%")
-        text = re.sub(r'([A-Z]+):\s+([0-9.]+)%', r'\1:' + chr(0x00A0) + r'\2%', text)
+        text = re.sub(r'([A-Z]+):\s+([0-9.]+)%', r'\1:' + nbsp + r'\2%', text)
         
         # Pattern 5: Prevent breaking of price formats (e.g., "$110")
-        text = re.sub(r'(\$)\s*([0-9.]+)', r'\1' + chr(0x00A0) + r'\2', text)
+        # Only add non-breaking space if there's already a space, don't create new spaces
+        # Don't modify prices without spaces to avoid breaking them
+        # Temporarily disabled to debug the issue
+        # text = re.sub(r'(\$)\s+([0-9.]+)', r'\1' + nbsp + r'\2', text)  # Only if space already exists
         
         # Pattern 6: Prevent breaking of weight units (e.g., "1g x 28 Pack")
-        text = re.sub(r'(\d+\.?\d*g)\s+x\s+(\d+)\s+Pack', r'\1' + chr(0x00A0) + 'x' + chr(0x00A0) + r'\2' + chr(0x00A0) + 'Pack', text, flags=re.IGNORECASE)
+        # Keep hyphens with the Pack text to preserve formats like "28 Pack"
+        text = re.sub(r'(\d+\.?\d*g)\s+x\s+(\d+)\s+Pack', r'\1' + nbsp + 'x' + nbsp + r'\2' + nbsp + 'Pack', text, flags=re.IGNORECASE)
+        
+        # Pattern 7: Preserve hyphens in joint ratio formats (e.g., "28 Pack", "5 Pack")
+        # This ensures the hyphen stays with the Pack text
+        text = re.sub(r'(\d+)\s*-\s*Pack', r'\1-Pack', text, flags=re.IGNORECASE)
+        
+        # Pattern 8: Keep leading hyphens with joint ratio text (e.g., " - 1g x 28 Pack")
+        # This ensures the leading hyphen stays with the joint ratio content
+        text = re.sub(r'^\s*-\s+', '- ', text)  # Leading hyphen with space
+        text = re.sub(r'\s+-\s+', ' - ', text)  # Hyphen with spaces on both sides
+        
+        # Pattern 9: CRITICAL - Preserve leading space before hyphens in ALL contexts
+        # This ensures any space before a hyphen is preserved and made non-breaking
+        # Convert "word -" to "word " + nbsp + "-" (preserve the space)
+        # EXCEPT for joint ratio patterns which are handled separately
+        text = re.sub(r'(\S)\s+-\s+(?!\d*\.?\d*g)', r'\1 ' + nbsp + '-', text)  # Any word + space + hyphen, but not followed by weight
+        
+        # Pattern 10: Ensure leading space is preserved for standalone hyphens
+        # This handles cases like " - 1g x 28 Pack" to keep the leading space
+        text = re.sub(r'^\s+-\s+', ' ' + nbsp + '-', text)  # Leading space + hyphen
+        
+        # Pattern 11: Prevent hanging hyphens at line endings
+        # This prevents "Pre-Roll -" from breaking to a new line
+        # Add non-breaking space after hyphens to keep them with the following text
+        text = re.sub(r'-\s+', '-' + nbsp, text)  # Hyphen followed by non-breaking space
+        
+        # Pattern 12: Prevent specific hanging hyphen patterns
+        # This prevents "Pre-Roll -" from breaking to a new line
+        # EXCEPT for joint ratio patterns which are handled separately
+        text = re.sub(r'([A-Za-z]+)\s*-\s+(?!\d*\.?\d*g)', r'\1-' + nbsp, text)  # Word-hyphen followed by non-breaking space, but not followed by weight
+        
+        # Pattern 13: Comprehensive joint ratio protection - keep entire ratio together
+        # This prevents ANY part of the joint ratio from breaking across lines
+        # Examples: "0.5g x 2 Pack", "1g x 28 Pack", "0.5g x 7 Pack"
+        text = re.sub(r'(\d*\.?\d+g)\s+x\s+(\d+)\s+Pack', r'\1' + nbsp + 'x' + nbsp + r'\2' + nbsp + 'Pack', text, flags=re.IGNORECASE)
+        
+        # Pattern 14: Weight unit protection - keep weight and unit together
+        # This prevents "0.5g" from breaking as "0.5" and "g" on separate lines
+        # Only apply if there's already a space, don't create new spaces
+        text = re.sub(r'(\d*\.?\d+)\s+g', r'\1' + nbsp + 'g', text)  # Only if space already exists
+        
+        # Pattern 15: "x" symbol protection - keep "x" with surrounding text
+        # This prevents "x" from appearing alone on a line
+        text = re.sub(r'(\d+)\s+x\s+', r'\1' + nbsp + 'x' + nbsp, text)
+        
+        # Pattern 16: Preserve spaces in common product format patterns
+        # Handle "1g x 28 Pack" to prevent "28 Pa ck"
+        text = re.sub(r'(\d+)\s+x\s+(\d+)\s+Pack', r'\1' + nbsp + 'x' + nbsp + r'\2' + nbsp + 'Pack', text, flags=re.IGNORECASE)
+        
+        # Pattern 17: CRITICAL - Prevent leading hyphens from breaking
+        # This is the main fix for "stop hyphen from breaking from preroll ratios"
+        # Convert any leading hyphen + space to hyphen + non-breaking space
+        text = re.sub(r'^\s*-\s+', '-' + nbsp, text)  # Leading hyphen
+        text = re.sub(r'\s+-\s+', nbsp + '-' + nbsp, text)  # Hyphen with spaces on both sides
+        
+        # Pattern 18: Ensure product names stay with their hyphens
+        # This prevents "Pre-Roll -" from breaking
+        # EXCEPT for joint ratio patterns which are handled separately
+        text = re.sub(r'([A-Za-z]+)\s*-\s+(?!\d*\.?\d*g)', r'\1-' + nbsp, text)
+        
+        # Pattern 18b: CRITICAL - Force joint ratio to ALWAYS start on a new line
+        # This ensures "Pre-Roll - 1g x 28 Pack" ALWAYS breaks to a new line
+        # Convert "Pre-Roll - 1g x 28 Pack" to "Pre-Roll\n\xa0-\xa01g\xa0x\xa028\xa0Pack"
+        text = re.sub(r'([A-Za-z]+)\s+-\s+(\d*\.?\d*g\s+x\s+\d+\s+Pack)', 
+                     r'\1\n' + nbsp + '-' + nbsp + r'\2', text, flags=re.IGNORECASE)
+        
+        # Pattern 18c: Force single weight cases to ALWAYS start on a new line
+        # Convert "Pre-Roll - 1g" to "Pre-Roll\n\xa0-\xa01g"
+        text = re.sub(r'([A-Za-z]+)\s+-\s+(\d*\.?\d*g)(?!\s+x\s+\d+\s+Pack)', r'\1\n' + nbsp + '-' + nbsp + r'\2', text)
+        
+        # Pattern 19: CRITICAL - Preserve leading space before hyphens in joint ratios
+        # This ensures "Pre-Roll - 0.5g x 7 Pack" keeps the space before the hyphen
+        # Convert "Pre-Roll -" to "Pre-Roll " + nbsp + "-" (preserve space + non-breaking space before hyphen)
+        # EXCEPT for joint ratio patterns which are handled separately
+        text = re.sub(r'([A-Za-z]+)\s+-\s+(?!\d*\.?\d*g)', r'\1 ' + nbsp + '-', text)  # Word + space + non-breaking space + hyphen, but not followed by weight
+        
+        # Pattern 20: Ensure joint ratio text stays together after hyphens
+        # This prevents "0.5g x 7 Pack" from breaking after the hyphen
+        text = re.sub(r'-\s+(\d*\.?\d*g)', r'-' + nbsp + r'\1', text)  # Hyphen + space + weight
         
         return text
 
@@ -4438,5 +5081,426 @@ class TemplateProcessor:
         
         # If no pattern matches, return the original text
         return text
+
+    def _expand_original_mini_template_to_4x5(self):
+        """Expand the original mini.docx template to 4x5 grid while preserving its design and content."""
+        try:
+            from docx import Document
+            from docx.shared import Pt
+            from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT
+            from docx.enum.text import WD_ALIGN_PARAGRAPH
+            from docx.oxml import OxmlElement
+            from docx.oxml.ns import qn
+            from io import BytesIO
+            from copy import deepcopy
+            
+            self.logger.info("Expanding original mini.docx template to 4x5 grid")
+            
+            # Load the original mini.docx template
+            template_path = self._get_template_path()
+            original_doc = Document(template_path)
+            
+            if not original_doc.tables:
+                raise RuntimeError("Original mini template must contain at least one table.")
+            
+            original_table = original_doc.tables[0]
+            self.logger.info(f"Original mini template has {len(original_table.rows)} rows × {len(original_table.rows[0].cells)} columns")
+            
+            # Extract the original cell content and formatting
+            original_cell = deepcopy(original_table.rows[0].cells[0]._tc)
+            
+            # Create a new document for the expanded template
+            doc = Document()
+            
+            # Create the 4x5 table
+            table = doc.add_table(rows=5, cols=4)
+            table.alignment = WD_TABLE_ALIGNMENT.CENTER
+            
+            # CRITICAL: Disable autofit completely to prevent cell expansion
+            table.autofit = False
+            if hasattr(table, 'allow_autofit'):
+                table.allow_autofit = False
+            
+            # Set table properties
+            tblPr = table._element.find(qn('w:tblPr'))
+            if tblPr is None:
+                tblPr = OxmlElement('w:tblPr')
+            layout = OxmlElement('w:tblLayout')
+            layout.set(qn('w:type'), 'fixed')
+            tblPr.append(layout)
+            table._element.insert(0, tblPr)
+            
+            # Set column widths to exactly 1.5 inches each
+            grid = OxmlElement('w:tblGrid')
+            for _ in range(4):
+                gc = OxmlElement('w:gridCol')
+                gc.set(qn('w:w'), str(int(1.5 * 1440)))  # 1.5 inches in twips
+                grid.append(gc)
+            table._element.insert(0, grid)
+            
+            # Set row heights to exactly 1.5 inches each
+            for row in table.rows:
+                row.height = Pt(1.5 * 72)  # 1.5 inches
+                row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+            
+            # Populate cells with the original template content, properly numbered
+            label_num = 1
+            for row in table.rows:
+                for cell in row.cells:
+                    # Clear default content
+                    while cell.paragraphs:
+                        cell.paragraphs[0]._element.getparent().remove(cell.paragraphs[0]._element)
+                    
+                    # Copy the original cell content and formatting
+                    for element in original_cell:
+                        if element.tag.endswith('}tcPr'):
+                            # Copy cell properties (colors, borders, etc.)
+                            cell._tc.append(deepcopy(element))
+                        else:
+                            # Copy other content elements
+                            cell._tc.append(deepcopy(element))
+                    
+                    # Replace Label1 with LabelX in the copied content
+                    for t in cell._tc.iter(qn('w:t')):
+                        if t.text and 'Label1' in t.text:
+                            t.text = t.text.replace('Label1', f'Label{label_num}')
+                    
+                    # Also check paragraph text for Label1 references
+                    for para in cell.paragraphs:
+                        if 'Label1' in para.text:
+                            para.text = para.text.replace('Label1', f'Label{label_num}')
+                    
+                    # CRITICAL: Always add the DOH field as a new paragraph for mini templates
+                    # This ensures DOH images are properly inserted
+                    doh_para = cell.add_paragraph()
+                    doh_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    doh_run = doh_para.add_run(f"{{{{{f'Label{label_num}'}.DOH}}}}")
+                    doh_run.font.name = 'Arial'
+                    doh_run.font.size = Pt(8)
+                    self.logger.debug(f"Added DOH placeholder for Label{label_num} in mini template")
+                    
+                    label_num += 1
+            
+            # CRITICAL: Final autofit disabling to ensure no expansion
+            table.autofit = False
+            if hasattr(table, 'allow_autofit'):
+                table.allow_autofit = False
+            
+            # CRITICAL: Verify table layout is fixed
+            tblPr = table._element.find(qn('w:tblPr'))
+            if tblPr is not None:
+                tblLayout = tblPr.find(qn('w:tblLayout'))
+                if tblLayout is None or tblLayout.get(qn('w:type')) != 'fixed':
+                    # Force fixed layout
+                    if tblLayout is not None:
+                        tblLayout.getparent().remove(tblLayout)
+                    tblLayout = OxmlElement('w:tblLayout')
+                    tblLayout.set(qn('w:type'), 'fixed')
+                    tblPr.append(tblLayout)
+            
+            # Save to buffer
+            buffer = BytesIO()
+            doc.save(buffer)
+            buffer.seek(0)
+            
+            self.logger.info("Successfully expanded original mini.docx template to 4x5 grid with FIXED DIMENSIONS")
+            return buffer
+            
+        except Exception as e:
+            self.logger.error(f"Error expanding original mini template: {e}")
+            import traceback
+            self.logger.error(f"Traceback: {traceback.format_exc()}")
+            raise
+
+    def _create_simple_4x5_mini_grid(self):
+        """Create a simple 4x5 mini template grid with proper label placeholders."""
+        try:
+            from docx import Document
+            from docx.shared import Pt
+            from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT
+            from docx.oxml import OxmlElement
+            from docx.oxml.ns import qn
+            from io import BytesIO
+            
+            self.logger.info("Creating simple 4x5 mini template grid")
+            
+            # Create a new document
+            doc = Document()
+            
+            # Create the 4x5 table
+            table = doc.add_table(rows=5, cols=4)
+            table.alignment = WD_TABLE_ALIGNMENT.CENTER
+            
+            # Set table properties
+            tblPr = table._element.find(qn('w:tblPr'))
+            if tblPr is None:
+                tblPr = OxmlElement('w:tblPr')
+            layout = OxmlElement('w:tblLayout')
+            layout.set(qn('w:type'), 'fixed')
+            tblPr.append(layout)
+            table._element.insert(0, tblPr)
+            
+            # Set column widths to exactly 1.5 inches each
+            grid = OxmlElement('w:tblGrid')
+            for _ in range(4):
+                gc = OxmlElement('w:gridCol')
+                gc.set(qn('w:w'), str(int(1.5 * 1440)))  # 1.5 inches in twips
+                grid.append(gc)
+            table._element.insert(0, grid)
+            
+            # Set row heights to exactly 1.5 inches each
+            for row in table.rows:
+                row.height = Pt(1.5 * 72)  # 1.5 inches
+                row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+            
+            # Populate cells with proper label placeholders
+            label_num = 1
+            for row in table.rows:
+                for cell in row.cells:
+                    # Clear default content by removing all paragraphs
+                    while cell.paragraphs:
+                        cell.paragraphs[0]._element.getparent().remove(cell.paragraphs[0]._element)
+                    
+                    # Add comprehensive placeholders that match the mini template system
+                    para = cell.add_paragraph()
+                    para.text = f"{{{{{f'Label{label_num}'}.ProductBrand}}}}"
+                    
+                    # Add additional placeholders for other fields
+                    para2 = cell.add_paragraph()
+                    para2.text = f"{{{{{f'Label{label_num}'}.Price}}}}"
+                    
+                    para3 = cell.add_paragraph()
+                    para3.text = f"{{{{{f'Label{label_num}'}.DescAndWeight}}}}"
+                    
+                    para4 = cell.add_paragraph()
+                    para4.text = f"{{{{{f'Label{label_num}'}.DOH}}}}"
+                    
+                    # Set font to Arial, size 10 for all paragraphs
+                    for para in [para, para2, para3, para4]:
+                        for run in para.runs:
+                            run.font.name = 'Arial'
+                            run.font.size = Pt(10)
+                    
+                    label_num += 1
+            
+            # Save to buffer
+            buffer = BytesIO()
+            doc.save(buffer)
+            buffer.seek(0)
+            
+            self.logger.info("Successfully created simple 4x5 mini template grid")
+            return buffer
+            
+        except Exception as e:
+            self.logger.error(f"Error creating simple 4x5 mini grid: {e}")
+            import traceback
+            self.logger.error(f"Traceback: {traceback.format_exc()}")
+            raise
+
+    def _expand_mini_template_simple(self):
+        """Expand existing mini template while preserving all existing content and formatting."""
+        try:
+            from docx import Document
+            from docx.shared import Pt
+            from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT
+            from docx.oxml import OxmlElement
+            from docx.oxml.ns import qn
+            from copy import deepcopy
+            
+            self.logger.info("Starting mini template expansion while preserving existing content")
+            
+            # Load the original mini template (your working template)
+            template_path = self._get_template_path()
+            original_doc = Document(template_path)
+            if not original_doc.tables:
+                raise RuntimeError("Original mini template must contain at least one table.")
+            
+            original_table = original_doc.tables[0]
+            self.logger.info(f"Original template has {len(original_table.rows)} rows and {len(original_table.rows[0].cells) if original_table.rows else 0} columns")
+            
+            # Check if we need to expand the table
+            current_rows = len(original_table.rows)
+            current_cols = len(original_table.rows[0].cells) if original_table.rows else 0
+            
+            # If table is already 4x5 or larger, no expansion needed
+            if current_rows >= 5 and current_cols >= 4:
+                self.logger.info("Template is already 4x5 or larger, no expansion needed")
+                # Just copy the existing document
+                self.doc = original_doc
+                return True
+            
+            # Calculate how many rows/columns to add
+            rows_to_add = max(0, 5 - current_rows)
+            cols_to_add = max(0, 4 - current_cols)
+            
+            self.logger.info(f"Adding {rows_to_add} rows and {cols_to_add} columns to expand to 4x5")
+            
+            # Add rows if needed
+            for i in range(rows_to_add):
+                new_row = original_table.add_row()
+                # Copy formatting from existing rows
+                if current_rows > 0:
+                    existing_row = original_table.rows[current_rows - 1]
+                    new_row.height = existing_row.height
+                    new_row.height_rule = existing_row.height_rule
+                
+                # Add cells to the new row
+                for j in range(current_cols):
+                    new_cell = new_row.cells[j]
+                    # Copy cell properties from existing cells
+                    if current_rows > 0:
+                        existing_cell = original_table.cell(current_rows - 1, j)
+                        # Copy background color and other properties
+                        existing_tcPr = existing_cell._tc.find(qn('w:tcPr'))
+                        if existing_tcPr is not None:
+                            new_tcPr = new_cell._tc.get_or_add_tcPr()
+                            for prop in existing_tcPr:
+                                if prop.tag.endswith('}shd'):  # Copy shading/background color
+                                    new_tcPr.append(deepcopy(prop))
+            
+            # Add columns if needed
+            for j in range(cols_to_add):
+                for i in range(len(original_table.rows)):
+                    # Add cell to each row
+                    new_cell = original_table.rows[i].add_cell()
+                    # Copy cell properties from existing cells in the same row
+                    if current_cols > 0:
+                        existing_cell = original_table.cell(i, current_cols - 1)
+                        # Copy background color and other properties
+                        existing_tcPr = existing_cell._tc.find(qn('w:tcPr'))
+                        if existing_tcPr is not None:
+                            new_tcPr = new_cell._tc.get_or_add_tcPr()
+                            for prop in existing_tcPr:
+                                if prop.tag.endswith('}shd'):  # Copy shading/background color
+                                    new_tcPr.append(deepcopy(prop))
+            
+            # Set exact cell dimensions: 1.5" x 1.5"
+            cell_width_twips = int(1.5 * 1440)  # 1.5 inches in twips
+            
+            # Ensure all cells have proper dimensions
+            for row in original_table.rows:
+                for cell in row.cells:
+                    # Set cell width
+                    tcPr = cell._tc.get_or_add_tcPr()
+                    tcW = tcPr.find(qn('w:tcW'))
+                    if tcW is None:
+                        tcW = OxmlElement('w:tcW')
+                        tcPr.append(tcW)
+                    tcW.set(qn('w:w'), str(cell_width_twips))
+                    tcW.set(qn('w:type'), 'dxa')
+                
+                # Set row height to exactly 1.5"
+                row.height = Pt(1.5 * 72)
+                row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+            
+            # Set table properties
+            # CRITICAL: Disable autofit completely to prevent cell expansion
+            original_table.autofit = False
+            original_table.allow_autofit = False
+            
+            # CRITICAL: Set table layout to fixed to prevent any auto-sizing
+            tblPr = original_table._element.find(qn('w:tblPr'))
+            if tblPr is None:
+                tblPr = OxmlElement('w:tblPr')
+                original_table._element.insert(0, tblPr)
+            
+            # Force fixed layout - this prevents cells from expanding
+            tblLayout = OxmlElement('w:tblLayout')
+            tblLayout.set(qn('w:type'), 'fixed')
+            tblPr.append(tblLayout)
+            
+            original_table.alignment = WD_TABLE_ALIGNMENT.CENTER
+            
+            # Use the expanded original document
+            self.doc = original_doc
+            
+            self.logger.info(f"Successfully expanded template to {len(original_table.rows)}x{len(original_table.rows[0].cells)} while preserving all existing content")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error expanding mini template while preserving content: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
+            return False
+
+    def _clear_empty_labels(self, doc, context):
+        """Clear content and styling for empty labels to prevent showing placeholder text and colors."""
+        try:
+            from docx.oxml.ns import qn
+            from docx.oxml import OxmlElement
+            
+            self.logger.info("Clearing content and styling for empty labels")
+            cleared_count = 0
+            
+            # Find empty labels in the context
+            empty_labels = [label_key for label_key, label_context in context.items() 
+                          if label_context.get('_IS_EMPTY_LABEL', False)]
+            
+            if not empty_labels:
+                self.logger.debug("No empty labels found to clear")
+                return
+            
+            self.logger.info(f"Found {len(empty_labels)} empty labels to clear: {empty_labels}")
+            
+            # Process each table in the document
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        # Check if this cell contains any of the empty label placeholders
+                        cell_text = ' '.join([para.text for para in cell.paragraphs])
+                        
+                        for empty_label in empty_labels:
+                            # Check if this cell contains placeholders for the empty label
+                            # Look for various placeholder patterns that might exist
+                            placeholder_patterns = [
+                                '{{{' + empty_label + '.',  # Triple braces
+                                '{{' + empty_label + '.',   # Double braces
+                                '{{' + empty_label + '.Ratio_or_THC_CBD}}',  # Common placeholder
+                                '{{' + empty_label + '.ProductBrand}}',      # Common placeholder
+                                '{{' + empty_label + '.ProductStrain}}',     # Common placeholder
+                                '{{' + empty_label + '.Price}}',            # Common placeholder
+                                '{{' + empty_label + '.Lineage}}',          # Common placeholder
+                                '{{' + empty_label + '.DOH}}',              # Common placeholder
+                                '{{' + empty_label + '.DescAndWeight}}',    # Common placeholder
+                            ]
+                            
+                            # Check if any placeholder pattern exists in this cell
+                            # OR if the cell is mostly empty (just whitespace/newlines) for empty labels
+                            empty_label_list = ['Label4', 'Label5', 'Label6', 'Label7', 'Label8', 'Label9', 'Label10', 'Label11', 'Label12']
+                            if (any(pattern in cell_text for pattern in placeholder_patterns) or
+                                (cell_text.strip() == '' and empty_label in empty_label_list)):
+                                # This cell contains placeholders for an empty label - clear it completely
+                                self.logger.debug(f"Clearing cell content for empty label {empty_label}")
+                                
+                                # Clear all paragraph content
+                                for paragraph in cell.paragraphs:
+                                    paragraph.clear()
+                                
+                                # Clear any nested tables
+                                for nested_table in cell.tables:
+                                    nested_table._element.getparent().remove(nested_table._element)
+                                
+                                # Clear background color by removing shading
+                                tcPr = cell._tc.get_or_add_tcPr()
+                                shd = tcPr.find(qn('w:shd'))
+                                if shd is not None:
+                                    shd.getparent().remove(shd)
+                                
+                                # Set background to white/transparent
+                                new_shd = OxmlElement('w:shd')
+                                new_shd.set(qn('w:val'), 'clear')
+                                new_shd.set(qn('w:color'), 'auto')
+                                new_shd.set(qn('w:fill'), 'FFFFFF')  # White background
+                                tcPr.append(new_shd)
+                                
+                                cleared_count += 1
+                                break  # Only clear once per cell
+            
+            self.logger.info(f"Successfully cleared {cleared_count} cells for empty labels")
+            
+        except Exception as e:
+            self.logger.warning(f"Error clearing empty labels: {e}")
+            import traceback
+            self.logger.debug(traceback.format_exc())
 
 __all__ = ['get_font_scheme', 'TemplateProcessor']
