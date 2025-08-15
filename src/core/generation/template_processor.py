@@ -3777,19 +3777,9 @@ class TemplateProcessor:
                 self._process_lineage_vendor_two_lines(paragraph, lineage_content, vendor_content)
                 return
             
-            # Check if we need to split to multiple lines due to content length
-            # Calculate approximate character limits based on template type
-            if self.template_type == 'mini':
-                max_chars_per_line = 25
-            elif self.template_type == 'vertical':
-                max_chars_per_line = 35
-            else:  # horizontal, double
-                max_chars_per_line = 45
-            
-            # Check if combined content would be too long for one line
-            combined_length = len(lineage_content or '') + len(vendor_content or '')
-            
-            if combined_length > max_chars_per_line and vendor_content and vendor_content.strip():
+            # ALWAYS use two-line layout for Product Vendor to enable right-justification
+            # This ensures Product Vendor text can be properly right-justified on its own line
+            if vendor_content and vendor_content.strip():
                 # Split to two lines: lineage on first line, vendor on second line
                 self._process_lineage_vendor_two_lines(paragraph, lineage_content, vendor_content)
                 return
@@ -3926,6 +3916,7 @@ class TemplateProcessor:
             
             # Add vendor on second line with smaller font size
             if vendor_content and vendor_content.strip():
+                # Add vendor text to the same paragraph but with right alignment
                 vendor_run = paragraph.add_run(vendor_content.strip())
                 vendor_run.font.name = "Arial"
                 vendor_run.font.bold = False
@@ -3943,8 +3934,8 @@ class TemplateProcessor:
                 vendor_font_size = get_font_size(vendor_content, 'vendor', self.template_type, self.scale_factor)
                 set_run_font_size(vendor_run, vendor_font_size)
                 
-                # Set the vendor line to right alignment
-                # Since vendor is on its own line, we can set the paragraph to right alignment
+                # Set the entire paragraph to right alignment for the vendor line
+                # This will right-align both the lineage and vendor text
                 paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
             
             # Handle left indentation based on lineage content type
