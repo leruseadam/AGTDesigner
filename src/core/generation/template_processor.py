@@ -2205,9 +2205,9 @@ class TemplateProcessor:
                             product_type = self.label_context['ProductType']
                         set_run_font_size(run, get_font_size_by_marker(marker_data['content'], marker_name, self.template_type, self.scale_factor, product_type))
                     continue
-                # Right-align PRODUCTVENDOR markers
+                # Right-justify PRODUCTVENDOR markers
                 if marker_name == 'PRODUCTVENDOR':
-                    paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                    paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
                     # Ensure consistent spacing above vendor section for equal margins
                     paragraph.paragraph_format.space_before = Pt(2)
                     paragraph.paragraph_format.space_after = Pt(1)
