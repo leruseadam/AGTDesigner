@@ -1242,8 +1242,8 @@ class TemplateProcessor:
         # For classic types, ALWAYS try to get the strain's canonical lineage from the database
         if is_classic_type and product_strain:
             self.logger.debug(f"DEBUG: Processing classic type '{product_type}' with strain '{product_strain}'")
-                            try:
-                    from ..data.product_database import get_product_database
+            try:
+                from ..data.product_database import get_product_database
                 product_db = get_product_database()
                 strain_info = product_db.get_strain_info(product_strain)
                 self.logger.debug(f"DEBUG: Strain info: {strain_info}")
