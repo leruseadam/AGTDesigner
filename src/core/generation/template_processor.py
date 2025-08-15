@@ -3942,6 +3942,10 @@ class TemplateProcessor:
                 # Get vendor font size using unified font sizing system
                 vendor_font_size = get_font_size(vendor_content, 'vendor', self.template_type, self.scale_factor)
                 set_run_font_size(vendor_run, vendor_font_size)
+                
+                # Set the vendor line to right alignment
+                # Since vendor is on its own line, we can set the paragraph to right alignment
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
             
             # Handle left indentation based on lineage content type
             if lineage_content:
