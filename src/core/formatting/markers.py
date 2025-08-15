@@ -32,7 +32,7 @@ MARKER_MAP = {
     'DOH': 'DOH',
     'Description': 'DESC',
     'DescAndWeight': 'DESC',  # Map DescAndWeight to DESC marker
-    'Ratio_or_THC_CBD': 'RATIO',  # Map Ratio_or_THC_CBD to RATIO marker
+    'Ratio_or_THC_CBD': 'THC_CBD',  # Map Ratio_or_THC_CBD to THC_CBD marker for proper font sizing
     'THC_CBD': 'THC_CBD',
     'Ratio': 'RATIO',
     'JointRatio': 'JOINT_RATIO',

@@ -16,7 +16,7 @@ import cProfile
 from itertools import groupby
 import pandas as pd
 
-from src.core.generation.docx_formatting import (
+from .docx_formatting import (
     fix_table_row_heights,
     safe_fix_paragraph_spacing,
     apply_conditional_formatting,
@@ -25,15 +25,15 @@ from src.core.generation.docx_formatting import (
     clear_table_cell_padding,
     enforce_fixed_cell_dimensions,
 )
-from src.core.generation.context_builders import (
+from .context_builders import (
     build_context,
 )
-from src.core.formatting.markers import (
+from ..formatting.markers import (
     wrap_with_marker,
     FIELD_MARKERS
 )
-from src.core.utils.resource_utils import resource_path
-from src.core.constants import (
+from ..utils.resource_utils import resource_path
+from ..constants import (
     FONT_SCHEME_HORIZONTAL,
     FONT_SCHEME_VERTICAL,
     FONT_SCHEME_MINI,
@@ -276,15 +276,17 @@ def process_chunk(args):
             
             # Only add brand markers for non-classic types
             # Classic types should show lineage instead of brand
-            from src.core.constants import CLASSIC_TYPES
+            from ..constants import CLASSIC_TYPES
             is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES]
             
             if is_classic_type:
-                # For classic types, don't add brand markers (they should show lineage)
-                label_data["ProductBrand"] = ""
+                # For classic types, don't add brand markers initially
+                # They will be set to lineage later if lineage is available
+                pass
             else:
                 # For non-classic types, add brand markers
-                label_data["ProductBrand"] = wrap_with_marker(product_brand.upper(), "PRODUCTBRAND_CENTER")
+                label_data["ProductBrand"] = wrap_with_marker(product_brand.upper(), "PRODUCTBRAND")
+                label_data["ProductBrand_Center"] = wrap_with_marker(product_brand.upper(), "PRODUCTBRAND_CENTER")
             
             # Add other fields to label_data
             # Use the processed Description and WeightUnits fields from the excel processor
@@ -306,8 +308,8 @@ def process_chunk(args):
             # For classic types, try to get the strain's canonical lineage from the database
             if is_classic_type and product_strain:
                 # DEBUG: Processing classic type '{product_type}' with strain '{product_strain}'
-                try:
-                    from src.core.data.product_database import get_product_database
+                            try:
+                from ..data.product_database import get_product_database
                     product_db = get_product_database()
                     strain_info = product_db.get_strain_info(product_strain)
                     # DEBUG: Strain info: {strain_info}
@@ -332,8 +334,26 @@ def process_chunk(args):
             # Add a single space before Lineage in the output
             lineage_val_with_space = f" {lineage_val}" if lineage_val else ""
             label_data["Lineage"] = wrap_with_marker(lineage_val_with_space, "LINEAGE")
+            
+            # For classic types, set ProductBrand and ProductBrand_Center to lineage
+            if is_classic_type:
+                if lineage_val:
+                    # Use the lineage value from database or Excel
+                    label_data["ProductBrand"] = wrap_with_marker(lineage_val.strip(), "PRODUCTBRAND")
+                    label_data["ProductBrand_Center"] = wrap_with_marker(lineage_val.strip(), "PRODUCTBRAND_CENTER")
+                else:
+                    # Fallback to Excel lineage if no database lineage found
+                    fallback_lineage = lineage_text.upper() if lineage_text else ""
+                    if fallback_lineage:
+                        label_data["ProductBrand"] = wrap_with_marker(fallback_lineage.strip(), "PRODUCTBRAND")
+                        label_data["ProductBrand_Center"] = wrap_with_marker(fallback_lineage.strip(), "PRODUCTBRAND_CENTER")
+                    else:
+                        # No lineage available, set to empty
+                        label_data["ProductBrand"] = ""
+                        label_data["ProductBrand_Center"] = ""
             label_data["Ratio_or_THC_CBD"] = wrap_with_marker(str(row.get("Ratio", "")), "RATIO")
-            label_data["ProductStrain"] = wrap_with_marker(str(row.get("Product Strain", "")), "PRODUCTSTRAIN")
+            # ProductStrain is now handled by the template processor to ensure proper conversion
+            # of non-classic types to "Mixed" or "CBD Blend"
             # Fix: Handle NaN values in JointRatio
             joint_ratio_value = row.get("JointRatio", "")
             if pd.isna(joint_ratio_value) or str(joint_ratio_value).lower() == 'nan':
@@ -416,7 +436,7 @@ def process_chunk(args):
                 "Lineage": "",
                 "DOH": "",
                 "Ratio_or_THC_CBD": "",
-                "ProductStrain": "",
+                # ProductStrain handled by template processor
                 "DescAndWeight": "",
                 "JointRatio": ""
             }
@@ -679,7 +699,7 @@ def generate_multiple_label_tables(records, template_path):
             table.alignment = WD_TABLE_ALIGNMENT.CENTER
         
         # Ensure all fonts are Arial Bold for consistency across platforms
-        from src.core.generation.docx_formatting import enforce_arial_bold_all_text
+        from .docx_formatting import enforce_arial_bold_all_text
         enforce_arial_bold_all_text(final_doc)
         
         # Save final document

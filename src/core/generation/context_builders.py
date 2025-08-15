@@ -31,8 +31,15 @@ def build_context(record, doc, template_type='vertical'):
     context['lineage'] = record.get('Lineage', '')
     context['doh'] = record.get('DOH', '')
     
-    # Vendor information
-    context['vendor'] = record.get('Vendor', '')
+    # Vendor information - only include for classic types
+    product_type = record.get('Product Type*', '').lower()
+    classic_types = ["flower", "pre-roll", "infused pre-roll", "concentrate", 
+                    "solventless concentrate", "vape cartridge", "rso/co2 tankers"]
+    
+    if product_type in classic_types:
+        context['vendor'] = record.get('Vendor', '')
+    else:
+        context['vendor'] = ''  # No vendor for non-classic types
     
     return context
 

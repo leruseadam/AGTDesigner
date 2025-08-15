@@ -8,7 +8,7 @@ import logging
 from docx.shared import Pt
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
-from src.core.utils.common import calculate_text_complexity
+from ..utils.common import calculate_text_complexity
 import json
 import os
 

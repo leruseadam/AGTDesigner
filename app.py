@@ -1,5 +1,6 @@
 import os
 
+
 import sys  # Add this import
 import logging
 import threading
@@ -2601,13 +2602,15 @@ def generate_labels():
         font_scheme = get_font_scheme(template_type)
         processor = TemplateProcessor(template_type, font_scheme, saved_scale_factor)
         
-        # Pass the number of selected tags to the template processor for dynamic grid sizing
-        if hasattr(processor, '_expand_template_if_needed'):
-            # Force re-expansion with the actual number of selected tags
+        # CRITICAL: For mini templates, NEVER force re-expansion as they have fixed capacity
+        if hasattr(processor, '_expand_template_if_needed') and processor.template_type != 'mini':
+            # Force re-expansion (but not for mini templates)
             processor._expanded_template_buffer = processor._expand_template_if_needed(
-                force_expand=True, 
-                num_selected_tags=len(records)
+                force_expand=True
             )
+        elif processor.template_type == 'mini':
+            # Mini templates have fixed capacity - log this for debugging
+            logging.info(f"Mini template detected - skipping forced re-expansion to maintain fixed 20-label capacity")
         
         # Apply custom template settings if they exist
         if template_settings:
@@ -5138,13 +5141,15 @@ def json_inventory():
         
         processor = TemplateProcessor(template_type, font_scheme, 1.0)
         
-        # Pass the number of selected tags to the template processor for dynamic grid sizing
-        if hasattr(processor, '_expand_template_if_needed'):
-            # Force re-expansion with the actual number of selected tags
+        # CRITICAL: For mini templates, NEVER force re-expansion as they have fixed capacity
+        if hasattr(processor, '_expand_template_if_needed') and processor.template_type != 'mini':
+            # Force re-expansion (but not for mini templates)
             processor._expanded_template_buffer = processor._expand_template_if_needed(
-                force_expand=True, 
-                num_selected_tags=len(records)
+                force_expand=True
             )
+        elif processor.template_type == 'mini':
+            # Mini templates have fixed capacity - log this for debugging
+            logging.info(f"Mini template detected - skipping forced re-expansion to maintain fixed 20-label capacity")
         
         # Debug the template dimensions
         from docx import Document

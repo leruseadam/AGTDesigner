@@ -21,26 +21,26 @@ import time
 import pandas as pd
 
 # Local imports
-from src.core.utils.common import safe_get
-from src.core.generation.docx_formatting import (
+from ..utils.common import safe_get
+from .docx_formatting import (
     apply_lineage_colors,
     enforce_fixed_cell_dimensions,
     clear_cell_background,
     clear_cell_margins,
     clear_table_cell_padding,
 )
-from src.core.generation.unified_font_sizing import (
+from .unified_font_sizing import (
     get_font_size,
     get_font_size_by_marker,
     set_run_font_size,
     is_classic_type,
     get_line_spacing_by_marker
 )
-from src.core.generation.text_processing import (
+from .text_processing import (
     process_doh_image,
     format_ratio_multiline
 )
-from src.core.formatting.markers import wrap_with_marker, unwrap_marker, is_already_wrapped
+from ..formatting.markers import wrap_with_marker, unwrap_marker, is_already_wrapped
 
 # Performance settings
 MAX_PROCESSING_TIME_PER_CHUNK = 30  # 30 seconds max per chunk
@@ -602,7 +602,7 @@ class TemplateProcessor:
         num_cols, num_rows = 3, 3
         
         # Set dimensions based on template type - use constants for consistency
-        from src.core.constants import CELL_DIMENSIONS
+        from ..constants import CELL_DIMENSIONS
         
         cell_dims = CELL_DIMENSIONS.get(self.template_type, {'width': 2.4, 'height': 2.4})
         col_width_twips = str(int(cell_dims['width'] * 1440))  # Use width from constants
@@ -726,7 +726,7 @@ class TemplateProcessor:
         tblPr2.append(spacing)
         
         # CRITICAL: Remove ALL headers and footers from the expanded template
-        from src.core.generation.docx_formatting import remove_all_headers_and_footers
+        from .docx_formatting import remove_all_headers_and_footers
         doc = remove_all_headers_and_footers(doc)
         
         buf = BytesIO()
@@ -796,7 +796,7 @@ class TemplateProcessor:
             
             # CRITICAL: Remove ALL headers and footers from the final combined document
             final_doc = Document(final_doc_buffer)
-            from src.core.generation.docx_formatting import remove_all_headers_and_footers
+            from .docx_formatting import remove_all_headers_and_footers
             final_doc = remove_all_headers_and_footers(final_doc)
             
             total_time = time.time() - self.start_time
@@ -879,7 +879,7 @@ class TemplateProcessor:
             # Cell widths already standardized
             
             # CRITICAL: Remove ALL headers and footers to prevent unwanted content
-            from src.core.generation.docx_formatting import remove_all_headers_and_footers
+            from .docx_formatting import remove_all_headers_and_footers
             rendered_doc = remove_all_headers_and_footers(rendered_doc)
             
             # Ensure proper table centering and document setup
@@ -1061,7 +1061,7 @@ class TemplateProcessor:
                 label_context[key] = ""
 
         # Define product type sets for use throughout the method
-        from src.core.constants import CLASSIC_TYPES
+        from ..constants import CLASSIC_TYPES
         classic_types = CLASSIC_TYPES
         edible_types = {"edible (solid)", "edible (liquid)", "high cbd edible liquid", "tincture", "topical", "capsule"}
 
@@ -1126,7 +1126,7 @@ class TemplateProcessor:
             lineage_val = ""
             if product_strain:
                 try:
-                    from src.core.data.product_database import get_product_database
+                    from ..data.product_database import get_product_database
                     product_db = get_product_database()
                     strain_info = product_db.get_strain_info(product_strain)
                     if strain_info and strain_info.get('canonical_lineage'):
@@ -1207,7 +1207,7 @@ class TemplateProcessor:
             content = cleaned_ratio.replace('|BR|', '\n')
             # Apply new bold label formatting for THC/CBD content
             if content.strip().startswith('THC:') and 'CBD:' in content:
-                from src.core.generation.text_processing import format_thc_cbd_bold_labels
+                from .text_processing import format_thc_cbd_bold_labels
                 content = format_thc_cbd_bold_labels(content, self.template_type)
             # Force line breaks for vertical and double templates
             elif self.template_type in ['vertical', 'double'] and content.strip().startswith('THC:') and 'CBD:' in content:
@@ -1242,8 +1242,8 @@ class TemplateProcessor:
         # For classic types, ALWAYS try to get the strain's canonical lineage from the database
         if is_classic_type and product_strain:
             self.logger.debug(f"DEBUG: Processing classic type '{product_type}' with strain '{product_strain}'")
-            try:
-                from src.core.data.product_database import get_product_database
+                            try:
+                    from ..data.product_database import get_product_database
                 product_db = get_product_database()
                 strain_info = product_db.get_strain_info(product_strain)
                 self.logger.debug(f"DEBUG: Strain info: {strain_info}")
@@ -1456,7 +1456,7 @@ class TemplateProcessor:
 
         # Fast Arial Bold enforcement
         try:
-            from src.core.generation.docx_formatting import enforce_arial_bold_all_text, enforce_ratio_formatting, enforce_thc_cbd_bold_formatting
+            from .docx_formatting import enforce_arial_bold_all_text, enforce_ratio_formatting, enforce_thc_cbd_bold_formatting
             enforce_arial_bold_all_text(doc)
             enforce_ratio_formatting(doc)
             enforce_thc_cbd_bold_formatting(doc)
@@ -1881,7 +1881,7 @@ class TemplateProcessor:
                             paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                             
                             # Set cell background to white/transparent to ensure it's visually clean
-                            from src.core.generation.docx_formatting import clear_cell_background
+                            from .docx_formatting import clear_cell_background
                             clear_cell_background(cell)
                             
                             self.logger.debug(f"Cleared blank cell in mini template")
@@ -1928,7 +1928,7 @@ class TemplateProcessor:
                 paragraph_text = paragraph.text
                 if 'THC:' in paragraph_text and 'CBD:' in paragraph_text:
                     # Use unified font sizing system for THC_CBD content
-                    from src.core.generation.unified_font_sizing import get_line_spacing_by_marker
+                    from .unified_font_sizing import get_line_spacing_by_marker
                     line_spacing = get_line_spacing_by_marker('THC_CBD', self.template_type)
                     if line_spacing:
                         paragraph.paragraph_format.line_spacing = line_spacing
@@ -2166,12 +2166,12 @@ class TemplateProcessor:
                     # Use unified LINEAGE font sizing for all templates including double
                     for run in paragraph.runs:
                         # Use unified font sizing system instead of old get_font_size_by_marker
-                        from src.core.generation.unified_font_sizing import get_font_size
+                        from .unified_font_sizing import get_font_size
                         font_size = get_font_size(content, 'lineage', self.template_type, self.scale_factor)
                         set_run_font_size(run, font_size)
                     
                     # Handle alignment based on PRODUCT TYPE, not just lineage content
-                    from src.core.constants import CLASSIC_TYPES
+                    from ..constants import CLASSIC_TYPES
                     is_classic_product = product_type and product_type.lower() in CLASSIC_TYPES
                     
                     # Classic product types should have LEFT alignment for lineage
@@ -2441,7 +2441,7 @@ class TemplateProcessor:
                     else:
                         # Fallback: check if this is a classic product type by using the context
                         # Import constants to check against CLASSIC_TYPES
-                        from src.core.constants import CLASSIC_TYPES
+                        from ..constants import CLASSIC_TYPES
                         
                         # Get product type from context, not from content
                         is_classic_product = False
@@ -2704,7 +2704,7 @@ class TemplateProcessor:
                     # Check if this is THC_CBD content and use unified font sizing system
                     if 'thc:' in text and 'cbd:' in text:
                         # Use unified font sizing system for THC_CBD content
-                        from src.core.generation.unified_font_sizing import get_line_spacing_by_marker
+                        from .unified_font_sizing import get_line_spacing_by_marker
                         line_spacing = get_line_spacing_by_marker('THC_CBD', self.template_type)
                         if line_spacing:
                             paragraph.paragraph_format.space_before = Pt(0)
@@ -3101,7 +3101,7 @@ class TemplateProcessor:
 
                 
                 # Calculate and set proper table width for perfect centering
-                from src.core.constants import CELL_DIMENSIONS, GRID_LAYOUTS
+                from ..constants import CELL_DIMENSIONS, GRID_LAYOUTS
                 
                 # Get individual cell dimensions and grid layout
                 cell_dims = CELL_DIMENSIONS.get(self.template_type, {'width': 2.4, 'height': 2.4})
@@ -3264,7 +3264,7 @@ class TemplateProcessor:
         """
         try:
             # Import CLASSIC_TYPES to check if current product type is classic
-            from src.core.constants import CLASSIC_TYPES
+            from ..constants import CLASSIC_TYPES
             
             # Get current product type if available
             current_product_type = None
@@ -3343,7 +3343,7 @@ class TemplateProcessor:
         """
         try:
             # Import CLASSIC_TYPES to check if current product type is classic
-            from src.core.constants import CLASSIC_TYPES
+            from ..constants import CLASSIC_TYPES
             
             # Get current product type if available
             current_product_type = None
@@ -4097,7 +4097,7 @@ class TemplateProcessor:
                 run.font.bold = True
                 
                 # Apply appropriate font sizing for ProductBrand using the unified font sizing
-                from src.core.generation.unified_font_sizing import get_font_size
+                from .unified_font_sizing import get_font_size
                 font_size = get_font_size(new_text, 'brand', self.template_type, self.scale_factor)
                 run.font.size = font_size
                 
@@ -4142,7 +4142,7 @@ class TemplateProcessor:
                     run.font.bold = True
                     
                     # Apply appropriate font sizing for ProductBrand
-                    from src.core.generation.unified_font_sizing import get_font_size_by_marker
+                    from .unified_font_sizing import get_font_size_by_marker
                     font_size = get_font_size_by_marker(new_text, 'PRODUCTBRAND_CENTER', self.template_type, self.scale_factor)
                     if font_size:
                         run.font.size = font_size
