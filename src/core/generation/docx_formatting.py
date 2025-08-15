@@ -33,27 +33,7 @@ def apply_lineage_colors(doc):
                         text = text.replace(marker, "")
                     text = text.strip()
                     
-                    # Extract lineage and product type information from embedded format
-                    lineage_part = text
-                    product_type = ""
-                    is_classic = False
-                    
-                    if "_PRODUCT_TYPE_" in text:
-                        parts = text.split("_PRODUCT_TYPE_")
-                        if len(parts) >= 2:
-                            lineage_part = parts[0]
-                            remaining = parts[1]
-                            # Extract product type and classic flag
-                            if "_IS_CLASSIC_" in remaining:
-                                type_parts = remaining.split("_IS_CLASSIC_")
-                                if len(type_parts) >= 2:
-                                    product_type = type_parts[0]
-                                    is_classic = type_parts[1].lower() == "true"
-                    
-                    # Define classic product types
-                    classic_types = ["flower", "pre-roll", "infused pre-roll", "concentrate", "solventless concentrate", "vape cartridge", "rso/co2 tankers"]
-                    
-                    # Apply lineage coloring logic
+                    # Apply lineage coloring logic based on clean text
                     if "PARAPHERNALIA" in text:
                         color_hex = COLORS['PARA']
                     elif "HYBRID/INDICA" in text or "HYBRID INDICA" in text:
@@ -69,11 +49,11 @@ def apply_lineage_colors(doc):
                     elif "CBD" in text or "CBD_BLEND" in text:
                         color_hex = COLORS['CBD']
                     elif "MIXED" in text:
-                        # For non-classic product types, Mixed should be blue
-                        if not is_classic and product_type and product_type not in classic_types:
-                            color_hex = COLORS['MIXED']  # Blue for non-classic Mixed
-                        else:
-                            color_hex = COLORS['MIXED']  # Default blue for Mixed
+                        # MIXED lineage always gets blue bars (this covers non-classic types like edibles)
+                        color_hex = COLORS['MIXED']  # Blue for Mixed
+                    elif any(brand in text.upper() for brand in ["MOONSHOT", "PLATINUM", "PREMIUM", "GOLD", "SILVER", "ELITE", "SELECT", "RESERVE", "CRAFT", "ARTISAN", "BOUTIQUE", "SIGNATURE", "LIMITED", "EXCLUSIVE", "PRIVATE", "CUSTOM", "SPECIAL", "DELUXE", "ULTRA", "SUPER", "MEGA", "MAX", "PRO", "PLUS", "X", "CONSTELLATION"]):
+                        # Product Brand values (like "MOONSHOT", "PLATINUM", "CONSTELLATION", etc.) get blue bars for non-classic types
+                        color_hex = COLORS['MIXED']  # Blue for Product Brand
                     
                     if color_hex:
                         # Set cell background color
@@ -843,7 +823,7 @@ def enforce_fixed_cell_dimensions(table, template_type=None):
             if template_type == 'mini':
                 logger.info("Enforcing exact 1.5\" x 1.5\" dimensions for mini template")
                 try:
-                    from src.core.constants import CELL_DIMENSIONS
+                    from ..constants import CELL_DIMENSIONS
                     cell_dims = CELL_DIMENSIONS.get(template_type)
                     if cell_dims and table.rows:
                         # Set column widths based on template type
@@ -872,7 +852,7 @@ def enforce_fixed_cell_dimensions(table, template_type=None):
                     # Continue with general dimension enforcement
             
             try:
-                from src.core.constants import CELL_DIMENSIONS
+                from ..constants import CELL_DIMENSIONS
                 cell_dims = CELL_DIMENSIONS.get(template_type)
                 if cell_dims and table.rows:
                     # Set column widths based on template type
@@ -980,7 +960,7 @@ def enforce_fixed_cell_dimensions(table, template_type=None):
 
 def fix_table(doc, num_rows=3, num_cols=3, template_type='horizontal'):
     """Fix table with proper cell dimensions based on template type."""
-    from src.core.constants import CELL_DIMENSIONS
+    from ..constants import CELL_DIMENSIONS
     
     # Get individual cell dimensions
     cell_dims = CELL_DIMENSIONS.get(template_type, {'width': 2.4, 'height': 2.4})
@@ -1029,7 +1009,7 @@ def fix_table(doc, num_rows=3, num_cols=3, template_type='horizontal'):
 
 def rebuild_3x3_grid(doc, template_type='horizontal'):
     """Rebuild 3x3 grid with proper cell dimensions based on template type."""
-    from src.core.constants import CELL_DIMENSIONS
+    from ..constants import CELL_DIMENSIONS
     
     # Get individual cell dimensions
     cell_dims = CELL_DIMENSIONS.get(template_type, {'width': 2.4, 'height': 2.4})
@@ -1158,6 +1138,62 @@ def apply_custom_formatting(doc, template_settings):
         logger.error(f"Error applying custom formatting: {str(e)}")
         # Fall back to default formatting
         enforce_arial_bold_all_text(doc) 
+
+def remove_all_headers_and_footers(doc):
+    """CRITICAL: Remove ALL headers and footers from the document to prevent unwanted content."""
+    try:
+        # Process all sections in the document
+        for section in doc.sections:
+            # Remove header content
+            if hasattr(section, 'header') and section.header:
+                # Clear header content by removing all child elements
+                for child in list(section.header._element):
+                    section.header._element.remove(child)
+                # Also try to remove the header element itself
+                try:
+                    section.header._element.getparent().remove(section.header._element)
+                except:
+                    pass
+            
+            # Remove footer content
+            if hasattr(section, 'footer') and section.footer:
+                # Clear footer content by removing all child elements
+                for child in list(section.footer._element):
+                    section.footer._element.remove(child)
+                # Also try to remove the footer element itself
+                try:
+                    section.footer._element.getparent().remove(section.footer._element)
+                except:
+                    pass
+            
+            # Ensure no header/footer spacing
+            section.header_distance = 0
+            section.footer_distance = 0
+        
+        # Also check for any header/footer references in the document XML
+        try:
+            from docx.oxml.ns import qn
+            # Remove any w:headerReference and w:footerReference elements
+            for section in doc.sections:
+                sectPr = section._element.find(qn('w:sectPr'))
+                if sectPr is not None:
+                    # Remove header references
+                    header_refs = sectPr.findall(qn('w:headerReference'))
+                    for header_ref in header_refs:
+                        sectPr.remove(header_ref)
+                    
+                    # Remove footer references
+                    footer_refs = sectPr.findall(qn('w:footerReference'))
+                    for footer_ref in footer_refs:
+                        sectPr.remove(footer_ref)
+        except Exception as e:
+            logger.warning(f"Could not remove header/footer references: {e}")
+        
+        logger.info("CRITICAL: All headers and footers removed from document")
+        return doc
+    except Exception as e:
+        logger.error(f"Error removing headers and footers: {e}")
+        return doc
 
 def fix_page_margins_for_3x3_grid(doc):
     """Fix page margins to ensure 3x3 grid fits properly."""

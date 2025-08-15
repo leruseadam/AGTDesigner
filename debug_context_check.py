@@ -1,73 +1,80 @@
 #!/usr/bin/env python3
 """
-Debug script to check what's in the context for mini templates.
+Debug script to check the actual context after building.
 """
 
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from pathlib import Path
 
-from src.core.generation.template_processor import TemplateProcessor, get_font_scheme
+# Add the src directory to the path
+sys.path.insert(0, str(Path(__file__).parent / 'src'))
 
-def debug_context_check():
-    """Debug the context building for mini templates."""
+from src.core.generation.template_processor import TemplateProcessor
+
+def debug_context():
+    """Debug the context building to see where duplication occurs."""
     
-    print("Debug Context Check for Mini Templates")
-    print("=" * 50)
+    # Test record that should show the duplication
+    test_record = {
+        'ProductName': 'Grape Moonshot',
+        'ProductBrand': 'CONSTELLATION CANNABIS',
+        'Product Type*': 'edible (solid)',
+        'Description': 'Grape Moonshot -1.7oz',
+        'WeightUnits': '1.7oz',
+        'Price': '$15',
+        'THC': '100.0%',
+        'CBD': '0%',
+        'Lineage': 'MIXED'
+    }
     
-    # Test data
-    test_records = [
-        {
-            'ProductName': 'Grape Moonshot',
-            'WeightUnits': '1.7oz',
-            'Price': '$15',
-            'DOH': '100mg THC',
-            'ProductBrand': 'Test Brand',
-            'ProductType': 'edible',
-            'Lineage': 'HYBRID',
-            'ProductStrain': 'Grape Moonshot'
-        }
-    ]
+    print("=== DEBUGGING CONTEXT BUILDING ===")
+    print(f"Test record: {test_record}")
+    
+    # Test with horizontal template
+    from src.core.generation.template_processor import get_font_scheme
+    font_scheme = get_font_scheme('horizontal')
+    processor = TemplateProcessor('horizontal', font_scheme)
     
     try:
-        font_scheme = get_font_scheme('mini')
-        processor = TemplateProcessor('mini', font_scheme, 1.0)
+        # Create a dummy document for context building
+        from docx import Document
+        doc = Document()
         
-        print(f"Template type: {processor.template_type}")
+        # Set the TemplateProcessor logger to DEBUG level
+        import logging
+        logging.getLogger('src.core.generation.template_processor').setLevel(logging.DEBUG)
         
-        # Build context for the first record
-        label_context = processor._build_label_context(test_records[0], None)
+        # Build the label context
+        print("\nBuilding label context...")
+        label_context = processor._build_label_context(test_record, doc)
         
-        print("\n=== Context for Label1 ===")
+        print("\n=== CONTEXT AFTER BUILDING ===")
         for key, value in label_context.items():
-            print(f"{key}: {repr(value)}")
+            if 'CONSTELLATION' in str(value):
+                print(f"🔍 {key}: '{value}'")
+            else:
+                print(f"   {key}: '{value}'")
         
-        # Check if DOH field is present
-        if 'DOH' in label_context:
-            print(f"\n✅ DOH field found: {repr(label_context['DOH'])}")
+        # Check for duplication in the context itself
+        print("\n=== CHECKING FOR DUPLICATION IN CONTEXT ===")
+        duplication_found = False
+        for key, value in label_context.items():
+            if 'CONSTELLATION CANNABISCONSTELLATION CANNABIS' in str(value):
+                print(f"❌ DUPLICATION FOUND in context field '{key}': '{value}'")
+                duplication_found = True
+            elif 'CONSTELLATION CANNABIS' in str(value):
+                print(f"✅ Field '{key}' contains 'CONSTELLATION CANNABIS' (correct)")
+        
+        if not duplication_found:
+            print("✅ No duplication found in context")
         else:
-            print("\n❌ DOH field NOT found")
-        
-        # Check if _DOH_IMAGE_PATH is present
-        if '_DOH_IMAGE_PATH' in label_context:
-            print(f"✅ _DOH_IMAGE_PATH found: {repr(label_context['_DOH_IMAGE_PATH'])}")
-        else:
-            print("❌ _DOH_IMAGE_PATH NOT found")
-        
-        # Create full context
-        context = {}
-        for i, record in enumerate(test_records):
-            label_context = processor._build_label_context(record, None)
-            context[f'Label{i+1}'] = label_context
-        
-        print(f"\n=== Full Context Keys ===")
-        for label_key, label_context in context.items():
-            print(f"{label_key}: {list(label_context.keys())}")
+            print("❌ DUPLICATION WAS CREATED DURING CONTEXT BUILDING")
             
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"❌ Error during context building: {e}")
         import traceback
         traceback.print_exc()
 
 if __name__ == "__main__":
-    debug_context_check()
+    debug_context()

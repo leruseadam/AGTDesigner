@@ -7,11 +7,11 @@ from pathlib import Path
 import pandas as pd
 import datetime
 from flask import send_file
-from src.core.formatting.markers import wrap_with_marker, unwrap_marker
+from ..formatting.markers import wrap_with_marker, unwrap_marker
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Pt
-from src.core.generation.text_processing import (
+from ..generation.text_processing import (
     format_cannabinoid_content,
     safe_get,
     safe_get_text,
@@ -19,8 +19,8 @@ from src.core.generation.text_processing import (
     make_nonbreaking_hyphens,
 )
 from collections import OrderedDict
-from src.core.constants import CLASSIC_TYPES, VALID_CLASSIC_LINEAGES, EXCLUDED_PRODUCT_TYPES, EXCLUDED_PRODUCT_PATTERNS, TYPE_OVERRIDES
-from src.core.utils.common import calculate_text_complexity
+from ..constants import CLASSIC_TYPES, VALID_CLASSIC_LINEAGES, EXCLUDED_PRODUCT_TYPES, EXCLUDED_PRODUCT_PATTERNS, TYPE_OVERRIDES
+from ..utils.common import calculate_text_complexity
 
 # Configure logging
 logging.basicConfig(
@@ -150,7 +150,7 @@ def optimized_lineage_persistence(processor, df):
     
     try:
         from .product_database import ProductDatabase
-        from src.core.constants import CLASSIC_TYPES
+        from ..constants import CLASSIC_TYPES
         product_db = ProductDatabase()
         
         # Process lineage persistence in batches for performance
@@ -174,6 +174,7 @@ def optimized_lineage_persistence(processor, df):
             return df
         
         # Use constant for valid lineages for classic types
+        from ..constants import VALID_CLASSIC_LINEAGES
         valid_classic_lineages = VALID_CLASSIC_LINEAGES
         
         # Process strains in batches
@@ -229,7 +230,7 @@ def batch_lineage_database_update(processor, df):
     
     try:
         from .product_database import ProductDatabase
-        from src.core.constants import CLASSIC_TYPES
+        from ..constants import CLASSIC_TYPES
         product_db = ProductDatabase()
         
         # Process in batches for performance
@@ -252,7 +253,7 @@ def batch_lineage_database_update(processor, df):
                 most_common_lineage = lineage_counts.index[0]
                 
                 # Validate lineage for classic types - never save MIXED lineage
-                from src.core.constants import VALID_CLASSIC_LINEAGES
+                from ..constants import VALID_CLASSIC_LINEAGES
                 if most_common_lineage and str(most_common_lineage).strip():
                     lineage_to_save = most_common_lineage
                     
@@ -605,6 +606,35 @@ class ExcelProcessor:
         """Clear the file cache to free memory."""
         self._file_cache.clear()
         self.logger.debug("File cache cleared")
+    
+    def apply_strain_extraction(self):
+        """Apply strain extraction logic to loaded data."""
+        if self.df is None or self.df.empty:
+            self.logger.warning("No data loaded to apply strain extraction")
+            return
+        
+        self.logger.info("Applying strain extraction logic for Moonshot products...")
+        
+        # Find products with "Moonshot" in Product Strain
+        if "Product Strain" in self.df.columns:
+            moonshot_mask = self.df["Product Strain"].astype(str).str.contains("Moonshot", case=False, na=False)
+            
+            if moonshot_mask.any():
+                # Apply strain extraction to these products
+                for idx in self.df[moonshot_mask].index:
+                    original_strain = str(self.df.loc[idx, "Product Strain"])
+                    if 'Moonshot' in original_strain:
+                        # Extract the strain name (everything before "Moonshot")
+                        strain_name = original_strain.replace(' Moonshot', '').strip()
+                        if strain_name:
+                            self.df.loc[idx, "Product Strain"] = strain_name
+                            self.logger.debug(f"Extracted strain '{strain_name}' from '{original_strain}' for product '{self.df.loc[idx, 'ProductName']}'")
+                
+                self.logger.info(f"Applied strain extraction to {moonshot_mask.sum()} Moonshot products")
+            else:
+                self.logger.info("No Moonshot products found for strain extraction")
+        else:
+            self.logger.warning("Product Strain column not found for strain extraction")
 
     def _manage_cache_size(self):
         """Keep cache size under control."""
@@ -882,7 +912,7 @@ class ExcelProcessor:
                 
                 # 5. Basic lineage standardization (vectorized)
                 if "Lineage" in df.columns:
-                    from src.core.constants import CLASSIC_TYPES
+                    from ..constants import CLASSIC_TYPES
                     df["Lineage"] = optimized_lineage_assignment(
                         df, 
                         df["Product Type*"], 
@@ -907,6 +937,9 @@ class ExcelProcessor:
 
             self.df = df
             self.logger.debug(f"Original columns: {self.df.columns.tolist()}")
+            
+            # Apply strain extraction for Moonshot products
+            self.apply_strain_extraction()
             
             self._last_loaded_file = file_path
             self.logger.info(f"Ultra-fast load successful: {len(self.df)} rows, {len(self.df.columns)} columns")
@@ -1169,7 +1202,7 @@ class ExcelProcessor:
                 
                 # Fix invalid lineage assignments for classic types
                 # Classic types should never have "MIXED" lineage
-                from src.core.constants import CLASSIC_TYPES
+                from ..constants import CLASSIC_TYPES
                 
                 classic_mask = self.df["Product Type*"].str.strip().str.lower().isin(CLASSIC_TYPES)
                 mixed_lineage_mask = self.df["Lineage"] == "MIXED"
@@ -1585,7 +1618,11 @@ class ExcelProcessor:
                         self.df.loc[edible_mixed_mask, "Product Strain"] = "Mixed"
                         self.logger.info(f"Assigned 'Mixed' to {edible_mixed_mask.sum()} edibles without cannabinoid content in ProductName")
 
-            # 8.5) Convert Product Strain to categorical after all logic is complete
+            # 8.5) Apply strain extraction logic for product names containing "Moonshot"
+            # Call the dedicated method to ensure consistency
+            self.apply_strain_extraction()
+            
+            # 8.6) Convert Product Strain to categorical after all logic is complete
             if "Product Strain" in self.df.columns:
                 self.df["Product Strain"] = self.df["Product Strain"].astype("category")
 
@@ -1966,7 +2003,7 @@ class ExcelProcessor:
                 ]
                 
                 # Identify non-classic types - products that are NOT in CLASSIC_TYPES
-                from src.core.constants import CLASSIC_TYPES
+                from ..constants import CLASSIC_TYPES
                 nonclassic_mask = ~self.df["Product Type*"].str.strip().str.lower().isin([c.lower() for c in CLASSIC_TYPES])
                 
                 # Add debugging
@@ -2376,6 +2413,14 @@ class ExcelProcessor:
                         else:
                             ratio_text = "THC:|BR|CBD:"
                     
+                    # For non-classic types, preserve the ratio value from Excel
+                    # This ensures that edibles, tinctures, etc. show their actual ratio values
+                    else:
+                        # Keep the original ratio value from Excel for non-classic types
+                        if not ratio_text or ratio_text in ["", "nan", "NaN"]:
+                            ratio_text = ""  # Empty for non-classic types without ratio
+                        # Otherwise, keep the ratio value as-is
+                    
                     # Don't apply ratio formatting here - let the template processor handle it
                     # For classic types (including RSO/CO2 Tankers), the template processor will handle the classic formatting
                     
@@ -2429,14 +2474,30 @@ class ExcelProcessor:
                     original_lineage = str(record.get('Lineage', '')).upper()
                     original_product_strain = record.get('Product Strain', '')
                     
+                    # Extract strain from product name if Product Strain contains the full product name
+                    # This handles cases like "Grape Moonshot" where the strain should be "Grape"
+                    extracted_strain = original_product_strain
+                    if original_product_strain and 'Moonshot' in original_product_strain:
+                        # Extract the strain name (everything before "Moonshot")
+                        strain_name = original_product_strain.replace(' Moonshot', '').strip()
+                        if strain_name:
+                            extracted_strain = strain_name
+                            logger.debug(f"Extracted strain '{extracted_strain}' from '{original_product_strain}'")
+                    elif original_product_strain and product_name:
+                        # Check if Product Strain contains the full product name (common with brand names)
+                        if original_product_strain in product_name and len(original_product_strain) > len(product_name.split()[0]):
+                            # Extract just the first word as the strain (e.g., "Grape" from "Grape Moonshot")
+                            extracted_strain = product_name.split()[0]
+                            logger.debug(f"Extracted strain '{extracted_strain}' from '{original_product_strain}' for product '{product_name}'")
+                    
                     # For RSO/CO2 Tankers and Capsules, use Product Brand in place of Lineage
                     if product_type in ["rso/co2 tankers", "capsule"]:
                         final_lineage = product_brand if product_brand else original_lineage
-                        final_product_strain = original_product_strain  # Keep Product Strain for CBD Blend/Mixed values
+                        final_product_strain = extracted_strain  # Use extracted strain
                     else:
                         # For other product types, use the actual Lineage value
                         final_lineage = original_lineage
-                        final_product_strain = original_product_strain
+                        final_product_strain = extracted_strain  # Use extracted strain
                     
                     lineage_needs_centering = False  # Lineage should not be centered
                     
@@ -2527,7 +2588,7 @@ class ExcelProcessor:
                         'WeightUnits': record.get('JointRatio', '') if product_type in {"pre-roll", "infused pre-roll"} else self._format_weight_units(record),
                         'ProductBrand': product_brand,
                         'Price': str(record.get('Price', '')).strip(),
-                        'Lineage': wrap_with_marker(unwrap_marker(f" {str(final_lineage)}" if str(final_lineage) else "", "LINEAGE"), "LINEAGE"),
+                        'Lineage': f" {str(final_lineage)}" if str(final_lineage) else "",
                         'DOH': doh_value,  # Keep DOH as raw value
                         'Ratio_or_THC_CBD': ratio_text,  # Use the processed ratio_text for all product types
                         'ProductStrain': wrap_with_marker(final_product_strain, "PRODUCTSTRAIN") if include_product_strain else '',
@@ -2535,6 +2596,7 @@ class ExcelProcessor:
                         'Ratio': str(record.get('Ratio', '')).strip(),
                         'THC': wrap_with_marker(ai_value, "THC"),  # AI column for THC
                         'CBD': wrap_with_marker(ak_value, "CBD"),  # AK column for CBD
+                        'THC_CBD': self._construct_thc_cbd_field(ai_value, ak_value, product_type),  # Construct combined THC_CBD field
                         'AI': ai_value,  # Total THC or THCA value for THC
                         'AJ': str(record.get('THCA', '')).strip(),  # THCA value for alternative THC
                         'AK': ak_value,  # CBDA value for CBD
@@ -2570,6 +2632,55 @@ class ExcelProcessor:
         except Exception as e:
             logger.error(f"Error in get_selected_records: {str(e)}")
             return []
+
+    def _construct_thc_cbd_field(self, thc_value, cbd_value, product_type):
+        """
+        Construct the THC_CBD field from separate THC and CBD values.
+        This ensures the template processor has access to the combined field.
+        """
+        if not thc_value and not cbd_value:
+            return ""
+        
+        # Clean up the values
+        thc_clean = str(thc_value).strip() if thc_value else ""
+        cbd_clean = str(cbd_value).strip() if cbd_value else ""
+        
+        # Remove 'nan' values
+        if thc_clean in ['nan', 'NaN', '']:
+            thc_clean = ""
+        if cbd_clean in ['nan', 'NaN', '']:
+            cbd_clean = ""
+        
+        # Construct the combined field
+        if thc_clean and cbd_clean:
+            # Both values available
+            if '%' in thc_clean or '%' in cbd_clean:
+                # Percentage format
+                return f"THC: {thc_clean} CBD: {cbd_clean}"
+            elif 'mg' in thc_clean.lower() or 'mg' in cbd_clean.lower():
+                # mg format
+                return f"THC: {thc_clean} CBD: {cbd_clean}"
+            else:
+                # Assume percentage format
+                return f"THC: {thc_clean}% CBD: {cbd_clean}%"
+        elif thc_clean:
+            # Only THC value available
+            if '%' in thc_clean:
+                return f"THC: {thc_clean}"
+            elif 'mg' in thc_clean.lower():
+                return f"THC: {thc_clean}"
+            else:
+                return f"THC: {thc_clean}%"
+        elif cbd_clean:
+            # Only CBD value available
+            if '%' in cbd_clean:
+                return f"CBD: {cbd_clean}"
+            elif 'mg' in cbd_clean.lower():
+                return f"CBD: {cbd_clean}"
+            else:
+                return f"CBD: {cbd_clean}%"
+        else:
+            return ""
 
     def _format_weight_units(self, record):
         # Handle pandas Series and NA values properly
@@ -2870,7 +2981,7 @@ class ExcelProcessor:
                 return {"message": "No data loaded", "updated_count": 0}
             
             # Get all classic type products with strains
-            from src.core.constants import CLASSIC_TYPES
+            from ..constants import CLASSIC_TYPES
             classic_mask = self.df["Product Type*"].str.strip().str.lower().isin(CLASSIC_TYPES)
             classic_df = self.df[classic_mask]
             

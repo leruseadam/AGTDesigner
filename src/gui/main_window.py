@@ -4,10 +4,10 @@ from pathlib import Path
 from typing import Optional
 import logging
 
-from src.core.data.excel_processor import ExcelProcessor
-from src.gui.components.filter_panel import FilterPanel
-from src.gui.components.tag_panel import TagPanel
-from src.gui.components.action_panel import ActionPanel
+from ..core.data.excel_processor import ExcelProcessor
+from .components.filter_panel import FilterPanel
+from .components.tag_panel import TagPanel
+from .components.action_panel import ActionPanel
 
 class MainWindow:
     def __init__(self):
