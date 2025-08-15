@@ -3916,8 +3916,11 @@ class TemplateProcessor:
             
             # Add vendor on second line with smaller font size
             if vendor_content and vendor_content.strip():
-                # Add vendor text to the same paragraph but with right alignment
-                vendor_run = paragraph.add_run(vendor_content.strip())
+                # Create a new paragraph for the vendor line to enable separate alignment
+                vendor_paragraph = paragraph._parent.add_paragraph()
+                vendor_paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                
+                vendor_run = vendor_paragraph.add_run(vendor_content.strip())
                 vendor_run.font.name = "Arial"
                 vendor_run.font.bold = False
                 vendor_run.font.italic = True  # Make vendor text italic
@@ -3933,10 +3936,6 @@ class TemplateProcessor:
                 # Get vendor font size using unified font sizing system
                 vendor_font_size = get_font_size(vendor_content, 'vendor', self.template_type, self.scale_factor)
                 set_run_font_size(vendor_run, vendor_font_size)
-                
-                # Set the entire paragraph to right alignment for the vendor line
-                # This will right-align both the lineage and vendor text
-                paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
             
             # Handle left indentation based on lineage content type
             if lineage_content:
@@ -3999,6 +3998,44 @@ class TemplateProcessor:
                 
             except Exception as e:
                 self.logger.error(f"Error detecting combined lineage/vendor: {e}")
+                return False
+        
+        # NEW: Also check for plain text patterns that indicate combined lineage/vendor content
+        # This handles cases where placeholders have been replaced with actual text
+        # Look for patterns like "SATIVA 1555 Industrial LLC" or "INDICA Company Name"
+        lineage_patterns = ['SATIVA', 'INDICA', 'HYBRID', 'CBD', 'MIXED', 'PARAPHERNALIA', 'PARA']
+        vendor_patterns = ['LLC', 'INC', 'CORP', 'CO', 'COMPANY', 'BRANDS', 'BRAND', 'INDUSTRIAL']
+        
+        # Check if the text contains both a lineage pattern and vendor indicators
+        has_lineage = any(pattern in full_text.upper() for pattern in lineage_patterns)
+        has_vendor = any(pattern in full_text.upper() for pattern in vendor_patterns)
+        
+        if has_lineage and has_vendor:
+            try:
+                # Split the text to separate lineage and vendor
+                # Look for the first vendor indicator to split on
+                split_point = -1
+                for pattern in vendor_patterns:
+                    if pattern in full_text.upper():
+                        split_point = full_text.upper().find(pattern)
+                        break
+                
+                if split_point > 0:
+                    # Extract lineage (everything before the vendor)
+                    lineage_content = full_text[:split_point].strip()
+                    # Extract vendor (everything from the vendor indicator onwards)
+                    vendor_content = full_text[split_point:].strip()
+                    
+                    # Process with different font sizes
+                    self._process_combined_lineage_vendor(paragraph, lineage_content, vendor_content)
+                    
+                    # Mark this paragraph as processed to prevent re-processing
+                    paragraph._combined_lineage_vendor_processed = True
+                    
+                    return True
+                    
+            except Exception as e:
+                self.logger.error(f"Error processing plain text combined lineage/vendor: {e}")
                 return False
         
         return False
@@ -4213,6 +4250,11 @@ class TemplateProcessor:
                                         paragraph_text = paragraph_text.replace(placeholder, str(field_value))
                                         self.logger.debug(f"Replaced {placeholder} with {field_value} in paragraph")
                             paragraph.text = paragraph_text
+                            
+                            # After replacing placeholders, check if this paragraph contains combined lineage/vendor content
+                            # and process it for proper formatting
+                            if self._detect_and_process_combined_lineage_vendor(paragraph):
+                                self.logger.debug("Processed combined lineage/vendor after placeholder replacement")
             
             self.logger.info("Manual placeholder replacement completed")
             
