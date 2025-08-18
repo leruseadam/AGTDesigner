@@ -1293,3 +1293,51 @@ def fix_page_margins_for_horizontal_3x3_grid(doc):
     except Exception as e:
         logger.error(f"Error fixing horizontal page margins: {e}")
         return doc 
+
+def fix_page_margins_for_4x3_grid(doc):
+    """Fix page margins to ensure 4x3 grid fits properly for double templates."""
+    try:
+        from docx.shared import Inches
+        
+        # Get the first section (or create one if none exists)
+        if not doc.sections:
+            section = doc.add_section()
+        else:
+            section = doc.sections[0]
+        
+        # Set minimal margins to maximize available space for the 4x3 grid
+        # Standard letter paper is 8.5" x 11"
+        # We need space for: 4 columns × 2.4" = 9.6" total width
+        # So we need very small margins
+        section.left_margin = Inches(0.25)   # 0.25" left margin
+        section.right_margin = Inches(0.25)  # 0.25" right margin
+        section.top_margin = Inches(0.25)    # 0.25" top margin
+        section.bottom_margin = Inches(0.25) # 0.25" bottom margin
+        
+        # REMOVE ANY HEADERS AND FOOTERS that might be taking up space
+        # This ensures the full page area is available for the 4x3 grid
+        if hasattr(section, 'header') and section.header:
+            # Clear header content by removing all child elements
+            for child in list(section.header._element):
+                section.header._element.remove(child)
+        if hasattr(section, 'footer') and section.footer:
+            # Clear footer content by removing all child elements
+            for child in list(section.footer._element):
+                section.footer._element.remove(child)
+        # Ensure no header/footer spacing
+        section.header_distance = 0
+        section.footer_distance = 0
+        
+        # Calculate available space (convert twips to inches for logging)
+        # 1 inch = 1440 twips
+        available_width_inches = (section.page_width - section.left_margin - section.right_margin) / 1440
+        available_height_inches = (section.page_height - section.top_margin - section.bottom_margin) / 1440
+        
+        logger.debug(f"4x3 GRID Page dimensions: {section.page_width/1440:.2f}\" x {section.page_height/1440:.2f}\"")
+        logger.debug(f"4x3 GRID Margins: L={section.left_margin.inches:.2f}\", R={section.right_margin.inches:.2f}\", T={section.top_margin.inches:.2f}\", B={section.bottom_margin.inches:.2f}\"")
+        logger.debug(f"4x3 GRID Available space: {available_width_inches:.2f}\" x {available_height_inches:.2f}\"")
+        
+        return doc
+    except Exception as e:
+        logger.error(f"Error fixing 4x3 grid page margins: {e}")
+        return doc 

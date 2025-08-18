@@ -28,6 +28,7 @@ from .docx_formatting import (
     clear_cell_background,
     clear_cell_margins,
     clear_table_cell_padding,
+    fix_page_margins_for_4x3_grid,
 )
 from .unified_font_sizing import (
     get_font_size,
@@ -1962,6 +1963,10 @@ class TemplateProcessor:
         # Apply vertical template specific optimizations for minimal spacing
         if self.template_type in ['vertical', 'double']:
             self._optimize_vertical_template_spacing(doc)
+        
+        # Fix page margins for specific template types
+        if self.template_type == 'double':
+            doc = fix_page_margins_for_4x3_grid(doc)
 
 
 
@@ -3129,8 +3134,8 @@ class TemplateProcessor:
         try:
             # Set document margins to ensure proper centering
             for section in doc.sections:
-                # Use smaller margins for vertical template to fit all 9 labels
-                if self.template_type == 'vertical':
+                # Use smaller margins for vertical and double templates to fit all labels
+                if self.template_type in ['vertical', 'double']:
                     section.left_margin = Inches(0.25)
                     section.right_margin = Inches(0.25)
                     section.top_margin = Inches(0.25)
