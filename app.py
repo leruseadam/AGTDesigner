@@ -3022,27 +3022,6 @@ def get_available_tags():
         tags = excel_processor.get_available_tags()
         logging.info(f"Raw tags obtained: {len(tags)} items")
         
-        # VENDOR FILTERING: If we have a manifest vendor in session, filter tags to only show that vendor
-        manifest_vendor = session.get('manifest_vendor')
-        if manifest_vendor:
-            logging.info(f"VENDOR FILTERING: Filtering available tags to only show vendor: {manifest_vendor}")
-            original_count = len(tags)
-            vendor_filtered_tags = []
-            for tag in tags:
-                if isinstance(tag, dict):
-                    tag_vendor = tag.get('Vendor', '').lower()
-                    if tag_vendor == manifest_vendor.lower():
-                        vendor_filtered_tags.append(tag)
-                    else:
-                        logging.debug(f"VENDOR FILTERING: Excluding tag '{tag.get('Product Name*', 'Unknown')}' from vendor '{tag_vendor}' (manifest vendor: {manifest_vendor})")
-                else:
-                    vendor_filtered_tags.append(tag)
-            
-            tags = vendor_filtered_tags
-            logging.info(f"VENDOR FILTERING: Filtered from {original_count} to {len(tags)} tags for vendor '{manifest_vendor}'")
-        else:
-            logging.info("No manifest vendor in session - showing all vendors")
-        
         import math
         def clean_dict(d):
             if not isinstance(d, dict):
@@ -4667,9 +4646,6 @@ def json_match():
                     
                     # Store manifest vendor in request for later use
                     request.manifest_vendor = manifest_vendor
-                    # Also store in session for other endpoints to access
-                    session['manifest_vendor'] = manifest_vendor
-                    logging.info(f"Stored manifest vendor '{manifest_vendor}' in session")
                 else:
                     logging.warning(f"Failed to fetch manifest data: {response.status_code}")
             except Exception as e:
@@ -4907,22 +4883,22 @@ def json_match():
                         
                         # Strategy 1: Exact name match
                         if json_name in existing_names:
-                            existing_tag_index = None
-                            for i, tag in enumerate(available_tags):
-                                if isinstance(tag, dict):
-                                    tag_name = tag.get('Product Name*', tag.get('ProductName', '')).lower()
-                                    if tag_name == json_name:
-                                        existing_tag_index = i
-                                        break
-                            
-                            if existing_tag_index is not None:
+                        existing_tag_index = None
+                        for i, tag in enumerate(available_tags):
+                            if isinstance(tag, dict):
+                                tag_name = tag.get('Product Name*', tag.get('ProductName', '')).lower()
+                                if tag_name == json_name:
+                                    existing_tag_index = i
+                                    break
+                        
+                        if existing_tag_index is not None:
                                 # Update existing tag with JSON data
-                                existing_tag = available_tags[existing_tag_index]
-                                for key, value in json_tag.items():
-                                    if key not in existing_tag or not existing_tag[key]:
-                                        existing_tag[key] = value
-                                existing_tag['Source'] = 'JSON Match'
-                                json_matched_tags.append(existing_tag)
+                            existing_tag = available_tags[existing_tag_index]
+                            for key, value in json_tag.items():
+                                if key not in existing_tag or not existing_tag[key]:
+                                    existing_tag[key] = value
+                            existing_tag['Source'] = 'JSON Match'
+                            json_matched_tags.append(existing_tag)
                                 matched = True
                                 logging.info(f"Exact match found for: {json_name}")
                         
@@ -4990,7 +4966,7 @@ def json_match():
                                 # Determine source based on vendor match
                                 if json_vendor and best_match.get('Vendor', '').lower() == json_vendor:
                                     source = f'JSON Match (Vendor-Specific Fuzzy: {best_score:.2f})'
-                                else:
+                        else:
                                     source = f'JSON Match (Fuzzy: {best_score:.2f})'
                                 
                                 enhanced_tag['Source'] = source
@@ -5124,8 +5100,8 @@ def json_match():
                             product_name = tag.get('Product Name*', '').lower()
                             # Only set vendor if we can confidently identify it from the product name
                             if 'dank czar' in product_name or 'dcz' in product_name:
-                                tag['Vendor'] = 'JSM LLC'
-                                tag['vendor'] = 'JSM LLC'
+                        tag['Vendor'] = 'JSM LLC'
+                        tag['vendor'] = 'JSM LLC'
                             elif 'omega' in product_name:
                                 tag['Vendor'] = 'JSM LLC'
                                 tag['vendor'] = 'JSM LLC'
@@ -5136,21 +5112,21 @@ def json_match():
                         
                         # Enhanced brand detection (vendor-aware)
                         if not tag.get('Product Brand') or tag.get('Product Brand') == 'Unknown':
-                            product_name = tag.get('Product Name*', '').lower()
+                        product_name = tag.get('Product Name*', '').lower()
                             if 'dank czar' in product_name or 'dcz' in product_name:
-                                tag['Product Brand'] = 'Dank Czar'
-                                tag['brand'] = 'Dank Czar'
-                            elif 'omega' in product_name:
+                            tag['Product Brand'] = 'Dank Czar'
+                            tag['brand'] = 'Dank Czar'
+                        elif 'omega' in product_name:
+                            tag['Product Brand'] = 'Omega Labs'
+                            tag['brand'] = 'Omega Labs'
+                        elif 'medically compliant' in product_name:
+                                # Check for specific product types that might indicate brand
+                            if any(x in product_name for x in ['distillate cartridge', 'omega']):
                                 tag['Product Brand'] = 'Omega Labs'
                                 tag['brand'] = 'Omega Labs'
-                            elif 'medically compliant' in product_name:
-                                # Check for specific product types that might indicate brand
-                                if any(x in product_name for x in ['distillate cartridge', 'omega']):
-                                    tag['Product Brand'] = 'Omega Labs'
-                                    tag['brand'] = 'Omega Labs'
-                                else:
-                                    tag['Product Brand'] = 'Dank Czar'
-                                    tag['brand'] = 'Dank Czar'
+                            else:
+                                tag['Product Brand'] = 'Dank Czar'
+                                tag['brand'] = 'Dank Czar'
                         
                         # Enhanced product type detection if missing
                         if not tag.get('Product Type*') or tag.get('Product Type*') == 'Unknown':
@@ -5230,7 +5206,7 @@ def json_match():
                 json_matched_tags = _filtered
                 available_tags = json_matched_tags
             logging.info(f"Hard vendor filter applied: kept {len(json_matched_tags)} of {_before_count} for vendor '{_manifest_vendor}'")
-
+        
         # Store in cache
         cache_key_json = f"json_matched_tags_{session.get('session_id', 'default')}"
         cache.set(cache_key_json, json_matched_tags, timeout=3600)
@@ -5720,9 +5696,7 @@ def match_json_tags():
                 
                 # Store manifest vendor in request for debugging
                 request.manifest_vendor = manifest_vendor
-                # Also store in session for other endpoints to access
-                session['manifest_vendor'] = manifest_vendor
-                logging.info(f"Stored manifest vendor '{manifest_vendor}' in request object and session")
+                logging.info(f"Stored manifest vendor '{manifest_vendor}' in request object")
             else:
                 # Try to extract names from any array in the object
                 for key, value in data.items():
@@ -5783,46 +5757,42 @@ def match_json_tags():
                         manifest_vendor = request_manifest_vendor
                         logging.info(f"Using request manifest vendor: {manifest_vendor}")
                 
-                # Store manifest vendor in session for other endpoints to access
-                session['manifest_vendor'] = manifest_vendor
-                logging.info(f"Stored manifest vendor '{manifest_vendor}' in session for endpoint access")
-            
-            # STRICT VENDOR FILTERING: Only use tags from the manifest vendor
-            if manifest_vendor:
-                vendor_filtered_tags = []
-                for tag in available_tags:
-                    if isinstance(tag, dict):
-                        tag_vendor = tag.get('Vendor', '').lower()
-                        if tag_vendor == manifest_vendor:
-                            vendor_filtered_tags.append(tag)
+                # STRICT VENDOR FILTERING: Only use tags from the manifest vendor
+                if manifest_vendor:
+                    vendor_filtered_tags = []
+                    for tag in available_tags:
+                        if isinstance(tag, dict):
+                            tag_vendor = tag.get('Vendor', '').lower()
+                            if tag_vendor == manifest_vendor:
+                                vendor_filtered_tags.append(tag)
+                            else:
+                                logging.info(f"BLOCKING tag from vendor '{tag_vendor}' (manifest vendor: {manifest_vendor}): {tag.get('Product Name*', 'Unknown')}")
                         else:
-                            logging.info(f"BLOCKING tag from vendor '{tag_vendor}' (manifest vendor: {manifest_vendor}): {tag.get('Product Name*', 'Unknown')}")
-                    else:
-                        vendor_filtered_tags.append(tag)
-                
-                available_tags_for_matching = vendor_filtered_tags
-                logging.info(f"STRICT VENDOR FILTERING: Using {len(vendor_filtered_tags)} tags from vendor '{manifest_vendor}' out of {len(available_tags)} total tags")
-                
-                # Verify no wrong vendors slipped through
-                wrong_vendors = set()
-                for tag in vendor_filtered_tags:
-                    if isinstance(tag, dict):
-                        tag_vendor = tag.get('Vendor', '').lower()
-                        if tag_vendor and tag_vendor != manifest_vendor:
-                            wrong_vendors.add(tag_vendor)
-                
-                if wrong_vendors:
-                    logging.error(f"CRITICAL: Found wrong vendors in filtered tags: {wrong_vendors}")
-                    return jsonify({
-                        'matched': [], 
-                        'unmatched': names,
-                        'error': f'Vendor filtering failed. Found tags from wrong vendors: {wrong_vendors}. Expected vendor: {manifest_vendor}'
-                    }), 400
+                            vendor_filtered_tags.append(tag)
+                    
+                    available_tags_for_matching = vendor_filtered_tags
+                    logging.info(f"STRICT VENDOR FILTERING: Using {len(vendor_filtered_tags)} tags from vendor '{manifest_vendor}' out of {len(available_tags)} total tags")
+                    
+                    # Verify no wrong vendors slipped through
+                    wrong_vendors = set()
+                    for tag in vendor_filtered_tags:
+                        if isinstance(tag, dict):
+                            tag_vendor = tag.get('Vendor', '').lower()
+                            if tag_vendor and tag_vendor != manifest_vendor:
+                                wrong_vendors.add(tag_vendor)
+                    
+                    if wrong_vendors:
+                        logging.error(f"CRITICAL: Found wrong vendors in filtered tags: {wrong_vendors}")
+                        return jsonify({
+                            'matched': [], 
+                            'unmatched': names,
+                            'error': f'Vendor filtering failed. Found tags from wrong vendors: {wrong_vendors}. Expected vendor: {manifest_vendor}'
+                        }), 400
+                else:
+                    available_tags_for_matching = available_tags
+                    logging.warning("No manifest vendor available - using all tags without vendor filtering")
             else:
                 available_tags_for_matching = available_tags
-                logging.warning("No manifest vendor available - using all tags without vendor filtering")
-        else:
-            available_tags_for_matching = available_tags
             
             for product in products:
                 product_name = product.get('Product Name*', '')
@@ -5908,39 +5878,39 @@ def match_json_tags():
                     logging.info(f"No enhanced match found for '{product_name}' (vendor: {product_vendor})")
         else:
             # Fallback to basic name matching for backward compatibility
-            for name in names:
-                best_score = 0.0
-                best_match = None
-                
-                # Create a mock JSON item for scoring
-                json_item = {"product_name": name}
-                
-                # Try to match against all available tags
-                for tag in available_tags:
-                    tag_name = tag.get('Product Name*', '')
-                    if not tag_name:
-                        continue
-                        
-                    # Create a mock cache item for scoring
-                    cache_item = {
-                        "original_name": tag_name,
-                        "key_terms": json_matcher._extract_key_terms(tag_name),
-                        "norm": json_matcher._normalize(tag_name)
-                    }
+        for name in names:
+            best_score = 0.0
+            best_match = None
+            
+            # Create a mock JSON item for scoring
+            json_item = {"product_name": name}
+            
+            # Try to match against all available tags
+            for tag in available_tags:
+                tag_name = tag.get('Product Name*', '')
+                if not tag_name:
+                    continue
                     
-                    # Calculate match score
-                    score = json_matcher._calculate_match_score(json_item, cache_item)
+                # Create a mock cache item for scoring
+                cache_item = {
+                    "original_name": tag_name,
+                    "key_terms": json_matcher._extract_key_terms(tag_name),
+                    "norm": json_matcher._normalize(tag_name)
+                }
+                
+                # Calculate match score
+                score = json_matcher._calculate_match_score(json_item, cache_item)
+                
+                if score > best_score:
+                    best_score = score
+                    best_match = tag
                     
-                    if score > best_score:
-                        best_score = score
-                        best_match = tag
-                        
-                # Accept matches with reasonable confidence
-                if best_score >= 0.3:  # Lowered threshold for better matching
-                    matched.append(best_match)
+            # Accept matches with reasonable confidence
+            if best_score >= 0.3:  # Lowered threshold for better matching
+                matched.append(best_match)
                     logging.info(f"Basic match found for '{name}' -> '{best_match.get('Product Name*', '')}' (score: {best_score:.2f})")
-                else:
-                    unmatched.append(name)
+            else:
+                unmatched.append(name)
                     logging.info(f"No basic match found for '{name}' (best score: {best_score:.2f})")
         
         logging.info(f"JSON matching: {len(matched)} matched, {len(unmatched)} unmatched out of {len(names)} total")
@@ -7721,56 +7691,18 @@ def serve_test_products():
 def get_filter_status():
     """Get the current filter status and available modes."""
     try:
-        logging.info("=== GET FILTER STATUS DEBUG START ===")
+        current_mode = session.get('current_filter_mode', 'json_matched')
+        has_full_excel = 'full_excel_cache_key' in session
+        has_json_matched = 'json_matched_cache_key' in session
         
-        # Simple session test first
-        try:
-            session['test_key'] = 'test_value'
-            test_value = session.get('test_key', 'not_found')
-            logging.info(f"Session test - set: test_value, got: {test_value}")
-        except Exception as session_test_error:
-            logging.error(f"Session test failed: {session_test_error}")
-            return jsonify({'error': f'Session test failed: {str(session_test_error)}'}), 500
+        # Get counts from cache
+        json_matched_cache_key = session.get('json_matched_cache_key')
+        full_excel_cache_key = session.get('full_excel_cache_key')
         
-        # Check session access
-        try:
-            current_mode = session.get('current_filter_mode', 'json_matched')
-            logging.info(f"Current filter mode: {current_mode}")
-        except Exception as session_error:
-            logging.error(f"Session access error: {session_error}")
-            current_mode = 'json_matched'
+        json_matched_count = len(cache.get(json_matched_cache_key, [])) if json_matched_cache_key else 0
+        full_excel_count = len(cache.get(full_excel_cache_key, [])) if full_excel_cache_key else 0
         
-        # Check session keys safely
-        try:
-            has_full_excel = 'full_excel_cache_key' in session
-            has_json_matched = 'json_matched_cache_key' in session
-            logging.info(f"Session keys - full_excel: {has_full_excel}, json_matched: {has_json_matched}")
-        except Exception as key_error:
-            logging.error(f"Session key check error: {key_error}")
-            has_full_excel = False
-            has_json_matched = False
-        
-        # Get cache keys safely
-        try:
-            json_matched_cache_key = session.get('json_matched_cache_key')
-            full_excel_cache_key = session.get('full_excel_cache_key')
-            logging.info(f"Cache keys - json_matched: {json_matched_cache_key}, full_excel: {full_excel_cache_key}")
-        except Exception as cache_key_error:
-            logging.error(f"Cache key access error: {cache_key_error}")
-            json_matched_cache_key = None
-            full_excel_cache_key = None
-        
-        # Get counts from cache safely
-        try:
-            json_matched_count = len(cache.get(json_matched_cache_key, [])) if json_matched_cache_key else 0
-            full_excel_count = len(cache.get(full_excel_cache_key, [])) if full_excel_cache_key else 0
-            logging.info(f"Cache counts - json_matched: {json_matched_count}, full_excel: {full_excel_count}")
-        except Exception as cache_error:
-            logging.error(f"Cache access error: {cache_error}")
-            json_matched_count = 0
-            full_excel_count = 0
-        
-        response_data = {
+        return jsonify({
             'success': True,
             'current_mode': current_mode,
             'has_full_excel': has_full_excel,
@@ -7778,31 +7710,10 @@ def get_filter_status():
             'json_matched_count': json_matched_count,
             'full_excel_count': full_excel_count,
             'can_toggle': has_full_excel and has_json_matched and json_matched_count > 0
-        }
-        
-        logging.info(f"Filter status response: {response_data}")
-        logging.info("=== GET FILTER STATUS DEBUG END ===")
-        
-        return jsonify(response_data)
+        })
         
     except Exception as e:
         logging.error(f"Error getting filter status: {str(e)}")
-        import traceback
-        logging.error(f"Traceback: {traceback.format_exc()}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/test-session', methods=['GET'])
-def test_session():
-    """Test endpoint to verify session functionality."""
-    try:
-        session['test_counter'] = session.get('test_counter', 0) + 1
-        return jsonify({
-            'success': True,
-            'test_counter': session['test_counter'],
-            'session_id': session.get('_id', 'unknown'),
-            'message': 'Session test successful'
-        })
-    except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 @app.route('/test_lineage_editor_simple.html')
