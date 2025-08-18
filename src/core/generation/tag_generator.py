@@ -16,7 +16,7 @@ import cProfile
 from itertools import groupby
 import pandas as pd
 
-from .docx_formatting import (
+from src.core.generation.docx_formatting import (
     fix_table_row_heights,
     safe_fix_paragraph_spacing,
     apply_conditional_formatting,
@@ -25,15 +25,15 @@ from .docx_formatting import (
     clear_table_cell_padding,
     enforce_fixed_cell_dimensions,
 )
-from .context_builders import (
+from src.core.generation.context_builders import (
     build_context,
 )
-from ..formatting.markers import (
+from src.core.formatting.markers import (
     wrap_with_marker,
     FIELD_MARKERS
 )
-from ..utils.resource_utils import resource_path
-from ..constants import (
+from src.core.utils.resource_utils import resource_path
+from src.core.constants import (
     FONT_SCHEME_HORIZONTAL,
     FONT_SCHEME_VERTICAL,
     FONT_SCHEME_MINI,
@@ -276,7 +276,7 @@ def process_chunk(args):
             
             # Only add brand markers for non-classic types
             # Classic types should show lineage instead of brand
-            from ..constants import CLASSIC_TYPES
+            from src.core.constants import CLASSIC_TYPES
             is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES]
             
             if is_classic_type:
@@ -309,7 +309,7 @@ def process_chunk(args):
             if is_classic_type and product_strain:
                 # DEBUG: Processing classic type '{product_type}' with strain '{product_strain}'
                 try:
-                    from ..data.product_database import get_product_database
+                    from src.core.data.product_database import get_product_database
                     product_db = get_product_database()
                     strain_info = product_db.get_strain_info(product_strain)
                     # DEBUG: Strain info: {strain_info}
@@ -699,7 +699,7 @@ def generate_multiple_label_tables(records, template_path):
             table.alignment = WD_TABLE_ALIGNMENT.CENTER
         
         # Ensure all fonts are Arial Bold for consistency across platforms
-        from .docx_formatting import enforce_arial_bold_all_text
+        from src.core.generation.docx_formatting import enforce_arial_bold_all_text
         enforce_arial_bold_all_text(final_doc)
         
         # Save final document

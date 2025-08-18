@@ -366,18 +366,38 @@ class ProductDatabase:
                 conn.commit()
                 return product_id
             else:
-                # Add new product
+                # Add new product with all available columns
                 cursor.execute('''
                     INSERT INTO products (
                         product_name, normalized_name, strain_id, product_type, vendor, brand,
-                        description, weight, units, price, lineage, first_seen_date, last_seen_date, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        description, weight, units, price, lineage, first_seen_date, last_seen_date, created_at, updated_at,
+                        product_strain, quantity, doh_compliant, concentrate_type, ratio, joint_ratio,
+                        thc_test_result, cbd_test_result, test_result_unit, state, is_sample, is_mj_product,
+                        discountable, room, batch_number, lot_number, barcode, cost, medical_only, med_price,
+                        expiration_date, is_archived, thc_per_serving, allergens, solvent, accepted_date,
+                        internal_product_identifier, product_tags, image_url, ingredients
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     product_name, normalized_name, strain_id, product_data.get('Product Type*'),
                     product_data.get('Vendor'), product_data.get('Product Brand'),
                     product_data.get('Description'), product_data.get('Weight*'),
                     product_data.get('Units'), product_data.get('Price'),
-                    product_data.get('Lineage'), current_date, current_date, current_date, current_date
+                    product_data.get('Lineage'), current_date, current_date, current_date, current_date,
+                    product_data.get('Product Strain'), product_data.get('Quantity*'),
+                    product_data.get('DOH'), product_data.get('Concentrate Type'),
+                    product_data.get('Ratio'), product_data.get('Joint Ratio'),
+                    product_data.get('THC test result'), product_data.get('CBD test result'),
+                    product_data.get('Test result unit (% or mg)'), product_data.get('State'),
+                    product_data.get('Is Sample? (yes/no)'), product_data.get('Is MJ product?(yes/no)'),
+                    product_data.get('Discountable? (yes/no)'), product_data.get('Room*'),
+                    product_data.get('Batch Number'), product_data.get('Lot Number'),
+                    product_data.get('Barcode*'), product_data.get('Cost*'),
+                    product_data.get('Medical Only (Yes/No)'), product_data.get('Med Price'),
+                    product_data.get('Expiration Date(YYYY-MM-DD)'), product_data.get('Is Archived? (yes/no)'),
+                    product_data.get('THC Per Serving'), product_data.get('Allergens'),
+                    product_data.get('Solvent'), product_data.get('Accepted Date'),
+                    product_data.get('Internal Product Identifier'), product_data.get('Product Tags (comma separated)'),
+                    product_data.get('Image URL'), product_data.get('Ingredients')
                 ))
                 
                 product_id = cursor.lastrowid
@@ -673,10 +693,18 @@ class ProductDatabase:
                 ORDER BY total_occurrences DESC
             ''', conn)
             
-            # Export products
+            # Export products with all columns
             products_df = pd.read_sql_query('''
                 SELECT p.product_name, p.product_type, p.vendor, p.brand, p.lineage,
-                       s.strain_name, p.total_occurrences, p.first_seen_date, p.last_seen_date
+                       s.strain_name, p.total_occurrences, p.first_seen_date, p.last_seen_date,
+                       p.description, p.weight, p.units, p.price, p.product_strain, p.quantity,
+                       p.doh_compliant, p.concentrate_type, p.ratio, p.joint_ratio,
+                       p.thc_test_result, p.cbd_test_result, p.test_result_unit, p.state,
+                       p.is_sample, p.is_mj_product, p.discountable, p.room, p.batch_number,
+                       p.lot_number, p.barcode, p.cost, p.medical_only, p.med_price,
+                       p.expiration_date, p.is_archived, p.thc_per_serving, p.allergens,
+                       p.solvent, p.accepted_date, p.internal_product_identifier, p.product_tags,
+                       p.image_url, p.ingredients
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
                 ORDER BY p.total_occurrences DESC

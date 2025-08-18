@@ -99,7 +99,7 @@ class MainWindow:
 
     def handle_json_match(self, json_url):
         """Fetch and match JSON, then update the selected tags panel with matches."""
-        from ..data.json_matcher import JSONMatcher
+        from src.core.data.json_matcher import JSONMatcher
         # Assume file_panel has loaded the Excel file and has a DataFrame
         excel_processor = type('ExcelProcessor', (), {'df': self.file_panel.df})()
         matcher = JSONMatcher(excel_processor)

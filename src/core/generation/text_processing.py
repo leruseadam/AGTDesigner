@@ -220,7 +220,7 @@ def process_doh_image(doh_value, product_type):
     Returns the image path or an empty string.
     """
     import os
-    from ..utils import resource_path
+    from src.core.utils import resource_path
     import logging
     logger = logging.getLogger(__name__)
 

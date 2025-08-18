@@ -41,6 +41,10 @@ JSON_TO_DB_FIELD_MAP = {
     "Description": "description",
     "vendor": "vendor",
     "Vendor": "vendor",
+    "supplier": "vendor",
+    "Supplier": "vendor",
+    "vendor_name": "vendor",
+    "supplier_name": "vendor",
     "brand": "brand",
     "Product Brand": "brand",
     "price": "price",
@@ -80,6 +84,103 @@ def extract_cannabinoids(lab_result_data):
     if "coa" in lab_result_data:
         result["coa"] = lab_result_data["coa"]
     return result
+
+def extract_vendor_info(json_data):
+    """Extract vendor information from JSON data, trying multiple possible field names."""
+    vendor = (str(json_data.get("vendor", "")).strip() or 
+              str(json_data.get("supplier", "")).strip() or
+              str(json_data.get("vendor_name", "")).strip() or
+              str(json_data.get("supplier_name", "")).strip() or
+              str(json_data.get("manufacturer", "")).strip() or
+              str(json_data.get("distributor", "")).strip() or
+              str(json_data.get("brand", "")).strip() or
+              str(json_data.get("company", "")).strip() or
+              str(json_data.get("producer", "")).strip() or
+              str(json_data.get("grower", "")).strip() or
+              str(json_data.get("farm", "")).strip() or
+              str(json_data.get("lab", "")).strip() or
+              str(json_data.get("laboratory", "")).strip() or "")
+    
+    # Enhanced vendor normalization with more comprehensive mappings
+    if vendor:
+        vendor_lower = vendor.lower()
+        # Handle common vendor variations and abbreviations
+        vendor_mappings = {
+            'dcz': 'dcz holdings inc',
+            'dank czar': 'dcz holdings inc',
+            'jsm': 'jsm llc',
+            'omega': 'omega labs',
+            'airo': 'airo pro',
+            'airopro': 'airo pro',
+            'hustlers': 'hustler\'s ambition',
+            'hustlers ambition': 'hustler\'s ambition',
+            '1555': '1555 industrial llc',
+            '1555 industrial': '1555 industrial llc',
+            'dcz holdings': 'dcz holdings inc',
+            'dcz holdings inc': 'dcz holdings inc',
+            'dcz holdings inc.': 'dcz holdings inc',
+            'jsm llc': 'jsm llc',
+            'omega labs': 'omega labs',
+            'omega cannabis': 'omega labs',
+            'airo pro': 'airo pro',
+            'hustler\'s ambition': 'hustler\'s ambition',
+            '1555 industrial llc': '1555 industrial llc',
+            'harmony farms': 'airo pro',
+            'jsm': 'jsm llc'
+        }
+        
+        for key, value in vendor_mappings.items():
+            if key in vendor_lower:
+                vendor = value
+                break
+    
+    # If still no vendor, try to extract from product name patterns
+    if not vendor:
+        product_name = str(json_data.get("product_name", "")).strip()
+        if product_name:
+            import re
+            # Look for "by [Brand]" pattern
+            by_match = re.search(r'by\s+([A-Za-z0-9\s]+)(?:\s|$)', product_name, re.IGNORECASE)
+            if by_match:
+                vendor = by_match.group(1).strip()
+            # Look for "from [Brand]" pattern
+            elif "from" in product_name.lower():
+                from_match = re.search(r'from\s+([A-Za-z0-9\s]+)(?:\s|$)', product_name, re.IGNORECASE)
+                if from_match:
+                    vendor = from_match.group(1).strip()
+            # Look for "by [Brand] -" pattern
+            elif "by" in product_name.lower() and "-" in product_name:
+                by_dash_match = re.search(r'by\s+([A-Za-z0-9\s]+)\s*-', product_name, re.IGNORECASE)
+                if by_dash_match:
+                    vendor = by_dash_match.group(1).strip()
+    
+    # If still no vendor, try to extract from brand field
+    if not vendor:
+        brand = str(json_data.get("brand", "")).strip()
+        if brand and brand.lower() not in ['unknown', 'n/a', '']:
+            vendor = brand
+    
+    # Final fallback: extract from product name using common patterns
+    if not vendor:
+        product_name = str(json_data.get("product_name", "")).strip()
+        if product_name:
+            # Look for common vendor patterns in product names
+            name_lower = product_name.lower()
+            if any(x in name_lower for x in ['dank czar', 'dcz', 'jsm', 'omega', 'airo', 'hustler']):
+                if 'dank czar' in name_lower or 'dcz' in name_lower:
+                    vendor = 'dcz holdings inc'
+                elif 'jsm' in name_lower:
+                    vendor = 'jsm llc'
+                elif 'omega' in name_lower:
+                    vendor = 'omega labs'
+                elif 'airo' in name_lower:
+                    vendor = 'airo pro'
+                elif 'hustler' in name_lower:
+                    vendor = 'hustler\'s ambition'
+                elif '1555' in name_lower:
+                    vendor = '1555 industrial llc'
+    
+    return vendor
 
 # Main function: Process manifest JSON and return list of product dicts
 # Each dict contains all relevant DB fields, including cannabinoids/COA
@@ -486,11 +587,12 @@ class JSONMatcher:
         json_name = normalize_product_name(json_name_raw)
         json_strain = str(json_item.get("strain_name", "")).lower().strip()
         
-        # Extract vendor from JSON item - try multiple sources with proper error handling
+        # Extract vendor from JSON item using enhanced vendor extraction
         json_vendor = None
         try:
-            if json_item.get("vendor"):
-                json_vendor = str(json_item.get("vendor", "")).strip().lower()
+            vendor_info = extract_vendor_info(json_item)
+            if vendor_info:
+                json_vendor = vendor_info.lower()
             elif json_item.get("brand"):
                 json_vendor = str(json_item.get("brand", "")).strip().lower()
             else:
@@ -717,13 +819,14 @@ class JSONMatcher:
         return [candidate for candidate, score in scored_candidates if score > 0.2]  # Increased threshold for better accuracy
         
     def _calculate_match_score(self, json_item: dict, cache_item: dict) -> float:
-        """Calculate a match score between JSON item and cache item."""
+        """Calculate a match score between JSON item and cache item using enhanced field matching."""
         try:
             # Safety check: ensure both items are dictionaries
             if not isinstance(json_item, dict) or not isinstance(cache_item, dict):
                 logging.warning(f"Invalid item types in _calculate_match_score: json_item={type(json_item)}, cache_item={type(cache_item)}")
                 return 0.0
                 
+            # Extract core fields for matching
             json_name_raw = str(json_item.get("product_name", ""))
             cache_name_raw = str(cache_item.get("original_name", ""))
             json_name = normalize_product_name(json_name_raw)
@@ -742,10 +845,18 @@ class JSONMatcher:
             
             cache_vendor = str(cache_item.get("vendor", "")).strip().lower()
             
-            # Debug log
-            logging.debug(f"[SCORE] JSON: '{json_name_raw}' (norm: '{json_name}') | Excel: '{cache_name_raw}' (norm: '{cache_name}') | Strain: '{json_strain}' vs '{cache_strain}' | Vendor: '{json_vendor}' vs '{cache_vendor}'")
+            # Extract additional fields for enhanced matching
+            json_brand = str(json_item.get("brand", "")).lower().strip()
+            cache_brand = str(cache_item.get("brand", "")).lower().strip()
+            json_type = str(json_item.get("product_type", "")).lower().strip()
+            cache_type = str(cache_item.get("product_type", "")).lower().strip()
+            json_weight = str(json_item.get("weight", "")).lower().strip()
+            cache_weight = str(cache_item.get("weight", "")).lower().strip()
             
-            # --- BEGIN: Strict vendor matching ---
+            # Debug log
+            logging.debug(f"[SCORE] JSON: '{json_name_raw}' (norm: '{json_name}') | Excel: '{cache_name_raw}' (norm: '{cache_name}') | Strain: '{json_strain}' vs '{cache_strain}' | Vendor: '{json_vendor}' vs '{cache_vendor}' | Brand: '{json_brand}' vs '{cache_brand}' | Type: '{json_type}' vs '{cache_type}' | Weight: '{json_weight}' vs '{cache_weight}'")
+            
+            # --- BEGIN: Enhanced vendor matching ---
             # If we have vendor information for both, they must match or be very similar
             if json_vendor and cache_vendor:
                 # Check if vendors are the same or known variations
@@ -776,7 +887,37 @@ class JSONMatcher:
                 # If vendors don't match, return very low score (but not 0 to allow for edge cases)
                 if not vendors_match:
                     return 0.05
-            # --- END: Strict vendor matching ---
+            # --- END: Enhanced vendor matching ---
+            
+            # --- BEGIN: Enhanced brand matching ---
+            # Brand matching provides additional confidence
+            brand_bonus = 0.0
+            if json_brand and cache_brand:
+                if json_brand == cache_brand:
+                    brand_bonus = 0.1
+                elif json_brand in cache_brand or cache_brand in json_brand:
+                    brand_bonus = 0.05
+            # --- END: Enhanced brand matching ---
+            
+            # --- BEGIN: Enhanced product type matching ---
+            # Product type matching provides additional confidence
+            type_bonus = 0.0
+            if json_type and cache_type:
+                if json_type == cache_type:
+                    type_bonus = 0.1
+                elif json_type in cache_type or cache_type in json_type:
+                    type_bonus = 0.05
+            # --- END: Enhanced product type matching ---
+            
+            # --- BEGIN: Enhanced weight matching ---
+            # Weight matching provides additional confidence
+            weight_bonus = 0.0
+            if json_weight and cache_weight:
+                if json_weight == cache_weight:
+                    weight_bonus = 0.1
+                elif json_weight in cache_weight or cache_weight in json_weight:
+                    weight_bonus = 0.05
+            # --- END: Enhanced weight matching ---
             
             # --- BEGIN: Strict cannabis type filtering ---
             # Define recognized cannabis product types (update as needed)
@@ -790,34 +931,46 @@ class JSONMatcher:
                 return any(t in type_str for t in CANNABIS_TYPES)
 
             # Get product type/category from both JSON and cache item
-            json_type = json_item.get("product_type") or json_item.get("inventory_type") or json_item.get("inventory_category")
-            cache_type = cache_item.get("product_type") or cache_item.get("product_category")
+            json_type_check = json_item.get("product_type") or json_item.get("inventory_type") or json_item.get("inventory_category")
+            cache_type_check = cache_item.get("product_type") or cache_item.get("product_category")
 
             # If either is not a cannabis type, do not match
-            if not is_cannabis_type(json_type) or not is_cannabis_type(cache_type):
+            if not is_cannabis_type(json_type_check) or not is_cannabis_type(cache_type_check):
                 return 0.0
             # --- END: Strict cannabis type filtering ---
 
+            # Calculate base score
+            base_score = 0.0
+
             # Exact match
             if json_name == cache_name:
-                return 1.0
+                base_score = 1.0
             # Contains match
-            if json_name in cache_name or cache_name in json_name:
-                return 0.9
+            elif json_name in cache_name or cache_name in json_name:
+                base_score = 0.9
             # Strain match bonus
-            if json_strain and cache_strain and json_strain == cache_strain:
-                return 0.8
+            elif json_strain and cache_strain and json_strain == cache_strain:
+                base_score = 0.8
             # Partial overlap
-            json_words = set(json_name.split())
-            cache_words = set(cache_name.split())
-            overlap = json_words & cache_words
-            if overlap:
-                overlap_ratio = len(overlap) / min(len(json_words), len(cache_words))
-                if overlap_ratio > 0.5:
-                    return 0.7
-                elif overlap_ratio > 0.3:
-                    return 0.5
-            return 0.1
+            else:
+                json_words = set(json_name.split())
+                cache_words = set(cache_name.split())
+                overlap = json_words & cache_words
+                if overlap:
+                    overlap_ratio = len(overlap) / min(len(json_words), len(cache_words))
+                    if overlap_ratio > 0.5:
+                        base_score = 0.7
+                    elif overlap_ratio > 0.3:
+                        base_score = 0.5
+                    else:
+                        base_score = 0.3
+                else:
+                    base_score = 0.1
+            
+            # Apply bonuses for additional field matches
+            final_score = min(1.0, base_score + brand_bonus + type_bonus + weight_bonus)
+            
+            return final_score
             
         except Exception as e:
             logging.error(f"Error in _calculate_match_score: {e}")
@@ -914,8 +1067,12 @@ class JSONMatcher:
             # Handle both list and dictionary payloads
             if isinstance(payload, list):
                 items = payload
+                global_vendor = ""  # No global vendor for list payloads
             elif isinstance(payload, dict):
                 items = payload.get("inventory_transfer_items", [])
+                # Extract global vendor from document metadata
+                global_vendor = payload.get("from_license_name", "")
+                logging.info(f"Extracted global vendor from document: {global_vendor}")
             else:
                 logging.warning(f"Unexpected payload type: {type(payload)}")
                 return []
@@ -938,7 +1095,8 @@ class JSONMatcher:
                     
                 # Create a unique key based on product name and vendor
                 product_name = str(item.get("product_name", "")).strip().lower()
-                vendor = str(item.get("vendor", "")).strip().lower()
+                # Use global vendor if available, otherwise fall back to item vendor
+                vendor = global_vendor if global_vendor else str(item.get("vendor", "")).strip().lower()
                 
                 if not product_name:
                     continue
@@ -1016,7 +1174,8 @@ class JSONMatcher:
                     
                 # Debug logging for specific item
                 product_name = str(item.get("product_name", ""))
-                vendor = str(item.get("vendor", ""))
+                # Use global vendor from document metadata if available
+                vendor = global_vendor if global_vendor else str(item.get("vendor", ""))
                 if "banana og" in product_name.lower():
                     logging.info(f"Processing Banana OG item: {product_name} (vendor: {vendor})")
                     
@@ -1126,8 +1285,8 @@ class JSONMatcher:
                     
                     fallback_tag = {
                         'Product Name*': product_name,
-                        'Vendor': mapped_json.get("vendor", ""),
-                        'Vendor/Supplier*': mapped_json.get("vendor", ""),
+                        'Vendor': extract_vendor_info(mapped_json),
+                        'Vendor/Supplier*': extract_vendor_info(mapped_json),
                         'Product Brand': mapped_json.get("brand", ""),
                         'ProductBrand': mapped_json.get("brand", ""),
                         'Lineage': lineage,
@@ -1142,7 +1301,7 @@ class JSONMatcher:
                         'Quantity': mapped_json.get("quantity", ""),  # Add uppercase Quantity
                         'quantity': mapped_json.get("quantity", ""),
                         # Lowercase versions for backward compatibility
-                        'vendor': mapped_json.get("vendor", ""),
+                        'vendor': extract_vendor_info(mapped_json),
                         'productBrand': mapped_json.get("brand", ""),
                         'lineage': lineage,
                         'productType': mapped_json.get("product_type", ""),
@@ -1264,10 +1423,13 @@ class JSONMatcher:
                     if lineage not in ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA', 'CBD', 'MIXED', 'PARAPHERNALIA']:
                         lineage = "MIXED"
                     
+                    # Use global vendor from JSON if available, otherwise use Excel vendor
+                    vendor_value = global_vendor if global_vendor else safe_get_value(safe_row_get(row, 'Vendor', ''))
+                    
                     tag = {
                         'Product Name*': safe_get_value(product_name),
-                        'Vendor': safe_get_value(safe_row_get(row, 'Vendor', '')),
-                        'Vendor/Supplier*': safe_get_value(safe_row_get(row, 'Vendor', '')),
+                        'Vendor': vendor_value,
+                        'Vendor/Supplier*': vendor_value,
                         'Product Brand': safe_get_value(safe_row_get(row, 'Product Brand', '')),
                         'ProductBrand': safe_get_value(safe_row_get(row, 'Product Brand', '')),
                         'Lineage': lineage,
@@ -1282,7 +1444,7 @@ class JSONMatcher:
                         'Quantity': safe_get_value(quantity),  # Add uppercase Quantity
                         'quantity': safe_get_value(quantity),
                         # Lowercase versions for backward compatibility
-                        'vendor': safe_get_value(safe_row_get(row, 'Vendor', '')),
+                        'vendor': vendor_value,
                         'productBrand': safe_get_value(safe_row_get(row, 'Product Brand', '')),
                         'lineage': lineage,
                         'productType': safe_get_value(safe_row_get(row, 'Product Type*', '')),
@@ -1363,6 +1525,7 @@ class JSONMatcher:
         Returns:
             List of product dictionaries
         """
+        print(f"DEBUG: fetch_and_match_with_product_db called with URL: {url}")
         if not url.lower().startswith("http"):
             raise ValueError("Please provide a valid HTTP URL")
             
@@ -1404,6 +1567,9 @@ class JSONMatcher:
                 items = payload
             elif isinstance(payload, dict):
                 items = payload.get("inventory_transfer_items", [])
+                # Extract global vendor from document metadata
+                global_vendor = payload.get("from_license_name", "")
+                logging.info(f"Extracted global vendor from document: {global_vendor}")
             else:
                 logging.warning(f"Unexpected payload type: {type(payload)}")
                 return []
@@ -1426,7 +1592,8 @@ class JSONMatcher:
                     
                 # Create a unique key based on product name and vendor
                 product_name = str(item.get("product_name", "")).strip().lower()
-                vendor = str(item.get("vendor", "")).strip().lower()
+                # Always use global vendor from document metadata for Cultivera data
+                vendor = global_vendor if global_vendor else str(item.get("vendor", "")).strip().lower()
                 
                 if not product_name:
                     continue
@@ -1458,68 +1625,342 @@ class JSONMatcher:
                         logging.warning(f"Item {i+1} is not a dictionary (type: {type(item)}), skipping: {item}")
                         continue
                     
-                    # Extract product information
+                    # Enhanced product information extraction using new database columns
                     product_name = str(item.get("product_name", "")).strip()
+                    print(f"DEBUG: Processing product: {product_name}")
                     if not product_name:
                         continue
                         
-                    # Extract vendor information
-                    vendor = str(item.get("vendor", "")).strip()
-                    brand = str(item.get("brand", "")).strip()
+                    # Use global vendor from document metadata (already set above)
+                    # vendor = extract_vendor_info(item)  # Removed - conflicts with global vendor
                     
-                    # Extract product type
+                    # Enhanced brand extraction with fallbacks
+                    brand = str(item.get("brand", "")).strip()
+                    logging.debug(f"Extracting brand for: {product_name}")
+                    if not brand:
+                        # Try to extract brand from product name patterns
+                        name_lower = product_name.lower()
+                        
+                        # Look for common brand patterns - prioritize these for the Cultivera data
+                        if "dank czar" in name_lower:
+                            brand = "Dank Czar"
+                            logging.debug(f"  -> Detected brand from pattern: {brand}")
+                        elif "omega" in name_lower:
+                            brand = "Omega Labs"
+                            logging.debug(f"  -> Detected brand from pattern: {brand}")
+                        elif "airo" in name_lower:
+                            brand = "Airo Pro"
+                            logging.debug(f"  -> Detected brand from pattern: {brand}")
+                        elif "jsm" in name_lower:
+                            brand = "JSM"
+                            logging.debug(f"  -> Detected brand from pattern: {brand}")
+                        elif "hustler" in name_lower:
+                            brand = "Hustler's Ambition"
+                            logging.debug(f"  -> Detected brand from pattern: {brand}")
+                        elif "1555" in name_lower:
+                            brand = "1555 Industrial"
+                            logging.debug(f"  -> Detected brand from pattern: {brand}")
+                        elif "harmony" in name_lower:
+                            brand = "Harmony Farms"
+                            logging.debug(f"  -> Detected brand from pattern: {brand}")
+                        
+                        # Look for "by [Brand]" pattern
+                        if not brand:
+                            import re
+                            by_match = re.search(r'by\s+([A-Za-z0-9\s]+)(?:\s|$)', product_name, re.IGNORECASE)
+                            if by_match:
+                                brand = by_match.group(1).strip().title()
+                                logging.debug(f"  -> Detected brand from 'by' pattern: {brand}")
+                        
+                        # Look for "from [Brand]" pattern
+                        if not brand:
+                            from_match = re.search(r'from\s+([A-Za-z0-9\s]+)(?:\s|$)', product_name, re.IGNORECASE)
+                            if from_match:
+                                brand = from_match.group(1).strip().title()
+                                logging.debug(f"  -> Detected brand from 'from' pattern: {brand}")
+                        
+                        # Look for "Brand -" pattern
+                        if not brand:
+                            if " - " in product_name:
+                                parts = product_name.split(" - ")
+                                if len(parts) > 0:
+                                    potential_brand = parts[0].strip()
+                                    if len(potential_brand) > 2 and not any(x in potential_brand.lower() for x in ["live", "resin", "rosin", "wax", "shatter", "hash", "flower", "bud", "pre", "roll", "joint", "cartridge", "vape", "pen", "edible", "gummy", "chocolate", "cookie", "brownie", "candy", "sweet", "food", "drink", "beverage", "tincture", "drops", "capsule", "pill", "tablet", "lozenge", "mint", "chew", "chewing", "cream", "lotion", "salve", "balm", "ointment", "gel", "spray", "patch", "transdermal", "skin", "external", "apply", "rub", "grinder", "pipe", "bong", "rig", "torch", "lighter", "tray", "scale", "storage", "container", "jar", "bag", "accessory", "tool"]):
+                                        brand = potential_brand.title()
+                                        logging.debug(f"  -> Detected brand from dash pattern: {brand}")
+                        
+                        # Special handling for Cultivera data - look for brand indicators in product names
+                        if not brand:
+                            # Look for "Dank Czar" in product names
+                            if "dank czar" in name_lower:
+                                brand = "Dank Czar"
+                                logging.debug(f"  -> Detected Dank Czar brand from product name: {brand}")
+                            # Look for "Omega" in product names
+                            elif "omega" in name_lower:
+                                brand = "Omega Labs"
+                                logging.debug(f"  -> Detected Omega Labs brand from product name: {brand}")
+                            # Look for "Medically Compliant" as a brand indicator
+                            elif "medically compliant" in name_lower:
+                                # Extract the brand after "Medically Compliant -"
+                                if "medically compliant -" in name_lower:
+                                    parts = name_lower.split("medically compliant -")
+                                    if len(parts) > 1:
+                                        potential_brand = parts[1].split(" - ")[0].strip()
+                                        if potential_brand and len(potential_brand) > 2:
+                                            brand = potential_brand.title()
+                                            logging.debug(f"  -> Detected brand from Medically Compliant pattern: {brand}")
+                    
+                    # If still no brand, use vendor as brand
+                    if not brand and vendor:
+                        brand = vendor.title()
+                        logging.debug(f"  -> Using vendor as brand: {brand}")
+                    
+                    # If still no brand, try to extract from product name using capitalization patterns
+                    if not brand:
+                        words = product_name.split()
+                        for word in words:
+                            if len(word) > 2 and word[0].isupper() and word[1:].islower():
+                                # Check if it's not a common product word
+                                common_words = ["live", "resin", "rosin", "wax", "shatter", "hash", "flower", "bud", "pre", "roll", "joint", "cartridge", "vape", "pen", "edible", "gummy", "chocolate", "cookie", "brownie", "candy", "sweet", "food", "drink", "beverage", "tincture", "drops", "capsule", "pill", "tablet", "lozenge", "mint", "chew", "chewing", "cream", "lotion", "salve", "balm", "ointment", "gel", "spray", "patch", "transdermal", "skin", "external", "apply", "rub", "grinder", "pipe", "bong", "rig", "torch", "lighter", "tray", "scale", "storage", "container", "jar", "bag", "accessory", "tool"]
+                                if word.lower() not in common_words:
+                                    brand = word
+                                    logging.debug(f"  -> Detected brand from capitalization: {brand}")
+                                    break
+                    
+                    logging.debug(f"Final brand for '{product_name}': {brand}")
+                    
+                    # Extract product type with comprehensive inference
                     product_type = str(item.get("product_type", "")).strip()
                     if not product_type:
-                        # Try to infer product type from name
+                        # Try to infer product type from name with comprehensive keyword matching
                         name_lower = product_name.lower()
-                        if any(x in name_lower for x in ["rosin", "wax", "shatter", "live resin", "distillate"]):
+                        logging.debug(f"Inferring product type for: {product_name}")
+                        
+                        # Concentrate types
+                        if any(x in name_lower for x in ["rosin", "wax", "shatter", "live resin", "distillate", "hash", "live hash", "bubble hash", "kief", "keef", "crystal", "diamond", "sauce", "terp sauce", "terpene", "terps", "extract", "extraction", "solventless", "solvent-less"]):
                             product_type = "concentrate"
-                        elif any(x in name_lower for x in ["pre-roll", "pre roll", "joint"]):
+                            logging.debug(f"  -> Detected concentrate type: {product_type}")
+                        # Pre-roll types
+                        elif any(x in name_lower for x in ["pre-roll", "pre roll", "preroll", "joint", "blunt", "cigar", "cone", "paper", "rolling", "rolled"]):
                             product_type = "pre-roll"
-                        elif any(x in name_lower for x in ["cartridge", "vape"]):
+                            logging.debug(f"  -> Detected pre-roll type: {product_type}")
+                        # Vape types
+                        elif any(x in name_lower for x in ["cartridge", "vape", "pen", "disposable", "pod", "battery", "510", "thc", "cbd", "oil", "distillate", "live resin", "rosin", "sauce"]):
                             product_type = "vape cartridge"
-                        elif any(x in name_lower for x in ["flower", "bud"]):
+                            logging.debug(f"  -> Detected vape type: {product_type}")
+                        # Flower types
+                        elif any(x in name_lower for x in ["flower", "bud", "nug", "buds", "nugs", "marijuana", "cannabis", "weed", "herb", "green", "natural", "raw", "loose", "loose leaf"]):
                             product_type = "flower"
+                            logging.debug(f"  -> Detected flower type: {product_type}")
+                        # Edible types
+                        elif any(x in name_lower for x in ["edible", "gummy", "chocolate", "cookie", "brownie", "candy", "sweet", "food", "drink", "beverage", "tincture", "drops", "capsule", "pill", "tablet", "lozenge", "mint", "chew", "chewing"]):
+                            product_type = "edible"
+                            logging.debug(f"  -> Detected edible type: {product_type}")
+                        # Topical types
+                        elif any(x in name_lower for x in ["topical", "cream", "lotion", "salve", "balm", "ointment", "gel", "spray", "patch", "transdermal", "skin", "external", "apply", "rub"]):
+                            product_type = "topical"
+                            logging.debug(f"  -> Detected topical type: {product_type}")
+                        # Paraphernalia types
+                        elif any(x in name_lower for x in ["paraphernalia", "grinder", "pipe", "bong", "dab rig", "rig", "torch", "lighter", "rolling tray", "tray", "scale", "scale", "storage", "container", "jar", "bag", "accessory", "tool"]):
+                            product_type = "paraphernalia"
+                            logging.debug(f"  -> Detected paraphernalia type: {product_type}")
+                        # CBD specific types
+                        elif any(x in name_lower for x in ["cbd", "hemp", "cannabidiol", "non-psychoactive", "non psychoactive", "medicinal", "therapeutic", "wellness", "health"]):
+                            if any(x in name_lower for x in ["gummy", "oil", "tincture", "cream"]):
+                                product_type = "edible" if "gummy" in name_lower or "oil" in name_lower else "topical"
+                            else:
+                                product_type = "cbd product"
+                            logging.debug(f"  -> Detected CBD type: {product_type}")
+                        # Default based on common patterns
                         else:
-                            product_type = "concentrate"  # Default
+                            # Look for weight indicators to make educated guesses
+                            if any(x in name_lower for x in ["1g", "2g", "3.5g", "7g", "14g", "28g", "gram", "grams", "oz", "ounce"]):
+                                product_type = "flower"  # Most likely flower if weight is specified
+                                logging.debug(f"  -> Defaulted to flower based on weight: {product_type}")
+                            elif any(x in name_lower for x in ["mg", "milligram", "milligrams"]):
+                                product_type = "edible"  # Most likely edible if mg is specified
+                                logging.debug(f"  -> Defaulted to edible based on mg: {product_type}")
+                            else:
+                                product_type = "concentrate"  # Conservative default
+                                logging.debug(f"  -> Defaulted to concentrate: {product_type}")
+                    else:
+                        logging.debug(f"Product type already provided: {product_type}")
                     
-                    # Extract weight and quantity
+                    logging.debug(f"Final product type for '{product_name}': {product_type}")
+                    print(f"DEBUG: Product type for '{product_name}': '{product_type}'")
+                    
+                    # Enhanced weight and quantity extraction
                     weight = str(item.get("weight", "")).strip()
                     quantity = str(item.get("quantity", "1")).strip()
                     units = str(item.get("units", "g")).strip()
                     
-                    # Extract price
+                    # Enhanced price extraction with better estimation
                     price = str(item.get("price", "")).strip()
                     if not price:
-                        # Estimate price based on product type
+                        # Estimate price based on product type and weight
                         if "pre-roll" in product_type.lower():
                             price = "20"
                         elif "flower" in product_type.lower():
-                            price = "35"
+                            if weight and weight.isdigit():
+                                weight_val = float(weight)
+                                if weight_val <= 1:
+                                    price = "35"
+                                elif weight_val <= 3.5:
+                                    price = "120"
+                                elif weight_val <= 7:
+                                    price = "220"
+                                else:
+                                    price = "400"
+                            else:
+                                price = "35"
                         elif "concentrate" in product_type.lower():
-                            price = "50"
+                            if weight and weight.isdigit():
+                                weight_val = float(weight)
+                                if weight_val <= 1:
+                                    price = "50"
+                                elif weight_val <= 2:
+                                    price = "90"
+                                else:
+                                    price = "150"
+                            else:
+                                price = "50"
                         else:
                             price = "25"
                     
-                    # Extract strain information
+                    # Enhanced strain information extraction
                     strain = str(item.get("strain_name", "")).strip()
                     if not strain:
-                        # Try to extract strain from product name
-                        name_parts = product_name.lower().split()
-                        strain_keywords = ["og", "haze", "kush", "diesel", "cookies", "runtz", "gelato", "wedding cake"]
+                        # Try to extract strain from product name with comprehensive keyword matching
+                        name_lower = product_name.lower()
+                        name_parts = name_lower.split()
+                        
+                        # Comprehensive strain keyword database
+                        strain_keywords = [
+                            # OG strains
+                            "og", "original gangster", "original gangsta", "gangster", "gangsta",
+                            # Haze strains
+                            "haze", "silver haze", "super silver haze", "lemon haze", "purple haze", "amnesia haze",
+                            # Kush strains
+                            "kush", "bubba kush", "master kush", "purple kush", "og kush", "hindu kush", "afghan kush",
+                            # Diesel strains
+                            "diesel", "sour diesel", "nyc diesel", "east coast sour diesel", "underdog",
+                            # Cookie strains
+                            "cookies", "girl scout cookies", "gsc", "thin mint", "forum cut", "animal cookies",
+                            # Runtz strains
+                            "runtz", "white runtz", "pink runtz", "zombie runtz", "rainbow runtz", "trophy runtz",
+                            # Gelato strains
+                            "gelato", "gelato 33", "gelato 41", "gelato 47", "sunset sherbet", "sherbet",
+                            # Wedding strains
+                            "wedding cake", "wedding crasher", "wedding pie", "wedding mint",
+                            # Fruit strains
+                            "blueberry", "strawberry", "banana", "mango", "pineapple", "lemon", "lime", "cherry", 
+                            "grape", "apple", "orange", "guava", "dragon", "fruit", "passion", "peach", "apricot",
+                            "watermelon", "cantaloupe", "honeydew", "kiwi", "plum", "raspberry", "blackberry",
+                            # Classic strains
+                            "yoda", "amnesia", "afghani", "hashplant", "super", "boof", "grandy", "candy",
+                            "tricho", "jordan", "cosmic", "combo", "honey", "bread", "mintz", "grinch",
+                            # Additional popular strains
+                            "ak-47", "white widow", "northern lights", "skunk", "jack herer", "durban poison",
+                            "trainwreck", "chemdawg", "sour", "cheese", "blue dream", "green crack", "maui wowie",
+                            "granddaddy purple", "purple", "bubba", "master", "hindu", "afghan", "master",
+                            "sour", "cheese", "dream", "crack", "maui", "granddaddy", "grand daddy",
+                            "bubba", "master", "hindu", "afghan", "master", "sour", "cheese", "dream"
+                        ]
+                        
+                        # First try exact matches
                         for keyword in strain_keywords:
                             if keyword in name_parts:
                                 strain = keyword.title()
                                 break
                     
-                    # Determine lineage
+                        # If no exact match, try partial matches
+                        if not strain:
+                            for keyword in strain_keywords:
+                                if keyword in name_lower:
+                                    strain = keyword.title()
+                                    break
+                        
+                        # If still no strain, try to extract from common patterns
+                        if not strain:
+                            # Look for "Strain Name -" pattern
+                            if " - " in product_name:
+                                parts = product_name.split(" - ")
+                                if len(parts) > 1:
+                                    potential_strain = parts[1].split()[0]  # First word after dash
+                                    if len(potential_strain) > 2:  # Must be at least 3 characters
+                                        strain = potential_strain.title()
+                        
+                        # Final fallback: look for any capitalized words that might be strain names
+                        if not strain:
+                            words = product_name.split()
+                            for word in words:
+                                if len(word) > 2 and word[0].isupper() and word[1:].islower():
+                                    # Check if it's not a common product word
+                                    common_words = ["live", "resin", "rosin", "wax", "shatter", "hash", "flower", "bud", "pre", "roll", "joint", "cartridge", "vape", "pen", "edible", "gummy", "chocolate", "cookie", "brownie", "candy", "sweet", "food", "drink", "beverage", "tincture", "drops", "capsule", "pill", "tablet", "lozenge", "mint", "chew", "chewing", "cream", "lotion", "salve", "balm", "ointment", "gel", "spray", "patch", "transdermal", "skin", "external", "apply", "rub", "grinder", "pipe", "bong", "rig", "torch", "lighter", "tray", "scale", "storage", "container", "jar", "bag", "accessory", "tool"]
+                                    if word.lower() not in common_words:
+                                        strain = word
+                                        break
+                    
+                    # Enhanced lineage determination
                     lineage = "HYBRID"  # Default
                     if strain:
-                        # You could add logic here to determine lineage based on strain
-                        pass
+                        # Enhanced lineage logic based on strain characteristics
+                        strain_lower = strain.lower()
+                        
+                        # Sativa-dominant strains
+                        if any(x in strain_lower for x in ["haze", "sativa", "durban", "jack", "herer", "trainwreck", "green crack", "maui", "wowie", "amnesia", "lemon", "lime", "tropical", "tangie", "clementine", "mandarin", "orange", "citrus", "energetic", "uplifting", "creative", "focus", "daytime"]):
+                            lineage = "SATIVA"
+                        # Indica-dominant strains
+                        elif any(x in strain_lower for x in ["kush", "indica", "afghan", "afghani", "bubba", "master", "purple", "granddaddy", "grand daddy", "northern lights", "skunk", "hashplant", "relaxing", "sedating", "sleep", "nighttime", "body", "couch", "lock"]):
+                            lineage = "INDICA"
+                        # Hybrid strains (including balanced)
+                        elif any(x in strain_lower for x in ["og", "diesel", "cookies", "runtz", "gelato", "wedding", "cake", "sherbet", "sherbert", "blueberry", "strawberry", "banana", "mango", "pineapple", "cherry", "grape", "apple", "guava", "dragon", "fruit", "passion", "peach", "apricot", "watermelon", "cantaloupe", "honeydew", "kiwi", "plum", "raspberry", "blackberry", "yoda", "cosmic", "combo", "honey", "bread", "mintz", "grinch", "ak-47", "white widow", "chemdawg", "sour", "cheese", "blue dream", "balanced", "hybrid"]):
+                            lineage = "HYBRID"
+                        # CBD strains
+                        elif any(x in strain_lower for x in ["cbd", "hemp", "cannabidiol", "non-psychoactive", "non psychoactive", "medicinal", "therapeutic", "wellness", "health", "paraphernalia"]):
+                            lineage = "CBD"
+                        # Special cases
+                        elif "haze" in strain_lower and ("purple" in strain_lower or "amnesia" in strain_lower):
+                            lineage = "HYBRID/SATIVA"  # Purple Haze, Amnesia Haze are often hybrid-sativa
+                        elif "kush" in strain_lower and ("purple" in strain_lower or "bubba" in strain_lower):
+                            lineage = "HYBRID/INDICA"  # Purple Kush, Bubba Kush are often hybrid-indica
+                        else:
+                            lineage = "HYBRID"  # Conservative default
+                    else:
+                        # If no strain info, try to infer from product type
+                        if product_type and "flower" in product_type.lower():
+                            lineage = "HYBRID"  # Most flower is hybrid
+                        elif product_type and "concentrate" in product_type.lower():
+                            lineage = "MIXED"  # Concentrates often contain multiple strains
+                        elif product_type and "edible" in product_type.lower():
+                            lineage = "HYBRID"  # Edibles often use hybrid extracts
+                        else:
+                            lineage = "HYBRID"  # Conservative default
                     
-                    # Create product tag
+                    # Extract additional fields for new database columns
+                    thc_result = str(item.get("thc", "")).strip()
+                    cbd_result = str(item.get("cbd", "")).strip()
+                    test_unit = str(item.get("test_unit", "%")).strip()
+                    batch_num = str(item.get("batch_number", "")).strip()
+                    lot_num = str(item.get("lot_number", "")).strip()
+                    barcode = str(item.get("barcode", "")).strip()
+                    cost = str(item.get("cost", "")).strip()
+                    medical_only = str(item.get("medical_only", "No")).strip()
+                    med_price = str(item.get("med_price", "")).strip()
+                    expiration = str(item.get("expiration_date", "")).strip()
+                    is_archived = str(item.get("is_archived", "no")).strip()
+                    thc_per_serving = str(item.get("thc_per_serving", "")).strip()
+                    allergens = str(item.get("allergens", "")).strip()
+                    solvent = str(item.get("solvent", "")).strip()
+                    accepted_date = str(item.get("accepted_date", "")).strip()
+                    internal_id = str(item.get("internal_id", "")).strip()
+                    product_tags = str(item.get("product_tags", "")).strip()
+                    image_url = str(item.get("image_url", "")).strip()
+                    ingredients = str(item.get("ingredients", "")).strip()
+                    
+                    # Enhanced product tag creation using new database columns
                     tag = {
+                        # Core product information
                         'Product Name*': product_name,
                         'ProductName': product_name,
                         'Description': product_name,
@@ -1539,6 +1980,8 @@ class JSONMatcher:
                         'Units': units,
                         'Price': price,
                         'Price* (Tier Name for Bulk)': price,
+                        
+                        # Enhanced fields using new database columns
                         'State': 'active',
                         'Is Sample? (yes/no)': 'no',
                         'Is MJ product?(yes/no)': 'yes',
@@ -1546,20 +1989,38 @@ class JSONMatcher:
                         'Room*': 'Default',
                         'Medical Only (Yes/No)': 'No',
                         'DOH': 'No',
-                        'Source': 'JSON Match - Product Database',
-                        # Additional fields for consistency
-                        'Quantity Received*': quantity,
-                        'Weight Unit* (grams/gm or ounces/oz)': units,
                         'DOH Compliant (Yes/No)': 'No',
+                        
+                        # New database column mappings
                         'Concentrate Type': product_type if "concentrate" in product_type.lower() else '',
                         'Ratio': '',
                         'Joint Ratio': '',
                         'JointRatio': '',
+                        'THC test result': thc_result,
+                        'CBD test result': cbd_result,
+                        'Test result unit (% or mg)': test_unit,
+                        'Batch Number': batch_num,
+                        'Lot Number': lot_num,
+                        'Barcode*': barcode,
+                        'Cost*': cost,
+                        'Med Price': med_price,
+                        'Expiration Date(YYYY-MM-DD)': expiration,
+                        'Is Archived? (yes/no)': is_archived,
+                        'THC Per Serving': thc_per_serving,
+                        'Allergens': allergens,
+                        'Solvent': solvent,
+                        'Accepted Date': accepted_date,
+                        'Internal Product Identifier': internal_id,
+                        'Product Tags (comma separated)': product_tags,
+                        'Image URL': image_url,
+                        'Ingredients': ingredients,
+                        
+                        # Legacy fields for compatibility
+                        'Source': 'JSON Match - Product Database',
+                        'Quantity Received*': quantity,
+                        'Weight Unit* (grams/gm or ounces/oz)': units,
                         'CombinedWeight': weight,
                         'Description_Complexity': '1',
-                        'Test result unit (% or mg)': '%',
-                        'THC test result': '',
-                        'CBD test result': '',
                         'Ratio_or_THC_CBD': '',
                         'displayName': product_name,
                         'weightWithUnits': f"{weight} {units}" if weight and units else weight,

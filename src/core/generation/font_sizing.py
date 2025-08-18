@@ -2,7 +2,7 @@ from docx.shared import Pt
 import logging
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
-from ..utils.common import calculate_text_complexity
+from src.core.utils.common import calculate_text_complexity
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +13,7 @@ def _complexity(text):
 # Legacy function - use calculate_text_complexity from common.py instead
 def _description_complexity(text):
     """Legacy function - use calculate_text_complexity from common.py instead."""
-    from ..utils.common import calculate_text_complexity
+    from src.core.utils.common import calculate_text_complexity
     return calculate_text_complexity(text, 'description')
 
 def set_run_font_size(run, font_size):
@@ -622,5 +622,5 @@ def get_thresholded_font_size_thc_cbd_label(text, orientation='vertical', scale_
 
 # DEPRECATED: Use get_font_size from unified_font_sizing.py for all ratio font sizing.
 def get_thresholded_font_size_ratio(*args, **kwargs):
-            from .unified_font_sizing import get_font_size
+    from src.core.generation.unified_font_sizing import get_font_size
     return get_font_size(*args, field_type='ratio', **kwargs) 
