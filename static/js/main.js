@@ -2679,9 +2679,9 @@ const TagManager = {
         tags = validTags;
         
         // NOTE: We do NOT apply filtering to selected tags here
-        // Display the selected tags alphabetically rather than backend/matching order
+        // Display the selected tags in the same order as the available list for consistency
         // Filtering is only applied to available tags, not selected tags
-        console.log('Displaying selected tags alphabetically (no filtering applied):', tags);
+        console.log('Displaying selected tags in available list order (no filtering applied):', tags);
         
         if (tags.length === 0) {
             // Check if we have persistent selected tags that should be displayed
@@ -2865,16 +2865,12 @@ const TagManager = {
             this.state.selectedTags = new Set(this.state.persistentSelectedTags);
         }
 
-        // Use the tags and display alphabetically instead of backend/matching order
+        // Use the tags and display in the same order as the available list for consistency
         let fullTags = tags;
         if (tags && tags.length > 0) {
-            console.log('Using tags for display (alphabetical order):', tags);
-            // Sort selected tags alphabetically by product name for display
-            fullTags = [...tags].sort((a, b) => {
-                const nameA = (a['Product Name*'] || a.ProductName || a.Description || '').toLowerCase();
-                const nameB = (b['Product Name*'] || b.ProductName || b.Description || '').toLowerCase();
-                return nameA.localeCompare(nameB);
-            });
+            console.log('Using tags for display (available list order):', tags);
+            // Keep selected tags in the same order as the available list for consistency
+            fullTags = [...tags];
             // Keep selectedTags set in sync with persistent without reordering
             this.state.selectedTags = new Set(this.state.persistentSelectedTags);
         } else {
@@ -3288,16 +3284,12 @@ const TagManager = {
                         weightContent.className = 'collapsible-content';
                         weightSection.appendChild(weightContent);
                         
-                        // Always render tags as leaf nodes - sort alphabetically by product name
+                        // Always render tags as leaf nodes - maintain the same order as available list
                         if (tags && tags.length > 0) {
-                            // Sort tags alphabetically by product name
-                            const sortedTags = tags.sort((a, b) => {
-                                const nameA = (a['Product Name*'] || a.ProductName || a.Description || '').toLowerCase();
-                                const nameB = (b['Product Name*'] || b.ProductName || b.Description || '').toLowerCase();
-                                return nameA.localeCompare(nameB);
-                            });
+                            // Keep tags in the same order as the available list for consistency
+                            const orderedTags = [...tags];
                             
-                            sortedTags.forEach(tag => {
+                            orderedTags.forEach(tag => {
                                 const tagElement = this.createTagElement(tag, true); // true = isForSelectedTags
                                 const checkbox = tagElement.querySelector('.tag-checkbox');
                                 const shouldBeChecked = this.state.persistentSelectedTags.includes(tag['Product Name*']);

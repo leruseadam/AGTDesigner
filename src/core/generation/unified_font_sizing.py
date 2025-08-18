@@ -8,7 +8,7 @@ import logging
 from docx.shared import Pt
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
-from ..utils.common import calculate_text_complexity
+from src.core.utils.common import calculate_text_complexity
 import json
 import os
 
@@ -44,10 +44,10 @@ def _load_font_sizing_config():
                 'double': {
                     'description': [(10, 24), (20, 22), (60, 18), (80, 16), (100, 14), (120, 12), (140, 10), (float('inf'), 10)],
                     'brand': [(10, 14), (15, 12), (20, 10), (25, 8), (float('inf'), 7.5)],
-                    'price': [(10, 20), (15, 18), (float('inf'), 14)],
+                    'price': [(5, 20), (10, 18), (float('inf'), 14)],
                     'lineage': [(15, 13), (25, 12), (35, 10), (45, 9), (float('inf'), 9)],
                     'ratio': [(10, 9), (20, 7), (30, 5.5), (float('inf'), 5)],
-                    'thc_cbd': [(1, 8),(float('inf'), 6.5)],
+                    'thc_cbd': [(1, 6.5),(float('inf'), 6.5)],
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
                     'weight': [(15, 16), (25, 14), (35, 12), (float('inf'), 9)],
                     'doh': [(15, 18), (25, 16), (float('inf'), 13)],
@@ -60,7 +60,7 @@ def _load_font_sizing_config():
                     'price': [(5, 30), (8, 28), (float('inf'), 14)],
                     'lineage': [(20, 18), (40, 16), (60, 12), (float('inf'), 8)],
                     'ratio': [(10, 14), (20, 12), (30, 9), (float('inf'), 9)],
-                    'thc_cbd': [(10, 11), (25, 8), (35, 7), (float('inf'), 6)],
+                    'thc_cbd': [(10, 12), (float('inf'), 12)],
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
                     'vendor': [(10, 6), (20, 5), (40, 4), (70, 3),(float('inf'), 2)],
                     'default': [(30, 16), (60, 14), (100, 12), (float('inf'), 10)]
@@ -75,6 +75,19 @@ def _load_font_sizing_config():
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
                     'vendor': [(10, 6), (20, 5), (40, 4), (70, 3),(float('inf'), 2)],
                     'default': [(20, 18), (40, 16), (60, 14), (float('inf'), 12)]
+                },
+                'mini': {
+                    'description': [(10, 16), (20, 14), (30, 12), (40, 10), (50, 9), (float('inf'), 8)],
+                    'brand': [(10, 10), (20, 9), (30, 8), (40, 7), (float('inf'), 6)],
+                    'price': [(5, 14), (10, 13), (15, 12), (20, 11), (float('inf'), 9)],
+                    'lineage': [(10, 10), (20, 9), (30, 8), (40, 7), (float('inf'), 6)],
+                    'ratio': [(5, 10), (10, 9), (15, 8), (20, 7), (float('inf'), 6)],
+                    'thc_cbd': [(10, 10), (20, 9), (30, 8), (40, 7), (float('inf'), 6)],
+                    'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
+                    'weight': [(10, 12), (20, 10), (30, 8), (float('inf'), 6)],
+                    'doh': [(10, 8), (20, 7), (float('inf'), 6)],
+                    'vendor': [(10, 6), (20, 5), (40, 4), (float('inf'), 3)],
+                    'default': [(20, 10), (40, 9), (60, 8), (float('inf'), 7)]
                 }
             }
         }
@@ -378,7 +391,7 @@ def get_line_spacing_by_marker(marker_type, template_type='vertical'):
     
     spacing_config = {
         'RATIO': 2.4,
-        'THC_CBD': 1.5,  # Increased from 2.0 to 1.5 for better readability
+        'THC_CBD': 1.5,  # Base spacing for THC_CBD
         'DESC': 1.0,
         'DESCRIPTION': 1.0,
         'PRICE': 1.0,
@@ -397,21 +410,16 @@ def get_line_spacing_by_marker(marker_type, template_type='vertical'):
         'PRODUCTVENDOR': 1.0
     }
     
-    # Special case: Vertical template THC_CBD uses 1.3 spacing for better readability with extra line breaks
-    if base_marker == 'THC_CBD' and template_type.lower() == 'vertical':
-        return 1.3
-    
-    # Special case: Mini template THC_CBD uses 1.3 spacing for better readability
-    if base_marker == 'THC_CBD' and template_type.lower() == 'mini':
-        return 1.3
-    
-    # Special case: Double template THC_CBD uses 1.4 spacing for better readability
-    if base_marker == 'THC_CBD' and template_type.lower() == 'double':
-        return 1.4
-    
-    # Special case: Horizontal template THC_CBD uses 1.35 spacing for better readability
-    if base_marker == 'THC_CBD' and template_type.lower() == 'horizontal':
-        return 1.35
+    # Template-specific spacing adjustments for better readability
+    if base_marker == 'THC_CBD':
+        if template_type.lower() == 'double':
+            return 1.4  # Double template needs slightly tighter spacing for larger cells
+        elif template_type.lower() == 'vertical':
+            return 1.5  # Vertical template uses standard spacing
+        elif template_type.lower() == 'mini':
+            return 1.3  # Mini template needs tighter spacing for small cells
+        elif template_type.lower() == 'horizontal':
+            return 1.35  # Horizontal template uses slightly tighter spacing
     
     return spacing_config.get(base_marker, 1.0)
 

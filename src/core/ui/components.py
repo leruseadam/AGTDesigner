@@ -3,7 +3,7 @@ from tkinter import ttk, filedialog, messagebox
 import pandas as pd
 from pathlib import Path
 import logging
-from ..constants import PRODUCT_TYPE_EMOJIS
+from src.core.constants import PRODUCT_TYPE_EMOJIS
 
 class FileUploadPanel(ttk.Frame):
     def __init__(self, parent, theme):

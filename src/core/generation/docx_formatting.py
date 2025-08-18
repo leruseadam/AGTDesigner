@@ -823,7 +823,7 @@ def enforce_fixed_cell_dimensions(table, template_type=None):
             if template_type == 'mini':
                 logger.info("Enforcing exact 1.5\" x 1.5\" dimensions for mini template")
                 try:
-                    from ..constants import CELL_DIMENSIONS
+                    from src.core.constants import CELL_DIMENSIONS
                     cell_dims = CELL_DIMENSIONS.get(template_type)
                     if cell_dims and table.rows:
                         # Set column widths based on template type
@@ -852,7 +852,7 @@ def enforce_fixed_cell_dimensions(table, template_type=None):
                     # Continue with general dimension enforcement
             
             try:
-                from ..constants import CELL_DIMENSIONS
+                from src.core.constants import CELL_DIMENSIONS
                 cell_dims = CELL_DIMENSIONS.get(template_type)
                 if cell_dims and table.rows:
                     # Set column widths based on template type
@@ -960,7 +960,7 @@ def enforce_fixed_cell_dimensions(table, template_type=None):
 
 def fix_table(doc, num_rows=3, num_cols=3, template_type='horizontal'):
     """Fix table with proper cell dimensions based on template type."""
-    from ..constants import CELL_DIMENSIONS
+    from src.core.constants import CELL_DIMENSIONS
     
     # Get individual cell dimensions
     cell_dims = CELL_DIMENSIONS.get(template_type, {'width': 2.4, 'height': 2.4})
@@ -1009,7 +1009,7 @@ def fix_table(doc, num_rows=3, num_cols=3, template_type='horizontal'):
 
 def rebuild_3x3_grid(doc, template_type='horizontal'):
     """Rebuild 3x3 grid with proper cell dimensions based on template type."""
-    from ..constants import CELL_DIMENSIONS
+    from src.core.constants import CELL_DIMENSIONS
     
     # Get individual cell dimensions
     cell_dims = CELL_DIMENSIONS.get(template_type, {'width': 2.4, 'height': 2.4})

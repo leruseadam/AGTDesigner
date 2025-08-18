@@ -7,11 +7,11 @@ from pathlib import Path
 import pandas as pd
 import datetime
 from flask import send_file
-from ..formatting.markers import wrap_with_marker, unwrap_marker
+from src.core.formatting.markers import wrap_with_marker, unwrap_marker
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Pt
-from ..generation.text_processing import (
+from src.core.generation.text_processing import (
     format_cannabinoid_content,
     safe_get,
     safe_get_text,
@@ -19,8 +19,8 @@ from ..generation.text_processing import (
     make_nonbreaking_hyphens,
 )
 from collections import OrderedDict
-from ..constants import CLASSIC_TYPES, VALID_CLASSIC_LINEAGES, EXCLUDED_PRODUCT_TYPES, EXCLUDED_PRODUCT_PATTERNS, TYPE_OVERRIDES
-from ..utils.common import calculate_text_complexity
+from src.core.constants import CLASSIC_TYPES, VALID_CLASSIC_LINEAGES, EXCLUDED_PRODUCT_TYPES, EXCLUDED_PRODUCT_PATTERNS, TYPE_OVERRIDES
+from src.core.utils.common import calculate_text_complexity
 
 # Configure logging
 logging.basicConfig(
@@ -150,7 +150,7 @@ def optimized_lineage_persistence(processor, df):
     
     try:
         from .product_database import ProductDatabase
-        from ..constants import CLASSIC_TYPES
+        from src.core.constants import CLASSIC_TYPES
         product_db = ProductDatabase()
         
         # Process lineage persistence in batches for performance
@@ -174,7 +174,6 @@ def optimized_lineage_persistence(processor, df):
             return df
         
         # Use constant for valid lineages for classic types
-        from ..constants import VALID_CLASSIC_LINEAGES
         valid_classic_lineages = VALID_CLASSIC_LINEAGES
         
         # Process strains in batches
@@ -230,7 +229,7 @@ def batch_lineage_database_update(processor, df):
     
     try:
         from .product_database import ProductDatabase
-        from ..constants import CLASSIC_TYPES
+        from src.core.constants import CLASSIC_TYPES
         product_db = ProductDatabase()
         
         # Process in batches for performance
@@ -253,7 +252,7 @@ def batch_lineage_database_update(processor, df):
                 most_common_lineage = lineage_counts.index[0]
                 
                 # Validate lineage for classic types - never save MIXED lineage
-                from ..constants import VALID_CLASSIC_LINEAGES
+                from src.core.constants import VALID_CLASSIC_LINEAGES
                 if most_common_lineage and str(most_common_lineage).strip():
                     lineage_to_save = most_common_lineage
                     
@@ -333,7 +332,8 @@ def get_default_upload_file() -> Optional[str]:
             try:
                 for filename in os.listdir(location):
                     # Look for any Excel file, prioritize "A Greener Today"
-                    if filename.lower().endswith(('.xlsx', '.xls')):
+                    # Skip temporary Excel files (starting with ~$)
+                    if filename.lower().endswith(('.xlsx', '.xls')) and not filename.startswith('~$'):
                         file_path = os.path.join(location, filename)
                         if os.path.isfile(file_path):
                             mod_time = os.path.getmtime(file_path)
@@ -344,8 +344,12 @@ def get_default_upload_file() -> Optional[str]:
                             if "a greener today" in filename.lower():
                                 priority = 1
                             
-                            excel_files.append((file_path, filename, mod_time, file_size, priority))
-                            logger.debug(f"Found Excel file: {filename} (modified: {mod_time}, size: {file_size:,} bytes, priority: {priority})")
+                            # Skip files that are too small (likely corrupted)
+                            if file_size > 1000:  # Minimum 1KB
+                                excel_files.append((file_path, filename, mod_time, file_size, priority))
+                                logger.debug(f"Found Excel file: {filename} (modified: {mod_time}, size: {file_size:,} bytes, priority: {priority})")
+                            else:
+                                logger.debug(f"Skipping small file (likely corrupted): {filename} (size: {file_size:,} bytes)")
             except Exception as e:
                 logger.error(f"Error searching {location}: {e}")
         else:
@@ -912,7 +916,7 @@ class ExcelProcessor:
                 
                 # 5. Basic lineage standardization (vectorized)
                 if "Lineage" in df.columns:
-                    from ..constants import CLASSIC_TYPES
+                    from src.core.constants import CLASSIC_TYPES
                     df["Lineage"] = optimized_lineage_assignment(
                         df, 
                         df["Product Type*"], 
@@ -1202,7 +1206,7 @@ class ExcelProcessor:
                 
                 # Fix invalid lineage assignments for classic types
                 # Classic types should never have "MIXED" lineage
-                from ..constants import CLASSIC_TYPES
+                from src.core.constants import CLASSIC_TYPES
                 
                 classic_mask = self.df["Product Type*"].str.strip().str.lower().isin(CLASSIC_TYPES)
                 mixed_lineage_mask = self.df["Lineage"] == "MIXED"
@@ -2003,7 +2007,7 @@ class ExcelProcessor:
                 ]
                 
                 # Identify non-classic types - products that are NOT in CLASSIC_TYPES
-                from ..constants import CLASSIC_TYPES
+                from src.core.constants import CLASSIC_TYPES
                 nonclassic_mask = ~self.df["Product Type*"].str.strip().str.lower().isin([c.lower() for c in CLASSIC_TYPES])
                 
                 # Add debugging
@@ -2655,30 +2659,62 @@ class ExcelProcessor:
         if thc_clean and cbd_clean:
             # Both values available
             if '%' in thc_clean or '%' in cbd_clean:
-                # Percentage format
-                return f"THC: {thc_clean} CBD: {cbd_clean}"
+                # Percentage format - round to 1 decimal place
+                try:
+                    thc_rounded = f"{float(thc_clean.replace('%', '')):.1f}" if thc_clean.replace('%', '').replace('.', '').isdigit() else thc_clean
+                    cbd_rounded = f"{float(cbd_clean.replace('%', '')):.1f}" if cbd_clean.replace('%', '').replace('.', '').isdigit() else cbd_clean
+                    return f"THC: {thc_rounded} CBD: {cbd_rounded}"
+                except (ValueError, TypeError):
+                    # Fallback to original values if conversion fails
+                    return f"THC: {thc_clean} CBD: {cbd_clean}"
             elif 'mg' in thc_clean.lower() or 'mg' in cbd_clean.lower():
                 # mg format
                 return f"THC: {thc_clean} CBD: {cbd_clean}"
             else:
-                # Assume percentage format
-                return f"THC: {thc_clean}% CBD: {cbd_clean}%"
+                # Assume percentage format - round to 1 decimal place
+                try:
+                    thc_rounded = f"{float(thc_clean):.1f}" if thc_clean.replace('.', '').isdigit() else thc_clean
+                    cbd_rounded = f"{float(cbd_clean):.1f}" if cbd_clean.replace('.', '').isdigit() else cbd_clean
+                    return f"THC: {thc_rounded}% CBD: {cbd_rounded}%"
+                except (ValueError, TypeError):
+                    # Fallback to original values if conversion fails
+                    return f"THC: {thc_clean}% CBD: {cbd_clean}%"
         elif thc_clean:
             # Only THC value available
             if '%' in thc_clean:
-                return f"THC: {thc_clean}"
+                # Round to 1 decimal place
+                try:
+                    thc_rounded = f"{float(thc_clean.replace('%', '')):.1f}" if thc_clean.replace('%', '').replace('.', '').isdigit() else thc_clean
+                    return f"THC: {thc_rounded}"
+                except (ValueError, TypeError):
+                    return f"THC: {thc_clean}"
             elif 'mg' in thc_clean.lower():
                 return f"THC: {thc_clean}"
             else:
-                return f"THC: {thc_clean}%"
+                # Round to 1 decimal place
+                try:
+                    thc_rounded = f"{float(thc_clean):.1f}" if thc_clean.replace('.', '').isdigit() else thc_clean
+                    return f"THC: {thc_rounded}%"
+                except (ValueError, TypeError):
+                    return f"THC: {thc_clean}%"
         elif cbd_clean:
             # Only CBD value available
             if '%' in cbd_clean:
-                return f"CBD: {cbd_clean}"
+                # Round to 1 decimal place
+                try:
+                    cbd_rounded = f"{float(cbd_clean.replace('%', '')):.1f}" if cbd_clean.replace('%', '').replace('.', '').isdigit() else cbd_clean
+                    return f"CBD: {cbd_rounded}"
+                except (ValueError, TypeError):
+                    return f"CBD: {cbd_clean}"
             elif 'mg' in cbd_clean.lower():
                 return f"CBD: {cbd_clean}"
             else:
-                return f"CBD: {cbd_clean}%"
+                # Round to 1 decimal place
+                try:
+                    cbd_rounded = f"{float(cbd_clean):.1f}" if cbd_clean.replace('.', '').isdigit() else cbd_clean
+                    return f"CBD: {cbd_rounded}%"
+                except (ValueError, TypeError):
+                    return f"CBD: {cbd_clean}%"
         else:
             return ""
 
@@ -2981,7 +3017,7 @@ class ExcelProcessor:
                 return {"message": "No data loaded", "updated_count": 0}
             
             # Get all classic type products with strains
-            from ..constants import CLASSIC_TYPES
+            from src.core.constants import CLASSIC_TYPES
             classic_mask = self.df["Product Type*"].str.strip().str.lower().isin(CLASSIC_TYPES)
             classic_df = self.df[classic_mask]
             

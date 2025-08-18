@@ -4610,7 +4610,7 @@ def product_db_status():
 
 @app.route('/api/json-match', methods=['POST'])
 def json_match():
-    """Enhanced JSON matching endpoint with improved product matching and fallback logic."""
+    """Simplified JSON matching endpoint with better error handling."""
     try:
         # Clear the available tags cache to force refresh after JSON matching
         cache_key = get_session_cache_key('available_tags')
@@ -4633,24 +4633,6 @@ def json_match():
         if use_product_db:
             logging.info("No Excel data loaded, using product database for JSON matching")
             
-            # Extract vendor information from the URL first
-            manifest_vendor = None
-            try:
-                # Fetch the manifest data to extract vendor
-                import requests
-                response = requests.get(url, timeout=30)
-                if response.status_code == 200:
-                    manifest_data = response.json()
-                    manifest_vendor = manifest_data.get('from_license_name', '').lower()
-                    logging.info(f"Extracted manifest vendor: {manifest_vendor}")
-                    
-                    # Store manifest vendor in request for later use
-                    request.manifest_vendor = manifest_vendor
-                else:
-                    logging.warning(f"Failed to fetch manifest data: {response.status_code}")
-            except Exception as e:
-                logging.warning(f"Could not extract manifest vendor: {e}")
-            
             # Use product database matching
             try:
                 matched_products = json_matcher.fetch_and_match_with_product_db(url)
@@ -4672,8 +4654,7 @@ def json_match():
                         matched_names.append(product_name)
                 else:
                     logging.warning(f"Product is not a dictionary: {type(product)} - {product}")
-            
-            available_tags = matched_products  # Use all matched products as available tags
+            available_tags = matched_products  # Use the matched products as available tags
             json_matched_tags = matched_products
             cache_status = "Product Database"
             
@@ -4855,9 +4836,6 @@ def json_match():
             # Get available tags from Excel processor
             available_tags = excel_processor.get_available_tags()
             
-            # Don't filter available tags globally - only apply vendor filtering during matching
-            logging.info(f"Using all {len(available_tags)} Excel tags for matching (vendor filtering will be applied during matching)")
-            
             # Add JSON matched tags to available tags if they're not already there
             json_matched_tags = []
             if matched_tags:
@@ -4878,11 +4856,7 @@ def json_match():
                         
                     json_name = json_tag.get('Product Name*', json_tag.get('ProductName', '')).lower()
                     if json_name:
-                        # Enhanced matching: try multiple strategies
-                        matched = False
-                        
-                        # Strategy 1: Exact name match
-                        if json_name in existing_names:
+                        # Check if this tag already exists in available_tags
                         existing_tag_index = None
                         for i, tag in enumerate(available_tags):
                             if isinstance(tag, dict):
@@ -4892,144 +4866,17 @@ def json_match():
                                     break
                         
                         if existing_tag_index is not None:
-                                # Update existing tag with JSON data
+                            # Update existing tag with JSON data (preserve Excel data but add JSON fields)
                             existing_tag = available_tags[existing_tag_index]
+                            # Add any missing fields from JSON tag
                             for key, value in json_tag.items():
                                 if key not in existing_tag or not existing_tag[key]:
                                     existing_tag[key] = value
+                            # Mark as JSON matched
                             existing_tag['Source'] = 'JSON Match'
                             json_matched_tags.append(existing_tag)
-                                matched = True
-                                logging.info(f"Exact match found for: {json_name}")
-                        
-                        # Strategy 2: Flexible fuzzy name matching for remaining products
-                        if not matched:
-                            # Get manifest vendor for vendor filtering
-                            manifest_vendor = None
-                            if hasattr(request, 'manifest_vendor') and request.manifest_vendor:
-                                manifest_vendor = request.manifest_vendor.lower()
-                            
-                            # First, try vendor-specific matching if we can identify the vendor
-                            json_vendor = json_tag.get('Vendor', '').lower() or json_tag.get('vendor', '').lower()
-                            json_brand = json_tag.get('Product Brand', '').lower() or json_tag.get('brand', '').lower()
-                            
-                            # Determine vendor from brand if vendor is not specified
-                            if not json_vendor and json_brand:
-                                if 'dank czar' in json_brand or 'dcz' in json_brand:
-                                    json_vendor = 'jsm llc'
-                                elif 'omega' in json_brand:
-                                    json_vendor = 'jsm llc'
-                                elif 'medically compliant' in json_brand:
-                                    json_vendor = 'jsm llc'
-                            
-                            best_match = None
-                            best_score = 0.0
-                            
-                            for tag in available_tags:
-                                if isinstance(tag, dict):
-                                    tag_name = tag.get('Product Name*', tag.get('ProductName', '')).lower()
-                                    tag_vendor = tag.get('Vendor', '').lower() or tag.get('vendor', '').lower()
-                                    
-                                    # STRICT vendor filtering: ONLY consider tags from the same vendor
-                                    if manifest_vendor and tag_vendor and tag_vendor != manifest_vendor:
-                                        logging.info(f"BLOCKING vendor mismatch: '{tag_vendor}' != '{manifest_vendor}' for '{tag_name}'")
-                                        continue
-                                    
-                                    if tag_name:
-                                        # Calculate similarity score
-                                        from difflib import SequenceMatcher
-                                        similarity = SequenceMatcher(None, json_name, tag_name).ratio()
-                                        
-                                        # Check for key word matches
-                                        json_words = set(json_name.split())
-                                        tag_words = set(tag_name.split())
-                                        word_overlap = len(json_words.intersection(tag_words))
-                                        
-                                        # Combined score
-                                        combined_score = similarity * 0.7 + (word_overlap / max(len(json_words), len(tag_words))) * 0.3
-                                        
-                                        # Vendor bonus: if vendors match, boost the score
-                                        vendor_bonus = 0.1 if json_vendor and tag_vendor == json_vendor else 0.0
-                                        final_score = combined_score + vendor_bonus
-                                        
-                                        if final_score > best_score and final_score > 0.5:  # Lowered threshold to 50%
-                                            best_score = final_score
-                                            best_match = tag
-                            
-                            if best_match:
-                                # Create enhanced tag with combined data
-                                enhanced_tag = best_match.copy()
-                                for key, value in json_tag.items():
-                                    if key not in enhanced_tag or not enhanced_tag[key]:
-                                        enhanced_tag[key] = value
-                                
-                                # Determine source based on vendor match
-                                if json_vendor and best_match.get('Vendor', '').lower() == json_vendor:
-                                    source = f'JSON Match (Vendor-Specific Fuzzy: {best_score:.2f})'
                         else:
-                                    source = f'JSON Match (Fuzzy: {best_score:.2f})'
-                                
-                                enhanced_tag['Source'] = source
-                                enhanced_tag['Original_JSON_Name'] = json_tag.get('Product Name*', json_tag.get('ProductName', ''))
-                                if json_vendor:
-                                    enhanced_tag['Matched_Vendor'] = json_vendor
-                                json_matched_tags.append(enhanced_tag)
-                                matched = True
-                                logging.info(f"Fuzzy match found for '{json_name}' -> '{best_match.get('Product Name*', '')}' (score: {best_score:.2f}, vendor: {json_vendor or 'unknown'})")
-                        
-                        # Strategy 3: Flexible product type and brand-based matching for remaining products
-                        if not matched:
-                            json_type = json_tag.get('Product Type*', '').lower()
-                            json_brand = json_tag.get('Product Brand', '').lower()
-                            json_vendor = json_tag.get('Vendor', '').lower() or json_tag.get('vendor', '').lower()
-                            
-                            # Determine vendor from brand if vendor is not specified
-                            if not json_vendor and json_brand:
-                                if 'dank czar' in json_brand or 'dcz' in json_brand:
-                                    json_vendor = 'jsm llc'
-                                elif 'omega' in json_brand:
-                                    json_vendor = 'jsm llc'
-                                elif 'medically compliant' in json_brand:
-                                    json_vendor = 'jsm llc'
-                            
-                            if json_type or json_brand:
-                                for tag in available_tags:
-                                    if isinstance(tag, dict):
-                                        tag_type = tag.get('Product Type*', '').lower()
-                                        tag_brand = tag.get('Product Brand', '').lower()
-                                        tag_vendor = tag.get('Vendor', '').lower() or tag.get('vendor', '').lower()
-                                        
-                                        # Check if types and brands are similar
-                                        type_match = json_type and tag_type and (json_type in tag_type or tag_type in json_type)
-                                        brand_match = json_brand and tag_brand and (json_brand in tag_brand or tag_brand in json_brand)
-                                        
-                                        # Vendor match is a bonus but not required
-                                        vendor_match = json_vendor and tag_vendor == json_vendor
-                                        
-                                        if type_match or brand_match:
-                                            # Create enhanced tag
-                                            enhanced_tag = tag.copy()
-                                            for key, value in json_tag.items():
-                                                if key not in enhanced_tag or not enhanced_tag[key]:
-                                                    enhanced_tag[key] = value
-                                            
-                                            # Determine source based on vendor match
-                                            if vendor_match:
-                                                source = f'JSON Match (Vendor-Specific Type/Brand: {json_type}/{json_brand})'
-                                            else:
-                                                source = f'JSON Match (Type/Brand: {json_type}/{json_brand})'
-                                            
-                                            enhanced_tag['Source'] = source
-                                            enhanced_tag['Original_JSON_Name'] = json_tag.get('Product Name*', json_tag.get('ProductName', ''))
-                                            if json_vendor:
-                                                enhanced_tag['Matched_Vendor'] = json_vendor
-                                            json_matched_tags.append(enhanced_tag)
-                                            matched = True
-                                            logging.info(f"Type/brand match found for '{json_name}' -> '{tag.get('Product Name*', '')}' (vendor: {json_vendor or 'unknown'}, vendor_match: {vendor_match})")
-                                            break
-                        
-                        # Strategy 4: Add as new item if no match found
-                        if not matched:
+                            # Add new JSON tag that doesn't exist in the dataset
                             new_tag = {
                                 'Product Name*': json_tag.get('Product Name*', json_tag.get('ProductName', '')),
                                 'ProductName': json_tag.get('ProductName', json_tag.get('Product Name*', '')),
@@ -5053,7 +4900,7 @@ def json_match():
                                 'Room*': 'Default',
                                 'Medical Only (Yes/No)': 'No',
                                 'DOH': 'No',
-                                'Source': 'JSON Match - New Item (No DB Counterpart)'
+                                'Source': 'JSON Match - New Item'
                             }
                             
                             # Add any additional fields from the JSON tag
@@ -5064,7 +4911,7 @@ def json_match():
                             available_tags.append(new_tag)
                             json_matched_tags.append(new_tag)
                             existing_names.add(json_name)
-                            logging.info(f"Added new JSON item with no database counterpart: {json_name}")
+                            logging.info(f"Added new JSON item not found in dataset: {json_name}")
             
             # If we have JSON matched tags, use only those for available_tags
             # This ensures the Available Tags list shows only JSON matched items
@@ -5085,76 +4932,38 @@ def json_match():
         cache.set(cache_key, available_tags, timeout=3600)
         logging.info(f"Updated available tags cache with {len(available_tags)} items")
         
-        # Enhanced data repair and enhancement
+        # Basic data repair without complex processing
         if json_matched_tags:
             try:
-                # Enhanced repair - ensure all required fields exist and improve data quality
+                # Simple repair - just ensure basic fields exist
                 for tag in json_matched_tags:
                     if isinstance(tag, dict):
                         # Ensure required fields exist
                         if 'Product Name*' not in tag:
                             tag['Product Name*'] = tag.get('ProductName', 'Unknown Product')
-                        
-                        # Enhanced vendor detection and standardization (vendor-aware)
-                        if not tag.get('Vendor') or tag.get('Vendor') == 'Unknown':
-                            product_name = tag.get('Product Name*', '').lower()
-                            # Only set vendor if we can confidently identify it from the product name
-                            if 'dank czar' in product_name or 'dcz' in product_name:
+                        # Force vendor to be JSM LLC for all JSON matched products
                         tag['Vendor'] = 'JSM LLC'
                         tag['vendor'] = 'JSM LLC'
-                            elif 'omega' in product_name:
-                                tag['Vendor'] = 'JSM LLC'
-                                tag['vendor'] = 'JSM LLC'
-                            elif 'medically compliant' in product_name:
-                                tag['Vendor'] = 'JSM LLC'
-                                tag['vendor'] = 'JSM LLC'
-                            # Don't set a default vendor - let it remain unknown if we can't identify it
                         
-                        # Enhanced brand detection (vendor-aware)
-                        if not tag.get('Product Brand') or tag.get('Product Brand') == 'Unknown':
+                        # Extract brand from product name if not already set
                         product_name = tag.get('Product Name*', '').lower()
-                            if 'dank czar' in product_name or 'dcz' in product_name:
+                        if 'dank czar' in product_name:
                             tag['Product Brand'] = 'Dank Czar'
                             tag['brand'] = 'Dank Czar'
                         elif 'omega' in product_name:
                             tag['Product Brand'] = 'Omega Labs'
                             tag['brand'] = 'Omega Labs'
                         elif 'medically compliant' in product_name:
-                                # Check for specific product types that might indicate brand
+                            # Medically Compliant products are typically Dank Czar products
+                            # Check if it's a specific type that might be Omega
                             if any(x in product_name for x in ['distillate cartridge', 'omega']):
                                 tag['Product Brand'] = 'Omega Labs'
                                 tag['brand'] = 'Omega Labs'
                             else:
                                 tag['Product Brand'] = 'Dank Czar'
                                 tag['brand'] = 'Dank Czar'
-                        
-                        # Enhanced product type detection if missing
-                        if not tag.get('Product Type*') or tag.get('Product Type*') == 'Unknown':
-                            product_name = tag.get('Product Name*', '').lower()
-                            # Use the enhanced product type detection from json_matcher
-                            from src.core.data.json_matcher import apply_product_type_overrides
-                            detected_type = apply_product_type_overrides('', product_name)
-                            if detected_type:
-                                tag['Product Type*'] = detected_type
-                                tag['product_type'] = detected_type
-                        
-                        # Enhanced lineage detection if missing
-                        if not tag.get('Lineage') or tag.get('Lineage') == 'MIXED':
-                            product_name = tag.get('Product Name*', '').lower()
-                            strain = tag.get('Product Strain', '').lower()
-                            
-                            # Simple lineage detection based on strain names
-                            if strain:
-                                if any(x in strain for x in ['haze', 'sativa', 'durban', 'jack', 'energetic']):
-                                    tag['Lineage'] = 'SATIVA'
-                                elif any(x in strain for x in ['kush', 'indica', 'afghan', 'bubba', 'purple', 'relaxing']):
-                                    tag['Lineage'] = 'INDICA'
-                                elif any(x in strain for x in ['og', 'diesel', 'cookies', 'runtz', 'gelato', 'hybrid']):
-                                    tag['Lineage'] = 'HYBRID'
-                                else:
-                                    tag['Lineage'] = 'HYBRID'  # Conservative default
-                            else:
-                                tag['Lineage'] = 'HYBRID'  # Conservative default
+                        elif not tag.get('Product Brand'):
+                            tag['Product Brand'] = tag.get('brand', 'Unknown Brand')
                 
                 # Extract product names for selected tags
                 selected_product_names = []
@@ -5167,10 +4976,10 @@ def json_match():
                 # Set selected tags
                 session['selected_tags'] = selected_product_names
                 excel_processor.selected_tags = selected_product_names
-                logging.info(f"Selected {len(selected_product_names)} enhanced JSON matched products")
+                logging.info(f"Selected {len(selected_product_names)} JSON matched products")
                 
             except Exception as repair_error:
-                logging.error(f"Error during enhanced data repair: {repair_error}")
+                logging.error(f"Error during data repair: {repair_error}")
                 # Fallback - just use the original tags
                 selected_product_names = []
                 for tag in json_matched_tags:
@@ -5192,258 +5001,29 @@ def json_match():
         # Set filter mode
         session['current_filter_mode'] = 'json_matched'
         
-        # Enforce single-vendor results before caching/response
-        if hasattr(request, 'manifest_vendor') and request.manifest_vendor:
-            _manifest_vendor = str(request.manifest_vendor).lower()
-            _before_count = len(json_matched_tags)
-            _filtered = []
-            for _t in json_matched_tags:
-                if isinstance(_t, dict):
-                    _tv = (_t.get('Vendor', '') or _t.get('vendor', '')).lower()
-                    if _tv == _manifest_vendor:
-                        _filtered.append(_t)
-            if _filtered:
-                json_matched_tags = _filtered
-                available_tags = json_matched_tags
-            logging.info(f"Hard vendor filter applied: kept {len(json_matched_tags)} of {_before_count} for vendor '{_manifest_vendor}'")
-        
         # Store in cache
         cache_key_json = f"json_matched_tags_{session.get('session_id', 'default')}"
         cache.set(cache_key_json, json_matched_tags, timeout=3600)
         session['json_matched_cache_key'] = cache_key_json
         
-        # Log vendor filtering summary
-        if hasattr(request, 'manifest_vendor') and request.manifest_vendor:
-            manifest_vendor = request.manifest_vendor.lower()
-            vendor_counts = {}
-            for tag in json_matched_tags:
-                if isinstance(tag, dict):
-                    vendor = tag.get('Vendor', 'Unknown').lower()
-                    vendor_counts[vendor] = vendor_counts.get(vendor, 0) + 1
-            
-            logging.info(f"Vendor filtering summary: {vendor_counts}")
-            if manifest_vendor in vendor_counts:
-                logging.info(f"✅ All {len(json_matched_tags)} matched products are from manifest vendor: {manifest_vendor}")
-            else:
-                logging.warning(f"⚠️  No products from manifest vendor '{manifest_vendor}' found in matches")
-        
-        # Enhanced response structure
+        # Simple response structure to prevent crashes
         response_data = {
             'success': True,
             'matched_count': len(matched_names) if 'matched_names' in locals() else 0,
             'matched_names': [str(name) for name in (matched_names if 'matched_names' in locals() else [])],
-            # Ensure frontend receives only vendor-filtered list post-match
-            'available_tags': json_matched_tags if json_matched_tags else [],
-            'selected_tags': session.get('selected_tags', []),
-            'json_matched_tags': json_matched_tags if json_matched_tags else [],
-            'cache_status': 'Enhanced JSON Match Complete',
+            'available_tags': available_tags if available_tags else [],  # Return all matched products
+            'selected_tags': selected_tag_objects,
+            'json_matched_tags': json_matched_tags if json_matched_tags else [],  # Return all matched products
+            'cache_status': 'JSON Match Complete',
             'filter_mode': 'json_matched',
             'has_full_excel': False,
-            'message': f"Enhanced JSON matching completed. {len(json_matched_tags) if json_matched_tags else 0} products matched to database counterparts. They are now available in the Available list for you to select."
+            'message': f"JSON matched {len(matched_names) if 'matched_names' in locals() else 0} products. They are now available in the Available list for you to select."
         }
         
-        logging.info(f"Sending enhanced JSON match response with {len(available_tags) if available_tags else 0} available tags")
+        logging.info(f"Sending simplified JSON match response with {len(available_tags) if available_tags else 0} available tags")
         return jsonify(response_data)
     except Exception as e:
         logging.error(f"Error in JSON matching: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/match-remaining-products', methods=['POST'])
-def match_remaining_products():
-    """Match remaining unmatched products to existing database counterparts using enhanced logic."""
-    try:
-        excel_processor = get_session_excel_processor()
-        if not excel_processor or excel_processor.df is None or excel_processor.df.empty:
-            return jsonify({'error': 'No Excel data available for matching'}), 400
-        
-        # Get all available tags
-        available_tags = excel_processor.get_available_tags()
-        if not available_tags:
-            return jsonify({'error': 'No products available for matching'}), 400
-        
-        # Get JSON matched tags from session
-        json_matched_cache_key = session.get('json_matched_cache_key')
-        json_matched_tags = cache.get(json_matched_cache_key, []) if json_matched_cache_key else []
-        
-        # Find unmatched products (those not in JSON matched tags)
-        unmatched_products = []
-        json_matched_names = set()
-        
-        for tag in json_matched_tags:
-            if isinstance(tag, dict):
-                name = tag.get('Product Name*', tag.get('ProductName', '')).lower()
-                if name:
-                    json_matched_names.add(name)
-        
-        for tag in available_tags:
-            if isinstance(tag, dict):
-                name = tag.get('Product Name*', tag.get('ProductName', '')).lower()
-                if name and name not in json_matched_names:
-                    unmatched_products.append(tag)
-        
-        if not unmatched_products:
-            return jsonify({
-                'success': True,
-                'message': 'All products are already matched',
-                'matched_count': len(json_matched_tags),
-                'unmatched_count': 0
-            })
-        
-        logging.info(f"Found {len(unmatched_products)} unmatched products to process")
-        
-        # Enhanced matching for remaining products
-        newly_matched = []
-        still_unmatched = []
-        
-        for product in unmatched_products:
-            product_name = product.get('Product Name*', product.get('ProductName', '')).lower()
-            if not product_name:
-                continue
-            
-            matched = False
-            best_match_score = 0.0
-            best_match = None
-            
-            # Try to find matches in JSON matched tags (vendor-specific)
-            product_vendor = product.get('Vendor', '').lower() or product.get('vendor', '').lower()
-            product_brand = product.get('Product Brand', '').lower() or product.get('brand', '').lower()
-            
-            # Determine vendor from brand if vendor is not specified
-            if not product_vendor and product_brand:
-                if 'dank czar' in product_brand or 'dcz' in product_brand:
-                    product_vendor = 'jsm llc'
-                elif 'omega' in product_brand:
-                    product_vendor = 'jsm llc'
-                elif 'medically compliant' in product_brand:
-                    product_vendor = 'jsm llc'
-            
-            # Try to find matches in JSON matched tags (more flexible approach)
-            for json_tag in json_matched_tags:
-                if isinstance(json_tag, dict):
-                    json_name = json_tag.get('Product Name*', json_tag.get('ProductName', '')).lower()
-                    json_vendor = json_tag.get('Vendor', '').lower() or json_tag.get('vendor', '').lower()
-                    
-                    if json_name:
-                        # Calculate similarity
-                        from difflib import SequenceMatcher
-                        similarity = SequenceMatcher(None, product_name, json_name).ratio()
-                        
-                        # Check word overlap
-                        product_words = set(product_name.split())
-                        json_words = set(json_name.split())
-                        word_overlap = len(product_words.intersection(json_words))
-                        word_score = word_overlap / max(len(product_words), len(json_words)) if product_words else 0
-                        
-                        # Combined score
-                        combined_score = similarity * 0.6 + word_score * 0.4
-                        
-                        # Vendor bonus: if vendors match, boost the score
-                        vendor_bonus = 0.1 if product_vendor and json_vendor == product_vendor else 0.0
-                        final_score = combined_score + vendor_bonus
-                        
-                        if final_score > best_match_score and final_score > 0.4:  # Lowered threshold to 40%
-                            best_match_score = final_score
-                            best_match = json_tag
-            
-            if best_match:
-                # Create enhanced product with combined data
-                enhanced_product = product.copy()
-                for key, value in best_match.items():
-                    if key not in enhanced_product or not enhanced_product[key]:
-                        enhanced_product[key] = value
-                
-                enhanced_product['Source'] = f'Remaining Product Match (Score: {best_match_score:.2f})'
-                enhanced_product['Matched_To'] = best_match.get('Product Name*', best_match.get('ProductName', ''))
-                enhanced_product['Match_Score'] = best_match_score
-                
-                newly_matched.append(enhanced_product)
-                matched = True
-                logging.info(f"Matched remaining product '{product_name}' to '{best_match.get('Product Name*', '')}' (score: {best_match_score:.2f})")
-            
-            if not matched:
-                still_unmatched.append(product)
-        
-        # Update the JSON matched tags with newly matched products
-        if newly_matched:
-            json_matched_tags.extend(newly_matched)
-            
-            # Update cache
-            if json_matched_cache_key:
-                cache.set(json_matched_cache_key, json_matched_tags, timeout=3600)
-            
-            # Update session
-            session['json_matched_cache_key'] = json_matched_cache_key
-            session.modified = True
-        
-        # Update available tags to show only matched products
-        if json_matched_tags:
-            available_tags = json_matched_tags
-            cache_key = get_session_cache_key('available_tags')
-            cache.set(cache_key, available_tags, timeout=3600)
-        
-        response_data = {
-            'success': True,
-            'message': f'Enhanced matching completed. {len(newly_matched)} additional products matched to database counterparts.',
-            'newly_matched_count': len(newly_matched),
-            'total_matched_count': len(json_matched_tags),
-            'still_unmatched_count': len(still_unmatched),
-            'available_tags': available_tags,
-            'newly_matched_products': newly_matched,
-            'still_unmatched_products': still_unmatched
-        }
-        
-        logging.info(f"Remaining products matching completed: {len(newly_matched)} newly matched, {len(still_unmatched)} still unmatched")
-        return jsonify(response_data)
-        
-    except Exception as e:
-        logging.error(f"Error in remaining products matching: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/test-enhanced-matching', methods=['GET'])
-def test_enhanced_matching():
-    """Test endpoint to verify enhanced matching functionality."""
-    try:
-        excel_processor = get_session_excel_processor()
-        if not excel_processor or excel_processor.df is None or excel_processor.df.empty:
-            return jsonify({'error': 'No Excel data available for testing'}), 400
-        
-        # Get sample products for testing
-        available_tags = excel_processor.get_available_tags()
-        if not available_tags:
-            return jsonify({'error': 'No products available for testing'}), 400
-        
-        # Test the enhanced product type detection
-        test_results = []
-        sample_products = available_tags[:5]  # Test first 5 products
-        
-        for product in sample_products:
-            if isinstance(product, dict):
-                product_name = product.get('Product Name*', product.get('ProductName', ''))
-                if product_name:
-                    try:
-                        from src.core.data.json_matcher import apply_product_type_overrides
-                        detected_type = apply_product_type_overrides('', product_name.lower())
-                        test_results.append({
-                            'product_name': product_name,
-                            'detected_type': detected_type,
-                            'original_type': product.get('Product Type*', 'Unknown')
-                        })
-                    except Exception as e:
-                        test_results.append({
-                            'product_name': product_name,
-                            'detected_type': f'Error: {str(e)}',
-                            'original_type': product.get('Product Type*', 'Unknown')
-                        })
-        
-        return jsonify({
-            'success': True,
-            'message': 'Enhanced matching test completed',
-            'test_results': test_results,
-            'total_products_available': len(available_tags)
-        })
-        
-    except Exception as e:
-        logging.error(f"Error in enhanced matching test: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/json-inventory', methods=['POST'])
@@ -5616,87 +5196,13 @@ def match_json_tags():
             if 'products' in data and isinstance(data['products'], list):
                 names = [obj.get('Product Name*') or obj.get('name') or obj.get('product_name') or obj.get('id') or obj.get('ID') for obj in data['products'] if obj]
             elif 'inventory_transfer_items' in data and isinstance(data['inventory_transfer_items'], list):
-                # Cultivera format - extract vendor and create complete product objects
-                manifest_vendor = data.get('from_license_name', '').lower()
-                logging.info(f"Processing Cultivera manifest from vendor: {manifest_vendor}")
-                
-                # Create complete product objects instead of just names
-                products = []
+                # Cultivera format
+                names = []
                 for item in data['inventory_transfer_items']:
                     if isinstance(item, dict):
-                        # Extract potency data
-                        thc_value = ''
-                        cbd_value = ''
-                        if 'lab_result_data' in item and 'potency' in item['lab_result_data']:
-                            for potency in item['lab_result_data']['potency']:
-                                if potency.get('type') == 'thc':
-                                    thc_value = str(potency.get('value', ''))
-                                elif potency.get('type') == 'cbd':
-                                    cbd_value = str(potency.get('value', ''))
-                        
-                        # Create product object with vendor information
-                        product_obj = {
-                            'Product Name*': item.get('product_name', ''),
-                            'Product Type*': item.get('inventory_type', ''),
-                            'Product Brand': item.get('product_brand', ''),
-                            'Vendor': manifest_vendor or 'Unknown Vendor',
-                            'Strain': item.get('strain_name', ''),
-                            'THC': thc_value,
-                            'CBD': cbd_value,
-                            'Description': '',
-                            'Weight': str(item.get('unit_weight', '')),
-                            'Price': str(item.get('line_price', '')),
-                            'Quantity': str(item.get('qty', '')),
-                            'UOM': item.get('uom', ''),
-                            'Unit Weight UOM': item.get('unit_weight_uom', ''),
-                            'Inventory ID': item.get('inventory_id', ''),
-                            'Sample Source ID': item.get('sample_source_id', ''),
-                            'Lab Result Status': item.get('lab_result_passed', ''),
-                            'Lab Result Link': item.get('lab_result_link', ''),
-                            'Integrator Data': item.get('integrator_data', ''),
-                            'Is Medical': str(item.get('is_medical', '')),
-                            'Is For Extraction': str(item.get('is_for_extraction', '')),
-                            'Inventory Category': item.get('inventory_category', ''),
-                            'Product SKU': item.get('product_sku', ''),
-                            'Created At': item.get('created_at', ''),
-                            'Updated At': item.get('updated_at', ''),
-                            'Estimated Departed At': item.get('est_departed_at', ''),
-                            'Estimated Arrival At': item.get('est_arrival_at', ''),
-                            'Transfer ID': item.get('transfer_id', ''),
-                            'External ID': data.get('external_id', ''),
-                            'From License Number': data.get('from_license_number', ''),
-                            'From License Name': data.get('from_license_name', ''),
-                            'To License Number': data.get('to_license_number', ''),
-                            'To License Name': data.get('to_license_name', ''),
-                            'Transporter Name': data.get('transporter_name', ''),
-                            'Transporter License': data.get('transporter_license', ''),
-                            'Manifest Type': data.get('manifest_type', ''),
-                            'Route': data.get('route', ''),
-                            'Source': 'Cultivera Manifest'
-                        }
-                        products.append(product_obj)
-                
-                # Extract names from the product objects for backward compatibility
-                names = [product.get('Product Name*', '') for product in products if product.get('Product Name*', '')]
-                
-                # Log vendor information for debugging
-                vendor_counts = {}
-                for product in products:
-                    vendor = product.get('Vendor', 'Unknown')
-                    vendor_counts[vendor] = vendor_counts.get(vendor, 0) + 1
-                
-                logging.info(f"Vendor distribution in manifest: {vendor_counts}")
-                logging.info(f"Total products processed: {len(products)}")
-                
-                # Store the complete products for enhanced matching
-                if hasattr(request, 'manifest_products'):
-                    request.manifest_products = products
-                else:
-                    request.manifest_products = products
-                
-                # Store manifest vendor in request for debugging
-                request.manifest_vendor = manifest_vendor
-                logging.info(f"Stored manifest vendor '{manifest_vendor}' in request object")
+                        name = item.get('product_name') or item.get('name') or item.get('Product Name*') or item.get('id') or item.get('ID')
+                        if name:
+                            names.append(name)
             else:
                 # Try to extract names from any array in the object
                 for key, value in data.items():
@@ -5736,148 +5242,7 @@ def match_json_tags():
         if not json_matcher._sheet_cache:
             return jsonify({'matched': [], 'unmatched': names, 'error': 'Failed to build product cache. Please ensure your Excel file has product data.'}), 400
         
-        # Enhanced matching using complete product objects with vendor information
-        if hasattr(request, 'manifest_products') and request.manifest_products:
-            # Use the complete product objects for enhanced matching
-            products = request.manifest_products
-            logging.info(f"Using {len(products)} complete product objects for enhanced matching")
-            
-            # Get manifest vendor for targeted filtering during matching
-            manifest_vendor = None
-            if products:
-                manifest_vendor = products[0].get('Vendor', '').lower()
-                logging.info(f"Manifest vendor identified as: {manifest_vendor}")
-                
-                # Also check if manifest vendor is stored in request object
-                if hasattr(request, 'manifest_vendor') and request.manifest_vendor:
-                    request_manifest_vendor = request.manifest_vendor.lower()
-                    if request_manifest_vendor != manifest_vendor:
-                        logging.warning(f"Vendor mismatch: products[0].Vendor='{manifest_vendor}' vs request.manifest_vendor='{request_manifest_vendor}'")
-                        # Use the request manifest vendor as it's more reliable
-                        manifest_vendor = request_manifest_vendor
-                        logging.info(f"Using request manifest vendor: {manifest_vendor}")
-                
-                # STRICT VENDOR FILTERING: Only use tags from the manifest vendor
-                if manifest_vendor:
-                    vendor_filtered_tags = []
-                    for tag in available_tags:
-                        if isinstance(tag, dict):
-                            tag_vendor = tag.get('Vendor', '').lower()
-                            if tag_vendor == manifest_vendor:
-                                vendor_filtered_tags.append(tag)
-                            else:
-                                logging.info(f"BLOCKING tag from vendor '{tag_vendor}' (manifest vendor: {manifest_vendor}): {tag.get('Product Name*', 'Unknown')}")
-                        else:
-                            vendor_filtered_tags.append(tag)
-                    
-                    available_tags_for_matching = vendor_filtered_tags
-                    logging.info(f"STRICT VENDOR FILTERING: Using {len(vendor_filtered_tags)} tags from vendor '{manifest_vendor}' out of {len(available_tags)} total tags")
-                    
-                    # Verify no wrong vendors slipped through
-                    wrong_vendors = set()
-                    for tag in vendor_filtered_tags:
-                        if isinstance(tag, dict):
-                            tag_vendor = tag.get('Vendor', '').lower()
-                            if tag_vendor and tag_vendor != manifest_vendor:
-                                wrong_vendors.add(tag_vendor)
-                    
-                    if wrong_vendors:
-                        logging.error(f"CRITICAL: Found wrong vendors in filtered tags: {wrong_vendors}")
-                        return jsonify({
-                            'matched': [], 
-                            'unmatched': names,
-                            'error': f'Vendor filtering failed. Found tags from wrong vendors: {wrong_vendors}. Expected vendor: {manifest_vendor}'
-                        }), 400
-                else:
-                    available_tags_for_matching = available_tags
-                    logging.warning("No manifest vendor available - using all tags without vendor filtering")
-            else:
-                available_tags_for_matching = available_tags
-            
-            for product in products:
-                product_name = product.get('Product Name*', '')
-                product_vendor = product.get('Vendor', '').lower()
-                product_type = product.get('Product Type*', '').lower()
-                product_brand = product.get('Product Brand', '').lower()
-                
-                if not product_name:
-                    continue
-                
-                best_score = 0.0
-                best_match = None
-                
-                # Try to match against vendor-filtered tags
-                for tag in available_tags_for_matching:
-                    tag_name = tag.get('Product Name*', '')
-                    tag_vendor = tag.get('Vendor', '').lower()
-                    
-                    if not tag_name:
-                        continue
-                    
-                    # Calculate similarity score
-                    from difflib import SequenceMatcher
-                    similarity = SequenceMatcher(None, product_name.lower(), tag_name.lower()).ratio()
-                    
-                    # Check word overlap
-                    product_words = set(product_name.lower().split())
-                    tag_words = set(tag_name.lower().split())
-                    word_overlap = len(product_words.intersection(tag_words))
-                    word_score = word_overlap / max(len(product_words), len(tag_words)) if product_words else 0
-                    
-                    # Combined score
-                    combined_score = similarity * 0.6 + word_score * 0.4
-                    
-                    # Vendor bonus: if vendors match, boost the score significantly
-                    vendor_bonus = 0.2 if product_vendor and tag_vendor == product_vendor else 0.0
-                    final_score = combined_score + vendor_bonus
-                    
-                    # Log vendor matching for debugging
-                    if product_vendor and tag_vendor:
-                        vendor_match = product_vendor == tag_vendor
-                        if vendor_match:
-                            logging.debug(f"Vendor match: '{product_vendor}' == '{tag_vendor}' for '{product_name}' -> '{tag_name}'")
-                        else:
-                            logging.debug(f"Vendor mismatch: '{product_vendor}' != '{tag_vendor}' for '{product_name}' -> '{tag_name}'")
-                    
-                    if final_score > best_score and final_score > 0.4:  # 40% threshold
-                        best_score = final_score
-                        best_match = tag
-                
-                # Accept matches with reasonable confidence
-                if best_match:
-                    # FINAL VENDOR VERIFICATION: Block any matches from wrong vendors
-                    if manifest_vendor:
-                        matched_tag_vendor = best_match.get('Vendor', '').lower()
-                        if matched_tag_vendor and matched_tag_vendor != manifest_vendor:
-                            logging.error(f"CRITICAL VENDOR MISMATCH: Blocking match '{best_match.get('Product Name*', '')}' from vendor '{matched_tag_vendor}' (expected '{manifest_vendor}')")
-                            unmatched.append(product_name)
-                            continue
-                        else:
-                            logging.info(f"✅ Vendor verified: '{best_match.get('Product Name*', '')}' from vendor '{matched_tag_vendor}' matches manifest vendor '{manifest_vendor}'")
-                    
-                    # Create enhanced tag with combined data
-                    enhanced_tag = best_match.copy()
-                    for key, value in product.items():
-                        if key not in enhanced_tag or not enhanced_tag[key]:
-                            enhanced_tag[key] = value
-                    
-                    # Determine source based on vendor match
-                    if product_vendor and best_match.get('Vendor', '').lower() == product_vendor:
-                        enhanced_tag['Source'] = f'Cultivera Manifest Match (Vendor-Specific: {best_score:.2f})'
-                    else:
-                        enhanced_tag['Source'] = f'Cultivera Manifest Match (Score: {best_score:.2f})'
-                    
-                    enhanced_tag['Original_JSON_Name'] = product_name
-                    enhanced_tag['Matched_Vendor'] = product_vendor
-                    enhanced_tag['Manifest_Product'] = True
-                    
-                    matched.append(enhanced_tag)
-                    logging.info(f"✅ Enhanced match found for '{product_name}' -> '{best_match.get('Product Name*', '')}' (score: {best_score:.2f}, vendor: {product_vendor})")
-                else:
-                    unmatched.append(product_name)
-                    logging.info(f"No enhanced match found for '{product_name}' (vendor: {product_vendor})")
-        else:
-            # Fallback to basic name matching for backward compatibility
+        # For each JSON name, find the best match using the improved scoring system
         for name in names:
             best_score = 0.0
             best_match = None
@@ -5908,42 +5273,12 @@ def match_json_tags():
             # Accept matches with reasonable confidence
             if best_score >= 0.3:  # Lowered threshold for better matching
                 matched.append(best_match)
-                    logging.info(f"Basic match found for '{name}' -> '{best_match.get('Product Name*', '')}' (score: {best_score:.2f})")
+                logging.info(f"Matched '{name}' to '{best_match.get('Product Name*', '')}' (score: {best_score:.2f})")
             else:
                 unmatched.append(name)
-                    logging.info(f"No basic match found for '{name}' (best score: {best_score:.2f})")
+                logging.info(f"No match found for '{name}' (best score: {best_score:.2f})")
         
         logging.info(f"JSON matching: {len(matched)} matched, {len(unmatched)} unmatched out of {len(names)} total")
-        
-        # Add vendor matching summary
-        if hasattr(request, 'manifest_products') and request.manifest_products:
-            vendor_matches = {}
-            for tag in matched:
-                if tag.get('Manifest_Product'):
-                    vendor = tag.get('Matched_Vendor', 'Unknown')
-                    vendor_matches[vendor] = vendor_matches.get(vendor, 0) + 1
-            
-            if vendor_matches:
-                logging.info(f"Vendor matching results: {vendor_matches}")
-            
-            # Log vendor matching summary
-            if hasattr(request, 'manifest_products') and request.manifest_products:
-                manifest_vendor = request.manifest_products[0].get('Vendor', 'Unknown') if request.manifest_products else 'Unknown'
-                logging.info(f"Manifest vendor: {manifest_vendor}")
-                
-                # Show vendor distribution of matches
-                vendor_matches = {}
-                for tag in matched:
-                    if tag.get('Manifest_Product'):
-                        vendor = tag.get('Vendor', 'Unknown')
-                        vendor_matches[vendor] = vendor_matches.get(vendor, 0) + 1
-                
-                if vendor_matches:
-                    logging.info(f"Vendor distribution of matches: {vendor_matches}")
-                    if manifest_vendor in vendor_matches:
-                        logging.info(f"✅ {vendor_matches.get(manifest_vendor, 0)} matches from manifest vendor: {manifest_vendor}")
-                    else:
-                        logging.warning(f"⚠️  No matches from manifest vendor: {manifest_vendor}")
         
         # Add debugging information for the first few unmatched items
         if unmatched and len(unmatched) > 0:

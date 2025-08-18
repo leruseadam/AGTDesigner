@@ -166,9 +166,6 @@ class TemplateProcessor:
                 elif self.template_type == 'inventory':
                     self.logger.info("Calling 2x2 inventory expansion method")
                     return self._expand_template_to_2x2_inventory()
-                elif self.template_type == 'double':
-                    self.logger.info("Calling 4x3 expansion method")
-                    return self._expand_template_to_4x3_fixed_double()
                 else:
                     # horizontal and vertical templates expand to 3x3 grid
                     self.logger.info(f"Calling 3x3 expansion method for template type: '{self.template_type}'")
@@ -467,7 +464,12 @@ class TemplateProcessor:
         # Equal width columns: 1.125 inches each for a total of 4.5 inches
         col_width_twips = str(int(1.125 * 1440))  # 1.125 inches per column
         row_height_pts = Pt(2.5 * 72)  # 2.5 inches per row for equal height
-        cut_line_twips = int(0.001 * 1440)
+        
+        # Improved spacing for double template - add proper gutters between cells
+        # Horizontal gutter: 0.10 inches between columns, Vertical gutter: 0.05 inches between rows
+        horizontal_gutter_twips = int(0.10 * 1440)  # 0.10 inches between columns
+        vertical_gutter_twips = int(0.05 * 1440)    # 0.05 inches between rows
+        cut_line_twips = horizontal_gutter_twips  # Use horizontal gutter for cell spacing
 
         template_path = self._get_template_path()
         doc = Document(template_path)
@@ -517,9 +519,11 @@ class TemplateProcessor:
             grid.append(gc)
         tbl._element.insert(0, grid)
         
-        # Set row heights
+        # Set row heights with vertical gutters
         for row in tbl.rows:
-            row.height = row_height_pts
+            # Add vertical gutter spacing between rows
+            row_height_with_gutter = Pt((2.5 + 0.05) * 72)  # 2.5 inches + 0.05 inch gutter
+            row.height = row_height_with_gutter
             row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
         
         # Process all cells normally (no gutters)
@@ -837,12 +841,39 @@ class TemplateProcessor:
                 # Debug logging to check field values and order
                 product_name = record.get('ProductName', 'Unknown')
                 self.logger.debug(f"Label{i+1} -> {product_name} - ProductBrand: '{label_context.get('ProductBrand', 'NOT_FOUND')}', Price: '{label_context.get('Price', 'NOT_FOUND')}', THC: '{label_context.get('THC', 'NOT_FOUND')}', CBD: '{label_context.get('CBD', 'NOT_FOUND')}'")
+            
+            # Add empty contexts for remaining labels up to chunk_size
             for i in range(len(chunk), self.chunk_size):
                 context[f'Label{i+1}'] = {}
+            
+            # Debug: Log the total number of labels created
+            self.logger.info(f"Created context with {len(context)} labels: {list(context.keys())}")
+            
+            # Safety check: Ensure we have enough labels for the template
+            # The template expansion might create more labels than chunk_size
+            # Add empty contexts for labels up to 500 to prevent undefined errors
+            max_labels_needed = 500  # Increased safety limit to cover all possible labels
+            for i in range(self.chunk_size + 1, max_labels_needed + 1):
+                context[f'Label{i}'] = {}
+            
+            self.logger.info(f"Added safety labels up to Label{max_labels_needed}, total context keys: {list(context.keys())}")
 
             # DOH images are already created in _build_label_context, no need for redundant creation here
 
-            doc.render(context)
+            # Debug: Log the template structure before rendering
+            self.logger.info(f"About to render template with {len(context)} labels")
+            self.logger.info(f"Template type: {self.template_type}")
+            self.logger.info(f"Chunk size: {self.chunk_size}")
+            
+            try:
+                doc.render(context)
+                self.logger.info("Template rendering completed successfully")
+            except Exception as render_error:
+                self.logger.error(f"Template rendering failed: {render_error}")
+                # Log more details about the context
+                self.logger.error(f"Context keys available: {list(context.keys())}")
+                self.logger.error(f"Context length: {len(context)}")
+                raise render_error
             
             buffer = BytesIO()
             doc.save(buffer)
@@ -1204,17 +1235,30 @@ class TemplateProcessor:
                 cleaned_ratio = self.format_classic_ratio(cleaned_ratio, record)
             
             # Fast marker wrapping
-            content = cleaned_ratio.replace('|BR|', '\n')
-            # Apply new bold label formatting for THC/CBD content
-            if content.strip().startswith('THC:') and 'CBD:' in content:
-                from .text_processing import format_thc_cbd_bold_labels
-                content = format_thc_cbd_bold_labels(content, self.template_type)
+            if cleaned_ratio:
+                content = cleaned_ratio.replace('|BR|', '\n')
+            else:
+                content = ''
+            
             # Force line breaks for vertical and double templates
-            elif self.template_type in ['vertical', 'double'] and content.strip().startswith('THC:') and 'CBD:' in content:
-                content = content.replace('THC: CBD:', 'THC:\nCBD:').replace('THC:  CBD:', 'THC:\nCBD:')
-                # For vertical template, format with right-aligned percentages
-                if self.template_type == 'vertical':
-                    content = self.format_thc_cbd_vertical_alignment(content)
+            if (self.template_type in ['vertical', 'double'] and 
+                content and content.strip() and 
+                content.strip().startswith('THC:') and 'CBD:' in content):
+                try:
+                    # Simple fix: add a newline after the first % and extra space after THC: in vertical THC_CBD
+                    if self.template_type == 'vertical':
+                        # First add newline after first %
+                        content = content.replace('%', '%\n', 1)
+                        # Then add extra space after THC: and its value
+                        content = content.replace('THC:', 'THC: ')
+                        # Add extra space after the THC percentage value
+                        content = content.replace('%\n', '% \n')
+                    else:
+                        content = content.replace('THC: CBD:', 'THC:\nCBD:').replace('THC:  CBD:', 'THC:\nCBD:')
+                except Exception as e:
+                    self.logger.error(f"Error processing THC_CBD content for {self.template_type} template: {e}")
+                    # Fallback: keep original content unchanged
+                    pass
             
             marker = 'THC_CBD' if is_classic else 'RATIO'
             label_context['Ratio_or_THC_CBD'] = wrap_with_marker(content, marker)
@@ -1411,6 +1455,8 @@ class TemplateProcessor:
             self._post_process_template_specific(doc)
         except Exception as e:
             self.logger.warning(f"Font sizing failed: {e}")
+        
+        # Vendor alignment moved to final step after all processing
 
         # Fast BR marker conversion - only process if needed
         try:
@@ -1502,6 +1548,15 @@ class TemplateProcessor:
             self._final_marker_cleanup(doc)
         except Exception as e:
             self.logger.warning(f"DOH centering failed: {e}")
+        
+        # FINAL STEP: Apply vendor alignment after ALL processing is complete
+        try:
+            print("🔧 FINAL VENDOR ALIGNMENT CALL")
+            self._apply_vendor_alignment_with_tabs(doc)
+            print("🔧 FINAL VENDOR ALIGNMENT COMPLETED")
+        except Exception as e:
+            print(f"🔧 FINAL VENDOR ALIGNMENT FAILED: {e}")
+            self.logger.warning(f"Final vendor alignment failed: {e}")
             
         return doc
 
@@ -2070,9 +2125,15 @@ class TemplateProcessor:
             # Clear paragraph and rebuild with all processed content
             paragraph.clear()
             
-            # Ensure consistent spacing above all marker sections for equal margins
-            paragraph.paragraph_format.space_before = Pt(2)
-            paragraph.paragraph_format.space_after = Pt(1)
+            # Template-specific paragraph spacing for better readability
+            if self.template_type == 'double':
+                # Double template needs tighter spacing for better content fit
+                paragraph.paragraph_format.space_before = Pt(1)
+                paragraph.paragraph_format.space_after = Pt(0.5)
+            else:
+                # Standard spacing for other templates
+                paragraph.paragraph_format.space_before = Pt(2)
+                paragraph.paragraph_format.space_after = Pt(1)
             
             # Sort markers by position in text
             sorted_markers = sorted(processed_content.items(), key=lambda x: x[1]['start_pos'])
@@ -2095,9 +2156,13 @@ class TemplateProcessor:
                 run = paragraph.add_run()
                 run.font.name = "Arial"
                 
-                # Special handling for PRODUCTVENDOR - don't make it bold
+                # Special handling for PRODUCTVENDOR - don't make it bold, make it italic and light grey
                 if marker_name == 'PRODUCTVENDOR':
                     run.font.bold = False
+                    run.font.italic = True
+                    from docx.shared import RGBColor
+                    run.font.color.rgb = RGBColor(204, 204, 204)  # #CCCCCC
+                    run.font.color.theme_color = None  # Clear any theme color
                 else:
                     run.font.bold = True
                 
@@ -2144,6 +2209,13 @@ class TemplateProcessor:
                     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     continue
                 if marker_name == 'RATIO':
+                    # MINI template specific alignment: Left-justify RATIO markers
+                    if self.template_type == 'mini':
+                        paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                        # Ensure consistent spacing above ratio section for equal margins
+                        paragraph.paragraph_format.space_before = Pt(2)
+                        paragraph.paragraph_format.space_after = Pt(1)
+                    
                     for run in paragraph.runs:
                         # Get product type for font sizing
                         product_type = None
@@ -2177,9 +2249,10 @@ class TemplateProcessor:
                     # Classic product types should have LEFT alignment for lineage
                     if is_classic_product:
                         paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                        # Use left indent for proper visual separation from edge
-                        if self.template_type in {"horizontal", "double", "vertical"}:
-                            paragraph.paragraph_format.left_indent = Inches(0.15)
+                        # NOTE: Left indent conflicts with vendor alignment, so we'll skip it
+                        # The vendor alignment is more important than the lineage indentation
+                        # if self.template_type in {"horizontal", "double", "vertical"}:
+                        #     paragraph.paragraph_format.left_indent = Inches(0.15)
                         # Ensure consistent spacing above lineage section for equal margins
                         paragraph.paragraph_format.space_before = Pt(2)
                         paragraph.paragraph_format.space_after = Pt(1)
@@ -2316,9 +2389,13 @@ class TemplateProcessor:
                     paragraph.clear()
                     run = paragraph.add_run()
                     run.font.name = "Arial"
-                    # Special handling for PRODUCTVENDOR - don't make it bold
+                    # Special handling for PRODUCTVENDOR - don't make it bold, make it italic and light grey
                     if marker_name == 'PRODUCTVENDOR':
                         run.font.bold = False
+                        run.font.italic = True
+                        from docx.shared import RGBColor
+                        run.font.color.rgb = RGBColor(204, 204, 204)  # #CCCCCC
+                        run.font.color.theme_color = None  # Clear any theme color
                     else:
                         run.font.bold = True
                     run.font.size = font_size
@@ -3417,9 +3494,9 @@ class TemplateProcessor:
         
         # Use unified font sizing with appropriate complexity type
         if self.template_type == 'mini':
-            # For mini templates, use mini-specific font sizing
-            from .unified_font_sizing import get_mini_font_size_by_marker
-            return get_mini_font_size_by_marker(content, marker_name, self.scale_factor)
+            # For mini templates, use unified font sizing system
+            from .unified_font_sizing import get_font_size
+            return get_font_size(content, marker_name, 'mini', self.scale_factor)
         else:
             # For other templates, use standard font sizing
             return get_font_size_by_marker(content, marker_name, self.template_type, self.scale_factor)
@@ -3491,11 +3568,26 @@ class TemplateProcessor:
                 
                 # Format with actual values if available
                 if thc_value and cbd_value:
-                    return f"THC: {thc_value}% CBD: {cbd_value}%"
+                    # Round percentage values to 1 decimal place
+                    try:
+                        thc_rounded = f"{float(thc_value):.1f}" if thc_value else ""
+                        cbd_rounded = f"{float(cbd_value):.1f}" if cbd_value else ""
+                        return f"THC: {thc_rounded}% CBD: {cbd_rounded}%"
+                    except (ValueError, TypeError):
+                        # Fallback to original values if conversion fails
+                        return f"THC: {thc_value}% CBD: {cbd_value}%"
                 elif thc_value:
-                    return f"THC: {thc_value}%"
+                    try:
+                        thc_rounded = f"{float(thc_value):.1f}"
+                        return f"THC: {thc_rounded}%"
+                    except (ValueError, TypeError):
+                        return f"THC: {thc_value}%"
                 elif cbd_value:
-                    return f"CBD: {cbd_value}%"
+                    try:
+                        cbd_rounded = f"{float(cbd_value):.1f}"
+                        return f"CBD: {cbd_rounded}%"
+                    except (ValueError, TypeError):
+                        return f"CBD: {cbd_value}%"
             
             # Fallback to default format if no record data or no values
             return "THC: CBD:"
@@ -3549,10 +3641,20 @@ class TemplateProcessor:
         
         # If we found both values, format them
         if thc_value and cbd_value:
-            # Keep on same line without line breaks
-            return f"THC: {thc_value}% CBD: {cbd_value}%"
+            # Round percentage values to 1 decimal place
+            try:
+                thc_rounded = f"{float(thc_value):.1f}"
+                cbd_rounded = f"{float(cbd_value):.1f}"
+                return f"THC: {thc_rounded}% CBD: {cbd_rounded}%"
+            except (ValueError, TypeError):
+                # Fallback to original values if conversion fails
+                return f"THC: {thc_value}% CBD: {cbd_value}%"
         elif thc_value:
-            return f"THC: {thc_value}%"
+            try:
+                thc_rounded = f"{float(thc_value):.1f}"
+                return f"THC: {thc_rounded}%"
+            except (ValueError, TypeError):
+                return f"THC: {thc_value}%"
         elif cbd_value:
             return f"CBD: {cbd_value}%"
         else:
@@ -3699,7 +3801,7 @@ class TemplateProcessor:
     def _format_thc_cbd_simple(self, text, max_percentage_width):
         """
         Helper function to format THC/CBD with simple line break between values.
-        Returns format: "THC: x%\nCBD: x%"
+        Returns format: "THC: x% \nCBD: x%" (note the space after first percentage)
         """
         if not text or '%' not in text:
             return text
@@ -3716,8 +3818,14 @@ class TemplateProcessor:
         percentage = match.group(2)  # e.g., "21.0"
         remaining = match.group(3)  # e.g., " CBD: 0.25%"
         
-        # Simple format: label and percentage on same line
-        formatted_group = f"{label} {percentage}%"
+        # Round percentage to 1 decimal place
+        try:
+            percentage_rounded = f"{float(percentage):.1f}"
+        except (ValueError, TypeError):
+            percentage_rounded = percentage  # Keep original if conversion fails
+        
+        # Simple format: label and percentage on same line with space after percentage
+        formatted_group = f"{label} {percentage_rounded}% "
         
         # Add remaining content if any
         if remaining.strip():
@@ -3728,6 +3836,7 @@ class TemplateProcessor:
     def _format_percentage_right_alignment(self, text, max_percentage_width):
         """
         Helper function to right-align percentage values in a single line.
+        Adds a space after the percentage value for better readability.
         """
         if not text or '%' not in text:
             return text
@@ -3744,12 +3853,18 @@ class TemplateProcessor:
         percentage = match.group(2)  # e.g., "21.0"
         remaining = match.group(3)  # e.g., " CBD: 0.25%"
         
+        # Round percentage to 1 decimal place
+        try:
+            percentage_rounded = f"{float(percentage):.1f}"
+        except (ValueError, TypeError):
+            percentage_rounded = percentage  # Keep original if conversion fails
+        
         # Calculate spacing needed for right-alignment
-        spacing_needed = max_percentage_width - len(percentage)
+        spacing_needed = max_percentage_width - len(percentage_rounded)
         spaces = ' ' * max(0, spacing_needed)
         
-        # Return the formatted string with proper spacing
-        return f"{label}{spaces}{percentage}%{remaining}"
+        # Return the formatted string with proper spacing and space after percentage
+        return f"{label}{spaces}{percentage_rounded}% {remaining}"
 
     def _process_combined_lineage_vendor(self, paragraph, lineage_content, vendor_content):
         """
@@ -3777,9 +3892,19 @@ class TemplateProcessor:
                 self._process_lineage_vendor_two_lines(paragraph, lineage_content, vendor_content)
                 return
             
-            # ALWAYS use two-line layout for Product Vendor to enable right-justification
-            # This ensures Product Vendor text can be properly right-justified on its own line
-            if vendor_content and vendor_content.strip():
+            # Check if we need to split to multiple lines due to content length
+            # Only split if the combined content would be too long for one line
+            if self.template_type == 'mini':
+                max_chars_per_line = 25
+            elif self.template_type == 'vertical':
+                max_chars_per_line = 35
+            else:  # horizontal, double
+                max_chars_per_line = 45
+            
+            # Check if combined content would be too long for one line
+            combined_length = len(lineage_content or '') + len(vendor_content or '')
+            
+            if combined_length > max_chars_per_line and vendor_content and vendor_content.strip():
                 # Split to two lines: lineage on first line, vendor on second line
                 self._process_lineage_vendor_two_lines(paragraph, lineage_content, vendor_content)
                 return
@@ -4038,6 +4163,7 @@ class TemplateProcessor:
                 self.logger.error(f"Error processing plain text combined lineage/vendor: {e}")
                 return False
         
+        # DISABLED: Return False to prevent old complex logic
         return False
 
     def _fix_productstrain_in_brand_cells(self, doc):
@@ -4261,5 +4387,122 @@ class TemplateProcessor:
         except Exception as e:
             self.logger.error(f"Error during manual placeholder replacement: {e}")
             raise
+
+    def _apply_vendor_alignment_with_tabs(self, doc):
+        """
+        Simple post-processing method to apply vendor alignment using tab stops.
+        This preserves the natural template structure and just adds tab stops for vendor positioning.
+        """
+        try:
+            self.logger.info("Applying vendor alignment with tab stops...")
+            
+            processed_count = 0
+            
+            # Process all tables
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for paragraph in cell.paragraphs:
+                            if self._apply_vendor_alignment_to_paragraph(paragraph):
+                                processed_count += 1
+            
+            # Process all paragraphs outside tables
+            for paragraph in doc.paragraphs:
+                if self._apply_vendor_alignment_to_paragraph(paragraph):
+                    processed_count += 1
+            
+            self.logger.info(f"Vendor alignment applied to {processed_count} paragraphs")
+            
+        except Exception as e:
+            self.logger.error(f"Error applying vendor alignment with tabs: {e}")
+            import traceback
+            self.logger.error(f"Traceback: {traceback.format_exc()}")
+    
+    def _apply_vendor_alignment_to_paragraph(self, paragraph):
+        """
+        Apply vendor alignment to a single paragraph using tab stops.
+        Returns True if the paragraph was processed.
+        """
+        try:
+            # Check if this paragraph contains vendor text
+            full_text = paragraph.text
+            
+            # Look for vendor indicators
+            vendor_indicators = ['LLC', 'INC', 'CORP', 'CO', 'COMPANY', 'BRANDS', 'BRAND', 'INDUSTRIAL']
+            has_vendor = any(indicator in full_text.upper() for indicator in vendor_indicators)
+            
+            if not has_vendor:
+                return False
+            
+            # Check if this paragraph has already been processed
+            if hasattr(paragraph, '_vendor_alignment_applied'):
+                return False
+            
+            # Check if this looks like a combined lineage/vendor field
+            # Look for classic lineage values
+            classic_lineages = [
+                "SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", 
+                "CBD", "MIXED", "PARAPHERNALIA", "PARA"
+            ]
+            
+            has_lineage = any(lineage in full_text.upper() for lineage in classic_lineages)
+            
+            if has_lineage and has_vendor:
+                self.logger.debug(f"Processing vendor alignment for: '{full_text}'")
+                
+                # Set paragraph to LEFT alignment (not JUSTIFY)
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                
+                # Clear existing tab stops
+                paragraph.paragraph_format.tab_stops.clear_all()
+                
+                # Add right-aligned tab stop based on template type
+                from docx.shared import Inches
+                from docx.enum.text import WD_TAB_ALIGNMENT
+                
+                if self.template_type == 'mini':
+                    tab_position = Inches(1.2)
+                elif self.template_type == 'vertical':
+                    tab_position = Inches(2.3)
+                else:  # horizontal, double
+                    tab_position = Inches(3.2)
+                
+                paragraph.paragraph_format.tab_stops.add_tab_stop(tab_position, WD_TAB_ALIGNMENT.RIGHT)
+                
+                # Find the vendor run and add tab character before it
+                vendor_run = None
+                for run in paragraph.runs:
+                    if any(indicator in run.text.upper() for indicator in vendor_indicators):
+                        vendor_run = run
+                        break
+                
+                if vendor_run:
+                    # Insert tab character before vendor text
+                    vendor_run.text = '\t' + vendor_run.text
+                    self.logger.debug(f"Added tab character before vendor text: '{vendor_run.text}'")
+                    
+                    # Format vendor text
+                    vendor_run.font.name = "Arial"
+                    vendor_run.font.bold = False
+                    vendor_run.font.italic = True
+                    
+                    # Set vendor color to light gray (#CCCCCC)
+                    from docx.shared import RGBColor
+                    vendor_run.font.color.rgb = RGBColor(204, 204, 204)  # #CCCCCC
+                    vendor_run.font.color.theme_color = None  # Clear any theme color
+                    
+                else:
+                    self.logger.warning(f"No vendor run found for text: '{full_text}'")
+                
+                # Mark as processed
+                paragraph._vendor_alignment_applied = True
+                
+                return True
+            
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"Error applying vendor alignment to paragraph: {e}")
+            return False
 
 __all__ = ['get_font_scheme', 'TemplateProcessor']

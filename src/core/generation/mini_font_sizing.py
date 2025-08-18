@@ -10,7 +10,7 @@ from docx.shared import Pt
 from docx.oxml.ns import qn
 from docx.oxml.shared import OxmlElement
 import re
-from ..utils.common import calculate_text_complexity
+from src.core.utils.common import calculate_text_complexity
 
 logger = logging.getLogger(__name__)
 
@@ -279,7 +279,7 @@ def get_mini_font_size_by_marker(text, marker_type, scale_factor=1.0):
     elif marker_type in ['LINEAGE', 'LINEAGE_CENTER']:
         return get_mini_font_size_lineage(text, scale_factor)
     elif marker_type in ['RATIO']:
-        from .unified_font_sizing import get_font_size
+        from src.core.generation.unified_font_sizing import get_font_size
         # Remove line breaks so word count is based on the full placeholder
         full_text = text.replace('\n', ' ').replace('\r', ' ')
         return get_font_size(full_text, 'ratio', 'mini', scale_factor, 'mini')

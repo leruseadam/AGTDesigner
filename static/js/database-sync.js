@@ -188,12 +188,15 @@ async function openDatabaseAnalytics() {
     // Initialize the usage chart after the modal is shown
     const modal = document.getElementById('databaseModal');
     modal.addEventListener('shown.bs.modal', function () {
-      // Get historical usage data
-      const usageData = upload_stats?.historical || [];
-      const dates = usageData.map(d => new Date(d.date).toLocaleDateString());
+      // Get historical usage data - handle case where upload_stats might not exist
+      const usageData = (window.upload_stats && window.upload_stats.historical) ? window.upload_stats.historical : [];
+      
+      // Only create chart if we have valid data
+      if (usageData && usageData.length > 0) {
+        const dates = usageData.map(d => new Date(d.date).toLocaleDateString());
 
-      const ctx = document.getElementById('usageChart').getContext('2d');
-      new Chart(ctx, {
+        const ctx = document.getElementById('usageChart').getContext('2d');
+        new Chart(ctx, {
         type: 'line',
         data: {
           labels: dates,
@@ -253,7 +256,14 @@ async function openDatabaseAnalytics() {
           }
         }
       });
-    });
+        } else {
+          // No historical data available
+          const chartContainer = document.getElementById('usageChart');
+          if (chartContainer) {
+            chartContainer.innerHTML = '<div class="text-center text-muted p-4">No historical usage data available</div>';
+          }
+        }
+      });
 
   } catch (error) {
     console.error('Error loading database analytics:', error);
