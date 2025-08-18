@@ -3022,6 +3022,27 @@ def get_available_tags():
         tags = excel_processor.get_available_tags()
         logging.info(f"Raw tags obtained: {len(tags)} items")
         
+        # VENDOR FILTERING: If we have a manifest vendor in session, filter tags to only show that vendor
+        manifest_vendor = session.get('manifest_vendor')
+        if manifest_vendor:
+            logging.info(f"VENDOR FILTERING: Filtering available tags to only show vendor: {manifest_vendor}")
+            original_count = len(tags)
+            vendor_filtered_tags = []
+            for tag in tags:
+                if isinstance(tag, dict):
+                    tag_vendor = tag.get('Vendor', '').lower()
+                    if tag_vendor == manifest_vendor.lower():
+                        vendor_filtered_tags.append(tag)
+                    else:
+                        logging.debug(f"VENDOR FILTERING: Excluding tag '{tag.get('Product Name*', 'Unknown')}' from vendor '{tag_vendor}' (manifest vendor: {manifest_vendor})")
+                else:
+                    vendor_filtered_tags.append(tag)
+            
+            tags = vendor_filtered_tags
+            logging.info(f"VENDOR FILTERING: Filtered from {original_count} to {len(tags)} tags for vendor '{manifest_vendor}'")
+        else:
+            logging.info("No manifest vendor in session - showing all vendors")
+        
         import math
         def clean_dict(d):
             if not isinstance(d, dict):
@@ -4646,6 +4667,9 @@ def json_match():
                     
                     # Store manifest vendor in request for later use
                     request.manifest_vendor = manifest_vendor
+                    # Also store in session for other endpoints to access
+                    session['manifest_vendor'] = manifest_vendor
+                    logging.info(f"Stored manifest vendor '{manifest_vendor}' in session")
                 else:
                     logging.warning(f"Failed to fetch manifest data: {response.status_code}")
             except Exception as e:
@@ -5696,7 +5720,9 @@ def match_json_tags():
                 
                 # Store manifest vendor in request for debugging
                 request.manifest_vendor = manifest_vendor
-                logging.info(f"Stored manifest vendor '{manifest_vendor}' in request object")
+                # Also store in session for other endpoints to access
+                session['manifest_vendor'] = manifest_vendor
+                logging.info(f"Stored manifest vendor '{manifest_vendor}' in request object and session")
             else:
                 # Try to extract names from any array in the object
                 for key, value in data.items():
@@ -5757,42 +5783,46 @@ def match_json_tags():
                         manifest_vendor = request_manifest_vendor
                         logging.info(f"Using request manifest vendor: {manifest_vendor}")
                 
-                # STRICT VENDOR FILTERING: Only use tags from the manifest vendor
-                if manifest_vendor:
-                    vendor_filtered_tags = []
-                    for tag in available_tags:
-                        if isinstance(tag, dict):
-                            tag_vendor = tag.get('Vendor', '').lower()
-                            if tag_vendor == manifest_vendor:
-                                vendor_filtered_tags.append(tag)
-                            else:
-                                logging.info(f"BLOCKING tag from vendor '{tag_vendor}' (manifest vendor: {manifest_vendor}): {tag.get('Product Name*', 'Unknown')}")
-                        else:
+                # Store manifest vendor in session for other endpoints to access
+                session['manifest_vendor'] = manifest_vendor
+                logging.info(f"Stored manifest vendor '{manifest_vendor}' in session for endpoint access")
+            
+            # STRICT VENDOR FILTERING: Only use tags from the manifest vendor
+            if manifest_vendor:
+                vendor_filtered_tags = []
+                for tag in available_tags:
+                    if isinstance(tag, dict):
+                        tag_vendor = tag.get('Vendor', '').lower()
+                        if tag_vendor == manifest_vendor:
                             vendor_filtered_tags.append(tag)
-                    
-                    available_tags_for_matching = vendor_filtered_tags
-                    logging.info(f"STRICT VENDOR FILTERING: Using {len(vendor_filtered_tags)} tags from vendor '{manifest_vendor}' out of {len(available_tags)} total tags")
-                    
-                    # Verify no wrong vendors slipped through
-                    wrong_vendors = set()
-                    for tag in vendor_filtered_tags:
-                        if isinstance(tag, dict):
-                            tag_vendor = tag.get('Vendor', '').lower()
-                            if tag_vendor and tag_vendor != manifest_vendor:
-                                wrong_vendors.add(tag_vendor)
-                    
-                    if wrong_vendors:
-                        logging.error(f"CRITICAL: Found wrong vendors in filtered tags: {wrong_vendors}")
-                        return jsonify({
-                            'matched': [], 
-                            'unmatched': names,
-                            'error': f'Vendor filtering failed. Found tags from wrong vendors: {wrong_vendors}. Expected vendor: {manifest_vendor}'
-                        }), 400
-                else:
-                    available_tags_for_matching = available_tags
-                    logging.warning("No manifest vendor available - using all tags without vendor filtering")
+                        else:
+                            logging.info(f"BLOCKING tag from vendor '{tag_vendor}' (manifest vendor: {manifest_vendor}): {tag.get('Product Name*', 'Unknown')}")
+                    else:
+                        vendor_filtered_tags.append(tag)
+                
+                available_tags_for_matching = vendor_filtered_tags
+                logging.info(f"STRICT VENDOR FILTERING: Using {len(vendor_filtered_tags)} tags from vendor '{manifest_vendor}' out of {len(available_tags)} total tags")
+                
+                # Verify no wrong vendors slipped through
+                wrong_vendors = set()
+                for tag in vendor_filtered_tags:
+                    if isinstance(tag, dict):
+                        tag_vendor = tag.get('Vendor', '').lower()
+                        if tag_vendor and tag_vendor != manifest_vendor:
+                            wrong_vendors.add(tag_vendor)
+                
+                if wrong_vendors:
+                    logging.error(f"CRITICAL: Found wrong vendors in filtered tags: {wrong_vendors}")
+                    return jsonify({
+                        'matched': [], 
+                        'unmatched': names,
+                        'error': f'Vendor filtering failed. Found tags from wrong vendors: {wrong_vendors}. Expected vendor: {manifest_vendor}'
+                    }), 400
             else:
                 available_tags_for_matching = available_tags
+                logging.warning("No manifest vendor available - using all tags without vendor filtering")
+        else:
+            available_tags_for_matching = available_tags
             
             for product in products:
                 product_name = product.get('Product Name*', '')
