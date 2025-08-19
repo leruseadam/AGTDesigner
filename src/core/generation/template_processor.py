@@ -466,10 +466,10 @@ class TemplateProcessor:
         col_width_twips = str(int(1.125 * 1440))  # 1.125 inches per column
         row_height_pts = Pt(2.5 * 72)  # 2.5 inches per row for equal height
         
-        # Improved spacing for double template - add proper gutters between cells
-        # Horizontal gutter: 0.10 inches between columns, Vertical gutter: 0.05 inches between rows
-        horizontal_gutter_twips = int(0.10 * 1440)  # 0.10 inches between columns
-        vertical_gutter_twips = int(0.05 * 1440)    # 0.05 inches between rows
+        # Minimal spacing for double template to match other templates
+        # Use minimal gutters like other templates for consistent output
+        horizontal_gutter_twips = int(0.001 * 1440)  # 0.001 inches between columns (minimal)
+        vertical_gutter_twips = int(0.001 * 1440)    # 0.001 inches between rows (minimal)
         cut_line_twips = horizontal_gutter_twips  # Use horizontal gutter for cell spacing
 
         template_path = self._get_template_path()
@@ -520,11 +520,10 @@ class TemplateProcessor:
             grid.append(gc)
         tbl._element.insert(0, grid)
         
-        # Set row heights with vertical gutters
+        # Set row heights with minimal spacing
         for row in tbl.rows:
-            # Add vertical gutter spacing between rows
-            row_height_with_gutter = Pt((2.5 + 0.05) * 72)  # 2.5 inches + 0.05 inch gutter
-            row.height = row_height_with_gutter
+            # Use exact row height without extra gutter spacing
+            row.height = Pt(2.5 * 72)  # 2.5 inches exactly
             row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
         
         # Process all cells normally (no gutters)
@@ -1980,7 +1979,7 @@ class TemplateProcessor:
             
             def optimize_paragraph_spacing(paragraph):
                 """Set minimal spacing for all paragraphs in vertical and double templates."""
-                # Set absolute minimum spacing
+                # Set minimal spacing that matches other templates
                 paragraph.paragraph_format.space_before = Pt(0)
                 paragraph.paragraph_format.space_after = Pt(0)
                 
@@ -2132,9 +2131,9 @@ class TemplateProcessor:
             
             # Template-specific paragraph spacing for better readability
             if self.template_type == 'double':
-                # Double template needs tighter spacing for better content fit
-                paragraph.paragraph_format.space_before = Pt(1)
-                paragraph.paragraph_format.space_after = Pt(0.5)
+                # Double template now uses standard spacing like other templates
+                paragraph.paragraph_format.space_before = Pt(2)
+                paragraph.paragraph_format.space_after = Pt(1)
             else:
                 # Standard spacing for other templates
                 paragraph.paragraph_format.space_before = Pt(2)

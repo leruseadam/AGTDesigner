@@ -413,7 +413,7 @@ def get_line_spacing_by_marker(marker_type, template_type='vertical'):
     # Template-specific spacing adjustments for better readability
     if base_marker == 'THC_CBD':
         if template_type.lower() == 'double':
-            return 1.4  # Double template needs slightly tighter spacing for larger cells
+            return 1.5  # Double template now uses standard spacing like other templates
         elif template_type.lower() == 'vertical':
             return 1.5  # Vertical template uses standard spacing
         elif template_type.lower() == 'mini':
