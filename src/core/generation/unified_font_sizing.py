@@ -51,7 +51,7 @@ def _load_font_sizing_config():
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
                     'weight': [(15, 16), (25, 14), (35, 12), (float('inf'), 9)],
                     'doh': [(15, 18), (25, 16), (float('inf'), 13)],
-                    'vendor': [(10, 3), (20, 2), (40, 1), (70, 1),(float('inf'), 1)],
+                    'vendor': [(10, 5), (20, 4), (40, 3), (70, 2),(float('inf'), 1)],
                     'default': [(20, 16), (40, 14), (60, 12), (float('inf'), 10)]
                 },
                 'vertical': {
