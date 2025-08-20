@@ -12,7 +12,7 @@ xlrd==2.0.1
 # Document Processing
 python-docx==0.8.11
 docxtpl==0.16.7
-docxcompose==1.4.1
+docxcompose==1.4.0
 lxml==4.9.3
 
 # Image Processing
