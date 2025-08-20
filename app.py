@@ -403,7 +403,29 @@ def get_product_database():
     global _product_database
     if _product_database is None:
         from src.core.data.product_database import ProductDatabase
-        _product_database = ProductDatabase()
+        # CRITICAL FIX: Use absolute path in uploads directory for database
+        db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
+        _product_database = ProductDatabase(db_path)
+        # CRITICAL FIX: Initialize the database immediately to ensure tables exist
+        try:
+            logging.info(f"Attempting to initialize database at: {db_path}")
+            _product_database.init_database()
+            logging.info(f"Product database initialized successfully at {db_path}")
+            
+            # Verify database was created and has tables
+            if os.path.exists(db_path):
+                db_size = os.path.getsize(db_path)
+                logging.info(f"Database file created successfully, size: {db_size} bytes")
+            else:
+                logging.error(f"Database file was not created at {db_path}")
+                
+        except Exception as e:
+            logging.error(f"Failed to initialize product database: {e}")
+            logging.error(f"Database path: {db_path}")
+            logging.error(f"Current directory: {os.getcwd()}")
+            logging.error(f"Directory exists: {os.path.exists(os.path.dirname(db_path))}")
+            logging.error(f"Directory writable: {os.access(os.path.dirname(db_path), os.W_OK) if os.path.exists(os.path.dirname(db_path)) else False}")
+            # Don't fail completely - return the uninitialized database
     return _product_database
 
 def get_json_matcher():
@@ -1528,6 +1550,41 @@ def process_excel_background(filename, temp_path):
                 logging.info("[BG] Skipping global cache clear - not in request context")
         except Exception as global_cache_error:
             logging.warning(f"[BG] Error in global cache clearing: {global_cache_error}")
+        # CRITICAL FIX: Store uploaded data in database for persistence and analytics
+        try:
+            logging.info(f"[BG] CRITICAL: Forcing database storage of uploaded data")
+            logging.info(f"[BG] DataFrame shape: {new_processor.df.shape if hasattr(new_processor.df, 'shape') else 'No DataFrame'}")
+            logging.info(f"[BG] DataFrame columns: {list(new_processor.df.columns) if hasattr(new_processor.df, 'columns') else 'No columns'}")
+            
+            if hasattr(new_processor, '_store_upload_in_database'):
+                logging.info("[BG] Using ExcelProcessor _store_upload_in_database method")
+                storage_result = new_processor._store_upload_in_database(new_processor.df, temp_path)
+                logging.info(f"[BG] ✅ Database storage completed successfully: {storage_result}")
+            else:
+                logging.warning("[BG] ExcelProcessor does not have _store_upload_in_database method")
+                # Try alternative database storage method
+                try:
+                    logging.info("[BG] Attempting alternative database storage with ProductDatabase")
+                    product_db = get_product_database()
+                    logging.info(f"[BG] ProductDatabase obtained: {product_db}")
+                    
+                    if hasattr(product_db, 'store_excel_data'):
+                        logging.info("[BG] ProductDatabase has store_excel_data method, calling it...")
+                        storage_result = product_db.store_excel_data(new_processor.df, temp_path)
+                        logging.info(f"[BG] ✅ Alternative database storage completed: {storage_result}")
+                    else:
+                        logging.warning("[BG] ProductDatabase does not have store_excel_data method")
+                        logging.error("[BG] CRITICAL: No database storage method available!")
+                except Exception as alt_storage_error:
+                    logging.error(f"[BG] Alternative database storage failed: {alt_storage_error}")
+                    import traceback
+                    logging.error(f"[BG] Alternative storage traceback: {traceback.format_exc()}")
+        except Exception as storage_error:
+            logging.error(f"[BG] ❌ Database storage failed: {storage_error}")
+            import traceback
+            logging.error(f"[BG] Storage error traceback: {traceback.format_exc()}")
+            # Don't fail the upload - continue without database storage
+        
         # Mark as ready as soon as DataFrame is loaded so frontend can proceed
         try:
             update_processing_status(filename, 'ready')
@@ -4071,8 +4128,20 @@ def database_health():
         
         product_db = get_product_database()
         
+        # CRITICAL DEBUG: Check database file status
+        db_exists = os.path.exists(product_db.db_path)
+        db_path = product_db.db_path
+        db_dir = os.path.dirname(db_path)
+        dir_exists = os.path.exists(db_dir)
+        dir_writable = os.access(db_dir, os.W_OK) if dir_exists else False
+        
+        logging.info(f"[DB-HEALTH] Database path: {db_path}")
+        logging.info(f"[DB-HEALTH] Database exists: {db_exists}")
+        logging.info(f"[DB-HEALTH] Directory exists: {dir_exists}")
+        logging.info(f"[DB-HEALTH] Directory writable: {dir_writable}")
+        
         # Get database file size
-        db_size = os.path.getsize(product_db.db_path) if os.path.exists(product_db.db_path) else 0
+        db_size = os.path.getsize(product_db.db_path) if db_exists else 0
         db_size_mb = round(db_size / (1024 * 1024), 2)
         
         # Check database integrity
@@ -4144,6 +4213,244 @@ def database_health():
     except Exception as e:
         logging.error(f"Error checking database health: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/database-test', methods=['GET'])
+def database_test():
+    """Simple database test endpoint to diagnose issues."""
+    try:
+        import sqlite3
+        import os
+        
+        # Test 1: Check if we can get the database instance
+        try:
+            product_db = get_product_database()
+            logging.info(f"[DB-TEST] Successfully got ProductDatabase instance")
+            logging.info(f"[DB-TEST] Database path: {product_db.db_path}")
+        except Exception as e:
+            logging.error(f"[DB-TEST] Failed to get ProductDatabase: {e}")
+            return jsonify({'error': f'Failed to get ProductDatabase: {e}'}), 500
+        
+        # Test 2: Check if database file exists and is accessible
+        db_path = product_db.db_path
+        db_exists = os.path.exists(db_path)
+        db_dir = os.path.dirname(db_path)
+        dir_exists = os.path.exists(db_dir)
+        dir_writable = os.access(db_dir, os.W_OK) if dir_exists else False
+        
+        # Test 3: Try to create a simple connection
+        try:
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1")
+            result = cursor.fetchone()
+            conn.close()
+            connection_test = "SUCCESS"
+        except Exception as e:
+            connection_test = f"FAILED: {e}"
+        
+        # Test 4: Try to initialize the database
+        try:
+            product_db.init_database()
+            init_test = "SUCCESS"
+        except Exception as e:
+            init_test = f"FAILED: {e}"
+        
+        return jsonify({
+            'database_path': db_path,
+            'database_exists': db_exists,
+            'directory_exists': dir_exists,
+            'directory_writable': dir_writable,
+            'connection_test': connection_test,
+            'initialization_test': init_test,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logging.error(f"[DB-TEST] Database test failed: {e}")
+        return jsonify({'error': f'Database test failed: {e}'}), 500
+
+@app.route('/api/database-status', methods=['GET'])
+def database_status():
+    """Get basic database status and information."""
+    try:
+        product_db = get_product_database()
+        
+        # Check if database file exists
+        db_exists = os.path.exists(product_db.db_path)
+        db_size = os.path.getsize(product_db.db_path) if db_exists else 0
+        
+        # Try to get basic database info
+        try:
+            import sqlite3
+            with sqlite3.connect(product_db.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Get table list
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                tables = [row[0] for row in cursor.fetchall()]
+                
+                # Get record counts
+                table_counts = {}
+                for table in tables:
+                    if table != 'sqlite_sequence':
+                        cursor.execute(f"SELECT COUNT(*) FROM {table}")
+                        count = cursor.fetchone()[0]
+                        table_counts[table] = count
+                
+                db_info = {
+                    'tables': tables,
+                    'table_counts': table_counts,
+                    'database_working': True
+                }
+        except Exception as db_error:
+            db_info = {
+                'tables': [],
+                'table_counts': {},
+                'database_working': False,
+                'error': str(db_error)
+            }
+        
+        return jsonify({
+            'database_path': product_db.db_path,
+            'database_exists': db_exists,
+            'database_size_bytes': db_size,
+            'database_size_mb': round(db_size / (1024 * 1024), 2),
+            'database_info': db_info,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logging.error(f"Database status check failed: {e}")
+        return jsonify({'error': f'Database status check failed: {e}'}), 500
+
+@app.route('/api/force-database-storage', methods=['POST'])
+def force_database_storage():
+    """Force database storage of current Excel data for testing."""
+    try:
+        excel_processor = get_excel_processor()
+        
+        if not hasattr(excel_processor, 'df') or excel_processor.df is None or excel_processor.df.empty:
+            return jsonify({'error': 'No Excel data available to store'}), 400
+        
+        # Get the current DataFrame
+        df = excel_processor.df
+        source_file = getattr(excel_processor, '_last_loaded_file', 'unknown')
+        
+        logging.info(f"[FORCE-STORAGE] Starting force database storage")
+        logging.info(f"[FORCE-STORAGE] DataFrame shape: {df.shape}")
+        logging.info(f"[FORCE-STORAGE] Source file: {source_file}")
+        
+        # Store in database
+        product_db = get_product_database()
+        logging.info(f"[FORCE-STORAGE] ProductDatabase obtained: {product_db}")
+        
+        if hasattr(product_db, 'store_excel_data'):
+            logging.info("[FORCE-STORAGE] Calling store_excel_data method...")
+            storage_result = product_db.store_excel_data(df, source_file)
+            logging.info(f"[FORCE-STORAGE] Database storage completed: {storage_result}")
+            return jsonify({
+                'message': 'Database storage completed',
+                'result': storage_result,
+                'timestamp': datetime.now().isoformat()
+            })
+        else:
+            logging.error("[FORCE-STORAGE] ProductDatabase does not have store_excel_data method")
+            return jsonify({'error': 'ProductDatabase does not have store_excel_data method'}), 500
+            
+    except Exception as e:
+        logging.error(f"[FORCE-STORAGE] Force database storage failed: {e}")
+        import traceback
+        logging.error(f"[FORCE-STORAGE] Traceback: {traceback.format_exc()}")
+        return jsonify({'error': f'Database storage failed: {str(e)}'}), 500
+
+@app.route('/api/test-database-storage', methods=['GET'])
+def test_database_storage():
+    """Simple GET endpoint to test database storage - accessible in browser."""
+    try:
+        excel_processor = get_excel_processor()
+        
+        if not hasattr(excel_processor, 'df') or excel_processor.df is None or excel_processor.df.empty:
+            return jsonify({'error': 'No Excel data available to store'}), 400
+        
+        # Get the current DataFrame
+        df = excel_processor.df
+        source_file = getattr(excel_processor, '_last_loaded_file', 'unknown')
+        
+        logging.info(f"[TEST-STORAGE] Starting test database storage")
+        logging.info(f"[TEST-STORAGE] DataFrame shape: {df.shape}")
+        logging.info(f"[TEST-STORAGE] Source file: {source_file}")
+        
+        # DEBUG: Show DataFrame columns and first few rows
+        logging.info(f"[TEST-STORAGE] DataFrame columns: {list(df.columns)}")
+        logging.info(f"[TEST-STORAGE] First 3 rows preview:")
+        for i in range(min(3, len(df))):
+            row = df.iloc[i]
+            logging.info(f"[TEST-STORAGE] Row {i}: {dict(row.head(5))}")  # Show first 5 columns
+        
+        # Store in database
+        product_db = get_product_database()
+        logging.info(f"[TEST-STORAGE] ProductDatabase obtained: {product_db}")
+        
+        if hasattr(product_db, 'store_excel_data'):
+            logging.info("[TEST-STORAGE] Calling store_excel_data method...")
+            storage_result = product_db.store_excel_data(df, source_file)
+            logging.info(f"[TEST-STORAGE] Database storage completed: {storage_result}")
+            
+            # Return a nice HTML response for browser viewing
+            return f"""
+            <html>
+            <head><title>Database Storage Test</title></head>
+            <body>
+                <h1>Database Storage Test Results</h1>
+                <h2>✅ Storage Completed Successfully!</h2>
+                <p><strong>DataFrame Shape:</strong> {df.shape}</p>
+                <p><strong>Source File:</strong> {source_file}</p>
+                
+                <h3>🔍 DEBUG INFORMATION</h3>
+                <p><strong>DataFrame Columns:</strong></p>
+                <pre>{list(df.columns)}</pre>
+                
+                <p><strong>First 3 Rows Preview:</strong></p>
+                <pre>{chr(10).join([f"Row {i}: {dict(df.iloc[i].head(5))}" for i in range(min(3, len(df)))])}</pre>
+                
+                <p><strong>Storage Result:</strong></p>
+                <pre>{storage_result}</pre>
+                
+                <p><a href="/api/database-status">Check Database Status</a></p>
+                <p><a href="/api/database-health">Check Database Health</a></p>
+                <p><a href="/">Back to Main App</a></p>
+            </body>
+            </html>
+            """
+        else:
+            logging.error("[TEST-STORAGE] ProductDatabase does not have store_excel_data method")
+            return f"""
+            <html>
+            <head><title>Database Storage Test - Error</title></head>
+            <body>
+                <h1>Database Storage Test - Error</h1>
+                <h2>❌ Storage Method Not Found</h2>
+                <p>ProductDatabase does not have store_excel_data method</p>
+                <p><a href="/">Back to Main App</a></p>
+            </body>
+            </html>
+            """
+            
+    except Exception as e:
+        logging.error(f"[TEST-STORAGE] Test database storage failed: {e}")
+        import traceback
+        logging.error(f"[TEST-STORAGE] Traceback: {traceback.format_exc()}")
+        return f"""
+        <html>
+        <head><title>Database Storage Test - Error</title></head>
+        <body>
+            <h1>Database Storage Test - Error</h1>
+            <h2>❌ Storage Failed</h2>
+            <p><strong>Error:</strong> {str(e)}</p>
+            <p><a href="/">Back to Main App</a></p>
+        </body>
+        </html>
+        """
 
 @app.route('/api/product-similarity', methods=['POST'])
 def product_similarity():
