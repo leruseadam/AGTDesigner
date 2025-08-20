@@ -671,56 +671,30 @@ class TemplateProcessor:
                 cell._tc.clear_content()
                 tc = deepcopy(src_tc)
                 
-                # Update Label1 references to Label{cnt} for proper grid expansion
-                cell_text = ''
+                # CRITICAL FIX: Properly copy content with Label1 -> Label{cnt} replacement
+                # First, create a proper deep copy of the source cell
+                tc = deepcopy(src_tc)
+                
+                # Update all Label1 references to Label{cnt} for proper grid expansion
                 for t in tc.iter(qn('w:t')):
-                    if t.text:
-                        cell_text += t.text
-                        if 'Label1' in t.text:
-                            t.text = t.text.replace('Label1', f'Label{cnt}')
+                    if t.text and 'Label1' in t.text:
+                        t.text = t.text.replace('Label1', f'Label{cnt}')
                 
-                # CRITICAL FIX: The template uses Lineage and ProductVendor, not ProductBrand
-                # No need to add missing placeholders - just copy the existing template structure
+                # CRITICAL FIX: Copy the entire cell content structure properly
+                # Clear the target cell and copy all elements from the source
+                cell._tc.clear_content()
                 
-                # Add DOH placeholder if it's missing
-                self.logger.debug(f"Cell {cnt} - cell_text: '{cell_text}'")
-                self.logger.debug(f"Cell {cnt} - checking for DOH: '{{Label1.DOH}}' not in '{cell_text}' and 'DOH' not in '{cell_text}'")
-                if '{{Label1.DOH}}' not in cell_text and 'DOH' not in cell_text:
-                    self.logger.debug(f"Adding DOH placeholder to cell {cnt}")
-                    # Find the position after the ProductStrain placeholder
-                    text_elements = list(tc.iter(qn('w:t')))
-                    strain_end_index = -1
-                    
-                    # Find where the ProductStrain placeholder ends
-                    for i, t in enumerate(text_elements):
-                        if t.text and 'ProductStrain' in t.text:
-                            # Found the ProductStrain text element, look for the closing }}
-                            for j in range(i, len(text_elements)):
-                                if text_elements[j].text and '}}' in text_elements[j].text:
-                                    strain_end_index = j
-                                    break
-                            break
-                    
-                    if strain_end_index >= 0:
-                        self.logger.debug(f"Found ProductStrain end at index {strain_end_index}")
-                        # Insert DOH placeholder after the ProductStrain placeholder
-                        new_text = OxmlElement('w:t')
-                        new_text.text = f'\n{{{{Label{cnt}.DOH}}}}'
-                        
-                        # Insert after the strain end element
-                        strain_end_element = text_elements[strain_end_index]
-                        strain_end_element.getparent().insert(
-                            strain_end_element.getparent().index(strain_end_element) + 1, 
-                            new_text
-                        )
-                        self.logger.debug(f"Inserted DOH placeholder: {new_text.text}")
-                    else:
-                        self.logger.warning(f"Could not find ProductStrain end position for cell {cnt}")
+                # Copy all child elements from the source cell to maintain structure
+                for child in tc.getchildren():
+                    cell._tc.append(deepcopy(child))
+                
+                # Verify the content was copied correctly
+                cell_text = cell.text
+                self.logger.debug(f"Cell {cnt} - copied content: '{cell_text}'")
+                if not cell_text.strip():
+                    self.logger.warning(f"Cell {cnt} appears to be empty after copying!")
                 else:
-                    self.logger.debug(f"DOH placeholder already exists in cell {cnt}")
-                
-                for el in tc.xpath('./*'):
-                    cell._tc.append(deepcopy(el))
+                    self.logger.debug(f"Cell {cnt} - content verified successfully")
                 cnt += 1
         from docx.oxml.shared import OxmlElement as OE
         tblPr2 = tbl._element.find(qn('w:tblPr'))
@@ -858,7 +832,10 @@ class TemplateProcessor:
             
             self.logger.info(f"Added safety labels up to Label{max_labels_needed}, total context keys: {list(context.keys())}")
 
-            # DOH images are already created in _build_label_context, no need for redundant creation here
+            # CRITICAL FIX: Process any deferred DOH images now that we have the proper DocxTemplate
+            self._process_deferred_doh_images(context, doc)
+            
+            # DOH images are now properly created with InlineImage objects
 
             # Debug: Log the template structure before rendering
             self.logger.info(f"About to render template with {len(context)} labels")
@@ -868,6 +845,9 @@ class TemplateProcessor:
             try:
                 doc.render(context)
                 self.logger.info("Template rendering completed successfully")
+                
+
+                
             except Exception as render_error:
                 self.logger.error(f"Template rendering failed: {render_error}")
                 # Log more details about the context
@@ -880,10 +860,14 @@ class TemplateProcessor:
             buffer.seek(0)
             rendered_doc = Document(buffer)
             
+
+            
             # Check timeout before post-processing
             if time.time() - chunk_start_time > MAX_PROCESSING_TIME_PER_CHUNK:
                 self.logger.warning(f"Chunk processing timeout reached ({MAX_PROCESSING_TIME_PER_CHUNK}s), skipping post-processing")
                 return rendered_doc
+            
+
             
             # PRE-PROCESSING TABLE VALIDATION: Validate and repair all tables before any processing begins
             self.logger.debug("Starting pre-processing table validation")
@@ -898,10 +882,31 @@ class TemplateProcessor:
             # Post-process the document to apply dynamic font sizing first
             self._post_process_and_replace_content(rendered_doc)
             
+
+            for table in rendered_doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for para in cell.paragraphs:
+                            if para.text.strip():
+                                self.logger.debug(f"  Found content: '{para.text[:100]}{'...' if len(para.text) > 100 else ''}'")
+                            else:
+                                self.logger.debug(f"  Found empty paragraph")
+            
             # Check timeout before lineage colors
             if time.time() - chunk_start_time > MAX_PROCESSING_TIME_PER_CHUNK:
                 self.logger.warning(f"Chunk processing timeout reached ({MAX_PROCESSING_TIME_PER_CHUNK}s), skipping lineage colors")
                 return rendered_doc
+            
+            # CRITICAL DEBUG: Check content before lineage colors
+            self.logger.debug("Content check before lineage colors:")
+            for table in rendered_doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for para in cell.paragraphs:
+                            if para.text.strip():
+                                self.logger.debug(f"  Found content: '{para.text[:100]}{'...' if len(para.text) > 100 else ''}'")
+                            else:
+                                self.logger.debug(f"  Found empty paragraph")
             
             # Apply lineage colors last to ensure they are not overwritten
             apply_lineage_colors(rendered_doc)
@@ -915,6 +920,17 @@ class TemplateProcessor:
             
             # Ensure proper table centering and document setup
             self._ensure_proper_centering(rendered_doc)
+            
+            # CRITICAL DEBUG: Check content after final processing
+            self.logger.debug("Content check after final processing:")
+            for table in rendered_doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for para in cell.paragraphs:
+                            if para.text.strip():
+                                self.logger.debug(f"  Found content: '{para.text[:100]}{'...' if len(para.text) > 100 else ''}'")
+                            else:
+                                self.logger.debug(f"  Found empty paragraph")
 
             # FINAL ENFORCEMENT: For vertical and double templates, force appropriate line spacing for all paragraphs in any cell containing THC_CBD marker
             if self.template_type in ['vertical', 'double']:
@@ -1046,6 +1062,17 @@ class TemplateProcessor:
                         if prefix_pattern.search(run.text):
                             run.text = prefix_pattern.sub('', run.text)
             
+            # CRITICAL DEBUG: Final content check before returning from chunk processing
+            self.logger.debug("FINAL content check before returning from chunk processing:")
+            for table in rendered_doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for para in cell.paragraphs:
+                            if para.text.strip():
+                                self.logger.debug(f"  Found content: '{para.text[:100]}{'...' if len(para.text) > 100 else ''}'")
+                            else:
+                                self.logger.debug(f"  Found empty paragraph")
+            
             return rendered_doc
         except Exception as e:
             self.logger.error(f"Error in _process_chunk: {e}\n{traceback.format_exc()}")
@@ -1125,12 +1152,11 @@ class TemplateProcessor:
 
             image_path = process_doh_image(doh_value, product_type)
             if image_path:
-                # Fast width selection - reduced by 1mm for all template types
-                width_map = {'mini': 8, 'double': 7, 'vertical': 11, 'horizontal': 11}
-                image_width = Mm(width_map.get(self.template_type, 11))
-                label_context['DOH'] = InlineImage(doc, image_path, width=image_width)
-                # Ensure DOH image takes priority - clear any other DOH-related content
-                label_context['DOH_TEXT'] = ''  # Clear any text content
+                # CRITICAL FIX: Always defer DOH image creation until after template rendering
+                # Store the image path for later processing
+                label_context['DOH_IMAGE_PATH'] = image_path
+                label_context['DOH'] = 'DOH_IMAGE_PLACEHOLDER'
+                self.logger.debug(f"Deferred DOH image creation: {image_path}")
             else:
                 label_context['DOH'] = ''
                 label_context['DOH_TEXT'] = ''
@@ -1164,16 +1190,19 @@ class TemplateProcessor:
                         lineage_val = strain_info['canonical_lineage'].upper()
                         self.logger.debug(f"Using database lineage: '{lineage_val}'")
                     else:
-                        # Fallback to Excel lineage
-                        lineage_val = lineage_text.upper() if lineage_text else ""
+                        # CRITICAL FIX: Get lineage directly from record, not from label_context
+                        excel_lineage = record.get('Lineage', '')
+                        lineage_val = excel_lineage.upper() if excel_lineage else ""
                         self.logger.debug(f"Using Excel lineage fallback: '{lineage_val}'")
                 except Exception as e:
-                    # Fallback to Excel lineage if database lookup fails
-                    lineage_val = lineage_text.upper() if lineage_text else ""
+                    # CRITICAL FIX: Get lineage directly from record, not from label_context
+                    excel_lineage = record.get('Lineage', '')
+                    lineage_val = excel_lineage.upper() if excel_lineage else ""
                     self.logger.debug(f"Using Excel lineage due to error: '{lineage_val}' (error: {e})")
             else:
-                # No strain available, try Excel lineage
-                lineage_val = lineage_text.upper() if lineage_text else ""
+                # CRITICAL FIX: Get lineage directly from record, not from label_context
+                excel_lineage = record.get('Lineage', '')
+                lineage_val = excel_lineage.upper() if excel_lineage else ""
                 self.logger.debug(f"No strain available, using Excel lineage: '{lineage_val}'")
             
             # Set Lineage to strain lineage for classic types
@@ -1184,15 +1213,24 @@ class TemplateProcessor:
                 label_context['Lineage'] = ""
                 self.logger.debug(f"No lineage available for classic type '{product_type}', Lineage set to empty")
             
-            # Set ProductVendor to actual vendor/supplier for classic types
-            # Get vendor from record, not from product_brand
-            vendor_val = record.get('Vendor') or record.get('Vendor/Supplier*') or record.get('ProductVendor', '')
-            if vendor_val and str(vendor_val).lower() != 'nan':
-                label_context['ProductVendor'] = f"PRODUCTVENDOR_START {str(vendor_val)} PRODUCTVENDOR_END"
-                self.logger.debug(f"Set ProductVendor to vendor: '{vendor_val}' for classic type '{product_type}'")
+            # WORKAROUND: Set VendorInfo instead of ProductVendor to avoid template corruption
+            # Since you don't have a ProductVendor column, we use the Vendor column directly
+            vendor_val = record.get('Vendor')
+            
+            if vendor_val and str(vendor_val).lower() != 'nan' and vendor_val.strip():
+                # Safety check: ensure vendor doesn't match brand exactly
+                if product_brand and str(vendor_val).strip().lower() == str(product_brand).strip().lower():
+                    self.logger.warning(f"Vendor '{vendor_val}' matches brand '{product_brand}' - setting VendorInfo to empty")
+                    label_context['VendorInfo'] = ""
+                else:
+                    label_context['VendorInfo'] = f"VENDORINFO_START {str(vendor_val).strip()} VENDORINFO_END"
+                    self.logger.debug(f"Set VendorInfo to vendor: '{vendor_val}' for classic type '{product_type}'")
             else:
-                label_context['ProductVendor'] = ""
-                self.logger.debug(f"ProductVendor set to empty for classic type '{product_type}' (no vendor data)")
+                label_context['VendorInfo'] = ""
+                self.logger.debug(f"No vendor data found for classic type '{product_type}', VendorInfo set to empty")
+            
+            # Keep ProductVendor empty to avoid template corruption
+            label_context['ProductVendor'] = ""
         else:
             # For non-classic types, Lineage shows brand and ProductVendor is empty
             self.logger.debug(f"Processing non-classic type '{product_type}' for Lineage and ProductVendor")
@@ -1211,6 +1249,7 @@ class TemplateProcessor:
             else:
                 label_context['Lineage'] = ""
                 self.logger.debug(f"Lineage set to empty for non-classic type '{product_type}'")
+            label_context['VendorInfo'] = ""
             label_context['ProductVendor'] = ""
         
         # Fast ratio processing
@@ -1277,6 +1316,8 @@ class TemplateProcessor:
         # Fast other field processing
         if label_context.get('Price'):
             label_context['Price'] = wrap_with_marker(unwrap_marker(label_context['Price'], 'PRICE'), 'PRICE')
+        
+
         
         # Always process lineage for classic types, and conditionally for non-classic types
         product_type = (label_context.get('Product Type*', '').lower() or 
@@ -1392,20 +1433,48 @@ class TemplateProcessor:
                 formatted_val = self.format_with_soft_hyphen(val)
                 label_context[key] = wrap_with_marker(unwrap_marker(formatted_val, marker), marker)
         
-        # Fast vendor handling - only override if ProductVendor wasn't already set by our logic
-        # This preserves the ProductVendor logic for classic types
-        if 'ProductVendor' not in label_context:
-            product_type = (label_context.get('ProductType', '').lower() or 
-                           label_context.get('Product Type*', '').lower())
-            
-            # Only set vendor from record if ProductVendor wasn't already set by our logic
-            product_vendor = record.get('Vendor') or record.get('Vendor/Supplier*', '') or record.get('ProductVendor', '')
-            # Handle NaN values in vendor data
-            if pd.isna(product_vendor) or str(product_vendor).lower() == 'nan':
-                product_vendor = ''
-            label_context['ProductVendor'] = wrap_with_marker(product_vendor, 'PRODUCTVENDOR')
+        # CRITICAL FIX: ProductVendor is now handled earlier in the method for classic types
+        # This section is no longer needed as ProductVendor logic is handled in the classic type processing section
+        # Removing this to prevent conflicts with the earlier ProductVendor assignment
 
         return label_context
+
+    def _process_deferred_doh_images(self, context, doc_template):
+        """Process any deferred DOH images by creating InlineImage objects with the proper DocxTemplate."""
+        try:
+            for label_key, label_context in context.items():
+                if isinstance(label_context, dict) and 'DOH_IMAGE_PATH' in label_context:
+                    # We have a deferred DOH image to process
+                    image_path = label_context['DOH_IMAGE_PATH']
+                    
+                    # Check if the image file exists
+                    if os.path.exists(image_path):
+                        # Fast width selection - reduced by 1mm for all template types
+                        width_map = {'mini': 8, 'double': 7, 'vertical': 11, 'horizontal': 11}
+                        image_width = Mm(width_map.get(self.template_type, 11))
+                        
+                        # Create InlineImage with the correct DocxTemplate object
+                        from docxtpl import InlineImage
+                        doh_image = InlineImage(doc_template, image_path, width=image_width)
+                        
+                        # Replace the placeholder with the actual image
+                        label_context['DOH'] = doh_image
+                        label_context['DOH_TEXT'] = ''  # Clear any text content
+                        
+                        # Remove the deferred image path
+                        del label_context['DOH_IMAGE_PATH']
+                        
+                        self.logger.debug(f"Processed deferred DOH image for {label_key}: {image_path}")
+                    else:
+                        # Image not found, remove the placeholder
+                        label_context['DOH'] = ''
+                        label_context['DOH_TEXT'] = ''
+                        del label_context['DOH_IMAGE_PATH']
+                        self.logger.warning(f"DOH image not found at path: {image_path}")
+                        
+        except Exception as e:
+            self.logger.error(f"Error processing deferred DOH images: {e}")
+            # Continue processing even if DOH images fail
 
     def _post_process_and_replace_content(self, doc):
         """Post-process the document after template rendering."""
@@ -3548,7 +3617,7 @@ class TemplateProcessor:
         # Handle the default "THC:|BR|CBD:" format from excel processor
         if text == "THC:|BR|CBD:":
             # If we have record data, try to get actual THC and CBD values from columns
-            if record:
+            if record is not None and (hasattr(record, 'empty') and not record.empty or isinstance(record, dict) and record):
                 # Get THC value from AI column (Total THC)
                 thc_value = record.get('AI', '')
                 if thc_value:

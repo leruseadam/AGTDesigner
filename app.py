@@ -182,11 +182,54 @@ def force_reload_excel_processor(new_file_path):
         _excel_processor._last_loaded_file = new_file_path
         logging.info(f"Excel processor successfully loaded new file with full processing rules: {new_file_path}")
         logging.info(f"New DataFrame shape: {_excel_processor.df.shape if _excel_processor.df is not None else 'None'}")
+        
+        # CRITICAL FIX: Ensure dropdown cache is populated after successful file load
+        if hasattr(_excel_processor, '_cache_dropdown_values'):
+            try:
+                _excel_processor._cache_dropdown_values()
+                logging.info(f"Successfully populated dropdown cache with {len(_excel_processor.dropdown_cache)} filter options")
+                # Log the strain count specifically
+                if 'strain' in _excel_processor.dropdown_cache:
+                    strain_count = len(_excel_processor.dropdown_cache['strain'])
+                    logging.info(f"Dropdown cache contains {strain_count} strains")
+                else:
+                    logging.warning("No strain filter found in dropdown cache")
+            except Exception as e:
+                logging.error(f"Failed to populate dropdown cache: {e}")
+        else:
+            logging.warning("ExcelProcessor does not have _cache_dropdown_values method")
+            
     else:
         logging.error(f"Failed to load new file in Excel processor: {new_file_path}")
-        # Create empty DataFrame as fallback
-        _excel_processor.df = pd.DataFrame()
-        _excel_processor.selected_tags = []
+        # CRITICAL FIX: Don't create empty DataFrame - this causes the "no strains" issue
+        # Instead, try to load a default file as fallback
+        from src.core.data.excel_processor import get_default_upload_file
+        default_file = get_default_upload_file()
+        if default_file and os.path.exists(default_file):
+            logging.info(f"Attempting to load default file as fallback: {default_file}")
+            fallback_success = _excel_processor.load_file(default_file)
+            if fallback_success:
+                _excel_processor._last_loaded_file = default_file
+                logging.info(f"Successfully loaded default file as fallback: {default_file}")
+                # Populate dropdown cache for fallback file
+                if hasattr(_excel_processor, '_cache_dropdown_values'):
+                    try:
+                        _excel_processor._cache_dropdown_values()
+                        logging.info(f"Successfully populated dropdown cache from fallback file")
+                    except Exception as e:
+                        logging.error(f"Failed to populate dropdown cache from fallback: {e}")
+            else:
+                logging.error(f"Failed to load default file as fallback: {default_file}")
+                # Only create empty DataFrame as last resort
+                _excel_processor.df = pd.DataFrame()
+                _excel_processor.selected_tags = []
+                logging.warning("Created empty DataFrame as last resort - this may cause 'no strains' issues")
+        else:
+            logging.error("No default file available as fallback")
+            # Only create empty DataFrame as last resort
+            _excel_processor.df = pd.DataFrame()
+            _excel_processor.selected_tags = []
+            logging.warning("Created empty DataFrame as last resort - this may cause 'no strains' issues")
 
 def cleanup_old_processing_status():
     """Clean up old processing status entries to prevent memory leaks."""
@@ -263,6 +306,22 @@ def get_excel_processor():
                                         for col in ['Product Type*', 'Lineage', 'Product Brand', 'Vendor', 'Product Strain']:
                                             if col in _excel_processor.df.columns:
                                                 _excel_processor.df[col] = _excel_processor.df[col].astype('category')
+                                    
+                                    # CRITICAL FIX: Ensure dropdown cache is populated after successful file load
+                                    if hasattr(_excel_processor, '_cache_dropdown_values'):
+                                        try:
+                                            _excel_processor._cache_dropdown_values()
+                                            logging.info(f"Successfully populated dropdown cache in get_excel_processor")
+                                            # Log the strain count specifically
+                                            if 'strain' in _excel_processor.dropdown_cache:
+                                                strain_count = len(_excel_processor.dropdown_cache['strain'])
+                                                logging.info(f"Dropdown cache contains {strain_count} strains")
+                                            else:
+                                                logging.warning("No strain filter found in dropdown cache")
+                                        except Exception as e:
+                                            logging.error(f"Failed to populate dropdown cache in get_excel_processor: {e}")
+                                    else:
+                                        logging.warning("ExcelProcessor does not have _cache_dropdown_values method")
                                 else:
                                     logging.error("Failed to load default file in get_excel_processor")
                                     # Ensure df attribute exists even if loading failed
@@ -289,6 +348,21 @@ def get_excel_processor():
                             success = _excel_processor.load_file(default_file)
                             if success:
                                 _excel_processor._last_loaded_file = default_file
+                                # CRITICAL FIX: Ensure dropdown cache is populated after successful file load
+                                if hasattr(_excel_processor, '_cache_dropdown_values'):
+                                    try:
+                                        _excel_processor._cache_dropdown_values()
+                                        logging.info(f"Successfully populated dropdown cache in get_excel_processor fallback")
+                                        # Log the strain count specifically
+                                        if 'strain' in _excel_processor.dropdown_cache:
+                                            strain_count = len(_excel_processor.dropdown_cache['strain'])
+                                            logging.info(f"Dropdown cache contains {strain_count} strains")
+                                        else:
+                                            logging.warning("No strain filter found in dropdown cache")
+                                    except Exception as e:
+                                        logging.error(f"Failed to populate dropdown cache in get_excel_processor fallback: {e}")
+                                else:
+                                    logging.warning("ExcelProcessor does not have _cache_dropdown_values method")
                             else:
                                 if not hasattr(_excel_processor, 'df'):
                                     _excel_processor.df = pd.DataFrame()
@@ -707,9 +781,25 @@ def get_session_excel_processor():
                 if not hasattr(g.excel_processor, 'df') or g.excel_processor.df is None or g.excel_processor.df.empty:
                     logging.info(f"CRITICAL FIX: Loading uploaded file from session: {session_file_path}")
                     success = g.excel_processor.load_file(session_file_path)
-                    if not success:
+                    if success:
+                        # CRITICAL FIX: Ensure dropdown cache is populated after successful file load
+                        if hasattr(g.excel_processor, '_cache_dropdown_values'):
+                            try:
+                                g.excel_processor._cache_dropdown_values()
+                                logging.info(f"Successfully populated dropdown cache from session uploaded file")
+                                # Log the strain count specifically
+                                if 'strain' in g.excel_processor.dropdown_cache:
+                                    strain_count = len(g.excel_processor.dropdown_cache['strain'])
+                                    logging.info(f"Dropdown cache contains {strain_count} strains")
+                                else:
+                                    logging.warning("No strain filter found in dropdown cache")
+                            except Exception as e:
+                                logging.error(f"Failed to populate dropdown cache from session uploaded file: {e}")
+                        else:
+                            logging.warning("ExcelProcessor does not have _cache_dropdown_values method")
+                    else:
                         logging.error("Failed to load uploaded file from session")
-                                                # Create a minimal DataFrame to prevent errors
+                        # Create a minimal DataFrame to prevent errors
                         import pandas as pd
                         g.excel_processor.df = pd.DataFrame()
                 
@@ -745,7 +835,23 @@ def get_session_excel_processor():
                     if default_file and os.path.exists(default_file):
                         logging.info(f"Loading default file for session: {default_file}")
                         success = g.excel_processor.load_file(default_file)
-                        if not success:
+                        if success:
+                            # CRITICAL FIX: Ensure dropdown cache is populated after successful file load
+                            if hasattr(g.excel_processor, '_cache_dropdown_values'):
+                                try:
+                                    g.excel_processor._cache_dropdown_values()
+                                    logging.info(f"Successfully populated dropdown cache from session default file")
+                                    # Log the strain count specifically
+                                    if 'strain' in g.excel_processor.dropdown_cache:
+                                        strain_count = len(g.excel_processor.dropdown_cache['strain'])
+                                        logging.info(f"Dropdown cache contains {strain_count} strains")
+                                    else:
+                                        logging.warning("No strain filter found in dropdown cache")
+                                except Exception as e:
+                                    logging.error(f"Failed to populate dropdown cache from session default file: {e}")
+                            else:
+                                logging.warning("ExcelProcessor does not have _cache_dropdown_values method")
+                        else:
                             logging.error("Failed to load default file for session")
                             # Create a minimal DataFrame to prevent errors
                             import pandas as pd
@@ -1226,6 +1332,22 @@ def process_excel_background(filename, temp_path):
             logging.error(f"[BG] File load failed for {filename} - DataFrame is empty")
             return
         
+        # CRITICAL FIX: Populate dropdown cache after successful file load
+        if hasattr(new_processor, '_cache_dropdown_values'):
+            try:
+                new_processor._cache_dropdown_values()
+                logging.info(f"[BG] Successfully populated dropdown cache after file load")
+                # Log the strain count specifically
+                if 'strain' in new_processor.dropdown_cache:
+                    strain_count = len(new_processor.dropdown_cache['strain'])
+                    logging.info(f"[BG] Dropdown cache contains {strain_count} strains")
+                else:
+                    logging.warning("[BG] No strain filter found in dropdown cache")
+            except Exception as e:
+                logging.error(f"[BG] Failed to populate dropdown cache after file load: {e}")
+        else:
+            logging.warning("[BG] ExcelProcessor does not have _cache_dropdown_values method")
+        
         # CRITICAL FIX: Verify we loaded the correct file (with more robust comparison)
         logging.info(f"[BG] CRITICAL FIX: Verifying loaded file matches uploaded file")
         logging.info(f"[BG] Expected file: {temp_path}")
@@ -1282,6 +1404,22 @@ def process_excel_background(filename, temp_path):
                 update_processing_status(filename, f'error: Failed to reload file')
                 return
             logging.info(f"[BG] File reloaded successfully with fresh data")
+            
+            # CRITICAL FIX: Populate dropdown cache after redundant reload
+            if hasattr(new_processor, '_cache_dropdown_values'):
+                try:
+                    new_processor._cache_dropdown_values()
+                    logging.info(f"[BG] Successfully populated dropdown cache after redundant reload")
+                    # Log the strain count specifically
+                    if 'strain' in new_processor.dropdown_cache:
+                        strain_count = len(new_processor.dropdown_cache['strain'])
+                        logging.info(f"[BG] Dropdown cache contains {strain_count} strains")
+                    else:
+                        logging.warning("[BG] No strain filter found in dropdown cache")
+                except Exception as e:
+                    logging.error(f"[BG] Failed to populate dropdown cache after redundant reload: {e}")
+            else:
+                logging.warning("[BG] ExcelProcessor does not have _cache_dropdown_values method")
         else:
             logging.info(f"[BG] Using pythonanywhere_fast_load data without redundant reload")
         

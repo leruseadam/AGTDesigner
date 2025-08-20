@@ -906,6 +906,13 @@ class ExcelProcessor:
                     rename_mapping["Price* (Tier Name for Bulk)"] = "Price"
                 if "Vendor/Supplier*" in df.columns and "Vendor" not in df.columns:
                     rename_mapping["Vendor/Supplier*"] = "Vendor"
+                    self.logger.info(f"Renaming column 'Vendor/Supplier*' to 'Vendor' during minimal processing")
+                elif "Vendor/Supplier*" in df.columns:
+                    self.logger.info(f"Column 'Vendor/Supplier*' found but 'Vendor' already exists - keeping both columns")
+                elif "Vendor" in df.columns:
+                    self.logger.info(f"Column 'Vendor' found - no renaming needed")
+                else:
+                    self.logger.warning(f"No vendor column found in DataFrame. Available columns: {[col for col in df.columns if 'vendor' in col.lower() or 'supplier' in col.lower()]}")
                 if "DOH Compliant (Yes/No)" in df.columns and "DOH" not in df.columns:
                     rename_mapping["DOH Compliant (Yes/No)"] = "DOH"
                 if "Concentrate Type" in df.columns and "Ratio" not in df.columns:
@@ -1154,6 +1161,13 @@ class ExcelProcessor:
                 rename_mapping["Price* (Tier Name for Bulk)"] = "Price"
             if "Vendor/Supplier*" in self.df.columns and "Vendor" not in self.df.columns:
                 rename_mapping["Vendor/Supplier*"] = "Vendor"
+                self.logger.info(f"Renaming column 'Vendor/Supplier*' to 'Vendor' during regular processing")
+            elif "Vendor/Supplier*" in self.df.columns:
+                self.logger.info(f"Column 'Vendor/Supplier*' found but 'Vendor' already exists - keeping both columns")
+            elif "Vendor" in self.df.columns:
+                self.logger.info(f"Column 'Vendor' found - no renaming needed")
+            else:
+                self.logger.warning(f"No vendor column found in DataFrame. Available columns: {[col for col in self.df.columns if 'vendor' in col.lower() or 'supplier' in col.lower()]}")
             if "DOH Compliant (Yes/No)" in self.df.columns and "DOH" not in self.df.columns:
                 rename_mapping["DOH Compliant (Yes/No)"] = "DOH"
             if "Concentrate Type" in self.df.columns and "Ratio" not in self.df.columns:
@@ -2201,10 +2215,22 @@ class ExcelProcessor:
             # Add to seen set
             seen_product_names.add(product_name)
             
+            # Get vendor from multiple possible column names
+            vendor_value = (
+                safe_get_value(row.get('Vendor/Supplier*', '')) or  # Primary column name
+                safe_get_value(row.get('Vendor', '')) or           # Alternative column name
+                safe_get_value(row.get('Vendor/Supplier', ''))     # Fallback column name
+            )
+            
+            # Debug logging for vendor field detection
+            if not vendor_value and product_name:
+                logger.debug(f"Vendor field is empty for product '{product_name}'. Available vendor columns: {[col for col in row.index if 'vendor' in col.lower() or 'supplier' in col.lower()]}")
+                logger.debug(f"Row vendor values: Vendor/Supplier*='{row.get('Vendor/Supplier*', '')}', Vendor='{row.get('Vendor', '')}', Vendor/Supplier='{row.get('Vendor/Supplier', '')}'")
+            
             tag = {
                 'Product Name*': product_name,
-                'Vendor': safe_get_value(row.get('Vendor', '')),
-                'Vendor/Supplier*': safe_get_value(row.get('Vendor', '')),
+                'Vendor': vendor_value,
+                'Vendor/Supplier*': vendor_value,
                 'Product Brand': safe_get_value(row.get('Product Brand', '')),
                 'ProductBrand': safe_get_value(row.get('Product Brand', '')),
                 'Lineage': safe_get_value(row.get('Lineage', 'MIXED')),
@@ -2219,7 +2245,7 @@ class ExcelProcessor:
                 'quantity': safe_get_value(quantity),
                 'DOH': safe_get_value(row.get('DOH', '')),  # Add DOH field for UI display
                 # Also include the lowercase versions for backward compatibility
-                'vendor': safe_get_value(row.get('Vendor', '')),
+                'vendor': vendor_value,
                 'productBrand': safe_get_value(row.get('Product Brand', '')),
                 'lineage': safe_get_value(row.get('Lineage', 'MIXED')),
                 'productType': safe_get_value(row.get('Product Type*', '')),
