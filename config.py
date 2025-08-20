@@ -49,7 +49,7 @@ class Config:
     DISABLE_STARTUP_FILE_LOADING = os.environ.get('DISABLE_STARTUP_FILE_LOADING', 'False').lower() == 'true'
     
     # Database configuration
-    DATABASE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'product_database.db')
+    DATABASE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'product_database.db')
     
     # File upload configuration
     ALLOWED_EXTENSIONS = {'xlsx', 'xls'}
