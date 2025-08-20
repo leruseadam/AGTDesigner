@@ -789,6 +789,9 @@ class TemplateProcessor:
         """Process a chunk of records with timeout protection."""
         chunk_start_time = time.time()
         
+        # Define max_labels_needed at the beginning so it's available in both branches
+        max_labels_needed = 500  # Increased safety limit to cover all possible labels
+        
         try:
             # Special handling for mini templates - use manual placeholder replacement
             if self.template_type == 'mini':
@@ -816,7 +819,6 @@ class TemplateProcessor:
                 self.logger.info(f"Created context with {len(context)} labels: {list(context.keys())}")
                 
                 # Safety check: Ensure we have enough labels for the template
-                max_labels_needed = 500  # Increased safety limit to cover all possible labels
                 for i in range(self.chunk_size + 1, max_labels_needed + 1):
                     context[f'Label{i}'] = {}
                 
@@ -4458,49 +4460,7 @@ class TemplateProcessor:
         except Exception as e:
             self.logger.warning(f"Error cleaning DOH cells: {e}")
 
-    def _manual_replace_placeholders(self, doc, context):
-        """Manually replace placeholders in the document when DocxTemplate fails."""
-        try:
-            self.logger.info("Starting manual placeholder replacement")
-            
-            # Process each table in the document
-            for table in doc.tables:
-                for row in table.rows:
-                    for cell in row.cells:
-                        for paragraph in cell.paragraphs:
-                            # Process runs for placeholder replacement
-                            for run in paragraph.runs:
-                                text = run.text
-                                for label_key, label_context in context.items():
-                                    for field_key, field_value in label_context.items():
-                                        placeholder = f"{{{{{label_key}.{field_key}}}}}"
-                                        if placeholder in text:
-                                            # Replace placeholder with actual value
-                                            text = text.replace(placeholder, str(field_value))
-                                            self.logger.debug(f"Replaced {placeholder} with {field_value}")
-                                run.text = text
-                            
-                            # Also check paragraph text for remaining placeholders
-                            paragraph_text = paragraph.text
-                            for label_key, label_context in context.items():
-                                for field_key, field_value in label_context.items():
-                                    placeholder = f"{{{{{label_key}.{field_key}}}}}"
-                                    if placeholder in paragraph_text:
-                                        # Replace placeholder with actual value
-                                        paragraph_text = paragraph_text.replace(placeholder, str(field_value))
-                                        self.logger.debug(f"Replaced {placeholder} with {field_value} in paragraph")
-                            paragraph.text = paragraph_text
-                            
-                            # After replacing placeholders, check if this paragraph contains combined lineage/vendor content
-                            # and process it for proper formatting
-                            if self._detect_and_process_combined_lineage_vendor(paragraph):
-                                self.logger.debug("Processed combined lineage/vendor after placeholder replacement")
-            
-            self.logger.info("Manual placeholder replacement completed")
-            
-        except Exception as e:
-            self.logger.error(f"Error during manual placeholder replacement: {e}")
-            raise
+
 
     def _apply_vendor_alignment_with_tabs(self, doc):
         """
@@ -4726,14 +4686,16 @@ class TemplateProcessor:
             raise
 
     def _manual_replace_placeholders(self, doc, context):
-        """Manually replace placeholders in mini template with actual data."""
+        """Manually replace placeholders in the document when DocxTemplate fails."""
         try:
-            self.logger.info("Starting manual placeholder replacement for mini template")
+            self.logger.info("Starting manual placeholder replacement")
             
+            # Process each table in the document
             for table in doc.tables:
                 for row in table.rows:
                     for cell in row.cells:
                         for paragraph in cell.paragraphs:
+                            # Process runs for placeholder replacement
                             for run in paragraph.runs:
                                 if run.text:
                                     # Handle both double braces {{Label1.Field}} and triple braces {{{Label1.Field}}}
@@ -4773,11 +4735,27 @@ class TemplateProcessor:
                                     if text != original_text:
                                         run.text = text
                                         self.logger.debug(f"Updated run text from '{original_text}' to '{text}'")
+                            
+                            # Also check paragraph text for remaining placeholders
+                            paragraph_text = paragraph.text
+                            for label_key, label_context in context.items():
+                                for field_key, field_value in label_context.items():
+                                    placeholder = f"{{{{{label_key}.{field_key}}}}}"
+                                    if placeholder in paragraph_text:
+                                        # Replace placeholder with actual value
+                                        paragraph_text = paragraph_text.replace(placeholder, str(field_value))
+                                        self.logger.debug(f"Replaced {placeholder} with {field_value} in paragraph")
+                            paragraph.text = paragraph_text
+                            
+                            # After replacing placeholders, check if this paragraph contains combined lineage/vendor content
+                            # and process it for proper formatting
+                            if self._detect_and_process_combined_lineage_vendor(paragraph):
+                                self.logger.debug("Processed combined lineage/vendor after placeholder replacement")
             
             self.logger.info("Manual placeholder replacement completed")
             
         except Exception as e:
-            self.logger.error(f"Error in manual placeholder replacement: {e}")
+            self.logger.error(f"Error during manual placeholder replacement: {e}")
             raise
 
 __all__ = ['get_font_scheme', 'TemplateProcessor']
