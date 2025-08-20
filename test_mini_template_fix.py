@@ -1,55 +1,70 @@
 #!/usr/bin/env python3
 """
-Test script to verify the mini template generation fix.
+Test script to verify the mini template fix is working correctly.
 """
 
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from pathlib import Path
 
-from src.core.generation.template_processor import TemplateProcessor
-import logging
+# Add the src directory to the Python path
+src_path = Path(__file__).parent / "src"
+sys.path.insert(0, str(src_path))
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
+from core.generation.template_processor import TemplateProcessor
 
-def test_mini_template_fix():
-    """Test that the mini template can be processed without the Label100 error."""
-    
-    # Create a test record
-    test_record = {
-        'ProductName': 'Test Product',
-        'ProductBrand': 'Test Brand',
-        'ProductStrain': 'Test Strain',
-        'ProductVendor': 'Test Vendor',
-        'Price': '$20',
-        'THC': '15.02%',
-        'CBD': '0.04%',
-        'ProductType': 'flower',
-        'Description': 'Test Description',
-        'WeightUnits': '1g'
-    }
+def test_mini_template_processing():
+    """Test that mini template processing works correctly."""
+    print("Testing mini template processing...")
     
     try:
-        # Create template processor for mini template
-        from src.core.generation.template_processor import get_font_scheme
-        font_scheme = get_font_scheme('mini')
-        processor = TemplateProcessor('mini', font_scheme)
-        print(f"✓ Template processor created successfully")
-        print(f"✓ Template type: {processor.template_type}")
-        print(f"✓ Chunk size: {processor.chunk_size}")
+        # Create a template processor for mini template
+        processor = TemplateProcessor(template_type='mini', font_scheme='Arial')
+        print("✓ Template processor created successfully")
         
-        # Test processing a single record
-        result = processor.process_records([test_record])
+        # Test data
+        test_record = {
+            'ProductName': 'Test Product',
+            'Product Type*': 'Flower',
+            'Product Brand': 'Test Brand',
+            'Description': 'Test Description',
+            'Weight*': '3.5g',
+            'Price': '$45.00',
+            'Product Strain': 'Test Strain',
+            'Lineage': 'Sativa',
+            'DOH': 'Yes'
+        }
         
-        if result:
-            print("✓ Mini template processing completed successfully")
-            print(f"✓ Generated document has {len(result.tables)} tables")
-            return True
-        else:
-            print("✗ Mini template processing failed")
-            return False
+        # Test building label context
+        label_context = processor._build_label_context(test_record)
+        print("✓ Label context built successfully")
+        print(f"  - ProductBrand: {label_context.get('ProductBrand')}")
+        print(f"  - DOH: {label_context.get('DOH')}")
+        
+        # Test mini template processing
+        context = {'Label1': label_context}
+        result_doc = processor._expand_mini_template_preserve_design(None, context)
+        print("✓ Mini template processing completed successfully")
+        
+        # Check the result
+        if result_doc and result_doc.tables:
+            table = result_doc.tables[0]
+            print(f"✓ Result document has {len(table.rows)}x{len(table.columns)} table")
             
+            # Check first cell content
+            first_cell = table.cell(0, 0)
+            if first_cell.paragraphs:
+                first_para = first_cell.paragraphs[0]
+                print(f"✓ First cell has content: '{first_para.text[:50]}...'")
+            else:
+                print("⚠ First cell has no paragraphs")
+        else:
+            print("✗ Result document has no tables")
+            return False
+        
+        print("\n🎉 Mini template fix test PASSED!")
+        return True
+        
     except Exception as e:
         print(f"✗ Error during mini template processing: {e}")
         import traceback
@@ -57,11 +72,5 @@ def test_mini_template_fix():
         return False
 
 if __name__ == "__main__":
-    print("Testing mini template generation fix...")
-    success = test_mini_template_fix()
-    
-    if success:
-        print("\n🎉 Mini template fix test PASSED!")
-    else:
-        print("\n❌ Mini template fix test FAILED!")
-        sys.exit(1)
+    success = test_mini_template_processing()
+    sys.exit(0 if success else 1)
