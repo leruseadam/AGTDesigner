@@ -1269,6 +1269,80 @@ def upload_file():
         else:
             return jsonify({'error': 'Upload failed. Please try again.'}), 500
 
+@app.route('/upload-simple', methods=['POST'])
+def upload_file_simple():
+    """Simple, reliable file upload for PythonAnywhere"""
+    try:
+        logging.info("=== SIMPLE UPLOAD REQUEST START ===")
+        
+        if 'file' not in request.files:
+            logging.error("No file uploaded")
+            return jsonify({'error': 'No file uploaded'}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            logging.error("No file selected")
+            return jsonify({'error': 'No file selected'}), 400
+        
+        if not file.filename.lower().endswith('.xlsx'):
+            logging.error(f"Invalid file type: {file.filename}")
+            return jsonify({'error': 'Only .xlsx files are allowed'}), 400
+        
+        # Check file size
+        file.seek(0, 2)  # Seek to end
+        file_size = file.tell()
+        file.seek(0)  # Reset to beginning
+        
+        if file_size > app.config['MAX_CONTENT_LENGTH']:
+            logging.error(f"File too large: {file_size} bytes (max: {app.config['MAX_CONTENT_LENGTH']})")
+            return jsonify({'error': f'File too large. Maximum size is {app.config["MAX_CONTENT_LENGTH"] / (1024*1024):.1f} MB'}), 400
+        
+        # Ensure upload folder exists
+        upload_folder = app.config['UPLOAD_FOLDER']
+        os.makedirs(upload_folder, exist_ok=True)
+        
+        # Save file with timestamp to avoid conflicts
+        timestamp = int(time.time())
+        safe_filename = f"upload_{timestamp}_{file.filename}"
+        file_path = os.path.join(upload_folder, safe_filename)
+        
+        logging.info(f"Saving file to: {file_path}")
+        file.save(file_path)
+        
+        # Clear any existing status for this filename and mark as processing
+        update_processing_status(file.filename, 'processing')
+        
+        # Start background thread for fast processing
+        try:
+            thread = threading.Thread(target=process_excel_background, args=(file.filename, file_path))
+            thread.daemon = True
+            thread.start()
+            logging.info(f"Background processing thread started for {file.filename}")
+        except Exception as thread_error:
+            logging.error(f"Failed to start background thread: {thread_error}")
+            update_processing_status(file.filename, f'error: Failed to start processing')
+            return jsonify({'error': 'Failed to start file processing'}), 500
+        
+        # Store uploaded file path in session
+        session['file_path'] = file_path
+        session['selected_tags'] = []
+        
+        # ULTRA-FAST RESPONSE - Return immediately for instant user feedback
+        upload_response_time = time.time() - start_time
+        logging.info(f"[UPLOAD-SIMPLE] Ultra-fast upload completed in {upload_response_time:.3f}s")
+        
+        return jsonify({
+            'message': 'File uploaded, processing in background', 
+            'filename': file.filename,
+            'upload_time': f"{upload_response_time:.3f}s",
+            'processing_status': 'background',
+            'performance': 'ultra_fast'
+        })
+            
+    except Exception as e:
+        logging.error(f"Upload error: {e}")
+        return jsonify({'error': 'Upload failed'}), 500
+
 def process_excel_background(filename, temp_path):
     """Ultra-optimized background processing with minimal processing for instant response"""
     global os  # Ensure os is available in this scope
@@ -7383,61 +7457,8 @@ def upload_file_fast():
             return jsonify({'error': f'Upload failed: {str(e)}'}), 500
         else:
             return jsonify({'error': 'Upload failed. Please try again.'}), 500
-    """Ultra-fast upload endpoint - bypasses some checks for maximum speed"""
-    try:
-        logging.info("=== ULTRA-FAST UPLOAD REQUEST START ===")
-        start_time = time.time()
-        
-        if 'file' not in request.files:
-            return jsonify({'error': 'No file uploaded'}), 400
-        
-        file = request.files['file']
-        if file.filename == '' or not file.filename.lower().endswith('.xlsx'):
-            return jsonify({'error': 'Invalid file'}), 400
-        
-        # Sanitize filename
-        sanitized_filename = sanitize_filename(file.filename)
-        if not sanitized_filename:
-            return jsonify({'error': 'Invalid filename'}), 400
-        
-        # Check file size (minimal check)
-        file.seek(0, 2)
-        file_size = file.tell()
-        file.seek(0)
-        
-        if file_size > app.config['MAX_CONTENT_LENGTH']:
-            return jsonify({'error': 'File too large'}), 400
-        
-        # Save file
-        upload_folder = app.config['UPLOAD_FOLDER']
-        os.makedirs(upload_folder, exist_ok=True)
-        temp_path = os.path.join(upload_folder, sanitized_filename)
-        
-        file.save(temp_path)
-        
-        # Set processing status
-        update_processing_status(file.filename, 'processing')
-        
-        # Start background processing
-        thread = threading.Thread(target=process_excel_background, args=(file.filename, temp_path))
-        thread.daemon = True
-        thread.start()
-        
-        # Ultra-fast response
-        upload_time = time.time() - start_time
-        logging.info(f"[FAST-UPLOAD] Completed in {upload_time:.3f}s")
-        
-        return jsonify({
-            'success': True,
-            'message': 'File uploaded successfully',
-            'filename': sanitized_filename,
-            'upload_time': f"{upload_time:.3f}s",
-            'performance': 'ultra_fast'
-        })
-        
-    except Exception as e:
-        logging.error(f"Fast upload error: {str(e)}")
-        return jsonify({'error': 'Upload failed'}), 500
+
+
 
 if __name__ == '__main__':
     # Create and run the application
