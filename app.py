@@ -3200,8 +3200,12 @@ def get_available_tags():
             logging.info(f"Available tags debug - json_matched_cache_key: {json_matched_cache_key}")
             logging.info(f"Available tags debug - full_excel_cache_key: {full_excel_cache_key}")
             
-            json_matched_tags = cache.get(json_matched_cache_key, []) if json_matched_cache_key else []
-            full_excel_tags = cache.get(full_excel_cache_key, []) if full_excel_cache_key else []
+            json_matched_tags = cache.get(json_matched_cache_key) if json_matched_cache_key else None
+            if json_matched_tags is None:
+                json_matched_tags = []
+            full_excel_tags = cache.get(full_excel_cache_key) if full_excel_cache_key else None
+            if full_excel_tags is None:
+                full_excel_tags = []
             
             logging.info(f"Available tags debug - json_matched_tags count: {len(json_matched_tags)}")
             logging.info(f"Available tags debug - full_excel_tags count: {len(full_excel_tags)}")
@@ -7503,11 +7507,15 @@ def toggle_json_filter():
         # Get the appropriate tags based on the new mode from cache
         if new_mode == 'json_matched':
             cache_key = session.get('json_matched_cache_key')
-            available_tags = cache.get(cache_key, []) if cache_key else []
+            available_tags = cache.get(cache_key) if cache_key else []
+            if available_tags is None:
+                available_tags = []
             mode_name = 'JSON Matched Items'
         else:  # full_excel
             cache_key = session.get('full_excel_cache_key')
-            available_tags = cache.get(cache_key, []) if cache_key else []
+            available_tags = cache.get(cache_key) if cache_key else []
+            if available_tags is None:
+                available_tags = []
             mode_name = 'Full Excel List'
         
         # Update session
@@ -7553,8 +7561,11 @@ def get_filter_status():
         json_matched_cache_key = session.get('json_matched_cache_key')
         full_excel_cache_key = session.get('full_excel_cache_key')
         
-        json_matched_count = len(cache.get(json_matched_cache_key, [])) if json_matched_cache_key else 0
-        full_excel_count = len(cache.get(full_excel_cache_key, [])) if full_excel_cache_key else 0
+        json_matched_tags = cache.get(json_matched_cache_key) if json_matched_cache_key else None
+        full_excel_tags = cache.get(full_excel_cache_key) if full_excel_cache_key else None
+        
+        json_matched_count = len(json_matched_tags) if json_matched_tags else 0
+        full_excel_count = len(full_excel_tags) if full_excel_tags else 0
         
         return jsonify({
             'success': True,
