@@ -340,7 +340,8 @@ class ProductDatabase:
                 conn.commit()
                 
                 # Check if we need to add missing columns (migration)
-                self._migrate_database_schema(cursor, conn)
+                # Only migrate if tables are empty or missing critical columns
+                self._migrate_database_schema_safe(cursor, conn)
                 
                 self._initialized = True
                 
@@ -351,8 +352,38 @@ class ProductDatabase:
                 logger.error(f"Error initializing database: {e}")
                 raise
     
+    def _migrate_database_schema_safe(self, cursor, conn):
+        """Safely migrate database schema only if necessary."""
+        try:
+            # Check if tables exist and have data
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='strains'")
+            strains_table_exists = cursor.fetchone() is not None
+            
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+            products_table_exists = cursor.fetchone() is not None
+            
+            if strains_table_exists and products_table_exists:
+                # Check if tables have data
+                cursor.execute("SELECT COUNT(*) FROM strains")
+                strain_count = cursor.fetchone()[0]
+                
+                cursor.execute("SELECT COUNT(*) FROM products")
+                product_count = cursor.fetchone()[0]
+                
+                if strain_count > 0 or product_count > 0:
+                    logger.info(f"Database has existing data ({strain_count} strains, {product_count} products). Skipping destructive migration.")
+                    return
+            
+            logger.info("Database is empty or missing tables. Performing safe schema migration...")
+            # Only proceed with migration if tables are empty or don't exist
+            self._migrate_database_schema(cursor, conn)
+            
+        except Exception as e:
+            logger.error(f"Error during safe schema migration: {e}")
+            # Don't raise - continue with existing schema
+    
     def _migrate_database_schema(self, cursor, conn):
-        """Force recreate database with correct schema."""
+        """Force recreate database with correct schema - USE WITH CAUTION."""
         try:
             logger.info("Forcing database recreation with correct schema...")
             
