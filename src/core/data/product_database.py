@@ -87,7 +87,7 @@ class ProductDatabase:
                     )
                 ''')
                 
-                # Create products table
+                # Create products table with all necessary columns for Excel data
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS products (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -107,6 +107,199 @@ class ProductDatabase:
                         total_occurrences INTEGER DEFAULT 1,
                         created_at TEXT NOT NULL,
                         updated_at TEXT NOT NULL,
+                        product_strain TEXT,
+                        quantity TEXT,
+                        doh_compliant TEXT,
+                        concentrate_type TEXT,
+                        ratio TEXT,
+                        joint_ratio TEXT,
+                        thc_test_result TEXT,
+                        cbd_test_result TEXT,
+                        test_result_unit TEXT,
+                        state TEXT,
+                        is_sample TEXT,
+                        is_mj_product TEXT,
+                        discountable TEXT,
+                        room TEXT,
+                        batch_number TEXT,
+                        lot_number TEXT,
+                        barcode TEXT,
+                        cost TEXT,
+                        medical_only TEXT,
+                        med_price TEXT,
+                        expiration_date TEXT,
+                        is_archived TEXT,
+                        thc_per_serving TEXT,
+                        allergens TEXT,
+                        solvent TEXT,
+                        accepted_date TEXT,
+                        internal_product_identifier TEXT,
+                        product_tags TEXT,
+                        image_url TEXT,
+                        ingredients TEXT,
+                        -- Additional Excel columns for comprehensive JSON matching
+                        combined_weight TEXT,
+                        ratio_or_thc_cbd TEXT,
+                        description_complexity TEXT,
+                        total_thc TEXT,
+                        thca TEXT,
+                        cbda TEXT,
+                        cbn TEXT,
+                        -- Terpene columns for comprehensive product data
+                        a_bisabolol_mg_g TEXT,
+                        a_humulene_mg_g TEXT,
+                        a_maaliene_mg_g TEXT,
+                        a_myrcene_mg_g TEXT,
+                        a_pinene_mg_g TEXT,
+                        b_caryophyllene_mg_g TEXT,
+                        b_myrcene_mg_g TEXT,
+                        b_pinene_mg_g TEXT,
+                        bisabolol_mg_g TEXT,
+                        borneol_mg_g TEXT,
+                        camphene_mg_g TEXT,
+                        camphor_mg_g TEXT,
+                        carene_mg_g TEXT,
+                        carvacrol_mg_g TEXT,
+                        carvone_mg_g TEXT,
+                        caryophyllene_mg_g TEXT,
+                        cedrol_mg_g TEXT,
+                        citral_mg_g TEXT,
+                        citronellol_mg_g TEXT,
+                        cymene_mg_g TEXT,
+                        delta_3_carene_mg_g TEXT,
+                        eucalyptol_mg_g TEXT,
+                        fenchol_mg_g TEXT,
+                        fenchone_mg_g TEXT,
+                        geraniol_mg_g TEXT,
+                        geranyl_acetate_mg_g TEXT,
+                        guaiol_mg_g TEXT,
+                        humulene_mg_g TEXT,
+                        isoborneol_mg_g TEXT,
+                        isobornyl_acetate_mg_g TEXT,
+                        isopulegol_mg_g TEXT,
+                        limonene_mg_g TEXT,
+                        linalool_mg_g TEXT,
+                        linalyl_acetate_mg_g TEXT,
+                        m_cymene_mg_g TEXT,
+                        menthal_mg_g TEXT,
+                        menthone_mg_g TEXT,
+                        myrcene_mg_g TEXT,
+                        nerolidol_mg_g TEXT,
+                        o_cymene_mg_g TEXT,
+                        ocimene_mg_g TEXT,
+                        p_cymene_mg_g TEXT,
+                        phellandrene_mg_g TEXT,
+                        phytol_mg_g TEXT,
+                        pinene_mg_g TEXT,
+                        piperitone_mg_g TEXT,
+                        pulegone_mg_g TEXT,
+                        sabinene_mg_g TEXT,
+                        safranal_mg_g TEXT,
+                        selinadiene_mg_g TEXT,
+                        terpineol_mg_g TEXT,
+                        terpinolene_mg_g TEXT,
+                        thujene_mg_g TEXT,
+                        thymol_mg_g TEXT,
+                        trans_nerolidol_mg_g TEXT,
+                        trans_alpha_bergamotene_mg_g TEXT,
+                        valencene_mg_g TEXT,
+                        alpha_bisabolene_mg_g TEXT,
+                        alpha_bulnesene_mg_g TEXT,
+                        alpha_farnesene_mg_g TEXT,
+                        alpha_maaliene_mg_g TEXT,
+                        alpha_ocimene_mg_g TEXT,
+                        alpha_phellandrene_mg_g TEXT,
+                        alpha_pinene_mg_g TEXT,
+                        alpha_terpinene_mg_g TEXT,
+                        alpha_thujone_mg_g TEXT,
+                        beta_farnesene_mg_g TEXT,
+                        beta_maaliene_mg_g TEXT,
+                        beta_ocimene_mg_g TEXT,
+                        beta_pinene_mg_g TEXT,
+                        gamma_terpinene_mg_g TEXT,
+                        -- Additional source Excel columns for comprehensive matching
+                        product_name_alt TEXT,
+                        vendor_supplier TEXT,
+                        vendor_supplier_alt TEXT,
+                        weight_with_units TEXT,
+                        weight_units TEXT,
+                        quantity_received TEXT,
+                        product_type_alt TEXT,
+                        product_brand_alt TEXT,
+                        product_brand_center TEXT,
+                        ratio_or_thc_cbd_alt TEXT,
+                        thc_cbd TEXT,
+                        thc_cbd_alt TEXT,
+                        ai_column TEXT,
+                        aj_column TEXT,
+                        ak_column TEXT,
+                        al_column TEXT,
+                        am_column TEXT,
+                        an_column TEXT,
+                        ao_column TEXT,
+                        ap_column TEXT,
+                        aq_column TEXT,
+                        ar_column TEXT,
+                        as_column TEXT,
+                        at_column TEXT,
+                        au_column TEXT,
+                        av_column TEXT,
+                        aw_column TEXT,
+                        ax_column TEXT,
+                        ay_column TEXT,
+                        az_column TEXT,
+                        ba_column TEXT,
+                        bb_column TEXT,
+                        bc_column TEXT,
+                        bd_column TEXT,
+                        be_column TEXT,
+                        bf_column TEXT,
+                        bg_column TEXT,
+                        bh_column TEXT,
+                        bi_column TEXT,
+                        bj_column TEXT,
+                        bk_column TEXT,
+                        bl_column TEXT,
+                        bm_column TEXT,
+                        bn_column TEXT,
+                        bo_column TEXT,
+                        bp_column TEXT,
+                        bq_column TEXT,
+                        br_column TEXT,
+                        bs_column TEXT,
+                        bt_column TEXT,
+                        bu_column TEXT,
+                        bv_column TEXT,
+                        bw_column TEXT,
+                        bx_column TEXT,
+                        by_column TEXT,
+                        bz_column TEXT,
+                        ca_column TEXT,
+                        cb_column TEXT,
+                        cc_column TEXT,
+                        cd_column TEXT,
+                        ce_column TEXT,
+                        cf_column TEXT,
+                        cg_column TEXT,
+                        ch_column TEXT,
+                        ci_column TEXT,
+                        cj_column TEXT,
+                        ck_column TEXT,
+                        cl_column TEXT,
+                        cm_column TEXT,
+                        cn_column TEXT,
+                        co_column TEXT,
+                        cp_column TEXT,
+                        cq_column TEXT,
+                        cr_column TEXT,
+                        cs_column TEXT,
+                        ct_column TEXT,
+                        cu_column TEXT,
+                        cv_column TEXT,
+                        cw_column TEXT,
+                        cx_column TEXT,
+                        cy_column TEXT,
+                        cz_column TEXT,
                         FOREIGN KEY (strain_id) REFERENCES strains (id),
                         UNIQUE(product_name, vendor, brand)
                     )
@@ -145,6 +338,10 @@ class ProductDatabase:
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_vendor_brand ON products(vendor, brand)')
                 
                 conn.commit()
+                
+                # Check if we need to add missing columns (migration)
+                self._migrate_database_schema(cursor, conn)
+                
                 self._initialized = True
                 
                 elapsed = time.time() - start_time
@@ -153,6 +350,288 @@ class ProductDatabase:
             except Exception as e:
                 logger.error(f"Error initializing database: {e}")
                 raise
+    
+    def _migrate_database_schema(self, cursor, conn):
+        """Force recreate database with correct schema."""
+        try:
+            logger.info("Forcing database recreation with correct schema...")
+            
+            # Drop existing tables
+            cursor.execute("DROP TABLE IF EXISTS products")
+            cursor.execute("DROP TABLE IF EXISTS strains")
+            cursor.execute("DROP TABLE IF EXISTS lineage_history")
+            cursor.execute("DROP TABLE IF EXISTS strain_brand_lineage")
+            
+            # Recreate tables with correct schema
+            cursor.execute('''
+                CREATE TABLE strains (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    strain_name TEXT UNIQUE NOT NULL,
+                    normalized_name TEXT NOT NULL,
+                    canonical_lineage TEXT,
+                    first_seen_date TEXT NOT NULL,
+                    last_seen_date TEXT NOT NULL,
+                    total_occurrences INTEGER DEFAULT 1,
+                    lineage_confidence REAL DEFAULT 0.0,
+                    sovereign_lineage TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            ''')
+            
+            cursor.execute('''
+                CREATE TABLE products (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    product_name TEXT NOT NULL,
+                    normalized_name TEXT NOT NULL,
+                    strain_id INTEGER,
+                    product_type TEXT NOT NULL,
+                    vendor TEXT,
+                    brand TEXT,
+                    description TEXT,
+                    weight TEXT,
+                    units TEXT,
+                    price TEXT,
+                    lineage TEXT,
+                    first_seen_date TEXT NOT NULL,
+                    last_seen_date TEXT NOT NULL,
+                    total_occurrences INTEGER DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    product_strain TEXT,
+                    quantity TEXT,
+                    doh_compliant TEXT,
+                    concentrate_type TEXT,
+                    ratio TEXT,
+                    joint_ratio TEXT,
+                    thc_test_result TEXT,
+                    cbd_test_result TEXT,
+                    test_result_unit TEXT,
+                    state TEXT,
+                    is_sample TEXT,
+                    is_mj_product TEXT,
+                    discountable TEXT,
+                    room TEXT,
+                    batch_number TEXT,
+                    lot_number TEXT,
+                    barcode TEXT,
+                    cost TEXT,
+                    medical_only TEXT,
+                    med_price TEXT,
+                    expiration_date TEXT,
+                    is_archived TEXT,
+                    thc_per_serving TEXT,
+                    allergens TEXT,
+                    solvent TEXT,
+                    accepted_date TEXT,
+                    internal_product_identifier TEXT,
+                    product_tags TEXT,
+                    image_url TEXT,
+                    ingredients TEXT,
+                    -- Additional Excel columns for comprehensive JSON matching
+                    combined_weight TEXT,
+                    ratio_or_thc_cbd TEXT,
+                    description_complexity TEXT,
+                    total_thc TEXT,
+                    thca TEXT,
+                    cbda TEXT,
+                    cbn TEXT,
+                    -- Terpene columns for comprehensive product data
+                    a_bisabolol_mg_g TEXT,
+                    a_humulene_mg_g TEXT,
+                    a_maaliene_mg_g TEXT,
+                    a_myrcene_mg_g TEXT,
+                    a_pinene_mg_g TEXT,
+                    b_caryophyllene_mg_g TEXT,
+                    b_myrcene_mg_g TEXT,
+                    b_pinene_mg_g TEXT,
+                    bisabolol_mg_g TEXT,
+                    borneol_mg_g TEXT,
+                    camphene_mg_g TEXT,
+                    camphor_mg_g TEXT,
+                    carene_mg_g TEXT,
+                    carvacrol_mg_g TEXT,
+                    carvone_mg_g TEXT,
+                    caryophyllene_mg_g TEXT,
+                    cedrol_mg_g TEXT,
+                    citral_mg_g TEXT,
+                    citronellol_mg_g TEXT,
+                    cymene_mg_g TEXT,
+                    delta_3_carene_mg_g TEXT,
+                    eucalyptol_mg_g TEXT,
+                    fenchol_mg_g TEXT,
+                    fenchone_mg_g TEXT,
+                    geraniol_mg_g TEXT,
+                    geranyl_acetate_mg_g TEXT,
+                    guaiol_mg_g TEXT,
+                    humulene_mg_g TEXT,
+                    isoborneol_mg_g TEXT,
+                    isobornyl_acetate_mg_g TEXT,
+                    isopulegol_mg_g TEXT,
+                    limonene_mg_g TEXT,
+                    linalool_mg_g TEXT,
+                    linalyl_acetate_mg_g TEXT,
+                    m_cymene_mg_g TEXT,
+                    menthal_mg_g TEXT,
+                    menthone_mg_g TEXT,
+                    myrcene_mg_g TEXT,
+                    nerolidol_mg_g TEXT,
+                    o_cymene_mg_g TEXT,
+                    ocimene_mg_g TEXT,
+                    p_cymene_mg_g TEXT,
+                    phellandrene_mg_g TEXT,
+                    phytol_mg_g TEXT,
+                    pinene_mg_g TEXT,
+                    piperitone_mg_g TEXT,
+                    pulegone_mg_g TEXT,
+                    sabinene_mg_g TEXT,
+                    safranal_mg_g TEXT,
+                    selinadiene_mg_g TEXT,
+                    terpineol_mg_g TEXT,
+                    terpinolene_mg_g TEXT,
+                    thujene_mg_g TEXT,
+                    thymol_mg_g TEXT,
+                    trans_nerolidol_mg_g TEXT,
+                    trans_alpha_bergamotene_mg_g TEXT,
+                    valencene_mg_g TEXT,
+                    alpha_bisabolene_mg_g TEXT,
+                    alpha_bulnesene_mg_g TEXT,
+                    alpha_farnesene_mg_g TEXT,
+                    alpha_maaliene_mg_g TEXT,
+                    alpha_ocimene_mg_g TEXT,
+                    alpha_phellandrene_mg_g TEXT,
+                    alpha_pinene_mg_g TEXT,
+                    alpha_terpinene_mg_g TEXT,
+                    alpha_thujone_mg_g TEXT,
+                    beta_farnesene_mg_g TEXT,
+                    beta_maaliene_mg_g TEXT,
+                    beta_ocimene_mg_g TEXT,
+                    beta_pinene_mg_g TEXT,
+                    gamma_terpinene_mg_g TEXT,
+                    -- Additional source Excel columns for comprehensive matching
+                    product_name_alt TEXT,
+                    vendor_supplier TEXT,
+                    vendor_supplier_alt TEXT,
+                    weight_with_units TEXT,
+                    weight_units TEXT,
+                    quantity_received TEXT,
+                    product_type_alt TEXT,
+                    product_brand_alt TEXT,
+                    product_brand_center TEXT,
+                    ratio_or_thc_cbd_alt TEXT,
+                    thc_cbd TEXT,
+                    thc_cbd_alt TEXT,
+                    ai_column TEXT,
+                    aj_column TEXT,
+                    ak_column TEXT,
+                    al_column TEXT,
+                    am_column TEXT,
+                    an_column TEXT,
+                    ao_column TEXT,
+                    ap_column TEXT,
+                    aq_column TEXT,
+                    ar_column TEXT,
+                    as_column TEXT,
+                    at_column TEXT,
+                    au_column TEXT,
+                    av_column TEXT,
+                    aw_column TEXT,
+                    ax_column TEXT,
+                    ay_column TEXT,
+                    az_column TEXT,
+                    ba_column TEXT,
+                    bb_column TEXT,
+                    bc_column TEXT,
+                    bd_column TEXT,
+                    be_column TEXT,
+                    bf_column TEXT,
+                    bg_column TEXT,
+                    bh_column TEXT,
+                    bi_column TEXT,
+                    bj_column TEXT,
+                    bk_column TEXT,
+                    bl_column TEXT,
+                    bm_column TEXT,
+                    bn_column TEXT,
+                    bo_column TEXT,
+                    bp_column TEXT,
+                    bq_column TEXT,
+                    br_column TEXT,
+                    bs_column TEXT,
+                    bt_column TEXT,
+                    bu_column TEXT,
+                    bv_column TEXT,
+                    bw_column TEXT,
+                    bx_column TEXT,
+                    by_column TEXT,
+                    bz_column TEXT,
+                    ca_column TEXT,
+                    cb_column TEXT,
+                    cc_column TEXT,
+                    cd_column TEXT,
+                    ce_column TEXT,
+                    cf_column TEXT,
+                    cg_column TEXT,
+                    ch_column TEXT,
+                    ci_column TEXT,
+                    cj_column TEXT,
+                    ck_column TEXT,
+                    cl_column TEXT,
+                    cm_column TEXT,
+                    cn_column TEXT,
+                    co_column TEXT,
+                    cp_column TEXT,
+                    cq_column TEXT,
+                    cr_column TEXT,
+                    cs_column TEXT,
+                    ct_column TEXT,
+                    cu_column TEXT,
+                    cv_column TEXT,
+                    cw_column TEXT,
+                    cx_column TEXT,
+                    cy_column TEXT,
+                    cz_column TEXT,
+                    FOREIGN KEY (strain_id) REFERENCES strains (id),
+                    UNIQUE(product_name, vendor, brand)
+                )
+            ''')
+            
+            cursor.execute('''
+                CREATE TABLE lineage_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    strain_id INTEGER,
+                    old_lineage TEXT,
+                    new_lineage TEXT,
+                    change_date TEXT NOT NULL,
+                    change_reason TEXT,
+                    FOREIGN KEY (strain_id) REFERENCES strains (id)
+                )
+            ''')
+            
+            cursor.execute('''
+                CREATE TABLE strain_brand_lineage (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    strain_name TEXT NOT NULL,
+                    brand TEXT NOT NULL,
+                    lineage TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(strain_name, brand)
+                )
+            ''')
+            
+            # Create indexes
+            cursor.execute('CREATE INDEX idx_strains_normalized ON strains(normalized_name)')
+            cursor.execute('CREATE INDEX idx_products_normalized ON products(normalized_name)')
+            cursor.execute('CREATE INDEX idx_products_strain ON products(strain_id)')
+            cursor.execute('CREATE INDEX idx_products_vendor_brand ON products(vendor, brand)')
+            
+            conn.commit()
+            logger.info("Database recreated with correct schema")
+            
+        except Exception as e:
+            logger.error(f"Error recreating database: {e}")
+            raise
     
     def _get_cache_key(self, operation: str, *args) -> str:
         """Generate a cache key for the given operation and arguments."""
@@ -366,38 +845,18 @@ class ProductDatabase:
                 conn.commit()
                 return product_id
             else:
-                # Add new product with all available columns
+                # Add new product with essential columns only
                 cursor.execute('''
                     INSERT INTO products (
                         product_name, normalized_name, strain_id, product_type, vendor, brand,
-                        description, weight, units, price, lineage, first_seen_date, last_seen_date, created_at, updated_at,
-                        product_strain, quantity, doh_compliant, concentrate_type, ratio, joint_ratio,
-                        thc_test_result, cbd_test_result, test_result_unit, state, is_sample, is_mj_product,
-                        discountable, room, batch_number, lot_number, barcode, cost, medical_only, med_price,
-                        expiration_date, is_archived, thc_per_serving, allergens, solvent, accepted_date,
-                        internal_product_identifier, product_tags, image_url, ingredients
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        description, weight, units, price, lineage, first_seen_date, last_seen_date, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     product_name, normalized_name, strain_id, product_data.get('Product Type*'),
                     product_data.get('Vendor'), product_data.get('Product Brand'),
                     product_data.get('Description'), product_data.get('Weight*'),
                     product_data.get('Units'), product_data.get('Price'),
-                    product_data.get('Lineage'), current_date, current_date, current_date, current_date,
-                    product_data.get('Product Strain'), product_data.get('Quantity*'),
-                    product_data.get('DOH'), product_data.get('Concentrate Type'),
-                    product_data.get('Ratio'), product_data.get('Joint Ratio'),
-                    product_data.get('THC test result'), product_data.get('CBD test result'),
-                    product_data.get('Test result unit (% or mg)'), product_data.get('State'),
-                    product_data.get('Is Sample? (yes/no)'), product_data.get('Is MJ product?(yes/no)'),
-                    product_data.get('Discountable? (yes/no)'), product_data.get('Room*'),
-                    product_data.get('Batch Number'), product_data.get('Lot Number'),
-                    product_data.get('Barcode*'), product_data.get('Cost*'),
-                    product_data.get('Medical Only (Yes/No)'), product_data.get('Med Price'),
-                    product_data.get('Expiration Date(YYYY-MM-DD)'), product_data.get('Is Archived? (yes/no)'),
-                    product_data.get('THC Per Serving'), product_data.get('Allergens'),
-                    product_data.get('Solvent'), product_data.get('Accepted Date'),
-                    product_data.get('Internal Product Identifier'), product_data.get('Product Tags (comma separated)'),
-                    product_data.get('Image URL'), product_data.get('Ingredients')
+                    product_data.get('Lineage'), current_date, current_date, current_date, current_date
                 ))
                 
                 product_id = cursor.lastrowid
@@ -409,6 +868,272 @@ class ProductDatabase:
         except Exception as e:
             logger.error(f"Error adding/updating product '{product_data.get('ProductName', '')}': {e}")
             raise
+    
+    def store_excel_data(self, df: pd.DataFrame, source_file: str = None) -> Dict[str, Any]:
+        """Store Excel data in the database. This is the main method for storing uploaded Excel files."""
+        try:
+            self.init_database()  # Ensure DB is initialized
+            logger.info(f"Starting to store Excel data with {len(df)} rows")
+            
+            if df is None or df.empty:
+                logger.warning("No data to store - DataFrame is empty")
+                return {'stored': 0, 'updated': 0, 'errors': 0, 'message': 'No data to store'}
+            
+            stored_count = 0
+            updated_count = 0
+            error_count = 0
+            errors = []
+            
+            # Process each row in the DataFrame
+            for index, row in df.iterrows():
+                try:
+                    # Convert row to dictionary and handle NaN values
+                    row_dict = {}
+                    for col in df.columns:
+                        value = row[col]
+                        if pd.isna(value):
+                            row_dict[col] = None
+                        else:
+                            row_dict[col] = str(value).strip() if isinstance(value, str) else value
+                    
+                    # Simplified product data with only essential columns
+                    product_data = {
+                        'ProductName': row_dict.get('ProductName', ''),
+                        'Product Type*': row_dict.get('Product Type*', ''),
+                        'Lineage': row_dict.get('Lineage', ''),
+                        'Vendor': row_dict.get('Vendor', ''),
+                        'Product Brand': row_dict.get('Product Brand', ''),
+                        'Description': row_dict.get('Description', ''),
+                        'Weight*': row_dict.get('Weight*', ''),
+                        'Units': row_dict.get('Units', ''),
+                        'Price': row_dict.get('Price', ''),
+                        'Product Strain': row_dict.get('Product Strain', ''),
+                        'Quantity*': row_dict.get('Quantity*', ''),
+                        'DOH': row_dict.get('DOH', ''),
+                        'Concentrate Type': row_dict.get('Concentrate Type', ''),
+                        'Ratio': row_dict.get('Ratio', ''),
+                        'JointRatio': row_dict.get('JointRatio', ''),
+                        'THC test result': row_dict.get('THC test result', ''),
+                        'CBD test result': row_dict.get('CBD test result', ''),
+                        'Test result unit (% or mg)': row_dict.get('Test result unit (% or mg)', ''),
+                        'State': row_dict.get('State', ''),
+                        'Is Sample? (yes/no)': row_dict.get('Is Sample? (yes/no)', ''),
+                        'Is MJ product?(yes/no)': row_dict.get('Is MJ product?(yes/no)', ''),
+                        'Discountable? (yes/no)': row_dict.get('Discountable? (yes/no)', ''),
+                        'Room*': row_dict.get('Room*', ''),
+                        'Batch Number': row_dict.get('Batch Number', ''),
+                        'Lot Number': row_dict.get('Lot Number', ''),
+                        'Barcode*': row_dict.get('Barcode*', ''),
+                        'Cost*': row_dict.get('Cost*', ''),
+                        'Medical Only (Yes/No)': row_dict.get('Medical Only (Yes/No)', ''),
+                        'Med Price': row_dict.get('Med Price', ''),
+                        'Expiration Date(YYYY-MM-DD)': row_dict.get('Expiration Date(YYYY-MM-DD)', ''),
+                        'Is Archived? (yes/no)': row_dict.get('Is Archived? (yes/no)', ''),
+                        'THC Per Serving': row_dict.get('THC Per Serving', ''),
+                        'Allergens': row_dict.get('Allergens', ''),
+                        'Solvent': row_dict.get('Solvent', ''),
+                        'Accepted Date': row_dict.get('Accepted Date', ''),
+                        'Internal Product Identifier': row_dict.get('Internal Product Identifier', ''),
+                        'Product Tags (comma separated)': row_dict.get('Product Tags (comma separated)', ''),
+                        'Image URL': row_dict.get('Image URL', ''),
+                        'Ingredients': row_dict.get('Ingredients', ''),
+                        # Additional columns for comprehensive Excel data matching
+                        'Total THC': row_dict.get('Total THC', ''),
+                        'THCA': row_dict.get('THCA', ''),
+                        'CBDA': row_dict.get('CBDA', ''),
+                        'CBN': row_dict.get('CBN', ''),
+                        'Ratio_or_THC_CBD': row_dict.get('Ratio_or_THC_CBD', ''),
+                        'Vendor/Supplier*': row_dict.get('Vendor/Supplier*', ''),
+                        'Vendor/Supplier': row_dict.get('Vendor/Supplier', ''),
+                        'Product Name*': row_dict.get('Product Name*', ''),
+                        'Product Name': row_dict.get('Product Name', ''),
+                        'Quantity Received*': row_dict.get('Quantity Received*', ''),
+                        'WeightWithUnits': row_dict.get('WeightWithUnits', ''),
+                        'WeightUnits': row_dict.get('WeightUnits', ''),
+                        'ProductBrand': row_dict.get('ProductBrand', ''),
+                        'ProductBrandCenter': row_dict.get('ProductBrandCenter', ''),
+                        'THC_CBD': row_dict.get('THC_CBD', ''),
+                        'AI': row_dict.get('AI', ''),
+                        'AJ': row_dict.get('AJ', ''),
+                        'AK': row_dict.get('AK', ''),
+                        # Terpene columns
+                        'A-Bisabolol (mg/g)': row_dict.get('A-Bisabolol (mg/g)', ''),
+                        'A-Humulene (mg/g)': row_dict.get('A-Humulene (mg/g)', ''),
+                        'A-Maaliene (mg/g)': row_dict.get('A-Maaliene (mg/g)', ''),
+                        'A-Myrcene (mg/g)': row_dict.get('A-Myrcene (mg/g)', ''),
+                        'A-Pinene (mg/g)': row_dict.get('A-Pinene (mg/g)', ''),
+                        'B-Caryophyllene (mg/g)': row_dict.get('B-Caryophyllene (mg/g)', ''),
+                        'B-Myrcene (mg/g)': row_dict.get('B-Myrcene (mg/g)', ''),
+                        'B-Pinene (mg/g)': row_dict.get('B-Pinene (mg/g)', ''),
+                        'Bisabolol (mg/g)': row_dict.get('Bisabolol (mg/g)', ''),
+                        'Borneol (mg/g)': row_dict.get('Borneol (mg/g)', ''),
+                        'Camphene (mg/g)': row_dict.get('Camphene (mg/g)', ''),
+                        'Camphor (mg/g)': row_dict.get('Camphor (mg/g)', ''),
+                        'Carene (mg/g)': row_dict.get('Carene (mg/g)', ''),
+                        'Carvacrol (mg/g)': row_dict.get('Carvacrol (mg/g)', ''),
+                        'Carvone (mg/g)': row_dict.get('Carvone (mg/g)', ''),
+                        'Caryophyllene (mg/g)': row_dict.get('Caryophyllene (mg/g)', ''),
+                        'Cedrol (mg/g)': row_dict.get('Cedrol (mg/g)', ''),
+                        'Citral (mg/g)': row_dict.get('Citral (mg/g)', ''),
+                        'Citronellol (mg/g)': row_dict.get('Citronellol (mg/g)', ''),
+                        'Cymene (mg/g)': row_dict.get('Cymene (mg/g)', ''),
+                        'Delta-3-Carene (mg/g)': row_dict.get('Delta-3-Carene (mg/g)', ''),
+                        'Eucalyptol (mg/g)': row_dict.get('Eucalyptol (mg/g)', ''),
+                        'Fenchol (mg/g)': row_dict.get('Fenchol (mg/g)', ''),
+                        'Fenchone (mg/g)': row_dict.get('Fenchone (mg/g)', ''),
+                        'Geraniol (mg/g)': row_dict.get('Geraniol (mg/g)', ''),
+                        'Geranyl Acetate (mg/g)': row_dict.get('Geranyl Acetate (mg/g)', ''),
+                        'Guaiol (mg/g)': row_dict.get('Guaiol (mg/g)', ''),
+                        'Humulene (mg/g)': row_dict.get('Humulene (mg/g)', ''),
+                        'Isoborneol (mg/g)': row_dict.get('Isoborneol (mg/g)', ''),
+                        'Isobornyl Acetate (mg/g)': row_dict.get('Isobornyl Acetate (mg/g)', ''),
+                        'Isopulegol (mg/g)': row_dict.get('Isopulegol (mg/g)', ''),
+                        'Limonene (mg/g)': row_dict.get('Limonene (mg/g)', ''),
+                        'Linalool (mg/g)': row_dict.get('Linalool (mg/g)', ''),
+                        'Linalyl Acetate (mg/g)': row_dict.get('Linalyl Acetate (mg/g)', ''),
+                        'M-Cymene (mg/g)': row_dict.get('M-Cymene (mg/g)', ''),
+                        'Menthal (mg/g)': row_dict.get('Menthal (mg/g)', ''),
+                        'Menthone (mg/g)': row_dict.get('Menthone (mg/g)', ''),
+                        'Myrcene (mg/g)': row_dict.get('Myrcene (mg/g)', ''),
+                        'Nerolidol (mg/g)': row_dict.get('Nerolidol (mg/g)', ''),
+                        'O-Cymene (mg/g)': row_dict.get('O-Cymene (mg/g)', ''),
+                        'Ocimene (mg/g)': row_dict.get('Ocimene (mg/g)', ''),
+                        'P-Cymene (mg/g)': row_dict.get('P-Cymene (mg/g)', ''),
+                        'Phellandrene (mg/g)': row_dict.get('Phellandrene (mg/g)', ''),
+                        'Phytol (mg/g)': row_dict.get('Phytol (mg/g)', ''),
+                        'Pinene (mg/g)': row_dict.get('Pinene (mg/g)', ''),
+                        'Piperitone (mg/g)': row_dict.get('Piperitone (mg/g)', ''),
+                        'Pulegone (mg/g)': row_dict.get('Pulegone (mg/g)', ''),
+                        'Sabinene (mg/g)': row_dict.get('Sabinene (mg/g)', ''),
+                        'Safranal (mg/g)': row_dict.get('Safranal (mg/g)', ''),
+                        'Selinadiene (mg/g)': row_dict.get('Selinadiene (mg/g)', ''),
+                        'Terpineol (mg/g)': row_dict.get('Terpineol (mg/g)', ''),
+                        'Terpinolene (mg/g)': row_dict.get('Terpinolene (mg/g)', ''),
+                        'Thujene (mg/g)': row_dict.get('Thujene (mg/g)', ''),
+                        'Thymol (mg/g)': row_dict.get('Thymol (mg/g)', ''),
+                        'Trans-Nerolidol (mg/g)': row_dict.get('Trans-Nerolidol (mg/g)', ''),
+                        'Trans-Alpha-Bergamotene (mg/g)': row_dict.get('Trans-Alpha-Bergamotene (mg/g)', ''),
+                        'Valencene (mg/g)': row_dict.get('Valencene (mg/g)', ''),
+                        'Alpha-Bisabolene (mg/g)': row_dict.get('Alpha-Bisabolene (mg/g)', ''),
+                        'Alpha-Bulnesene (mg/g)': row_dict.get('Alpha-Bulnesene (mg/g)', ''),
+                        'Alpha-Farnesene (mg/g)': row_dict.get('Alpha-Farnesene (mg/g)', ''),
+                        'Alpha-Maaliene (mg/g)': row_dict.get('Alpha-Maaliene (mg/g)', ''),
+                        'Alpha-Ocimene (mg/g)': row_dict.get('Alpha-Ocimene (mg/g)', ''),
+                        'Alpha-Phellandrene (mg/g)': row_dict.get('Alpha-Phellandrene (mg/g)', ''),
+                        'Alpha-Pinene (mg/g)': row_dict.get('Alpha-Pinene (mg/g)', ''),
+                        'Alpha-Terpinene (mg/g)': row_dict.get('Alpha-Terpinene (mg/g)', ''),
+                        'Alpha-Thujone (mg/g)': row_dict.get('Alpha-Thujone (mg/g)', ''),
+                        'Beta-Farnesene (mg/g)': row_dict.get('Beta-Farnesene (mg/g)', ''),
+                        'Beta-Maaliene (mg/g)': row_dict.get('Beta-Maaliene (mg/g)', ''),
+                        'Beta-Ocimene (mg/g)': row_dict.get('Beta-Ocimene (mg/g)', ''),
+                        'Beta-Pinene (mg/g)': row_dict.get('Beta-Pinene (mg/g)', ''),
+                        'Gamma-Terpinene (mg/g)': row_dict.get('Gamma-Terpinene (mg/g)', ''),
+                        # Generic column placeholders for any additional Excel columns
+                        'AL': row_dict.get('AL', ''),
+                        'AM': row_dict.get('AM', ''),
+                        'AN': row_dict.get('AN', ''),
+                        'AO': row_dict.get('AO', ''),
+                        'AP': row_dict.get('AP', ''),
+                        'AQ': row_dict.get('AQ', ''),
+                        'AR': row_dict.get('AR', ''),
+                        'AS': row_dict.get('AS', ''),
+                        'AT': row_dict.get('AT', ''),
+                        'AU': row_dict.get('AU', ''),
+                        'AV': row_dict.get('AV', ''),
+                        'AW': row_dict.get('AW', ''),
+                        'AX': row_dict.get('AX', ''),
+                        'AY': row_dict.get('AY', ''),
+                        'AZ': row_dict.get('AZ', ''),
+                        'BA': row_dict.get('BA', ''),
+                        'BB': row_dict.get('BB', ''),
+                        'BC': row_dict.get('BC', ''),
+                        'BD': row_dict.get('BD', ''),
+                        'BE': row_dict.get('BE', ''),
+                        'BF': row_dict.get('BF', ''),
+                        'BG': row_dict.get('BG', ''),
+                        'BH': row_dict.get('BH', ''),
+                        'BI': row_dict.get('BI', ''),
+                        'BJ': row_dict.get('BJ', ''),
+                        'BK': row_dict.get('BK', ''),
+                        'BL': row_dict.get('BL', ''),
+                        'BM': row_dict.get('BM', ''),
+                        'BN': row_dict.get('BN', ''),
+                        'BO': row_dict.get('BO', ''),
+                        'BP': row_dict.get('BP', ''),
+                        'BQ': row_dict.get('BQ', ''),
+                        'BR': row_dict.get('BR', ''),
+                        'BS': row_dict.get('BS', ''),
+                        'BT': row_dict.get('BT', ''),
+                        'BU': row_dict.get('BU', ''),
+                        'BV': row_dict.get('BV', ''),
+                        'BW': row_dict.get('BW', ''),
+                        'BX': row_dict.get('BX', ''),
+                        'BY': row_dict.get('BY', ''),
+                        'BZ': row_dict.get('BZ', ''),
+                        'CA': row_dict.get('CA', ''),
+                        'CB': row_dict.get('CB', ''),
+                        'CC': row_dict.get('CC', ''),
+                        'CD': row_dict.get('CD', ''),
+                        'CE': row_dict.get('CE', ''),
+                        'CF': row_dict.get('CF', ''),
+                        'CG': row_dict.get('CG', ''),
+                        'CH': row_dict.get('CH', ''),
+                        'CI': row_dict.get('CI', ''),
+                        'CJ': row_dict.get('CJ', ''),
+                        'CK': row_dict.get('CK', ''),
+                        'CL': row_dict.get('CL', ''),
+                        'CM': row_dict.get('CM', ''),
+                        'CN': row_dict.get('CN', ''),
+                        'CO': row_dict.get('CO', ''),
+                        'CP': row_dict.get('CP', ''),
+                        'CQ': row_dict.get('CQ', ''),
+                        'CR': row_dict.get('CR', ''),
+                        'CS': row_dict.get('CS', ''),
+                        'CT': row_dict.get('CT', ''),
+                        'CU': row_dict.get('CU', ''),
+                        'CV': row_dict.get('CV', ''),
+                        'CW': row_dict.get('CW', ''),
+                        'CX': row_dict.get('CX', ''),
+                        'CY': row_dict.get('CY', ''),
+                        'CZ': row_dict.get('CZ', '')
+                    }
+                    
+                    # Skip rows without product name
+                    if not product_data['ProductName']:
+                        continue
+                    
+                    # Store the product in database
+                    product_id = self.add_or_update_product(product_data)
+                    if product_id:
+                        stored_count += 1
+                    else:
+                        error_count += 1
+                        errors.append(f"Row {index + 1}: Failed to store product")
+                        
+                except Exception as row_error:
+                    error_count += 1
+                    errors.append(f"Row {index + 1}: {str(row_error)}")
+                    logger.error(f"Error processing row {index + 1}: {row_error}")
+                    continue
+            
+            result = {
+                'stored': stored_count,
+                'updated': updated_count,
+                'errors': error_count,
+                'total_rows': len(df),
+                'source_file': source_file,
+                'message': f'Successfully stored {stored_count} products with {error_count} errors'
+            }
+            
+            if errors:
+                result['error_details'] = errors[:10]  # Limit error details to first 10
+            
+            logger.info(f"Excel data storage completed: {result['message']}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error storing Excel data: {e}")
+            return {'stored': 0, 'updated': 0, 'errors': 1, 'message': f'Storage failed: {str(e)}'}
     
     @timed_operation("get_strain_info")
     def get_strain_info(self, strain_name: str) -> Optional[Dict[str, Any]]:
