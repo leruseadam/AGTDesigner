@@ -790,75 +790,111 @@ class TemplateProcessor:
         chunk_start_time = time.time()
         
         try:
-            if hasattr(self._expanded_template_buffer, 'seek'):
-                self._expanded_template_buffer.seek(0)
-            
-            doc = DocxTemplate(self._expanded_template_buffer)
-            
-            # Debug: Log the order of records in this chunk
-            chunk_order = [record.get('ProductName', 'Unknown') for record in chunk]
-            self.logger.info(f"Processing chunk with {len(chunk)} records in order: {chunk_order}")
-            
-            # Build context for each record in the chunk
-            context = {}
-            for i, record in enumerate(chunk):
-                # Set current record for brand centering logic
-                self.current_record = record
-                # Set current product type for brand marker processing
-                self.current_product_type = (record.get('ProductType', '').lower() or 
-                                          record.get('Product Type*', '').lower())
-                if self.template_type == 'inventory':
-                    label_context = self._build_inventory_context(record)
-                else:
-                    label_context = self._build_label_context(record, doc)
-                context[f'Label{i+1}'] = label_context
-                # Debug logging to check field values and order
-                product_name = record.get('ProductName', 'Unknown')
-                self.logger.debug(f"Label{i+1} -> {product_name} - ProductBrand: '{label_context.get('ProductBrand', 'NOT_FOUND')}', Price: '{label_context.get('Price', 'NOT_FOUND')}', THC: '{label_context.get('THC', 'NOT_FOUND')}', CBD: '{label_context.get('CBD', 'NOT_FOUND')}'")
-            
-            # Add empty contexts for remaining labels up to chunk_size
-            for i in range(len(chunk), self.chunk_size):
-                context[f'Label{i+1}'] = {}
-            
-            # Debug: Log the total number of labels created
-            self.logger.info(f"Created context with {len(context)} labels: {list(context.keys())}")
-            
-            # Safety check: Ensure we have enough labels for the template
-            # The template expansion might create more labels than chunk_size
-            # Add empty contexts for labels up to 500 to prevent undefined errors
-            max_labels_needed = 500  # Increased safety limit to cover all possible labels
-            for i in range(self.chunk_size + 1, max_labels_needed + 1):
-                context[f'Label{i}'] = {}
-            
-            self.logger.info(f"Added safety labels up to Label{max_labels_needed}, total context keys: {list(context.keys())}")
-
-            # CRITICAL FIX: Process any deferred DOH images now that we have the proper DocxTemplate
-            self._process_deferred_doh_images(context, doc)
-            
-            # DOH images are now properly created with InlineImage objects
-
-            # Debug: Log the template structure before rendering
-            self.logger.info(f"About to render template with {len(context)} labels")
-            self.logger.info(f"Template type: {self.template_type}")
-            self.logger.info(f"Chunk size: {self.chunk_size}")
-            
-            try:
-                doc.render(context)
-                self.logger.info("Template rendering completed successfully")
+            # Special handling for mini templates - use manual placeholder replacement
+            if self.template_type == 'mini':
+                self.logger.info("Mini template detected - using manual placeholder replacement instead of DocxTemplate")
                 
-
+                # Build context for each record in the chunk
+                context = {}
+                for i, record in enumerate(chunk):
+                    # Set current record for brand centering logic
+                    self.current_record = record
+                    # Set current product type for brand marker processing
+                    self.current_product_type = (record.get('ProductType', '').lower() or 
+                                              record.get('Product Type*', '').lower())
+                    label_context = self._build_label_context(record, None)  # No doc needed for mini templates
+                    context[f'Label{i+1}'] = label_context
+                    # Debug logging to check field values and order
+                    product_name = record.get('ProductName', 'Unknown')
+                    self.logger.debug(f"Label{i+1} -> {product_name} - ProductBrand: '{label_context.get('ProductBrand', 'NOT_FOUND')}', Price: '{label_context.get('Price', 'NOT_FOUND')}', THC: '{label_context.get('THC', 'NOT_FOUND')}', CBD: '{label_context.get('CBD', 'NOT_FOUND')}'")
                 
-            except Exception as render_error:
-                self.logger.error(f"Template rendering failed: {render_error}")
-                # Log more details about the context
-                self.logger.error(f"Context keys available: {list(context.keys())}")
-                self.logger.error(f"Context length: {len(context)}")
-                raise render_error
-            
-            buffer = BytesIO()
-            doc.save(buffer)
-            buffer.seek(0)
-            rendered_doc = Document(buffer)
+                # Add empty contexts for remaining labels up to chunk_size
+                for i in range(len(chunk), self.chunk_size):
+                    context[f'Label{i+1}'] = {}
+                
+                # Debug: Log the total number of labels created
+                self.logger.info(f"Created context with {len(context)} labels: {list(context.keys())}")
+                
+                # Safety check: Ensure we have enough labels for the template
+                max_labels_needed = 500  # Increased safety limit to cover all possible labels
+                for i in range(self.chunk_size + 1, max_labels_needed + 1):
+                    context[f'Label{i}'] = {}
+                
+                self.logger.info(f"Added safety labels up to Label{max_labels_needed}, total context keys: {list(context.keys())}")
+                
+                # Use the mini template preserve design method
+                rendered_doc = self._expand_mini_template_preserve_design(None, context)
+                
+            else:
+                # Standard processing for non-mini templates
+                if hasattr(self._expanded_template_buffer, 'seek'):
+                    self._expanded_template_buffer.seek(0)
+                
+                doc = DocxTemplate(self._expanded_template_buffer)
+                
+                # Debug: Log the order of records in this chunk
+                chunk_order = [record.get('ProductName', 'Unknown') for record in chunk]
+                self.logger.info(f"Processing chunk with {len(chunk)} records in order: {chunk_order}")
+                
+                # Build context for each record in the chunk
+                context = {}
+                for i, record in enumerate(chunk):
+                    # Set current record for brand centering logic
+                    self.current_record = record
+                    # Set current product type for brand marker processing
+                    self.current_product_type = (record.get('ProductType', '').lower() or 
+                                              record.get('Product Type*', '').lower())
+                    if self.template_type == 'inventory':
+                        label_context = self._build_inventory_context(record)
+                    else:
+                        label_context = self._build_label_context(record, doc)
+                    context[f'Label{i+1}'] = label_context
+                    # Debug logging to check field values and order
+                    product_name = record.get('ProductName', 'Unknown')
+                    self.logger.debug(f"Label{i+1} -> {product_name} - ProductBrand: '{label_context.get('ProductBrand', 'NOT_FOUND')}', Price: '{label_context.get('Price', 'NOT_FOUND')}', THC: '{label_context.get('THC', 'NOT_FOUND')}', CBD: '{label_context.get('CBD', 'NOT_FOUND')}'")
+                
+                # Add empty contexts for remaining labels up to chunk_size
+                for i in range(len(chunk), self.chunk_size):
+                    context[f'Label{i+1}'] = {}
+                
+                # Debug: Log the total number of labels created
+                self.logger.info(f"Created context with {len(context)} labels: {list(context.keys())}")
+                
+                # Safety check: Ensure we have enough labels for the template
+                # The template expansion might create more labels than chunk_size
+                # Add empty contexts for labels up to 500 to prevent undefined errors
+                for i in range(self.chunk_size + 1, max_labels_needed + 1):
+                    context[f'Label{i}'] = {}
+                
+                self.logger.info(f"Added safety labels up to Label{max_labels_needed}, total context keys: {list(context.keys())}")
+
+                # CRITICAL FIX: Process any deferred DOH images now that we have the proper DocxTemplate
+                self._process_deferred_doh_images(context, doc)
+                
+                # DOH images are now properly created with InlineImage objects
+
+                # Debug: Log the template structure before rendering
+                self.logger.info(f"About to render template with {len(context)} labels")
+                self.logger.info(f"Template type: {self.template_type}")
+                self.logger.info(f"Chunk size: {self.chunk_size}")
+                
+                try:
+                    doc.render(context)
+                    self.logger.info("Template rendering completed successfully")
+                    
+
+                    
+                except Exception as render_error:
+                    self.logger.error(f"Template rendering failed: {render_error}")
+                    # Log more details about the context
+                    self.logger.error(f"Context keys available: {list(context.keys())}")
+                    self.logger.error(f"Context length: {len(context)}")
+                    raise render_error
+                
+                buffer = BytesIO()
+                doc.save(buffer)
+                buffer.seek(0)
+                rendered_doc = Document(buffer)
             
 
             
@@ -1106,7 +1142,7 @@ class TemplateProcessor:
         
         return context
 
-    def _build_label_context(self, record, doc):
+    def _build_label_context(self, record, doc=None):
         """Ultra-optimized label context building for maximum performance."""
         # Fast dictionary copy
         label_context = dict(record)
@@ -1491,19 +1527,21 @@ class TemplateProcessor:
             return doc
         
         # Clean up DOH cells before processing to ensure proper image positioning
-        try:
-            self._clean_doh_cells_before_processing(doc)
-        except Exception as e:
-            self.logger.warning(f"DOH cell cleanup failed: {e}")
-        
-        # Fast mini template processing
-        if self.template_type == 'mini':
+        # SKIP for mini templates since they use manual processing
+        if self.template_type != 'mini':
             try:
-                self._add_weight_units_markers(doc)
-                self._add_brand_markers(doc)
-                self._clear_blank_cells_in_mini_template(doc)
+                self._clean_doh_cells_before_processing(doc)
             except Exception as e:
-                self.logger.warning(f"Mini template processing failed: {e}")
+                self.logger.warning(f"DOH cell cleanup failed: {e}")
+        else:
+            self.logger.info("Skipping DOH cell cleanup for mini template - using manual processing")
+        
+        # Fast mini template processing - SKIP for mini templates since they use manual processing
+        if self.template_type == 'mini':
+            self.logger.info("Skipping post-processing for mini template - using manual placeholder replacement")
+            # Mini templates don't need post-processing since they use manual placeholder replacement
+            # and bypass the general DocxTemplate pipeline entirely
+            pass
 
         # ProductStrain in Brand cells fix
         try:
@@ -1569,14 +1607,17 @@ class TemplateProcessor:
         except Exception as e:
             self.logger.warning(f"Content spacing consistency failed: {e}")
 
-        # Fast Arial Bold enforcement
-        try:
-            from .docx_formatting import enforce_arial_bold_all_text, enforce_ratio_formatting, enforce_thc_cbd_bold_formatting
-            enforce_arial_bold_all_text(doc)
-            enforce_ratio_formatting(doc)
-            enforce_thc_cbd_bold_formatting(doc)
-        except Exception as e:
-            self.logger.warning(f"Arial bold failed: {e}")
+        # Fast Arial Bold enforcement - SKIP for mini templates to preserve original formatting
+        if self.template_type != 'mini':
+            try:
+                from .docx_formatting import enforce_arial_bold_all_text, enforce_ratio_formatting, enforce_thc_cbd_bold_formatting
+                enforce_arial_bold_all_text(doc)
+                enforce_ratio_formatting(doc)
+                enforce_thc_cbd_bold_formatting(doc)
+            except Exception as e:
+                self.logger.warning(f"Arial bold failed: {e}")
+        else:
+            self.logger.info("Skipping Arial Bold enforcement for mini template - preserving original formatting")
 
         # Fast DOH image centering
         try:
@@ -4577,5 +4618,166 @@ class TemplateProcessor:
         except Exception as e:
             self.logger.error(f"Error applying vendor alignment to paragraph: {e}")
             return False
+
+    def _expand_mini_template_preserve_design(self, doc, context):
+        """Expand mini template to 4x5 grid while preserving original design and using manual placeholder replacement."""
+        try:
+            self.logger.info("Using mini template preserve design method with manual placeholder replacement")
+            
+            # Load the original mini.docx template to preserve design
+            mini_template_path = os.path.join(os.path.dirname(self._template_path), 'mini.docx')
+            if not os.path.exists(mini_template_path):
+                raise RuntimeError(f"mini.docx template not found at {mini_template_path}")
+            
+            # Load the original template to get the source cell structure
+            original_doc = Document(mini_template_path)
+            if not original_doc.tables:
+                raise RuntimeError("mini.docx template must contain at least one table")
+            
+            original_table = original_doc.tables[0]
+            original_table_xml = original_table._element
+            
+            # Get the first cell from the first row to use as template
+            original_table_rows = original_table_xml.findall(qn('w:tr'))
+            if not original_table_rows:
+                raise RuntimeError("Original mini template has no rows")
+            
+            first_row = original_table_rows[0]
+            original_cells = first_row.findall(qn('w:tc'))
+            if not original_cells:
+                raise RuntimeError("Original mini template has no cells")
+            
+            original_cell = original_cells[0]
+            
+            # Create a new document with the expanded grid
+            new_doc = Document()
+            
+            # Copy the original table properties to preserve styling
+            original_tblPr = original_table_xml.find(qn('w:tblPr'))
+            if original_tblPr is not None:
+                # Create new table with original properties
+                new_table = new_doc.add_table(rows=5, cols=4)
+                new_table._element.insert(0, deepcopy(original_tblPr))
+            else:
+                new_table = new_doc.add_table(rows=5, cols=4)
+            
+            # Set exact dimensions for 1.5" x 1.5" cells
+            col_width_twips = str(int(1.5 * 1440))  # 1.5 inches per column
+            row_height_pts = Pt(1.5 * 72)  # 1.5 inches per row
+            
+            # Apply dimensions to all cells
+            for row in new_table.rows:
+                row.height = row_height_pts
+                row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+                for cell in row.cells:
+                    # Set cell width
+                    tcPr = cell._tc.find(qn('w:tcPr'))
+                    if tcPr is None:
+                        tcPr = OxmlElement('w:tcPr')
+                        cell._tc.insert(0, tcPr)
+                    
+                    tcW = tcPr.find(qn('w:tcW'))
+                    if tcW is None:
+                        tcW = OxmlElement('w:tcW')
+                        tcPr.append(tcW)
+                    
+                    tcW.set(qn('w:w'), col_width_twips)
+                    tcW.set(qn('w:type'), 'dxa')
+            
+            # Fill each cell with the original content structure and update placeholders
+            label_count = 1
+            for row_idx in range(5):
+                for col_idx in range(4):
+                    cell = new_table.cell(row_idx, col_idx)
+                    
+                    # Clear existing content
+                    cell._tc.clear_content()
+                    
+                    # Copy the original cell structure
+                    new_cell_xml = deepcopy(original_cell)
+                    
+                    # Update all placeholder references from Label1 to LabelX
+                    for text_el in new_cell_xml.iter():
+                        if text_el.tag == qn('w:t') and text_el.text and "Label1" in text_el.text:
+                            text_el.text = text_el.text.replace("Label1", f"Label{label_count}")
+                    
+                    # Copy all elements from the original cell
+                    for el in new_cell_xml.xpath('./*'):
+                        cell._tc.append(deepcopy(el))
+                    
+                    # CRITICAL: Always add the DOH field as a new paragraph for mini templates
+                    # This ensures DOH images are properly inserted
+                    doh_para = cell.add_paragraph()
+                    doh_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    doh_run = doh_para.add_run(f"{{{{{f'Label{label_count}'}.DOH}}}}")
+                    doh_run.font.name = 'Arial'
+                    doh_run.font.size = Pt(8)
+                    self.logger.debug(f"Added DOH placeholder for Label{label_count} in mini template")
+                    
+                    label_count += 1
+            
+            # Now manually replace all placeholders with actual data
+            self._manual_replace_placeholders(new_doc, context)
+            
+            return new_doc
+            
+        except Exception as e:
+            self.logger.error(f"Error in mini template preserve design method: {e}")
+            raise
+
+    def _manual_replace_placeholders(self, doc, context):
+        """Manually replace placeholders in mini template with actual data."""
+        try:
+            self.logger.info("Starting manual placeholder replacement for mini template")
+            
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for paragraph in cell.paragraphs:
+                            for run in paragraph.runs:
+                                if run.text:
+                                    # Handle both double braces {{Label1.Field}} and triple braces {{{Label1.Field}}}
+                                    text = run.text
+                                    original_text = text
+                                    
+                                    # Find all placeholder patterns
+                                    placeholder_patterns = [
+                                        r'\{\{(\w+)\.(\w+)\}\}',  # {{Label1.Field}}
+                                        r'\{\{\{(\w+)\.(\w+)\}\}\}'  # {{{Label1.Field}}}
+                                    ]
+                                    
+                                    for pattern in placeholder_patterns:
+                                        matches = re.findall(pattern, text)
+                                        for match in matches:
+                                            label_key, field_name = match
+                                            placeholder = f"{{{{{label_key}.{field_name}}}}}"
+                                            triple_placeholder = f"{{{{{{{label_key}.{field_name}}}}}}}"
+                                            
+                                            # Get the value from context
+                                            if label_key in context and field_name in context[label_key]:
+                                                value = context[label_key][field_name]
+                                                if value is None:
+                                                    value = ""
+                                                else:
+                                                    value = str(value)
+                                                
+                                                # Replace both placeholder formats
+                                                text = text.replace(placeholder, value)
+                                                text = text.replace(triple_placeholder, value)
+                                                
+                                                self.logger.debug(f"Replaced {placeholder} with '{value}'")
+                                            else:
+                                                self.logger.warning(f"Placeholder not found in context: {label_key}.{field_name}")
+                                    
+                                    # Update the run text if it changed
+                                    if text != original_text:
+                                        run.text = text
+                                        self.logger.debug(f"Updated run text from '{original_text}' to '{text}'")
+            
+            self.logger.info("Manual placeholder replacement completed")
+            
+        except Exception as e:
+            self.logger.error(f"Error in manual placeholder replacement: {e}")
+            raise
 
 __all__ = ['get_font_scheme', 'TemplateProcessor']
