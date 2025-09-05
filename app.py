@@ -9859,19 +9859,39 @@ def upload_file_fast():
         # Process Excel file immediately to ensure data is ready
         try:
             logging.info(f"Starting immediate Excel processing for {file.filename}")
-            processor = ExcelProcessor(str(file_path))
-            success = processor.load_file(str(file_path))
             
-            if not success:
-                logging.error(f"Failed to load Excel file: {file_path}")
-                return jsonify({'error': 'Failed to process Excel file'}), 500
+            # Create processor with error handling
+            try:
+                processor = ExcelProcessor(str(file_path))
+                logging.info(f"ExcelProcessor created successfully")
+            except Exception as create_error:
+                logging.error(f"Failed to create ExcelProcessor: {create_error}")
+                logging.error(f"Create error traceback: {traceback.format_exc()}")
+                return jsonify({'error': 'Failed to create Excel processor'}), 500
+            
+            # Load file with error handling
+            try:
+                success = processor.load_file(str(file_path))
+                if not success:
+                    logging.error(f"Failed to load Excel file: {file_path}")
+                    return jsonify({'error': 'Failed to process Excel file'}), 500
+                logging.info(f"Excel file loaded successfully")
+            except Exception as load_error:
+                logging.error(f"Failed to load Excel file: {load_error}")
+                logging.error(f"Load error traceback: {traceback.format_exc()}")
+                return jsonify({'error': 'Failed to load Excel file'}), 500
             
             # Store in global context
-            g.excel_processor = processor
-            logging.info(f"Excel processor created and loaded successfully")
+            try:
+                g.excel_processor = processor
+                logging.info(f"Excel processor stored in global context")
+            except Exception as store_error:
+                logging.error(f"Failed to store Excel processor: {store_error}")
+                return jsonify({'error': 'Failed to store Excel processor'}), 500
             
             # Log column processing details for debugging
             if processor.df is not None:
+                logging.info(f"DataFrame shape: {processor.df.shape}")
                 logging.info(f"Columns: {list(processor.df.columns)}")
                 if 'Product Type*' in processor.df.columns:
                     product_types = processor.df['Product Type*'].unique()
@@ -9886,11 +9906,14 @@ def upload_file_fast():
                                 logging.info(f"PROBLEM PRODUCT: {row['ProductName']} -> Product Type: '{row.get('Product Type*', 'MISSING')}'")
                 else:
                     logging.error(f"Product Type* column missing!")
+            else:
+                logging.error(f"DataFrame is None after loading!")
+                return jsonify({'error': 'Excel file loaded but no data found'}), 500
             
         except Exception as process_error:
             logging.error(f"Excel processing error: {process_error}")
             logging.error(f"Processing traceback: {traceback.format_exc()}")
-            return jsonify({'error': 'Failed to process Excel file'}), 500
+            return jsonify({'error': f'Failed to process Excel file: {str(process_error)}'}), 500
         
         upload_time = time.time() - start_time
         logging.info(f"File saved and processed successfully: {filename} in {upload_time:.3f}s")
