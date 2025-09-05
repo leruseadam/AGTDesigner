@@ -3890,10 +3890,41 @@ class TemplateProcessor:
         
         return formatted_group
 
+    def _identify_marker_type(self, text):
+        """Identify the marker type from text content for proper font sizing."""
+        if not text:
+            return 'default'
+            
+        text_upper = text.upper()
+        
+        # Check for specific content patterns in order of specificity
+        if any(word in text_upper for word in ['THC', 'CBD', 'RATIO', ':', '%']):
+            return 'THC_CBD'
+        elif any(word in text_upper for word in ['SATIVA', 'INDICA', 'HYBRID', 'MIXED', 'PARA']):
+            return 'LINEAGE'
+        elif any(word in text_upper for word in ['$', 'PRICE', 'COST']):
+            return 'PRICE'
+        elif any(word in text_upper for word in ['WEIGHT', 'G', 'OZ', 'LB', 'KG']) and not any(word in text_upper for word in ['BRAND', 'PRODUCT', 'CANNABIS', 'COMPANY']):
+            return 'WEIGHT'
+        elif any(word in text_upper for word in ['DOH', 'DATE', 'EXP', '/']) and len(text) <= 12:
+            return 'DOH'
+        elif any(word in text_upper for word in ['VENDOR', 'SUPPLIER']):
+            return 'VENDOR'
+        elif any(word in text_upper for word in ['STRAIN', 'VARIETY']) or (len(text.split()) <= 2 and len(text) <= 15 and not any(char in text for char in ['$', '%', ':', '/']) and not any(word in text_upper for word in ['BRAND', 'PRODUCT', 'CANNABIS', 'COMPANY'])):
+            return 'STRAIN'
+        elif any(word in text_upper for word in ['BRAND', 'PRODUCT', 'CANNABIS', 'COMPANY']) or (len(text.split()) <= 3 and len(text) <= 25 and not any(word in text_upper for word in ['DESCRIPTION', 'LONG', 'DETAILED'])):
+            return 'BRAND'
+        else:
+            # Check if it looks like a description (longer text, multiple words)
+            if len(text.split()) > 3 or len(text) > 25:
+                return 'DESCRIPTION'
+            else:
+                return 'default'
+
     def _apply_mini_template_font_sizing(self, doc):
         """Apply mini template specific font sizing to all content."""
         try:
-            from src.core.generation.unified_font_sizing import get_font_size, set_run_font_size
+            from src.core.generation.unified_font_sizing import get_font_size_by_marker, set_run_font_size
             
             # Process all tables in the document
             for table in doc.tables:
@@ -3902,16 +3933,19 @@ class TemplateProcessor:
                         for paragraph in cell.paragraphs:
                             for run in paragraph.runs:
                                 if run.text.strip():
-                                    # Get appropriate font size for mini template
-                                    font_size = get_font_size(
+                                    # Identify the marker type from the text content for proper font sizing
+                                    marker_type = self._identify_marker_type(run.text)
+                                    
+                                    # Get appropriate font size for mini template using proper field type
+                                    font_size = get_font_size_by_marker(
                                         run.text, 
-                                        field_type='default', 
-                                        orientation='mini', 
+                                        marker_type, 
+                                        template_type='mini', 
                                         scale_factor=self.scale_factor
                                     )
                                     set_run_font_size(run, font_size)
                                     
-            self.logger.info("Applied mini template specific font sizing")
+            self.logger.info("Applied mini template specific font sizing with proper field type identification")
             
         except Exception as e:
             self.logger.warning(f"Error applying mini template font sizing: {e}")
