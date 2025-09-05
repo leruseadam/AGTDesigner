@@ -14,10 +14,67 @@ import re
 import logging
 from typing import Dict, List, Tuple, Optional, Any
 from difflib import SequenceMatcher
-import jellyfish
 from dataclasses import dataclass
 from collections import defaultdict
 import math
+
+# Make jellyfish optional - fallback to basic string matching if not available
+try:
+    import jellyfish
+    JELLYFISH_AVAILABLE = True
+except ImportError:
+    JELLYFISH_AVAILABLE = False
+    logging.warning("jellyfish module not available - using basic string matching fallback")
+
+# Fallback functions when jellyfish is not available
+def _jaro_winkler_similarity_fallback(s1: str, s2: str) -> float:
+    """Fallback Jaro-Winkler similarity using basic string operations"""
+    if s1 == s2:
+        return 1.0
+    if not s1 or not s2:
+        return 0.0
+    
+    # Basic similarity based on common characters
+    common_chars = set(s1.lower()) & set(s2.lower())
+    if not common_chars:
+        return 0.0
+    
+    # Simple similarity calculation
+    max_len = max(len(s1), len(s2))
+    similarity = len(common_chars) / max_len
+    
+    # Boost for prefix similarity (Jaro-Winkler characteristic)
+    prefix_len = 0
+    for i in range(min(len(s1), len(s2), 4)):
+        if s1[i].lower() == s2[i].lower():
+            prefix_len += 1
+        else:
+            break
+    
+    if prefix_len > 0:
+        similarity += prefix_len * 0.1
+    
+    return min(similarity, 1.0)
+
+def _levenshtein_distance_fallback(s1: str, s2: str) -> int:
+    """Fallback Levenshtein distance using basic algorithm"""
+    if len(s1) < len(s2):
+        return _levenshtein_distance_fallback(s2, s1)
+    
+    if len(s2) == 0:
+        return len(s1)
+    
+    previous_row = list(range(len(s2) + 1))
+    for i, c1 in enumerate(s1):
+        current_row = [i + 1]
+        for j, c2 in enumerate(s2):
+            insertions = previous_row[j + 1] + 1
+            deletions = current_row[j] + 1
+            substitutions = previous_row[j] + (c1 != c2)
+            current_row.append(min(insertions, deletions, substitutions))
+        previous_row = current_row
+    
+    return previous_row[-1]
 
 @dataclass
 class MatchScore:
@@ -380,7 +437,10 @@ class AIProductMatcher:
         
         # 2. Jaro-Winkler distance
         try:
-            jaro_similarity = jellyfish.jaro_winkler_similarity(product_name.lower(), strain_name.lower())
+            if JELLYFISH_AVAILABLE:
+                jaro_similarity = jellyfish.jaro_winkler_similarity(product_name.lower(), strain_name.lower())
+            else:
+                jaro_similarity = _jaro_winkler_similarity_fallback(product_name.lower(), strain_name.lower())
             similarities.append(jaro_similarity)
         except:
             pass
@@ -389,7 +449,10 @@ class AIProductMatcher:
         try:
             max_len = max(len(product_name), len(strain_name))
             if max_len > 0:
-                levenshtein_similarity = 1 - (jellyfish.levenshtein_distance(product_name.lower(), strain_name.lower()) / max_len)
+                if JELLYFISH_AVAILABLE:
+                    levenshtein_similarity = 1 - (jellyfish.levenshtein_distance(product_name.lower(), strain_name.lower()) / max_len)
+                else:
+                    levenshtein_similarity = 1 - (_levenshtein_distance_fallback(product_name.lower(), strain_name.lower()) / max_len)
                 similarities.append(levenshtein_similarity)
         except:
             pass
