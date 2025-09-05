@@ -29,17 +29,17 @@ def _load_font_sizing_config():
         return {
             'standard': {
                 'mini': {
-                    'description': [(5, 14), (15, 12), (25, 10), (35, 8), (45, 7), (60, 6), (float('inf'), 5)],
-                    'brand': [(5, 8), (10, 7), (15, 6), (20, 5.5), (float('inf'), 5)],
-                    'price': [(2, 12), (3, 10), (float('inf'), 8)],
-                    'lineage': [(5, 8), (10, 7), (15, 6), (20, 5.5), (float('inf'), 5)],
-                    'ratio': [(3, 8), (6, 7), (9, 6), (12, 5.5), (float('inf'), 5)],
-                    'thc_cbd': [(5, 6), (10, 5.5), (15, 5), (20, 4.5), (float('inf'), 4)],
-                    'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
-                    'weight': [(5, 12), (10, 8), (15, 7), (float('inf'), 6)],
-                    'doh': [(5, 8), (10, 7), (float('inf'), 6)],
-                    'vendor': [(5, 4), (10, 3.5), (15, 3), (20, 2.5), (float('inf'), 2)],
-                    'default': [(10, 8), (20, 7), (float('inf'), 6)]
+                    'description': [(5, 18), (15, 16), (25, 14), (35, 12), (45, 10), (60, 9), (float('inf'), 8)],
+                    'brand': [(5, 12), (10, 11), (15, 10), (20, 9), (float('inf'), 8)],
+                    'price': [(2, 16), (3, 14), (float('inf'), 12)],
+                    'lineage': [(5, 12), (10, 11), (15, 10), (20, 9), (float('inf'), 8)],
+                    'ratio': [(3, 12), (6, 11), (9, 10), (12, 9), (float('inf'), 8)],
+                    'thc_cbd': [(5, 10), (10, 9), (15, 8), (20, 7), (float('inf'), 6)],
+                    'strain': [(10, 8), (20, 7), (30, 6), (float('inf'), 5)],
+                    'weight': [(5, 14), (10, 12), (15, 10), (float('inf'), 8)],
+                    'doh': [(5, 12), (10, 11), (float('inf'), 10)],
+                    'vendor': [(5, 8), (10, 7), (15, 6), (20, 5), (float('inf'), 4)],
+                    'default': [(10, 12), (20, 11), (float('inf'), 10)]
                 },
                 'double': {
                     'description': [(10, 24), (20, 22), (30, 21), (40, 20), (50, 16), (60, 15), (70, 14), (float('inf'), 10)],
@@ -122,16 +122,16 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
         num_digits = len(clean_text)
         
         if num_digits <= 2:  # Single or two digit prices (e.g., $12, $30)
-            final_size = 16 * scale_factor
-            logger.debug(f"Mini template price rule: '{text}' has {num_digits} digits, using 16pt font")
+            final_size = 20 * scale_factor
+            logger.debug(f"Mini template price rule: '{text}' has {num_digits} digits, using 20pt font")
             return Pt(final_size)
         elif num_digits == 3:  # Three digit prices (e.g., $100, $195)
-            final_size = 14 * scale_factor
-            logger.debug(f"Mini template price rule: '{text}' has {num_digits} digits, using 14pt font")
+            final_size = 18 * scale_factor
+            logger.debug(f"Mini template price rule: '{text}' has {num_digits} digits, using 18pt font")
             return Pt(final_size)
         else:  # Four or more digits (e.g., $1000+)
-            final_size = 10 * scale_factor
-            logger.debug(f"Mini template price rule: '{text}' has {num_digits} digits, using 10pt font")
+            final_size = 14 * scale_factor
+            logger.debug(f"Mini template price rule: '{text}' has {num_digits} digits, using 14pt font")
             return Pt(final_size)
     
     if not text:
