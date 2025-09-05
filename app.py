@@ -10131,6 +10131,19 @@ def clear_json_match_cache():
         logging.error(f"Error clearing JSON match cache: {e}")
         return jsonify({'error': f'Failed to clear cache: {str(e)}'}), 500
 
+@app.route('/api/debug/font-config')
+def debug_font_config():
+    """Debug endpoint to check font configuration."""
+    try:
+        from src.core.generation.unified_font_sizing import FONT_SIZING_CONFIG
+        return jsonify({
+            "status": "success",
+            "mini_config": FONT_SIZING_CONFIG.get('standard', {}).get('mini', {}),
+            "is_pythonanywhere": IS_PYTHONANYWHERE
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
 if __name__ == '__main__':
     # Create and run the application
     label_maker = LabelMakerApp()
