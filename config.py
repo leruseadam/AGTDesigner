@@ -13,14 +13,17 @@ class Config:
     
     # File upload settings
     MAX_CONTENT_LENGTH = 20 * 1024 * 1024  # 20MB max file size
+    UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
     
     # Session settings
+    SESSION_TYPE = 'filesystem'  # Use filesystem-based sessions for persistence
     SESSION_REFRESH_EACH_REQUEST = False
     PERMANENT_SESSION_LIFETIME = 3600  # 1 hour
     SESSION_COOKIE_SECURE = False  # Allow HTTP in development
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = 'Lax'
     SESSION_COOKIE_MAX_SIZE = 8192
+    SESSION_FILE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sessions')
     
     # Caching
     CACHE_TYPE = 'SimpleCache'
@@ -107,6 +110,11 @@ class Config:
         # Set session configuration
         app.config['SESSION_TYPE'] = cls.SESSION_TYPE
         app.config['PERMANENT_SESSION_LIFETIME'] = cls.PERMANENT_SESSION_LIFETIME
+        app.config['SESSION_FILE_DIR'] = cls.SESSION_FILE_DIR
+        app.config['SESSION_REFRESH_EACH_REQUEST'] = cls.SESSION_REFRESH_EACH_REQUEST
+        app.config['SESSION_COOKIE_SECURE'] = cls.SESSION_COOKIE_SECURE
+        app.config['SESSION_COOKIE_HTTPONLY'] = cls.SESSION_COOKIE_HTTPONLY
+        app.config['SESSION_COOKIE_SAMESITE'] = cls.SESSION_COOKIE_SAMESITE
         
         return app
 

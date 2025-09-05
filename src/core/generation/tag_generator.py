@@ -120,20 +120,42 @@ def get_template_path(template_type):
 
 def chunk_records(records, chunk_size=9):
     """Split the list of records into chunks of a given size."""
-    # Deduplicate records by ProductName before chunking
-    seen_products = set()
-    unique_records = []
-    for record in records:
-        product_name = record.get('ProductName', 'Unknown')
-        if product_name not in seen_products:
-            seen_products.add(product_name)
-            unique_records.append(record)
+    # CRITICAL FIX: Only deduplicate if there are significantly more duplicates than expected
+    # This prevents removing legitimate products that happen to have similar names
+    if len(records) > 0:
+        # Check if we have excessive duplicates (more than 50% duplicates)
+        seen_products = set()
+        unique_records = []
+        duplicate_count = 0
+        
+        for record in records:
+            product_name = record.get('ProductName', 'Unknown')
+            if product_name not in seen_products:
+                seen_products.add(product_name)
+                unique_records.append(record)
+            else:
+                duplicate_count += 1
+                # CRITICAL FIX: Keep duplicates but log them for transparency
+                unique_records.append(record)
+                logger.info(f"Keeping duplicate product in chunking: {product_name} (duplicate #{duplicate_count})")
+        
+        # Only deduplicate if we have excessive duplicates (more than 50% of records)
+        duplicate_percentage = (duplicate_count / len(records)) * 100
+        if duplicate_percentage > 50:
+            logger.warning(f"Excessive duplicates detected ({duplicate_percentage:.1f}%), deduplicating")
+            # Remove duplicates in this case
+            seen_products = set()
+            unique_records = []
+            for record in records:
+                product_name = record.get('ProductName', 'Unknown')
+                if product_name not in seen_products:
+                    seen_products.add(product_name)
+                    unique_records.append(record)
+                else:
+                    logger.warning(f"Skipping duplicate product in chunking: {product_name}")
+            records = unique_records
         else:
-            logger.warning(f"Skipping duplicate product in chunking: {product_name}")
-    
-    if len(unique_records) != len(records):
-        logger.info(f"Deduplicated records before chunking: {len(records)} -> {len(unique_records)}")
-        records = unique_records
+            logger.info(f"Keeping all {len(records)} records (duplicate rate: {duplicate_percentage:.1f}%)")
     
     return [records[i:i+chunk_size] for i in range(0, len(records), chunk_size)]
 
@@ -267,7 +289,7 @@ def process_chunk(args):
                 
             # --- Wrap all fields with markers ---
             price_val = f"{row.get('Price', '')}"
-            label_data["Price"] = wrap_with_marker(price_val, "PRIC")  # Changed from "PRICE" to "PRIC" to match MAIN.py
+            label_data["Price"] = wrap_with_marker(price_val, "PRICE")  # Fixed: Use "PRICE" marker to match markers.py definition
             
             lineage_text   = str(row.get("Lineage", "")).strip()
             product_brand  = str(row.get("Product Brand", "")).strip()
@@ -329,11 +351,8 @@ def process_chunk(args):
             else:
                 lineage_val = lineage_text.upper() if lineage_text else ""
                 
-            if is_horizontal_or_double_or_vertical and lineage_val:
-                lineage_val = '\t' + lineage_val
-            # Add a single space before Lineage in the output
-            lineage_val_with_space = f" {lineage_val}" if lineage_val else ""
-            label_data["Lineage"] = wrap_with_marker(lineage_val_with_space, "LINEAGE")
+            # No extra space before Lineage in the output
+            label_data["Lineage"] = wrap_with_marker(lineage_val, "LINEAGE")
             
             # For classic types, set ProductBrand and ProductBrand_Center to lineage
             if is_classic_type:
@@ -351,7 +370,7 @@ def process_chunk(args):
                         # No lineage available, set to empty
                         label_data["ProductBrand"] = ""
                         label_data["ProductBrand_Center"] = ""
-            label_data["Ratio_or_THC_CBD"] = wrap_with_marker(str(row.get("Ratio", "")), "RATIO")
+            label_data["Ratio_or_THC_CBD"] = wrap_with_marker(str(row.get("Ratio", "")), "THC_CBD")
             # ProductStrain is now handled by the template processor to ensure proper conversion
             # of non-classic types to "Mixed" or "CBD Blend"
             # Fix: Handle NaN values in JointRatio

@@ -29,35 +29,35 @@ def _load_font_sizing_config():
         return {
             'standard': {
                 'mini': {
-                    'description': [(10, 16), (40, 14), (60, 12), (80, 10), (100, 9), (120, 8), (float('inf'), 7)],
-                    'brand': [(10, 10), (20, 8), (30, 7.5), (40, 7), (float('inf'), 6)],
-                    'price': [(30, 14), (40, 12), (50, 10), (float('inf'), 8)],
-                    'lineage': [(10, 10), (20, 9), (30, 8), (40, 7), (float('inf'), 6)],
-                    'ratio': [(5, 10), (8, 9), (12, 8), (20, 7), (float('inf'), 6)],
-                    'thc_cbd': [(10, 8), (20, 7), (25, 6), (35, 5), (float('inf'), 4)],
+                    'description': [(5, 14), (15, 12), (25, 10), (35, 8), (45, 7), (60, 6), (float('inf'), 5)],
+                    'brand': [(5, 8), (10, 7), (15, 6), (20, 5.5), (float('inf'), 5)],
+                    'price': [(2, 12), (3, 10), (float('inf'), 8)],
+                    'lineage': [(5, 8), (10, 7), (15, 6), (20, 5.5), (float('inf'), 5)],
+                    'ratio': [(3, 8), (6, 7), (9, 6), (12, 5.5), (float('inf'), 5)],
+                    'thc_cbd': [(5, 6), (10, 5.5), (15, 5), (20, 4.5), (float('inf'), 4)],
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
-                    'weight': [(10, 16), (20, 9), (30, 8), (float('inf'), 7)],
-                    'doh': [(10, 10), (20, 9), (float('inf'), 8)],
-                    'vendor': [(10, 4), (20, 3), (30, 2), (40, 1), (50, 1), (float('inf'), 1)],
-                    'default': [(20, 10), (40, 9), (float('inf'), 8)]
+                    'weight': [(5, 12), (10, 8), (15, 7), (float('inf'), 6)],
+                    'doh': [(5, 8), (10, 7), (float('inf'), 6)],
+                    'vendor': [(5, 4), (10, 3.5), (15, 3), (20, 2.5), (float('inf'), 2)],
+                    'default': [(10, 8), (20, 7), (float('inf'), 6)]
                 },
                 'double': {
-                    'description': [(10, 24), (20, 22), (60, 18), (80, 16), (100, 14), (120, 12), (140, 10), (float('inf'), 10)],
-                    'brand': [(10, 14), (15, 12), (20, 10), (25, 8), (float('inf'), 7.5)],
-                    'price': [(5, 20), (10, 18), (float('inf'), 14)],
+                    'description': [(10, 24), (20, 22), (30, 21), (40, 20), (50, 16), (60, 15), (70, 14), (float('inf'), 10)],
+                    'brand': [(1, 10), (2, 9), (5, 8), (10, 8), (float('inf'), 6.5)],
+                    'price': [(10, 20), (15, 18), (float('inf'), 14)],
                     'lineage': [(15, 13), (25, 12), (35, 10), (45, 9), (float('inf'), 9)],
-                    'ratio': [(10, 9), (20, 7), (30, 5.5), (float('inf'), 5)],
-                    'thc_cbd': [(1, 6.5),(float('inf'), 6.5)],
+                    'ratio': [(10, 9), (20, 8), (30, 7), (float('inf'), 6.5)],
+                    'thc_cbd': [(20, 7),(float('inf'), 6.5)],
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
                     'weight': [(15, 16), (25, 14), (35, 12), (float('inf'), 9)],
-                    'doh': [(15, 18), (25, 16), (float('inf'), 13)],
+                    'doh': [(15, 20), (25, 16), (float('inf'), 13)],
                     'vendor': [(10, 5), (20, 4), (40, 3), (70, 2),(float('inf'), 1)],
                     'default': [(20, 16), (40, 14), (60, 12), (float('inf'), 10)]
                 },
                 'vertical': {
                     'description': [(5, 34), (30, 32), (40, 28), (60, 26), (70, 24), (80, 22), (100, 20), (float('inf'), 14)],
                     'brand': [(10, 16), (20, 14), (30, 12), (float('inf'), 10)],
-                    'price': [(5, 30), (8, 28), (float('inf'), 14)],
+                    'price': [(2, 30), (5, 28), (float('inf'), 14)],
                     'lineage': [(20, 18), (40, 16), (60, 12), (float('inf'), 8)],
                     'ratio': [(10, 14), (20, 12), (30, 9), (float('inf'), 9)],
                     'thc_cbd': [(10, 12), (float('inf'), 12)],
@@ -70,24 +70,11 @@ def _load_font_sizing_config():
                     'brand': [(20, 18), (30, 16), (80, 14), (50, 12), (60, 10), (float('inf'), 10)],
                     'price': [(5, 36), (10, 34), (80, 20), (float('inf'), 18)],
                     'lineage': [(10, 20), (20, 18), (30, 16), (50, 12), (60, 10), (float('inf'), 10)],
-                    'ratio': [(5, 14), (10, 12), (15, 10), (20, 9), (30, 8), (40, 7), (50, 6), (float('inf'), 5)],
+                    'ratio': [(10, 14), (20, 12), (30, 10), (40, 9), (50, 8), (40, 7), (50, 6), (float('inf'), 5)],
                     'thc_cbd': [(10, 14), (float('inf'), 14)],
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
                     'vendor': [(10, 6), (20, 5), (40, 4), (70, 3),(float('inf'), 2)],
                     'default': [(20, 18), (40, 16), (60, 14), (float('inf'), 12)]
-                },
-                'mini': {
-                    'description': [(10, 16), (20, 14), (30, 12), (40, 10), (50, 9), (float('inf'), 8)],
-                    'brand': [(10, 10), (20, 9), (30, 8), (40, 7), (float('inf'), 6)],
-                    'price': [(5, 14), (10, 13), (15, 12), (20, 11), (float('inf'), 9)],
-                    'lineage': [(10, 10), (20, 9), (30, 8), (40, 7), (float('inf'), 6)],
-                    'ratio': [(5, 10), (10, 9), (15, 8), (20, 7), (float('inf'), 6)],
-                    'thc_cbd': [(10, 10), (20, 9), (30, 8), (40, 7), (float('inf'), 6)],
-                    'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
-                    'weight': [(10, 12), (20, 10), (30, 8), (float('inf'), 6)],
-                    'doh': [(10, 8), (20, 7), (float('inf'), 6)],
-                    'vendor': [(10, 6), (20, 5), (40, 4), (float('inf'), 3)],
-                    'default': [(20, 10), (40, 9), (60, 8), (float('inf'), 7)]
                 }
             }
         }
@@ -126,6 +113,25 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
         else:
             final_size = 14 * scale_factor
             logger.debug(f"BULLETPROOF: Vertical price '{text}' (complexity: {comp}) using 14pt font")
+            return Pt(final_size)
+    
+    # Special rule: Mini template prices based on number of digits
+    if field_type.lower() == 'price' and orientation.lower() == 'mini':
+        # Remove $ and any non-digit characters, then count digits
+        clean_text = ''.join(char for char in str(text) if char.isdigit())
+        num_digits = len(clean_text)
+        
+        if num_digits <= 2:  # Single or two digit prices (e.g., $12, $30)
+            final_size = 16 * scale_factor
+            logger.debug(f"Mini template price rule: '{text}' has {num_digits} digits, using 16pt font")
+            return Pt(final_size)
+        elif num_digits == 3:  # Three digit prices (e.g., $100, $195)
+            final_size = 14 * scale_factor
+            logger.debug(f"Mini template price rule: '{text}' has {num_digits} digits, using 14pt font")
+            return Pt(final_size)
+        else:  # Four or more digits (e.g., $1000+)
+            final_size = 10 * scale_factor
+            logger.debug(f"Mini template price rule: '{text}' has {num_digits} digits, using 10pt font")
             return Pt(final_size)
     
     if not text:
@@ -174,10 +180,18 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
             logger.debug(f"Special brand rule: text='{text}' ({len(text)} chars) is all caps >= 9 chars, forcing 14pt font")
             return Pt(final_size)
     
-    # Special rule: If brand name has multiple words with 8+ characters each, reduce font to 8pt
+    # Special rule: Handle specific large brand names that are too big
     if field_type.lower() == 'brand' and orientation.lower() == 'double':
+        # Force specific large brand names to use much smaller fonts
+        large_brands = ['CONSTELLATION', 'MARY JONES', 'MARY JONES CANNABIS', 'CONSTELLATION CANNABIS']
+        if any(brand in text.upper() for brand in large_brands):
+            final_size = 5.5 * scale_factor
+            logger.debug(f"Special double template brand rule: text='{text}' matches large brand list, forcing 5.5pt font")
+            return Pt(final_size)
+        
+        # Special rule: If brand name has multiple words with 8+ characters each, reduce font to 8pt
         words = text.split()
-        long_words = [word for word in words if len(word) >= 8]
+        long_words = [word for word in words if len(word) >= 7]
         if len(long_words) >= 2:  # Multiple words with 8+ characters each
             final_size = 8 * scale_factor
             logger.debug(f"Special double template brand rule: text='{text}' has {len(long_words)} words with 8+ chars each: {long_words}, forcing 8pt font")
@@ -279,77 +293,7 @@ def get_thresholded_font_size_strain(text, orientation='vertical', scale_factor=
     """Legacy function - use get_font_size instead."""
     return get_font_size(text, 'strain', orientation, scale_factor)
 
-# Mini-specific legacy functions
-def get_mini_font_size_description(text, scale_factor=1.0):
-    """Legacy function - use get_font_size instead."""
-    return get_font_size(text, 'description', 'mini', scale_factor, 'mini')
 
-def get_mini_font_size_brand(text, scale_factor=1.0):
-    """Legacy function - use get_font_size instead."""
-    return get_font_size(text, 'brand', 'mini', scale_factor, 'mini')
-
-def get_mini_font_size_price(text, scale_factor=1.0):
-    """Legacy function - use get_font_size instead."""
-    return get_font_size(text, 'price', 'mini', scale_factor, 'mini')
-
-def get_mini_font_size_lineage(text, scale_factor=1.0):
-    """Legacy function - use get_font_size instead."""
-    return get_font_size(text, 'lineage', 'mini', scale_factor, 'mini')
-
-def get_mini_font_size_ratio(text, scale_factor=1.0):
-    """Legacy function - use get_font_size instead."""
-    return get_font_size(text, 'ratio', 'mini', scale_factor, 'mini')
-
-def get_mini_font_size_thc_cbd(text, scale_factor=1.0):
-    """Legacy function - use get_font_size instead."""
-    return get_font_size(text, 'thc_cbd', 'mini', scale_factor, 'mini')
-
-def get_mini_font_size_strain(text, scale_factor=1.0):
-    """Legacy function - use get_font_size instead."""
-    return get_font_size(text, 'strain', 'mini', scale_factor, 'mini')
-
-def get_mini_font_size_weight(text, scale_factor=1.0):
-    """Legacy function - use get_font_size instead."""
-    return get_font_size(text, 'weight', 'mini', scale_factor, 'mini')
-
-def get_mini_font_size_doh(text, scale_factor=1.0):
-    """Legacy function - use get_font_size instead."""
-    return get_font_size(text, 'doh', 'mini', scale_factor, 'mini')
-
-def get_mini_font_size_by_marker(text, marker_type, scale_factor=1.0):
-    """Legacy function - use get_font_size instead."""
-    # Handle START/END marker pairs by extracting the base marker name
-    base_marker = marker_type.upper()
-    if base_marker.endswith('_START') or base_marker.endswith('_END'):
-        base_marker = base_marker.replace('_START', '').replace('_END', '')
-    
-    marker_to_field = {
-        'DESC': 'description',
-        'DESCRIPTION': 'description',
-        'PRICE': 'price',
-        'PRIC': 'price',
-        'BRAND': 'brand',
-        'PRODUCTBRAND': 'brand',
-        'PRODUCTBRAND_CENTER': 'brand',
-        'LINEAGE': 'lineage',
-        'LINEAGE_CENTER': 'lineage',
-        'RATIO': 'ratio',
-        'THC_CBD': 'thc_cbd',
-        'WEIGHT': 'weight',
-        'WEIGHTUNITS': 'weight',
-        'UNITS': 'weight',
-        'STRAIN': 'strain',
-        'PRODUCTSTRAIN': 'strain',
-        'DOH': 'doh',
-        'VENDOR': 'vendor',
-        'PRODUCTVENDOR': 'vendor'
-    }
-    field_type = marker_to_field.get(base_marker, 'default')
-    return get_font_size(text, field_type, 'mini', scale_factor, 'mini')
-
-def set_mini_run_font_size(run, font_size):
-    """Legacy function - use set_run_font_size instead."""
-    return set_run_font_size(run, font_size)
 
 def get_font_size_by_marker(text, marker_type, template_type='vertical', scale_factor=1.0, product_type=None):
     """Get font size based on marker type."""
@@ -391,7 +335,7 @@ def get_line_spacing_by_marker(marker_type, template_type='vertical'):
     
     spacing_config = {
         'RATIO': 2.4,
-        'THC_CBD': 1.5,  # Base spacing for THC_CBD
+        'THC_CBD': 1.0,  # Use standard spacing for THC_CBD
         'DESC': 1.0,
         'DESCRIPTION': 1.0,
         'PRICE': 1.0,
@@ -412,14 +356,7 @@ def get_line_spacing_by_marker(marker_type, template_type='vertical'):
     
     # Template-specific spacing adjustments for better readability
     if base_marker == 'THC_CBD':
-        if template_type.lower() == 'double':
-            return 1.5  # Double template now uses standard spacing like other templates
-        elif template_type.lower() == 'vertical':
-            return 1.5  # Vertical template uses standard spacing
-        elif template_type.lower() == 'mini':
-            return 1.3  # Mini template needs tighter spacing for small cells
-        elif template_type.lower() == 'horizontal':
-            return 1.35  # Horizontal template uses slightly tighter spacing
+        return 1.0  # Use standard spacing for all templates
     
     return spacing_config.get(base_marker, 1.0)
 

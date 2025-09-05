@@ -24,7 +24,15 @@ const getUniqueLineages = () => {
 
 function createTagRow(tag) {
     const lineage = tag.Lineage || tag.lineage || 'MIXED';
-    const tagName = tag['Product Name*'] || tag.ProductName || '';
+    
+    // For JSON matched tags and educated guess tags, prioritize the original display information over derived product names
+    let tagName;
+    if (tag.Source && (tag.Source.includes('JSON Match') || tag.Source.includes('Educated Guess'))) {
+        tagName = tag.displayName || tag['Product Name*'] || tag.ProductName || '';
+    } else {
+        tagName = tag['Product Name*'] || tag.ProductName || '';
+    }
+    
     const brand = tag['Product Brand'] || tag.Brand || '';
     const type = tag['Product Type*'] || tag.Type || '';
 
@@ -87,7 +95,15 @@ class TagsTable {
   // Render a tag row as a div with an inline dropdown for lineage
   static createTagRow(tag, isSelected = false) {
     const lineage = tag.Lineage || tag.lineage || 'MIXED';
-    const tagName = tag['Product Name*'] || tag.ProductName || '';
+    
+    // For JSON matched tags and educated guess tags, prioritize the original display information over derived product names
+    let tagName;
+    if (tag.Source && (tag.Source.includes('JSON Match') || tag.Source.includes('Educated Guess'))) {
+        tagName = tag.displayName || tag['Product Name*'] || tag.ProductName || '';
+    } else {
+        tagName = tag['Product Name*'] || tag.ProductName || '';
+    }
+    
     const brand = tag['Product Brand'] || tag.Brand || '';
     const vendor = tag['Vendor'] || tag['Vendor/Supplier*'] || tag['Vendor/Supplier'] || tag['Supplier'] || tag['Vendor*'] || tag['Supplier*'] || '';
     const type = tag['Product Type*'] || tag.Type || '';

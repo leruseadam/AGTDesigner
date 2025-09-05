@@ -15,18 +15,18 @@ LINEAGE_COLOR_MAP: Dict[str, str] = {
 
 # Product type mapping
 TYPE_OVERRIDES: Dict[str, str] = {
-    "all-in-one": "vape cartridge",
-    "rosin": "concentrate",
-    "mini buds": "flower",
-    "bud": "flower",
+    "all-in-one": "Vape Cartridge",
+    "rosin": "Concentrate",
+    "mini buds": "Flower",
+    "bud": "Flower",
     "pre-roll": "Pre-roll",
-    "alcohol/ethanol extract": "rso/co2 tankers",
-    "Alcohol/Ethanol Extract": "rso/co2 tankers",
-    "alcohol ethanol extract": "rso/co2 tankers",
-    "Alcohol Ethanol Extract": "rso/co2 tankers",
-    "c02/ethanol extract": "rso/co2 tankers",
-    "CO2 Concentrate": "rso/co2 tankers",
-    "co2 concentrate": "rso/co2 tankers",
+    "alcohol/ethanol extract": "RSO/CO2 Tankers",
+    "Alcohol/Ethanol Extract": "RSO/CO2 Tankers",
+    "alcohol ethanol extract": "RSO/CO2 Tankers",
+    "Alcohol Ethanol Extract": "RSO/CO2 Tankers",
+    "c02/ethanol extract": "RSO/CO2 Tankers",
+    "CO2 Concentrate": "RSO/CO2 Tankers",
+    "co2 concentrate": "RSO/CO2 Tankers",
 }
 
 # Text scaling constants

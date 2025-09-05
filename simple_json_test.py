@@ -13,7 +13,7 @@ def test_json_behavior():
     print("🧪 Simple JSON Behavior Test")
     print("=" * 40)
     
-    base_url = "http://localhost:5001"
+    base_url = "http://localhost:5002"
     
     try:
         # Check initial state

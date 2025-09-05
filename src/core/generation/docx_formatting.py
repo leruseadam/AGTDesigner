@@ -71,11 +71,66 @@ def apply_lineage_colors(doc):
                                 run.font.color.rgb = RGBColor(255, 255, 255)
                                 run.font.bold = True
                                 run.font.name = "Arial"
+        # FINAL LINEAGE CLEANUP: Remove any leading spaces from lineage content after coloring
+        _final_lineage_cleanup_after_coloring(doc)
+        
         logger.debug("Applied lineage colors to document")
         return doc
     except Exception as e:
         logger.error(f"Error applying lineage colors: {str(e)}")
         raise
+
+def _final_lineage_cleanup_after_coloring(doc):
+    """
+    Final cleanup to remove any leading spaces from lineage content after coloring is applied.
+    This runs after all other processing to ensure clean lineage display.
+    """
+    try:
+        # Define lineage values that should be cleaned
+        lineage_values = [
+            "SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", 
+            "CBD", "MIXED", "PARAPHERNALIA", "PARA"
+        ]
+        
+        # Clean lineage content in all tables
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    for paragraph in cell.paragraphs:
+                        for run in paragraph.runs:
+                            original_text = run.text
+                            
+                            # Check if this run contains lineage content
+                            for lineage in lineage_values:
+                                if lineage in original_text.upper():
+                                    # Aggressively clean leading spaces
+                                    cleaned_text = original_text.lstrip(' \t\n\r\u00A0\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u200B\u200C\u200D\u200E\u200F\u2028\u2029\u202A\u202B\u202C\u202D\u202E\u202F\u205F\u2060\u2061\u2062\u2063\u2064\u2065\u2066\u2067\u2068\u2069\u206A\u206B\u206C\u206D\u206E\u206F\u3000\uFEFF')
+                                    
+                                    if cleaned_text != original_text:
+                                        run.text = cleaned_text
+                                        logger.debug(f"Final lineage cleanup after coloring: '{original_text}' -> '{cleaned_text}'")
+                                    break
+        
+        # Clean lineage content in paragraphs outside tables
+        for paragraph in doc.paragraphs:
+            for run in paragraph.runs:
+                original_text = run.text
+                
+                # Check if this run contains lineage content
+                for lineage in lineage_values:
+                    if lineage in original_text.upper():
+                        # Aggressively clean leading spaces
+                        cleaned_text = original_text.lstrip(' \t\n\r\u00A0\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u200B\u200C\u200D\u200E\u200F\u2028\u2029\u202A\u202B\u202C\u202D\u202E\u202F\u205F\u2060\u2061\u2062\u2063\u2064\u2065\u2066\u2067\u2068\u2069\u206A\u206B\u206C\u206D\u206E\u206F\u3000\uFEFF')
+                        
+                        if cleaned_text != original_text:
+                            run.text = cleaned_text
+                            logger.debug(f"Final lineage cleanup after coloring: '{original_text}' -> '{cleaned_text}'")
+                        break
+        
+        logger.debug("Final lineage cleanup after coloring completed - all leading spaces should be removed")
+        
+    except Exception as e:
+        logger.warning(f"Error in final lineage cleanup after coloring: {e}")
 
 def fix_table_row_heights(doc, template_type):
     """Fix table row heights based on template type."""
