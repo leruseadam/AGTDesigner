@@ -3744,9 +3744,58 @@ def get_available_tags():
         # This ensures web version shows the same data as local version
         logging.info("CRITICAL FIX: Using fresh data from Excel processor instead of cached data")
         
-        # Get fresh data directly from global Excel processor
-        # Use global processor instead of session-based to ensure we get the uploaded data
-        excel_processor = get_excel_processor()
+        # CRITICAL FIX: Use global Excel processor with fallback to background processor
+        # This ensures we get the uploaded data regardless of Flask context issues
+        excel_processor = None
+        
+        # Try global processor first
+        try:
+            excel_processor = get_excel_processor()
+            logging.info(f"CRITICAL FIX: Got global Excel processor: {excel_processor is not None}")
+        except Exception as e:
+            logging.warning(f"CRITICAL FIX: Failed to get global Excel processor: {e}")
+        
+        # Fallback: Try to get from background processor if global is empty
+        if excel_processor is None or excel_processor.df is None or excel_processor.df.empty:
+            logging.info("CRITICAL FIX: Global processor empty, trying background processor")
+            try:
+                # Check if we have a background processor with data
+                if hasattr(g, 'excel_processor') and g.excel_processor is not None:
+                    if g.excel_processor.df is not None and not g.excel_processor.df.empty:
+                        excel_processor = g.excel_processor
+                        logging.info("CRITICAL FIX: Using background processor with data")
+            except Exception as e:
+                logging.warning(f"CRITICAL FIX: Background processor check failed: {e}")
+            
+            # Additional fallback: Check if there's a recently uploaded file we can load
+            if excel_processor is None or excel_processor.df is None or excel_processor.df.empty:
+                logging.info("CRITICAL FIX: Trying to find and load recently uploaded file")
+                try:
+                    # Look for recently uploaded files in uploads directory
+                    import glob
+                    import os
+                    uploads_dir = os.path.join(os.getcwd(), 'uploads')
+                    if os.path.exists(uploads_dir):
+                        # Get the most recent .xlsx file
+                        xlsx_files = glob.glob(os.path.join(uploads_dir, '*.xlsx'))
+                        if xlsx_files:
+                            # Sort by modification time, newest first
+                            xlsx_files.sort(key=os.path.getmtime, reverse=True)
+                            latest_file = xlsx_files[0]
+                            logging.info(f"CRITICAL FIX: Found latest uploaded file: {latest_file}")
+                            
+                            # Create a new processor and load the file
+                            from src.core.data.excel_processor import ExcelProcessor
+                            temp_processor = ExcelProcessor()
+                            success = temp_processor.load_file(latest_file)
+                            if success and temp_processor.df is not None and not temp_processor.df.empty:
+                                excel_processor = temp_processor
+                                logging.info(f"CRITICAL FIX: Successfully loaded latest file: {latest_file}")
+                            else:
+                                logging.warning(f"CRITICAL FIX: Failed to load latest file: {latest_file}")
+                except Exception as e:
+                    logging.warning(f"CRITICAL FIX: Latest file loading failed: {e}")
+        
         if excel_processor is None:
             logging.warning("No Excel processor available, returning empty tags")
             return jsonify([])
