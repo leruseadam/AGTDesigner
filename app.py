@@ -9796,6 +9796,50 @@ def upload_file_optimized():
         else:
             return jsonify({'error': 'Upload failed. Please try again.'}), 500
 
+@app.route('/upload-fast', methods=['POST'])
+def upload_file_fast():
+    """Fast file upload endpoint for enhanced UI"""
+    try:
+        # Check if file is present
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file provided'}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        # Validate file type
+        if not file.filename.lower().endswith(('.xlsx', '.xls')):
+            return jsonify({'error': 'Invalid file type. Please upload an Excel file.'}), 400
+        
+        # Create uploads directory if it doesn't exist
+        uploads_dir = Path('uploads')
+        uploads_dir.mkdir(exist_ok=True)
+        
+        # Generate unique filename
+        timestamp = int(time.time())
+        safe_filename = secure_filename(file.filename)
+        filename = f"{timestamp}_{safe_filename}"
+        file_path = uploads_dir / filename
+        
+        # Save file
+        file.save(str(file_path))
+        
+        # Store file path in session
+        session['file_path'] = str(file_path)
+        session['selected_tags'] = []
+        
+        # Return success response
+        return jsonify({
+            'message': 'File uploaded successfully',
+            'filename': filename,
+            'status': 'success'
+        })
+        
+    except Exception as e:
+        logging.error(f"Upload-fast error: {str(e)}")
+        return jsonify({'error': 'Upload failed. Please try again.'}), 500
+
 @app.route('/api/database-add-missing-columns', methods=['POST'])
 def add_missing_database_columns():
     """Add missing columns to existing database tables."""
