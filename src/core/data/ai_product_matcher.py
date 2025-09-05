@@ -19,6 +19,9 @@ from collections import defaultdict
 import math
 
 # Make jellyfish optional - fallback to basic string matching if not available
+JELLYFISH_AVAILABLE = False
+jellyfish = None
+
 try:
     import jellyfish
     JELLYFISH_AVAILABLE = True
