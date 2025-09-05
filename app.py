@@ -378,9 +378,14 @@ def get_excel_processor():
                     session_file_path = session.get('file_path')
                     if session_file_path and os.path.exists(session_file_path):
                         logging.info(f"CRITICAL FIX: Found uploaded file in session: {session_file_path}")
-                        # Don't load default file if we have an uploaded file
-                        _excel_processor.df = pd.DataFrame()  # Start with empty DataFrame
-                        _excel_processor._last_loaded_file = session_file_path
+                        # Load the uploaded file instead of clearing the DataFrame
+                        success = _excel_processor.load_file(session_file_path)
+                        if success:
+                            _excel_processor._last_loaded_file = session_file_path
+                            logging.info(f"CRITICAL FIX: Successfully loaded session file: {session_file_path}")
+                        else:
+                            logging.error(f"CRITICAL FIX: Failed to load session file: {session_file_path}")
+                            _excel_processor.df = pd.DataFrame()  # Fallback to empty DataFrame
                     else:
                         # Only load default file if not explicitly reset and no uploaded file exists
                         if not _excel_processor_reset_flag:
