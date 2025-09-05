@@ -9926,11 +9926,11 @@ def upload_file_fast():
         
         # Return success response with processed data
         return jsonify({
-            'message': 'File uploaded and processed successfully',
+            'message': 'File uploaded successfully',
             'filename': filename,
             'status': 'success',
             'upload_time': f"{upload_time:.3f}s",
-            'processing_status': 'completed'
+            'processing_status': 'completed' if processor else 'pending'
         })
         
     except Exception as e:
@@ -9984,6 +9984,46 @@ def check_processing():
     except Exception as e:
         logging.error(f"Check processing error: {str(e)}")
         return jsonify({'error': f'Check failed: {str(e)}'}), 500
+
+@app.route('/process-uploaded-file', methods=['POST'])
+def process_uploaded_file():
+    """Process the uploaded file after upload"""
+    try:
+        file_path = session.get('file_path')
+        if not file_path or not os.path.exists(file_path):
+            return jsonify({'error': 'No uploaded file found'}), 400
+        
+        logging.info(f"Processing uploaded file: {file_path}")
+        
+        # Create and load Excel processor
+        processor = ExcelProcessor(file_path)
+        success = processor.load_file(file_path)
+        
+        if not success:
+            return jsonify({'error': 'Failed to process Excel file'}), 500
+        
+        # Store in global context
+        g.excel_processor = processor
+        
+        # Log processing details
+        if processor.df is not None:
+            logging.info(f"Processed {len(processor.df)} rows")
+            logging.info(f"Columns: {list(processor.df.columns)}")
+            
+            if 'Product Type*' in processor.df.columns:
+                product_types = processor.df['Product Type*'].unique()
+                logging.info(f"Product Types: {product_types.tolist()}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'File processed successfully',
+            'rows': len(processor.df) if processor.df is not None else 0,
+            'columns': list(processor.df.columns) if processor.df is not None else []
+        })
+        
+    except Exception as e:
+        logging.error(f"Process uploaded file error: {str(e)}")
+        return jsonify({'error': f'Processing failed: {str(e)}'}), 500
 
 
 @app.route('/test-upload.html')
