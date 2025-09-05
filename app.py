@@ -10025,6 +10025,45 @@ def process_uploaded_file():
         logging.error(f"Process uploaded file error: {str(e)}")
         return jsonify({'error': f'Processing failed: {str(e)}'}), 500
 
+@app.route('/clear-cache', methods=['POST'])
+def clear_cache():
+    """Clear all persistent data and cache to force fresh data loading"""
+    try:
+        logging.info("=== CLEARING CACHE AND PERSISTENT DATA ===")
+        
+        # Reset Excel processor
+        reset_excel_processor()
+        
+        # Clear Flask cache
+        if cache is not None:
+            cache.clear()
+            logging.info("Cleared Flask cache")
+        
+        # Clear session data
+        session.clear()
+        logging.info("Cleared session data")
+        
+        # Clear global variables
+        global _initial_data_cache, _cache_timestamp
+        _initial_data_cache = None
+        _cache_timestamp = None
+        logging.info("Cleared global cache variables")
+        
+        # Clear processing status
+        global processing_status, processing_timestamps
+        processing_status.clear()
+        processing_timestamps.clear()
+        logging.info("Cleared processing status")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Cache and persistent data cleared successfully'
+        })
+        
+    except Exception as e:
+        logging.error(f"Clear cache error: {str(e)}")
+        return jsonify({'error': f'Failed to clear cache: {str(e)}'}), 500
+
 
 @app.route('/test-upload.html')
 def test_upload_page():
