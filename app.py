@@ -9799,8 +9799,9 @@ def upload_file_optimized():
 
 @app.route('/upload-fast', methods=['POST'])
 def upload_file_fast():
-    """Fast file upload endpoint for enhanced UI"""
+    """Ultra-fast file upload with background processing for PythonAnywhere"""
     try:
+        start_time = time.time()
         logging.info("=== UPLOAD-FAST REQUEST START ===")
         
         # Check if file is present
@@ -9840,13 +9841,25 @@ def upload_file_fast():
         session['file_path'] = str(file_path)
         session['selected_tags'] = []
         
-        logging.info(f"File saved successfully: {filename}")
+        # Start background processing for fast response
+        try:
+            thread = threading.Thread(target=process_excel_ultra_fast, args=(file.filename, str(file_path)))
+            thread.daemon = True
+            thread.start()
+            logging.info(f"Background processing thread started for {file.filename}")
+        except Exception as thread_error:
+            logging.error(f"Failed to start background thread: {thread_error}")
         
-        # Return success response
+        upload_time = time.time() - start_time
+        logging.info(f"File saved successfully: {filename} in {upload_time:.3f}s")
+        
+        # Return immediate success response
         return jsonify({
-            'message': 'File uploaded successfully',
+            'message': 'File uploaded successfully, processing in background',
             'filename': filename,
-            'status': 'success'
+            'status': 'success',
+            'upload_time': f"{upload_time:.3f}s",
+            'processing_status': 'background'
         })
         
     except Exception as e:
@@ -9854,6 +9867,36 @@ def upload_file_fast():
         logging.error(f"Upload-fast error: {str(e)}")
         logging.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({'error': 'Upload failed. Please try again.'}), 500
+
+def process_excel_ultra_fast(filename, file_path):
+    """Ultra-fast Excel processing optimized for PythonAnywhere"""
+    try:
+        logging.info(f"[ULTRA-FAST] Starting background processing: {filename}")
+        start_time = time.time()
+        
+        # Minimal processing - just load the file and create basic processor
+        try:
+            # Load with minimal processing
+            df = pd.read_excel(file_path, engine='openpyxl')
+            logging.info(f"[ULTRA-FAST] Loaded {len(df)} rows in {time.time() - start_time:.2f}s")
+            
+            # Create ExcelProcessor with minimal processing
+            processor = ExcelProcessor(file_path)
+            
+            # Store in global context for immediate access
+            with app.app_context():
+                g.excel_processor = processor
+                logging.info(f"[ULTRA-FAST] ExcelProcessor created successfully")
+            
+            processing_time = time.time() - start_time
+            logging.info(f"[ULTRA-FAST] Background processing completed in {processing_time:.2f}s")
+            
+        except Exception as process_error:
+            logging.error(f"[ULTRA-FAST] Processing error: {process_error}")
+            
+    except Exception as e:
+        logging.error(f"[ULTRA-FAST] Background processing failed: {e}")
+        logging.error(f"[ULTRA-FAST] Traceback: {traceback.format_exc()}")
 
 @app.route('/test-upload-fast', methods=['GET'])
 def test_upload_fast():
