@@ -1,32 +1,58 @@
 #!/bin/bash
+# PythonAnywhere installation script
+# This script installs dependencies in a way that works on PythonAnywhere
 
-# PythonAnywhere Dependency Installation Script
-# This script installs all necessary dependencies for the AGT Designer application
+echo "🚀 Installing dependencies for PythonAnywhere..."
 
-echo "=== PythonAnywhere Dependency Installation ==="
-echo "Installing all necessary dependencies..."
-echo ""
+# Update pip first
+pip install --upgrade pip
 
-# Check if we're in the right directory
-if [ ! -f "app.py" ]; then
-    echo "Error: Please run this script from the project root directory"
-    exit 1
-fi
+# Install numpy first (required for pandas)
+echo "📦 Installing numpy..."
+pip install numpy==1.24.3
 
-# Create logs directory if it doesn't exist
-mkdir -p logs
+# Install pandas with a compatible version
+echo "📦 Installing pandas..."
+pip install pandas==1.5.3
 
-# Run the Python installation script
-echo "Running dependency installation script..."
-python3 install_pythonanywhere_dependencies.py
+# Install other core dependencies
+echo "📦 Installing core dependencies..."
+pip install Flask==2.3.3 Flask-CORS==4.0.0 Werkzeug==2.3.7
 
-echo ""
-echo "=== Installation Complete ==="
-echo "Check the output above for any errors."
-echo ""
-echo "If all dependencies are installed successfully:"
-echo "1. Go to the Web tab in PythonAnywhere dashboard"
-echo "2. Click 'Reload' to restart your web app"
-echo "3. Test the application at your PythonAnywhere URL"
-echo ""
-echo "If there were errors, please review them and try again."
+# Install document processing
+echo "📦 Installing document processing..."
+pip install python-docx==0.8.11 docxtpl==0.16.7 lxml==4.9.3
+
+# Install data processing
+echo "📦 Installing data processing..."
+pip install openpyxl==3.1.2 xlrd==2.0.1
+
+# Install image processing
+echo "📦 Installing image processing..."
+pip install Pillow==10.1.0
+
+# Install utilities
+echo "📦 Installing utilities..."
+pip install python-dateutil==2.8.2 pytz==2023.3 requests>=2.32.0
+
+# Install fuzzy matching (optional)
+echo "📦 Installing fuzzy matching..."
+pip install fuzzywuzzy>=0.18.0
+
+# Install performance optimizations
+echo "📦 Installing performance optimizations..."
+pip install flask-compress==1.18 psutil==7.0.0
+
+# Try to install jellyfish (optional)
+echo "📦 Installing jellyfish (optional)..."
+pip install jellyfish==1.2.0 || echo "⚠️  jellyfish installation failed, but that's okay"
+
+# Try to install Levenshtein (optional)
+echo "📦 Installing Levenshtein (optional)..."
+pip install python-Levenshtein>=0.27.0 || echo "⚠️  Levenshtein installation failed, but that's okay"
+
+echo "✅ Installation complete!"
+echo "📊 Checking installation..."
+python -c "import flask, pandas, docx; print('✅ Core dependencies working!')"
+
+echo "🎉 Ready to run on PythonAnywhere!"

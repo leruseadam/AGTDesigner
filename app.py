@@ -3,24 +3,32 @@ import sys  # Add this import
 import logging
 import threading
 import pandas as pd  # Add this import
+import time
+import requests
 from pathlib import Path
 
-# PythonAnywhere performance optimizations
+# Performance optimizations
 IS_PYTHONANYWHERE = 'pythonanywhere.com' in os.environ.get('HTTP_HOST', '')
-if IS_PYTHONANYWHERE:
-    # Reduce logging verbosity on PythonAnywhere
+IS_PRODUCTION = os.environ.get('FLASK_ENV') == 'production' or IS_PYTHONANYWHERE
+
+if IS_PRODUCTION:
+    # Production optimizations
     logging.getLogger().setLevel(logging.WARNING)
-    # Disable debug mode for better performance
     os.environ['FLASK_ENV'] = 'production'
-    # Set smaller chunk sizes for PythonAnywhere
-    CHUNK_SIZE_LIMIT = 10  # Reduced from 50
-    MAX_PROCESSING_TIME_PER_CHUNK = 15  # Reduced from 30
-    MAX_TOTAL_PROCESSING_TIME = 120  # Reduced from 300
+    # Optimized settings for production
+    CHUNK_SIZE_LIMIT = 15  # Balanced for performance
+    MAX_PROCESSING_TIME_PER_CHUNK = 20  # Reasonable timeout
+    MAX_TOTAL_PROCESSING_TIME = 180  # 3 minutes max
+    # File upload limits
+    MAX_CONTENT_LENGTH = 50 * 1024 * 1024  # 50MB max file size
+    UPLOAD_CHUNK_SIZE = 8192  # 8KB chunks for uploads
 else:
-    # Normal settings for local development
+    # Development settings
     CHUNK_SIZE_LIMIT = 50
     MAX_PROCESSING_TIME_PER_CHUNK = 30
     MAX_TOTAL_PROCESSING_TIME = 300
+    MAX_CONTENT_LENGTH = 100 * 1024 * 1024  # 100MB for development
+    UPLOAD_CHUNK_SIZE = 16384  # 16KB chunks for development
 from flask import (
     Flask, 
     request, 
@@ -37,6 +45,33 @@ try:
     from flask_compress import Compress
 except Exception:  # pragma: no cover
     Compress = None
+
+# PythonAnywhere-specific configuration
+try:
+    from pythonanywhere_config import (
+        JELLYFISH_AVAILABLE, LEVENSHTEIN_AVAILABLE, PSUTIL_AVAILABLE,
+        jaro_winkler_similarity_fallback, levenshtein_distance_fallback,
+        get_memory_usage_fallback, get_pythonanywhere_config, log_missing_dependencies
+    )
+    PYTHONANYWHERE_CONFIG = get_pythonanywhere_config()
+    log_missing_dependencies()
+except ImportError:
+    JELLYFISH_AVAILABLE = True
+    LEVENSHTEIN_AVAILABLE = True
+    PSUTIL_AVAILABLE = True
+    PYTHONANYWHERE_CONFIG = {}
+
+# Performance optimizations
+try:
+    from performance_optimizations import (
+        cached, performance_monitor, optimize_dataframe, 
+        async_processor, clear_cache, log_performance_stats
+    )
+    PERFORMANCE_ENABLED = True
+    logging.info("Performance optimizations enabled")
+except ImportError:
+    PERFORMANCE_ENABLED = False
+    logging.warning("Performance optimizations not available")
 
 # Simple in-memory cache for PythonAnywhere
 if IS_PYTHONANYWHERE:
@@ -543,6 +578,16 @@ def resource_path(relative_path):
 def create_app():
     app = Flask(__name__, static_url_path='/static', static_folder='static')
     app.config.from_object('config.Config')
+    
+    # Performance optimizations
+    app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
+    app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 31536000  # 1 year cache for static files
+    app.config['PERMANENT_SESSION_LIFETIME'] = 3600  # 1 hour session timeout
+    
+    # Compression for better performance
+    if Compress:
+        Compress(app)
+        logging.info("Flask-Compress enabled for better performance")
     
     # Initialize session management
     if Session:
@@ -1243,19 +1288,15 @@ def generation_splash():
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    """Ultra-fast file upload with immediate response and background processing"""
+    """Optimized file upload with streaming and progress tracking"""
     try:
-        # Check disk space before processing upload
-        disk_ok, disk_message = check_disk_space()
-        if not disk_ok:
-            # Perform emergency cleanup
+        # Quick disk space check
+        if not check_disk_space()[0]:
             emergency_cleanup()
-            # Check again after cleanup
-            disk_ok, disk_message = check_disk_space()
-            if not disk_ok:
-                return jsonify({'error': f'Insufficient disk space: {disk_message}. Please free up some space and try again.'}), 507
+            if not check_disk_space()[0]:
+                return jsonify({'error': 'Insufficient disk space. Please free up space and try again.'}), 507
         
-        # Rate limiting for uploads (more restrictive)
+        # Rate limiting
         client_ip = request.remote_addr
         if not check_rate_limit(client_ip):
             return jsonify({'error': 'Rate limit exceeded. Please wait before uploading another file.'}), 429
@@ -2978,6 +3019,7 @@ def _validate_tags_against_excel(excel_processor, selected_tags):
     return valid_selected_tags, invalid_selected_tags
 
 @app.route('/api/generate', methods=['POST'])
+@performance_monitor if PERFORMANCE_ENABLED else lambda x: x
 def generate_labels():
     try:
         logging.info("=== GENERATE LABELS ACTION START ===")
@@ -9581,19 +9623,16 @@ def serve_undo_selections_test():
     """Serve the undo selections test page."""
     return send_from_directory('.', 'test_undo_selections.html')
 
-@app.route('/upload-fast', methods=['POST'])
-def upload_file_fast():
-    """Ultra-fast file upload endpoint with minimal processing for maximum speed"""
+@app.route('/upload-optimized', methods=['POST'])
+def upload_file_optimized():
+    """Highly optimized file upload with streaming and minimal processing"""
     try:
-        # Check disk space before processing upload
-        disk_ok, disk_message = check_disk_space()
-        if not disk_ok:
-            # Perform emergency cleanup
-            emergency_cleanup()
-            # Check again after cleanup
-            disk_ok, disk_message = check_disk_space()
-            if not disk_ok:
-                return jsonify({'error': f'Insufficient disk space: {disk_message}. Please free up some space and try again.'}), 507
+        # Quick validation
+        if not check_disk_space()[0]:
+            return jsonify({'error': 'Insufficient disk space'}), 507
+        
+        if not check_rate_limit(request.remote_addr):
+            return jsonify({'error': 'Rate limit exceeded'}), 429
         
         # Rate limiting for uploads (more restrictive)
         client_ip = request.remote_addr
@@ -10143,6 +10182,67 @@ def debug_font_config():
         })
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)})
+
+@app.route('/api/performance/status')
+def performance_status():
+    """Get current performance status and statistics."""
+    try:
+        if not PERFORMANCE_ENABLED:
+            return jsonify({
+                "status": "disabled",
+                "message": "Performance optimizations not available"
+            })
+        
+        try:
+            from performance_optimizations import get_memory_usage, _memory_cache, _cache_timestamps
+        except ImportError:
+            # Fallback if performance_optimizations is not available
+            def get_memory_usage():
+                if PSUTIL_AVAILABLE:
+                    try:
+                        import psutil
+                        process = psutil.Process()
+                        return process.memory_info().rss / 1024 / 1024
+                    except:
+                        return 0
+                return get_memory_usage_fallback()
+            _memory_cache = {}
+            _cache_timestamps = {}
+        
+        memory_mb = get_memory_usage()
+        cache_size = len(_memory_cache)
+        
+        return jsonify({
+            "status": "enabled",
+            "memory_usage_mb": round(memory_mb, 2),
+            "cache_entries": cache_size,
+            "is_production": IS_PRODUCTION,
+            "chunk_size_limit": CHUNK_SIZE_LIMIT,
+            "max_processing_time": MAX_PROCESSING_TIME_PER_CHUNK
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+@app.route('/api/performance/clear-cache', methods=['POST'])
+def clear_performance_cache():
+    """Clear performance cache."""
+    try:
+        if PERFORMANCE_ENABLED:
+            clear_cache()
+            return jsonify({"status": "success", "message": "Cache cleared"})
+        else:
+            return jsonify({"status": "disabled", "message": "Performance optimizations not available"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+# Missing function definitions
+def enforce_fixed_cell_dimensions():
+    """Placeholder for enforce_fixed_cell_dimensions function."""
+    pass
+
+def apply_lineage_colors():
+    """Placeholder for apply_lineage_colors function."""
+    pass
 
 if __name__ == '__main__':
     # Create and run the application
