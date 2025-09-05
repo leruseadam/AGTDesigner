@@ -1,0 +1,141 @@
+<!-- filepath: templates/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AGT Price Tag Transformer</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="/static/js/main.js" defer></script>
+</head>
+<body>
+    <div class="container">
+        <!-- Left Panel -->
+        <div class="left-panel">
+            <!-- File Upload Section -->
+            <div class="upload-section">
+                <button class="upload-btn">Upload Spreadsheet</button>
+                <input type="file" id="fileUpload" accept=".xlsx,.csv" hidden>
+                <span class="file-label">No file selected</span>
+            </div>
+
+            <!-- JSON URL Section -->
+            <div class="json-section">
+                <input type="text" class="json-url" placeholder="Enter JSON URL">
+                <button class="json-btn">▶ Load JSON & Match</button>
+            </div>
+
+            <!-- Filter Dropdowns -->
+            <div class="filters">
+                <div class="filter-group">
+                    <label>Vendor:</label>
+                    <select class="filter-dropdown">
+                        <option value="All">All</option>
+                    </select>
+                </div>
+
+                <div class="filter-group">
+                    <label>Brand:</label>
+                    <select class="filter-dropdown">
+                        <option value="All">All</option>
+                    </select>
+                </div>
+
+                <div class="filter-group">
+                    <label>Product Type:</label>
+                    <select class="filter-dropdown">
+                        <option value="All">All</option>
+                    </select>
+                </div>
+
+                <div class="filter-group">
+                    <label>Lineage (S/H/I):</label>
+                    <select class="filter-dropdown">
+                        <option value="All">All</option>
+                    </select>
+                </div>
+
+                <div class="filter-group">
+                    <label>CBD Blend:</label>
+                    <select class="filter-dropdown">
+                        <option value="All">All</option>
+                    </select>
+                </div>
+
+                <div class="filter-group">
+                    <label>Weight:</label>
+                    <select class="filter-dropdown">
+                        <option value="All">All</option>
+                    </select>
+                </div>
+
+                <div class="quantity-check">
+                    <label for="quantityFilter">Only show products with Quantity > 0</label>
+                </div>abel for="quantityFilter">Only show products with Quantity > 0</label>
+                </div>
+                <button class="clear-filter-btn">Clear Filter</button>
+            </div>utton class="clear-filter-btn">Clear Filter</button>
+        </div>div>
+        </div>
+        <!-- Center Panel -->
+        <div class="center-panel">
+            <div class="tags-container">
+                <!-- Available Tags -->>
+                <div class="available-tags">
+                    <h2>Available Tag List:</h2>
+                    <div class="select-all">/h2>
+                        <input type="checkbox" id="selectAllAvailable" checked>
+                        <label for="selectAllAvailable">Select All (Available)</label>
+                    </div>abel for="selectAllAvailable">Select All (Available)</label>
+                    <div class="tags-list" id="availableTags"></div>
+                </div>iv class="tags-list" id="availableTags"></div>
+                </div>
+                <!-- Move Buttons -->
+                <div class="move-buttons">
+                    <button class="move-btn" id="moveRight">></button>
+                    <button class="move-btn" id="moveLeft"><</button>>
+                    <button class="clear-btn">Clear Selected</button>
+                    <button class="undo-btn">Undo</button>ed</button>
+                    <button class="help-btn">?</button>on>
+                </div>utton class="help-btn">?</button>
+                </div>
+                <!-- Selected Tags -->
+                <div class="selected-tags">
+                    <h2>Selected Tag List:</h2>
+                    <div class="select-all">h2>
+                        <input type="checkbox" id="selectAllSelected" checked>
+                        <label for="selectAllSelected">Select All (Selected)</label>
+                    </div>abel for="selectAllSelected">Select All (Selected)</label>
+                    <div class="tags-list" id="selectedTags"></div>
+                </div>iv class="tags-list" id="selectedTags"></div>
+            </div>div>
+        </div>div>
+        </div>
+        <!-- Right Panel -->
+        <div class="right-panel">
+            <!-- Vendor Back Option -->
+            <div class="vendor-back">->
+                <input type="checkbox" id="printVendor">
+                <label for="printVendor">Print Vendor to Back</label>
+            </div>abel for="printVendor">Print Vendor to Back</label>
+            </div>
+            <!-- Scale Factor -->
+            <div class="scale-factor">
+                <label>Font Scale Factor</label>
+                <input type="range" min="0.5" max="2" step="0.05" value="1">
+                <button class="reset-scale">Reset Scale</button>" value="1">
+            </div>utton class="reset-scale">Reset Scale</button>
+            </div>
+            <!-- Action Buttons -->
+            <div class="action-buttons">
+                <button class="action-btn horizontal">▭ Horizontal Tags</button>
+                <button class="action-btn vertical">▯ Vertical Tags</button>ton>
+                <button class="action-btn mini">⬜ Mini Tags</button>/button>
+                <button class="action-btn template">🖊️ Edit Template</button>
+                <button class="action-btn lineage">🎨 Fix Lineage</button>ton>
+            </div>utton class="action-btn lineage">🎨 Fix Lineage</button>
+        </div>div>
+    </div>div>
+</body>iv>
+</html>
+</html>

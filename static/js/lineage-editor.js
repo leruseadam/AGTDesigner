@@ -67,25 +67,25 @@ class StrainLineageEditor {
         
         const modalHTML = `
             <div class="modal fade" id="strainLineageEditorModal" tabindex="-1" aria-labelledby="strainLineageEditorModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
-                <div class="modal-dialog modal-lg">
-                    <div class="modal-content">
-                        <div class="modal-header">
-                            <h5 class="modal-title" id="strainLineageEditorModalLabel">Edit Strain Lineage</h5>
-                            <button type="button" class="btn-close" id="lineageEditorCloseBtn" aria-label="Close"></button>
+                <div class="modal-dialog modal-xl">
+                    <div class="modal-content glass-card">
+                        <div class="modal-header border-0 bg-transparent">
+                            <h5 class="modal-title text-white" id="strainLineageEditorModalLabel">Edit Strain Lineage</h5>
+                            <button type="button" class="btn-close btn-close-white" id="lineageEditorCloseBtn" aria-label="Close"></button>
                         </div>
                         <div class="modal-body">
                             <div id="lineageEditorContent">
                                 <div class="text-center">
-                                    <div class="spinner-border" role="status">
+                                    <div class="spinner-border text-primary" role="status">
                                         <span class="visually-hidden">Loading...</span>
                                     </div>
-                                    <p class="mt-2">Loading lineage editor...</p>
+                                    <p class="mt-3 text-white-50">Loading lineage editor...</p>
                                 </div>
                             </div>
                         </div>
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary" id="lineageEditorCancelBtn">Cancel</button>
-                            <button type="button" class="btn btn-primary" id="saveStrainLineageBtn">Save Changes</button>
+                        <div class="modal-footer border-0 bg-transparent">
+                            <button type="button" class="btn btn-glass" id="lineageEditorCancelBtn">Cancel</button>
+                            <button type="button" class="btn btn-modern2" id="saveStrainLineageBtn">Save Changes</button>
                         </div>
                     </div>
                 </div>
@@ -401,7 +401,7 @@ class StrainLineageEditor {
     }
 
     closeModal() {
-        console.log('StrainLineageEditor: Closing modal...');
+        console.log('StrainLineageEditor: Closing enhanced modal...');
         this.userRequestedClose = true;
         this.preventClose = false;
         
@@ -415,33 +415,149 @@ class StrainLineageEditor {
     }
 
     cleanup() {
-        console.log('StrainLineageEditor: Cleaning up...');
+        console.log('StrainLineageEditor: Cleaning up enhanced editor...');
         this.isLoading = false;
         this.preventClose = false;
         this.modalState = 'closed';
         this.userRequestedClose = false;
         document.body.style.overflow = '';
+        
+        // Clear validation messages
+        const validationDiv = document.getElementById('validationMessages');
+        if (validationDiv) {
+            validationDiv.innerHTML = '';
+        }
     }
 
     handleError(message) {
         console.error('StrainLineageEditor Error:', message);
-        alert('Error: ' + message);
+        
+        // Create a toast notification for errors
+        const toast = document.createElement('div');
+        toast.className = 'toast align-items-center text-white bg-danger border-0 position-fixed';
+        toast.style.cssText = 'top: 20px; right: 20px; z-index: 9999;';
+        toast.setAttribute('role', 'alert');
+        toast.setAttribute('aria-live', 'assertive');
+        toast.setAttribute('aria-atomic', 'true');
+        
+        toast.innerHTML = `
+            <div class="d-flex">
+                <div class="toast-body">
+                    <i class="fas fa-exclamation-triangle me-2"></i>${message}
+                </div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+            </div>
+        `;
+        
+        document.body.appendChild(toast);
+        
+        // Show toast
+        const toastInstance = new bootstrap.Toast(toast, { delay: 5000 });
+        toastInstance.show();
+        
+        // Remove toast after it's hidden
+        toast.addEventListener('hidden.bs.toast', () => {
+            if (toast.parentNode) {
+                toast.parentNode.removeChild(toast);
+            }
+        });
     }
 
     showSuccess(message) {
         console.log('StrainLineageEditor Success:', message);
-        // You could show a toast notification here instead of alert
-        alert(message);
+        this.showEnhancedSuccess(message);
     }
 
     escapeHtml(text) {
+        if (!text) return '';
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
     }
+
+    // Enhanced utility methods
+    async ensureProductDatabaseEnabled() {
+        try {
+            const response = await fetch('/api/product-db/status');
+            const data = await response.json();
+            
+            if (!data.enabled) {
+                console.log('StrainLineageEditor: Enabling product database...');
+                await fetch('/api/product-db/enable', { method: 'POST' });
+            }
+        } catch (error) {
+            console.warn('StrainLineageEditor: Could not check/enable product database:', error);
+        }
+    }
+
+    showModal() {
+        console.log('StrainLineageEditor: Showing enhanced modal...');
+        
+        if (this.modal) {
+            try {
+                this.modal.show();
+                console.log('StrainLineageEditor: Bootstrap modal.show() completed');
+            } catch (error) {
+                console.error('StrainLineageEditor: Error in Bootstrap modal.show():', error);
+            }
+        } else {
+            console.log('StrainLineageEditor: Using fallback modal');
+            if (this.modalElement) {
+                this.modalElement.style.display = 'block';
+                this.modalElement.classList.add('show');
+                this.onModalShown();
+            }
+        }
+    }
+
+    onModalShown() {
+        console.log('StrainLineageEditor: Enhanced modal shown');
+        this.isLoading = false;
+        this.preventClose = false;
+        this.modalState = 'open';
+        document.body.style.overflow = 'hidden';
+        
+        // Focus on the first form element
+        const firstInput = document.getElementById('lineageSelect') || document.getElementById('customLineage');
+        if (firstInput) {
+            firstInput.focus();
+        }
+    }
+
+    createFallbackModal() {
+        console.log('StrainLineageEditor: Creating fallback modal...');
+        
+        const fallbackHTML = `
+            <div id="strainLineageEditorModal" class="fallback-modal" style="display: none;">
+                <div class="fallback-modal-overlay">
+                    <div class="fallback-modal-content">
+                        <div class="fallback-modal-header">
+                            <h5>Edit Strain Lineage (Fallback Mode)</h5>
+                            <button type="button" class="fallback-modal-close" id="lineageEditorCloseBtn" aria-label="Close">&times;</button>
+                        </div>
+                        <div class="fallback-modal-body" id="lineageEditorContent">
+                            <div class="text-center">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <p class="mt-3">Loading lineage editor...</p>
+                            </div>
+                        </div>
+                        <div class="fallback-modal-footer">
+                            <button type="button" class="btn btn-glass" id="lineageEditorCancelBtn">Cancel</button>
+                            <button type="button" class="btn btn-modern2" id="saveStrainLineageBtn">Save Changes</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        document.body.insertAdjacentHTML('beforeend', fallbackHTML);
+        this.modalElement = document.getElementById('strainLineageEditorModal');
+    }
 }
 
-// Initialize the editor when the script loads
+// Initialize the enhanced editor when the script loads
 if (typeof window !== 'undefined') {
     window.strainLineageEditor = new StrainLineageEditor();
     window.strainLineageEditor.init();

@@ -305,25 +305,56 @@ def format_thc_cbd_bold_labels(text, template_type='vertical'):
             result.append("CBD:")
         
         return "  ".join(result)
+    elif template_type == 'mini':
+        # Mini template: format like the example with THC and CBD on separate lines
+        result = []
+        
+        if thc_value and cbd_value:
+            # THC on first line, value on second line
+            result.append("THC:")
+            # Add three spaces before the percentage value if the unit is '%'
+            if thc_unit == '%':
+                result.append(f"   {thc_value}{thc_unit}")
+            else:
+                result.append(f"{thc_value}{thc_unit}")
+            # CBD on third line, value on fourth line
+            result.append("CBD:")
+            # Add three spaces before the percentage value if the unit is '%'
+            if cbd_unit == '%':
+                result.append(f"   {cbd_value}{cbd_unit}")
+            else:
+                result.append(f"{cbd_value}{cbd_unit}")
+        elif thc_value:
+            result.append("THC:")
+            if thc_unit == '%':
+                result.append(f"   {thc_value}{thc_unit}")
+            else:
+                result.append(f"{thc_value}{thc_unit}")
+        elif cbd_value:
+            result.append("CBD:")
+            if cbd_unit == '%':
+                result.append(f"   {cbd_value}{cbd_unit}")
+            else:
+                result.append(f"{cbd_value}{cbd_unit}")
+        else:
+            result.append("THC:")
+            result.append("")
+            result.append("CBD:")
+            result.append("")
+        
+        return "\n".join(result)
     else:
-        # Vertical/double templates: separate lines with indented values
+        # Vertical/double templates: THC and CBD on separate lines with line break after percentage
         result = []
         
         if thc_value:
-            result.append("THC:")
-            result.append(f"  {thc_value}{thc_unit}")
+            result.append(f"THC: {thc_value}{thc_unit}")
         else:
             result.append("THC:")
-            result.append("  ")
-        
-        # Add extra blank line for better spacing between THC and CBD
-        result.append("")
         
         if cbd_value:
-            result.append("CBD:")
-            result.append(f"  {cbd_value}{cbd_unit}")
+            result.append(f"CBD: {cbd_value}{cbd_unit}")
         else:
             result.append("CBD:")
-            result.append("  ")
         
         return "\n".join(result) 

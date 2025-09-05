@@ -1,3 +1,42 @@
+/* Performance optimizations to prevent GUI glitchiness and flashing */
+.tag-item, .tag-row, .vendor-section, .brand-section, .product-type-section, .weight-section {
+  /* Prevent layout shifts during rapid updates */
+  contain: layout style;
+  /* Smooth transitions for better UX */
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  /* Prevent text selection during rapid updates */
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  /* Optimize rendering */
+  will-change: opacity, transform;
+}
+
+/* Disable transitions during rapid updates to prevent flashing */
+.tag-item.no-transitions, .tag-row.no-transitions,
+.vendor-section.no-transitions, .brand-section.no-transitions,
+.product-type-section.no-transitions, .weight-section.no-transitions {
+  transition: none !important;
+  will-change: auto !important;
+}
+
+/* Optimize checkbox rendering to prevent flashing */
+.tag-checkbox {
+  /* Prevent layout shifts */
+  contain: layout style;
+  /* Smooth state changes */
+  transition: all 0.1s ease;
+  /* Optimize rendering */
+  will-change: transform, opacity;
+}
+
+/* Prevent rapid style changes from causing flashing */
+.tag-item[style*="display: none"],
+.tag-item[style*="display: block"] {
+  transition: opacity 0.1s ease;
+}
+
 /* Increase spacing between the Database / Lineage Editor / Match JSON buttons */
 .header-buttons-container,
 .header-buttons-container.d-flex,

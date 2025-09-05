@@ -393,12 +393,12 @@ def safe_product_name(name):
 def safe_product_type(product_type):
     """Safely process product types."""
     if not product_type or pd.isna(product_type):
-        return "Unknown Type"
+        return "Vape Cartridge"  # Default to Vape Cartridge for concentrates
     
     type_str = str(product_type).strip()
     
     if not type_str or type_str.lower() in ['nan', 'none', 'null', '']:
-        return "Unknown Type"
+        return "Vape Cartridge"  # Default to Vape Cartridge for concentrates
     
     return type_str
 
@@ -668,6 +668,9 @@ class ExcelProcessor:
                     from .product_database import ProductDatabase
                     product_db = ProductDatabase()
                     
+                    # Add retry logic for database locking issues
+                    max_retries = 3
+                    
                     # Process in batches for better performance
                     batch_size = 50
                     total_rows = len(self.df)
@@ -683,7 +686,7 @@ class ExcelProcessor:
                         batch_end = min(i + batch_size, total_rows)
                         batch_df = self.df.iloc[i:batch_end]
                         
-                        # Process batch
+                        # Process batch with retry logic for database locking
                         for _, row in batch_df.iterrows():
                             row_dict = row.to_dict()
                             
@@ -693,19 +696,56 @@ class ExcelProcessor:
                                 # Add or update strain (only if strain name exists)
                                 strain_name = row_dict.get('Product Strain', '')
                                 if strain_name and str(strain_name).strip():
-                                    strain_id = product_db.add_or_update_strain(strain_name, row_dict.get('Lineage', ''))
-                                    if strain_id:
-                                        strain_count += 1
+                                    # Retry logic for strain operations
+                                    strain_retry_delay = 0.5
+                                    for attempt in range(max_retries):
+                                        try:
+                                            strain_id = product_db.add_or_update_strain(strain_name, row_dict.get('Lineage', ''))
+                                            if strain_id:
+                                                strain_count += 1
+                                            break
+                                        except Exception as e:
+                                            if "database is locked" in str(e).lower() and attempt < max_retries - 1:
+                                                self.logger.warning(f"[ProductDB] Database locked for strain '{strain_name}', retrying in {strain_retry_delay}s (attempt {attempt + 1}/{max_retries})")
+                                                time.sleep(strain_retry_delay)
+                                                strain_retry_delay *= 2  # Exponential backoff
+                                            else:
+                                                self.logger.error(f"[ProductDB] Failed to add/update strain '{strain_name}' after {max_retries} attempts: {e}")
+                                                break
                                 
-                                # Add or update product
-                                product_id = product_db.add_or_update_product(row_dict)
-                                if product_id:
-                                    product_count += 1
+                                # Add or update product with retry logic
+                                product_retry_delay = 0.5
+                                for attempt in range(max_retries):
+                                    try:
+                                        product_id = product_db.add_or_update_product(row_dict)
+                                        if product_id:
+                                            product_count += 1
+                                        break
+                                    except Exception as e:
+                                        if "database is locked" in str(e).lower() and attempt < max_retries - 1:
+                                            self.logger.warning(f"[ProductDB] Database locked for product, retrying in {product_retry_delay}s (attempt {attempt + 1}/{max_retries})")
+                                            time.sleep(product_retry_delay)
+                                            product_retry_delay *= 2  # Exponential backoff
+                                        else:
+                                            self.logger.error(f"[ProductDB] Failed to add/update product after {max_retries} attempts: {e}")
+                                            break
                             else:
                                 # For non-classic types, only add/update the product (no strain processing)
-                                product_id = product_db.add_or_update_product(row_dict)
-                                if product_id:
-                                    product_count += 1
+                                non_classic_retry_delay = 0.5
+                                for attempt in range(max_retries):
+                                    try:
+                                        product_id = product_db.add_or_update_product(row_dict)
+                                        if product_id:
+                                            product_count += 1
+                                        break
+                                    except Exception as e:
+                                        if "database is locked" in str(e).lower() and attempt < max_retries - 1:
+                                            self.logger.warning(f"[ProductDB] Database locked for non-classic product, retrying in {non_classic_retry_delay}s (attempt {attempt + 1}/{max_retries})")
+                                            time.sleep(non_classic_retry_delay)
+                                            non_classic_retry_delay *= 2  # Exponential backoff
+                                        else:
+                                            self.logger.error(f"[ProductDB] Failed to add/update non-classic product after {max_retries} attempts: {e}")
+                                            break
                         
                         # Log progress for large files
                         if total_rows > 100:
@@ -948,6 +988,11 @@ class ExcelProcessor:
 
             self.df = df
             self.logger.debug(f"Original columns: {self.df.columns.tolist()}")
+            
+            # Duplicate Product Strain column to "Strain Names" for processing
+            if 'Product Strain' in self.df.columns:
+                self.df['Strain Names'] = self.df['Product Strain'].copy()
+                self.logger.info("Duplicated 'Product Strain' column to 'Strain Names' for processing")
             
             # Apply strain extraction for Moonshot products
             self.apply_strain_extraction()
@@ -1992,8 +2037,8 @@ class ExcelProcessor:
                 self.logger.debug("psutil not available for memory monitoring")
             
             # --- Product/Strain Database Integration (Background Processing) ---
-            # Move this to background processing to avoid blocking the main file load
-            self._schedule_product_db_integration()
+            # TEMPORARILY DISABLED to fix app stability issues
+            # self._schedule_product_db_integration()
             
             # Cache the processed file
             self._file_cache[cache_key] = self.df.copy()
@@ -2174,7 +2219,7 @@ class ExcelProcessor:
         logger.info(f"get_available_tags: DataFrame shape {self.df.shape}, filtered shape {filtered_df.shape}")
         
         tags = []
-        seen_product_names = set()  # Track seen product names to prevent duplicates
+        seen_product_keys = set()  # Track seen product keys to prevent duplicates
         
         for _, row in filtered_df.iterrows():
             # Get quantity from various possible column names
@@ -2207,13 +2252,25 @@ class ExcelProcessor:
             # Get the product name
             product_name = safe_get_value(row.get(product_name_col, '')) or safe_get_value(row.get('Description', '')) or 'Unnamed Product'
             
-            # Skip if we've already seen this product name (deduplication)
-            if product_name in seen_product_names:
-                logger.debug(f"Skipping duplicate product: {product_name}")
+            # Get vendor and brand for deduplication
+            vendor_value = (
+                safe_get_value(row.get('Vendor/Supplier*', '')) or  # Primary column name
+                safe_get_value(row.get('Vendor', '')) or           # Alternative column name
+                safe_get_value(row.get('Vendor/Supplier', ''))     # Fallback column name
+            )
+            brand_value = safe_get_value(row.get('Product Brand', ''))
+            weight_value = safe_get_value(raw_weight)
+            
+            # Create a unique key that includes vendor/brand/weight to allow same product names with different weights
+            product_key = f"{product_name}|{vendor_value}|{brand_value}|{weight_value}"
+            
+            # Skip if we've already seen this product key (deduplication)
+            if product_key in seen_product_keys:
+                logger.debug(f"Skipping exact duplicate product: {product_key}")
                 continue
             
             # Add to seen set
-            seen_product_names.add(product_name)
+            seen_product_keys.add(product_key)
             
             # Get vendor from multiple possible column names
             vendor_value = (
@@ -2329,7 +2386,61 @@ class ExcelProcessor:
                 logger.warning("No tags selected")
                 return []
             
-            logger.debug(f"Selected tags: {selected_tags}")
+            # CRITICAL FIX: Log the selected tags for debugging
+            logger.info(f"CRITICAL FIX: get_selected_records called with {len(selected_tags)} selected tags")
+            logger.info(f"CRITICAL FIX: Selected tags: {selected_tags}")
+            
+            # Convert selected tags to simple strings if they're dictionaries
+            selected_tag_names = []
+            for tag in selected_tags:
+                if isinstance(tag, dict):
+                    # Extract product name from dictionary
+                    product_name = tag.get('Product Name*') or tag.get('displayName') or tag.get('ProductName', '')
+                    if product_name and product_name.strip():
+                        selected_tag_names.append(str(product_name).strip())
+                elif isinstance(tag, str):
+                    # Already a string
+                    selected_tag_names.append(tag.strip())
+                else:
+                    logger.warning(f"Unexpected tag format: {type(tag)} - {tag}")
+            
+            if not selected_tag_names:
+                logger.warning("No valid tag names found after conversion")
+                return []
+            
+            logger.debug(f"Selected tag names: {selected_tag_names}")
+            
+            # Try to get records from database first
+            try:
+                from .product_database import get_product_database
+                product_db = get_product_database()
+                if product_db:
+                    logger.info("Attempting to get selected records from database...")
+                    db_records = product_db.get_products_by_names(selected_tags)
+                    if db_records:
+                        logger.info(f"Successfully retrieved {len(db_records)} records from database")
+                        logger.info(f"CRITICAL FIX: Expected {len(selected_tags)} records, got {len(db_records)} from database")
+                        
+                        # CRITICAL FIX: Use database records even if some are missing
+                        if len(db_records) > 0:
+                            logger.info(f"CRITICAL FIX: Using {len(db_records)} database records for generation")
+                            logger.info(f"CRITICAL FIX: {len(selected_tags) - len(db_records)} products not found in database")
+                            
+                            # Process database records to match the expected format
+                            processed_records = self._process_database_records(db_records, template_type)
+                            logger.info(f"CRITICAL FIX: Generated {len(processed_records)} records from database")
+                            return processed_records
+                        else:
+                            logger.warning("No database records found, falling back to Excel data")
+                    else:
+                        logger.warning("No database records found, falling back to Excel data")
+                else:
+                    logger.warning("Product database not available, falling back to Excel data")
+            except Exception as e:
+                logger.warning(f"Database lookup failed, falling back to Excel data: {e}")
+            
+            # Fallback to Excel data if database lookup fails or returns no results
+            logger.info("Using Excel data for selected records")
             
             # Build a mapping from normalized product names to canonical names
             product_name_col = 'ProductName'  # The actual column name in the DataFrame
@@ -2340,20 +2451,45 @@ class ExcelProcessor:
                     logger.error(f"Product name column not found. Available columns: {list(self.df.columns)}")
                     return []
             
+            # CRITICAL FIX: Log column information for debugging
+            logger.info(f"CRITICAL FIX: Using product name column: '{product_name_col}'")
+            logger.info(f"CRITICAL FIX: Available columns: {list(self.df.columns)}")
+            logger.info(f"CRITICAL FIX: DataFrame shape: {self.df.shape}")
+            
+            # Check if we have JSON matched products
+            if 'Source' in self.df.columns:
+                json_matched_count = (self.df['Source'] == 'JSON Match').sum()
+                logger.info(f"CRITICAL FIX: Found {json_matched_count} JSON matched products in DataFrame")
+            
             canonical_map = {normalize_name(name): name for name in self.df[product_name_col]}
             logger.debug(f"Canonical map sample: {dict(list(canonical_map.items())[:5])}")
             
             # Map incoming selected tags to canonical names
-            canonical_selected = [canonical_map.get(normalize_name(tag)) for tag in selected_tags if canonical_map.get(normalize_name(tag))]
-            logger.debug(f"Selected tags: {selected_tags}")
+            canonical_selected = [canonical_map.get(normalize_name(tag)) for tag in selected_tag_names if canonical_map.get(normalize_name(tag))]
+            logger.debug(f"Selected tag names: {selected_tag_names}")
             logger.debug(f"Canonical selected tags: {canonical_selected}")
+            
+            # CRITICAL FIX: Log which tags were matched and which were not
+            matched_tags = []
+            unmatched_tags = []
+            for tag in selected_tag_names:
+                normalized_tag = normalize_name(tag)
+                if normalized_tag in canonical_map:
+                    matched_tags.append(tag)
+                else:
+                    unmatched_tags.append(tag)
+            
+            logger.info(f"CRITICAL FIX: Matched {len(matched_tags)} tags: {matched_tags}")
+            if unmatched_tags:
+                logger.warning(f"CRITICAL FIX: Unmatched {len(unmatched_tags)} tags: {unmatched_tags}")
+                logger.warning(f"CRITICAL FIX: Available product names (sample): {list(self.df[product_name_col])[:10]}")
             
             # Fallback: try case-insensitive and whitespace-insensitive matching if no canonical matches
             if not canonical_selected:
                 logger.warning("No canonical matches for selected tags, trying fallback matching...")
                 available_names = list(self.df[product_name_col])
                 fallback_selected = []
-                for tag in selected_tags:
+                for tag in selected_tag_names:
                     tag_norm = tag.strip().lower().replace(' ', '')
                     for name in available_names:
                         name_norm = str(name).strip().lower().replace(' ', '')
@@ -2363,10 +2499,86 @@ class ExcelProcessor:
                 canonical_selected = fallback_selected
                 logger.debug(f"Fallback canonical selected tags: {canonical_selected}")
             
+            # CRITICAL FIX: If still no matches and we have JSON matched products, try direct matching
+            if not canonical_selected and 'Source' in self.df.columns:
+                logger.warning("CRITICAL FIX: No matches found, trying direct matching for JSON products...")
+                json_matched_products = self.df[self.df['Source'] == 'JSON Match']
+                if not json_matched_products.empty:
+                    logger.info(f"CRITICAL FIX: Found {len(json_matched_products)} JSON matched products")
+                    direct_matches = []
+                    for tag in selected_tag_names:
+                        # Try exact match first
+                        exact_match = json_matched_products[json_matched_products[product_name_col] == tag]
+                        if not exact_match.empty:
+                            direct_matches.append(tag)
+                            logger.info(f"CRITICAL FIX: Direct match found for '{tag}'")
+                        else:
+                            # Try case-insensitive match
+                            case_insensitive_match = json_matched_products[
+                                json_matched_products[product_name_col].str.lower() == tag.lower()
+                            ]
+                            if not case_insensitive_match.empty:
+                                direct_matches.append(tag)
+                                logger.info(f"CRITICAL FIX: Case-insensitive match found for '{tag}'")
+                    
+                    if direct_matches:
+                        canonical_selected = direct_matches
+                        logger.info(f"CRITICAL FIX: Found {len(canonical_selected)} direct matches: {canonical_selected}")
+                    else:
+                        logger.warning(f"CRITICAL FIX: No direct matches found for any of the {len(selected_tag_names)} selected tags")
+            
+            # CRITICAL FIX: If still no matches, try to get JSON matched products from cache/session
+            if not canonical_selected:
+                logger.warning("CRITICAL FIX: No matches found in DataFrame, trying to get JSON matched products from cache...")
+                try:
+                    from flask import session, cache
+                    # Try to get JSON matched products from session cache
+                    json_matched_cache_key = session.get('json_matched_cache_key')
+                    if json_matched_cache_key:
+                        json_matched_products = cache.get(json_matched_cache_key)
+                        if json_matched_products:
+                            logger.info(f"CRITICAL FIX: Found {len(json_matched_products)} JSON matched products in cache")
+                            # Create records directly from cached JSON matched products
+                            records = []
+                            for product in json_matched_products:
+                                if isinstance(product, dict):
+                                    # Ensure the product has all required fields
+                                    record = {
+                                        'ProductName': product.get('Product Name*', product.get('ProductName', '')),
+                                        'Product Name*': product.get('Product Name*', product.get('ProductName', '')),
+                                        'Description': product.get('Description', product.get('Product Name*', product.get('ProductName', ''))),
+                                        'Product Type*': product.get('Product Type*', 'Unknown'),
+                                        'Product Brand': product.get('Product Brand', 'Unknown'),
+                                        'Product Strain': product.get('Product Strain', 'Unknown'),
+                                        'Lineage': product.get('Lineage', 'MIXED'),
+                                        'Vendor': product.get('Vendor', 'Unknown'),
+                                        'Price': product.get('Price', '$0'),
+                                        'Weight*': product.get('Weight*', '1g'),
+                                        'Quantity*': product.get('Quantity*', '1'),
+                                        'Units': product.get('Units', 'each'),
+                                        'THC test result': product.get('THC test result', 0.0),
+                                        'CBD test result': product.get('CBD test result', 0.0),
+                                        'Test result unit (% or mg)': product.get('Test result unit (% or mg)', '%'),
+                                        'Source': 'JSON Match'
+                                    }
+                                    records.append(record)
+                            
+                            if records:
+                                logger.info(f"CRITICAL FIX: Created {len(records)} records from cached JSON matched products")
+                                return records
+                            else:
+                                logger.warning("CRITICAL FIX: No valid records created from cached JSON matched products")
+                        else:
+                            logger.warning("CRITICAL FIX: No JSON matched products found in cache")
+                    else:
+                        logger.warning("CRITICAL FIX: No JSON matched cache key found in session")
+                except Exception as e:
+                    logger.warning(f"CRITICAL FIX: Error getting JSON matched products from cache: {e}")
+            
             if not canonical_selected:
                 logger.warning("No canonical matches for selected tags after fallback")
                 logger.warning(f"Available canonical keys (sample): {list(canonical_map.keys())[:10]}")
-                normalized_selected = [normalize_name(tag) for tag in selected_tags]
+                normalized_selected = [normalize_name(tag) for tag in selected_tag_names]
                 logger.warning(f"Normalized selected tags: {normalized_selected}")
                 logger.warning(f"Available product names: {list(self.df[product_name_col])[:10]}")
                 return []
@@ -2395,14 +2607,14 @@ class ExcelProcessor:
                 product_name = rec.get(product_name_col, '').strip()
                 # Try exact match first
                 try:
-                    return selected_tags.index(product_name)
+                    return selected_tag_names.index(product_name)
                 except ValueError:
                     # Try case-insensitive match
                     product_name_lower = product_name.lower()
-                    for i, tag in enumerate(selected_tags):
+                    for i, tag in enumerate(selected_tag_names):
                         if tag.lower() == product_name_lower:
                             return i
-                    return len(selected_tags)  # Put unknown tags at the end
+                    return len(selected_tag_names)  # Put unknown tags at the end
             
             # Sort by selected order only (respecting user's drag-and-drop order)
             records_sorted = sorted(records, key=lambda r: get_selected_order(r))
@@ -2461,8 +2673,8 @@ class ExcelProcessor:
                         else:
                             ratio_text = ""
                     
-                    product_name = make_nonbreaking_hyphens(product_name)
-                    description = make_nonbreaking_hyphens(description)
+                    product_name = self.make_nonbreaking_hyphens(product_name)
+                    description = self.make_nonbreaking_hyphens(description)
                     
                     # Get DOH value without normalization
                     doh_value = str(record.get('DOH', '')).strip().upper()
@@ -2618,14 +2830,14 @@ class ExcelProcessor:
                         'WeightUnits': record.get('JointRatio', '') if product_type in {"pre-roll", "infused pre-roll"} else self._format_weight_units(record),
                         'ProductBrand': product_brand,
                         'Price': str(record.get('Price', '')).strip(),
-                        'Lineage': f" {str(final_lineage)}" if str(final_lineage) else "",
+                        'Lineage': str(final_lineage) if str(final_lineage) else "",
                         'DOH': doh_value,  # Keep DOH as raw value
                         'Ratio_or_THC_CBD': ratio_text,  # Use the processed ratio_text for all product types
                         'ProductStrain': wrap_with_marker(final_product_strain, "PRODUCTSTRAIN") if include_product_strain else '',
                         'ProductType': record.get('Product Type*', ''),
                         'Ratio': str(record.get('Ratio', '')).strip(),
-                        'THC': wrap_with_marker(ai_value, "THC"),  # AI column for THC
-                        'CBD': wrap_with_marker(ak_value, "CBD"),  # AK column for CBD
+                        'THC': self.wrap_with_marker(ai_value, "THC"),  # AI column for THC
+                        'CBD': self.wrap_with_marker(ak_value, "CBD"),  # AK column for CBD
                         'THC_CBD': self._construct_thc_cbd_field(ai_value, ak_value, product_type),  # Construct combined THC_CBD field
                         'AI': ai_value,  # Total THC or THCA value for THC
                         'AJ': str(record.get('THCA', '')).strip(),  # THCA value for alternative THC
@@ -2849,7 +3061,7 @@ class ExcelProcessor:
             "brand": "Product Brand",
             "productType": "Product Type*",
             "lineage": "Lineage",
-            "weight": "Weight*",  # Changed from "CombinedWeight" to "Weight*"
+            "weight": "CombinedWeight",  # Reverted back to "CombinedWeight" as requested
             "strain": "Product Strain",
             "doh": "DOH",
             "highCbd": "Product Type*"  # Will be processed specially for high CBD detection
@@ -4266,4 +4478,885 @@ class ExcelProcessor:
         except Exception as e:
             logger.error(f"Error in intelligent CBD inference: {e}")
             return None
+
+    def add_product_with_educated_guess(self, product_name: str, vendor: str = None, brand: str = None) -> Dict[str, Any]:
+        """
+        Add a new product to the Excel DataFrame using educated guessing for missing information.
+        
+        Args:
+            product_name: The product name to add
+            vendor: Optional vendor name
+            brand: Optional brand name
+            
+        Returns:
+            Dictionary with the complete product information
+        """
+        try:
+            # First try to find the product in existing data
+            existing_product = self._find_exact_product(product_name)
+            if existing_product:
+                logger.info(f"Product '{product_name}' already exists in Excel data")
+                return existing_product
+            
+            # Try educated guessing from product database
+            educated_guess = None
+            try:
+                from .product_database import ProductDatabase
+                product_db = ProductDatabase()
+                educated_guess = product_db.make_educated_guess(product_name, vendor, brand)
+                if educated_guess:
+                    logger.info(f"✅ Made educated guess for '{product_name}': {educated_guess}")
+            except Exception as e:
+                logger.warning(f"Could not use product database for educated guessing: {e}")
+            
+            # Create product data
+            if educated_guess:
+                # Use educated guess data
+                product_data = {
+                    'Product Name*': educated_guess.get("product_name", product_name),
+                    'ProductName': educated_guess.get("product_name", product_name),
+                    'Description': educated_guess.get("description", product_name),
+                    'Product Type*': educated_guess.get("product_type", "Unknown"),
+                    'Product Type': educated_guess.get("product_type", "Unknown"),
+                    'Vendor': vendor or educated_guess.get("vendor", "Unknown"),
+                    'Vendor/Supplier*': vendor or educated_guess.get("vendor", "Unknown"),
+                    'Product Brand': brand or educated_guess.get("brand", "Unknown"),
+                    'ProductBrand': brand or educated_guess.get("brand", "Unknown"),
+                    'Product Strain': educated_guess.get("strain_name", "Unknown"),
+                    'Strain Name': educated_guess.get("strain_name", "Unknown"),
+                    'Lineage': educated_guess.get("lineage", "HYBRID"),
+                    'Weight*': educated_guess.get("weight", "1"),
+                    'Weight': educated_guess.get("weight", "1"),
+                    'Quantity*': '1',
+                    'Quantity': '1',
+                    'Units': educated_guess.get("units", "g"),
+                    'Price': educated_guess.get("price", "25"),
+                    'Price* (Tier Name for Bulk)': educated_guess.get("price", "25"),
+                    'Source': f'Educated Guess ({educated_guess.get("confidence", "medium")})',
+                    'Quantity Received*': '1',
+                    'Weight Unit* (grams/gm or ounces/oz)': educated_guess.get("units", "g"),
+                    'CombinedWeight': educated_guess.get("weight", "1"),
+                    'DescAndWeight': educated_guess.get("description", product_name),
+                    'Description_Complexity': '1',
+                    'Ratio_or_THC_CBD': '',
+                    'THC test result': '',
+                    'CBD test result': '',
+                    'Test result unit (% or mg)': '%',
+                    'Batch Number': '',
+                    'Lot Number': '',
+                    'Barcode*': '',
+                    'Cost*': '',
+                    'Medical Only (Yes/No)': 'No',
+                    'DOH': 'No',
+                    'DOH Compliant (Yes/No)': 'No',
+                    'State': 'active',
+                    'Is Sample? (yes/no)': 'no',
+                    'Is MJ product?(yes/no)': 'yes',
+                    'Discountable? (yes/no)': 'yes',
+                    'Room*': 'Default',
+                    'Concentrate Type': '',
+                    'Ratio': '',
+                    'Joint Ratio': '',
+                    'JointRatio': '',
+                    'Med Price': '',
+                    'Expiration Date(YYYY-MM-DD)': '',
+                    'Is Archived? (yes/no)': 'no',
+                    'THC Per Serving': '',
+                    'Allergens': '',
+                    'Solvent': '',
+                    'Accepted Date': '',
+                    'Internal Product Identifier': '',
+                    'Product Tags (comma separated)': '',
+                    'Image URL': '',
+                    'Ingredients': '',
+                }
+            else:
+                # Use basic inference from existing data
+                product_data = {
+                    'Product Name*': product_name,
+                    'ProductName': product_name,
+                    'Description': product_name,
+                    'Product Type*': self._infer_product_type_from_name(product_name) or "Unknown",
+                    'Product Type': self._infer_product_type_from_name(product_name) or "Unknown",
+                    'Vendor': vendor or "Unknown",
+                    'Vendor/Supplier*': vendor or "Unknown",
+                    'Product Brand': brand or "Unknown",
+                    'ProductBrand': brand or "Unknown",
+                    'Product Strain': self._infer_strain_from_name(product_name) or "Unknown",
+                    'Strain Name': self._infer_strain_from_name(product_name) or "Unknown",
+                    'Lineage': self._infer_lineage_from_name(product_name) or "HYBRID",
+                    'Weight*': self._infer_weight_from_name(product_name)['weight'],
+                    'Weight': self._infer_weight_from_name(product_name)['weight'],
+                    'Quantity*': '1',
+                    'Quantity': '1',
+                    'Units': self._infer_weight_from_name(product_name)['units'],
+                    'Price': self._infer_price_from_type_and_weight(
+                        self._infer_product_type_from_name(product_name) or "Unknown",
+                        float(self._infer_weight_from_name(product_name)['weight'])
+                    ),
+                    'Price* (Tier Name for Bulk)': self._infer_price_from_type_and_weight(
+                        self._infer_product_type_from_name(product_name) or "Unknown",
+                        float(self._infer_weight_from_name(product_name)['weight'])
+                    ),
+                    'Source': 'Manual Entry with Inference',
+                    'Quantity Received*': '1',
+                    'Weight Unit* (grams/gm or ounces/oz)': self._infer_weight_from_name(product_name)['units'],
+                    'CombinedWeight': self._infer_weight_from_name(product_name)['weight'],
+                    'DescAndWeight': product_name,
+                    'Description_Complexity': '1',
+                    'Ratio_or_THC_CBD': '',
+                    'THC test result': '',
+                    'CBD test result': '',
+                    'Test result unit (% or mg)': '%',
+                    'Batch Number': '',
+                    'Lot Number': '',
+                    'Barcode*': '',
+                    'Cost*': '',
+                    'Medical Only (Yes/No)': 'No',
+                    'DOH': 'No',
+                    'DOH Compliant (Yes/No)': 'No',
+                    'State': 'active',
+                    'Is Sample? (yes/no)': 'no',
+                    'Is MJ product?(yes/no)': 'yes',
+                    'Discountable? (yes/no)': 'yes',
+                    'Room*': 'Default',
+                    'Concentrate Type': '',
+                    'Ratio': '',
+                    'Joint Ratio': '',
+                    'JointRatio': '',
+                    'Med Price': '',
+                    'Expiration Date(YYYY-MM-DD)': '',
+                    'Is Archived? (yes/no)': 'no',
+                    'THC Per Serving': '',
+                    'Allergens': '',
+                    'Solvent': '',
+                    'Accepted Date': '',
+                    'Internal Product Identifier': '',
+                    'Product Tags (comma separated)': '',
+                    'Image URL': '',
+                    'Ingredients': '',
+                }
+            
+            # Add the product to the DataFrame
+            if self.df is not None:
+                # Ensure all columns exist
+                for key in product_data.keys():
+                    if key not in self.df.columns:
+                        self.df[key] = ''
+                
+                # Add the new row
+                self.df = pd.concat([self.df, pd.DataFrame([product_data])], ignore_index=True)
+                logger.info(f"✅ Added product '{product_name}' to Excel DataFrame with educated guess")
+            else:
+                logger.warning("No Excel DataFrame available")
+            
+            return product_data
+            
+        except Exception as e:
+            logger.error(f"Error adding product with educated guess: {e}")
+            return {}
+    
+    def _find_exact_product(self, product_name: str) -> Optional[Dict[str, Any]]:
+        """Find an exact product match in the existing Excel data."""
+        if self.df is None or self.df.empty:
+            return None
+        
+        product_name_col = 'Product Name*' if 'Product Name*' in self.df.columns else 'ProductName'
+        if product_name_col not in self.df.columns:
+            return None
+        
+        # Look for exact match
+        mask = self.df[product_name_col].astype(str).str.lower() == product_name.lower()
+        if mask.any():
+            row = self.df[mask].iloc[0]
+            return row.to_dict()
+        
+        return None
+    
+    def _infer_price_from_type_and_weight(self, product_type: str, weight: float) -> str:
+        """Infer price based on product type and weight."""
+        product_type_lower = product_type.lower()
+        
+        if 'pre-roll' in product_type_lower:
+            return '20'
+        elif 'flower' in product_type_lower:
+            if weight <= 1:
+                return '35'
+            elif weight <= 3.5:
+                return '120'
+            elif weight <= 7:
+                return '220'
+            else:
+                return '400'
+        elif 'concentrate' in product_type_lower:
+            if weight <= 1:
+                return '50'
+            elif weight <= 2:
+                return '90'
+            else:
+                return '150'
+        elif 'vape' in product_type_lower:
+            return '40'
+        elif 'edible' in product_type_lower:
+            return '25'
+        else:
+            return '25'
+
+    def add_json_matched_products(self, products: List[Dict]) -> bool:
+        """
+        Add JSON-matched products to the existing Excel DataFrame.
+        This ensures that JSON-matched products can be found during validation
+        and label generation.
+        
+        Args:
+            products: List of product dictionaries from JSON matching
+            
+        Returns:
+            True if products were successfully added, False otherwise
+        """
+        try:
+            if not products:
+                logger.info("No products to add to Excel DataFrame")
+                return True
+                
+            if self.df is None:
+                logger.warning("No Excel DataFrame available for adding products")
+                return False
+                
+            logger.info(f"Adding {len(products)} JSON-matched products to Excel DataFrame")
+            
+            # Create a list to store the new rows
+            new_rows = []
+            
+            for product in products:
+                # Create a row that matches the Excel DataFrame structure
+                row_data = {}
+                
+                # Map all the fields to Excel columns
+                for key, value in product.items():
+                    # Handle both the original Excel column names and the JSON matcher field names
+                    if key in self.df.columns:
+                        row_data[key] = value
+                    else:
+                        # Try to find a matching column name
+                        matching_col = None
+                        for col in self.df.columns:
+                            if col.lower() == key.lower() or col.lower().replace(' ', '').replace('*', '') == key.lower().replace(' ', '').replace('*', ''):
+                                matching_col = col
+                                break
+                        
+                        if matching_col:
+                            row_data[matching_col] = value
+                        else:
+                            # If no matching column found, try to add it to the DataFrame
+                            if key not in self.df.columns:
+                                self.df[key] = ''
+                            row_data[key] = value
+                
+                # Ensure all required Excel columns are present
+                for col in self.df.columns:
+                    if col not in row_data:
+                        row_data[col] = ''
+                
+                new_rows.append(row_data)
+            
+            if new_rows:
+                # Create DataFrame from new rows
+                new_df = pd.DataFrame(new_rows)
+                
+                # Append to existing DataFrame
+                self.df = pd.concat([self.df, new_df], ignore_index=True)
+                
+                logger.info(f"Successfully added {len(new_rows)} JSON-matched products to Excel DataFrame")
+                logger.info(f"Excel DataFrame now contains {len(self.df)} total records")
+                
+                # Rebuild caches to include new products
+                self._rebuild_caches()
+                
+                return True
+            else:
+                logger.warning("No valid rows created for Excel DataFrame addition")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error adding JSON products to Excel DataFrame: {e}")
+            return False
+
+    def _rebuild_caches(self):
+        """Rebuild internal caches after adding new products."""
+        try:
+            # Clear existing caches
+            self._dropdown_cache = None
+            self._strain_cache = None
+            self._vendor_cache = None
+            
+            # Rebuild caches using the correct method names
+            if hasattr(self, '_build_dropdown_cache'):
+                self._build_dropdown_cache()
+            elif hasattr(self, 'build_dropdown_cache'):
+                self.build_dropdown_cache()
+                
+            if hasattr(self, '_build_strain_cache'):
+                self._build_strain_cache()
+            elif hasattr(self, 'build_strain_cache'):
+                self.build_strain_cache()
+                
+            if hasattr(self, '_build_vendor_cache'):
+                self._build_vendor_cache()
+            elif hasattr(self, 'build_vendor_cache'):
+                self.build_vendor_cache()
+            
+            logger.info("Successfully rebuilt Excel processor caches")
+        except Exception as e:
+            logger.warning(f"Error rebuilding caches: {e}")
+            # Continue without cache rebuilding - this is not critical
+
+    def _store_upload_in_database(self, df: pd.DataFrame, source_file: str = None) -> Dict[str, Any]:
+        """
+        Store Excel upload data in the database while excluding JSON matched tags.
+        
+        Args:
+            df: DataFrame containing the Excel data to store
+            source_file: Path to the source Excel file
+            
+        Returns:
+            Dictionary with storage results including counts and status
+        """
+        try:
+            from src.core.data.product_database import ProductDatabase
+            import os
+            
+            # Get the product database instance
+            current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+            db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
+            product_db = ProductDatabase(db_path)
+            
+            # Initialize database if needed
+            product_db.init_database()
+            
+            logger.info(f"Starting database storage for Excel upload: {len(df)} rows from {source_file}")
+            
+            if df is None or df.empty:
+                logger.warning("No data to store - DataFrame is empty")
+                return {'stored': 0, 'updated': 0, 'errors': 0, 'message': 'No data to store'}
+            
+            # Filter out JSON matched tags
+            # JSON matched tags typically have 'Source': 'JSON Match' or similar indicators
+            filtered_df = df.copy()
+            
+            # Remove rows that are JSON matched tags
+            json_match_indicators = [
+                'Source', 'ai_match_score', 'ai_confidence', 'ai_match_type',
+                'json_match_score', 'json_confidence', 'json_match_type'
+            ]
+            
+            # Check if any of these columns exist and contain JSON match data
+            json_match_mask = pd.Series([False] * len(filtered_df), index=filtered_df.index)
+            
+            for col in json_match_indicators:
+                if col in filtered_df.columns:
+                    # Check for JSON match indicators in the column
+                    if col == 'Source':
+                        # Look for 'JSON Match' or similar in Source column
+                        json_match_mask |= filtered_df[col].astype(str).str.contains('JSON Match|AI Match|JSON|AI', case=False, na=False)
+                    else:
+                        # Look for non-null values in other JSON match columns
+                        json_match_mask |= filtered_df[col].notna()
+            
+            # Apply the filter to exclude JSON matched tags
+            original_count = len(filtered_df)
+            filtered_df = filtered_df[~json_match_mask]
+            filtered_count = len(filtered_df)
+            excluded_count = original_count - filtered_count
+            
+            logger.info(f"Filtered out {excluded_count} JSON matched tags, {filtered_count} rows remaining for database storage")
+            
+            if filtered_count == 0:
+                logger.warning("All data was JSON matched tags - nothing to store in database")
+                return {
+                    'stored': 0, 
+                    'updated': 0, 
+                    'errors': 0, 
+                    'excluded_json_matches': excluded_count,
+                    'message': f'All {excluded_count} rows were JSON matched tags - excluded from database storage'
+                }
+            
+            # Use the product database's store_excel_data method
+            storage_result = product_db.store_excel_data(filtered_df, source_file)
+            
+            # Add JSON match exclusion information to the result
+            storage_result['excluded_json_matches'] = excluded_count
+            storage_result['original_count'] = original_count
+            storage_result['filtered_count'] = filtered_count
+            
+            logger.info(f"Database storage completed: {storage_result['message']}")
+            logger.info(f"Excluded {excluded_count} JSON matched tags from database storage")
+            
+            return storage_result
+            
+        except Exception as e:
+            logger.error(f"Error storing Excel upload in database: {e}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return {
+                'stored': 0, 
+                'updated': 0, 
+                'errors': 1, 
+                'excluded_json_matches': 0,
+                'message': f'Database storage failed: {str(e)}'
+            }
+
+    def _process_database_records(self, db_records: List[Dict[str, Any]], template_type: str) -> List[Dict[str, Any]]:
+        """Process database records into the format expected by template processor."""
+        try:
+            processed_records = []
+            
+            for record in db_records:
+                try:
+                    # Extract basic information
+                    product_name = record.get('ProductName', '') or record.get('Product Name*', '')
+                    
+                    # Clean the product name to remove subtext and parenthetical information
+                    original_product_name = product_name
+                    cleaned_product_name = self.clean_product_name(product_name)
+                    if cleaned_product_name != original_product_name:
+                        logger.info(f"🧹 Cleaned database product name: '{original_product_name}' → '{cleaned_product_name}'")
+                        product_name = cleaned_product_name
+                    
+                    description = record.get('Description', '') or product_name
+                    
+                    # Also clean the description if it contains uncleaned text
+                    if description and description != product_name:
+                        original_description = description
+                        cleaned_description = self.clean_product_name(description)
+                        if cleaned_description != original_description:
+                            logger.info(f"🧹 Cleaned database description: '{original_description}' → '{cleaned_description}'")
+                            description = cleaned_description
+                    product_type = record.get('Product Type*', '').strip().lower()
+                    
+                    # Get ratio text and ensure it's a string
+                    ratio_text = str(record.get('Ratio', '')).strip()
+                    
+                    # Define classic types
+                    classic_types = [
+                        "flower", "pre-roll", "infused pre-roll", "concentrate", 
+                        "solventless concentrate", "vape cartridge", "rso/co2 tankers"
+                    ]
+                    
+                    # For classic types, ensure proper ratio format
+                    if product_type in classic_types:
+                        # Check if we have a valid ratio, otherwise use default
+                        if not ratio_text or ratio_text in ["", "CBD", "THC", "CBD:", "THC:", "CBD:\n", "THC:\n"]:
+                            ratio_text = "THC:|BR|CBD:"
+                        # If ratio contains THC/CBD values, use it directly
+                        elif any(cannabinoid in ratio_text.upper() for cannabinoid in ['THC', 'CBD', 'CBC', 'CBG', 'CBN']):
+                            ratio_text = ratio_text  # Keep as is
+                        # If it's a valid ratio format, use it
+                        elif is_real_ratio(ratio_text):
+                            ratio_text = ratio_text  # Keep as is
+                        # Otherwise, use default THC:CBD format
+                        else:
+                            ratio_text = "THC:|BR|CBD:"
+                    
+                    # For non-classic types, preserve the ratio value from database
+                    else:
+                        # Keep the original ratio value from database for non-classic types
+                        if not ratio_text or ratio_text in ["", "nan", "NaN"]:
+                            ratio_text = ""  # Empty for non-classic types without ratio
+                        # Otherwise, keep the ratio value as-is
+                    
+                    # Ensure we have a valid ratio text
+                    if not ratio_text:
+                        if product_type in classic_types:
+                            ratio_text = "THC:|BR|CBD:"
+                        else:
+                            ratio_text = ""
+                    
+                    product_name = make_nonbreaking_hyphens(product_name)
+                    description = make_nonbreaking_hyphens(description)
+                    
+                    # Get DOH value without normalization
+                    doh_value = str(record.get('DOH', '')).strip().upper()
+                    logger.debug(f"Processing DOH value: {doh_value}")
+                    
+                    # Get original values
+                    product_brand = record.get('Product Brand', '').upper()
+                    
+                    # If no brand name, try to extract from product name or use vendor
+                    if not product_brand or product_brand.strip() == '':
+                        if product_name:
+                            # Look for common brand patterns in product name
+                            import re
+                            # Pattern: product name followed by brand name (e.g., "White Widow CBG Platinum Distillate")
+                            brand_patterns = [
+                                r'(.+?)\s+(Platinum|Premium|Gold|Silver|Elite|Select|Reserve|Craft|Artisan|Boutique|Signature|Limited|Exclusive|Private|Custom|Special|Deluxe|Ultra|Super|Mega|Max|Pro|Plus|X)\s+(Distillate|Extract|Concentrate|Oil|Tincture|Gel|Capsule|Edible|Gummy|Chocolate|Beverage|Topical|Cream|Lotion|Salve|Balm|Spray|Drops|Syrup|Sauce|Dab|Wax|Shatter|Live|Rosin|Resin|Kief|Hash|Bubble|Ice|Water|Solventless|Full\s+Spectrum|Broad\s+Spectrum|Isolate|Terpene|Terpenes|Terp|Terps)',
+                                r'(.+?)\s+(Distillate|Extract|Concentrate|Oil|Tincture|Gel|Capsule|Edible|Gummy|Chocolate|Beverage|Topical|Cream|Lotion|Salve|Balm|Spray|Drops|Syrup|Sauce|Dab|Wax|Shatter|Live|Rosin|Resin|Kief|Hash|Bubble|Ice|Water|Solventless|Full\s+Spectrum|Broad\s+Spectrum|Isolate|Terpene|Terpenes|Terp|Terps)',
+                                r'(.+?)\s+(Platinum|Premium|Gold|Silver|Elite|Select|Reserve|Craft|Artisan|Boutique|Signature|Limited|Exclusive|Private|Custom|Special|Deluxe|Ultra|Super|Mega|Max|Pro|Plus|X)',
+                            ]
+                            
+                            for pattern in brand_patterns:
+                                match = re.search(pattern, product_name, re.IGNORECASE)
+                                if match:
+                                    # Extract the brand part (everything after the product name)
+                                    full_match = match.group(0)
+                                    product_part = match.group(1).strip()
+                                    brand_part = full_match[len(product_part):].strip()
+                                    if brand_part:
+                                        product_brand = brand_part.upper()
+                                        break
+                        
+                        # If still no brand, try vendor as fallback
+                        if not product_brand or product_brand.strip() == '':
+                            vendor = record.get('Vendor', '') or record.get('Vendor/Supplier*', '')
+                            if vendor and vendor.strip() != '':
+                                product_brand = vendor.strip().upper()
+                    
+                    original_lineage = str(record.get('Lineage', '')).upper()
+                    original_product_strain = record.get('ProductStrain', '') or record.get('strain_name', '')
+                    
+                    # Extract strain from product name if Product Strain contains the full product name
+                    extracted_strain = original_product_strain
+                    if original_product_strain and 'Moonshot' in original_product_strain:
+                        # Extract the strain name (everything before "Moonshot")
+                        strain_name = original_product_strain.replace(' Moonshot', '').strip()
+                        if strain_name:
+                            extracted_strain = strain_name
+                            logger.debug(f"Extracted strain '{extracted_strain}' from '{original_product_strain}'")
+                    elif original_product_strain and product_name:
+                        # Check if Product Strain contains the full product name (common with brand names)
+                        if original_product_strain in product_name and len(original_product_strain) > len(product_name.split()[0]):
+                            # Extract just the first word as the strain (e.g., "Grape" from "Grape Moonshot")
+                            extracted_strain = product_name.split()[0]
+                            logger.debug(f"Extracted strain '{extracted_strain}' from '{original_product_strain}' for product '{product_name}'")
+                    
+                    # For RSO/CO2 Tankers and Capsules, use Product Brand in place of Lineage
+                    if product_type in ["rso/co2 tankers", "capsule"]:
+                        final_lineage = product_brand if product_brand else original_lineage
+                        final_product_strain = extracted_strain  # Use extracted strain
+                    else:
+                        # For other product types, use the actual Lineage value
+                        final_lineage = original_lineage
+                        final_product_strain = extracted_strain  # Use extracted strain
+                    
+                    # Extract THC/CBD values from database columns
+                    total_thc_value = str(record.get('Total THC', '')).strip()
+                    thca_value = str(record.get('THCA', '')).strip()
+                    thc_test_result = str(record.get('THC test result', '')).strip()
+                    
+                    # Clean up THC test result value
+                    if thc_test_result in ['nan', 'NaN', '']:
+                        thc_test_result = ''
+                    
+                    # Convert to float for comparison, handling empty/invalid values
+                    def safe_float(value):
+                        if not value or value in ['nan', 'NaN', '']:
+                            return 0.0
+                        try:
+                            return float(value)
+                        except (ValueError, TypeError):
+                            return 0.0
+                    
+                    # Compare Total THC vs THC test result, use highest
+                    total_thc_float = safe_float(total_thc_value)
+                    thc_test_float = safe_float(thc_test_result)
+                    thca_float = safe_float(thca_value)
+                    
+                    # For THC: Use the highest value among Total THC, THC test result, and THCA
+                    if total_thc_float > 0:
+                        if thc_test_float > total_thc_float:
+                            ai_value = thc_test_result
+                            logger.debug(f"Using THC test result ({thc_test_result}) over Total THC ({total_thc_value}) for product: {product_name}")
+                        else:
+                            ai_value = total_thc_value
+                    else:
+                        # Total THC is 0 or empty, compare THCA vs THC test result
+                        if thca_float > 0 and thca_float >= thc_test_float:
+                            ai_value = thca_value
+                        elif thc_test_float > 0:
+                            ai_value = thc_test_result
+                        else:
+                            ai_value = ''
+                    
+                    # For CBD: merge CBDA with CBD test result, use highest value
+                    cbda_value = str(record.get('CBDA', '')).strip()
+                    cbd_test_result = str(record.get('CBD test result', '')).strip()
+                    
+                    # Clean up CBD test result value
+                    if cbd_test_result in ['nan', 'NaN', '']:
+                        cbd_test_result = ''
+                    
+                    # Compare CBDA vs CBD test result, use highest
+                    cbda_float = safe_float(cbda_value)
+                    cbd_test_float = safe_float(cbd_test_result)
+                    
+                    if cbd_test_float > cbda_float:
+                        ak_value = cbd_test_result
+                        logger.debug(f"Using CBD test result ({cbd_test_result}) over CBDA ({cbda_value}) for product: {product_name}")
+                    else:
+                        ak_value = cbda_value
+                    
+                    # Clean up the values (remove 'nan', empty strings, etc.)
+                    if ai_value in ['nan', 'NaN', '']:
+                        ai_value = ''
+                    if ak_value in ['nan', 'NaN', '']:
+                        ak_value = ''
+                    
+                    # Get vendor information
+                    vendor = record.get('Vendor', '') or record.get('Vendor/Supplier*', '')
+                    if vendor and str(vendor).lower() == 'nan':
+                        vendor = ''
+                    
+                    # Build the processed record with raw values (no markers)
+                    processed = {
+                        'ProductName': product_name,  # Keep this for compatibility
+                        'Product Name*': product_name,  # Also store with original column name
+                        'Description': description,
+                        'WeightUnits': record.get('JointRatio', '') if product_type in {"pre-roll", "infused pre-roll"} else self._format_weight_units(record),
+                        'ProductBrand': product_brand,
+                        'Price': str(record.get('Price', '')).strip(),
+                        'Lineage': str(final_lineage) if str(final_lineage) else "",
+                        'DOH': doh_value,  # Keep DOH as raw value
+                        'Ratio_or_THC_CBD': ratio_text,  # Use the processed ratio_text for all product types
+                        'ProductStrain': self.wrap_with_marker(final_product_strain, "PRODUCTSTRAIN") if final_product_strain else '',
+                        'ProductType': record.get('Product Type*', ''),
+                        'Ratio': str(record.get('Ratio', '')).strip(),
+                        'THC': wrap_with_marker(ai_value, "THC"),  # AI column for THC
+                        'CBD': wrap_with_marker(ak_value, "CBD"),  # AK column for CBD
+                        'THC_CBD': self._construct_thc_cbd_field(ai_value, ak_value, product_type),  # Construct combined THC_CBD field
+                        'AI': ai_value,  # Total THC or THCA value for THC
+                        'AJ': str(record.get('THCA', '')).strip(),  # THCA value for alternative THC
+                        'AK': ak_value,  # CBDA value for CBD
+                        'Vendor': vendor,  # Add vendor information
+                    }
+                    
+                    # Ensure leading space before hyphen is a non-breaking space to prevent Word from stripping it
+                    joint_ratio = record.get('JointRatio', '')
+                    # Handle NaN values properly
+                    if joint_ratio and str(joint_ratio).lower() in ['nan', 'nan']:
+                        joint_ratio = ''
+                    elif joint_ratio and str(joint_ratio).startswith(' -'):
+                        joint_ratio = ' -\u00A0' + str(joint_ratio)[2:]
+                    processed['JointRatio'] = joint_ratio
+                    
+                    logger.info(f"Rendered label for database record: {product_name if product_name else '[NO NAME]'}")
+                    logger.debug(f"Processed database record DOH value: {processed['DOH']}")
+                    logger.debug(f"Product Type: {product_type}, Classic: {product_type in classic_types}")
+                    logger.debug(f"Original Lineage: {original_lineage}, Final Lineage: {final_lineage}")
+                    logger.debug(f"Original Product Strain: {original_product_strain}, Final Product Strain: {final_product_strain}")
+                    
+                    processed_records.append(processed)
+                except Exception as e:
+                    logger.error(f"Error processing database record {product_name}: {str(e)}")
+                    continue
+            
+            # Debug log the final processed records
+            logger.debug(f"Processed {len(processed_records)} database records")
+            for record in processed_records:
+                logger.debug(f"Processed database record: {record.get('ProductName', 'NO NAME')}")
+                logger.debug(f"Record DOH value: {record.get('DOH', 'NO DOH')}")
+            
+            return processed_records
+            
+        except Exception as e:
+            logger.error(f"Error in _process_database_records: {str(e)}")
+            return []
+
+    def make_nonbreaking_hyphens(self, text: str) -> str:
+        """Replace regular hyphens with non-breaking hyphens to prevent Word from stripping them."""
+        if not text:
+            return text
+        return str(text).replace('-', '-\u00A0')
+    
+    def wrap_with_marker(self, text: str, marker: str) -> str:
+        """Wrap text with marker tags for template processing."""
+        if not text or str(text).strip() == '':
+            return ''
+        return f"{marker}_START{text}{marker}_END"
+
+    def clean_product_name(self, name: str) -> str:
+        """Remove subtext and parenthetical information from product names."""
+        if not name:
+            return name
+        
+        import re
+        
+        # Remove parentheses but preserve their content
+        cleaned = re.sub(r'\(([^)]*)\)', r'\1', name)  # Replace (text) with text
+        cleaned = re.sub(r'\[([^\]]*)\]', r'\1', cleaned)  # Replace [text] with text
+        
+        # Remove "by Dabstract JSON" specifically
+        cleaned = re.sub(r'\s*by\s+Dabstract\s+JSON\s*$', '', cleaned, flags=re.IGNORECASE)
+        
+        # Remove other "by vendor" patterns
+        cleaned = re.sub(r'\s*by\s+[^-]*\s*$', '', cleaned, flags=re.IGNORECASE)
+        
+        # Remove trailing dash patterns
+        cleaned = re.sub(r'\s*-\s*[^-]*\s*$', '', cleaned, flags=re.IGNORECASE)
+        
+        # Clean up extra whitespace
+        cleaned = re.sub(r'\s+', ' ', cleaned)
+        cleaned = cleaned.strip()
+        
+        return cleaned
+
+    def get_available_tag_names(self) -> List[str]:
+        """Get available tag names as simple strings (for tag selection)."""
+        try:
+            available_tags = self.get_available_tags()
+            # Extract just the product names from the tag dictionaries
+            tag_names = []
+            for tag in available_tags:
+                if isinstance(tag, dict):
+                    # Get the product name from the dictionary
+                    product_name = tag.get('Product Name*') or tag.get('displayName') or tag.get('ProductName', '')
+                    if product_name and product_name.strip():
+                        tag_names.append(str(product_name).strip())
+                elif isinstance(tag, str):
+                    # If it's already a string, use it directly
+                    tag_names.append(tag.strip())
+            
+            # Remove duplicates while preserving order
+            seen = set()
+            unique_names = []
+            for name in tag_names:
+                if name not in seen:
+                    seen.add(name)
+                    unique_names.append(name)
+            
+            logger.info(f"get_available_tag_names: Returning {len(unique_names)} unique tag names")
+            return unique_names
+            
+        except Exception as e:
+            logger.error(f"Error in get_available_tag_names: {e}")
+            return []
+
+    def get_available_tags(self, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """Return a list of tag objects with all necessary data."""
+        if self.df is None:
+            logger.warning("DataFrame is None in get_available_tags")
+            return []
+        
+        filtered_df = self.apply_filters(filters) if filters else self.df
+        logger.info(f"get_available_tags: DataFrame shape {self.df.shape}, filtered shape {filtered_df.shape}")
+        
+        tags = []
+        seen_product_names = set()  # Track seen product names to prevent duplicates
+        
+        for _, row in filtered_df.iterrows():
+            # Get quantity from various possible column names
+            quantity = row.get('Quantity*', '') or row.get('Quantity Received*', '') or row.get('Quantity', '') or row.get('qty', '') or ''
+            
+            # Get formatted weight with units
+            weight_with_units = self._format_weight_units(row)
+            raw_weight = row.get('Weight*', '')
+            
+            # Helper function to safely get values and handle NaN
+            def safe_get_value(value, default=''):
+                if value is None:
+                    return default
+                if isinstance(value, pd.Series):
+                    if pd.isna(value).any():
+                        return default
+                    value = value.iloc[0] if len(value) > 0 else default
+                elif pd.isna(value):
+                    return default
+                return str(value).strip()
+            
+            # Use the dynamically detected product name column
+            product_name_col = 'Product Name*'
+            if product_name_col not in self.df.columns:
+                possible_cols = ['ProductName', 'Product Name', 'Description']
+                product_name_col = next((col for col in possible_cols if col in self.df.columns), None)
+                if not product_name_col:
+                    product_name_col = 'Description'  # Fallback to Description
+            
+            # Get the product name
+            product_name = safe_get_value(row.get(product_name_col, '')) or safe_get_value(row.get('Description', '')) or 'Unnamed Product'
+            
+            # CRITICAL FIX: Allow JSON matched products to have duplicates
+            # Check if this is a JSON matched product
+            is_json_matched = row.get('Source', '') == 'JSON Match'
+            
+            # Skip if we've already seen this product name (deduplication) - but allow JSON matched products
+            if product_name in seen_product_names and not is_json_matched:
+                logger.debug(f"Skipping duplicate product: {product_name}")
+                continue
+            
+            # Add to seen set (only for non-JSON matched products to allow JSON duplicates)
+            if not is_json_matched:
+                seen_product_names.add(product_name)
+            
+            # Get vendor from multiple possible column names
+            vendor_value = (
+                safe_get_value(row.get('Vendor/Supplier*', '')) or  # Primary column name
+                safe_get_value(row.get('Vendor', '')) or           # Alternative column name
+                safe_get_value(row.get('Vendor/Supplier', ''))     # Fallback column name
+            )
+            
+            # Debug logging for vendor field detection
+            if not vendor_value and product_name:
+                logger.debug(f"Vendor field is empty for product '{product_name}'. Available vendor columns: {[col for col in row.index if 'vendor' in col.lower() or 'supplier' in col.lower()]}")
+                logger.debug(f"Row vendor values: Vendor/Supplier*='{row.get('Vendor/Supplier*', '')}', Vendor='{row.get('Vendor', '')}', Vendor/Supplier='{row.get('Vendor/Supplier', '')}'")
+            
+            tag = {
+                'Product Name*': product_name,
+                'Vendor': vendor_value,
+                'Vendor/Supplier*': vendor_value,
+                'Product Brand': safe_get_value(row.get('Product Brand', '')),
+                'ProductBrand': safe_get_value(row.get('Product Brand', '')),
+                'Lineage': safe_get_value(row.get('Lineage', 'MIXED')),
+                'Product Type*': safe_get_value(row.get('Product Type*', '')),
+                'Product Type': safe_get_value(row.get('Product Type*', '')),
+                'Weight*': safe_get_value(raw_weight),
+                'Weight': safe_get_value(raw_weight),
+                'WeightWithUnits': safe_get_value(weight_with_units),
+                'WeightUnits': safe_get_value(weight_with_units),  # Add WeightUnits for frontend compatibility
+                'Quantity*': safe_get_value(quantity),
+                'Quantity Received*': safe_get_value(quantity),
+                'quantity': safe_get_value(quantity),
+                'DOH': safe_get_value(row.get('DOH', '')),  # Add DOH field for UI display
+                # Also include the lowercase versions for backward compatibility
+                'vendor': vendor_value,
+                'productBrand': safe_get_value(row.get('Product Brand', '')),
+                'lineage': safe_get_value(row.get('Lineage', 'MIXED')),
+                'productType': safe_get_value(row.get('Product Type*', '')),
+                'weight': safe_get_value(raw_weight),
+                'weightWithUnits': safe_get_value(weight_with_units),
+                'displayName': product_name
+            }
+            # --- Filtering logic ---
+            product_brand = str(tag['productBrand']).strip().lower()
+            product_type = str(tag['productType']).strip().lower().replace('  ', ' ')
+            weight = str(tag['weight']).strip().lower()
+
+            # Sanitize lineage
+            lineage = str(row.get('Lineage', 'MIXED') or '').strip().upper()
+            if lineage not in VALID_LINEAGES:
+                lineage = "MIXED"
+            tag['Lineage'] = lineage
+            tag['lineage'] = lineage
+
+            # Filter out samples and invalid products
+            product_name_lower = product_name.lower()
+            product_type_lower = product_type.lower()
+            if (
+                weight == '-1g' or  # Invalid weight
+                'trade sample' in product_type_lower or  # Filter any trade sample product types
+                'sample' in product_name_lower or  # Filter products with "Sample" in name
+                'trade sample' in product_name_lower or  # Filter products with "Trade Sample" in name
+                any(pattern.lower() in product_name_lower for pattern in EXCLUDED_PRODUCT_PATTERNS) or  # Filter based on excluded patterns
+                any(pattern.lower() in product_type_lower for pattern in EXCLUDED_PRODUCT_PATTERNS)  # Filter product types based on excluded patterns
+            ):
+                continue  # Skip this tag
+            tags.append(tag)
+        
+        # Sort tags by vendor first, then by brand, then by weight
+        def sort_key(tag):
+            vendor = str(tag.get('vendor', '')).strip().lower()
+            brand = str(tag.get('productBrand', '')).strip().lower()
+            weight = ExcelProcessor.parse_weight_str(tag.get('weight', ''), tag.get('weightWithUnits', ''))
+            return (vendor, brand, weight)
+        
+        sorted_tags = sorted(tags, key=sort_key)
+        logger.info(f"get_available_tags: Returning {len(sorted_tags)} tags (removed {len(filtered_df) - len(sorted_tags)} duplicates)")
+        return sorted_tags
 

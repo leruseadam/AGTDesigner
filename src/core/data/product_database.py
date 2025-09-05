@@ -8,6 +8,13 @@ import pandas as pd
 from pathlib import Path
 from functools import lru_cache
 import threading
+import os
+
+def get_database_path():
+    """Get the correct database path for ProductDatabase instances."""
+    # Get the current directory of this file
+    current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    return os.path.join(current_dir, 'uploads', 'product_database.db')
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +35,25 @@ def timed_operation(operation_name):
         return wrapper
     return decorator
 
+def retry_on_lock(max_retries=3, delay=0.5):
+    """Decorator to retry database operations on locking errors."""
+    def decorator(func):
+        def wrapper(self, *args, **kwargs):
+            current_delay = delay  # Use a local variable to avoid scope issues
+            for attempt in range(max_retries):
+                try:
+                    return func(self, *args, **kwargs)
+                except Exception as e:
+                    if "database is locked" in str(e).lower() and attempt < max_retries - 1:
+                        logger.warning(f"Database locked for {func.__name__}, retrying in {current_delay}s (attempt {attempt + 1}/{max_retries})")
+                        time.sleep(current_delay)
+                        current_delay *= 2  # Exponential backoff
+                    else:
+                        raise e
+            return None
+        return wrapper
+    return decorator
+
 class ProductDatabase:
     """Database for storing and managing product and strain information."""
     
@@ -38,6 +64,8 @@ class ProductDatabase:
         self._cache_lock = threading.Lock()
         self._initialized = False
         self._init_lock = threading.Lock()
+        # Serialize writers to avoid 'database is locked' under concurrent writes
+        self._write_lock = threading.RLock()
         
         # Performance timing
         self._timing_stats = {
@@ -51,7 +79,21 @@ class ProductDatabase:
         """Get a database connection, reusing if possible."""
         thread_id = threading.get_ident()
         if thread_id not in self._connection_pool:
-            self._connection_pool[thread_id] = sqlite3.connect(self.db_path)
+            # Configure connection for better concurrency
+            conn = sqlite3.connect(
+                self.db_path,
+                timeout=30.0,  # 30 second timeout for database operations
+                check_same_thread=False  # Allow connection sharing across threads
+            )
+            # Enable WAL mode for better concurrency
+            conn.execute("PRAGMA journal_mode=WAL")
+            # Set busy timeout (60s) to ride out background batches
+            conn.execute("PRAGMA busy_timeout=60000")
+            # Optimize for concurrent access
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("PRAGMA cache_size=10000")
+            conn.execute("PRAGMA temp_store=MEMORY")
+            self._connection_pool[thread_id] = conn
         return self._connection_pool[thread_id]
     
     def init_database(self):
@@ -372,6 +414,8 @@ class ProductDatabase:
                 
                 if strain_count > 0 or product_count > 0:
                     logger.info(f"Database has existing data ({strain_count} strains, {product_count} products). Skipping destructive migration.")
+                    # Add missing columns to existing tables
+                    self._add_missing_columns_safe(cursor, conn)
                     return
             
             logger.info("Database is empty or missing tables. Performing safe schema migration...")
@@ -744,97 +788,110 @@ class ProductDatabase:
         logger.info(f"Canonical lineage update complete. {updated} strains updated.")
 
     @timed_operation("add_or_update_strain")
+    @retry_on_lock(max_retries=3, delay=0.5)
     def add_or_update_strain(self, strain_name: str, lineage: str = None, sovereign: bool = False) -> int:
         """Add a new strain or update existing strain information. If sovereign is True, set sovereign_lineage."""
         try:
             self.init_database()  # Ensure DB is initialized
             normalized_name = self._normalize_strain_name(strain_name)
             current_date = datetime.now().isoformat()
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            
-            # Check if strain exists
-            cursor.execute('''
-                SELECT id, canonical_lineage, total_occurrences, lineage_confidence, sovereign_lineage
-                FROM strains 
-                WHERE normalized_name = ?
-            ''', (normalized_name,))
-            existing = cursor.fetchone()
-            
-            if existing:
-                strain_id, existing_lineage, occurrences, confidence, existing_sovereign = existing
-                new_occurrences = occurrences + 1
-                # Update lineage if provided and different
-                if lineage and lineage != existing_lineage:
-                    cursor.execute('''
-                        INSERT INTO lineage_history (strain_id, old_lineage, new_lineage, change_date, change_reason)
-                        VALUES (?, ?, ?, ?, ?)
-                    ''', (strain_id, existing_lineage, lineage, current_date, 'New data upload'))
-                    cursor.execute('''
-                        UPDATE strains 
-                        SET canonical_lineage = ?, total_occurrences = ?, last_seen_date = ?, updated_at = ?
-                        WHERE id = ?
-                    ''', (lineage, new_occurrences, current_date, current_date, strain_id))
-                    
-                    # Notify all sessions of the lineage update (non-blocking)
-                    try:
-                        from .database_notifier import notify_lineage_update
-                        notify_lineage_update(strain_name, existing_lineage, lineage)
-                    except Exception as notify_error:
-                        logger.warning(f"Failed to notify lineage update: {notify_error}")
+            # Serialize write operations
+            with self._write_lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                # Check if we're already in a transaction
+                try:
+                    cursor.execute("BEGIN IMMEDIATE")
+                except sqlite3.OperationalError as e:
+                    if "cannot start a transaction within a transaction" in str(e):
+                        # We're already in a transaction, continue without BEGIN
+                        pass
+                    else:
+                        raise e
+                
+                # Check if strain exists
+                cursor.execute('''
+                    SELECT id, canonical_lineage, total_occurrences, lineage_confidence, sovereign_lineage
+                    FROM strains 
+                    WHERE normalized_name = ?
+                ''', (normalized_name,))
+                existing = cursor.fetchone()
+                
+                if existing:
+                    strain_id, existing_lineage, occurrences, confidence, existing_sovereign = existing
+                    new_occurrences = occurrences + 1
+                    # Update lineage if provided and different
+                    if lineage and lineage != existing_lineage:
+                        cursor.execute('''
+                            INSERT INTO lineage_history (strain_id, old_lineage, new_lineage, change_date, change_reason)
+                            VALUES (?, ?, ?, ?, ?)
+                        ''', (strain_id, existing_lineage, lineage, current_date, 'New data upload'))
+                        cursor.execute('''
+                            UPDATE strains 
+                            SET canonical_lineage = ?, total_occurrences = ?, last_seen_date = ?, updated_at = ?
+                            WHERE id = ?
+                        ''', (lineage, new_occurrences, current_date, current_date, strain_id))
+                        
+                        # Notify all sessions of the lineage update (non-blocking)
+                        try:
+                            from .database_notifier import notify_lineage_update
+                            notify_lineage_update(strain_name, existing_lineage, lineage)
+                        except Exception as notify_error:
+                            logger.warning(f"Failed to notify lineage update: {notify_error}")
+                    else:
+                        cursor.execute('''
+                            UPDATE strains 
+                            SET total_occurrences = ?, last_seen_date = ?, updated_at = ?
+                            WHERE id = ?
+                        ''', (new_occurrences, current_date, current_date, strain_id))
+                    # Sovereign lineage update
+                    if sovereign and lineage:
+                        cursor.execute('''
+                            UPDATE strains SET sovereign_lineage = ? WHERE id = ?
+                        ''', (lineage, strain_id))
+                        
+                        # Notify all sessions of the sovereign lineage update (non-blocking)
+                        try:
+                            from .database_notifier import notify_sovereign_lineage_set
+                            notify_sovereign_lineage_set(strain_name, lineage)
+                        except Exception as notify_error:
+                            logger.warning(f"Failed to notify sovereign lineage update: {notify_error}")
+                        
+                    conn.commit()
+                    cache_key = self._get_cache_key("strain_info", normalized_name)
+                    with self._cache_lock:
+                        if cache_key in self._cache:
+                            del self._cache[cache_key]
+                    return strain_id
                 else:
                     cursor.execute('''
-                        UPDATE strains 
-                        SET total_occurrences = ?, last_seen_date = ?, updated_at = ?
-                        WHERE id = ?
-                    ''', (new_occurrences, current_date, current_date, strain_id))
-                # Sovereign lineage update
-                if sovereign and lineage:
-                    cursor.execute('''
-                        UPDATE strains SET sovereign_lineage = ? WHERE id = ?
-                    ''', (lineage, strain_id))
+                        INSERT INTO strains (strain_name, normalized_name, canonical_lineage, first_seen_date, last_seen_date, created_at, updated_at, sovereign_lineage)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (strain_name, normalized_name, lineage, current_date, current_date, current_date, current_date, lineage if sovereign else None))
+                    strain_id = cursor.lastrowid
+                    conn.commit()
                     
-                    # Notify all sessions of the sovereign lineage update (non-blocking)
+                    # Notify all sessions of the new strain (non-blocking)
                     try:
-                        from .database_notifier import notify_sovereign_lineage_set
-                        notify_sovereign_lineage_set(strain_name, lineage)
+                        from .database_notifier import notify_strain_add
+                        notify_strain_add(strain_name, {
+                            'lineage': lineage,
+                            'sovereign': sovereign,
+                            'strain_id': strain_id
+                        })
                     except Exception as notify_error:
-                        logger.warning(f"Failed to notify sovereign lineage update: {notify_error}")
-                        
-                conn.commit()
-                cache_key = self._get_cache_key("strain_info", normalized_name)
-                with self._cache_lock:
-                    if cache_key in self._cache:
-                        del self._cache[cache_key]
-                return strain_id
-            else:
-                cursor.execute('''
-                    INSERT INTO strains (strain_name, normalized_name, canonical_lineage, first_seen_date, last_seen_date, created_at, updated_at, sovereign_lineage)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (strain_name, normalized_name, lineage, current_date, current_date, current_date, current_date, lineage if sovereign else None))
-                strain_id = cursor.lastrowid
-                conn.commit()
-                
-                # Notify all sessions of the new strain (non-blocking)
-                try:
-                    from .database_notifier import notify_strain_add
-                    notify_strain_add(strain_name, {
-                        'lineage': lineage,
-                        'sovereign': sovereign,
-                        'strain_id': strain_id
-                    })
-                except Exception as notify_error:
-                    logger.warning(f"Failed to notify strain add: {notify_error}")
+                        logger.warning(f"Failed to notify strain add: {notify_error}")
                     
-                if DEBUG_ENABLED:
-                    logger.debug(f"Added new strain '{strain_name}' with lineage '{lineage}'")
-                return strain_id
-                
+                    if DEBUG_ENABLED:
+                        logger.debug(f"Added new strain '{strain_name}' with lineage '{lineage}'")
+                    return strain_id
+                    
         except Exception as e:
             logger.error(f"Error adding/updating strain '{strain_name}': {e}")
             raise
     
     @timed_operation("add_or_update_product")
+    @retry_on_lock(max_retries=3, delay=0.5)
     def add_or_update_product(self, product_data: Dict[str, Any]) -> int:
         """Add a new product or update existing product information."""
         try:
@@ -850,52 +907,81 @@ class ProductDatabase:
             if strain_name:
                 strain_id = self.add_or_update_strain(strain_name, product_data.get('Lineage'))
             
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            
-            # Check if product exists (based on name, vendor, brand combination)
-            cursor.execute('''
-                SELECT id, total_occurrences
-                FROM products 
-                WHERE normalized_name = ? AND vendor = ? AND brand = ?
-            ''', (normalized_name, product_data.get('Vendor'), product_data.get('Product Brand')))
-            
-            existing = cursor.fetchone()
-            
-            if existing:
-                product_id, occurrences = existing
+            # Serialize write operations
+            with self._write_lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                # Check if we're already in a transaction
+                try:
+                    cursor.execute("BEGIN IMMEDIATE")
+                except sqlite3.OperationalError as e:
+                    if "cannot start a transaction within a transaction" in str(e):
+                        # We're already in a transaction, continue without BEGIN
+                        pass
+                    else:
+                        raise e
                 
-                # Update existing product
-                new_occurrences = occurrences + 1
+                # Enhanced duplicate detection: Check multiple combinations
+                # First check exact match (name + vendor + brand)
                 cursor.execute('''
-                    UPDATE products 
-                    SET total_occurrences = ?, last_seen_date = ?, updated_at = ?
-                    WHERE id = ?
-                ''', (new_occurrences, current_date, current_date, product_id))
+                    SELECT id, total_occurrences, product_name
+                    FROM products 
+                    WHERE normalized_name = ? AND vendor = ? AND brand = ?
+                ''', (normalized_name, product_data.get('vendor'), product_data.get('brand')))
                 
-                conn.commit()
-                return product_id
-            else:
-                # Add new product with essential columns only
+                existing = cursor.fetchone()
+                
+                if existing:
+                    product_id, occurrences, existing_name = existing
+                    
+                    # Log duplicate detection
+                    logger.info(f"Found existing product: '{existing_name}' (ID: {product_id}, occurrences: {occurrences})")
+                    
+                    # Update existing product
+                    new_occurrences = occurrences + 1
+                    cursor.execute('''
+                        UPDATE products 
+                        SET total_occurrences = ?, last_seen_date = ?, updated_at = ?
+                        WHERE id = ?
+                    ''', (new_occurrences, current_date, current_date, product_id))
+                    
+                    conn.commit()
+                    logger.info(f"Updated existing product '{existing_name}' - new occurrence count: {new_occurrences}")
+                    return product_id
+                
+                # Check for similar products (same name + vendor, different brand)
                 cursor.execute('''
-                    INSERT INTO products (
-                        product_name, normalized_name, strain_id, product_type, vendor, brand,
-                        description, weight, units, price, lineage, first_seen_date, last_seen_date, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    product_name, normalized_name, strain_id, product_data.get('Product Type*'),
-                    product_data.get('Vendor'), product_data.get('Product Brand'),
-                    product_data.get('Description'), product_data.get('Weight*'),
-                    product_data.get('Units'), product_data.get('Price'),
-                    product_data.get('Lineage'), current_date, current_date, current_date, current_date
-                ))
+                    SELECT id, total_occurrences, product_name, brand
+                    FROM products 
+                    WHERE normalized_name = ? AND vendor = ? AND brand != ?
+                ''', (normalized_name, product_data.get('vendor'), product_data.get('brand')))
                 
-                product_id = cursor.lastrowid
-                conn.commit()
-                if DEBUG_ENABLED:
-                    logger.debug(f"Added new product '{product_name}'")
-                return product_id
-                
+                similar_products = cursor.fetchall()
+                if similar_products:
+                    logger.info(f"Found {len(similar_products)} similar products with same name '{product_name}' and vendor '{product_data.get('Vendor')}' but different brands")
+                    for similar_id, similar_occurrences, similar_name, similar_brand in similar_products:
+                        logger.debug(f"Similar product: '{similar_name}' (Brand: {similar_brand}, ID: {similar_id})")
+                else:
+                    # Add new product with essential columns only
+                    cursor.execute('''
+                        INSERT INTO products (
+                            product_name, normalized_name, product_strain, product_type, vendor, brand,
+                            description, weight, units, price, lineage, first_seen_date, last_seen_date, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        product_name, normalized_name, product_data.get('product_strain'), product_data.get('product_type'),
+                        product_data.get('vendor'), product_data.get('brand'),
+                        product_data.get('description'), product_data.get('weight'),
+                        product_data.get('units'), product_data.get('price'),
+                        product_data.get('lineage'), current_date, current_date, current_date, current_date
+                    ))
+                    
+                    product_id = cursor.lastrowid
+                    conn.commit()
+                    if DEBUG_ENABLED:
+                        logger.debug(f"Added new product '{product_name}'")
+                    return product_id
+                    
         except Exception as e:
             logger.error(f"Error adding/updating product '{product_data.get('ProductName', '')}': {e}")
             raise
@@ -904,35 +990,51 @@ class ProductDatabase:
         """Store Excel data in the database. This is the main method for storing uploaded Excel files."""
         try:
             self.init_database()  # Ensure DB is initialized
-            logger.info(f"Starting to store Excel data with {len(df)} rows")
+            logger.info(f"Starting to store Excel data with {len(df)} rows from {source_file}")
             
             if df is None or df.empty:
                 logger.warning("No data to store - DataFrame is empty")
                 return {'stored': 0, 'updated': 0, 'errors': 0, 'message': 'No data to store'}
+            
+            # Enhanced JSON match detection and filtering
+            filtered_df = self._filter_json_matched_tags(df)
+            
+            if filtered_df.empty:
+                logger.warning("All data was filtered out as JSON matched tags - nothing to store")
+                return {
+                    'stored': 0, 
+                    'updated': 0, 
+                    'errors': 0, 
+                    'excluded_json_matches': len(df),
+                    'message': f'All {len(df)} rows were JSON matched tags - excluded from database storage'
+                }
+            
+            # Initialize duplicate tracking for this upload
+            self._current_upload_products = set()
             
             stored_count = 0
             updated_count = 0
             error_count = 0
             errors = []
             
-            # Process each row in the DataFrame
-            for index, row in df.iterrows():
+            # Process each row in the filtered DataFrame
+            for index, row in filtered_df.iterrows():
                 try:
                     # Convert row to dictionary and handle NaN values
                     row_dict = {}
-                    for col in df.columns:
+                    for col in filtered_df.columns:
                         value = row[col]
                         if pd.isna(value):
                             row_dict[col] = None
                         else:
                             row_dict[col] = str(value).strip() if isinstance(value, str) else value
                     
-                    # Simplified product data with only essential columns
+                    # Map to database columns correctly
                     product_data = {
                         'ProductName': row_dict.get('ProductName', ''),
                         'Product Type*': row_dict.get('Product Type*', ''),
                         'Lineage': row_dict.get('Lineage', ''),
-                        'Vendor': row_dict.get('Vendor', ''),
+                        'Vendor': row_dict.get('Vendor/Supplier*', row_dict.get('Vendor', '')),  # Map to correct column
                         'Product Brand': row_dict.get('Product Brand', ''),
                         'Description': row_dict.get('Description', ''),
                         'Weight*': row_dict.get('Weight*', ''),
@@ -1056,6 +1158,7 @@ class ProductDatabase:
                         'Alpha-Thujone (mg/g)': row_dict.get('Alpha-Thujone (mg/g)', ''),
                         'Beta-Farnesene (mg/g)': row_dict.get('Beta-Farnesene (mg/g)', ''),
                         'Beta-Maaliene (mg/g)': row_dict.get('Beta-Maaliene (mg/g)', ''),
+                        'Alpha-Maaliene (mg/g)': row_dict.get('Alpha-Maaliene (mg/g)', ''),
                         'Beta-Ocimene (mg/g)': row_dict.get('Beta-Ocimene (mg/g)', ''),
                         'Beta-Pinene (mg/g)': row_dict.get('Beta-Pinene (mg/g)', ''),
                         'Gamma-Terpinene (mg/g)': row_dict.get('Gamma-Terpinene (mg/g)', ''),
@@ -1129,9 +1232,46 @@ class ProductDatabase:
                         'CZ': row_dict.get('CZ', '')
                     }
                     
-                    # Skip rows without product name
-                    if not product_data['ProductName']:
+                    # Skip rows without product name - check multiple possible column names
+                    product_name = (product_data.get('ProductName') or 
+                                  product_data.get('Product Name*') or 
+                                  product_data.get('Product Name') or 
+                                  product_data.get('product_name') or 
+                                  '')
+                    
+                    # Enhanced validation: Skip blank or invalid entries
+                    if not product_name or str(product_name).strip() == '' or str(product_name).lower() in ['nan', 'none', 'null', '']:
+                        logger.warning(f"Row {index + 1}: Skipping blank/invalid product name: '{product_name}'")
                         continue
+                    
+                    # Skip rows with only whitespace or special characters
+                    if str(product_name).strip() == '' or len(str(product_name).strip()) < 2:
+                        logger.warning(f"Row {index + 1}: Skipping product name too short or only whitespace: '{product_name}'")
+                        continue
+                    
+                    # Update the product data with the found name
+                    product_data['ProductName'] = str(product_name).strip()
+                    
+                    # Additional validation: Skip rows with missing essential data
+                    vendor = product_data.get('Vendor', '').strip()
+                    product_type = product_data.get('Product Type*', '').strip()
+                    
+                    if not vendor or str(vendor).lower() in ['nan', 'none', 'null', '']:
+                        logger.warning(f"Row {index + 1}: Skipping product '{product_name}' - missing vendor information")
+                        continue
+                    
+                    if not product_type or str(product_type).lower() in ['nan', 'none', 'null', '']:
+                        logger.warning(f"Row {index + 1}: Skipping product '{product_name}' - missing product type")
+                        continue
+                    
+                    # Skip duplicate entries within the same upload (same name + vendor + type combination)
+                    duplicate_key = f"{product_name}|{vendor}|{product_type}"
+                    if duplicate_key in self._current_upload_products:
+                        logger.warning(f"Row {index + 1}: Skipping duplicate product '{product_name}' from same vendor '{vendor}' and type '{product_type}'")
+                        continue
+                    
+                    # Track this product to prevent duplicates within the same upload
+                    self._current_upload_products.add(duplicate_key)
                     
                     # Store the product in database
                     product_id = self.add_or_update_product(product_data)
@@ -1147,13 +1287,20 @@ class ProductDatabase:
                     logger.error(f"Error processing row {index + 1}: {row_error}")
                     continue
             
+            # Calculate excluded counts
+            excluded_count = len(df) - len(filtered_df)
+            blank_entries_skipped = len(df) - len(filtered_df) - excluded_count
+            
             result = {
                 'stored': stored_count,
                 'updated': updated_count,
                 'errors': error_count,
+                'excluded_json_matches': excluded_count,
+                'blank_entries_skipped': blank_entries_skipped,
                 'total_rows': len(df),
+                'filtered_rows': len(filtered_df),
                 'source_file': source_file,
-                'message': f'Successfully stored {stored_count} products with {error_count} errors'
+                'message': f'Successfully stored {stored_count} products with {error_count} errors, excluded {excluded_count} JSON matched tags, skipped {blank_entries_skipped} blank entries'
             }
             
             if errors:
@@ -1164,7 +1311,129 @@ class ProductDatabase:
             
         except Exception as e:
             logger.error(f"Error storing Excel data: {e}")
-            return {'stored': 0, 'updated': 0, 'errors': 1, 'message': f'Storage failed: {str(e)}'}
+            return {'stored': 0, 'updated': 0, 'errors': 1, 'excluded_json_matches': 0, 'message': f'Storage failed: {str(e)}'}
+    
+    def cleanup_blank_entries(self) -> Dict[str, Any]:
+        """
+        Clean up existing blank entries in the database.
+        
+        Returns:
+            Dictionary with cleanup results
+        """
+        try:
+            self.init_database()
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Find and count blank entries
+            cursor.execute('''
+                SELECT COUNT(*) FROM products 
+                WHERE product_name IS NULL 
+                   OR product_name = '' 
+                   OR product_name = 'nan' 
+                   OR product_name = 'None' 
+                   OR product_name = 'null'
+                   OR LENGTH(TRIM(product_name)) < 2
+            ''')
+            
+            blank_count = cursor.fetchone()[0]
+            
+            if blank_count == 0:
+                return {
+                    'cleaned': 0,
+                    'message': 'No blank entries found in database'
+                }
+            
+            # Delete blank entries
+            cursor.execute('''
+                DELETE FROM products 
+                WHERE product_name IS NULL 
+                   OR product_name = '' 
+                   OR product_name = 'nan' 
+                   OR product_name = 'None' 
+                   OR product_name = 'null'
+                   OR LENGTH(TRIM(product_name)) < 2
+            ''')
+            
+            deleted_count = cursor.rowcount
+            conn.commit()
+            
+            logger.info(f"Cleaned up {deleted_count} blank entries from database")
+            
+            return {
+                'cleaned': deleted_count,
+                'message': f'Successfully cleaned up {deleted_count} blank entries from database'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error cleaning up blank entries: {e}")
+            return {
+                'cleaned': 0,
+                'error': str(e),
+                'message': f'Failed to clean up blank entries: {str(e)}'
+            }
+    
+    def _filter_json_matched_tags(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Filter out JSON matched tags from the DataFrame.
+        
+        Args:
+            df: DataFrame to filter
+            
+        Returns:
+            Filtered DataFrame with JSON matched tags removed
+        """
+        try:
+            if df is None or df.empty:
+                return df
+            
+            # Create a copy to avoid modifying the original
+            filtered_df = df.copy()
+            
+            # Define JSON match indicators
+            json_match_indicators = [
+                'Source', 'ai_match_score', 'ai_confidence', 'ai_match_type',
+                'json_match_score', 'json_confidence', 'json_match_type',
+                'match_score', 'confidence', 'match_type'
+            ]
+            
+            # Create a mask for JSON matched tags
+            json_match_mask = pd.Series([False] * len(filtered_df), index=filtered_df.index)
+            
+            for col in json_match_indicators:
+                if col in filtered_df.columns:
+                    if col == 'Source':
+                        # Look for JSON match indicators in Source column
+                        json_match_mask |= filtered_df[col].astype(str).str.contains(
+                            'JSON Match|AI Match|JSON|AI|Match|Generated', 
+                            case=False, 
+                            na=False
+                        )
+                    else:
+                        # Look for non-null values in other JSON match columns
+                        json_match_mask |= filtered_df[col].notna()
+            
+            # Apply the filter
+            original_count = len(filtered_df)
+            filtered_df = filtered_df[~json_match_mask]
+            filtered_count = len(filtered_df)
+            excluded_count = original_count - filtered_count
+            
+            if excluded_count > 0:
+                logger.info(f"Filtered out {excluded_count} JSON matched tags, {filtered_count} rows remaining for database storage")
+                
+                # Log some examples of excluded tags for debugging
+                excluded_examples = df[json_match_mask].head(3)
+                for idx, row in excluded_examples.iterrows():
+                    source_info = row.get('Source', 'Unknown') if 'Source' in row else 'No Source'
+                    logger.debug(f"Excluded JSON matched tag: {row.get('Product Name*', row.get('ProductName', 'Unknown'))} (Source: {source_info})")
+            
+            return filtered_df
+            
+        except Exception as e:
+            logger.error(f"Error filtering JSON matched tags: {e}")
+            # Return original DataFrame if filtering fails
+            return df
     
     @timed_operation("get_strain_info")
     def get_strain_info(self, strain_name: str) -> Optional[Dict[str, Any]]:
@@ -1236,7 +1505,8 @@ class ProductDatabase:
             if vendor and brand:
                 cursor.execute('''
                     SELECT p.id, p.product_name, p.product_type, p.vendor, p.brand, p.lineage,
-                           s.strain_name, s.canonical_lineage, p.total_occurrences, p.first_seen_date, p.last_seen_date
+                           s.strain_name, s.canonical_lineage, p.total_occurrences, p.first_seen_date, p.last_seen_date,
+                           p.description, p.weight, p.units, p.price
                     FROM products p
                     LEFT JOIN strains s ON p.strain_id = s.id
                     WHERE p.normalized_name = ? AND p.vendor = ? AND p.brand = ?
@@ -1244,7 +1514,8 @@ class ProductDatabase:
             else:
                 cursor.execute('''
                     SELECT p.id, p.product_name, p.product_type, p.vendor, p.brand, p.lineage,
-                           s.strain_name, s.canonical_lineage, p.total_occurrences, p.first_seen_date, p.last_seen_date
+                           s.strain_name, s.canonical_lineage, p.total_occurrences, p.first_seen_date, p.last_seen_date,
+                           p.description, p.weight, p.units, p.price
                     FROM products p
                     LEFT JOIN strains s ON p.strain_id = s.id
                     WHERE p.normalized_name = ?
@@ -1263,7 +1534,11 @@ class ProductDatabase:
                     'canonical_lineage': result[7],
                     'total_occurrences': result[8],
                     'first_seen_date': result[9],
-                    'last_seen_date': result[10]
+                    'last_seen_date': result[10],
+                    'description': result[11],
+                    'weight': result[12],
+                    'units': result[13],
+                    'price': result[14]
                 }
                 
                 # Cache the result for 5 minutes
@@ -1376,45 +1651,45 @@ class ProductDatabase:
             cursor.execute('SELECT COUNT(*) FROM products')
             total_products = cursor.fetchone()[0]
             
-            # Vendor statistics
+            # Vendor statistics - use correct Excel column names
             cursor.execute('''
-                SELECT vendor, COUNT(*) as count
+                SELECT "Vendor/Supplier*", COUNT(*) as count
                 FROM products 
-                WHERE vendor IS NOT NULL AND vendor != ''
-                GROUP BY vendor
+                WHERE "Vendor/Supplier*" IS NOT NULL AND "Vendor/Supplier*" != ''
+                GROUP BY "Vendor/Supplier*"
                 ORDER BY count DESC
                 LIMIT 20
             ''')
             vendor_stats = [{'vendor': vendor, 'count': count} for vendor, count in cursor.fetchall()]
             
-            # Brand statistics
+            # Brand statistics - use correct Excel column names
             cursor.execute('''
-                SELECT brand, COUNT(*) as count
+                SELECT "Product Brand", COUNT(*) as count
                 FROM products 
-                WHERE brand IS NOT NULL AND brand != ''
-                GROUP BY brand
+                WHERE "Product Brand" IS NOT NULL AND "Product Brand" != ''
+                GROUP BY "Product Brand"
                 ORDER BY count DESC
                 LIMIT 20
             ''')
             brand_stats = [{'brand': brand, 'count': count} for brand, count in cursor.fetchall()]
             
-            # Product type statistics
+            # Product type statistics - use correct Excel column names
             cursor.execute('''
-                SELECT product_type, COUNT(*) as count
+                SELECT "Product Type*", COUNT(*) as count
                 FROM products 
-                WHERE product_type IS NOT NULL AND product_type != ''
-                GROUP BY product_type
+                WHERE "Product Type*" IS NOT NULL AND "Product Type*" != ''
+                GROUP BY "Product Type*"
                 ORDER BY count DESC
                 LIMIT 20
             ''')
             product_type_stats = [{'product_type': product_type, 'count': count} for product_type, count in cursor.fetchall()]
             
-            # Vendor-Brand combinations
+            # Vendor-Brand combinations - use correct Excel column names
             cursor.execute('''
-                SELECT vendor, brand, COUNT(*) as count
+                SELECT "Vendor/Supplier*", "Product Brand", COUNT(*) as count
                 FROM products 
-                WHERE vendor IS NOT NULL AND vendor != '' AND brand IS NOT NULL AND brand != ''
-                GROUP BY vendor, brand
+                WHERE "Vendor/Supplier*" IS NOT NULL AND "Vendor/Supplier*" != '' AND "Product Brand" IS NOT NULL AND "Product Brand" != ''
+                GROUP BY "Vendor/Supplier*", "Product Brand"
                 ORDER BY count DESC
                 LIMIT 15
             ''')
@@ -1441,6 +1716,10 @@ class ProductDatabase:
             self.init_database()  # Ensure DB is initialized
             
             conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Add missing columns if they don't exist
+            self._add_missing_columns_safe(cursor, conn)
             
             # Export strains
             strains_df = pd.read_sql_query('''
@@ -1449,22 +1728,34 @@ class ProductDatabase:
                 ORDER BY total_occurrences DESC
             ''', conn)
             
-            # Export products with all columns
-            products_df = pd.read_sql_query('''
-                SELECT p.product_name, p.product_type, p.vendor, p.brand, p.lineage,
-                       s.strain_name, p.total_occurrences, p.first_seen_date, p.last_seen_date,
-                       p.description, p.weight, p.units, p.price, p.product_strain, p.quantity,
-                       p.doh_compliant, p.concentrate_type, p.ratio, p.joint_ratio,
-                       p.thc_test_result, p.cbd_test_result, p.test_result_unit, p.state,
-                       p.is_sample, p.is_mj_product, p.discountable, p.room, p.batch_number,
-                       p.lot_number, p.barcode, p.cost, p.medical_only, p.med_price,
-                       p.expiration_date, p.is_archived, p.thc_per_serving, p.allergens,
-                       p.solvent, p.accepted_date, p.internal_product_identifier, p.product_tags,
-                       p.image_url, p.ingredients
-                FROM products p
-                LEFT JOIN strains s ON p.strain_id = s.id
-                ORDER BY p.total_occurrences DESC
-            ''', conn)
+            # Export products with all columns - handle missing columns gracefully
+            try:
+                products_df = pd.read_sql_query('''
+                    SELECT p.product_name, p.product_type, p.vendor, p.brand, p.lineage,
+                           s.strain_name, p.total_occurrences, p.first_seen_date, p.last_seen_date,
+                           p.description, p.weight, p.units, p.price, p.product_strain, p.quantity,
+                           p.doh_compliant, p.concentrate_type, p.ratio, p.joint_ratio,
+                           p.thc_test_result, p.cbd_test_result, p.test_result_unit, p.state,
+                           p.is_sample, p.is_mj_product, p.discountable, p.room, p.batch_number,
+                           p.lot_number, p.barcode, p.cost, p.medical_only, p.med_price,
+                           p.expiration_date, p.is_archived, p.thc_per_serving, p.allergens,
+                           p.solvent, p.accepted_date, p.internal_product_identifier, p.product_tags,
+                           p.image_url, p.ingredients
+                    FROM products p
+                    LEFT JOIN strains s ON p.strain_id = s.id
+                    ORDER BY p.total_occurrences DESC
+                ''', conn)
+            except Exception as e:
+                # Fallback to basic columns if some are missing
+                logger.warning(f"Full export failed, using fallback columns: {e}")
+                products_df = pd.read_sql_query('''
+                    SELECT p.product_name, p.product_type, p.vendor, p.brand, p.lineage,
+                           s.strain_name, p.total_occurrences, p.first_seen_date, p.last_seen_date,
+                           p.description, p.weight, p.units, p.price
+                    FROM products p
+                    LEFT JOIN strains s ON p.strain_id = s.id
+                    ORDER BY p.total_occurrences DESC
+                ''', conn)
             
             # Export to Excel
             with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
@@ -1476,6 +1767,147 @@ class ProductDatabase:
         except Exception as e:
             logger.error(f"Error exporting database: {e}")
             raise
+    
+    def _add_missing_columns_safe(self, cursor, conn):
+        """Safely add missing columns to existing tables without losing data."""
+        try:
+            # Check and add missing columns to products table
+            cursor.execute("PRAGMA table_info(products)")
+            existing_columns = {row[1] for row in cursor.fetchall()}
+            
+            missing_columns = []
+            
+            # Define all expected columns
+            expected_columns = [
+                ('product_strain', 'TEXT'),
+                ('quantity', 'TEXT'),
+                ('doh_compliant', 'TEXT'),
+                ('concentrate_type', 'TEXT'),
+                ('ratio', 'TEXT'),
+                ('joint_ratio', 'TEXT'),
+                ('thc_test_result', 'TEXT'),
+                ('cbd_test_result', 'TEXT'),
+                ('test_result_unit', 'TEXT'),
+                ('state', 'TEXT'),
+                ('is_sample', 'TEXT'),
+                ('is_mj_product', 'TEXT'),
+                ('discountable', 'TEXT'),
+                ('room', 'TEXT'),
+                ('batch_number', 'TEXT'),
+                ('lot_number', 'TEXT'),
+                ('barcode', 'TEXT'),
+                ('cost', 'TEXT'),
+                ('medical_only', 'TEXT'),
+                ('med_price', 'TEXT'),
+                ('expiration_date', 'TEXT'),
+                ('is_archived', 'TEXT'),
+                ('thc_per_serving', 'TEXT'),
+                ('allergens', 'TEXT'),
+                ('solvent', 'TEXT'),
+                ('accepted_date', 'TEXT'),
+                ('internal_product_identifier', 'TEXT'),
+                ('product_tags', 'TEXT'),
+                ('image_url', 'TEXT'),
+                ('ingredients', 'TEXT'),
+                ('combined_weight', 'TEXT'),
+                ('ratio_or_thc_cbd', 'TEXT'),
+                ('description_complexity', 'TEXT'),
+                ('total_thc', 'TEXT'),
+                ('thca', 'TEXT'),
+                ('cbda', 'TEXT'),
+                ('cbn', 'TEXT'),
+                # Terpene columns
+                ('a_bisabolol_mg_g', 'TEXT'),
+                ('a_humulene_mg_g', 'TEXT'),
+                ('a_maaliene_mg_g', 'TEXT'),
+                ('a_myrcene_mg_g', 'TEXT'),
+                ('a_pinene_mg_g', 'TEXT'),
+                ('b_caryophyllene_mg_g', 'TEXT'),
+                ('b_myrcene_mg_g', 'TEXT'),
+                ('b_pinene_mg_g', 'TEXT'),
+                ('bisabolol_mg_g', 'TEXT'),
+                ('borneol_mg_g', 'TEXT'),
+                ('camphene_mg_g', 'TEXT'),
+                ('camphor_mg_g', 'TEXT'),
+                ('carene_mg_g', 'TEXT'),
+                ('carvacrol_mg_g', 'TEXT'),
+                ('carvone_mg_g', 'TEXT'),
+                ('caryophyllene_mg_g', 'TEXT'),
+                ('cedrol_mg_g', 'TEXT'),
+                ('citral_mg_g', 'TEXT'),
+                ('citronellol_mg_g', 'TEXT'),
+                ('cymene_mg_g', 'TEXT'),
+                ('delta_3_carene_mg_g', 'TEXT'),
+                ('eucalyptol_mg_g', 'TEXT'),
+                ('fenchol_mg_g', 'TEXT'),
+                ('fenchone_mg_g', 'TEXT'),
+                ('geraniol_mg_g', 'TEXT'),
+                ('geranyl_acetate_mg_g', 'TEXT'),
+                ('guaiol_mg_g', 'TEXT'),
+                ('humulene_mg_g', 'TEXT'),
+                ('isoborneol_mg_g', 'TEXT'),
+                ('isobornyl_acetate_mg_g', 'TEXT'),
+                ('isopulegol_mg_g', 'TEXT'),
+                ('limonene_mg_g', 'TEXT'),
+                ('linalool_mg_g', 'TEXT'),
+                ('linalyl_acetate_mg_g', 'TEXT'),
+                ('m_cymene_mg_g', 'TEXT'),
+                ('menthal_mg_g', 'TEXT'),
+                ('menthone_mg_g', 'TEXT'),
+                ('myrcene_mg_g', 'TEXT'),
+                ('nerolidol_mg_g', 'TEXT'),
+                ('o_cymene_mg_g', 'TEXT'),
+                ('ocimene_mg_g', 'TEXT'),
+                ('p_cymene_mg_g', 'TEXT')
+            ]
+            
+            for col_name, col_type in expected_columns:
+                if col_name not in existing_columns:
+                    missing_columns.append((col_name, col_type))
+            
+            # Add missing columns
+            for col_name, col_type in missing_columns:
+                try:
+                    cursor.execute(f"ALTER TABLE products ADD COLUMN {col_name} {col_type}")
+                    logger.info(f"Added missing column: {col_name}")
+                except Exception as e:
+                    logger.warning(f"Could not add column {col_name}: {e}")
+            
+            if missing_columns:
+                conn.commit()
+                logger.info(f"Added {len(missing_columns)} missing columns to products table")
+            
+            # Check and add missing columns to strains table
+            cursor.execute("PRAGMA table_info(strains)")
+            existing_strain_columns = {row[1] for row in cursor.fetchall()}
+            
+            missing_strain_columns = []
+            
+            # Define expected strain columns
+            expected_strain_columns = [
+                ('lineage_confidence', 'REAL'),
+                ('sovereign_lineage', 'TEXT')
+            ]
+            
+            for col_name, col_type in expected_strain_columns:
+                if col_name not in existing_strain_columns:
+                    missing_strain_columns.append((col_name, col_type))
+            
+            # Add missing strain columns
+            for col_name, col_type in missing_strain_columns:
+                try:
+                    cursor.execute(f"ALTER TABLE strains ADD COLUMN {col_name} {col_type}")
+                    logger.info(f"Added missing strain column: {col_name}")
+                except Exception as e:
+                    logger.warning(f"Could not add strain column {col_name}: {e}")
+            
+            if missing_strain_columns:
+                conn.commit()
+                logger.info(f"Added {len(missing_strain_columns)} missing columns to strains table")
+            
+        except Exception as e:
+            logger.error(f"Error adding missing columns: {e}")
+            # Don't raise - continue with existing schema
     
     def get_performance_stats(self) -> Dict[str, Any]:
         """Get performance statistics for the database."""
@@ -2110,8 +2542,1013 @@ class ProductDatabase:
             logger.error(f"Error getting strains with brand info: {e}")
             return []
 
+    def add_missing_columns(self):
+        """Public method to add missing columns to existing database tables."""
+        try:
+            self.init_database()
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            self._add_missing_columns_safe(cursor, conn)
+            logger.info("Missing columns check completed")
+        except Exception as e:
+            logger.error(f"Error adding missing columns: {e}")
+            raise
+
+    @timed_operation("get_products_by_names")
+    def get_products_by_names(self, product_names: List[str]) -> List[Dict[str, Any]]:
+        """Get information about multiple products by their names (with caching)."""
+        try:
+            self.init_database()  # Ensure DB is initialized
+            
+            if not product_names:
+                return []
+            
+            # Normalize all product names
+            normalized_names = [self._normalize_product_name(name) for name in product_names]
+            
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Use placeholders for the IN clause
+            placeholders = ','.join(['?' for _ in normalized_names])
+            
+            cursor.execute(f'''
+                SELECT p.id, p.product_name, p.normalized_name, p.product_type, p.vendor, p.brand, p.lineage,
+                       s.strain_name, s.canonical_lineage, p.total_occurrences, p.first_seen_date, p.last_seen_date,
+                       p.description, p.weight, p.units, p.price, p.thc_test_result, p.cbd_test_result, p.test_result_unit,
+                       p.quantity, p.doh_compliant, p.concentrate_type, p.ratio, p.joint_ratio, p.state, p.is_sample,
+                       p.is_mj_product, p.discountable, p.room, p.batch_number, p.lot_number, p.barcode, p.cost,
+                       p.medical_only, p.med_price, p.expiration_date, p.is_archived, p.thc_per_serving, p.allergens,
+                       p.solvent, p.accepted_date, p.internal_product_identifier, p.product_tags, p.image_url, p.ingredients,
+                       p.combined_weight, p.ratio_or_thc_cbd, p.description_complexity, p.total_thc, p.thca, p.cbda, p.cbn
+                FROM products p
+                LEFT JOIN strains s ON p.strain_id = s.id
+                WHERE p.normalized_name IN ({placeholders})
+            ''', normalized_names)
+            
+            results = cursor.fetchall()
+            
+            # Create a mapping from normalized names to results
+            products_map = {}
+            for result in results:
+                normalized_name = result[2]  # normalized_name column
+                if normalized_name not in products_map:
+                    products_map[normalized_name] = []
+                products_map[normalized_name].append(result)
+            
+            # Build the final list maintaining the order of requested product names
+            products = []
+            for i, product_name in enumerate(product_names):
+                normalized_name = normalized_names[i]
+                if normalized_name in products_map:
+                    # Use the first result for each product (or could implement logic to choose best match)
+                    result = products_map[normalized_name][0]
+                    
+                    product_info = {
+                        'id': result[0],
+                        'ProductName': result[1],  # product_name
+                        'Product Name*': result[1],  # Excel column name compatibility
+                        'normalized_name': result[2],
+                        'Product Type*': result[3],  # product_type
+                        'Vendor': result[4],  # vendor
+                        'Vendor/Supplier*': result[4],  # Excel column name compatibility
+                        'Product Brand': result[5],  # brand
+                        'Lineage': result[6] or result[8] or 'MIXED',  # lineage or canonical_lineage
+                        'strain_name': result[7],  # strain_name
+                        'canonical_lineage': result[8],  # canonical_lineage
+                        'total_occurrences': result[9],
+                        'first_seen_date': result[10],
+                        'last_seen_date': result[11],
+                        'Description': result[12] or result[1],  # description or product_name
+                        'Weight*': result[13],  # weight
+                        'Units': result[14],  # units
+                        'Price': result[15],  # price
+                        'THC test result': result[16],  # thc_test_result
+                        'CBD test result': result[17],  # cbd_test_result
+                        'Test result unit': result[18],  # test_result_unit
+                        'Quantity*': result[19],  # quantity
+                        'DOH': result[20],  # doh_compliant
+                        'concentrate_type': result[21],  # concentrate_type
+                        'Ratio': result[22],  # ratio
+                        'JointRatio': result[23],  # joint_ratio
+                        'State': result[24],  # state
+                        'Is Sample?': result[25],  # is_sample
+                        'Is MJ product?': result[26],  # is_mj_product
+                        'Discountable?': result[27],  # discountable
+                        'Room*': result[28],  # room
+                        'batch_number': result[29],  # batch_number
+                        'lot_number': result[30],  # lot_number
+                        'barcode': result[31],  # barcode
+                        'cost': result[32],  # cost
+                        'Medical Only': result[33],  # medical_only
+                        'med_price': result[34],  # med_price
+                        'expiration_date': result[35],  # expiration_date
+                        'is_archived': result[36],  # is_archived
+                        'thc_per_serving': result[37],  # thc_per_serving
+                        'allergens': result[38],  # allergens
+                        'solvent': result[39],  # solvent
+                        'accepted_date': result[40],  # accepted_date
+                        'internal_product_identifier': result[41],  # internal_product_identifier
+                        'product_tags': result[42],  # product_tags
+                        'image_url': result[43],  # image_url
+                        'ingredients': result[44],  # ingredients
+                        'combined_weight': result[45],  # combined_weight
+                        'ratio_or_thc_cbd': result[46],  # ratio_or_thc_cbd
+                        'description_complexity': result[47],  # description_complexity
+                        'Total THC': result[48],  # total_thc
+                        'THCA': result[49],  # thca
+                        'CBDA': result[50],  # cbda
+                        'CBN': result[51],  # cbn
+                        # Add Excel column name compatibility fields
+                        'ProductName': result[1],
+                        'ProductBrand': result[5],
+                        'ProductStrain': result[7],
+                        'WeightWithUnits': f"{result[13]}{result[14]}" if result[13] and result[14] else result[13] or result[14] or '',
+                        'displayName': result[1]  # For frontend compatibility
+                    }
+                    
+                    products.append(product_info)
+                else:
+                    # Product not found in database, create a placeholder
+                    logger.warning(f"Product '{product_name}' not found in database")
+                    products.append({
+                        'ProductName': product_name,
+                        'Product Name*': product_name,
+                        'Description': product_name,
+                        'Vendor': '',
+                        'Vendor/Supplier*': '',
+                        'Product Brand': '',
+                        'Lineage': 'MIXED',
+                        'Product Type*': '',
+                        'Weight*': '',
+                        'Units': '',
+                        'Price': '',
+                        'displayName': product_name
+                    })
+            
+            return products
+            
+        except Exception as e:
+            logger.error(f"Error getting products by names: {e}")
+            return []
+
+    def find_best_product_match(self, product_name: str, vendor: str = None, product_type: str = None, strain: str = None) -> Optional[Dict[str, Any]]:
+        """
+        Find the best matching product in the database based on multiple criteria.
+        
+        Args:
+            product_name: The product name to search for
+            vendor: The vendor/supplier name
+            product_type: The product type/category
+            strain: The strain name
+            
+        Returns:
+            Best matching product dictionary or None if no match found
+        """
+        try:
+            self.init_database()  # Ensure DB is initialized
+            
+            if not product_name:
+                return None
+            
+            # Normalize the product name
+            normalized_name = self._normalize_product_name(product_name)
+            
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Build a flexible search query using the actual column names
+            query = '''
+                SELECT p.id, p.product_name, p.product_strain, p.product_type, p.vendor, p.brand, p.lineage,
+                       p.description, p.weight, p.units, p.price, p.quantity, p.doh_compliant, p.concentrate_type, p.ratio, p.joint_ratio,
+                       p.state, p.is_sample, p.is_mj_product, p.discountable, p.room, p.batch_number, p.lot_number, p.barcode, p.cost,
+                       p.medical_only, p.med_price, p.expiration_date, p.is_archived, p.thc_per_serving, p.allergens, p.solvent, p.accepted_date,
+                       p.internal_product_identifier, p.product_tags, p.image_url, p.ingredients, p.combined_weight, p.ratio_or_thc_cbd, 
+                       p.description_complexity, p.total_thc, p.thca, p.cbda, p.cbn, p.total_occurrences, p.first_seen_date, p.last_seen_date
+                FROM products p
+                WHERE 1=1
+            '''
+            
+            params = []
+            
+            # Add search conditions with priority using actual column names
+            if normalized_name:
+                # Exact name match (highest priority)
+                query += " AND (p.product_name LIKE ? OR p.description LIKE ?)"
+                params.extend([f"%{normalized_name}%", f"%{normalized_name}%"])
+            
+            if vendor:
+                # Vendor match
+                query += " AND p.vendor LIKE ?"
+                params.append(f"%{vendor}%")
+            
+            # Note: Product Type is often empty in the database, so we'll make this optional
+            # if product_type:
+            #     # Product type match
+            #     query += " AND p.\"Product Type*\" LIKE ?"
+            #     params.append(f"%{product_type}%")
+            
+            if strain:
+                # Strain match
+                query += " AND (p.product_strain LIKE ? OR p.lineage LIKE ?)"
+                params.extend([f"%{strain}%", f"%{strain}%"])
+            
+            # Order by relevance (exact matches first, then by occurrence count)
+            query += " ORDER BY CASE WHEN p.product_name LIKE ? THEN 1 ELSE 0 END DESC, p.total_occurrences DESC LIMIT 1"
+            params.append(f"%{normalized_name}%")
+            
+            cursor.execute(query, params)
+            result = cursor.fetchone()
+            
+            if result:
+                # Convert to the same format as get_products_by_names using actual column indices
+                product_info = {
+                    'id': result[0],
+                    'ProductName': result[1],  # Product Name*
+                    'Product Name*': result[1],  # Excel column name compatibility
+                    'Product Strain': result[2],  # Product Strain
+                    'Product Type*': result[3],  # Product Type*
+                    'Vendor': result[4],  # Vendor/Supplier*
+                    'Vendor/Supplier*': result[4],  # Excel column name compatibility
+                    'Product Brand': result[5],  # Product Brand
+                    'Lineage': result[6] or 'MIXED',  # Lineage
+                    'Description': result[7] or result[1],  # Description or Product Name*
+                    'Weight*': result[8],  # Weight*
+                    'Units': result[9],  # Units
+                    'Price': result[10],  # Price
+                    'Quantity*': result[11],  # Quantity*
+                    'DOH': result[12],  # DOH
+                    'concentrate_type': result[13],  # Concentrate Type
+                    'Ratio': result[14],  # Ratio
+                    'JointRatio': result[15],  # Joint Ratio
+                    'State': result[16],  # State
+                    'Is Sample?': result[17],  # Is Sample
+                    'Is MJ product?': result[18],  # Is MJ Product
+                    'Discountable?': result[19],  # Discountable
+                    'Room*': result[20],  # Room
+                    'batch_number': result[21],  # Batch Number
+                    'lot_number': result[22],  # Lot Number
+                    'barcode': result[23],  # Barcode
+                    'cost': result[24],  # Cost
+                    'Medical Only': result[25],  # Medical Only
+                    'med_price': result[26],  # Med Price
+                    'expiration_date': result[27],  # Expiration Date
+                    'is_archived': result[28],  # Is Archived
+                    'thc_per_serving': result[29],  # THC Per Serving
+                    'allergens': result[30],  # Allergens
+                    'solvent': result[31],  # Solvent
+                    'accepted_date': result[32],  # Accepted Date
+                    'internal_product_identifier': result[33],  # Internal Product Identifier
+                    'product_tags': result[34],  # Product Tags
+                    'image_url': result[35],  # Image URL
+                    'ingredients': result[36],  # Ingredients
+                    'combined_weight': result[37],  # Combined Weight
+                    'ratio_or_thc_cbd': result[38],  # Ratio or THC/CBD
+                    'description_complexity': result[39],  # Description Complexity
+                    'Total THC': result[40],  # Total THC
+                    'THCA': result[41],  # THCA
+                    'CBDA': result[42],  # CBDA
+                    'CBN': result[43],  # CBN
+                    'total_occurrences': result[44],
+                    'first_seen_date': result[45],
+                    'last_seen_date': result[46],
+                    # Add Excel column name compatibility fields
+                    'ProductBrand': result[5],
+                    'ProductStrain': result[2],
+                    'WeightWithUnits': f"{result[8]}{result[9]}" if result[8] and result[9] else result[8] or result[9] or '',
+                    'displayName': result[1],  # For frontend compatibility
+                    'Source': 'Product Database Match'  # Indicate this came from database
+                }
+                
+                logger.info(f"Found database match for '{product_name}': {product_info['ProductName']}")
+                return product_info
+            
+            logger.info(f"No database match found for '{product_name}'")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error finding best product match: {e}")
+            return None
+
+    def make_educated_guess(self, product_name: str, vendor: str = None, brand: str = None) -> Optional[Dict[str, Any]]:
+        """
+        Make an educated guess for a product based primarily on the product name itself.
+        Extracts vendor, brand, weight, product type, and strain from the product name.
+        
+        Args:
+            product_name: The product name to make a guess for
+            vendor: Optional vendor name (will be extracted from product name if not provided)
+            brand: Optional brand name (will be extracted from product name if not provided)
+            
+        Returns:
+            Dictionary with inferred product information or None if no good matches found
+        """
+        try:
+            self.init_database()
+            
+            logger.info(f"Making educated guess for: {product_name}")
+            
+            # Extract all information directly from the product name
+            extracted_info = self._extract_all_info_from_product_name(product_name, vendor, brand)
+            
+            if extracted_info:
+                logger.info(f"Successfully extracted info from product name: {extracted_info}")
+                return extracted_info
+            
+            # Fallback: Use similar products if direct extraction fails
+            logger.info("Direct extraction failed, falling back to similar products approach")
+            return self._make_educated_guess_from_similar_products(product_name, vendor, brand)
+            
+        except Exception as e:
+            logger.error(f"Error making educated guess for '{product_name}': {e}")
+            return None
+    
+    def _extract_all_info_from_product_name(self, product_name: str, vendor: str = None, brand: str = None) -> Optional[Dict[str, Any]]:
+        """
+        Extract all product information directly from the product name.
+        Handles patterns like "Liquid Diamond Disposable Vape by Oleum"
+        """
+        try:
+            # Extract vendor and brand from product name if not provided
+            extracted_vendor, extracted_brand = self._extract_vendor_and_brand_from_name(product_name, vendor, brand)
+            
+            # Extract weight and units
+            weight_info = self._infer_weight_from_name(product_name)
+            
+            # Extract product type
+            product_type = self._infer_product_type_from_name(product_name)
+            
+            # Extract strain name
+            strain_name = self._extract_strain_from_name(product_name)
+            
+            # Infer price based on product type and weight
+            price = self._infer_price_from_type_and_weight(product_type, float(weight_info['weight']))
+            
+            # Default lineage to HYBRID if we can't determine it
+            lineage = 'HYBRID'
+            
+            # Create the result
+            result = {
+                'product_name': product_name,
+                'source': 'Educated Guess',
+                'confidence': 'high' if extracted_brand else 'medium',
+                'weight': weight_info['weight'],
+                'units': weight_info['units'],
+                'price': str(price),
+                'product_type': product_type or 'Unknown',
+                'lineage': lineage,
+                'strain_name': strain_name or 'Unknown',
+                'vendor': extracted_vendor or 'Unknown',
+                'brand': extracted_brand or 'Unknown',
+                'description': f"{product_name} - {weight_info['weight']}{weight_info['units']}"
+            }
+            
+            logger.info(f"Extracted from product name: {result}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error extracting info from product name '{product_name}': {e}")
+            return None
+    
+    def _extract_vendor_and_brand_from_name(self, product_name: str, vendor: str = None, brand: str = None) -> tuple[str, str]:
+        """
+        Extract vendor and brand from product name patterns like:
+        - "Product Name by Brand"
+        - "Brand Product Name"
+        - "Product Name - Brand"
+        """
+        import re
+        
+        if vendor and brand:
+            return vendor, brand
+        
+        name_lower = product_name.lower()
+        
+        # Pattern 1: "Product Name by Brand"
+        by_match = re.search(r'by\s+([A-Za-z0-9\s&]+)(?:\s|$)', product_name, re.IGNORECASE)
+        if by_match:
+            brand_name = by_match.group(1).strip()
+            return brand_name, brand_name  # Brand and vendor are often the same
+        
+        # Pattern 2: "Brand Product Name" (brand at the beginning)
+        # Common brand names to look for
+        common_brands = [
+            'oleum', 'dank czar', 'omega labs', 'airo pro', 'jsm', "hustler's ambition",
+            'ceres', 'harmony farms', "farmer's daughter", 'greasy runtz', 'kelloggz koffee',
+            'trop banana', 'velvet koffee', 'trigonal industries', 'peak supply', 'fk it',
+            'conscious cannabis', 'honey tree', 'bodhi high', 'skagit organics', 'super fog',
+            'seattle bubble works', 'blue sky farms', 'green and gold brands', 'seatown'
+        ]
+        
+        for brand_name in common_brands:
+            if brand_name in name_lower:
+                return brand_name.title(), brand_name.title()
+        
+        # Pattern 3: "Product Name - Brand" (brand at the end)
+        if " - " in product_name:
+            parts = product_name.split(" - ")
+            if len(parts) > 1:
+                potential_brand = parts[-1].strip()
+                if len(potential_brand) > 2:
+                    return potential_brand, potential_brand
+        
+        return vendor or 'Unknown', brand or 'Unknown'
+    
+    def _make_educated_guess_from_similar_products(self, product_name: str, vendor: str = None, brand: str = None) -> Optional[Dict[str, Any]]:
+        """
+        Fallback method: Make educated guess using similar products approach.
+        This is the original method logic.
+        """
+        try:
+            # Normalize the product name for comparison
+            normalized_name = self._normalize_product_name(product_name)
+            name_lower = product_name.lower()
+            
+            # Extract key terms from product name for matching
+            key_terms = self._extract_key_terms(product_name)
+            
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Strategy 1: Find products with similar names
+            similar_products = []
+            
+            # Search for products with similar key terms
+            for term in key_terms:
+                if len(term) > 3:  # Only use meaningful terms
+                    cursor.execute('''
+                        SELECT p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Weight*", p."Weight Unit* (grams/gm or ounces/oz)", p."Price* (Tier Name for Bulk)",
+                               p."Lineage", s.strain_name, p."Description"
+                        FROM products p
+                        LEFT JOIN strains s ON p."Product Strain" = s.strain_name
+                        WHERE p."Product Name*" LIKE ? OR p."Product Name*" LIKE ?
+                        ORDER BY p.total_occurrences DESC
+                        LIMIT 20
+                    ''', (f'%{term}%', f'%{term}%'))
+                    
+                    results = cursor.fetchall()
+                    for result in results:
+                        similar_products.append({
+                            'product_name': result[0],
+                            'product_type': result[1],
+                            'vendor': result[2],
+                            'brand': result[3],
+                            'weight': result[4],
+                            'units': result[5],
+                            'price': result[6],
+                            'lineage': result[7],
+                            'strain_name': result[8],
+                            'description': result[9],
+                            'similarity_score': self._calculate_similarity_score(product_name, result[0])
+                        })
+            
+            # Strategy 2: Find products with similar product types
+            product_type = self._infer_product_type_from_name(product_name)
+            if product_type:
+                cursor.execute('''
+                    SELECT p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Weight*", p."Weight Unit* (grams/gm or ounces/oz)", p."Price* (Tier Name for Bulk)",
+                           p."Lineage", s.strain_name, p."Description"
+                    FROM products p
+                    LEFT JOIN strains s ON p."Product Strain" = s.strain_name
+                    WHERE p."Product Type*" = ?
+                    ORDER BY p.total_occurrences DESC
+                    LIMIT 10
+                ''', (product_type,))
+                
+                results = cursor.fetchall()
+                for result in results:
+                    similar_products.append({
+                        'product_name': result[0],
+                        'product_type': result[1],
+                        'vendor': result[2],
+                        'brand': result[3],
+                        'weight': result[4],
+                        'units': result[5],
+                        'price': result[6],
+                        'lineage': result[7],
+                        'strain_name': result[8],
+                        'description': result[9],
+                        'similarity_score': 0.3  # Lower score for type-only matches
+                    })
+            
+            # Strategy 3: Find products with similar strains
+            strain_name = self._extract_strain_from_name(product_name)
+            if strain_name:
+                cursor.execute('''
+                    SELECT p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Weight*", p."Weight Unit* (grams/gm or ounces/oz)", p."Price* (Tier Name for Bulk)",
+                           p."Lineage", s.strain_name, p."Description"
+                    FROM products p
+                    LEFT JOIN strains s ON p."Product Strain" = s.strain_name
+                    WHERE s.strain_name LIKE ? OR p."Product Strain" LIKE ?
+                    ORDER BY p.total_occurrences DESC
+                    LIMIT 10
+                ''', (f'%{strain_name}%', f'%{strain_name}%'))
+                
+                results = cursor.fetchall()
+                for result in results:
+                    similar_products.append({
+                        'product_name': result[0],
+                        'product_type': result[1],
+                        'vendor': result[2],
+                        'brand': result[3],
+                        'weight': result[4],
+                        'units': result[5],
+                        'price': result[6],
+                        'lineage': result[7],
+                        'strain_name': result[8],
+                        'description': result[9],
+                        'similarity_score': 0.4  # Medium score for strain matches
+                    })
+            
+            # Remove duplicates and sort by similarity score
+            unique_products = {}
+            for product in similar_products:
+                key = f"{product['product_name']}_{product['vendor']}_{product['brand']}"
+                if key not in unique_products or product['similarity_score'] > unique_products[key]['similarity_score']:
+                    unique_products[key] = product
+            
+            similar_products = list(unique_products.values())
+            similar_products.sort(key=lambda x: x['similarity_score'], reverse=True)
+            
+            if not similar_products:
+                logger.warning(f"No similar products found for '{product_name}'")
+                return None
+            
+            logger.info(f"Found {len(similar_products)} similar products for '{product_name}'")
+            logger.info(f"Key terms extracted: {key_terms}")
+            logger.info(f"Product type inferred: {product_type}")
+            logger.info(f"Strain name extracted: {strain_name}")
+            
+            # Take top 5 most similar products for analysis
+            top_similar = similar_products[:5]
+            
+            # Infer properties from similar products
+            inferred_data = self._infer_properties_from_similar_products(product_name, top_similar)
+            
+            if inferred_data:
+                logger.info(f"Made educated guess for '{product_name}': {inferred_data}")
+                return inferred_data
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error making educated guess from similar products for '{product_name}': {e}")
+            return None
+    
+    def _extract_key_terms(self, product_name: str) -> Set[str]:
+        """Extract key terms from product name for matching."""
+        import re
+        
+        # Remove common words and punctuation
+        name_lower = product_name.lower()
+        
+        # Remove common product words that don't help with matching
+        common_words = {
+            'live', 'resin', 'rosin', 'wax', 'shatter', 'hash', 'flower', 'bud', 'pre', 'roll', 
+            'joint', 'cartridge', 'vape', 'pen', 'edible', 'gummy', 'chocolate', 'cookie', 
+            'brownie', 'candy', 'sweet', 'food', 'drink', 'beverage', 'tincture', 'drops', 
+            'capsule', 'pill', 'tablet', 'lozenge', 'mint', 'chew', 'chewing', 'cream', 
+            'lotion', 'salve', 'balm', 'ointment', 'gel', 'spray', 'patch', 'transdermal', 
+            'skin', 'external', 'apply', 'rub', 'disposable', 'pod', 'battery', 'oil', 
+            'extract', 'concentrate', 'distillate', 'sauce', 'terp', 'terpene', 'diamond',
+            'crystal', 'powder', 'granule', 'pellet', 'tablet', 'capsule', 'liquid', 'solid'
+        }
+        
+        # Extract words, filter out common words and short words
+        words = re.findall(r'\b[a-zA-Z]+\b', name_lower)
+        key_terms = {word for word in words if len(word) > 2 and word not in common_words}
+        
+        # Add broader matching terms for better similarity
+        # For example, "Glazed Apricots" should match "Wedding Cake" (both are dessert-like)
+        dessert_terms = {'glazed', 'apricots', 'wedding', 'cake', 'cherry', 'lemon', 'blueberry', 'strawberry'}
+        if any(term in key_terms for term in dessert_terms):
+            # Add dessert-related terms to improve matching
+            key_terms.update({'cake', 'dessert', 'fruit', 'sweet'})
+        
+        # Add strain-related terms for better matching
+        strain_terms = {'kush', 'haze', 'diesel', 'og', 'cookies', 'runtz', 'gelato'}
+        if any(term in key_terms for term in strain_terms):
+            key_terms.update({'strain', 'cannabis', 'marijuana'})
+        
+        return key_terms
+    
+    def _calculate_similarity_score(self, name1: str, name2: str) -> float:
+        """Calculate similarity score between two product names."""
+        from difflib import SequenceMatcher
+        
+        # Use sequence matcher for overall similarity
+        similarity = SequenceMatcher(None, name1.lower(), name2.lower()).ratio()
+        
+        # Boost score for exact word matches
+        words1 = set(name1.lower().split())
+        words2 = set(name2.lower().split())
+        word_overlap = len(words1.intersection(words2))
+        total_words = len(words1.union(words2))
+        
+        if total_words > 0:
+            word_similarity = word_overlap / total_words
+            # Combine overall similarity with word overlap
+            final_score = (similarity + word_similarity) / 2
+        else:
+            final_score = similarity
+        
+        return final_score
+    
+    def _infer_product_type_from_name(self, product_name: str) -> Optional[str]:
+        """Infer product type from product name using consistent logic."""
+        if not isinstance(product_name, str):
+            return "Unknown Type"
+        
+        name_lower = product_name.lower()
+        
+        # Check TYPE_OVERRIDES first
+        from src.core.constants import TYPE_OVERRIDES
+        for key, value in TYPE_OVERRIDES.items():
+            if key in name_lower:
+                return value
+        
+        # Pattern-based inference - prioritize vape keywords over concentrate keywords
+        if any(x in name_lower for x in ["flower", "bud", "nug", "herb", "marijuana", "cannabis"]):
+            return "Flower"
+        elif any(x in name_lower for x in ["vape", "cart", "cartridge", "disposable", "pod", "battery", "jefe", "twisted", "fire", "pen"]):
+            return "Vape Cartridge"
+        elif any(x in name_lower for x in ["concentrate", "rosin", "shatter", "wax", "live resin", "diamonds", "sauce", "extract", "oil", "distillate"]):
+            return "Concentrate"
+        elif any(x in name_lower for x in ["edible", "gummy", "chocolate", "cookie", "brownie", "candy"]):
+            return "Edible (Solid)"
+        elif any(x in name_lower for x in ["tincture", "oil", "drops", "liquid"]):
+            return "Edible (Liquid)"
+        elif any(x in name_lower for x in ["pre-roll", "joint", "cigar", "blunt"]):
+            return "Pre-roll"
+        elif any(x in name_lower for x in ["topical", "cream", "lotion", "salve", "balm"]):
+            return "Topical"
+        elif any(x in name_lower for x in ["tincture", "sublingual"]):
+            return "Tincture"
+        else:
+            # Default to Vape Cartridge for any remaining unknown types since most products are concentrates
+            return "Vape Cartridge"
+    
+    def _extract_strain_from_name(self, product_name: str) -> Optional[str]:
+        """Extract strain name from product name."""
+        import re
+        
+        # Common strain keywords
+        strain_keywords = [
+            'og', 'kush', 'haze', 'diesel', 'cookies', 'runtz', 'gelato', 'wedding', 'cake',
+            'blueberry', 'strawberry', 'banana', 'mango', 'pineapple', 'lemon', 'lime', 'cherry',
+            'grape', 'apple', 'orange', 'guava', 'dragon', 'fruit', 'passion', 'peach', 'apricot',
+            'watermelon', 'cantaloupe', 'honeydew', 'kiwi', 'plum', 'raspberry', 'blackberry',
+            'yoda', 'amnesia', 'afghani', 'hashplant', 'super', 'boof', 'grandy', 'candy',
+            'tricho', 'jordan', 'cosmic', 'combo', 'honey', 'bread', 'mintz', 'grinch'
+        ]
+        
+        name_lower = product_name.lower()
+        words = name_lower.split()
+        
+        # Look for multi-word strain names first (e.g., "Wedding Cake", "Sour Diesel")
+        multi_word_strains = [
+            'wedding cake', 'sour diesel', 'blueberry kush', 'lemon haze', 'strawberry cough',
+            'granddaddy purple', 'northern lights', 'white widow', 'jack herer', 'durban poison',
+            'trainwreck', 'chemdawg', 'sour cheese', 'dream crack', 'maui wowie', 'bubba kush',
+            'master kush', 'hindu kush', 'afghan kush', 'master og', 'sour og', 'cheese og',
+            'dream og', 'high life', 'white gummie', 'seattle trophy wife', 'tangerine queen',
+            'triangle kush', 'red velvet cake', 'grape goji', 'watermelon mojito', 'candy pound cake',
+            'truffle cake', 'emerald apricot', 'bollywood runtz', 'mango punch', 'raspberry lemonade',
+            'strawberry burst', 'watermelon wave', 'grape soda', 'strawberry bliss', 'cherry ztripez',
+            'metaverse', 'galactic jack', 'gdpunch', 'grape ape', 'rainbow cake', 'strawberry mimosa',
+            'yoda og', 'goji og', 'cookies and cream', 'grape gas gelatti', 'maui wowie', 
+            'strawberry shortcake', 'grapefruit', 'purple rain', 'crepe ape', 'trunk funk', 
+            'sub woofer', 'golden pineapple', 'chicken & waffles'
+        ]
+        
+        for strain in multi_word_strains:
+            if strain in name_lower:
+                # Return the proper case version
+                return strain.title()
+        
+        # Look for single word strain keywords
+        for word in words:
+            if word in strain_keywords:
+                return word.title()
+        
+        # Look for capitalized words that might be strain names (but exclude common product words)
+        common_product_words = {
+            'live', 'resin', 'rosin', 'wax', 'shatter', 'hash', 'flower', 'bud', 'pre', 'roll', 
+            'joint', 'cartridge', 'vape', 'pen', 'edible', 'gummy', 'chocolate', 'cookie', 
+            'brownie', 'candy', 'sweet', 'food', 'drink', 'beverage', 'tincture', 'drops', 
+            'capsule', 'pill', 'tablet', 'lozenge', 'mint', 'chew', 'chewing', 'cream', 
+            'lotion', 'salve', 'balm', 'ointment', 'gel', 'spray', 'patch', 'transdermal', 
+            'skin', 'external', 'apply', 'rub', 'disposable', 'pod', 'battery', 'oil', 
+            'extract', 'concentrate', 'distillate', 'sauce', 'terp', 'terpene', 'diamond',
+            'crystal', 'powder', 'granule', 'pellet', 'tablet', 'capsule', 'liquid', 'solid'
+        }
+        
+        for word in product_name.split():
+            if (len(word) > 2 and word[0].isupper() and word[1:].islower() and 
+                word.lower() not in common_product_words):
+                return word
+        
+        return None
+    
+    def _infer_properties_from_similar_products(self, product_name: str, similar_products: List[Dict]) -> Optional[Dict[str, Any]]:
+        """Infer product properties from similar products."""
+        if not similar_products:
+            return None
+        
+        # Extract weight and units
+        weights = []
+        units = []
+        prices = []
+        product_types = []
+        lineages = []
+        strains = []
+        vendors = []
+        brands = []
+        
+        for product in similar_products:
+            # Weight and units
+            if product['weight'] and product['weight'] != 'nan':
+                try:
+                    weight_val = float(product['weight'])
+                    if weight_val > 0:
+                        weights.append(weight_val)
+                        if product['units'] and product['units'] != 'nan':
+                            units.append(product['units'])
+                except (ValueError, TypeError):
+                    pass
+            
+            # Price
+            if product['price'] and product['price'] != 'nan':
+                try:
+                    price_val = float(product['price'])
+                    if price_val > 0:
+                        prices.append(price_val)
+                except (ValueError, TypeError):
+                    pass
+            
+            # Product type
+            if product['product_type'] and product['product_type'] != 'nan':
+                product_types.append(product['product_type'])
+            
+            # Lineage
+            if product['lineage'] and product['lineage'] != 'nan':
+                lineages.append(product['lineage'])
+            
+            # Strain
+            if product['strain_name'] and product['strain_name'] != 'nan':
+                strains.append(product['strain_name'])
+            
+            # Vendor
+            if product['vendor'] and product['vendor'] != 'nan':
+                vendors.append(product['vendor'])
+            
+            # Brand
+            if product['brand'] and product['brand'] != 'nan':
+                brands.append(product['brand'])
+        
+        # Calculate most common values
+        from collections import Counter
+        
+        inferred_data = {
+            'product_name': product_name,
+            'source': 'Educated Guess',
+            'confidence': 'medium'
+        }
+        
+        # Weight and units - PRIORITY: Use weight from product name first, then similar products
+        weight_info = self._infer_weight_from_name(product_name)
+        if weight_info['weight'] != '1.0' or 'g' not in product_name.lower():  # If we found a specific weight in the name
+            inferred_data['weight'] = weight_info['weight']
+            inferred_data['units'] = weight_info['units']
+            logger.info(f"Using weight from product name: {weight_info['weight']}{weight_info['units']}")
+        elif weights:
+            # Use median weight from similar products
+            weights.sort()
+            median_weight = weights[len(weights) // 2]
+            inferred_data['weight'] = str(median_weight)
+            
+            if units:
+                most_common_unit = Counter(units).most_common(1)[0][0]
+                inferred_data['units'] = most_common_unit
+            else:
+                inferred_data['units'] = 'g'  # Default
+            logger.info(f"Using weight from similar products: {inferred_data['weight']}{inferred_data['units']}")
+        else:
+            # Fallback weight inference
+            inferred_data['weight'] = weight_info['weight']
+            inferred_data['units'] = weight_info['units']
+            logger.info(f"Using fallback weight: {weight_info['weight']}{weight_info['units']}")
+        
+        # Price
+        if prices:
+            # Use median price for more stability
+            prices.sort()
+            median_price = prices[len(prices) // 2]
+            inferred_data['price'] = str(median_price)
+        else:
+            # Fallback price inference
+            inferred_data['price'] = self._infer_price_from_type_and_weight(
+                inferred_data.get('product_type', 'Unknown'),
+                float(inferred_data['weight'])
+            )
+        
+        # Product type
+        if product_types:
+            most_common_type = Counter(product_types).most_common(1)[0][0]
+            inferred_data['product_type'] = most_common_type
+        else:
+            inferred_data['product_type'] = self._infer_product_type_from_name(product_name) or 'Unknown'
+        
+        # Lineage
+        if lineages:
+            most_common_lineage = Counter(lineages).most_common(1)[0][0]
+            inferred_data['lineage'] = most_common_lineage
+        else:
+            inferred_data['lineage'] = 'HYBRID'  # Default
+        
+        # Strain - PRIORITY: Extract from product name first, then use similar products
+        extracted_strain = self._extract_strain_from_name(product_name)
+        if extracted_strain and extracted_strain != 'Unknown':
+            inferred_data['strain_name'] = extracted_strain
+            logger.info(f"Using strain from product name: {extracted_strain}")
+        elif strains:
+            most_common_strain = Counter(strains).most_common(1)[0][0]
+            inferred_data['strain_name'] = most_common_strain
+            logger.info(f"Using strain from similar products: {most_common_strain}")
+        else:
+            inferred_data['strain_name'] = 'Unknown'
+            logger.info("No strain information available")
+        
+        # Vendor
+        if vendors:
+            most_common_vendor = Counter(vendors).most_common(1)[0][0]
+            inferred_data['vendor'] = most_common_vendor
+        else:
+            inferred_data['vendor'] = 'Unknown'
+        
+        # Brand
+        if brands:
+            most_common_brand = Counter(brands).most_common(1)[0][0]
+            inferred_data['brand'] = most_common_brand
+        else:
+            inferred_data['brand'] = 'Unknown'
+        
+        # Description
+        inferred_data['description'] = f"{product_name} - {inferred_data['weight']}{inferred_data['units']}"
+        
+        return inferred_data
+    
+    def _infer_weight_from_name(self, product_name: str) -> Dict[str, str]:
+        """Infer weight from product name."""
+        import re
+        
+        # Look for weight patterns in product name
+        weight_patterns = [
+            r'(\d+\.?\d*)\s*(g|gram|grams|gm)',  # 3.5g, 3.5 gram, etc.
+            r'(\d+\.?\d*)\s*(mg|milligram|milligrams)',  # 100mg, etc.
+            r'(\d+\.?\d*)\s*(oz|ounce|ounces)',  # 1oz, etc.
+            r'(\d+\.?\d*)\s*(lb|pound|pounds)',  # 1lb, etc.
+        ]
+        
+        for pattern in weight_patterns:
+            match = re.search(pattern, product_name, re.IGNORECASE)
+            if match:
+                weight = match.group(1)
+                units = match.group(2).lower()
+                if units in ['gram', 'grams', 'gm']:
+                    units = 'g'
+                elif units in ['milligram', 'milligrams']:
+                    units = 'mg'
+                elif units in ['ounce', 'ounces']:
+                    units = 'oz'
+                elif units in ['pound', 'pounds']:
+                    units = 'lb'
+                return {'weight': weight, 'units': units}
+        
+        # Default weights based on product type
+        product_type = self._infer_product_type_from_name(product_name)
+        default_weights = {
+            'flower': {'weight': '3.5', 'units': 'g'},
+            'pre-roll': {'weight': '1.0', 'units': 'g'},
+            'concentrate': {'weight': '1.0', 'units': 'g'},
+            'vape': {'weight': '0.5', 'units': 'g'},
+            'edible': {'weight': '10', 'units': 'mg'},
+            'tincture': {'weight': '30', 'units': 'ml'},
+            'topical': {'weight': '30', 'units': 'ml'}
+        }
+        
+        return default_weights.get(product_type, {'weight': '1.0', 'units': 'g'})
+    
+    def _infer_price_from_type_and_weight(self, product_type: str, weight: float) -> str:
+        """Infer price based on product type and weight."""
+        product_type_lower = product_type.lower()
+        
+        if 'pre-roll' in product_type_lower:
+            return '20'
+        elif 'flower' in product_type_lower:
+            if weight <= 1:
+                return '35'
+            elif weight <= 3.5:
+                return '120'
+            elif weight <= 7:
+                return '220'
+            else:
+                return '400'
+        elif 'concentrate' in product_type_lower:
+            if weight <= 1:
+                return '50'
+            elif weight <= 2:
+                return '90'
+            else:
+                return '150'
+        elif 'vape' in product_type_lower:
+            return '40'
+        elif 'edible' in product_type_lower:
+            return '25'
+        else:
+            return '25'
+    
+    def search_products_by_name(self, product_name: str) -> List[Dict]:
+        """Search for products by exact product name."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Search for products with exact name match
+            cursor.execute('''
+                SELECT p.*, s.canonical_lineage, s.sovereign_lineage
+                FROM products p
+                LEFT JOIN strains s ON p.strain_id = s.id
+                WHERE p.product_name = ?
+                ORDER BY p.last_seen_date DESC
+            ''', (product_name,))
+            
+            results = []
+            for row in cursor.fetchall():
+                product = dict(zip([col[0] for col in cursor.description], row))
+                results.append(product)
+            
+            return results
+            
+        except Exception as e:
+            logging.error(f"Error searching products by name: {e}")
+            return []
+    
+    def search_products_by_strain(self, strain_name: str) -> List[Dict]:
+        """Search for products by strain name."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Search for products with matching strain
+            cursor.execute('''
+                SELECT p.*, s.canonical_lineage, s.sovereign_lineage
+                FROM products p
+                LEFT JOIN strains s ON p.strain_id = s.id
+                WHERE p.product_strain LIKE ? OR s.strain_name LIKE ?
+                ORDER BY p.last_seen_date DESC
+            ''', (f'%{strain_name}%', f'%{strain_name}%'))
+            
+            results = []
+            for row in cursor.fetchall():
+                product = dict(zip([col[0] for col in cursor.description], row))
+                results.append(product)
+            
+            return results
+            
+        except Exception as e:
+            logging.error(f"Error searching products by strain: {e}")
+            return []
+    
+    def search_products_by_type_and_strain(self, product_type: str, strain_name: str) -> List[Dict]:
+        """Search for products by product type and strain combination."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Search for products with matching type and strain
+            cursor.execute('''
+                SELECT p.*, s.canonical_lineage, s.sovereign_lineage
+                FROM products p
+                LEFT JOIN strains s ON p.strain_id = s.id
+                WHERE p.product_type = ? AND (p.product_strain = ? OR s.strain_name = ?)
+                ORDER BY p.last_seen_date DESC
+            ''', (product_type, strain_name, strain_name))
+            
+            results = []
+            for row in cursor.fetchall():
+                product = dict(zip([col[0] for col in cursor.description], row))
+                results.append(product)
+            
+            return results
+            
+        except Exception as e:
+            logging.error(f"Error searching products by type and strain: {e}")
+            return []
+
 def get_product_database():
-    return ProductDatabase() 
+    # CRITICAL FIX: Use correct database path
+    return ProductDatabase(get_database_path()) 
 
 if __name__ == "__main__":
     import argparse
@@ -2119,6 +3556,7 @@ if __name__ == "__main__":
     parser.add_argument('--update-canonical-to-mode', action='store_true', help='Update all canonical lineages to mode lineage')
     args = parser.parse_args()
     if args.update_canonical_to_mode:
-        db = ProductDatabase()
+        # CRITICAL FIX: Use correct database path
+        db = ProductDatabase(get_database_path())
         db.update_all_canonical_lineages_to_mode()
         # Canonical lineages updated to mode for all strains. 
