@@ -1047,7 +1047,9 @@ def get_session_excel_processor():
             
             logging.info(f"Restored {len(g.excel_processor.selected_tags)} selected tags from session")
             logging.info(f"Session selected_tags: {session_selected_tag_names}")
-            logging.info(f"Excel processor selected_tags after restore: {g.excel_processor.selected_tags}")
+            # Truncate large log messages to prevent "Message too long" error
+            selected_tags_preview = str(g.excel_processor.selected_tags)[:500] + "..." if len(str(g.excel_processor.selected_tags)) > 500 else str(g.excel_processor.selected_tags)
+            logging.info(f"Excel processor selected_tags after restore: {selected_tags_preview}")
         
         # Final safety check - ensure df attribute exists
         if not hasattr(g.excel_processor, 'df'):
