@@ -1604,14 +1604,11 @@ def process_excel_background(filename, temp_path):
             new_processor.enable_product_db_integration(False)
             logging.info("[BG] Product database integration disabled for upload performance")
         
-        # Use pythonanywhere_fast_load method for ultra-fast response
-        logging.info(f"[BG] Loading file with pythonanywhere_fast_load method: {temp_path}")
+        # Use full load_file method to ensure identical processing to local version
+        logging.info(f"[BG] Loading file with full load_file method: {temp_path}")
         
-        # Enable PythonAnywhere mode for faster processing
-        new_processor.enable_pythonanywhere_mode(True)
-        
-        # Use the PythonAnywhere-optimized loading method
-        success = new_processor.pythonanywhere_fast_load(temp_path)
+        # Use the full load_file method for complete data processing
+        success = new_processor.load_file(temp_path)
         load_time = time.time() - load_start
         
         if not success:
