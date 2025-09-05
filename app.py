@@ -3742,14 +3742,23 @@ def get_available_tags():
         # Get fresh data directly from global Excel processor
         # Use global processor instead of session-based to ensure we get the uploaded data
         excel_processor = get_excel_processor()
-        if excel_processor is None or excel_processor.df is None or excel_processor.df.empty:
-            logging.warning("No Excel processor or data available, returning empty tags")
+        if excel_processor is None:
+            logging.warning("No Excel processor available, returning empty tags")
+            return jsonify([])
+        
+        if excel_processor.df is None or excel_processor.df.empty:
+            logging.warning(f"Excel processor has no data - df is None: {excel_processor.df is None}, empty: {excel_processor.df.empty if excel_processor.df is not None else 'N/A'}")
+            logging.warning(f"Last loaded file: {getattr(excel_processor, '_last_loaded_file', 'None')}")
             return jsonify([])
         
         # Convert DataFrame to list of dictionaries for frontend
         try:
+            logging.info(f"CRITICAL FIX: Excel processor has {len(excel_processor.df)} rows, {len(excel_processor.df.columns)} columns")
+            logging.info(f"CRITICAL FIX: Last loaded file: {getattr(excel_processor, '_last_loaded_file', 'None')}")
+            
             # Get all rows as dictionaries
             tags = excel_processor.df.to_dict('records')
+            logging.info(f"CRITICAL FIX: Converted to {len(tags)} records")
             
             # Clean the data (remove NaN values, etc.)
             import math
@@ -3759,6 +3768,12 @@ def get_available_tags():
                 return {k: ('' if (v is None or (isinstance(v, float) and math.isnan(v))) else v) for k, v in d.items()}
             
             cleaned_tags = [clean_dict(tag) for tag in tags if isinstance(tag, dict)]
+            logging.info(f"CRITICAL FIX: Cleaned to {len(cleaned_tags)} tags")
+            
+            # Log sample data for debugging
+            if len(cleaned_tags) > 0:
+                sample = cleaned_tags[0]
+                logging.info(f"CRITICAL FIX: Sample tag: {sample.get('Product Name*', 'N/A')} - {sample.get('Lineage', 'N/A')}")
             
             logging.info(f"CRITICAL FIX: Returning {len(cleaned_tags)} fresh tags from Excel processor")
             logging.info("=== AVAILABLE TAGS DEBUG END ===")
