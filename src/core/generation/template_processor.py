@@ -46,16 +46,10 @@ from src.core.formatting.markers import wrap_with_marker, unwrap_marker, is_alre
 import os
 IS_PYTHONANYWHERE = 'pythonanywhere.com' in os.environ.get('HTTP_HOST', '')
 
-if IS_PYTHONANYWHERE:
-    # Reduced settings for PythonAnywhere performance
-    MAX_PROCESSING_TIME_PER_CHUNK = 15  # 15 seconds max per chunk
-    MAX_TOTAL_PROCESSING_TIME = 120     # 2 minutes max total
-    CHUNK_SIZE_LIMIT = 10               # Smaller chunks for PythonAnywhere
-else:
-    # Normal settings for local development
-    MAX_PROCESSING_TIME_PER_CHUNK = 30  # 30 seconds max per chunk
-    MAX_TOTAL_PROCESSING_TIME = 300     # 5 minutes max total
-    CHUNK_SIZE_LIMIT = 50               # Limit chunk size for performance
+# Use same settings for both local and PythonAnywhere to ensure consistent generation
+MAX_PROCESSING_TIME_PER_CHUNK = 30  # 30 seconds max per chunk
+MAX_TOTAL_PROCESSING_TIME = 300     # 5 minutes max total
+CHUNK_SIZE_LIMIT = 50               # Limit chunk size for performance
 
 def get_font_scheme(template_type, base_size=12):
     schemes = {

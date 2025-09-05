@@ -12,24 +12,17 @@ from werkzeug.utils import secure_filename
 IS_PYTHONANYWHERE = 'pythonanywhere.com' in os.environ.get('HTTP_HOST', '')
 IS_PRODUCTION = os.environ.get('FLASK_ENV') == 'production' or IS_PYTHONANYWHERE
 
+# Use consistent settings for both local and production to ensure identical generation
+CHUNK_SIZE_LIMIT = 50
+MAX_PROCESSING_TIME_PER_CHUNK = 30
+MAX_TOTAL_PROCESSING_TIME = 300
+MAX_CONTENT_LENGTH = 100 * 1024 * 1024  # 100MB max file size
+UPLOAD_CHUNK_SIZE = 16384  # 16KB chunks for uploads
+
 if IS_PRODUCTION:
-    # Production optimizations
+    # Production optimizations (logging only)
     logging.getLogger().setLevel(logging.WARNING)
     os.environ['FLASK_ENV'] = 'production'
-    # Optimized settings for production
-    CHUNK_SIZE_LIMIT = 15  # Balanced for performance
-    MAX_PROCESSING_TIME_PER_CHUNK = 20  # Reasonable timeout
-    MAX_TOTAL_PROCESSING_TIME = 180  # 3 minutes max
-    # File upload limits
-    MAX_CONTENT_LENGTH = 50 * 1024 * 1024  # 50MB max file size
-    UPLOAD_CHUNK_SIZE = 8192  # 8KB chunks for uploads
-else:
-    # Development settings
-    CHUNK_SIZE_LIMIT = 50
-    MAX_PROCESSING_TIME_PER_CHUNK = 30
-    MAX_TOTAL_PROCESSING_TIME = 300
-    MAX_CONTENT_LENGTH = 100 * 1024 * 1024  # 100MB for development
-    UPLOAD_CHUNK_SIZE = 16384  # 16KB chunks for development
 from flask import (
     Flask, 
     request, 
