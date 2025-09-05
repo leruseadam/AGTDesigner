@@ -4380,6 +4380,36 @@ def debug_weight_formatting():
         logging.error(f"Error in debug_weight_formatting: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/test-excel-processor', methods=['GET'])
+def test_excel_processor():
+    """Test endpoint to debug Excel processor access."""
+    try:
+        excel_processor = get_excel_processor()
+        if excel_processor is None:
+            return jsonify({'error': 'Excel processor is None'}), 400
+        
+        if excel_processor.df is None:
+            return jsonify({'error': 'Excel processor df is None'}), 400
+        
+        if excel_processor.df.empty:
+            return jsonify({'error': 'Excel processor df is empty'}), 400
+        
+        # Test converting to records
+        try:
+            records = excel_processor.df.to_dict('records')
+            return jsonify({
+                'success': True,
+                'shape': excel_processor.df.shape,
+                'records_count': len(records),
+                'last_loaded_file': getattr(excel_processor, '_last_loaded_file', 'None'),
+                'sample_record': records[0] if records else None
+            })
+        except Exception as e:
+            return jsonify({'error': f'Error converting to records: {str(e)}'}), 500
+            
+    except Exception as e:
+        return jsonify({'error': f'Exception in test: {str(e)}'}), 500
+
 @app.route('/api/debug-columns', methods=['GET'])
 def debug_columns():
     """Debug endpoint to show available columns in the DataFrame."""
