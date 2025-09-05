@@ -1258,14 +1258,17 @@ def index():
         
         # Remove uploaded file if it exists and is not the default file
         if uploaded_file:
-            from src.core.data.excel_processor import get_default_upload_file
-            default_file = get_default_upload_file()
-            if uploaded_file != default_file and os.path.exists(uploaded_file):
-                try:
-                    os.remove(uploaded_file)
-                    logging.info(f"Removed uploaded file: {uploaded_file}")
-                except Exception as e:
-                    logging.warning(f"Failed to remove uploaded file: {e}")
+            try:
+                from src.core.data.excel_processor import get_default_upload_file
+                default_file = get_default_upload_file()
+                if uploaded_file != default_file and os.path.exists(uploaded_file):
+                    try:
+                        os.remove(uploaded_file)
+                        logging.info(f"Removed uploaded file: {uploaded_file}")
+                    except Exception as e:
+                        logging.warning(f"Failed to remove uploaded file: {e}")
+            except Exception as e:
+                logging.warning(f"Error checking default file: {e}")
         
         # Periodic cleanup (much less frequent - every 200th page load)
         import random
@@ -1286,7 +1289,10 @@ def index():
         
     except Exception as e:
         logging.error(f"Error in index route: {str(e)}")
-        return render_template('index.html', error=str(e), cache_bust=str(int(time.time())))
+        logging.error(f"Index route traceback: {traceback.format_exc()}")
+        # Ensure cache_bust is always available
+        cache_bust = str(int(time.time()))
+        return render_template('index.html', error=str(e), cache_bust=cache_bust)
 
 @app.route('/splash')
 def splash():
