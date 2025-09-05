@@ -3727,6 +3727,15 @@ def get_available_tags():
         logging.info("=== AVAILABLE TAGS DEBUG START ===")
         logging.info(f"Available tags request at {datetime.now().strftime('%H:%M:%S')}")
         
+        # Check if Excel processor is available
+        if not hasattr(g, 'excel_processor') or g.excel_processor is None:
+            logging.warning("No Excel processor available, returning empty tags")
+            return jsonify([])
+        
+        if g.excel_processor.df is None:
+            logging.warning("Excel processor has no data, returning empty tags")
+            return jsonify([])
+        
         # Store validation to prevent cross-store data access
         current_store = session.get('selected_store', '')
         file_store = session.get('file_store', '')
