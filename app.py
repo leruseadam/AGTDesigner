@@ -9863,6 +9863,11 @@ def test_upload_fast():
         'timestamp': time.time()
     })
 
+@app.route('/test-upload.html')
+def test_upload_page():
+    """Test page for file upload"""
+    return send_from_directory('.', 'test_upload.html')
+
 @app.route('/api/database-add-missing-columns', methods=['POST'])
 def add_missing_database_columns():
     """Add missing columns to existing database tables."""
