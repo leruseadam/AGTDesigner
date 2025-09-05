@@ -36,6 +36,7 @@ fuzzywuzzy>=0.18.0
 
 # Performance optimizations
 flask-compress>=1.18
+flask-caching>=2.0.0
 psutil>=7.0.0
 
 # Optional dependencies (may fail on PythonAnywhere)
