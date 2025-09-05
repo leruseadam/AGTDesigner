@@ -3739,9 +3739,10 @@ def get_available_tags():
         # This ensures web version shows the same data as local version
         logging.info("CRITICAL FIX: Using fresh data from Excel processor instead of cached data")
         
-        # Get fresh data directly from Excel processor
-        excel_processor = get_session_excel_processor()
-        if excel_processor is None or excel_processor.df is None:
+        # Get fresh data directly from global Excel processor
+        # Use global processor instead of session-based to ensure we get the uploaded data
+        excel_processor = get_excel_processor()
+        if excel_processor is None or excel_processor.df is None or excel_processor.df.empty:
             logging.warning("No Excel processor or data available, returning empty tags")
             return jsonify([])
         
