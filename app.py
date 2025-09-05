@@ -9874,14 +9874,26 @@ def process_excel_ultra_fast(filename, file_path):
         logging.info(f"[ULTRA-FAST] Starting background processing: {filename}")
         start_time = time.time()
         
-        # Minimal processing - just load the file and create basic processor
+        # Full processing to ensure column mapping works correctly
         try:
-            # Load with minimal processing
-            df = pd.read_excel(file_path, engine='openpyxl')
-            logging.info(f"[ULTRA-FAST] Loaded {len(df)} rows in {time.time() - start_time:.2f}s")
-            
-            # Create ExcelProcessor with minimal processing
+            # Create ExcelProcessor and load file with full processing
             processor = ExcelProcessor(file_path)
+            success = processor.load_file(file_path)
+            
+            if not success:
+                logging.error(f"[ULTRA-FAST] Failed to load file: {file_path}")
+                return
+            
+            logging.info(f"[ULTRA-FAST] Loaded {len(processor.df)} rows in {time.time() - start_time:.2f}s")
+            
+            # Log column processing details for debugging
+            if processor.df is not None:
+                logging.info(f"[ULTRA-FAST] Columns: {list(processor.df.columns)}")
+                if 'Product Type*' in processor.df.columns:
+                    product_types = processor.df['Product Type*'].unique()
+                    logging.info(f"[ULTRA-FAST] Product Types: {product_types.tolist()}")
+                else:
+                    logging.error(f"[ULTRA-FAST] Product Type* column missing!")
             
             # Store in global context for immediate access
             with app.app_context():
@@ -9893,6 +9905,7 @@ def process_excel_ultra_fast(filename, file_path):
             
         except Exception as process_error:
             logging.error(f"[ULTRA-FAST] Processing error: {process_error}")
+            logging.error(f"[ULTRA-FAST] Processing traceback: {traceback.format_exc()}")
             
     except Exception as e:
         logging.error(f"[ULTRA-FAST] Background processing failed: {e}")
