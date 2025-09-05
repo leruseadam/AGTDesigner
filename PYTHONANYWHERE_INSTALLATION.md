@@ -4,25 +4,32 @@
 
 The pandas compilation error you encountered is common on PythonAnywhere due to Python 3.13 compatibility issues. Here's how to fix it:
 
-## 🔧 Solution 1: Use the Installation Script (Recommended)
+## 🔧 Solution 1: Use the Python 3.13 Installation Script (Recommended)
 
 ```bash
 # On PythonAnywhere, run:
-chmod +x install_pythonanywhere.sh
-./install_pythonanywhere.sh
+chmod +x install_pythonanywhere_python313.sh
+./install_pythonanywhere_python313.sh
 ```
 
-## 🔧 Solution 2: Manual Installation
+## 🔧 Solution 1B: Use the Python 3.13 Requirements File
 
 ```bash
-# Step 1: Update pip
-pip install --upgrade pip
+# Install from the Python 3.13 compatible requirements file
+pip install -r requirements_python313.txt
+```
 
-# Step 2: Install numpy first (required for pandas)
-pip install numpy==1.24.3
+## 🔧 Solution 2: Manual Installation for Python 3.13
 
-# Step 3: Install pandas with compatible version
-pip install pandas==1.5.3
+```bash
+# Step 1: Update pip and install build tools
+pip install --upgrade pip setuptools wheel
+
+# Step 2: Install numpy (latest version for Python 3.13)
+pip install numpy
+
+# Step 3: Install pandas (latest version for Python 3.13)
+pip install pandas
 
 # Step 4: Install other core dependencies
 pip install Flask==2.3.3 Flask-CORS==4.0.0 Werkzeug==2.3.7
