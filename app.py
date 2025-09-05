@@ -3735,215 +3735,37 @@ def get_available_tags():
             logging.warning("Returning empty tags to prevent cross-store data access")
             return jsonify([])
         
-        # Simplified logic for available tags
-        cache_key = get_session_cache_key('available_tags')
-        current_filter_mode = session.get('current_filter_mode', 'full_excel')
+        # CRITICAL FIX: Always use fresh data from Excel processor instead of cached data
+        # This ensures web version shows the same data as local version
+        logging.info("CRITICAL FIX: Using fresh data from Excel processor instead of cached data")
         
-        # Check if we should use filtered tags based on JSON matching
-        json_matched_cache_key = session.get('json_matched_cache_key')
-        full_excel_cache_key = session.get('full_excel_cache_key')
-        
-        logging.info(f"Available tags debug - current_filter_mode: {current_filter_mode}")
-        logging.info(f"Available tags debug - json_matched_cache_key: {json_matched_cache_key}")
-        logging.info(f"Available tags debug - full_excel_cache_key: {full_excel_cache_key}")
-        
-        # Initialize tag variables
-        json_matched_tags = []
-        full_excel_tags = []
-        
-        # Try to get tags from cache if cache keys exist
-        if json_matched_cache_key:
-            cached_json_tags = cache.get(json_matched_cache_key)
-            if cached_json_tags:
-                json_matched_tags = cached_json_tags
-        
-        if full_excel_cache_key:
-            cached_full_tags = cache.get(full_excel_cache_key)
-            if cached_full_tags:
-                full_excel_tags = cached_full_tags
-        
-        logging.info(f"Available tags debug - json_matched_tags count: {len(json_matched_tags)}")
-        logging.info(f"Available tags debug - full_excel_tags count: {len(full_excel_tags)}")
-        
-        # Try to use cached tags if available
-        if current_filter_mode == 'json_matched' and json_matched_tags:
-            logging.info(f"Using JSON matched tags from cache: {len(json_matched_tags)} items")
-            
-            # CRITICAL FIX: When in JSON matched mode, show BOTH Excel data AND JSON matched items
-            # This ensures users see all their data, not just the JSON matched items
-            combined_tags = []
-            
-            # Add Excel data first (if available)
-            if full_excel_tags:
-                combined_tags.extend(full_excel_tags)
-                logging.info(f"Added {len(full_excel_tags)} Excel tags to combined list")
-            else:
-                # If no full_excel_tags in cache, try to get them from the general cache
-                cached_tags = cache.get(cache_key)
-                if cached_tags:
-                    # Filter to get only Excel-based items (not JSON matched)
-                    excel_items = [tag for tag in cached_tags if isinstance(tag, dict) and tag.get('Source') not in ['JSON Match', 'Product Database Match']]
-                    if excel_items:
-                        combined_tags.extend(excel_items)
-                        logging.info(f"Added {len(excel_items)} Excel tags from general cache to combined list")
-            
-            # Add JSON matched items
-            combined_tags.extend(json_matched_tags)
-            logging.info(f"Added {len(json_matched_tags)} JSON matched tags to combined list")
-            
-            # Remove duplicates based on Product Name
-            seen_names = set()
-            unique_tags = []
-            for tag in combined_tags:
-                if isinstance(tag, dict):
-                    product_name = tag.get('Product Name*', tag.get('ProductName', ''))
-                    if product_name and product_name not in seen_names:
-                        seen_names.add(product_name)
-                        unique_tags.append(tag)
-            
-            logging.info(f"Combined list has {len(unique_tags)} unique tags (Excel + JSON matched)")
-            
-            import math
-            def clean_dict(d):
-                if not isinstance(d, dict):
-                    logging.warning(f"clean_dict received non-dict item: {type(d)} - {d}")
-                    return {}
-                return {k: ('' if (v is None or (isinstance(v, float) and math.isnan(v))) else v) for k, v in d.items()}
-            tags = [clean_dict(tag) for tag in unique_tags if isinstance(tag, dict)]
-            logging.info(f"Cleaned tags: {len(tags)} items")
-            
-            logging.info(f"Returning {len(tags)} combined available tags (filter mode: {current_filter_mode})")
-            logging.info("=== AVAILABLE TAGS DEBUG END ===")
-            return jsonify(tags)
-        
-        # CRITICAL FIX: If no JSON matched tags in cache but filter mode is json_matched, 
-        # try to get them from the general available_tags cache
-        elif current_filter_mode == 'json_matched':
-            logging.info("Filter mode is json_matched but no JSON matched tags in cache, checking general cache")
-            cached_tags = cache.get(cache_key)
-            if cached_tags:
-                # Filter to show only JSON matched items (those with Source field)
-                json_matched_items = [tag for tag in cached_tags if isinstance(tag, dict) and tag.get('Source') in ['JSON Match', 'Product Database Match', 'JSON + Excel Match (Exact)', 'JSON + Excel Match (Strict)', 'Excel Match (Exact)', 'Excel Match (Strict)']]
-                if json_matched_items:
-                    logging.info(f"Found {len(json_matched_items)} JSON matched items in general cache")
-                    import math
-                    def clean_dict(d):
-                        if not isinstance(d, dict):
-                            logging.warning(f"clean_dict received non-dict item: {type(d)} - {d}")
-                            return {}
-                        return {k: ('' if (v is None or (isinstance(v, float) and math.isnan(v))) else v) for k, v in d.items()}
-                    tags = [clean_dict(tag) for tag in json_matched_items if isinstance(tag, dict)]
-                    logging.info(f"Returning {len(tags)} JSON matched tags from general cache")
-                    logging.info("=== AVAILABLE TAGS DEBUG END ===")
-                    return jsonify(tags)
-                else:
-                    logging.warning("No JSON matched items found in general cache")
-            else:
-                logging.warning("No cached tags found at all")
-            
-            # CRITICAL FIX: If no cached JSON matched tags, try to get them from Excel processor
-            logging.info("No cached JSON matched tags found, checking Excel processor for JSON matched items")
-            excel_processor = get_session_excel_processor()
-            if excel_processor and hasattr(excel_processor, 'df') and excel_processor.df is not None:
-                # Look for items with Source field indicating JSON matching
-                json_matched_mask = excel_processor.df.get('Source', pd.Series()).astype(str).str.contains('JSON Match|JSON \+ Excel Match|Excel Match|Product Database Match', case=False, na=False)
-                if json_matched_mask.any():
-                    json_matched_df = excel_processor.df[json_matched_mask]
-                    json_matched_items = json_matched_df.to_dict('records')
-                    logging.info(f"Found {len(json_matched_items)} JSON matched items in Excel processor")
-                    
-                    import math
-                    def clean_dict(d):
-                        if not isinstance(d, dict):
-                            logging.warning(f"clean_dict received non-dict item: {type(d)} - {d}")
-                            return {}
-                        return {k: ('' if (v is None or (isinstance(v, float) and math.isnan(v))) else v) for k, v in d.items()}
-                    tags = [clean_dict(tag) for tag in json_matched_items if isinstance(tag, dict)]
-                    logging.info(f"Returning {len(tags)} JSON matched tags from Excel processor")
-                    logging.info("=== AVAILABLE TAGS DEBUG END ===")
-                    return jsonify(tags)
-            
-            # If we get here, return empty list for JSON matched mode
-            logging.info("Returning empty list for JSON matched mode (no data found)")
-            logging.info("=== AVAILABLE TAGS DEBUG END ===")
+        # Get fresh data directly from Excel processor
+        excel_processor = get_session_excel_processor()
+        if excel_processor is None or excel_processor.df is None:
+            logging.warning("No Excel processor or data available, returning empty tags")
             return jsonify([])
         
-        elif current_filter_mode == 'full_excel' and full_excel_tags:
-            logging.info(f"Using full Excel tags from cache: {len(full_excel_tags)} items")
+        # Convert DataFrame to list of dictionaries for frontend
+        try:
+            # Get all rows as dictionaries
+            tags = excel_processor.df.to_dict('records')
             
+            # Clean the data (remove NaN values, etc.)
             import math
             def clean_dict(d):
                 if not isinstance(d, dict):
-                    logging.warning(f"clean_dict received non-dict item: {type(d)} - {d}")
                     return {}
                 return {k: ('' if (v is None or (isinstance(v, float) and math.isnan(v))) else v) for k, v in d.items()}
-            tags = [clean_dict(tag) for tag in full_excel_tags if isinstance(tag, dict)]
-            logging.info(f"Cleaned tags: {len(tags)} items")
             
-            logging.info(f"Returning {len(tags)} available tags (filter mode: {current_filter_mode})")
+            cleaned_tags = [clean_dict(tag) for tag in tags if isinstance(tag, dict)]
+            
+            logging.info(f"CRITICAL FIX: Returning {len(cleaned_tags)} fresh tags from Excel processor")
             logging.info("=== AVAILABLE TAGS DEBUG END ===")
-            return jsonify(tags)
-        
-        # Try general cache as fallback
-        cached_tags = cache.get(cache_key)
-        if cached_tags is not None:
-            logging.info(f"Returning cached tags: {len(cached_tags)} items")
-            return jsonify(cached_tags)
-        
-        logging.info("No cached tags found, getting ExcelProcessor")
-        excel_processor = get_session_excel_processor()
-        if excel_processor is None:
-            logging.error("Failed to get ExcelProcessor instance")
-            return jsonify({'error': 'Server error: Unable to initialize data processor'}), 500
-        
-        logging.info(f"ExcelProcessor obtained: {excel_processor}")
-        logging.info(f"DataFrame exists: {excel_processor.df is not None}")
-        logging.info(f"DataFrame empty: {excel_processor.df.empty if excel_processor.df is not None else 'N/A'}")
-        logging.info(f"DataFrame shape: {excel_processor.df.shape if excel_processor.df is not None else 'N/A'}")
-        
-        # CRITICAL FIX: Check if we have an uploaded file in session
-        session_file_path = session.get('file_path')
-        if session_file_path and os.path.exists(session_file_path):
-            logging.info(f"CRITICAL FIX: Session has uploaded file: {session_file_path}")
-        if excel_processor.df is None or excel_processor.df.empty:
-                logging.info(f"CRITICAL FIX: Loading uploaded file from session: {session_file_path}")
-                success = excel_processor.load_file(session_file_path)
-                if not success:
-                    logging.error("Failed to load uploaded file from session")
-                    return jsonify({'error': 'Failed to load uploaded file'}), 500
-        elif excel_processor.df is None or excel_processor.df.empty:
-            processing_files = [f for f, status in processing_status.items() if status == 'processing']
-            logging.info(f"Processing files: {processing_files}")
-            if processing_files:
-                logging.info("File is still being processed, returning 202")
-                return jsonify({'error': 'File is still being processed. Please wait...'}), 202
-            from src.core.data.excel_processor import get_default_upload_file
-            default_file = get_default_upload_file()
-            if default_file and os.path.exists(default_file):
-                logging.info(f"Attempting to load default file: {default_file}")
-                success = excel_processor.load_file(default_file)
-        
-        logging.info("Getting available tags from ExcelProcessor")
-        tags = excel_processor.get_available_tags()
-        logging.info(f"Raw tags obtained: {len(tags)} items")
-        
-        import math
-        def clean_dict(d):
-            if not isinstance(d, dict):
-                logging.warning(f"clean_dict received non-dict item: {type(d)} - {d}")
-                return {}
-            return {k: ('' if (v is None or (isinstance(v, float) and math.isnan(v))) else v) for k, v in d.items()}
-        tags = [clean_dict(tag) for tag in tags if isinstance(tag, dict)]
-        logging.info(f"Cleaned tags: {len(tags)} items")
-        
-        # Only cache if we're not using filtered tags and don't have cache keys
-        if current_filter_mode == 'full_excel' and not full_excel_cache_key:
-            cache.set(cache_key, tags)
-            logging.info(f"Cached tags with key: {cache_key}")
-        
-        logging.info(f"Returning {len(tags)} available tags (filter mode: {current_filter_mode})")
-        logging.info("=== AVAILABLE TAGS DEBUG END ===")
-        return jsonify(tags)
+            return jsonify(cleaned_tags)
+            
+        except Exception as e:
+            logging.error(f"Error converting Excel data to tags: {e}")
+            return jsonify([])
     except Exception as e:
         logging.error(f"Error getting available tags: {str(e)}")
         logging.error(traceback.format_exc())
