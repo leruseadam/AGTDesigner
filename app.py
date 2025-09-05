@@ -9898,6 +9898,14 @@ def process_excel_ultra_fast(filename, file_path):
                 if 'Product Type*' in processor.df.columns:
                     product_types = processor.df['Product Type*'].unique()
                     logging.info(f"[ULTRA-FAST] Product Types: {product_types.tolist()}")
+                    
+                    # Check specific products that are showing empty category bars
+                    problem_products = ['Cheesecake', 'Birthday Cake', 'Banana OG', 'Cherry Pie']
+                    for product in problem_products:
+                        matching_rows = processor.df[processor.df['ProductName'].str.contains(product, case=False, na=False)]
+                        if not matching_rows.empty:
+                            for idx, row in matching_rows.iterrows():
+                                logging.info(f"[ULTRA-FAST] PROBLEM PRODUCT: {row['ProductName']} -> Product Type: '{row.get('Product Type*', 'MISSING')}'")
                 else:
                     logging.error(f"[ULTRA-FAST] Product Type* column missing!")
             
@@ -9925,6 +9933,42 @@ def test_upload_fast():
         'status': 'success',
         'timestamp': time.time()
     })
+
+@app.route('/check-processing', methods=['GET'])
+def check_processing():
+    """Check if background processing completed and show sample data"""
+    try:
+        if not hasattr(g, 'excel_processor') or g.excel_processor is None:
+            return jsonify({'error': 'No Excel processor available'}), 400
+        
+        if g.excel_processor.df is None:
+            return jsonify({'error': 'No Excel data loaded'}), 400
+        
+        # Check the problem products
+        problem_products = ['Cheesecake', 'Birthday Cake', 'Banana OG', 'Cherry Pie']
+        problem_data = []
+        
+        for product in problem_products:
+            matching_rows = g.excel_processor.df[g.excel_processor.df['ProductName'].str.contains(product, case=False, na=False)]
+            if not matching_rows.empty:
+                for idx, row in matching_rows.iterrows():
+                    problem_data.append({
+                        'product_name': row['ProductName'],
+                        'product_type': row.get('Product Type*', 'MISSING'),
+                        'lineage': row.get('Lineage', 'MISSING'),
+                        'index': idx
+                    })
+        
+        return jsonify({
+            'total_rows': len(g.excel_processor.df),
+            'columns': list(g.excel_processor.df.columns),
+            'problem_products': problem_data,
+            'all_product_types': g.excel_processor.df['Product Type*'].unique().tolist() if 'Product Type*' in g.excel_processor.df.columns else []
+        })
+        
+    except Exception as e:
+        logging.error(f"Check processing error: {str(e)}")
+        return jsonify({'error': f'Check failed: {str(e)}'}), 500
 
 
 @app.route('/test-upload.html')
