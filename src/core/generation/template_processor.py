@@ -42,10 +42,20 @@ from src.core.generation.text_processing import (
 )
 from src.core.formatting.markers import wrap_with_marker, unwrap_marker, is_already_wrapped
 
-# Performance settings
-MAX_PROCESSING_TIME_PER_CHUNK = 30  # 30 seconds max per chunk
-MAX_TOTAL_PROCESSING_TIME = 300     # 5 minutes max total
-CHUNK_SIZE_LIMIT = 50               # Limit chunk size for performance
+# Performance settings - check if running on PythonAnywhere
+import os
+IS_PYTHONANYWHERE = 'pythonanywhere.com' in os.environ.get('HTTP_HOST', '')
+
+if IS_PYTHONANYWHERE:
+    # Reduced settings for PythonAnywhere performance
+    MAX_PROCESSING_TIME_PER_CHUNK = 15  # 15 seconds max per chunk
+    MAX_TOTAL_PROCESSING_TIME = 120     # 2 minutes max total
+    CHUNK_SIZE_LIMIT = 10               # Smaller chunks for PythonAnywhere
+else:
+    # Normal settings for local development
+    MAX_PROCESSING_TIME_PER_CHUNK = 30  # 30 seconds max per chunk
+    MAX_TOTAL_PROCESSING_TIME = 300     # 5 minutes max total
+    CHUNK_SIZE_LIMIT = 50               # Limit chunk size for performance
 
 def get_font_scheme(template_type, base_size=12):
     schemes = {
@@ -71,20 +81,26 @@ class TemplateProcessor:
         self._expanded_template_buffer = self._expand_template_if_needed()
         
         # Set chunk size based on template type with performance limits
-        self.logger.info(f"DEBUG: Setting chunk size for template_type='{self.template_type}' (type: {type(self.template_type)})")
+        if not IS_PYTHONANYWHERE:
+            self.logger.info(f"DEBUG: Setting chunk size for template_type='{self.template_type}' (type: {type(self.template_type)})")
+        
         if self.template_type == 'mini':
             self.chunk_size = min(20, CHUNK_SIZE_LIMIT)  # Fixed: 4x5 grid = 20 labels per page
-            self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for mini template")
+            if not IS_PYTHONANYWHERE:
+                self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for mini template")
         elif self.template_type == 'double':
             self.chunk_size = min(12, CHUNK_SIZE_LIMIT)  # Fixed: 4x3 grid = 12 labels per page
-            self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for double template")
+            if not IS_PYTHONANYWHERE:
+                self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for double template")
         elif self.template_type == 'inventory':
             self.chunk_size = min(4, CHUNK_SIZE_LIMIT)   # Fixed: 2x2 grid = 4 labels per page
-            self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for inventory template")
+            if not IS_PYTHONANYWHERE:
+                self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for inventory template")
         else:
             # For standard templates (horizontal, vertical), use 3x3 grid = 9 labels per page
             self.chunk_size = min(9, CHUNK_SIZE_LIMIT)  # Fixed: 3x3 grid = 9 labels per page
-            self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for template type '{self.template_type}' (fallback to 3x3)")
+            if not IS_PYTHONANYWHERE:
+                self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for template type '{self.template_type}' (fallback to 3x3)")
         
         self.logger.info(f"Template type: {self.template_type}, Chunk size: {self.chunk_size}")
         

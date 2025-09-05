@@ -4,6 +4,23 @@ import logging
 import threading
 import pandas as pd  # Add this import
 from pathlib import Path
+
+# PythonAnywhere performance optimizations
+IS_PYTHONANYWHERE = 'pythonanywhere.com' in os.environ.get('HTTP_HOST', '')
+if IS_PYTHONANYWHERE:
+    # Reduce logging verbosity on PythonAnywhere
+    logging.getLogger().setLevel(logging.WARNING)
+    # Disable debug mode for better performance
+    os.environ['FLASK_ENV'] = 'production'
+    # Set smaller chunk sizes for PythonAnywhere
+    CHUNK_SIZE_LIMIT = 10  # Reduced from 50
+    MAX_PROCESSING_TIME_PER_CHUNK = 15  # Reduced from 30
+    MAX_TOTAL_PROCESSING_TIME = 120  # Reduced from 300
+else:
+    # Normal settings for local development
+    CHUNK_SIZE_LIMIT = 50
+    MAX_PROCESSING_TIME_PER_CHUNK = 30
+    MAX_TOTAL_PROCESSING_TIME = 300
 from flask import (
     Flask, 
     request, 
@@ -20,6 +37,20 @@ try:
     from flask_compress import Compress
 except Exception:  # pragma: no cover
     Compress = None
+
+# Simple in-memory cache for PythonAnywhere
+if IS_PYTHONANYWHERE:
+    from functools import lru_cache
+    # Cache frequently used functions
+    @lru_cache(maxsize=128)
+    def cached_get_font_scheme(template_type, base_size=12):
+        from src.core.generation.template_processor import get_font_scheme
+        return get_font_scheme(template_type, base_size)
+    
+    @lru_cache(maxsize=64)
+    def cached_calculate_text_complexity(text):
+        from src.core.utils.common import calculate_text_complexity
+        return calculate_text_complexity(text)
 try:
     from flask_session import Session
 except ImportError:
