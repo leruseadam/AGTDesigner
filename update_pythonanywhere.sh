@@ -1,60 +1,94 @@
 #!/bin/bash
+# Update PythonAnywhere deployment script
 
-# PythonAnywhere Update Script
-# Run this in your PythonAnywhere bash console
+echo "🚀 Updating PythonAnywhere deployment..."
 
-echo "=== Updating PythonAnywhere Deployment ==="
+# Step 1: Pull latest changes
+echo "📥 Pulling latest changes..."
+git pull
 
-# Step 1: Navigate to your project directory
-cd ~/AGTDesigner
+# Step 2: Install missing dependencies
+echo "📦 Installing missing dependencies..."
+source venv_pythonanywhere_fresh/bin/activate
+pip install flask-caching
 
-# Step 2: Pull latest changes
-echo "Pulling latest changes from GitHub..."
-git pull origin main
+# Step 3: Update WSGI file with fixed version
+echo "🔧 Updating WSGI file..."
+cat > /var/www/www_agtpricetags_com_wsgi.py << 'EOF'
+#!/usr/bin/env python3
+"""
+PythonAnywhere WSGI configuration - Fixed for directory path issues
+This fixes the chdir() errors and logging issues
+"""
 
-# Step 3: Update configuration for production
-echo "Updating configuration for production..."
-if [ -f "config_production.py" ]; then
-    echo "Production config found - ensuring DEVELOPMENT_MODE is false"
-    # The config_production.py should already have the right settings
-else
-    echo "Creating production config..."
-    cp config.py config_production.py
-    # Update the config to use environment variables
-    sed -i 's/DEVELOPMENT_MODE = True/DEVELOPMENT_MODE = os.environ.get("DEVELOPMENT_MODE", "False").lower() == "true"/' config_production.py
-fi
+import os
+import sys
+import logging
 
-# Step 4: Clear any cached files
-echo "Clearing cache..."
-rm -rf __pycache__
-rm -rf src/__pycache__
-rm -rf src/core/__pycache__
-rm -rf src/core/data/__pycache__
-rm -rf src/core/generation/__pycache__
+# Fix the directory path issue
+project_dir = '/home/adamcordova/labelMaker_fresh'
 
-# Step 5: Ensure proper permissions
-echo "Setting permissions..."
-chmod -R 755 .
-chmod -R 755 uploads output cache logs static
+# Verify directory exists, fallback to current directory
+if not os.path.exists(project_dir):
+    project_dir = os.path.dirname(os.path.abspath(__file__))
+    print(f"⚠️  Project directory not found, using current directory: {project_dir}")
 
-# Step 6: Check if virtual environment is active
-if [[ "$VIRTUAL_ENV" == "" ]]; then
-    echo "⚠️  WARNING: Not in virtual environment!"
-    echo "Please activate your virtual environment:"
-    echo "source ~/.virtualenvs/myflaskapp-env/bin/activate"
-    echo "Then run this script again."
-    exit 1
-fi
+# Add the project directory to Python path
+if project_dir not in sys.path:
+    sys.path.insert(0, project_dir)
 
-# Step 7: Install any new dependencies
-echo "Checking for new dependencies..."
-pip install -r requirements_pythonanywhere.txt
+# Set environment variables for PythonAnywhere
+os.environ['PYTHONANYWHERE_SITE'] = 'True'
+os.environ['PYTHONANYWHERE_DOMAIN'] = 'www.agtpricetags.com'
+os.environ['FLASK_ENV'] = 'production'
+os.environ['FLASK_DEBUG'] = 'False'
 
-echo ""
-echo "=== Update Complete ==="
-echo "Next steps:"
-echo "1. Go to PythonAnywhere Web tab"
-echo "2. Click 'Reload' for your web app"
-echo "3. Test the application at https://www.agtpricetags.com"
-echo ""
-echo "If you see any errors, check the error logs in the Web tab." 
+# Configure logging to prevent "Message too long" errors
+logging.basicConfig(
+    level=logging.ERROR,  # Only show errors to reduce log size
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler()
+    ]
+)
+
+# Suppress verbose logging from all libraries
+logging.getLogger('werkzeug').setLevel(logging.ERROR)
+logging.getLogger('urllib3').setLevel(logging.ERROR)
+logging.getLogger('requests').setLevel(logging.ERROR)
+logging.getLogger('pandas').setLevel(logging.ERROR)
+logging.getLogger('openpyxl').setLevel(logging.ERROR)
+logging.getLogger('xlrd').setLevel(logging.ERROR)
+
+# Import and configure the Flask app
+try:
+    from app import app
+    
+    # Configure Flask for PythonAnywhere
+    app.config['DEBUG'] = False
+    app.config['TESTING'] = False
+    app.config['TEMPLATES_AUTO_RELOAD'] = False
+    app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 31536000
+    
+    # Set the application
+    application = app
+    
+    # Log successful startup
+    logging.info("WSGI application loaded successfully")
+    
+except ImportError as e:
+    logging.error(f"Failed to import Flask app: {e}")
+    raise
+except Exception as e:
+    logging.error(f"Error configuring Flask app: {e}")
+    raise
+
+if __name__ == "__main__":
+    application.run()
+EOF
+
+echo "✅ WSGI file updated!"
+
+# Step 4: Restart web app
+echo "🔄 Please restart your web app in PythonAnywhere Web tab"
+echo "✅ Update complete!"
