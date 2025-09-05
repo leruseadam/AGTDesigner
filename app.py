@@ -9856,25 +9856,52 @@ def upload_file_fast():
         session['file_path'] = str(file_path)
         session['selected_tags'] = []
         
-        # Start background processing for fast response
+        # Process Excel file immediately to ensure data is ready
         try:
-            thread = threading.Thread(target=process_excel_ultra_fast, args=(file.filename, str(file_path)))
-            thread.daemon = True
-            thread.start()
-            logging.info(f"Background processing thread started for {file.filename}")
-        except Exception as thread_error:
-            logging.error(f"Failed to start background thread: {thread_error}")
+            logging.info(f"Starting immediate Excel processing for {file.filename}")
+            processor = ExcelProcessor(str(file_path))
+            success = processor.load_file(str(file_path))
+            
+            if not success:
+                logging.error(f"Failed to load Excel file: {file_path}")
+                return jsonify({'error': 'Failed to process Excel file'}), 500
+            
+            # Store in global context
+            g.excel_processor = processor
+            logging.info(f"Excel processor created and loaded successfully")
+            
+            # Log column processing details for debugging
+            if processor.df is not None:
+                logging.info(f"Columns: {list(processor.df.columns)}")
+                if 'Product Type*' in processor.df.columns:
+                    product_types = processor.df['Product Type*'].unique()
+                    logging.info(f"Product Types: {product_types.tolist()}")
+                    
+                    # Check specific products that are showing empty category bars
+                    problem_products = ['Cheesecake', 'Birthday Cake', 'Banana OG', 'Cherry Pie']
+                    for product in problem_products:
+                        matching_rows = processor.df[processor.df['ProductName'].str.contains(product, case=False, na=False)]
+                        if not matching_rows.empty:
+                            for idx, row in matching_rows.iterrows():
+                                logging.info(f"PROBLEM PRODUCT: {row['ProductName']} -> Product Type: '{row.get('Product Type*', 'MISSING')}'")
+                else:
+                    logging.error(f"Product Type* column missing!")
+            
+        except Exception as process_error:
+            logging.error(f"Excel processing error: {process_error}")
+            logging.error(f"Processing traceback: {traceback.format_exc()}")
+            return jsonify({'error': 'Failed to process Excel file'}), 500
         
         upload_time = time.time() - start_time
-        logging.info(f"File saved successfully: {filename} in {upload_time:.3f}s")
+        logging.info(f"File saved and processed successfully: {filename} in {upload_time:.3f}s")
         
-        # Return immediate success response
+        # Return success response with processed data
         return jsonify({
-            'message': 'File uploaded successfully, processing in background',
+            'message': 'File uploaded and processed successfully',
             'filename': filename,
             'status': 'success',
             'upload_time': f"{upload_time:.3f}s",
-            'processing_status': 'background'
+            'processing_status': 'completed'
         })
         
     except Exception as e:
@@ -9883,56 +9910,6 @@ def upload_file_fast():
         logging.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({'error': 'Upload failed. Please try again.'}), 500
 
-def process_excel_ultra_fast(filename, file_path):
-    """Ultra-fast Excel processing optimized for PythonAnywhere"""
-    try:
-        logging.info(f"[ULTRA-FAST] Starting background processing: {filename}")
-        start_time = time.time()
-        
-        # Full processing to ensure column mapping works correctly
-        try:
-            # Create ExcelProcessor and load file with full processing
-            processor = ExcelProcessor(file_path)
-            success = processor.load_file(file_path)
-            
-            if not success:
-                logging.error(f"[ULTRA-FAST] Failed to load file: {file_path}")
-                return
-            
-            logging.info(f"[ULTRA-FAST] Loaded {len(processor.df)} rows in {time.time() - start_time:.2f}s")
-            
-            # Log column processing details for debugging
-            if processor.df is not None:
-                logging.info(f"[ULTRA-FAST] Columns: {list(processor.df.columns)}")
-                if 'Product Type*' in processor.df.columns:
-                    product_types = processor.df['Product Type*'].unique()
-                    logging.info(f"[ULTRA-FAST] Product Types: {product_types.tolist()}")
-                    
-                    # Check specific products that are showing empty category bars
-                    problem_products = ['Cheesecake', 'Birthday Cake', 'Banana OG', 'Cherry Pie']
-                    for product in problem_products:
-                        matching_rows = processor.df[processor.df['ProductName'].str.contains(product, case=False, na=False)]
-                        if not matching_rows.empty:
-                            for idx, row in matching_rows.iterrows():
-                                logging.info(f"[ULTRA-FAST] PROBLEM PRODUCT: {row['ProductName']} -> Product Type: '{row.get('Product Type*', 'MISSING')}'")
-                else:
-                    logging.error(f"[ULTRA-FAST] Product Type* column missing!")
-            
-            # Store in global context for immediate access
-            with app.app_context():
-                g.excel_processor = processor
-                logging.info(f"[ULTRA-FAST] ExcelProcessor created successfully")
-            
-            processing_time = time.time() - start_time
-            logging.info(f"[ULTRA-FAST] Background processing completed in {processing_time:.2f}s")
-            
-        except Exception as process_error:
-            logging.error(f"[ULTRA-FAST] Processing error: {process_error}")
-            logging.error(f"[ULTRA-FAST] Processing traceback: {traceback.format_exc()}")
-            
-    except Exception as e:
-        logging.error(f"[ULTRA-FAST] Background processing failed: {e}")
-        logging.error(f"[ULTRA-FAST] Traceback: {traceback.format_exc()}")
 
 @app.route('/test-upload-fast', methods=['GET'])
 def test_upload_fast():
