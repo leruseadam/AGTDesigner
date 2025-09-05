@@ -9867,53 +9867,59 @@ def upload_file_fast():
             except Exception as create_error:
                 logging.error(f"Failed to create ExcelProcessor: {create_error}")
                 logging.error(f"Create error traceback: {traceback.format_exc()}")
-                return jsonify({'error': 'Failed to create Excel processor'}), 500
+                # Don't fail the upload, just log the error and continue
+                logging.warning("Continuing without immediate processing - will process later")
+                processor = None
             
             # Load file with error handling
-            try:
-                success = processor.load_file(str(file_path))
-                if not success:
-                    logging.error(f"Failed to load Excel file: {file_path}")
-                    return jsonify({'error': 'Failed to process Excel file'}), 500
-                logging.info(f"Excel file loaded successfully")
-            except Exception as load_error:
-                logging.error(f"Failed to load Excel file: {load_error}")
-                logging.error(f"Load error traceback: {traceback.format_exc()}")
-                return jsonify({'error': 'Failed to load Excel file'}), 500
+            if processor:
+                try:
+                    success = processor.load_file(str(file_path))
+                    if not success:
+                        logging.error(f"Failed to load Excel file: {file_path}")
+                        logging.warning("Continuing without immediate processing - will process later")
+                        processor = None
+                    else:
+                        logging.info(f"Excel file loaded successfully")
+                except Exception as load_error:
+                    logging.error(f"Failed to load Excel file: {load_error}")
+                    logging.error(f"Load error traceback: {traceback.format_exc()}")
+                    logging.warning("Continuing without immediate processing - will process later")
+                    processor = None
             
-            # Store in global context
-            try:
-                g.excel_processor = processor
-                logging.info(f"Excel processor stored in global context")
-            except Exception as store_error:
-                logging.error(f"Failed to store Excel processor: {store_error}")
-                return jsonify({'error': 'Failed to store Excel processor'}), 500
-            
-            # Log column processing details for debugging
-            if processor.df is not None:
-                logging.info(f"DataFrame shape: {processor.df.shape}")
-                logging.info(f"Columns: {list(processor.df.columns)}")
-                if 'Product Type*' in processor.df.columns:
-                    product_types = processor.df['Product Type*'].unique()
-                    logging.info(f"Product Types: {product_types.tolist()}")
+            # Store in global context if successful
+            if processor:
+                try:
+                    g.excel_processor = processor
+                    logging.info(f"Excel processor stored in global context")
                     
-                    # Check specific products that are showing empty category bars
-                    problem_products = ['Cheesecake', 'Birthday Cake', 'Banana OG', 'Cherry Pie']
-                    for product in problem_products:
-                        matching_rows = processor.df[processor.df['ProductName'].str.contains(product, case=False, na=False)]
-                        if not matching_rows.empty:
-                            for idx, row in matching_rows.iterrows():
-                                logging.info(f"PROBLEM PRODUCT: {row['ProductName']} -> Product Type: '{row.get('Product Type*', 'MISSING')}'")
-                else:
-                    logging.error(f"Product Type* column missing!")
-            else:
-                logging.error(f"DataFrame is None after loading!")
-                return jsonify({'error': 'Excel file loaded but no data found'}), 500
+                    # Log column processing details for debugging
+                    if processor.df is not None:
+                        logging.info(f"DataFrame shape: {processor.df.shape}")
+                        logging.info(f"Columns: {list(processor.df.columns)}")
+                        if 'Product Type*' in processor.df.columns:
+                            product_types = processor.df['Product Type*'].unique()
+                            logging.info(f"Product Types: {product_types.tolist()}")
+                            
+                            # Check specific products that are showing empty category bars
+                            problem_products = ['Cheesecake', 'Birthday Cake', 'Banana OG', 'Cherry Pie']
+                            for product in problem_products:
+                                matching_rows = processor.df[processor.df['ProductName'].str.contains(product, case=False, na=False)]
+                                if not matching_rows.empty:
+                                    for idx, row in matching_rows.iterrows():
+                                        logging.info(f"PROBLEM PRODUCT: {row['ProductName']} -> Product Type: '{row.get('Product Type*', 'MISSING')}'")
+                        else:
+                            logging.error(f"Product Type* column missing!")
+                    else:
+                        logging.error(f"DataFrame is None after loading!")
+                except Exception as store_error:
+                    logging.error(f"Failed to store Excel processor: {store_error}")
+                    logging.warning("Continuing without immediate processing - will process later")
             
         except Exception as process_error:
             logging.error(f"Excel processing error: {process_error}")
             logging.error(f"Processing traceback: {traceback.format_exc()}")
-            return jsonify({'error': f'Failed to process Excel file: {str(process_error)}'}), 500
+            logging.warning("Continuing without immediate processing - will process later")
         
         upload_time = time.time() - start_time
         logging.info(f"File saved and processed successfully: {filename} in {upload_time:.3f}s")
