@@ -6,6 +6,7 @@ import pandas as pd  # Add this import
 import time
 import requests
 from pathlib import Path
+from werkzeug.utils import secure_filename
 
 # Performance optimizations
 IS_PYTHONANYWHERE = 'pythonanywhere.com' in os.environ.get('HTTP_HOST', '')
