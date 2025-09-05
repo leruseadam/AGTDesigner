@@ -9926,41 +9926,6 @@ def test_upload_fast():
         'timestamp': time.time()
     })
 
-@app.route('/debug-columns', methods=['GET'])
-def debug_columns():
-    """Debug endpoint to check column processing differences"""
-    try:
-        if not hasattr(g, 'excel_processor') or g.excel_processor is None:
-            return jsonify({'error': 'No Excel processor available'}), 400
-        
-        if g.excel_processor.df is None:
-            return jsonify({'error': 'No Excel data loaded'}), 400
-        
-        # Get sample data for debugging
-        sample_data = []
-        for i, row in g.excel_processor.df.head(5).iterrows():
-            sample_data.append({
-                'index': i,
-                'ProductName': str(row.get('ProductName', '')),
-                'Product Type*': str(row.get('Product Type*', '')),
-                'Lineage': str(row.get('Lineage', '')),
-                'Product Brand': str(row.get('Product Brand', '')),
-                'Vendor': str(row.get('Vendor', '')),
-                'Description': str(row.get('Description', '')),
-                'WeightUnits': str(row.get('WeightUnits', ''))
-            })
-        
-        return jsonify({
-            'columns': list(g.excel_processor.df.columns),
-            'total_rows': len(g.excel_processor.df),
-            'sample_data': sample_data,
-            'product_types': g.excel_processor.df['Product Type*'].unique().tolist() if 'Product Type*' in g.excel_processor.df.columns else [],
-            'lineages': g.excel_processor.df['Lineage'].unique().tolist() if 'Lineage' in g.excel_processor.df.columns else []
-        })
-        
-    except Exception as e:
-        logging.error(f"Debug columns error: {str(e)}")
-        return jsonify({'error': f'Debug failed: {str(e)}'}), 500
 
 @app.route('/test-upload.html')
 def test_upload_page():
