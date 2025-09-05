@@ -9800,21 +9800,29 @@ def upload_file_optimized():
 def upload_file_fast():
     """Fast file upload endpoint for enhanced UI"""
     try:
+        logging.info("=== UPLOAD-FAST REQUEST START ===")
+        
         # Check if file is present
         if 'file' not in request.files:
+            logging.error("No file provided in request")
             return jsonify({'error': 'No file provided'}), 400
         
         file = request.files['file']
         if file.filename == '':
+            logging.error("No file selected")
             return jsonify({'error': 'No file selected'}), 400
+        
+        logging.info(f"Processing file: {file.filename}")
         
         # Validate file type
         if not file.filename.lower().endswith(('.xlsx', '.xls')):
+            logging.error(f"Invalid file type: {file.filename}")
             return jsonify({'error': 'Invalid file type. Please upload an Excel file.'}), 400
         
         # Create uploads directory if it doesn't exist
         uploads_dir = Path('uploads')
         uploads_dir.mkdir(exist_ok=True)
+        logging.info(f"Uploads directory: {uploads_dir.absolute()}")
         
         # Generate unique filename
         timestamp = int(time.time())
@@ -9822,12 +9830,16 @@ def upload_file_fast():
         filename = f"{timestamp}_{safe_filename}"
         file_path = uploads_dir / filename
         
+        logging.info(f"Saving file to: {file_path}")
+        
         # Save file
         file.save(str(file_path))
         
         # Store file path in session
         session['file_path'] = str(file_path)
         session['selected_tags'] = []
+        
+        logging.info(f"File saved successfully: {filename}")
         
         # Return success response
         return jsonify({
@@ -9837,8 +9849,19 @@ def upload_file_fast():
         })
         
     except Exception as e:
+        logging.error(f"=== UPLOAD-FAST ERROR ===")
         logging.error(f"Upload-fast error: {str(e)}")
+        logging.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({'error': 'Upload failed. Please try again.'}), 500
+
+@app.route('/test-upload-fast', methods=['GET'])
+def test_upload_fast():
+    """Test endpoint to verify upload-fast is working"""
+    return jsonify({
+        'message': 'Upload-fast endpoint is working',
+        'status': 'success',
+        'timestamp': time.time()
+    })
 
 @app.route('/api/database-add-missing-columns', methods=['POST'])
 def add_missing_database_columns():
