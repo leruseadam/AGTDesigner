@@ -42,7 +42,7 @@ pip install fuzzywuzzy
 
 # Install performance optimizations
 echo "📦 Installing performance optimizations..."
-pip install flask-compress psutil
+pip install flask-compress flask-caching psutil
 
 # Try optional dependencies (may fail, that's okay)
 echo "📦 Installing optional dependencies..."

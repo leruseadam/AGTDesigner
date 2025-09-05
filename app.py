@@ -117,7 +117,18 @@ import time
 from src.core.data.excel_processor import ExcelProcessor, get_default_upload_file
 from src.core.data.json_matcher import map_inventory_type_to_product_type
 import random
-from flask_caching import Cache
+# Optional import for flask_caching
+try:
+    from flask_caching import Cache
+    CACHE_AVAILABLE = True
+except ImportError:
+    CACHE_AVAILABLE = False
+    # Create a dummy Cache class for fallback
+    class Cache:
+        def __init__(self, *args, **kwargs):
+            pass
+        def __getattr__(self, name):
+            return lambda *args, **kwargs: None
 import hashlib
 import glob
 import subprocess
@@ -658,8 +669,11 @@ def create_app():
 
 app = create_app()
 
-# Initialize Flask-Caching after app creation
-cache = Cache(app, config={'CACHE_TYPE': 'SimpleCache', 'CACHE_DEFAULT_TIMEOUT': 300})
+# Initialize Flask-Caching after app creation (if available)
+if CACHE_AVAILABLE:
+    cache = Cache(app, config={'CACHE_TYPE': 'SimpleCache', 'CACHE_DEFAULT_TIMEOUT': 300})
+else:
+    cache = Cache()  # Use dummy cache
 
 # Initialize Flask-Compress after app creation (if available)
 if Compress is not None:
