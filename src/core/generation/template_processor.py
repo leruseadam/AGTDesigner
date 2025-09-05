@@ -462,10 +462,20 @@ class TemplateProcessor:
             grid.append(gc)
         tbl._element.insert(0, grid)
         
-        # Set row heights
+        # Set row heights and individual cell widths
         for row in tbl.rows:
             row.height = row_height_pts
             row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+            
+            # Set individual cell widths to ensure exact 1.5" dimensions
+            for cell in row.cells:
+                tcPr = cell._tc.get_or_add_tcPr()
+                tcW = tcPr.find(qn('w:tcW'))
+                if tcW is None:
+                    tcW = OxmlElement('w:tcW')
+                    tcPr.append(tcW)
+                tcW.set(qn('w:w'), col_width_twips)
+                tcW.set(qn('w:type'), 'dxa')
         
         # Preserve original borders if they exist
         if original_borders is not None:

@@ -898,10 +898,20 @@ def enforce_fixed_cell_dimensions(table, template_type=None):
                                 tblGrid.append(gridCol)
                             table._element.insert(0, tblGrid)
                             
-                            # Set row heights based on template type
+                            # Set row heights and cell widths based on template type
                             for row in table.rows:
                                 row.height = Inches(cell_dims['height'])
                                 row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+                                
+                                # Set individual cell widths
+                                for cell in row.cells:
+                                    tcPr = cell._tc.get_or_add_tcPr()
+                                    tcW = tcPr.find(qn('w:tcW'))
+                                    if tcW is None:
+                                        tcW = OxmlElement('w:tcW')
+                                        tcPr.append(tcW)
+                                    tcW.set(qn('w:w'), str(int(cell_dims['width'] * 1440)))
+                                    tcW.set(qn('w:type'), 'dxa')
                 except Exception as e:
                     logger.warning(f"Could not enforce mini template dimensions: {e}")
                     # Continue with general dimension enforcement
@@ -927,10 +937,20 @@ def enforce_fixed_cell_dimensions(table, template_type=None):
                             tblGrid.append(gridCol)
                         table._element.insert(0, tblGrid)
                         
-                        # Set row heights based on template type
+                        # Set row heights and cell widths based on template type
                         for row in table.rows:
                             row.height = Inches(cell_dims['height'])
                             row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+                            
+                            # Set individual cell widths
+                            for cell in row.cells:
+                                tcPr = cell._tc.get_or_add_tcPr()
+                                tcW = tcPr.find(qn('w:tcW'))
+                                if tcW is None:
+                                    tcW = OxmlElement('w:tcW')
+                                    tcPr.append(tcW)
+                                tcW.set(qn('w:w'), str(int(cell_dims['width'] * 1440)))
+                                tcW.set(qn('w:type'), 'dxa')
             except Exception as e:
                 logger.warning(f"Could not enforce template-specific dimensions for {template_type}: {e}")
                 # Continue with general dimension enforcement
