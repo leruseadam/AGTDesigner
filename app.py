@@ -9989,6 +9989,56 @@ def test_sync_processing():
         'function_exists': hasattr(globals(), 'process_excel_sync')
     })
 
+@app.route('/diagnose-uploads', methods=['GET'])
+def diagnose_uploads():
+    """Diagnostic endpoint to check upload directory and files"""
+    try:
+        import os
+        import glob
+        
+        # Check current working directory
+        cwd = os.getcwd()
+        
+        # Check uploads directory
+        uploads_dir = os.path.join(cwd, 'uploads')
+        uploads_exists = os.path.exists(uploads_dir)
+        
+        # List files in uploads directory
+        files = []
+        if uploads_exists:
+            xlsx_files = glob.glob(os.path.join(uploads_dir, '*.xlsx'))
+            for file_path in xlsx_files:
+                file_stat = os.stat(file_path)
+                files.append({
+                    'name': os.path.basename(file_path),
+                    'size': file_stat.st_size,
+                    'modified': file_stat.st_mtime,
+                    'path': file_path
+                })
+            # Sort by modification time, newest first
+            files.sort(key=lambda x: x['modified'], reverse=True)
+        
+        # Check global processor
+        global _excel_processor
+        processor_status = {
+            'exists': _excel_processor is not None,
+            'has_df': _excel_processor.df is not None if _excel_processor else False,
+            'df_shape': _excel_processor.df.shape if _excel_processor and _excel_processor.df is not None else None,
+            'last_file': getattr(_excel_processor, '_last_loaded_file', None) if _excel_processor else None
+        }
+        
+        return jsonify({
+            'cwd': cwd,
+            'uploads_dir': uploads_dir,
+            'uploads_exists': uploads_exists,
+            'files': files,
+            'processor_status': processor_status,
+            'total_files': len(files)
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/check-processing', methods=['GET'])
 def check_processing():
     """Check if background processing completed and show sample data"""
