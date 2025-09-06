@@ -10123,6 +10123,56 @@ def test_database_fix():
             'error': str(e)
         })
 
+@app.route('/test-direct-excel', methods=['GET'])
+def test_direct_excel():
+    """Test endpoint to directly load and return Excel data"""
+    try:
+        import glob
+        import os
+        import pandas as pd
+        
+        # Find the most recent Excel file
+        uploads_dir = os.path.join(os.getcwd(), 'uploads')
+        if not os.path.exists(uploads_dir):
+            return jsonify({'error': 'Uploads directory not found'})
+        
+        xlsx_files = glob.glob(os.path.join(uploads_dir, '*.xlsx'))
+        if not xlsx_files:
+            return jsonify({'error': 'No Excel files found'})
+        
+        # Get the most recent file
+        xlsx_files.sort(key=os.path.getmtime, reverse=True)
+        latest_file = xlsx_files[0]
+        
+        # Load the file
+        df = pd.read_excel(latest_file)
+        
+        # Convert to records
+        records = df.to_dict('records')
+        
+        # Clean the data
+        import math
+        def clean_dict(d):
+            if not isinstance(d, dict):
+                return {}
+            return {k: ('' if (v is None or (isinstance(v, float) and math.isnan(v))) else v) for k, v in d.items()}
+        
+        cleaned_records = [clean_dict(record) for record in records if isinstance(record, dict)]
+        
+        return jsonify({
+            'message': 'Direct Excel loading test',
+            'file': latest_file,
+            'shape': df.shape,
+            'columns': list(df.columns),
+            'record_count': len(cleaned_records),
+            'sample_record': cleaned_records[0] if cleaned_records else None
+        })
+    except Exception as e:
+        return jsonify({
+            'message': 'Direct Excel loading failed',
+            'error': str(e)
+        })
+
 @app.route('/diagnose-uploads', methods=['GET'])
 def diagnose_uploads():
     """Diagnostic endpoint to check upload directory and files"""
