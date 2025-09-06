@@ -1572,10 +1572,27 @@ def process_excel_background(filename, temp_path):
     global os  # Ensure os is available in this scope
     
     try:
-        logging.debug(f"[BG] ===== BACKGROUND PROCESSING START =====")
-        logging.debug(f"[BG] Starting ultra-optimized file processing: {temp_path}")
-        logging.debug(f"[BG] Filename: {filename}")
-        logging.debug(f"[BG] Temp path: {temp_path}")
+        logging.info(f"[BG] ===== BACKGROUND PROCESSING START =====")
+        logging.info(f"[BG] Starting ultra-optimized file processing: {temp_path}")
+        logging.info(f"[BG] Filename: {filename}")
+        logging.info(f"[BG] Temp path: {temp_path}")
+        
+        # CRITICAL FIX: Add comprehensive error handling
+        try:
+            import traceback
+            logging.info(f"[BG] Python version: {sys.version}")
+            logging.info(f"[BG] Current working directory: {os.getcwd()}")
+            logging.info(f"[BG] File exists check: {os.path.exists(temp_path) if temp_path else 'temp_path is None'}")
+            if temp_path and os.path.exists(temp_path):
+                file_size = os.path.getsize(temp_path)
+                logging.info(f"[BG] File size: {file_size} bytes")
+            else:
+                logging.error(f"[BG] CRITICAL ERROR: File does not exist at {temp_path}")
+                update_processing_status(filename, f'error: File not found at {temp_path}')
+                return
+        except Exception as debug_error:
+            logging.error(f"[BG] Debug error: {debug_error}")
+            logging.error(f"[BG] Debug traceback: {traceback.format_exc()}")
         
         # Set a timeout for the entire processing operation
         start_time = time.time()
@@ -1597,24 +1614,45 @@ def process_excel_background(filename, temp_path):
             return
         
         # Create a new ExcelProcessor instance directly
-        from src.core.data.excel_processor import ExcelProcessor
-        new_processor = ExcelProcessor()
+        try:
+            from src.core.data.excel_processor import ExcelProcessor
+            logging.info(f"[BG] Importing ExcelProcessor...")
+            new_processor = ExcelProcessor()
+            logging.info(f"[BG] ExcelProcessor created successfully")
+        except Exception as import_error:
+            logging.error(f"[BG] CRITICAL ERROR: Failed to import/create ExcelProcessor: {import_error}")
+            logging.error(f"[BG] Import traceback: {traceback.format_exc()}")
+            update_processing_status(filename, f'error: Failed to create ExcelProcessor: {import_error}')
+            return
         
         # CRITICAL FIX: Disable default file loading to prevent interference
-        new_processor._last_loaded_file = temp_path  # Set this immediately to prevent default loading
-        logging.info(f"[BG] CRITICAL FIX: Set _last_loaded_file to uploaded file: {temp_path}")
+        try:
+            new_processor._last_loaded_file = temp_path  # Set this immediately to prevent default loading
+            logging.info(f"[BG] CRITICAL FIX: Set _last_loaded_file to uploaded file: {temp_path}")
+        except Exception as set_error:
+            logging.error(f"[BG] Error setting _last_loaded_file: {set_error}")
         
         # Disable product database integration for faster loading
-        if hasattr(new_processor, 'enable_product_db_integration'):
-            new_processor.enable_product_db_integration(False)
-            logging.info("[BG] Product database integration disabled for upload performance")
+        try:
+            if hasattr(new_processor, 'enable_product_db_integration'):
+                new_processor.enable_product_db_integration(False)
+                logging.info("[BG] Product database integration disabled for upload performance")
+        except Exception as db_error:
+            logging.warning(f"[BG] Error disabling product database integration: {db_error}")
         
         # Use full load_file method to ensure identical processing to local version
         logging.info(f"[BG] Loading file with full load_file method: {temp_path}")
         
         # Use the full load_file method for complete data processing
-        success = new_processor.load_file(temp_path)
-        load_time = time.time() - load_start
+        try:
+            success = new_processor.load_file(temp_path)
+            load_time = time.time() - load_start
+            logging.info(f"[BG] File load completed in {load_time:.3f}s, success: {success}")
+        except Exception as load_error:
+            logging.error(f"[BG] CRITICAL ERROR: File load failed: {load_error}")
+            logging.error(f"[BG] Load traceback: {traceback.format_exc()}")
+            update_processing_status(filename, f'error: File load failed: {load_error}')
+            return
         
         if not success:
             update_processing_status(filename, f'error: Failed to load file data')
