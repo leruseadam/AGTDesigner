@@ -10124,6 +10124,78 @@ def test_direct_excel():
             'error': str(e)
         })
 
+@app.route('/test-available-tags-debug', methods=['GET'])
+def test_available_tags_debug():
+    """Test endpoint to debug available tags logic step by step"""
+    try:
+        import glob
+        import os
+        import pandas as pd
+        
+        debug_info = {
+            'message': 'Available tags debug test',
+            'steps': []
+        }
+        
+        # Step 1: Check uploads directory
+        uploads_dir = os.path.join(os.getcwd(), 'uploads')
+        debug_info['steps'].append(f'Uploads dir exists: {os.path.exists(uploads_dir)}')
+        debug_info['uploads_dir'] = uploads_dir
+        
+        if not os.path.exists(uploads_dir):
+            return jsonify(debug_info)
+        
+        # Step 2: Find Excel files
+        xlsx_files = glob.glob(os.path.join(uploads_dir, '*.xlsx'))
+        debug_info['steps'].append(f'Found {len(xlsx_files)} Excel files')
+        debug_info['xlsx_files'] = xlsx_files
+        
+        if not xlsx_files:
+            return jsonify(debug_info)
+        
+        # Step 3: Get most recent file
+        xlsx_files.sort(key=os.path.getmtime, reverse=True)
+        latest_file = xlsx_files[0]
+        debug_info['steps'].append(f'Latest file: {latest_file}')
+        debug_info['latest_file'] = latest_file
+        
+        # Step 4: Load the file
+        df = pd.read_excel(latest_file)
+        debug_info['steps'].append(f'Loaded file shape: {df.shape}')
+        debug_info['shape'] = df.shape
+        debug_info['columns'] = list(df.columns)
+        
+        # Step 5: Convert to records
+        records = df.to_dict('records')
+        debug_info['steps'].append(f'Converted to {len(records)} records')
+        debug_info['record_count'] = len(records)
+        
+        # Step 6: Clean the data
+        import math
+        def clean_dict(d):
+            if not isinstance(d, dict):
+                return {}
+            return {k: ('' if (v is None or (isinstance(v, float) and math.isnan(v))) else v) for k, v in d.items()}
+        
+        cleaned_records = [clean_dict(record) for record in records if isinstance(record, dict)]
+        debug_info['steps'].append(f'Cleaned to {len(cleaned_records)} records')
+        debug_info['cleaned_count'] = len(cleaned_records)
+        
+        # Step 7: Return sample
+        if cleaned_records:
+            debug_info['sample_record'] = cleaned_records[0]
+            debug_info['steps'].append('Sample record created')
+        else:
+            debug_info['steps'].append('No cleaned records')
+        
+        return jsonify(debug_info)
+    except Exception as e:
+        return jsonify({
+            'message': 'Available tags debug failed',
+            'error': str(e),
+            'steps': debug_info.get('steps', [])
+        })
+
 @app.route('/diagnose-uploads', methods=['GET'])
 def diagnose_uploads():
     """Diagnostic endpoint to check upload directory and files"""
