@@ -10043,6 +10043,31 @@ def test_sync_processing():
         'function_exists': hasattr(globals(), 'process_excel_sync')
     })
 
+@app.route('/test-database-fix', methods=['GET'])
+def test_database_fix():
+    """Test endpoint to verify database fix is deployed"""
+    try:
+        from src.core.data.product_database import ProductDatabase
+        product_db = ProductDatabase()
+        
+        # Test if clear_all_data method exists
+        has_clear_method = hasattr(product_db, 'clear_all_data')
+        
+        return jsonify({
+            'message': 'Database fix test', 
+            'status': 'ok',
+            'version': 'database-fix-v1',
+            'has_clear_all_data': has_clear_method,
+            'database_path': product_db.db_path,
+            'database_exists': os.path.exists(product_db.db_path)
+        })
+    except Exception as e:
+        return jsonify({
+            'message': 'Database fix test failed', 
+            'status': 'error',
+            'error': str(e)
+        })
+
 @app.route('/diagnose-uploads', methods=['GET'])
 def diagnose_uploads():
     """Diagnostic endpoint to check upload directory and files"""
