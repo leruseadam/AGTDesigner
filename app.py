@@ -3845,49 +3845,48 @@ def get_available_tags():
         except Exception as e:
             logging.warning(f"SIMPLIFIED FIX: Failed to get Excel processor: {e}")
         
-        # If no processor or empty data, try direct file loading like debug columns
-        if excel_processor is None or excel_processor.df is None or excel_processor.df.empty:
-            logging.info("SIMPLIFIED FIX: Trying direct file loading like debug columns")
-            try:
-                import glob
-                import os
-                import pandas as pd
-                
-                uploads_dir = os.path.join(os.getcwd(), 'uploads')
-                if os.path.exists(uploads_dir):
-                    xlsx_files = glob.glob(os.path.join(uploads_dir, '*.xlsx'))
-                    if xlsx_files:
-                        xlsx_files.sort(key=os.path.getmtime, reverse=True)
-                        latest_file = xlsx_files[0]
-                        logging.info(f"SIMPLIFIED FIX: Loading {latest_file} directly")
+        # ALWAYS try direct file loading like debug columns (since debug columns works)
+        logging.info("ALWAYS DIRECT: Using direct file loading like debug columns")
+        try:
+            import glob
+            import os
+            import pandas as pd
+            
+            uploads_dir = os.path.join(os.getcwd(), 'uploads')
+            if os.path.exists(uploads_dir):
+                xlsx_files = glob.glob(os.path.join(uploads_dir, '*.xlsx'))
+                if xlsx_files:
+                    xlsx_files.sort(key=os.path.getmtime, reverse=True)
+                    latest_file = xlsx_files[0]
+                    logging.info(f"ALWAYS DIRECT: Loading {latest_file} directly")
+                    
+                    # Load the file directly
+                    df = pd.read_excel(latest_file)
+                    if not df.empty:
+                        # Convert to the format expected by the frontend
+                        tags = df.to_dict('records')
                         
-                        # Load the file directly
-                        df = pd.read_excel(latest_file)
-                        if not df.empty:
-                            # Convert to the format expected by the frontend
-                            tags = df.to_dict('records')
-                            
-                            # Clean the data
-                            import math
-                            def clean_dict(d):
-                                if not isinstance(d, dict):
-                                    return {}
-                                return {k: ('' if (v is None or (isinstance(v, float) and math.isnan(v))) else v) for k, v in d.items()}
-                            
-                            cleaned_tags = [clean_dict(tag) for tag in tags if isinstance(tag, dict)]
-                            logging.info(f"SIMPLIFIED FIX: Successfully loaded {len(cleaned_tags)} tags directly")
-                            
-                            # Return the data immediately
-                            logging.info(f"SIMPLIFIED FIX: Returning {len(cleaned_tags)} tags directly")
-                            return jsonify(cleaned_tags)
-                        else:
-                            logging.warning(f"SIMPLIFIED FIX: File is empty: {latest_file}")
+                        # Clean the data
+                        import math
+                        def clean_dict(d):
+                            if not isinstance(d, dict):
+                                return {}
+                            return {k: ('' if (v is None or (isinstance(v, float) and math.isnan(v))) else v) for k, v in d.items()}
+                        
+                        cleaned_tags = [clean_dict(tag) for tag in tags if isinstance(tag, dict)]
+                        logging.info(f"ALWAYS DIRECT: Successfully loaded {len(cleaned_tags)} tags directly")
+                        
+                        # Return the data immediately
+                        logging.info(f"ALWAYS DIRECT: Returning {len(cleaned_tags)} tags directly")
+                        return jsonify(cleaned_tags)
                     else:
-                        logging.warning(f"SIMPLIFIED FIX: No Excel files found in {uploads_dir}")
+                        logging.warning(f"ALWAYS DIRECT: File is empty: {latest_file}")
                 else:
-                    logging.warning(f"SIMPLIFIED FIX: Uploads directory not found: {uploads_dir}")
-            except Exception as e:
-                logging.error(f"SIMPLIFIED FIX: Direct loading failed: {e}")
+                    logging.warning(f"ALWAYS DIRECT: No Excel files found in {uploads_dir}")
+            else:
+                logging.warning(f"ALWAYS DIRECT: Uploads directory not found: {uploads_dir}")
+        except Exception as e:
+            logging.error(f"ALWAYS DIRECT: Direct loading failed: {e}")
         
         if excel_processor is None:
             logging.warning("No Excel processor available, returning empty tags")
