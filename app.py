@@ -3826,117 +3826,68 @@ def get_available_tags():
             logging.warning("Returning empty tags to prevent cross-store data access")
             return jsonify([])
         
-        # CRITICAL FIX: Always use fresh data from Excel processor instead of cached data
-        # This ensures web version shows the same data as local version
-        logging.info("CRITICAL FIX: Using fresh data from Excel processor instead of cached data")
+        # SIMPLIFIED FIX: Use the same logic as debug columns endpoint
+        # This ensures we get the same data that debug columns shows
+        logging.info("SIMPLIFIED FIX: Using same logic as debug columns endpoint")
         
-        # CRITICAL FIX: Use global Excel processor with fallback to background processor
-        # This ensures we get the uploaded data regardless of Flask context issues
+        # Try to get the Excel processor the same way debug columns does
         excel_processor = None
-        
-        # Try global processor first
         try:
             excel_processor = get_excel_processor()
-            logging.info(f"CRITICAL FIX: Got global Excel processor: {excel_processor is not None}")
+            logging.info(f"SIMPLIFIED FIX: Got Excel processor: {excel_processor is not None}")
             if excel_processor is not None:
-                logging.info(f"CRITICAL FIX: Global processor df is None: {excel_processor.df is None}")
+                logging.info(f"SIMPLIFIED FIX: Processor df is None: {excel_processor.df is None}")
                 if excel_processor.df is not None:
-                    logging.info(f"CRITICAL FIX: Global processor df shape: {excel_processor.df.shape}")
-                    logging.info(f"CRITICAL FIX: Global processor df empty: {excel_processor.df.empty}")
-                    logging.info(f"CRITICAL FIX: Global processor last file: {getattr(excel_processor, '_last_loaded_file', 'None')}")
+                    logging.info(f"SIMPLIFIED FIX: Processor df shape: {excel_processor.df.shape}")
+                    logging.info(f"SIMPLIFIED FIX: Processor df empty: {excel_processor.df.empty}")
                 else:
-                    logging.warning(f"CRITICAL FIX: Global processor has no DataFrame!")
+                    logging.warning(f"SIMPLIFIED FIX: Processor has no DataFrame!")
         except Exception as e:
-            logging.warning(f"CRITICAL FIX: Failed to get global Excel processor: {e}")
+            logging.warning(f"SIMPLIFIED FIX: Failed to get Excel processor: {e}")
         
-        # Fallback: Try to get from background processor if global is empty
+        # If no processor or empty data, try direct file loading like debug columns
         if excel_processor is None or excel_processor.df is None or excel_processor.df.empty:
-            logging.info("CRITICAL FIX: Global processor empty, trying background processor")
+            logging.info("SIMPLIFIED FIX: Trying direct file loading like debug columns")
             try:
-                # Check if we have a background processor with data
-                if hasattr(g, 'excel_processor') and g.excel_processor is not None:
-                    if g.excel_processor.df is not None and not g.excel_processor.df.empty:
-                        excel_processor = g.excel_processor
-                        logging.info("CRITICAL FIX: Using background processor with data")
+                import glob
+                import os
+                import pandas as pd
+                
+                uploads_dir = os.path.join(os.getcwd(), 'uploads')
+                if os.path.exists(uploads_dir):
+                    xlsx_files = glob.glob(os.path.join(uploads_dir, '*.xlsx'))
+                    if xlsx_files:
+                        xlsx_files.sort(key=os.path.getmtime, reverse=True)
+                        latest_file = xlsx_files[0]
+                        logging.info(f"SIMPLIFIED FIX: Loading {latest_file} directly")
+                        
+                        # Load the file directly
+                        df = pd.read_excel(latest_file)
+                        if not df.empty:
+                            # Convert to the format expected by the frontend
+                            tags = df.to_dict('records')
+                            
+                            # Clean the data
+                            import math
+                            def clean_dict(d):
+                                if not isinstance(d, dict):
+                                    return {}
+                                return {k: ('' if (v is None or (isinstance(v, float) and math.isnan(v))) else v) for k, v in d.items()}
+                            
+                            cleaned_tags = [clean_dict(tag) for tag in tags if isinstance(tag, dict)]
+                            logging.info(f"SIMPLIFIED FIX: Successfully loaded {len(cleaned_tags)} tags directly")
+                            
+                            # Return the data immediately
+                            logging.info(f"SIMPLIFIED FIX: Returning {len(cleaned_tags)} tags directly")
+                            return jsonify(cleaned_tags)
+                        else:
+                            logging.warning(f"SIMPLIFIED FIX: File is empty: {latest_file}")
+                    else:
+                        logging.warning(f"SIMPLIFIED FIX: No Excel files found in {uploads_dir}")
+                else:
+                    logging.warning(f"SIMPLIFIED FIX: Uploads directory not found: {uploads_dir}")
             except Exception as e:
-                logging.warning(f"CRITICAL FIX: Background processor check failed: {e}")
-            
-            # Additional fallback: Check if there's a recently uploaded file we can load
-            if excel_processor is None or excel_processor.df is None or excel_processor.df.empty:
-                logging.info("CRITICAL FIX: Trying to find and load recently uploaded file")
-                try:
-                    # Look for recently uploaded files in uploads directory
-                    import glob
-                    import os
-                    uploads_dir = os.path.join(os.getcwd(), 'uploads')
-                    if os.path.exists(uploads_dir):
-                        # Get the most recent .xlsx file
-                        xlsx_files = glob.glob(os.path.join(uploads_dir, '*.xlsx'))
-                        if xlsx_files:
-                            # Sort by modification time, newest first
-                            xlsx_files.sort(key=os.path.getmtime, reverse=True)
-                            latest_file = xlsx_files[0]
-                            logging.info(f"CRITICAL FIX: Found latest uploaded file: {latest_file}")
-                            
-                            # Create a new processor and load the file
-                            from src.core.data.excel_processor import ExcelProcessor
-                            temp_processor = ExcelProcessor()
-                            success = temp_processor.load_file(latest_file)
-                            if success and temp_processor.df is not None and not temp_processor.df.empty:
-                                excel_processor = temp_processor
-                                logging.info(f"CRITICAL FIX: Successfully loaded latest file: {latest_file}")
-                                
-                                # CRITICAL FIX: Update the global processor with this data
-                                global _excel_processor
-                                with excel_processor_lock:
-                                    _excel_processor = temp_processor
-                                    logging.info(f"CRITICAL FIX: Updated global processor with latest file data")
-                            else:
-                                logging.warning(f"CRITICAL FIX: Failed to load latest file: {latest_file}")
-                except Exception as e:
-                    logging.warning(f"CRITICAL FIX: Latest file loading failed: {e}")
-            
-            # ULTIMATE FALLBACK: If still no data, try to load the most recent file directly
-            if excel_processor is None or excel_processor.df is None or excel_processor.df.empty:
-                logging.info("ULTIMATE FALLBACK: Trying direct file loading as last resort")
-                try:
-                    import glob
-                    import os
-                    uploads_dir = os.path.join(os.getcwd(), 'uploads')
-                    if os.path.exists(uploads_dir):
-                        xlsx_files = glob.glob(os.path.join(uploads_dir, '*.xlsx'))
-                        if xlsx_files:
-                            xlsx_files.sort(key=os.path.getmtime, reverse=True)
-                            latest_file = xlsx_files[0]
-                            logging.info(f"ULTIMATE FALLBACK: Loading {latest_file} directly")
-                            
-                            # Try to load the file directly without ExcelProcessor
-                            try:
-                                import pandas as pd
-                                df = pd.read_excel(latest_file)
-                                if not df.empty:
-                                    # Convert to the format expected by the frontend
-                                    tags = df.to_dict('records')
-                                    
-                                    # Clean the data
-                                    import math
-                                    def clean_dict(d):
-                                        if not isinstance(d, dict):
-                                            return {}
-                                        return {k: ('' if (v is None or (isinstance(v, float) and math.isnan(v))) else v) for k, v in d.items()}
-                                    
-                                    cleaned_tags = [clean_dict(tag) for tag in tags if isinstance(tag, dict)]
-                                    logging.info(f"ULTIMATE FALLBACK: Successfully loaded {len(cleaned_tags)} tags directly")
-                                    
-                                    # Return the data immediately
-                                    logging.info(f"ULTIMATE FALLBACK: Returning {len(cleaned_tags)} tags directly")
-                                    return jsonify(cleaned_tags)
-                                else:
-                                    logging.warning(f"ULTIMATE FALLBACK: File is empty: {latest_file}")
-                            except Exception as direct_error:
-                                logging.error(f"ULTIMATE FALLBACK: Direct loading failed: {direct_error}")
-                except Exception as e:
-                    logging.error(f"ULTIMATE FALLBACK: Failed: {e}")
+                logging.error(f"SIMPLIFIED FIX: Direct loading failed: {e}")
         
         if excel_processor is None:
             logging.warning("No Excel processor available, returning empty tags")
