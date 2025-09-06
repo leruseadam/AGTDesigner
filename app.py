@@ -6274,7 +6274,7 @@ def performance_stats():
 
 @app.route('/api/upload-database', methods=['POST'])
 def upload_database():
-    """Alias for upload_product_database - allows frontend to use either endpoint."""
+    """Upload or replace the product database Excel file (alternative endpoint)."""
     return upload_product_database()
 
 @app.route('/api/product-db/upload', methods=['POST'])
@@ -6322,26 +6322,80 @@ def upload_product_database():
         # Initialize the product database with the new file
         try:
             product_db = get_product_database()
-            # Force reinitialization with new file
-            if hasattr(product_db, 'reinitialize_from_excel'):
-                product_db.reinitialize_from_excel(db_file_path)
-            else:
-                # Fallback: delete old database and reinitialize
-                if os.path.exists(product_db.db_path):
-                    os.remove(product_db.db_path)
-                product_db.init_database()
-                if hasattr(product_db, 'import_excel_data'):
-                    product_db.import_excel_data(db_file_path)
             
-            logging.info(f"Product database updated successfully with {db_file_path}")
+            # CRITICAL FIX: Implement proper database import from Excel
+            logging.info(f"Starting database import from {db_file_path}")
+            
+            # Read the Excel file
+            import pandas as pd
+            df = pd.read_excel(db_file_path)
+            logging.info(f"Excel file loaded: {len(df)} rows, {len(df.columns)} columns")
+            
+            # Clear existing data
+            logging.info("Clearing existing database data...")
+            product_db.clear_all_data()
+            
+            # Import the data
+            logging.info("Importing Excel data to database...")
+            stored_count = 0
+            strains_count = 0
+            
+            for index, row in df.iterrows():
+                try:
+                    # Convert row to dictionary and clean NaN values
+                    product_data = {}
+                    for col, value in row.items():
+                        if pd.isna(value):
+                            product_data[col] = None
+                        else:
+                            product_data[col] = str(value)
+                    
+                    # Add product to database
+                    result = product_db.add_or_update_product(product_data)
+                    if result:
+                        stored_count += 1
+                    
+                    # Add strain if available
+                    if 'Product Strain' in product_data and product_data['Product Strain']:
+                        strain_result = product_db.add_or_update_strain(
+                            product_data['Product Strain'],
+                            product_data.get('Lineage', 'UNKNOWN')
+                        )
+                        if strain_result:
+                            strains_count += 1
+                            
+                except Exception as row_error:
+                    logging.warning(f"Error processing row {index}: {row_error}")
+                    continue
+            
+            logging.info(f"Database import completed: {stored_count} products, {strains_count} strains")
+            
+            # Get final database statistics
+            try:
+                conn = product_db._get_connection()
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM products")
+                final_products = cursor.fetchone()[0]
+                cursor.execute("SELECT COUNT(*) FROM strains")
+                final_strains = cursor.fetchone()[0]
+            except:
+                final_products = stored_count
+                final_strains = strains_count
+            
             return jsonify({
                 'success': True, 
                 'message': 'Product database updated successfully',
                 'filename': sanitized_filename,
-                'size': file_size
+                'size': file_size,
+                'stored': stored_count,
+                'strains_stored': strains_count,
+                'total_products': final_products,
+                'total_strains': final_strains
             })
         except Exception as db_error:
             logging.error(f"Error updating product database: {db_error}")
+            import traceback
+            logging.error(f"Database error traceback: {traceback.format_exc()}")
             return jsonify({'error': f'Failed to update product database: {str(db_error)}'}), 500
         
     except Exception as e:
