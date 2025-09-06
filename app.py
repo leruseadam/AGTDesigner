@@ -1851,19 +1851,29 @@ def process_excel_background(filename, temp_path):
             _excel_processor = new_processor
             _excel_processor._last_loaded_file = temp_path
             
-            # Store store context in the processor for validation
+            # Store store context in the processor for validation (without Flask session)
             try:
-                from flask import session
-                current_store = session.get('selected_store', '')
-                if current_store:
-                    _excel_processor._store_context = current_store
-                    logging.info(f"[BG] Store context set for processor: {current_store}")
-                else:
-                    logging.warning("[BG] No store context available for processor")
+                # Don't use Flask session in background thread - it's not available
+                # Just set a default store context
+                _excel_processor._store_context = 'uploaded_file'
+                logging.info(f"[BG] Store context set for processor: uploaded_file")
             except Exception as store_error:
                 logging.warning(f"[BG] Error setting store context: {store_error}")
             
             logging.info(f"[BG] Global Excel processor updated with new file: {temp_path}")
+            
+            # CRITICAL FIX: Verify the global processor was set correctly
+            if _excel_processor is not None and _excel_processor.df is not None:
+                logging.info(f"[BG] ✅ VERIFICATION: Global processor has {len(_excel_processor.df)} rows")
+                logging.info(f"[BG] ✅ VERIFICATION: Global processor file: {_excel_processor._last_loaded_file}")
+            else:
+                logging.error(f"[BG] ❌ CRITICAL ERROR: Global processor is None or has no data!")
+                logging.error(f"[BG] ❌ Global processor: {_excel_processor}")
+                if _excel_processor is not None:
+                    logging.error(f"[BG] ❌ Global processor df: {_excel_processor.df}")
+                    logging.error(f"[BG] ❌ Global processor df is None: {_excel_processor.df is None}")
+                    if hasattr(_excel_processor, 'df') and _excel_processor.df is not None:
+                        logging.error(f"[BG] ❌ Global processor df empty: {_excel_processor.df.empty}")
         
         # ULTRA-FAST CACHE OPTIMIZATION - Minimal clearing
         clear_initial_data_cache()
@@ -1932,7 +1942,7 @@ def process_excel_background(filename, temp_path):
                     delattr(g, 'excel_processor')
                     logging.info("[BG] Cleared g.excel_processor context")
             else:
-                logging.info("[BG] Skipping session/g context clear - not in request context")
+                logging.info("[BG] Skipping session/g context clear - not in request context (background thread)")
         except Exception as session_error:
             logging.warning(f"[BG] Error clearing session/g context: {session_error}")
         
@@ -3752,6 +3762,14 @@ def get_available_tags():
         try:
             excel_processor = get_excel_processor()
             logging.info(f"CRITICAL FIX: Got global Excel processor: {excel_processor is not None}")
+            if excel_processor is not None:
+                logging.info(f"CRITICAL FIX: Global processor df is None: {excel_processor.df is None}")
+                if excel_processor.df is not None:
+                    logging.info(f"CRITICAL FIX: Global processor df shape: {excel_processor.df.shape}")
+                    logging.info(f"CRITICAL FIX: Global processor df empty: {excel_processor.df.empty}")
+                    logging.info(f"CRITICAL FIX: Global processor last file: {getattr(excel_processor, '_last_loaded_file', 'None')}")
+                else:
+                    logging.warning(f"CRITICAL FIX: Global processor has no DataFrame!")
         except Exception as e:
             logging.warning(f"CRITICAL FIX: Failed to get global Excel processor: {e}")
         
