@@ -10195,6 +10195,75 @@ def test_available_tags_debug():
             'steps': debug_info.get('steps', [])
         })
 
+@app.route('/api/upload-database-file', methods=['POST'])
+def upload_database_file():
+    """Upload a database file directly to replace the existing database"""
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file uploaded'}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        if not file.filename.lower().endswith('.db'):
+            return jsonify({'error': 'Only .db files are allowed'}), 400
+        
+        # Check file size
+        file.seek(0, 2)
+        file_size = file.tell()
+        file.seek(0)
+        if file_size > 500 * 1024 * 1024:  # 500MB limit
+            return jsonify({'error': 'File too large. Maximum size is 500 MB'}), 400
+        
+        # Create database directory
+        db_dir = os.path.join(current_dir, 'uploads', 'product_database')
+        os.makedirs(db_dir, exist_ok=True)
+        
+        # Save the database file
+        db_file_path = os.path.join(db_dir, 'product_database.db')
+        file.save(db_file_path)
+        
+        # Verify the database file
+        try:
+            import sqlite3
+            conn = sqlite3.connect(db_file_path)
+            cursor = conn.cursor()
+            
+            # Check tables
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = [row[0] for row in cursor.fetchall()]
+            
+            # Check products count
+            cursor.execute('SELECT COUNT(*) FROM products')
+            products_count = cursor.fetchone()[0]
+            
+            # Check strains count
+            cursor.execute('SELECT COUNT(*) FROM strains')
+            strains_count = cursor.fetchone()[0]
+            
+            conn.close()
+            
+            logging.info(f"Database file uploaded successfully: {products_count} products, {strains_count} strains")
+            
+            return jsonify({
+                'success': True,
+                'message': 'Database file uploaded successfully',
+                'filename': file.filename,
+                'size': file_size,
+                'products': products_count,
+                'strains': strains_count,
+                'tables': tables
+            })
+            
+        except Exception as db_error:
+            logging.error(f"Error verifying database file: {db_error}")
+            return jsonify({'error': f'Invalid database file: {str(db_error)}'}), 400
+        
+    except Exception as e:
+        logging.error(f"Error uploading database file: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/diagnose-uploads', methods=['GET'])
 def diagnose_uploads():
     """Diagnostic endpoint to check upload directory and files"""
