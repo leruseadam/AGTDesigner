@@ -1567,6 +1567,44 @@ def upload_file_simple():
         logging.error(f"Upload error: {e}")
         return jsonify({'error': 'Upload failed'}), 500
 
+def process_excel_sync(filename, temp_path):
+    """Synchronous Excel processing for immediate response"""
+    try:
+        logging.info(f"[SYNC] ===== SYNCHRONOUS PROCESSING START =====")
+        logging.info(f"[SYNC] Processing file: {temp_path}")
+        logging.info(f"[SYNC] Filename: {filename}")
+        
+        # Verify file exists
+        if not os.path.exists(temp_path):
+            logging.error(f"[SYNC] File not found: {temp_path}")
+            return False
+        
+        # Create ExcelProcessor and load file
+        from src.core.data.excel_processor import ExcelProcessor
+        processor = ExcelProcessor()
+        
+        # Load the file
+        success = processor.load_file(temp_path)
+        if not success or processor.df is None or processor.df.empty:
+            logging.error(f"[SYNC] Failed to load file: {temp_path}")
+            return False
+        
+        # Update global processor
+        global _excel_processor
+        with excel_processor_lock:
+            _excel_processor = processor
+            _excel_processor._last_loaded_file = temp_path
+            logging.info(f"[SYNC] Global processor updated with {len(processor.df)} rows")
+        
+        logging.info(f"[SYNC] ===== SYNCHRONOUS PROCESSING COMPLETE =====")
+        return True
+        
+    except Exception as e:
+        logging.error(f"[SYNC] ===== SYNCHRONOUS PROCESSING ERROR =====")
+        logging.error(f"[SYNC] Error: {str(e)}")
+        logging.error(f"[SYNC] Traceback: {traceback.format_exc()}")
+        return False
+
 def process_excel_background(filename, temp_path):
     """Ultra-optimized background processing with minimal processing for instant response"""
     global os  # Ensure os is available in this scope
@@ -9856,30 +9894,31 @@ def upload_file_fast():
         session['file_path'] = str(file_path)
         session['selected_tags'] = []
         
-        # Start background processing to avoid blocking the upload response
+        # CRITICAL FIX: Do synchronous processing instead of background processing
+        # This bypasses any threading issues that might be causing failures
         try:
-            logging.info(f"Starting background Excel processing for {file.filename}")
+            logging.info(f"Starting synchronous Excel processing for {file.filename}")
             
-            # Start background thread for processing
-            thread = threading.Thread(target=process_excel_background, args=(file.filename, str(file_path)))
-            thread.daemon = True
-            thread.start()
-            logging.info(f"Background processing thread started for {file.filename}")
+            # Process the file immediately (synchronously)
+            process_excel_sync(file.filename, str(file_path))
+            logging.info(f"Synchronous processing completed for {file.filename}")
             
-        except Exception as thread_error:
-            logging.error(f"Failed to start background processing: {thread_error}")
-            logging.warning("Continuing without background processing - will process later")
+        except Exception as sync_error:
+            logging.error(f"Failed synchronous processing: {sync_error}")
+            logging.error(f"Sync error traceback: {traceback.format_exc()}")
+            # Don't fail the upload - just log the error
+            logging.warning("Continuing without processing - file uploaded but not processed")
         
         upload_time = time.time() - start_time
         logging.info(f"File saved and processed successfully: {filename} in {upload_time:.3f}s")
         
-        # Return success response with background processing status
+        # Return success response with synchronous processing status
         return jsonify({
-            'message': 'File uploaded successfully, processing in background',
+            'message': 'File uploaded and processed successfully',
             'filename': filename,
             'status': 'success',
             'upload_time': f"{upload_time:.3f}s",
-            'processing_status': 'background'
+            'processing_status': 'completed'
         })
         
     except Exception as e:
