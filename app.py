@@ -3809,6 +3809,12 @@ def get_available_tags():
                             if success and temp_processor.df is not None and not temp_processor.df.empty:
                                 excel_processor = temp_processor
                                 logging.info(f"CRITICAL FIX: Successfully loaded latest file: {latest_file}")
+                                
+                                # CRITICAL FIX: Update the global processor with this data
+                                global _excel_processor
+                                with excel_processor_lock:
+                                    _excel_processor = temp_processor
+                                    logging.info(f"CRITICAL FIX: Updated global processor with latest file data")
                             else:
                                 logging.warning(f"CRITICAL FIX: Failed to load latest file: {latest_file}")
                 except Exception as e:
