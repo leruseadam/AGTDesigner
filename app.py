@@ -9937,6 +9937,16 @@ def test_upload_fast():
         'timestamp': time.time()
     })
 
+@app.route('/test-sync-processing', methods=['GET'])
+def test_sync_processing():
+    """Test endpoint to verify synchronous processing is deployed"""
+    return jsonify({
+        'message': 'Synchronous processing is deployed', 
+        'status': 'ok',
+        'version': 'sync-v1',
+        'function_exists': hasattr(globals(), 'process_excel_sync')
+    })
+
 @app.route('/check-processing', methods=['GET'])
 def check_processing():
     """Check if background processing completed and show sample data"""
