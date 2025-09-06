@@ -1748,27 +1748,25 @@ class ExcelProcessor:
                     self.df.loc[combined_cbd_mask, "Lineage"] = "CBD"
                     self.logger.info(f"Assigned CBD lineage to {combined_cbd_mask.sum()} products with cannabinoid content")
 
-                # ENABLED: If Lineage is missing or empty, set to 'MIXED' for blue bars
-                empty_lineage_mask = self.df["Lineage"].isnull() | (self.df["Lineage"].astype(str).str.strip() == "")
-                if "MIXED" not in self.df["Lineage"].cat.categories:
-                    self.df["Lineage"] = self.df["Lineage"].cat.add_categories(["MIXED"])
-                # Use .any() to avoid Series boolean ambiguity
-                if empty_lineage_mask.any():
-                    self.df.loc[empty_lineage_mask, "Lineage"] = "MIXED"
-                    self.logger.info(f"Set {empty_lineage_mask.sum()} products with empty lineage to 'MIXED' for blue bars")
+                # DISABLED: If Lineage is missing or empty, set to 'MIXED'
+                # empty_lineage_mask = self.df["Lineage"].isnull() | (self.df["Lineage"].astype(str).str.strip() == "")
+                # if "MIXED" not in self.df["Lineage"].cat.categories:
+                #     self.df["Lineage"] = self.df["Lineage"].cat.add_categories(["MIXED"])
+                # # Use .any() to avoid Series boolean ambiguity
+                # if empty_lineage_mask.any():
+                #     self.df.loc[empty_lineage_mask, "Lineage"] = "MIXED"
 
-                # ENABLED: For all edibles, set Lineage to 'MIXED' unless already 'CBD'
-                edible_types = {"edible (solid)", "edible (liquid)", "high cbd edible liquid", "tincture", "topical", "capsule"}
-                if "Product Type*" in self.df.columns:
-                    edible_mask = self.df["Product Type*"].str.strip().str.lower().isin([e.lower() for e in edible_types])
-                    not_cbd_mask = self.df["Lineage"].astype(str).str.upper() != "CBD"
-                    if "MIXED" not in self.df["Lineage"].cat.categories:
-                        self.df["Lineage"] = self.df["Lineage"].cat.add_categories(["MIXED"])
-                    # Use .any() to avoid Series boolean ambiguity
-                    combined_mask = edible_mask & not_cbd_mask
-                    if combined_mask.any():
-                        self.df.loc[combined_mask, "Lineage"] = "MIXED"
-                        self.logger.info(f"Set {combined_mask.sum()} edible products to 'MIXED' lineage for blue bars")
+                # DISABLED: For all edibles, set Lineage to 'MIXED' unless already 'CBD'
+                # edible_types = {"edible (solid)", "edible (liquid)", "high cbd edible liquid", "tincture", "topical", "capsule"}
+                # if "Product Type*" in self.df.columns:
+                #     edible_mask = self.df["Product Type*"].str.strip().str.lower().isin([e.lower() for e in edible_types])
+                #     not_cbd_mask = self.df["Lineage"].astype(str).str.upper() != "CBD"
+                #     if "MIXED" not in self.df["Lineage"].cat.categories:
+                #         self.df["Lineage"] = self.df["Lineage"].cat.add_categories(["MIXED"])
+                #     # Use .any() to avoid Series boolean ambiguity
+                #     combined_mask = edible_mask & not_cbd_mask
+                #     if combined_mask.any():
+                #         self.df.loc[combined_mask, "Lineage"] = "MIXED"
 
             # 11) Normalize Weight* and CombinedWeight
             if "Weight*" in self.df.columns:
