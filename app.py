@@ -6340,6 +6340,53 @@ def upload_product_database():
             stored_count = 0
             strains_count = 0
             
+            # Column mapping from Excel column names to database column names
+            column_mapping = {
+                'Product Name*': 'ProductName',
+                'ProductType': 'ProductType',
+                'ProductBrand': 'ProductBrand',
+                'Description': 'Description',
+                'Lineage': 'Lineage',
+                'Vendor/Supplier*': 'Vendor',
+                'Weight*': 'Weight',
+                'Weight Unit*': 'Units',
+                'Quantity*': 'Quantity',
+                'Quantity Received*': 'QuantityReceived',
+                'Price*': 'Price',
+                'Price Tier': 'PriceTier',
+                'Bulk Price': 'BulkPrice',
+                'DOH Compliant*': 'DOHCompliant',
+                'DOH Status': 'DOHStatus',
+                'Product Strain': 'ProductStrain',
+                'Concentrate Type': 'ConcentrateType',
+                'Ratio': 'Ratio',
+                'Joint Ratio': 'JointRatio',
+                'THC Content': 'THCContent',
+                'CBD Content': 'CBDContent',
+                'THC_CBD': 'THCCBD',
+                'Total THC': 'TotalTHC',
+                'Total CBD': 'TotalCBD',
+                'Lab Test Date': 'LabTestDate',
+                'Lab Name': 'LabName',
+                'COA': 'COA',
+                'Batch Number': 'BatchNumber',
+                'Production Date': 'ProductionDate',
+                'Expiration Date': 'ExpirationDate',
+                'Terpenes': 'Terpenes',
+                'Flavor Profile': 'FlavorProfile',
+                'Effects': 'Effects',
+                'Medical Benefits': 'MedicalBenefits',
+                'SKU': 'SKU',
+                'Product Code': 'ProductCode',
+                'Category': 'Category',
+                'Subcategory': 'Subcategory',
+                'Supplier Contact': 'SupplierContact',
+                'Supplier Email': 'SupplierEmail',
+                'Country of Origin': 'CountryOfOrigin',
+                'Growing Method': 'GrowingMethod',
+                'Organic Status': 'OrganicStatus'
+            }
+            
             for index, row in df.iterrows():
                 try:
                     # Convert row to dictionary and clean NaN values
@@ -6350,12 +6397,18 @@ def upload_product_database():
                         else:
                             product_data[col] = str(value)
                     
-                    # Add product to database
-                    result = product_db.add_or_update_product(product_data)
+                    # Map Excel column names to database column names
+                    mapped_data = {}
+                    for excel_col, db_col in column_mapping.items():
+                        if excel_col in product_data:
+                            mapped_data[db_col] = product_data[excel_col]
+                    
+                    # Add product to database with mapped column names
+                    result = product_db.add_or_update_product(mapped_data)
                     if result:
                         stored_count += 1
                     
-                    # Add strain if available
+                    # Add strain if available (use original column names for strain)
                     if 'Product Strain' in product_data and product_data['Product Strain']:
                         strain_result = product_db.add_or_update_strain(
                             product_data['Product Strain'],
@@ -6366,6 +6419,8 @@ def upload_product_database():
                             
                 except Exception as row_error:
                     logging.warning(f"Error processing row {index}: {row_error}")
+                    import traceback
+                    logging.warning(f"Row error traceback: {traceback.format_exc()}")
                     continue
             
             logging.info(f"Database import completed: {stored_count} products, {strains_count} strains")
