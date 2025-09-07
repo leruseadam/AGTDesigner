@@ -924,10 +924,10 @@ class ProductDatabase:
                 # Enhanced duplicate detection: Check multiple combinations
                 # First check exact match (name + vendor + brand)
                 cursor.execute('''
-                    SELECT id, total_occurrences, product_name
+                    SELECT id, total_occurrences, "Product Name*"
                     FROM products 
-                    WHERE normalized_name = ? AND vendor = ? AND brand = ?
-                ''', (normalized_name, product_data.get('vendor'), product_data.get('brand')))
+                    WHERE normalized_name = ? AND "Vendor/Supplier*" = ? AND "Product Brand" = ?
+                ''', (normalized_name, product_data.get('Vendor/Supplier*'), product_data.get('Product Brand')))
                 
                 existing = cursor.fetchone()
                 
@@ -951,10 +951,10 @@ class ProductDatabase:
                 
                 # Check for similar products (same name + vendor, different brand)
                 cursor.execute('''
-                    SELECT id, total_occurrences, product_name, brand
+                    SELECT id, total_occurrences, "Product Name*", "Product Brand"
                     FROM products 
-                    WHERE normalized_name = ? AND vendor = ? AND brand != ?
-                ''', (normalized_name, product_data.get('vendor'), product_data.get('brand')))
+                    WHERE normalized_name = ? AND "Vendor/Supplier*" = ? AND "Product Brand" != ?
+                ''', (normalized_name, product_data.get('Vendor/Supplier*'), product_data.get('Product Brand')))
                 
                 similar_products = cursor.fetchall()
                 if similar_products:
@@ -965,15 +965,15 @@ class ProductDatabase:
                     # Add new product with essential columns only
                     cursor.execute('''
                         INSERT INTO products (
-                            product_name, normalized_name, product_strain, product_type, vendor, brand,
-                            description, weight, units, price, lineage, first_seen_date, last_seen_date, created_at, updated_at
+                            "Product Name*", normalized_name, "Product Strain", "Product Type*", "Vendor/Supplier*", "Product Brand",
+                            "Description", "Weight*", "Units", "Price", "Lineage", first_seen_date, last_seen_date, created_at, updated_at
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
-                        product_name, normalized_name, product_data.get('product_strain'), product_data.get('product_type'),
-                        product_data.get('vendor'), product_data.get('brand'),
-                        product_data.get('description'), product_data.get('weight'),
-                        product_data.get('units'), product_data.get('price'),
-                        product_data.get('lineage'), current_date, current_date, current_date, current_date
+                        product_name, normalized_name, product_data.get('Product Strain'), product_data.get('Product Type*'),
+                        product_data.get('Vendor/Supplier*'), product_data.get('Product Brand'),
+                        product_data.get('Description'), product_data.get('Weight*'),
+                        product_data.get('Units'), product_data.get('Price'),
+                        product_data.get('Lineage'), current_date, current_date, current_date, current_date
                     ))
                     
                     product_id = cursor.lastrowid
