@@ -3545,6 +3545,27 @@ class ProductDatabase:
         except Exception as e:
             logging.error(f"Error searching products by type and strain: {e}")
             return []
+    
+    def clear_all_data(self):
+        """Clear all data from the database tables."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Clear all data from tables
+            cursor.execute("DELETE FROM products")
+            cursor.execute("DELETE FROM strains")
+            
+            # Reset auto-increment counters
+            cursor.execute("DELETE FROM sqlite_sequence WHERE name='products'")
+            cursor.execute("DELETE FROM sqlite_sequence WHERE name='strains'")
+            
+            conn.commit()
+            logging.info("All database data cleared successfully")
+            
+        except Exception as e:
+            logging.error(f"Error clearing database data: {e}")
+            raise
 
 def get_product_database():
     # CRITICAL FIX: Use correct database path

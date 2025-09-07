@@ -42,6 +42,18 @@
   <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   
+  <!-- Performance Optimizations -->
+  <script src="{{ url_for('static', filename='js/performance.js') }}?v={{ cache_bust }}"></script>
+  
+  <!-- Preload critical resources -->
+  <link rel="preload" href="{{ url_for('static', filename='css/styles.css') }}" as="style">
+  <link rel="preload" href="{{ url_for('static', filename='js/performance.js') }}" as="script">
+  
+  <!-- Performance hints -->
+  <meta http-equiv="x-dns-prefetch-control" content="on">
+  <link rel="dns-prefetch" href="//cdn.jsdelivr.net">
+  <link rel="dns-prefetch" href="//code.jquery.com">
+  
   <!-- Define global functions early -->
   <script>
     console.log('Defining global functions early in head...');
@@ -9860,6 +9872,39 @@
     </div>
   </div>
 
+  <!-- Performance Dashboard (Hidden by default) -->
+  <div id="performanceDashboard" class="performance-dashboard" style="display: none;">
+    <div class="performance-card">
+      <div class="performance-header">
+        <h5>Performance Monitor</h5>
+        <button class="btn btn-sm btn-outline-secondary" onclick="togglePerformanceDashboard()">×</button>
+      </div>
+      <div class="performance-content">
+        <div class="performance-metric">
+          <span class="metric-label">Memory Usage:</span>
+          <span id="memoryUsage" class="metric-value">Loading...</span>
+        </div>
+        <div class="performance-metric">
+          <span class="metric-label">Cache Entries:</span>
+          <span id="cacheEntries" class="metric-value">Loading...</span>
+        </div>
+        <div class="performance-metric">
+          <span class="metric-label">Production Mode:</span>
+          <span id="productionMode" class="metric-value">Loading...</span>
+        </div>
+        <div class="performance-actions">
+          <button class="btn btn-sm btn-primary" onclick="refreshPerformanceMetrics()">Refresh</button>
+          <button class="btn btn-sm btn-warning" onclick="clearPerformanceCache()">Clear Cache</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Performance Toggle Button -->
+  <button id="performanceToggle" class="performance-toggle-btn" onclick="togglePerformanceDashboard()" title="Performance Monitor">
+    <i class="bi bi-speedometer2"></i>
+  </button>
+
   <!-- Error Toast -->
   <div class="toast-container position-fixed bottom-0 end-0 p-3">
     <div id="errorToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
@@ -9873,6 +9918,61 @@
       </div>
     </div>
   </div>
+
+  <script>
+    // Performance Dashboard Functions
+    function togglePerformanceDashboard() {
+      const dashboard = document.getElementById('performanceDashboard');
+      const toggle = document.getElementById('performanceToggle');
+      
+      if (dashboard.style.display === 'none') {
+        dashboard.style.display = 'block';
+        toggle.classList.add('active');
+        refreshPerformanceMetrics();
+      } else {
+        dashboard.style.display = 'none';
+        toggle.classList.remove('active');
+      }
+    }
+
+    async function refreshPerformanceMetrics() {
+      try {
+        const metrics = await window.performanceOptimizer.getPerformanceMetrics();
+        if (metrics) {
+          document.getElementById('memoryUsage').textContent = `${metrics.memory_usage_mb} MB`;
+          document.getElementById('cacheEntries').textContent = metrics.cache_entries;
+          document.getElementById('productionMode').textContent = metrics.is_production ? 'Yes' : 'No';
+        }
+      } catch (error) {
+        console.error('Failed to get performance metrics:', error);
+        document.getElementById('memoryUsage').textContent = 'Error';
+        document.getElementById('cacheEntries').textContent = 'Error';
+        document.getElementById('productionMode').textContent = 'Error';
+      }
+    }
+
+    async function clearPerformanceCache() {
+      try {
+        const result = await window.performanceOptimizer.clearCache();
+        if (result && result.status === 'success') {
+          showToast('Cache cleared successfully', 'success');
+          refreshPerformanceMetrics();
+        } else {
+          showToast('Failed to clear cache', 'error');
+        }
+      } catch (error) {
+        console.error('Failed to clear cache:', error);
+        showToast('Failed to clear cache', 'error');
+      }
+    }
+
+    // Initialize performance monitoring
+    if (window.performanceOptimizer) {
+      console.log('Performance optimizer initialized');
+      // Refresh metrics every 30 seconds
+      setInterval(refreshPerformanceMetrics, 30000);
+    }
+  </script>
 
   </body>
 </html> 
