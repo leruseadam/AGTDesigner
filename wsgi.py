@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
 """
-WSGI entry point for PythonAnywhere deployment
+WSGI configuration for PythonAnywhere deployment
 """
 
 import sys
 import os
 
-# Add the current directory to the Python path
-sys.path.insert(0, os.path.dirname(__file__))
+# Add the project directory to the Python path
+project_dir = '/home/adamcordova/AGTDesigner'  # Update this path
+if project_dir not in sys.path:
+    sys.path.insert(0, project_dir)
+
+# Change to the project directory
+os.chdir(project_dir)
 
 # Import the Flask app
-from app import create_app
-
-# Create the application instance
-application = create_app()
+from app import app as application
 
 if __name__ == "__main__":
-    application.run() 
+    application.run()
