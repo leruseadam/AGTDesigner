@@ -1635,58 +1635,71 @@ class ProductDatabase:
     def _add_missing_columns_safe(self, cursor, conn):
         """Safely add missing columns to existing tables without losing data."""
         try:
+            from datetime import datetime
+            # Check if we've already run this migration to avoid repeated attempts
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='_migration_log'")
+            if not cursor.fetchone():
+                cursor.execute("CREATE TABLE _migration_log (migration_name TEXT PRIMARY KEY, applied_date TEXT)")
+                conn.commit()
+            
+            # Check if column migration has already been applied
+            cursor.execute("SELECT migration_name FROM _migration_log WHERE migration_name = 'column_migration_v2'")
+            if cursor.fetchone():
+                logger.debug("Column migration already applied, skipping")
+                return
+            
             # Check and add missing columns to products table
             cursor.execute("PRAGMA table_info(products)")
             existing_columns = {row[1] for row in cursor.fetchall()}
             
             missing_columns = []
             
-            # Define all expected columns
+            # Define all expected columns using the actual database schema names
             expected_columns = [
-                ('product_strain', 'TEXT'),
-                ('quantity', 'TEXT'),
-                ('doh_compliant', 'TEXT'),
-                ('concentrate_type', 'TEXT'),
-                ('ratio', 'TEXT'),
-                ('joint_ratio', 'TEXT'),
-                ('thc_test_result', 'TEXT'),
-                ('cbd_test_result', 'TEXT'),
-                ('test_result_unit', 'TEXT'),
-                ('state', 'TEXT'),
-                ('is_sample', 'TEXT'),
-                ('is_mj_product', 'TEXT'),
-                ('discountable', 'TEXT'),
-                ('room', 'TEXT'),
-                ('batch_number', 'TEXT'),
-                ('lot_number', 'TEXT'),
-                ('barcode', 'TEXT'),
-                ('cost', 'TEXT'),
-                ('medical_only', 'TEXT'),
-                ('med_price', 'TEXT'),
-                ('expiration_date', 'TEXT'),
-                ('is_archived', 'TEXT'),
-                ('thc_per_serving', 'TEXT'),
-                ('allergens', 'TEXT'),
-                ('solvent', 'TEXT'),
-                ('accepted_date', 'TEXT'),
-                ('internal_product_identifier', 'TEXT'),
-                ('product_tags', 'TEXT'),
-                ('image_url', 'TEXT'),
-                ('ingredients', 'TEXT'),
-                ('combined_weight', 'TEXT'),
-                ('ratio_or_thc_cbd', 'TEXT'),
-                ('description_complexity', 'TEXT'),
-                ('total_thc', 'TEXT'),
-                ('thca', 'TEXT'),
-                ('cbda', 'TEXT'),
-                ('cbn', 'TEXT'),
-                # Terpene columns
-                ('a_bisabolol_mg_g', 'TEXT'),
-                ('a_humulene_mg_g', 'TEXT'),
-                ('a_maaliene_mg_g', 'TEXT'),
-                ('a_myrcene_mg_g', 'TEXT'),
-                ('a_pinene_mg_g', 'TEXT'),
-                ('b_caryophyllene_mg_g', 'TEXT'),
+                ('"Product Strain"', 'TEXT'),
+                ('"Quantity*"', 'TEXT'),
+                ('"DOH"', 'TEXT'),
+                ('"Concentrate Type"', 'TEXT'),
+                ('"Ratio"', 'TEXT'),
+                ('"JointRatio"', 'TEXT'),
+                ('"THC test result"', 'TEXT'),
+                ('"CBD test result"', 'TEXT'),
+                ('"Test result unit (% or mg)"', 'TEXT'),
+                ('"State"', 'TEXT'),
+                ('"Is Sample? (yes/no)"', 'TEXT'),
+                ('"Is MJ product?(yes/no)"', 'TEXT'),
+                ('"Discountable? (yes/no)"', 'TEXT'),
+                ('"Room*"', 'TEXT'),
+                ('"Batch Number"', 'TEXT'),
+                ('"Lot Number"', 'TEXT'),
+                ('"Barcode*"', 'TEXT'),
+                ('"Cost*"', 'TEXT'),
+                ('"Medical Only (Yes/No)"', 'TEXT'),
+                ('"Med Price"', 'TEXT'),
+                ('"Expiration Date(YYYY-MM-DD)"', 'TEXT'),
+                ('"Is Archived? (yes/no)"', 'TEXT'),
+                ('"THC Per Serving"', 'TEXT'),
+                ('"Allergens"', 'TEXT'),
+                ('"Solvent"', 'TEXT'),
+                ('"Accepted Date"', 'TEXT'),
+                ('"Internal Product Identifier"', 'TEXT'),
+                ('"Product Tags (comma separated)"', 'TEXT'),
+                ('"Image URL"', 'TEXT'),
+                ('"Ingredients"', 'TEXT'),
+                ('"CombinedWeight"', 'TEXT'),
+                ('"Ratio_or_THC_CBD"', 'TEXT'),
+                ('"Description_Complexity"', 'TEXT'),
+                ('"Total THC"', 'TEXT'),
+                ('"THCA"', 'TEXT'),
+                ('"CBDA"', 'TEXT'),
+                ('"CBN"', 'TEXT'),
+                # Terpene columns - using the actual schema names
+                ('"A-Bisabolol (mg/g)"', 'TEXT'),
+                ('"A-Humulene (mg/g)"', 'TEXT'),
+                ('"A-Maaliene (mg/g)"', 'TEXT'),
+                ('"A-Myrcene (mg/g)"', 'TEXT'),
+                ('"A-Pinene (mg/g)"', 'TEXT'),
+                ('"B-Caryophyllene (mg/g)"', 'TEXT'),
                 ('b_myrcene_mg_g', 'TEXT'),
                 ('b_pinene_mg_g', 'TEXT'),
                 ('bisabolol_mg_g', 'TEXT'),
@@ -1740,6 +1753,11 @@ class ProductDatabase:
             if missing_columns:
                 conn.commit()
                 logger.info(f"Added {len(missing_columns)} missing columns to products table")
+            
+            # Log that this migration has been applied
+            cursor.execute("INSERT OR REPLACE INTO _migration_log (migration_name, applied_date) VALUES (?, ?)", 
+                          ('column_migration_v2', datetime.now().isoformat()))
+            conn.commit()
             
             # Check and add missing columns to strains table
             cursor.execute("PRAGMA table_info(strains)")
