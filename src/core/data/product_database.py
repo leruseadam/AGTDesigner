@@ -129,221 +129,58 @@ class ProductDatabase:
                     )
                 ''')
                 
-                # Create products table with all necessary columns for Excel data
+                # Create products table with essential columns for Excel data
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS products (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        product_name TEXT NOT NULL,
+                        "Product Name*" TEXT NOT NULL,
                         normalized_name TEXT NOT NULL,
                         strain_id INTEGER,
-                        product_type TEXT NOT NULL,
-                        vendor TEXT,
-                        brand TEXT,
-                        description TEXT,
-                        weight TEXT,
-                        units TEXT,
-                        price TEXT,
-                        lineage TEXT,
+                        "Product Type*" TEXT NOT NULL,
+                        "Vendor/Supplier*" TEXT,
+                        "Product Brand" TEXT,
+                        "Description" TEXT,
+                        "Weight*" TEXT,
+                        "Units" TEXT,
+                        "Price" TEXT,
+                        "Lineage" TEXT,
                         first_seen_date TEXT NOT NULL,
                         last_seen_date TEXT NOT NULL,
                         total_occurrences INTEGER DEFAULT 1,
                         created_at TEXT NOT NULL,
                         updated_at TEXT NOT NULL,
-                        product_strain TEXT,
-                        quantity TEXT,
-                        doh_compliant TEXT,
-                        concentrate_type TEXT,
-                        ratio TEXT,
-                        joint_ratio TEXT,
-                        thc_test_result TEXT,
-                        cbd_test_result TEXT,
-                        test_result_unit TEXT,
-                        state TEXT,
-                        is_sample TEXT,
-                        is_mj_product TEXT,
-                        discountable TEXT,
-                        room TEXT,
-                        batch_number TEXT,
-                        lot_number TEXT,
-                        barcode TEXT,
-                        cost TEXT,
-                        medical_only TEXT,
-                        med_price TEXT,
-                        expiration_date TEXT,
-                        is_archived TEXT,
-                        thc_per_serving TEXT,
-                        allergens TEXT,
-                        solvent TEXT,
-                        accepted_date TEXT,
-                        internal_product_identifier TEXT,
-                        product_tags TEXT,
-                        image_url TEXT,
-                        ingredients TEXT,
-                        -- Additional Excel columns for comprehensive JSON matching
-                        combined_weight TEXT,
-                        ratio_or_thc_cbd TEXT,
-                        description_complexity TEXT,
-                        total_thc TEXT,
-                        thca TEXT,
-                        cbda TEXT,
-                        cbn TEXT,
-                        -- Terpene columns for comprehensive product data
-                        a_bisabolol_mg_g TEXT,
-                        a_humulene_mg_g TEXT,
-                        a_maaliene_mg_g TEXT,
-                        a_myrcene_mg_g TEXT,
-                        a_pinene_mg_g TEXT,
-                        b_caryophyllene_mg_g TEXT,
-                        b_myrcene_mg_g TEXT,
-                        b_pinene_mg_g TEXT,
-                        bisabolol_mg_g TEXT,
-                        borneol_mg_g TEXT,
-                        camphene_mg_g TEXT,
-                        camphor_mg_g TEXT,
-                        carene_mg_g TEXT,
-                        carvacrol_mg_g TEXT,
-                        carvone_mg_g TEXT,
-                        caryophyllene_mg_g TEXT,
-                        cedrol_mg_g TEXT,
-                        citral_mg_g TEXT,
-                        citronellol_mg_g TEXT,
-                        cymene_mg_g TEXT,
-                        delta_3_carene_mg_g TEXT,
-                        eucalyptol_mg_g TEXT,
-                        fenchol_mg_g TEXT,
-                        fenchone_mg_g TEXT,
-                        geraniol_mg_g TEXT,
-                        geranyl_acetate_mg_g TEXT,
-                        guaiol_mg_g TEXT,
-                        humulene_mg_g TEXT,
-                        isoborneol_mg_g TEXT,
-                        isobornyl_acetate_mg_g TEXT,
-                        isopulegol_mg_g TEXT,
-                        limonene_mg_g TEXT,
-                        linalool_mg_g TEXT,
-                        linalyl_acetate_mg_g TEXT,
-                        m_cymene_mg_g TEXT,
-                        menthal_mg_g TEXT,
-                        menthone_mg_g TEXT,
-                        myrcene_mg_g TEXT,
-                        nerolidol_mg_g TEXT,
-                        o_cymene_mg_g TEXT,
-                        ocimene_mg_g TEXT,
-                        p_cymene_mg_g TEXT,
-                        phellandrene_mg_g TEXT,
-                        phytol_mg_g TEXT,
-                        pinene_mg_g TEXT,
-                        piperitone_mg_g TEXT,
-                        pulegone_mg_g TEXT,
-                        sabinene_mg_g TEXT,
-                        safranal_mg_g TEXT,
-                        selinadiene_mg_g TEXT,
-                        terpineol_mg_g TEXT,
-                        terpinolene_mg_g TEXT,
-                        thujene_mg_g TEXT,
-                        thymol_mg_g TEXT,
-                        trans_nerolidol_mg_g TEXT,
-                        trans_alpha_bergamotene_mg_g TEXT,
-                        valencene_mg_g TEXT,
-                        alpha_bisabolene_mg_g TEXT,
-                        alpha_bulnesene_mg_g TEXT,
-                        alpha_farnesene_mg_g TEXT,
-                        alpha_maaliene_mg_g TEXT,
-                        alpha_ocimene_mg_g TEXT,
-                        alpha_phellandrene_mg_g TEXT,
-                        alpha_pinene_mg_g TEXT,
-                        alpha_terpinene_mg_g TEXT,
-                        alpha_thujone_mg_g TEXT,
-                        beta_farnesene_mg_g TEXT,
-                        beta_maaliene_mg_g TEXT,
-                        beta_ocimene_mg_g TEXT,
-                        beta_pinene_mg_g TEXT,
-                        gamma_terpinene_mg_g TEXT,
-                        -- Additional source Excel columns for comprehensive matching
-                        product_name_alt TEXT,
-                        vendor_supplier TEXT,
-                        vendor_supplier_alt TEXT,
-                        weight_with_units TEXT,
-                        weight_units TEXT,
-                        quantity_received TEXT,
-                        product_type_alt TEXT,
-                        product_brand_alt TEXT,
-                        product_brand_center TEXT,
-                        ratio_or_thc_cbd_alt TEXT,
-                        thc_cbd TEXT,
-                        thc_cbd_alt TEXT,
-                        ai_column TEXT,
-                        aj_column TEXT,
-                        ak_column TEXT,
-                        al_column TEXT,
-                        am_column TEXT,
-                        an_column TEXT,
-                        ao_column TEXT,
-                        ap_column TEXT,
-                        aq_column TEXT,
-                        ar_column TEXT,
-                        as_column TEXT,
-                        at_column TEXT,
-                        au_column TEXT,
-                        av_column TEXT,
-                        aw_column TEXT,
-                        ax_column TEXT,
-                        ay_column TEXT,
-                        az_column TEXT,
-                        ba_column TEXT,
-                        bb_column TEXT,
-                        bc_column TEXT,
-                        bd_column TEXT,
-                        be_column TEXT,
-                        bf_column TEXT,
-                        bg_column TEXT,
-                        bh_column TEXT,
-                        bi_column TEXT,
-                        bj_column TEXT,
-                        bk_column TEXT,
-                        bl_column TEXT,
-                        bm_column TEXT,
-                        bn_column TEXT,
-                        bo_column TEXT,
-                        bp_column TEXT,
-                        bq_column TEXT,
-                        br_column TEXT,
-                        bs_column TEXT,
-                        bt_column TEXT,
-                        bu_column TEXT,
-                        bv_column TEXT,
-                        bw_column TEXT,
-                        bx_column TEXT,
-                        by_column TEXT,
-                        bz_column TEXT,
-                        ca_column TEXT,
-                        cb_column TEXT,
-                        cc_column TEXT,
-                        cd_column TEXT,
-                        ce_column TEXT,
-                        cf_column TEXT,
-                        cg_column TEXT,
-                        ch_column TEXT,
-                        ci_column TEXT,
-                        cj_column TEXT,
-                        ck_column TEXT,
-                        cl_column TEXT,
-                        cm_column TEXT,
-                        cn_column TEXT,
-                        co_column TEXT,
-                        cp_column TEXT,
-                        cq_column TEXT,
-                        cr_column TEXT,
-                        cs_column TEXT,
-                        ct_column TEXT,
-                        cu_column TEXT,
-                        cv_column TEXT,
-                        cw_column TEXT,
-                        cx_column TEXT,
-                        cy_column TEXT,
-                        cz_column TEXT,
+                        "Product Strain" TEXT,
+                        "Quantity*" TEXT,
+                        "DOH" TEXT,
+                        "Concentrate Type" TEXT,
+                        "Ratio" TEXT,
+                        "JointRatio" TEXT,
+                        "THC test result" TEXT,
+                        "CBD test result" TEXT,
+                        "Test result unit (% or mg)" TEXT,
+                        "State" TEXT,
+                        "Is Sample? (yes/no)" TEXT,
+                        "Is MJ product?(yes/no)" TEXT,
+                        "Discountable? (yes/no)" TEXT,
+                        "Room*" TEXT,
+                        "Batch Number" TEXT,
+                        "Lot Number" TEXT,
+                        "Barcode*" TEXT,
+                        "Cost*" TEXT,
+                        "Medical Only (Yes/No)" TEXT,
+                        "Med Price" TEXT,
+                        "Expiration Date(YYYY-MM-DD)" TEXT,
+                        "Is Archived? (yes/no)" TEXT,
+                        "THC Per Serving" TEXT,
+                        "Allergens" TEXT,
+                        "Solvent" TEXT,
+                        "Accepted Date" TEXT,
+                        "Internal Product Identifier" TEXT,
+                        "Product Tags (comma separated)" TEXT,
+                        "Image URL" TEXT,
+                        "Ingredients" TEXT,
                         FOREIGN KEY (strain_id) REFERENCES strains (id),
-                        UNIQUE(product_name, vendor, brand)
+                        UNIQUE("Product Name*", "Vendor/Supplier*", "Product Brand")
                     )
                 ''')
                 
@@ -377,7 +214,7 @@ class ProductDatabase:
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_strains_normalized ON strains(normalized_name)')
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_normalized ON products(normalized_name)')
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_strain ON products(strain_id)')
-                cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_vendor_brand ON products(vendor, brand)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_vendor_brand ON products("Vendor/Supplier*", "Product Brand")')
                 
                 conn.commit()
                 
@@ -457,69 +294,69 @@ class ProductDatabase:
             cursor.execute('''
                 CREATE TABLE products (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    product_name TEXT NOT NULL,
+                    "Product Name*" TEXT NOT NULL,
                     normalized_name TEXT NOT NULL,
                     strain_id INTEGER,
-                    product_type TEXT NOT NULL,
-                    vendor TEXT,
-                    brand TEXT,
-                    description TEXT,
-                    weight TEXT,
-                    units TEXT,
-                    price TEXT,
-                    lineage TEXT,
+                    "Product Type*" TEXT NOT NULL,
+                    "Vendor/Supplier*" TEXT,
+                    "Product Brand" TEXT,
+                    "Description" TEXT,
+                    "Weight*" TEXT,
+                    "Units" TEXT,
+                    "Price" TEXT,
+                    "Lineage" TEXT,
                     first_seen_date TEXT NOT NULL,
                     last_seen_date TEXT NOT NULL,
                     total_occurrences INTEGER DEFAULT 1,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
-                    product_strain TEXT,
-                    quantity TEXT,
-                    doh_compliant TEXT,
-                    concentrate_type TEXT,
-                    ratio TEXT,
-                    joint_ratio TEXT,
-                    thc_test_result TEXT,
-                    cbd_test_result TEXT,
-                    test_result_unit TEXT,
-                    state TEXT,
-                    is_sample TEXT,
-                    is_mj_product TEXT,
-                    discountable TEXT,
-                    room TEXT,
-                    batch_number TEXT,
-                    lot_number TEXT,
-                    barcode TEXT,
-                    cost TEXT,
-                    medical_only TEXT,
-                    med_price TEXT,
-                    expiration_date TEXT,
-                    is_archived TEXT,
-                    thc_per_serving TEXT,
-                    allergens TEXT,
-                    solvent TEXT,
-                    accepted_date TEXT,
-                    internal_product_identifier TEXT,
-                    product_tags TEXT,
-                    image_url TEXT,
-                    ingredients TEXT,
+                    "Product Strain" TEXT,
+                    "Quantity*" TEXT,
+                    "DOH" TEXT,
+                    "Concentrate Type" TEXT,
+                    "Ratio" TEXT,
+                    "JointRatio" TEXT,
+                    "THC test result" TEXT,
+                    "CBD test result" TEXT,
+                    "Test result unit (% or mg)" TEXT,
+                    "State" TEXT,
+                    "Is Sample? (yes/no)" TEXT,
+                    "Is MJ product?(yes/no)" TEXT,
+                    "Discountable? (yes/no)" TEXT,
+                    "Room*" TEXT,
+                    "Batch Number" TEXT,
+                    "Lot Number" TEXT,
+                    "Barcode*" TEXT,
+                    "Cost*" TEXT,
+                    "Medical Only (Yes/No)" TEXT,
+                    "Med Price" TEXT,
+                    "Expiration Date(YYYY-MM-DD)" TEXT,
+                    "Is Archived? (yes/no)" TEXT,
+                    "THC Per Serving" TEXT,
+                    "Allergens" TEXT,
+                    "Solvent" TEXT,
+                    "Accepted Date" TEXT,
+                    "Internal Product Identifier" TEXT,
+                    "Product Tags (comma separated)" TEXT,
+                    "Image URL" TEXT,
+                    "Ingredients" TEXT,
                     -- Additional Excel columns for comprehensive JSON matching
-                    combined_weight TEXT,
-                    ratio_or_thc_cbd TEXT,
-                    description_complexity TEXT,
-                    total_thc TEXT,
-                    thca TEXT,
-                    cbda TEXT,
-                    cbn TEXT,
+                    "CombinedWeight" TEXT,
+                    "Ratio_or_THC_CBD" TEXT,
+                    "Description_Complexity" TEXT,
+                    "Total THC" TEXT,
+                    "THCA" TEXT,
+                    "CBDA" TEXT,
+                    "CBN" TEXT,
                     -- Terpene columns for comprehensive product data
-                    a_bisabolol_mg_g TEXT,
-                    a_humulene_mg_g TEXT,
-                    a_maaliene_mg_g TEXT,
-                    a_myrcene_mg_g TEXT,
-                    a_pinene_mg_g TEXT,
-                    b_caryophyllene_mg_g TEXT,
-                    b_myrcene_mg_g TEXT,
-                    b_pinene_mg_g TEXT,
+                    "A-Bisabolol (mg/g)" TEXT,
+                    "A-Humulene (mg/g)" TEXT,
+                    "A-Maaliene (mg/g)" TEXT,
+                    "A-Myrcene (mg/g)" TEXT,
+                    "A-Pinene (mg/g)" TEXT,
+                    "B-Caryophyllene (mg/g)" TEXT,
+                    "B-Myrcene (mg/g)" TEXT,
+                    "B-Pinene (mg/g)" TEXT,
                     bisabolol_mg_g TEXT,
                     borneol_mg_g TEXT,
                     camphene_mg_g TEXT,
@@ -667,7 +504,7 @@ class ProductDatabase:
                     cy_column TEXT,
                     cz_column TEXT,
                     FOREIGN KEY (strain_id) REFERENCES strains (id),
-                    UNIQUE(product_name, vendor, brand)
+                    UNIQUE("Product Name*", "Vendor/Supplier*", "Product Brand")
                 )
             ''')
             
@@ -699,7 +536,7 @@ class ProductDatabase:
             cursor.execute('CREATE INDEX idx_strains_normalized ON strains(normalized_name)')
             cursor.execute('CREATE INDEX idx_products_normalized ON products(normalized_name)')
             cursor.execute('CREATE INDEX idx_products_strain ON products(strain_id)')
-            cursor.execute('CREATE INDEX idx_products_vendor_brand ON products(vendor, brand)')
+            cursor.execute('CREATE INDEX idx_products_vendor_brand ON products("Vendor/Supplier*", "Product Brand")')
             
             conn.commit()
             logger.info("Database recreated with correct schema")
@@ -897,7 +734,8 @@ class ProductDatabase:
         try:
             self.init_database()  # Ensure DB is initialized
             
-            product_name = product_data.get('ProductName', '')
+            # Handle both 'ProductName' and 'Product Name*' column names
+            product_name = product_data.get('Product Name*', product_data.get('ProductName', ''))
             normalized_name = self._normalize_product_name(product_name)
             current_date = datetime.now().isoformat()
             
@@ -976,7 +814,8 @@ class ProductDatabase:
                     return product_id
                     
         except Exception as e:
-            logger.error(f"Error adding/updating product '{product_data.get('ProductName', '')}': {e}")
+            product_name = product_data.get('Product Name*', product_data.get('ProductName', ''))
+            logger.error(f"Error adding/updating product '{product_name}': {e}")
             raise
     
     def store_excel_data(self, df: pd.DataFrame, source_file: str = None) -> Dict[str, Any]:
@@ -1025,18 +864,18 @@ class ProductDatabase:
                     
                     # Map to database columns correctly
                     product_data = {
-                        'ProductName': row_dict.get('ProductName', ''),
+                        'Product Name*': row_dict.get('Product Name*', ''),
                         'Product Type*': row_dict.get('Product Type*', ''),
                         'Lineage': row_dict.get('Lineage', ''),
-                        'Vendor': row_dict.get('Vendor/Supplier*', row_dict.get('Vendor', '')),  # Map to correct column
+                        'Vendor/Supplier*': row_dict.get('Vendor/Supplier*', row_dict.get('Vendor', '')),  # Map to correct column
                         'Product Brand': row_dict.get('Product Brand', ''),
                         'Description': row_dict.get('Description', ''),
                         'Weight*': row_dict.get('Weight*', ''),
                         'Units': row_dict.get('Units', ''),
-                        'Price': row_dict.get('Price', ''),
+                        'Price': row_dict.get('Price* (Tier Name for Bulk)', row_dict.get('Price', '')),
                         'Product Strain': row_dict.get('Product Strain', ''),
                         'Quantity*': row_dict.get('Quantity*', ''),
-                        'DOH': row_dict.get('DOH', ''),
+                        'DOH': row_dict.get('DOH Compliant (Yes/No)', row_dict.get('DOH', '')),
                         'Concentrate Type': row_dict.get('Concentrate Type', ''),
                         'Ratio': row_dict.get('Ratio', ''),
                         'JointRatio': row_dict.get('JointRatio', ''),
@@ -1244,7 +1083,7 @@ class ProductDatabase:
                         continue
                     
                     # Update the product data with the found name
-                    product_data['ProductName'] = str(product_name).strip()
+                    product_data['Product Name*'] = str(product_name).strip()
                     
                     # Additional validation: Skip rows with missing essential data
                     vendor = product_data.get('Vendor', '').strip()
@@ -1329,12 +1168,12 @@ class ProductDatabase:
             # Find and count blank entries
             cursor.execute('''
                 SELECT COUNT(*) FROM products 
-                WHERE product_name IS NULL 
-                   OR product_name = '' 
-                   OR product_name = 'nan' 
-                   OR product_name = 'None' 
-                   OR product_name = 'null'
-                   OR LENGTH(TRIM(product_name)) < 2
+                WHERE "Product Name*" IS NULL 
+                   OR "Product Name*" = '' 
+                   OR "Product Name*" = 'nan' 
+                   OR "Product Name*" = 'None' 
+                   OR "Product Name*" = 'null'
+                   OR LENGTH(TRIM("Product Name*")) < 2
             ''')
             
             blank_count = cursor.fetchone()[0]
@@ -1348,12 +1187,12 @@ class ProductDatabase:
             # Delete blank entries
             cursor.execute('''
                 DELETE FROM products 
-                WHERE product_name IS NULL 
-                   OR product_name = '' 
-                   OR product_name = 'nan' 
-                   OR product_name = 'None' 
-                   OR product_name = 'null'
-                   OR LENGTH(TRIM(product_name)) < 2
+                WHERE "Product Name*" IS NULL 
+                   OR "Product Name*" = '' 
+                   OR "Product Name*" = 'nan' 
+                   OR "Product Name*" = 'None' 
+                   OR "Product Name*" = 'null'
+                   OR LENGTH(TRIM("Product Name*")) < 2
             ''')
             
             deleted_count = cursor.rowcount

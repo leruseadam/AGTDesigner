@@ -1432,21 +1432,17 @@ def upload_file():
             if app.config.get('DEVELOPMENT_MODE', False):
                 logging.debug("[UPLOAD] Cleared g.excel_processor context")
         
-        # Start background thread with error handling
+        # Start ultra-fast background processing
         try:
             if app.config.get('DEVELOPMENT_MODE', False):
-                logging.debug(f"[UPLOAD] Starting background processing thread for {file.filename}")
-            thread = threading.Thread(target=process_excel_background, args=(file.filename, temp_path))
+                logging.debug(f"[UPLOAD] Starting ultra-fast background processing for {file.filename}")
+            thread = threading.Thread(target=ultra_fast_background_processing, args=(file.filename, temp_path))
             thread.daemon = True  # Make thread daemon so it doesn't block app shutdown
             thread.start()
             if app.config.get('DEVELOPMENT_MODE', False):
-                logging.debug(f"[UPLOAD] Background processing thread started successfully for {file.filename}")
-            
-            # Log current processing status
-            if app.config.get('DEVELOPMENT_MODE', False):
-                logging.debug(f"[UPLOAD] Current processing status after thread start: {dict(processing_status)}")
+                logging.debug(f"[UPLOAD] Ultra-fast background processing started successfully for {file.filename}")
         except Exception as thread_error:
-            logging.error(f"[UPLOAD] Failed to start background thread: {thread_error}")
+            logging.error(f"[UPLOAD] Failed to start ultra-fast background processing: {thread_error}")
             update_processing_status(file.filename, f'error: Failed to start processing')
             return jsonify({'error': 'Failed to start file processing'}), 500
         
@@ -1604,6 +1600,136 @@ def process_excel_sync(filename, temp_path):
         logging.error(f"[SYNC] Error: {str(e)}")
         logging.error(f"[SYNC] Traceback: {traceback.format_exc()}")
         return False
+
+def ultra_fast_background_processing(filename, temp_path):
+    """Ultra-fast background processing with minimal overhead for maximum speed"""
+    try:
+        logging.info(f"[ULTRA-FAST-BG] Starting ultra-fast processing: {filename}")
+        start_time = time.time()
+        
+        # Step 1: Quick file validation
+        if not os.path.exists(temp_path):
+            update_processing_status(filename, 'error: File not found')
+            return
+        
+        # Step 2: Create ExcelProcessor with fast loading
+        from src.core.data.excel_processor import ExcelProcessor
+        processor = ExcelProcessor()
+        
+        # Disable heavy processing for speed
+        if hasattr(processor, 'enable_product_db_integration'):
+            processor.enable_product_db_integration(False)
+        
+        # Step 3: Use fast loading mode
+        logging.info(f"[ULTRA-FAST-BG] Loading file with fast mode: {temp_path}")
+        load_start = time.time()
+        
+        # Use the fast_load_file method
+        success = processor.fast_load_file(temp_path)
+        load_time = time.time() - load_start
+        
+        logging.info(f"[ULTRA-FAST-BG] Fast load completed in {load_time:.3f}s, success: {success}")
+        
+        if not success or processor.df is None or processor.df.empty:
+            update_processing_status(filename, 'error: Failed to load file data')
+            return
+        
+        # Step 4: Minimal additional processing
+        logging.info(f"[ULTRA-FAST-BG] Applying minimal additional processing to {len(processor.df)} rows")
+        process_start = time.time()
+        
+        # Only do essential additional processing
+        apply_essential_processing(processor.df)
+        
+        logging.info(f"[ULTRA-FAST-BG] Essential processing completed in {time.time() - process_start:.3f}s")
+        
+        # Step 5: Update global processor (skip database storage for speed)
+        update_global_processor_fast(processor, temp_path)
+        
+        # Step 6: Mark as ready
+        update_processing_status(filename, 'ready')
+        
+        total_time = time.time() - start_time
+        logging.info(f"[ULTRA-FAST-BG] Ultra-fast processing completed in {total_time:.3f}s")
+        
+    except Exception as e:
+        logging.error(f"[ULTRA-FAST-BG] Processing error: {str(e)}")
+        update_processing_status(filename, f'error: {str(e)}')
+
+def apply_essential_processing(df):
+    """Apply only the most essential data processing for speed"""
+    try:
+        logging.info("[ULTRA-FAST-BG] Applying essential processing...")
+        
+        # Only do the most critical processing that's needed for the UI
+        import pandas as pd
+        
+        # Basic string operations
+        if 'Product Name*' in df.columns:
+            df['Product Name*'] = df['Product Name*'].astype(str).str.strip()
+        
+        if 'Description' in df.columns:
+            df['Description'] = df['Description'].astype(str).str.strip()
+        
+        # Basic lineage standardization (minimal)
+        if 'Lineage' in df.columns:
+            df['Lineage'] = df['Lineage'].astype(str).str.strip().str.upper()
+            # Quick lineage fixes
+            df['Lineage'] = df['Lineage'].replace({
+                'INDICA_HYBRID': 'HYBRID/INDICA',
+                'SATIVA_HYBRID': 'HYBRID/SATIVA',
+                'SATIVA': 'SATIVA',
+                'HYBRID': 'HYBRID',
+                'INDICA': 'INDICA',
+                'CBD': 'CBD'
+            })
+            
+            # Set empty to HYBRID
+            empty_mask = (df['Lineage'] == '') | (df['Lineage'] == 'NAN')
+            df.loc[empty_mask, 'Lineage'] = 'HYBRID'
+        
+        # Basic product strain processing
+        if 'Product Strain' in df.columns:
+            df['Product Strain'] = df['Product Strain'].astype(str).str.strip()
+            empty_strain = (df['Product Strain'] == '') | (df['Product Strain'] == 'NAN')
+            df.loc[empty_strain, 'Product Strain'] = 'Mixed'
+        
+        # Basic ratio processing
+        if 'Ratio' in df.columns:
+            df['Ratio'] = df['Ratio'].astype(str).str.strip()
+            empty_ratio = (df['Ratio'] == '') | (df['Ratio'] == 'NAN')
+            df.loc[empty_ratio, 'Ratio'] = 'THC:|BR|CBD:'
+        
+        # Ensure ProductName column exists for UI
+        if 'Product Name*' in df.columns and 'ProductName' not in df.columns:
+            df['ProductName'] = df['Product Name*']
+        
+        logging.info("[ULTRA-FAST-BG] Essential processing completed")
+        
+    except Exception as e:
+        logging.error(f"Essential processing error: {str(e)}")
+
+def update_global_processor_fast(processor, temp_path):
+    """Update the global processor with minimal overhead"""
+    try:
+        global _excel_processor, excel_processor_lock
+        
+        with excel_processor_lock:
+            # Clear old processor efficiently
+            if _excel_processor is not None:
+                if hasattr(_excel_processor, 'df'):
+                    del _excel_processor.df
+                if hasattr(_excel_processor, 'selected_tags'):
+                    _excel_processor.selected_tags = []
+            
+            # Set new processor
+            _excel_processor = processor
+            _excel_processor._last_loaded_file = temp_path
+            
+            logging.info(f"[ULTRA-FAST-BG] Global processor updated with {len(processor.df)} rows")
+            
+    except Exception as e:
+        logging.error(f"Error updating global processor: {str(e)}")
 
 def process_excel_background(filename, temp_path):
     """Ultra-optimized background processing with minimal processing for instant response"""
