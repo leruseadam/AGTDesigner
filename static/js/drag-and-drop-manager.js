@@ -904,8 +904,8 @@ class DragAndDropManager {
         console.log('Drag state reset - all checkboxes and tag items re-enabled');
         
         // Also re-enable any tag-items that might have been disabled during drag
-        const disabledTagItems = document.querySelectorAll('.tag-item[data-drag-disabled="true"]');
-        disabledTagItems.forEach(tagItem => {
+        const disabledTagItems2 = document.querySelectorAll('.tag-item[data-drag-disabled="true"]');
+        disabledTagItems2.forEach(tagItem => {
             tagItem.style.pointerEvents = '';
             tagItem.removeAttribute('data-drag-disabled');
         });
