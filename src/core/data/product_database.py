@@ -1558,8 +1558,8 @@ class ProductDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
             
-            # Add missing columns if they don't exist
-            self._add_missing_columns_safe(cursor, conn)
+            # Database should already be initialized with all required columns
+            # No need to add missing columns during export
             
             # Export strains
             strains_df = pd.read_sql_query('''
@@ -1646,6 +1646,11 @@ class ProductDatabase:
             cursor.execute("SELECT migration_name FROM _migration_log WHERE migration_name = 'column_migration_v2'")
             if cursor.fetchone():
                 logger.debug("Column migration already applied, skipping")
+                return
+            
+            # Also check if we've already run this migration in this session
+            if hasattr(self, '_migration_applied'):
+                logger.debug("Column migration already applied in this session, skipping")
                 return
             
             # Check and add missing columns to products table
@@ -1758,6 +1763,9 @@ class ProductDatabase:
             cursor.execute("INSERT OR REPLACE INTO _migration_log (migration_name, applied_date) VALUES (?, ?)", 
                           ('column_migration_v2', datetime.now().isoformat()))
             conn.commit()
+            
+            # Mark migration as applied in this session
+            self._migration_applied = True
             
             # Check and add missing columns to strains table
             cursor.execute("PRAGMA table_info(strains)")
