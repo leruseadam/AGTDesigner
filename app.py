@@ -11166,6 +11166,277 @@ def clear_performance_cache():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)})
 
+# Database Import/Export API endpoints for migration
+@app.route('/api/clear-database', methods=['POST'])
+def clear_database():
+    """Clear the database for migration."""
+    try:
+        product_db = get_product_database()
+        
+        # Clear products and strains tables
+        conn = product_db._get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("DELETE FROM products")
+        cursor.execute("DELETE FROM strains")
+        cursor.execute("DELETE FROM _migration_log")
+        
+        conn.commit()
+        conn.close()
+        
+        logging.info("Database cleared for migration")
+        return jsonify({"status": "success", "message": "Database cleared"})
+        
+    except Exception as e:
+        logging.error(f"Error clearing database: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/import-strains', methods=['POST'])
+def import_strains():
+    """Import strains from migration data."""
+    try:
+        data = request.get_json()
+        strains = data.get('strains', [])
+        
+        if not strains:
+            return jsonify({"error": "No strains provided"}), 400
+        
+        product_db = get_product_database()
+        conn = product_db._get_connection()
+        cursor = conn.cursor()
+        
+        imported_count = 0
+        for strain in strains:
+            try:
+                cursor.execute("""
+                    INSERT OR REPLACE INTO strains 
+                    (strain_name, normalized_name, canonical_lineage, total_occurrences, 
+                     first_seen_date, last_seen_date, lineage_confidence, sovereign_lineage)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    strain.get('strain_name'),
+                    strain.get('normalized_name'),
+                    strain.get('canonical_lineage'),
+                    strain.get('total_occurrences', 0),
+                    strain.get('first_seen_date'),
+                    strain.get('last_seen_date'),
+                    strain.get('lineage_confidence'),
+                    strain.get('sovereign_lineage')
+                ))
+                imported_count += 1
+            except Exception as e:
+                logging.warning(f"Error importing strain {strain.get('strain_name')}: {e}")
+        
+        conn.commit()
+        conn.close()
+        
+        logging.info(f"Imported {imported_count} strains")
+        return jsonify({"status": "success", "imported": imported_count})
+        
+    except Exception as e:
+        logging.error(f"Error importing strains: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/import-products', methods=['POST'])
+def import_products():
+    """Import products from migration data."""
+    try:
+        data = request.get_json()
+        products = data.get('products', [])
+        
+        if not products:
+            return jsonify({"error": "No products provided"}), 400
+        
+        product_db = get_product_database()
+        conn = product_db._get_connection()
+        cursor = conn.cursor()
+        
+        imported_count = 0
+        for product in products:
+            try:
+                # Get strain_id if strain_name exists
+                strain_id = None
+                if product.get('strain_name'):
+                    cursor.execute("SELECT id FROM strains WHERE strain_name = ?", (product['strain_name'],))
+                    result = cursor.fetchone()
+                    if result:
+                        strain_id = result[0]
+                
+                # Insert product with all available columns
+                columns = []
+                values = []
+                
+                # Map product data to database columns
+                column_mapping = {
+                    'Product Name*': product.get('Product Name*'),
+                    'Product Type*': product.get('Product Type*'),
+                    'Vendor/Supplier*': product.get('Vendor/Supplier*'),
+                    'Product Brand': product.get('Product Brand'),
+                    'Lineage': product.get('Lineage'),
+                    'Description': product.get('Description'),
+                    'Weight*': product.get('Weight*'),
+                    'Units': product.get('Units'),
+                    'Price': product.get('Price'),
+                    'Product Strain': product.get('Product Strain'),
+                    'Quantity*': product.get('Quantity*'),
+                    'DOH': product.get('DOH'),
+                    'Concentrate Type': product.get('Concentrate Type'),
+                    'Ratio': product.get('Ratio'),
+                    'JointRatio': product.get('JointRatio'),
+                    'THC test result': product.get('THC test result'),
+                    'CBD test result': product.get('CBD test result'),
+                    'Test result unit (% or mg)': product.get('Test result unit (% or mg)'),
+                    'State': product.get('State'),
+                    'Is Sample? (yes/no)': product.get('Is Sample? (yes/no)'),
+                    'Is MJ product?(yes/no)': product.get('Is MJ product?(yes/no)'),
+                    'Discountable? (yes/no)': product.get('Discountable? (yes/no)'),
+                    'Room*': product.get('Room*'),
+                    'Batch Number': product.get('Batch Number'),
+                    'Lot Number': product.get('Lot Number'),
+                    'Barcode*': product.get('Barcode*'),
+                    'Cost*': product.get('Cost*'),
+                    'Medical Only (Yes/No)': product.get('Medical Only (Yes/No)'),
+                    'Med Price': product.get('Med Price'),
+                    'Expiration Date(YYYY-MM-DD)': product.get('Expiration Date(YYYY-MM-DD)'),
+                    'Is Archived? (yes/no)': product.get('Is Archived? (yes/no)'),
+                    'THC Per Serving': product.get('THC Per Serving'),
+                    'Allergens': product.get('Allergens'),
+                    'Solvent': product.get('Solvent'),
+                    'Accepted Date': product.get('Accepted Date'),
+                    'Internal Product Identifier': product.get('Internal Product Identifier'),
+                    'Product Tags (comma separated)': product.get('Product Tags (comma separated)'),
+                    'Image URL': product.get('Image URL'),
+                    'Ingredients': product.get('Ingredients'),
+                    'CombinedWeight': product.get('CombinedWeight'),
+                    'Ratio_or_THC_CBD': product.get('Ratio_or_THC_CBD'),
+                    'Description_Complexity': product.get('Description_Complexity'),
+                    'Total THC': product.get('Total THC'),
+                    'THCA': product.get('THCA'),
+                    'CBDA': product.get('CBDA'),
+                    'CBN': product.get('CBN')
+                }
+                
+                # Add non-null columns
+                for col, val in column_mapping.items():
+                    if val is not None:
+                        columns.append(f'"{col}"')
+                        values.append(val)
+                
+                # Add strain_id and metadata
+                columns.extend(['strain_id', 'total_occurrences', 'first_seen_date', 'last_seen_date'])
+                values.extend([
+                    strain_id,
+                    product.get('total_occurrences', 1),
+                    product.get('first_seen_date'),
+                    product.get('last_seen_date')
+                ])
+                
+                if columns:
+                    placeholders = ', '.join(['?' for _ in values])
+                    column_names = ', '.join(columns)
+                    
+                    cursor.execute(f"""
+                        INSERT OR REPLACE INTO products ({column_names})
+                        VALUES ({placeholders})
+                    """, values)
+                    
+                    imported_count += 1
+                    
+            except Exception as e:
+                logging.warning(f"Error importing product {product.get('Product Name*', 'Unknown')}: {e}")
+        
+        conn.commit()
+        conn.close()
+        
+        logging.info(f"Imported {imported_count} products")
+        return jsonify({"status": "success", "imported": imported_count})
+        
+    except Exception as e:
+        logging.error(f"Error importing products: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/upload-database-chunk', methods=['POST'])
+def upload_database_chunk():
+    """Upload a database chunk for reconstruction."""
+    try:
+        data = request.get_json()
+        chunk_data = data.get('chunk_data')
+        chunk_num = data.get('chunk_num', 0)
+        total_chunks = data.get('total_chunks', 1)
+        is_last = data.get('is_last', False)
+        
+        if not chunk_data:
+            return jsonify({"error": "No chunk data provided"}), 400
+        
+        # Decode base64 data
+        import base64
+        import gzip
+        import tempfile
+        import os
+        
+        decoded_data = base64.b64decode(chunk_data)
+        
+        # Create temporary file for this chunk
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=f'_chunk_{chunk_num}')
+        temp_file.write(decoded_data)
+        temp_file.close()
+        
+        # If this is the first chunk, start a new database file
+        if chunk_num == 0:
+            # Clear existing database
+            product_db = get_product_database()
+            conn = product_db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM products")
+            cursor.execute("DELETE FROM strains")
+            cursor.execute("DELETE FROM _migration_log")
+            conn.commit()
+            conn.close()
+            
+            # Start new compressed database file
+            with open('database_reconstruction.gz', 'wb') as f:
+                f.write(decoded_data)
+        else:
+            # Append to existing compressed database file
+            with open('database_reconstruction.gz', 'ab') as f:
+                f.write(decoded_data)
+        
+        # If this is the last chunk, decompress and replace the database
+        if is_last:
+            print(f"Reconstructing database from {total_chunks} chunks...")
+            
+            # Decompress the reconstructed database
+            with gzip.open('database_reconstruction.gz', 'rb') as f_in:
+                with open('uploads/product_database_new.db', 'wb') as f_out:
+                    f_out.write(f_in.read())
+            
+            # Replace the existing database
+            import shutil
+            if os.path.exists('uploads/product_database.db'):
+                shutil.move('uploads/product_database.db', 'uploads/product_database_backup.db')
+            
+            shutil.move('uploads/product_database_new.db', 'uploads/product_database.db')
+            
+            # Cleanup
+            os.remove('database_reconstruction.gz')
+            os.remove(temp_file.name)
+            
+            # Reinitialize the database
+            product_db = get_product_database()
+            product_db.init_database()
+            
+            logging.info(f"Database successfully reconstructed from {total_chunks} chunks")
+            return jsonify({"status": "success", "message": "Database reconstructed successfully"})
+        
+        # Cleanup temporary file
+        os.remove(temp_file.name)
+        
+        return jsonify({"status": "success", "message": f"Chunk {chunk_num + 1} received"})
+        
+    except Exception as e:
+        logging.error(f"Error processing database chunk: {e}")
+        return jsonify({"error": str(e)}), 500
+
 # Missing function definitions
 def enforce_fixed_cell_dimensions():
     """Placeholder for enforce_fixed_cell_dimensions function."""
