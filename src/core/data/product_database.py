@@ -1344,18 +1344,18 @@ class ProductDatabase:
             
             if vendor and brand:
                 cursor.execute('''
-                    SELECT p.id, p.product_name, p.product_type, p.vendor, p.brand, p.lineage,
+                    SELECT p.id, p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
                            s.strain_name, s.canonical_lineage, p.total_occurrences, p.first_seen_date, p.last_seen_date,
-                           p.description, p.weight, p.units, p.price
+                           p."Description", p."Weight*", p."Units", p."Price"
                     FROM products p
                     LEFT JOIN strains s ON p.strain_id = s.id
-                    WHERE p.normalized_name = ? AND p.vendor = ? AND p.brand = ?
+                    WHERE p.normalized_name = ? AND p."Vendor/Supplier*" = ? AND p."Product Brand" = ?
                 ''', (normalized_name, vendor, brand))
             else:
                 cursor.execute('''
-                    SELECT p.id, p.product_name, p.product_type, p.vendor, p.brand, p.lineage,
+                    SELECT p.id, p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
                            s.strain_name, s.canonical_lineage, p.total_occurrences, p.first_seen_date, p.last_seen_date,
-                           p.description, p.weight, p.units, p.price
+                           p."Description", p."Weight*", p."Units", p."Price"
                     FROM products p
                     LEFT JOIN strains s ON p.strain_id = s.id
                     WHERE p.normalized_name = ?
@@ -1571,16 +1571,16 @@ class ProductDatabase:
             # Export products with all columns - handle missing columns gracefully
             try:
                 products_df = pd.read_sql_query('''
-                    SELECT p.product_name, p.product_type, p.vendor, p.brand, p.lineage,
+                    SELECT p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
                            s.strain_name, p.total_occurrences, p.first_seen_date, p.last_seen_date,
-                           p.description, p.weight, p.units, p.price, p.product_strain, p.quantity,
-                           p.doh_compliant, p.concentrate_type, p.ratio, p.joint_ratio,
-                           p.thc_test_result, p.cbd_test_result, p.test_result_unit, p.state,
-                           p.is_sample, p.is_mj_product, p.discountable, p.room, p.batch_number,
-                           p.lot_number, p.barcode, p.cost, p.medical_only, p.med_price,
-                           p.expiration_date, p.is_archived, p.thc_per_serving, p.allergens,
-                           p.solvent, p.accepted_date, p.internal_product_identifier, p.product_tags,
-                           p.image_url, p.ingredients
+                           p."Description", p."Weight*", p."Units", p."Price", p."Product Strain", p."Quantity*",
+                           p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio",
+                           p."THC test result", p."CBD test result", p."Test result unit (% or mg)", p."State",
+                           p."Is Sample? (yes/no)", p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number",
+                           p."Lot Number", p."Barcode*", p."Cost*", p."Medical Only (Yes/No)", p."Med Price",
+                           p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens",
+                           p."Solvent", p."Accepted Date", p."Internal Product Identifier", p."Product Tags (comma separated)",
+                           p."Image URL", p."Ingredients"
                     FROM products p
                     LEFT JOIN strains s ON p.strain_id = s.id
                     ORDER BY p.total_occurrences DESC
@@ -1589,9 +1589,9 @@ class ProductDatabase:
                 # Fallback to basic columns if some are missing
                 logger.warning(f"Full export failed, using fallback columns: {e}")
                 products_df = pd.read_sql_query('''
-                    SELECT p.product_name, p.product_type, p.vendor, p.brand, p.lineage,
+                    SELECT p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
                            s.strain_name, p.total_occurrences, p.first_seen_date, p.last_seen_date,
-                           p.description, p.weight, p.units, p.price
+                           p."Description", p."Weight*", p."Units", p."Price"
                     FROM products p
                     LEFT JOIN strains s ON p.strain_id = s.id
                     ORDER BY p.total_occurrences DESC
@@ -2080,7 +2080,7 @@ class ProductDatabase:
             
             # Get all products associated with this strain
             cursor.execute('''
-                SELECT product_name, product_type, vendor, brand, description, weight, units, price, lineage,
+                SELECT "Product Name*", "Product Type*", "Vendor/Supplier*", "Product Brand", "Description", "Weight*", "Units", "Price", "Lineage",
                        total_occurrences, first_seen_date, last_seen_date
                 FROM products 
                 WHERE strain_id = ?
@@ -2208,15 +2208,15 @@ class ProductDatabase:
             # Get products for this strain with optional brand filter
             if brand:
                 cursor.execute('''
-                    SELECT product_name, product_type, vendor, brand, description, weight, units, price, lineage,
+                    SELECT "Product Name*", "Product Type*", "Vendor/Supplier*", "Product Brand", "Description", "Weight*", "Units", "Price", "Lineage",
                            total_occurrences, first_seen_date, last_seen_date
                     FROM products 
-                    WHERE strain_id = ? AND brand = ?
+                    WHERE strain_id = ? AND "Product Brand" = ?
                     ORDER BY total_occurrences DESC
                 ''', (strain_id, brand))
             else:
                 cursor.execute('''
-                    SELECT product_name, product_type, vendor, brand, description, weight, units, price, lineage,
+                    SELECT "Product Name*", "Product Type*", "Vendor/Supplier*", "Product Brand", "Description", "Weight*", "Units", "Price", "Lineage",
                            total_occurrences, first_seen_date, last_seen_date
                     FROM products 
                     WHERE strain_id = ?
@@ -2413,14 +2413,14 @@ class ProductDatabase:
             placeholders = ','.join(['?' for _ in normalized_names])
             
             cursor.execute(f'''
-                SELECT p.id, p.product_name, p.normalized_name, p.product_type, p.vendor, p.brand, p.lineage,
+                SELECT p.id, p."Product Name*", p.normalized_name, p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
                        s.strain_name, s.canonical_lineage, p.total_occurrences, p.first_seen_date, p.last_seen_date,
-                       p.description, p.weight, p.units, p.price, p.thc_test_result, p.cbd_test_result, p.test_result_unit,
-                       p.quantity, p.doh_compliant, p.concentrate_type, p.ratio, p.joint_ratio, p.state, p.is_sample,
-                       p.is_mj_product, p.discountable, p.room, p.batch_number, p.lot_number, p.barcode, p.cost,
-                       p.medical_only, p.med_price, p.expiration_date, p.is_archived, p.thc_per_serving, p.allergens,
-                       p.solvent, p.accepted_date, p.internal_product_identifier, p.product_tags, p.image_url, p.ingredients,
-                       p.combined_weight, p.ratio_or_thc_cbd, p.description_complexity, p.total_thc, p.thca, p.cbda, p.cbn
+                       p."Description", p."Weight*", p."Units", p."Price", p."THC test result", p."CBD test result", p."Test result unit (% or mg)",
+                       p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio", p."State", p."Is Sample? (yes/no)",
+                       p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*", p."Cost*",
+                       p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens",
+                       p."Solvent", p."Accepted Date", p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients",
+                       p."CombinedWeight", p."Ratio_or_THC_CBD", p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN"
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
                 WHERE p.normalized_name IN ({placeholders})
@@ -2559,12 +2559,12 @@ class ProductDatabase:
             
             # Build a flexible search query using the actual column names
             query = '''
-                SELECT p.id, p.product_name, p.product_strain, p.product_type, p.vendor, p.brand, p.lineage,
-                       p.description, p.weight, p.units, p.price, p.quantity, p.doh_compliant, p.concentrate_type, p.ratio, p.joint_ratio,
-                       p.state, p.is_sample, p.is_mj_product, p.discountable, p.room, p.batch_number, p.lot_number, p.barcode, p.cost,
-                       p.medical_only, p.med_price, p.expiration_date, p.is_archived, p.thc_per_serving, p.allergens, p.solvent, p.accepted_date,
-                       p.internal_product_identifier, p.product_tags, p.image_url, p.ingredients, p.combined_weight, p.ratio_or_thc_cbd, 
-                       p.description_complexity, p.total_thc, p.thca, p.cbda, p.cbn, p.total_occurrences, p.first_seen_date, p.last_seen_date
+                SELECT p.id, p."Product Name*", p."Product Strain", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
+                       p."Description", p."Weight*", p."Units", p."Price", p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio",
+                       p."State", p."Is Sample? (yes/no)", p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*", p."Cost*",
+                       p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens", p."Solvent", p."Accepted Date",
+                       p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."CombinedWeight", p."Ratio_or_THC_CBD", 
+                       p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN", p.total_occurrences, p.first_seen_date, p.last_seen_date
                 FROM products p
                 WHERE 1=1
             '''
@@ -3371,7 +3371,7 @@ class ProductDatabase:
                 SELECT p.*, s.canonical_lineage, s.sovereign_lineage
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
-                WHERE p.product_type = ? AND (p.product_strain = ? OR s.strain_name = ?)
+                WHERE p."Product Type*" = ? AND (p."Product Strain" = ? OR s.strain_name = ?)
                 ORDER BY p.last_seen_date DESC
             ''', (product_type, strain_name, strain_name))
             

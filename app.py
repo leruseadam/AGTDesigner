@@ -3950,12 +3950,13 @@ def get_available_tags():
         logging.info("=== AVAILABLE TAGS DEBUG START ===")
         logging.info(f"Available tags request at {datetime.now().strftime('%H:%M:%S')}")
         
-        # Check if Excel processor is available
-        if not hasattr(g, 'excel_processor') or g.excel_processor is None:
+        # Get Excel processor using the proper function
+        excel_processor = get_excel_processor()
+        if excel_processor is None:
             logging.warning("No Excel processor available, returning empty tags")
             return jsonify([])
         
-        if g.excel_processor.df is None:
+        if excel_processor.df is None:
             logging.warning("Excel processor has no data, returning empty tags")
             return jsonify([])
         
@@ -3968,24 +3969,15 @@ def get_available_tags():
             logging.warning("Returning empty tags to prevent cross-store data access")
             return jsonify([])
         
-        # SIMPLIFIED FIX: Use the same logic as debug columns endpoint
-        # This ensures we get the same data that debug columns shows
-        logging.info("SIMPLIFIED FIX: Using same logic as debug columns endpoint")
-        
-        # Try to get the Excel processor the same way debug columns does
-        excel_processor = None
-        try:
-            excel_processor = get_excel_processor()
-            logging.info(f"SIMPLIFIED FIX: Got Excel processor: {excel_processor is not None}")
-            if excel_processor is not None:
-                logging.info(f"SIMPLIFIED FIX: Processor df is None: {excel_processor.df is None}")
-                if excel_processor.df is not None:
-                    logging.info(f"SIMPLIFIED FIX: Processor df shape: {excel_processor.df.shape}")
-                    logging.info(f"SIMPLIFIED FIX: Processor df empty: {excel_processor.df.empty}")
-                else:
-                    logging.warning(f"SIMPLIFIED FIX: Processor has no DataFrame!")
-        except Exception as e:
-            logging.warning(f"SIMPLIFIED FIX: Failed to get Excel processor: {e}")
+        # Use the Excel processor we already obtained
+        logging.info(f"Using Excel processor: {excel_processor is not None}")
+        if excel_processor is not None:
+            logging.info(f"Processor df is None: {excel_processor.df is None}")
+            if excel_processor.df is not None:
+                logging.info(f"Processor df shape: {excel_processor.df.shape}")
+                logging.info(f"Processor df empty: {excel_processor.df.empty}")
+            else:
+                logging.warning("Processor has no DataFrame!")
         
         # ALWAYS try direct file loading like debug columns (since debug columns works)
         logging.info("ALWAYS DIRECT: Using direct file loading like debug columns")
@@ -4030,10 +4022,7 @@ def get_available_tags():
         except Exception as e:
             logging.error(f"ALWAYS DIRECT: Direct loading failed: {e}")
         
-        if excel_processor is None:
-            logging.warning("No Excel processor available, returning empty tags")
-            return jsonify([])
-        
+        # Check if we have data in the Excel processor
         if excel_processor.df is None or excel_processor.df.empty:
             logging.warning(f"Excel processor has no data - df is None: {excel_processor.df is None}, empty: {excel_processor.df.empty if excel_processor.df is not None else 'N/A'}")
             logging.warning(f"Last loaded file: {getattr(excel_processor, '_last_loaded_file', 'None')}")
@@ -5226,10 +5215,10 @@ def database_analytics():
         with sqlite3.connect(product_db.db_path) as conn:
             # Get product type distribution
             product_types_df = pd.read_sql_query('''
-                SELECT product_type, COUNT(*) as count
+                SELECT "Product Type*" as product_type, COUNT(*) as count
                 FROM products
-                WHERE product_type IS NOT NULL AND product_type != ''
-                GROUP BY product_type
+                WHERE "Product Type*" IS NOT NULL AND "Product Type*" != ''
+                GROUP BY "Product Type*"
                 ORDER BY count DESC
             ''', conn)
             
@@ -5244,12 +5233,12 @@ def database_analytics():
             
             # Get vendor performance
             vendor_performance_df = pd.read_sql_query('''
-                SELECT vendor, COUNT(*) as product_count,
-                       COUNT(DISTINCT brand) as unique_brands,
-                       COUNT(DISTINCT product_type) as unique_types
+                SELECT "Vendor/Supplier*" as vendor, COUNT(*) as product_count,
+                       COUNT(DISTINCT "Product Brand") as unique_brands,
+                       COUNT(DISTINCT "Product Type*") as unique_types
                 FROM products
-                WHERE vendor IS NOT NULL AND vendor != ''
-                GROUP BY vendor
+                WHERE "Vendor/Supplier*" IS NOT NULL AND "Vendor/Supplier*" != ''
+                GROUP BY "Vendor/Supplier*"
                 ORDER BY product_count DESC
                 LIMIT 10
             ''', conn)
