@@ -934,20 +934,13 @@ class ProductDatabase:
                 if existing:
                     product_id, occurrences, existing_name = existing
                     
-                    # Log duplicate detection
-                    logger.info(f"Found existing product: '{existing_name}' (ID: {product_id}, occurrences: {occurrences})")
+                    # Log duplicate detection and skip
+                    logger.info(f"Found existing product: '{existing_name}' (ID: {product_id}, occurrences: {occurrences}) - SKIPPING DUPLICATE")
                     
-                    # Update existing product
-                    new_occurrences = occurrences + 1
-                    cursor.execute('''
-                        UPDATE products 
-                        SET total_occurrences = ?, last_seen_date = ?, updated_at = ?
-                        WHERE id = ?
-                    ''', (new_occurrences, current_date, current_date, product_id))
-                    
+                    # Skip duplicate - don't add or update
                     conn.commit()
-                    logger.info(f"Updated existing product '{existing_name}' - new occurrence count: {new_occurrences}")
-                    return product_id
+                    logger.info(f"Skipped duplicate product '{existing_name}' - no changes made")
+                    return None
                 
                 # Check for similar products (same name + vendor, different brand)
                 cursor.execute('''
@@ -1014,6 +1007,7 @@ class ProductDatabase:
             
             stored_count = 0
             updated_count = 0
+            skipped_duplicates = 0
             error_count = 0
             errors = []
             
@@ -1267,6 +1261,7 @@ class ProductDatabase:
                     # Skip duplicate entries within the same upload (same name + vendor + type combination)
                     duplicate_key = f"{product_name}|{vendor}|{product_type}"
                     if duplicate_key in self._current_upload_products:
+                        skipped_duplicates += 1
                         logger.warning(f"Row {index + 1}: Skipping duplicate product '{product_name}' from same vendor '{vendor}' and type '{product_type}'")
                         continue
                     
@@ -1277,6 +1272,11 @@ class ProductDatabase:
                     product_id = self.add_or_update_product(product_data)
                     if product_id:
                         stored_count += 1
+                    elif product_id is None:
+                        # Product was skipped as duplicate
+                        skipped_duplicates += 1
+                        logger.info(f"Row {index + 1}: Skipped duplicate product '{product_name}'")
+                        continue
                     else:
                         error_count += 1
                         errors.append(f"Row {index + 1}: Failed to store product")
@@ -1294,13 +1294,14 @@ class ProductDatabase:
             result = {
                 'stored': stored_count,
                 'updated': updated_count,
+                'skipped_duplicates': skipped_duplicates,
                 'errors': error_count,
                 'excluded_json_matches': excluded_count,
                 'blank_entries_skipped': blank_entries_skipped,
                 'total_rows': len(df),
                 'filtered_rows': len(filtered_df),
                 'source_file': source_file,
-                'message': f'Successfully stored {stored_count} products with {error_count} errors, excluded {excluded_count} JSON matched tags, skipped {blank_entries_skipped} blank entries'
+                'message': f'Successfully stored {stored_count} products, skipped {skipped_duplicates} duplicates, {error_count} errors, excluded {excluded_count} JSON matched tags, skipped {blank_entries_skipped} blank entries'
             }
             
             if errors:
