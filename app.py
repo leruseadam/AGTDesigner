@@ -1432,17 +1432,17 @@ def upload_file():
             if app.config.get('DEVELOPMENT_MODE', False):
                 logging.debug("[UPLOAD] Cleared g.excel_processor context")
         
-        # Start ultra-fast background processing
+        # Start ultra-optimized background processing (includes database storage)
         try:
             if app.config.get('DEVELOPMENT_MODE', False):
-                logging.debug(f"[UPLOAD] Starting ultra-fast background processing for {file.filename}")
-            thread = threading.Thread(target=ultra_fast_background_processing, args=(file.filename, temp_path))
+                logging.debug(f"[UPLOAD] Starting ultra-optimized background processing for {file.filename}")
+            thread = threading.Thread(target=ultra_optimized_background_processing, args=(file.filename, temp_path))
             thread.daemon = True  # Make thread daemon so it doesn't block app shutdown
             thread.start()
             if app.config.get('DEVELOPMENT_MODE', False):
-                logging.debug(f"[UPLOAD] Ultra-fast background processing started successfully for {file.filename}")
+                logging.debug(f"[UPLOAD] Ultra-optimized background processing started successfully for {file.filename}")
         except Exception as thread_error:
-            logging.error(f"[UPLOAD] Failed to start ultra-fast background processing: {thread_error}")
+            logging.error(f"[UPLOAD] Failed to start ultra-optimized background processing: {thread_error}")
             update_processing_status(file.filename, f'error: Failed to start processing')
             return jsonify({'error': 'Failed to start file processing'}), 500
         
