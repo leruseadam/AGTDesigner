@@ -7,7 +7,7 @@ import sys
 import os
 
 # Add the project directory to the Python path
-project_dir = '/home/adamcordova/AGTDesigner'  # Update this path
+project_dir = '/home/adamcordova/labelMaker_fresh'  # Updated to correct folder name
 if project_dir not in sys.path:
     sys.path.insert(0, project_dir)
 
