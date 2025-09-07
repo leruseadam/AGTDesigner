@@ -4823,16 +4823,22 @@ class ExcelProcessor:
             Dictionary with storage results including counts and status
         """
         try:
-            from src.core.data.product_database import ProductDatabase
-            import os
-            
-            # Get the product database instance
-            current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-            db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
-            product_db = ProductDatabase(db_path)
-            
-            # Initialize database if needed
-            product_db.init_database()
+            # Use the same database instance as the main app to ensure consistency
+            # This prevents writing to different database files in different environments
+            try:
+                # Try to get the global database instance first
+                from app import get_product_database
+                product_db = get_product_database()
+                logger.info("Using global product database instance")
+            except ImportError:
+                # Fallback to creating a new instance if app module not available
+                from src.core.data.product_database import ProductDatabase
+                import os
+                current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+                db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
+                product_db = ProductDatabase(db_path)
+                product_db.init_database()
+                logger.info(f"Created new product database instance at: {db_path}")
             
             logger.info(f"Starting database storage for Excel upload: {len(df)} rows from {source_file}")
             
