@@ -1,25 +1,37 @@
-# Ultra-minimal requirements for PythonAnywhere
-# Use this if you're still having installation issues
-# Only includes absolutely essential packages
+# Minimal requirements for PythonAnywhere
+# This avoids packages that cause compilation issues
 
-# Core Flask framework
+# Core Flask
 Flask==2.3.3
+Flask-CORS==4.0.0
 Werkzeug==2.3.7
-Jinja2==3.1.2
 
-# Essential data processing
-numpy==1.24.3
-pandas==2.0.3
-
-# Document processing (core functionality)
-python-docx==0.8.11
+# Data processing - use older, stable versions
+pandas==1.5.3
 openpyxl==3.1.2
+xlrd==2.0.1
 
-# Image processing (essential for your app)
-Pillow==9.5.0
-
-# Template processing (if your app uses docxtpl)
+# Document processing
+python-docx==0.8.11
 docxtpl==0.16.7
+lxml==4.9.3
 
-# Note: Removed watchdog and docxcompose to minimize dependencies
-# Add them back individually if needed after core packages work
+# Image processing
+Pillow==10.1.0
+
+# Date/time utilities
+python-dateutil==2.8.2
+pytz==2023.3
+
+# HTTP requests
+requests>=2.32.0
+
+# Fuzzy string matching - make optional
+fuzzywuzzy>=0.18.0
+
+# Performance optimizations
+flask-compress==1.18
+psutil==7.0.0
+
+# Compatible numpy version
+numpy==1.24.3

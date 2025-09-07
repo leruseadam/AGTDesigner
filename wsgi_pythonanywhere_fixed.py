@@ -1,20 +1,3 @@
-#!/bin/bash
-# Update PythonAnywhere deployment script
-
-echo "🚀 Updating PythonAnywhere deployment..."
-
-# Step 1: Pull latest changes
-echo "📥 Pulling latest changes..."
-git pull
-
-# Step 2: Install missing dependencies
-echo "📦 Installing missing dependencies..."
-source venv_pythonanywhere_fresh/bin/activate
-pip install flask-caching
-
-# Step 3: Update WSGI file with fixed version
-echo "🔧 Updating WSGI file..."
-cat > /var/www/www_agtpricetags_com_wsgi.py << 'EOF'
 #!/usr/bin/env python3
 """
 PythonAnywhere WSGI configuration - Fixed for directory path issues
@@ -26,6 +9,8 @@ import sys
 import logging
 
 # Fix the directory path issue
+# The error shows it's trying to chdir to /home/adamcordova/AGTDesigner
+# but the actual directory is /home/adamcordova/labelMaker_fresh
 project_dir = '/home/adamcordova/labelMaker_fresh'
 
 # Verify directory exists, fallback to current directory
@@ -85,10 +70,3 @@ except Exception as e:
 
 if __name__ == "__main__":
     application.run()
-EOF
-
-echo "✅ WSGI file updated!"
-
-# Step 4: Restart web app
-echo "🔄 Please restart your web app in PythonAnywhere Web tab"
-echo "✅ Update complete!"
