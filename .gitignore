@@ -79,4 +79,4 @@ secrets.py
 backup/
 
 # PythonAnywhere specific
-pythonanywhere.log 
+pythonanywhere.log product_database_fixed.db.gz
