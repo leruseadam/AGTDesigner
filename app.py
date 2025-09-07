@@ -2928,6 +2928,22 @@ def get_store():
         logging.error(f"Error getting store: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/check-store-required', methods=['GET'])
+def check_store_required():
+    """Check if store selection is required for the current session."""
+    try:
+        current_store = session.get('selected_store', '')
+        requires_store = not bool(current_store)
+        
+        return jsonify({
+            'success': True,
+            'requires_store': requires_store,
+            'store': current_store
+        })
+    except Exception as e:
+        logging.error(f"Error checking store requirement: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/clear-session', methods=['POST'])
 def clear_session():
     """Clear the current session."""
