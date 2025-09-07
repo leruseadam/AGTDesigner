@@ -1568,34 +1568,58 @@ class ProductDatabase:
                 ORDER BY total_occurrences DESC
             ''', conn)
             
-            # Export products with all columns - handle missing columns gracefully
-            try:
-                products_df = pd.read_sql_query('''
-                    SELECT p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
-                           s.strain_name, p.total_occurrences, p.first_seen_date, p.last_seen_date,
-                           p."Description", p."Weight*", p."Units", p."Price", p."Product Strain", p."Quantity*",
-                           p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio",
-                           p."THC test result", p."CBD test result", p."Test result unit (% or mg)", p."State",
-                           p."Is Sample? (yes/no)", p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number",
-                           p."Lot Number", p."Barcode*", p."Cost*", p."Medical Only (Yes/No)", p."Med Price",
-                           p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens",
-                           p."Solvent", p."Accepted Date", p."Internal Product Identifier", p."Product Tags (comma separated)",
-                           p."Image URL", p."Ingredients"
-                    FROM products p
-                    LEFT JOIN strains s ON p.strain_id = s.id
-                    ORDER BY p.total_occurrences DESC
-                ''', conn)
-            except Exception as e:
-                # Fallback to basic columns if some are missing
-                logger.warning(f"Full export failed, using fallback columns: {e}")
-                products_df = pd.read_sql_query('''
-                    SELECT p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
-                           s.strain_name, p.total_occurrences, p.first_seen_date, p.last_seen_date,
-                           p."Description", p."Weight*", p."Units", p."Price"
-                    FROM products p
-                    LEFT JOIN strains s ON p.strain_id = s.id
-                    ORDER BY p.total_occurrences DESC
-                ''', conn)
+            # Get available columns dynamically to avoid SQL errors
+            cursor.execute("PRAGMA table_info(products)")
+            product_columns = {row[1] for row in cursor.fetchall()}
+            
+            # Define column groups in order of preference
+            column_groups = [
+                # Core columns that should always exist
+                ['"Product Name*"', '"Product Type*"', '"Vendor/Supplier*"', '"Product Brand"', '"Lineage"'],
+                # Basic product info
+                ['"Description"', '"Weight*"', '"Units"', '"Price"', '"Product Strain"', '"Quantity*"'],
+                # Test results
+                ['"THC test result"', '"CBD test result"', '"Test result unit (% or mg)"'],
+                # Additional product details
+                ['"DOH"', '"Concentrate Type"', '"Ratio"', '"JointRatio"', '"State"'],
+                # Product flags
+                ['"Is Sample? (yes/no)"', '"Is MJ product?(yes/no)"', '"Discountable? (yes/no)"', '"Room*"'],
+                # Batch and inventory info
+                ['"Batch Number"', '"Lot Number"', '"Barcode*"', '"Cost*"'],
+                # Medical and pricing
+                ['"Medical Only (Yes/No)"', '"Med Price"', '"Expiration Date(YYYY-MM-DD)"'],
+                # Additional fields
+                ['"Is Archived? (yes/no)"', '"THC Per Serving"', '"Allergens"', '"Solvent"'],
+                # Metadata
+                ['"Accepted Date"', '"Internal Product Identifier"', '"Product Tags (comma separated)"', '"Image URL"', '"Ingredients"']
+            ]
+            
+            # Build SELECT clause with only existing columns
+            select_columns = []
+            for group in column_groups:
+                for col in group:
+                    if col in product_columns:
+                        select_columns.append(f'p.{col}')
+            
+            # Always include these core columns
+            core_columns = ['s.strain_name', 'p.total_occurrences', 'p.first_seen_date', 'p.last_seen_date']
+            select_columns.extend(core_columns)
+            
+            if not select_columns:
+                # Ultimate fallback - just get basic info
+                select_columns = ['p.id', 's.strain_name', 'p.total_occurrences']
+            
+            # Build and execute the query
+            select_clause = ', '.join(select_columns)
+            query = f'''
+                SELECT {select_clause}
+                FROM products p
+                LEFT JOIN strains s ON p.strain_id = s.id
+                ORDER BY p.total_occurrences DESC
+            '''
+            
+            logger.info(f"Exporting products with columns: {select_columns[:10]}...")  # Log first 10 columns
+            products_df = pd.read_sql_query(query, conn)
             
             # Export to Excel
             with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
