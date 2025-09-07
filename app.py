@@ -10144,6 +10144,98 @@ def debug_font_config():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)})
 
+# Database decompress endpoint
+@app.route('/api/decompress-database', methods=['POST'])
+def decompress_database():
+    """Decompress the uploaded database file"""
+    try:
+        import gzip
+        import os
+        import sqlite3
+        from flask import jsonify
+        
+        # Paths
+        compressed_file = os.path.join(current_dir, 'uploads', 'product_database', 'product_database.db.gz')
+        db_file = os.path.join(current_dir, 'uploads', 'product_database', 'product_database.db')
+        
+        if not os.path.exists(compressed_file):
+            return jsonify({'error': 'Compressed database file not found'}), 404
+        
+        # Decompress the file
+        with gzip.open(compressed_file, 'rb') as f_in:
+            with open(db_file, 'wb') as f_out:
+                f_out.write(f_in.read())
+        
+        # Verify the decompressed file
+        if os.path.exists(db_file):
+            file_size = os.path.getsize(db_file)
+            
+            # Test the database
+            conn = sqlite3.connect(db_file)
+            cursor = conn.cursor()
+            
+            cursor.execute('SELECT COUNT(*) FROM products')
+            products_count = cursor.fetchone()[0]
+            
+            cursor.execute('SELECT COUNT(*) FROM strains')
+            strains_count = cursor.fetchone()[0]
+            
+            conn.close()
+            
+            return jsonify({
+                'success': True,
+                'message': 'Database decompressed successfully',
+                'file_size': file_size,
+                'products': products_count,
+                'strains': strains_count
+            })
+        else:
+            return jsonify({'error': 'Failed to decompress database'}), 500
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# Database file upload endpoint
+@app.route('/api/upload-database-file', methods=['POST'])
+def upload_database_file():
+    """Upload a database file"""
+    try:
+        import os
+        from flask import request, jsonify
+        
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file provided'}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        # Check file extension
+        if not file.filename.endswith(('.db', '.db.gz')):
+            return jsonify({'error': 'Only .db files are allowed'}), 400
+        
+        # Create upload directory
+        upload_dir = os.path.join(current_dir, 'uploads', 'product_database')
+        os.makedirs(upload_dir, exist_ok=True)
+        
+        # Save the file
+        file_path = os.path.join(upload_dir, file.filename)
+        file.save(file_path)
+        
+        # Get file size
+        file_size = os.path.getsize(file_path)
+        
+        return jsonify({
+            'success': True,
+            'message': 'Database file uploaded successfully',
+            'filename': file.filename,
+            'file_size': file_size,
+            'path': file_path
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     # Create and run the application
     label_maker = LabelMakerApp()
