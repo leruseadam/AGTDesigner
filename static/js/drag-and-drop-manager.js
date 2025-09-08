@@ -282,6 +282,13 @@ class DragAndDropManager {
             return;
         }
         
+        // Validate that the tag row has a valid checkbox before starting drag
+        const checkbox = tagRow.querySelector('.tag-checkbox');
+        if (!checkbox || !checkbox.value) {
+            console.log('Tag row has invalid checkbox, preventing drag');
+            return;
+        }
+        
         console.log('Drag handle clicked for:', tagRow.textContent.trim());
         
         // Prevent default behavior and stop propagation to prevent checkbox changes
@@ -454,19 +461,12 @@ class DragAndDropManager {
         const container = document.querySelector('#selectedTags');
         if (!container) return;
         
-        const tagRows = this.getDraggableTagItems(container);
-        if (tagRows.length === 0) return;
-        
-        // Find the parent container of the dragged element
-        const draggedElement = tagRows[this.originalIndex];
-        if (!draggedElement) return;
-        
-        const draggedParent = this.findParentContainer(draggedElement);
-        
-        // Allow dropping across all containers - get all tag rows in the entire selected tags container
+        // Get all tag rows in the entire selected tags container
         const allTagRows = Array.from(container.querySelectorAll('.tag-row')).filter(row => 
             row.querySelector('.tag-checkbox')
         );
+        
+        if (allTagRows.length === 0) return;
         
         console.log(`Found ${allTagRows.length} total tag rows across all containers`);
         
@@ -499,7 +499,7 @@ class DragAndDropManager {
         
         if (this.targetPosition !== targetIndex) {
             this.targetPosition = targetIndex;
-            this.showDropIndicator(targetIndex, targetParent || draggedParent, allTagRows);
+            this.showDropIndicator(targetIndex, targetParent, allTagRows);
         }
     }
 
@@ -593,11 +593,15 @@ class DragAndDropManager {
         const container = document.querySelector('#selectedTags');
         if (!container) return;
         
-        const tagRows = this.getDraggableTagItems(container);
-        if (tagRows.length === 0) return;
+        // Get all tag rows BEFORE removing anything
+        const allTagRows = Array.from(container.querySelectorAll('.tag-row')).filter(row => 
+            row.querySelector('.tag-checkbox')
+        );
+        
+        if (allTagRows.length === 0) return;
         
         // Get the dragged element
-        const draggedElement = tagRows[this.originalIndex];
+        const draggedElement = allTagRows[this.originalIndex];
         if (!draggedElement) return;
         
         // Get the checkbox value for debugging
@@ -605,7 +609,7 @@ class DragAndDropManager {
         const draggedValue = draggedCheckbox ? draggedCheckbox.value : 'unknown';
         console.log('Dragging element with value:', draggedValue);
         
-        // Find the parent container of the dragged element (e.g., weight-section, product-type-section, etc.)
+        // Find the parent container of the dragged element
         const draggedParent = this.findParentContainer(draggedElement);
         console.log('Dragged element parent:', draggedParent);
         
@@ -625,51 +629,52 @@ class DragAndDropManager {
         // Remove from current position
         draggedElement.remove();
         
-        // Find the target element and its parent
-        const targetElement = tagRows[this.targetPosition];
+        // Calculate the correct target position after removal
+        // If we're moving to a position after the original, we need to adjust for the removal
+        let adjustedTargetPosition = this.targetPosition;
+        if (this.targetPosition > this.originalIndex) {
+            adjustedTargetPosition = this.targetPosition - 1;
+        }
+        
+        // Ensure target position is within bounds
+        adjustedTargetPosition = Math.max(0, Math.min(adjustedTargetPosition, allTagRows.length - 1));
+        
+        // Get the target element after removal
+        const remainingTagRows = Array.from(container.querySelectorAll('.tag-row')).filter(row => 
+            row.querySelector('.tag-checkbox')
+        );
+        
+        const targetElement = remainingTagRows[adjustedTargetPosition];
         const targetParent = targetElement ? this.findParentContainer(targetElement) : null;
         
         console.log('Target element parent:', targetParent);
+        console.log('Adjusted target position:', adjustedTargetPosition);
+        console.log('Remaining tag rows count:', remainingTagRows.length);
         
-        // Allow reordering across different parent containers (weight categories, product types, etc.)
-        if (draggedParent && targetParent) {
-            if (draggedParent === targetParent) {
-                console.log('Reordering within same parent container');
-                
-                // Get all siblings within the same parent
-                const siblings = Array.from(draggedParent.querySelectorAll('.tag-row')).filter(row => 
-                    row.querySelector('.tag-checkbox')
-                );
-                
-                // Find the target sibling
-                const targetSibling = siblings[this.targetPosition] || siblings[siblings.length - 1];
-                
-                if (targetSibling) {
-                    draggedParent.insertBefore(draggedElement, targetSibling);
-                } else {
-                    draggedParent.appendChild(draggedElement);
-                }
+        // Insert the dragged element at the correct position
+        if (targetElement && targetParent) {
+            // Insert before the target element
+            targetParent.insertBefore(draggedElement, targetElement);
+            console.log('Inserted before target element');
+        } else if (targetParent) {
+            // Append to the target parent
+            targetParent.appendChild(draggedElement);
+            console.log('Appended to target parent');
+        } else if (remainingTagRows.length > 0) {
+            // Insert before the first remaining element
+            const firstElement = remainingTagRows[0];
+            const firstParent = this.findParentContainer(firstElement);
+            if (firstParent) {
+                firstParent.insertBefore(draggedElement, firstElement);
+                console.log('Inserted before first element');
             } else {
-                console.log('Reordering across different parent containers - allowing mixed categories');
-                
-                // Get all tag rows in the target parent
-                const targetSiblings = Array.from(targetParent.querySelectorAll('.tag-row')).filter(row => 
-                    row.querySelector('.tag-checkbox')
-                );
-                
-                // Find the target position within the target parent
-                const targetSibling = targetSiblings[this.targetPosition] || targetSiblings[targetSiblings.length - 1];
-                
-                if (targetSibling) {
-                    targetParent.insertBefore(draggedElement, targetSibling);
-                } else {
-                    targetParent.appendChild(draggedElement);
-                }
+                container.appendChild(draggedElement);
+                console.log('Appended to main container');
             }
         } else {
-            // If no specific parent containers, just append to the main container
-            console.log('No specific parent containers - appending to main container');
+            // No remaining elements, append to main container
             container.appendChild(draggedElement);
+            console.log('Appended to main container (no remaining elements)');
         }
         
         // Verify the element is still in the selected tags container
@@ -688,6 +693,16 @@ class DragAndDropManager {
                 draggedCheckbox.style.pointerEvents = '';
             }
         }, 100);
+        
+        // Validate tag integrity after reorder
+        if (!this.validateTagIntegrity()) {
+            console.error('Tag integrity validation failed after reorder!');
+            // Try to restore the tag if possible
+            if (draggedElement && !container.contains(draggedElement)) {
+                console.log('Attempting to restore lost tag...');
+                container.appendChild(draggedElement);
+            }
+        }
         
         // Update backend order
         this.updateBackendOrder();
@@ -925,6 +940,29 @@ class DragAndDropManager {
                 current: currentText
             });
             return false;
+        }
+        
+        return true;
+    }
+
+    validateTagIntegrity() {
+        const container = document.querySelector('#selectedTags');
+        if (!container) return false;
+        
+        const allTagRows = Array.from(container.querySelectorAll('.tag-row')).filter(row => 
+            row.querySelector('.tag-checkbox')
+        );
+        
+        console.log(`Validation: Found ${allTagRows.length} tag rows in selected tags`);
+        
+        // Check that all tag rows have valid checkboxes
+        for (let i = 0; i < allTagRows.length; i++) {
+            const row = allTagRows[i];
+            const checkbox = row.querySelector('.tag-checkbox');
+            if (!checkbox || !checkbox.value) {
+                console.error(`Validation failed: Tag row ${i} has invalid checkbox`);
+                return false;
+            }
         }
         
         return true;

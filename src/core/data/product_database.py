@@ -212,8 +212,17 @@ class ProductDatabase:
                 
                 # Create indexes for better performance
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_strains_normalized ON strains(normalized_name)')
-                cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_normalized ON products(normalized_name)')
-                cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_strain ON products(strain_id)')
+                
+                # Only create normalized_name index if the column exists
+                cursor.execute("PRAGMA table_info(products)")
+                product_columns = [col[1] for col in cursor.fetchall()]
+                if 'normalized_name' in product_columns:
+                    cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_normalized ON products(normalized_name)')
+                
+                # Only create strain_id index if the column exists
+                if 'strain_id' in product_columns:
+                    cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_strain ON products(strain_id)')
+                    
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_vendor_brand ON products("Vendor/Supplier*", "Product Brand")')
                 
                 conn.commit()
@@ -1572,14 +1581,14 @@ class ProductDatabase:
             cursor.execute("PRAGMA table_info(products)")
             product_columns = {row[1] for row in cursor.fetchall()}
             
-            # Define column groups in order of preference
+            # Define column groups in order of preference (using actual column names)
             column_groups = [
                 # Core columns that should always exist
                 ['"Product Name*"', '"Product Type*"', '"Vendor/Supplier*"', '"Product Brand"', '"Lineage"'],
                 # Basic product info
-                ['"Description"', '"Weight*"', '"Units"', '"Price"', '"Product Strain"', '"Quantity*"'],
+                ['"Description"', '"Weight*"', '"Weight Unit* (grams/gm or ounces/oz)"', '"Price* (Tier Name for Bulk)"', '"Product Strain"', '"Quantity*"'],
                 # Test results
-                ['"THC test result"', '"CBD test result"', '"Test result unit (% or mg)"'],
+                ['"Test result unit (% or mg)"'],
                 # Additional product details
                 ['"DOH"', '"Concentrate Type"', '"Ratio"', '"JointRatio"', '"State"'],
                 # Product flags
@@ -1591,7 +1600,9 @@ class ProductDatabase:
                 # Additional fields
                 ['"Is Archived? (yes/no)"', '"THC Per Serving"', '"Allergens"', '"Solvent"'],
                 # Metadata
-                ['"Accepted Date"', '"Internal Product Identifier"', '"Product Tags (comma separated)"', '"Image URL"', '"Ingredients"']
+                ['"Accepted Date"', '"Internal Product Identifier"', '"Product Tags (comma separated)"', '"Image URL"', '"Ingredients"'],
+                # THC/CBD data
+                ['"Total THC"', '"THCA"', '"CBDA"', '"CBN"']
             ]
             
             # Build SELECT clause with only existing columns
@@ -1601,22 +1612,33 @@ class ProductDatabase:
                     if col in product_columns:
                         select_columns.append(f'p.{col}')
             
-            # Always include these core columns
-            core_columns = ['s.strain_name', 'p.total_occurrences', 'p.first_seen_date', 'p.last_seen_date']
+            # Always include these core columns (only if they exist)
+            core_columns = []
+            if 'strain_id' in product_columns:
+                core_columns.extend(['s.strain_name', 'p.total_occurrences', 'p.first_seen_date', 'p.last_seen_date'])
             select_columns.extend(core_columns)
             
             if not select_columns:
                 # Ultimate fallback - just get basic info
-                select_columns = ['p.id', 's.strain_name', 'p.total_occurrences']
+                select_columns = ['p.id', 'p."Product Name*"']
             
             # Build and execute the query
             select_clause = ', '.join(select_columns)
-            query = f'''
-                SELECT {select_clause}
-                FROM products p
-                LEFT JOIN strains s ON p.strain_id = s.id
-                ORDER BY p.total_occurrences DESC
-            '''
+            
+            # Check if we can join with strains table
+            if 'strain_id' in product_columns and 'normalized_name' in product_columns:
+                query = f'''
+                    SELECT {select_clause}
+                    FROM products p
+                    LEFT JOIN strains s ON p.strain_id = s.id
+                    ORDER BY p.total_occurrences DESC
+                '''
+            else:
+                query = f'''
+                    SELECT {select_clause}
+                    FROM products p
+                    ORDER BY p."Product Name*"
+                '''
             
             logger.info(f"Exporting products with columns: {select_columns[:10]}...")  # Log first 10 columns
             products_df = pd.read_sql_query(query, conn)
@@ -1930,7 +1952,7 @@ class ProductDatabase:
                 cursor.execute('''
                     UPDATE products
                     SET lineage = ?, updated_at = ?
-                    WHERE normalized_name = ? AND vendor = ? AND brand = ?
+                    WHERE normalized_name = ? AND "Vendor/Supplier*" = ? AND "Product Brand" = ?
                 ''', (new_lineage, current_date, normalized_name, vendor, brand))
                 logger.info(f"Updated lineage for product '{product_name}' (vendor={vendor}, brand={brand}) to '{new_lineage}'")
             else:
@@ -2465,7 +2487,7 @@ class ProductDatabase:
             cursor.execute(f'''
                 SELECT p.id, p."Product Name*", p.normalized_name, p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
                        s.strain_name, s.canonical_lineage, p.total_occurrences, p.first_seen_date, p.last_seen_date,
-                       p."Description", p."Weight*", p."Units", p."Price", p."THC test result", p."CBD test result", p."Test result unit (% or mg)",
+                       p."Description", p."Weight*", p."Units", p."Price* (Tier Name for Bulk)", p."THC test result", p."CBD test result", p."Test result unit (% or mg)",
                        p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio", p."State", p."Is Sample? (yes/no)",
                        p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*", p."Cost*",
                        p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens",
@@ -2512,7 +2534,7 @@ class ProductDatabase:
                         'Description': result[12] or result[1],  # description or product_name
                         'Weight*': result[13],  # weight
                         'Units': result[14],  # units
-                        'Price': result[15],  # price
+                        'Price': result[15],  # price (Price* (Tier Name for Bulk))
                         'THC test result': result[16],  # thc_test_result
                         'CBD test result': result[17],  # cbd_test_result
                         'Test result unit': result[18],  # test_result_unit
@@ -2624,12 +2646,12 @@ class ProductDatabase:
             # Add search conditions with priority using actual column names
             if normalized_name:
                 # Exact name match (highest priority)
-                query += " AND (p.product_name LIKE ? OR p.description LIKE ?)"
+                query += " AND (p.\"Product Name*\" LIKE ? OR p.\"Description\" LIKE ?)"
                 params.extend([f"%{normalized_name}%", f"%{normalized_name}%"])
             
             if vendor:
                 # Vendor match
-                query += " AND p.vendor LIKE ?"
+                query += " AND p.\"Vendor/Supplier*\" LIKE ?"
                 params.append(f"%{vendor}%")
             
             # Note: Product Type is often empty in the database, so we'll make this optional
@@ -2640,11 +2662,11 @@ class ProductDatabase:
             
             if strain:
                 # Strain match
-                query += " AND (p.product_strain LIKE ? OR p.lineage LIKE ?)"
+                query += " AND (p.\"Product Strain\" LIKE ? OR p.\"Lineage\" LIKE ?)"
                 params.extend([f"%{strain}%", f"%{strain}%"])
             
             # Order by relevance (exact matches first, then by occurrence count)
-            query += " ORDER BY CASE WHEN p.product_name LIKE ? THEN 1 ELSE 0 END DESC, p.total_occurrences DESC LIMIT 1"
+            query += " ORDER BY CASE WHEN p.\"Product Name*\" LIKE ? THEN 1 ELSE 0 END DESC, p.total_occurrences DESC LIMIT 1"
             params.append(f"%{normalized_name}%")
             
             cursor.execute(query, params)

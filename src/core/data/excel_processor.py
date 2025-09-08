@@ -240,7 +240,7 @@ def batch_lineage_database_update(processor, df):
             return
         
         # Group by strain for efficient batch processing
-        strain_groups = classic_df.groupby('Product Strain')
+        strain_groups = classic_df.groupby('Product Strain', observed=True)
         
         for strain_name, group in strain_groups:
             if not strain_name or pd.isna(strain_name):
@@ -912,7 +912,7 @@ class ExcelProcessor:
             # Check which required columns are missing
             missing_columns = [col for col in required_columns if col not in df.columns]
             if missing_columns:
-                self.logger.warning(f"Missing required columns: {missing_columns}")
+                self.logger.debug(f"Missing required columns: {missing_columns}")
             
             # Apply minimal processing only if ENABLE_MINIMAL_PROCESSING is True
             if ENABLE_MINIMAL_PROCESSING:
@@ -1142,7 +1142,7 @@ class ExcelProcessor:
             # Check which required columns are missing
             missing_columns = [col for col in required_columns if col not in df.columns]
             if missing_columns:
-                self.logger.warning(f"Missing required columns: {missing_columns}")
+                self.logger.debug(f"Missing required columns: {missing_columns}")
             
             # Keep all columns - don't filter them out
             # df = df[existing_required]  # REMOVED - this was causing column loss
@@ -2836,8 +2836,8 @@ class ExcelProcessor:
                         'ProductStrain': wrap_with_marker(final_product_strain, "PRODUCTSTRAIN") if include_product_strain else '',
                         'ProductType': record.get('Product Type*', ''),
                         'Ratio': str(record.get('Ratio', '')).strip(),
-                        'THC': self.wrap_with_marker(ai_value, "THC"),  # AI column for THC
-                        'CBD': self.wrap_with_marker(ak_value, "CBD"),  # AK column for CBD
+                        'THC': self.wrap_with_marker(self._format_individual_thc_cbd(ai_value, 'THC'), "THC"),  # AI column for THC
+                        'CBD': self.wrap_with_marker(self._format_individual_thc_cbd(ak_value, 'CBD'), "CBD"),  # AK column for CBD
                         'THC_CBD': self._construct_thc_cbd_field(ai_value, ak_value, product_type),  # Construct combined THC_CBD field
                         'AI': ai_value,  # Total THC or THCA value for THC
                         'AJ': str(record.get('THCA', '')).strip(),  # THCA value for alternative THC
@@ -2881,7 +2881,7 @@ class ExcelProcessor:
         This ensures the template processor has access to the combined field.
         """
         if not thc_value and not cbd_value:
-            return ""
+            return "THC: 0% CBD: 0%"
         
         # Clean up the values
         thc_clean = str(thc_value).strip() if thc_value else ""
@@ -2893,68 +2893,35 @@ class ExcelProcessor:
         if cbd_clean in ['nan', 'NaN', '']:
             cbd_clean = ""
         
-        # Construct the combined field
+        # Construct the combined field - values already have % symbol from ai_value/ak_value
         if thc_clean and cbd_clean:
             # Both values available
-            if '%' in thc_clean or '%' in cbd_clean:
-                # Percentage format - round to 1 decimal place
-                try:
-                    thc_rounded = f"{float(thc_clean.replace('%', '')):.1f}" if thc_clean.replace('%', '').replace('.', '').isdigit() else thc_clean
-                    cbd_rounded = f"{float(cbd_clean.replace('%', '')):.1f}" if cbd_clean.replace('%', '').replace('.', '').isdigit() else cbd_clean
-                    return f"THC: {thc_rounded} CBD: {cbd_rounded}"
-                except (ValueError, TypeError):
-                    # Fallback to original values if conversion fails
-                    return f"THC: {thc_clean} CBD: {cbd_clean}"
-            elif 'mg' in thc_clean.lower() or 'mg' in cbd_clean.lower():
-                # mg format
-                return f"THC: {thc_clean} CBD: {cbd_clean}"
-            else:
-                # Assume percentage format - round to 1 decimal place
-                try:
-                    thc_rounded = f"{float(thc_clean):.1f}" if thc_clean.replace('.', '').isdigit() else thc_clean
-                    cbd_rounded = f"{float(cbd_clean):.1f}" if cbd_clean.replace('.', '').isdigit() else cbd_clean
-                    return f"THC: {thc_rounded}% CBD: {cbd_rounded}%"
-                except (ValueError, TypeError):
-                    # Fallback to original values if conversion fails
-                    return f"THC: {thc_clean}% CBD: {cbd_clean}%"
+            return f"THC: {thc_clean} CBD: {cbd_clean}"
         elif thc_clean:
             # Only THC value available
-            if '%' in thc_clean:
-                # Round to 1 decimal place
-                try:
-                    thc_rounded = f"{float(thc_clean.replace('%', '')):.1f}" if thc_clean.replace('%', '').replace('.', '').isdigit() else thc_clean
-                    return f"THC: {thc_rounded}"
-                except (ValueError, TypeError):
-                    return f"THC: {thc_clean}"
-            elif 'mg' in thc_clean.lower():
-                return f"THC: {thc_clean}"
-            else:
-                # Round to 1 decimal place
-                try:
-                    thc_rounded = f"{float(thc_clean):.1f}" if thc_clean.replace('.', '').isdigit() else thc_clean
-                    return f"THC: {thc_rounded}%"
-                except (ValueError, TypeError):
-                    return f"THC: {thc_clean}%"
+            return f"THC: {thc_clean} CBD:"
         elif cbd_clean:
             # Only CBD value available
-            if '%' in cbd_clean:
-                # Round to 1 decimal place
-                try:
-                    cbd_rounded = f"{float(cbd_clean.replace('%', '')):.1f}" if cbd_clean.replace('%', '').replace('.', '').isdigit() else cbd_clean
-                    return f"CBD: {cbd_rounded}"
-                except (ValueError, TypeError):
-                    return f"CBD: {cbd_clean}"
-            elif 'mg' in cbd_clean.lower():
-                return f"CBD: {cbd_clean}"
-            else:
-                # Round to 1 decimal place
-                try:
-                    cbd_rounded = f"{float(cbd_clean):.1f}" if cbd_clean.replace('.', '').isdigit() else cbd_clean
-                    return f"CBD: {cbd_rounded}%"
-                except (ValueError, TypeError):
-                    return f"CBD: {cbd_clean}%"
+            return f"THC: CBD: {cbd_clean}"
         else:
+            return "THC: 0% CBD: 0%"
+
+    def _format_individual_thc_cbd(self, value, cannabinoid_type):
+        """
+        Return THC or CBD values exactly as they are in the data.
+        
+        Args:
+            value: The raw THC or CBD value
+            cannabinoid_type: Either 'THC' or 'CBD'
+        
+        Returns:
+            Raw value without any formatting
+        """
+        if not value or str(value).strip() in ['nan', 'NaN', '']:
             return ""
+        
+        # Return the value exactly as it is - no % symbol, no rounding, no formatting
+        return str(value).strip()
 
     def _format_weight_units(self, record):
         # Handle pandas Series and NA values properly
@@ -4430,10 +4397,11 @@ class ExcelProcessor:
                             continue
                 
                 if thc_values:
-                    # Return the average THC value from similar products
+                    # Return the average THC value from similar products, rounded to 1 decimal place
                     avg_thc = sum(thc_values) / len(thc_values)
-                    logger.debug(f"Found {len(similar_products)} similar products, using average THC: {avg_thc:.1f}%")
-                    return round(avg_thc, 1)
+                    avg_thc_rounded = round(avg_thc, 1)
+                    logger.debug(f"Found {len(similar_products)} similar products, using average THC: {avg_thc_rounded}%")
+                    return avg_thc_rounded
             
             # If no similar products found, fall back to type-based inference
             logger.debug(f"No similar products found for {product_name}, falling back to type-based inference")
@@ -4468,8 +4436,8 @@ class ExcelProcessor:
                 if cbd_values:
                     # Return the average CBD value from similar products
                     avg_cbd = sum(cbd_values) / len(cbd_values)
-                    logger.debug(f"Found {len(similar_products)} similar products, using average CBD: {avg_cbd:.1f}%")
-                    return round(avg_cbd, 1)
+                    logger.debug(f"Found {len(similar_products)} similar products, using average CBD: {avg_cbd}%")
+                    return avg_cbd
             
             # If no similar products found, fall back to type-based inference
             logger.debug(f"No similar products found for {product_name}, falling back to type-based inference")
@@ -5043,68 +5011,19 @@ class ExcelProcessor:
                         final_lineage = original_lineage
                         final_product_strain = extracted_strain  # Use extracted strain
                     
-                    # Extract THC/CBD values from database columns
+                    # Extract THC/CBD values from database columns - use raw Total THC and CBDA
                     total_thc_value = str(record.get('Total THC', '')).strip()
-                    thca_value = str(record.get('THCA', '')).strip()
-                    thc_test_result = str(record.get('THC test result', '')).strip()
-                    
-                    # Clean up THC test result value
-                    if thc_test_result in ['nan', 'NaN', '']:
-                        thc_test_result = ''
-                    
-                    # Convert to float for comparison, handling empty/invalid values
-                    def safe_float(value):
-                        if not value or value in ['nan', 'NaN', '']:
-                            return 0.0
-                        try:
-                            return float(value)
-                        except (ValueError, TypeError):
-                            return 0.0
-                    
-                    # Compare Total THC vs THC test result, use highest
-                    total_thc_float = safe_float(total_thc_value)
-                    thc_test_float = safe_float(thc_test_result)
-                    thca_float = safe_float(thca_value)
-                    
-                    # For THC: Use the highest value among Total THC, THC test result, and THCA
-                    if total_thc_float > 0:
-                        if thc_test_float > total_thc_float:
-                            ai_value = thc_test_result
-                            logger.debug(f"Using THC test result ({thc_test_result}) over Total THC ({total_thc_value}) for product: {product_name}")
-                        else:
-                            ai_value = total_thc_value
-                    else:
-                        # Total THC is 0 or empty, compare THCA vs THC test result
-                        if thca_float > 0 and thca_float >= thc_test_float:
-                            ai_value = thca_value
-                        elif thc_test_float > 0:
-                            ai_value = thc_test_result
-                        else:
-                            ai_value = ''
-                    
-                    # For CBD: merge CBDA with CBD test result, use highest value
                     cbda_value = str(record.get('CBDA', '')).strip()
-                    cbd_test_result = str(record.get('CBD test result', '')).strip()
                     
-                    # Clean up CBD test result value
-                    if cbd_test_result in ['nan', 'NaN', '']:
-                        cbd_test_result = ''
+                    # Use THC/CBD values exactly as they are in the data, but add % symbol
+                    ai_value = total_thc_value if total_thc_value and total_thc_value.lower() not in ['nan', 'none', ''] else ''
+                    ak_value = cbda_value if cbda_value and cbda_value.lower() not in ['nan', 'none', ''] else ''
                     
-                    # Compare CBDA vs CBD test result, use highest
-                    cbda_float = safe_float(cbda_value)
-                    cbd_test_float = safe_float(cbd_test_result)
-                    
-                    if cbd_test_float > cbda_float:
-                        ak_value = cbd_test_result
-                        logger.debug(f"Using CBD test result ({cbd_test_result}) over CBDA ({cbda_value}) for product: {product_name}")
-                    else:
-                        ak_value = cbda_value
-                    
-                    # Clean up the values (remove 'nan', empty strings, etc.)
-                    if ai_value in ['nan', 'NaN', '']:
-                        ai_value = ''
-                    if ak_value in ['nan', 'NaN', '']:
-                        ak_value = ''
+                    # Add % symbol if values exist and don't already have it
+                    if ai_value and not ai_value.endswith('%'):
+                        ai_value = f"{ai_value}%"
+                    if ak_value and not ak_value.endswith('%'):
+                        ak_value = f"{ak_value}%"
                     
                     # Get vendor information
                     vendor = record.get('Vendor', '') or record.get('Vendor/Supplier*', '')
