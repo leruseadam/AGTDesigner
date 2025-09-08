@@ -110,9 +110,30 @@
       updateCurrentStoreDisplay(storeValue);
     }
     
+    function hideInterferingElements() {
+      // Hide any elements that might be interfering with the modal
+      const interferingElements = [
+        'generationSplashModal',
+        'spinnerOverlay',
+        'actionSplashModal'
+      ];
+      
+      interferingElements.forEach(id => {
+        const element = document.getElementById(id);
+        if (element) {
+          element.style.display = 'none';
+          element.style.visibility = 'hidden';
+          console.log(`Hidden interfering element: ${id}`);
+        }
+      });
+    }
+    
     function showStoreSelectionModal() {
       try {
         console.log('Attempting to show store selection modal...');
+        
+        // Hide any interfering elements first
+        hideInterferingElements();
         
         // Check if Bootstrap is available
         if (typeof bootstrap === 'undefined') {
@@ -126,9 +147,49 @@
           return;
         }
         
-        const modal = new bootstrap.Modal(modalElement);
+        console.log('Modal element found:', modalElement);
+        console.log('Modal element display:', modalElement.style.display);
+        console.log('Modal element classes:', modalElement.className);
+        
+        // Set high z-index to ensure modal appears above other elements
+        modalElement.style.zIndex = '10001';
+        
+        const modal = new bootstrap.Modal(modalElement, {
+          backdrop: true,
+          keyboard: false,
+          focus: true
+        });
         modal.show();
         console.log('Store selection modal shown successfully');
+        
+        // Fallback: Force show if Bootstrap doesn't work
+        setTimeout(() => {
+          if (!modalElement.classList.contains('show')) {
+            console.log('Bootstrap modal failed, forcing visibility...');
+            modalElement.style.display = 'block';
+            modalElement.classList.add('show');
+            modalElement.setAttribute('aria-hidden', 'false');
+            document.body.classList.add('modal-open');
+            
+            // Add backdrop manually
+            const backdrop = document.createElement('div');
+            backdrop.className = 'modal-backdrop fade show';
+            backdrop.style.zIndex = '10000';
+            document.body.appendChild(backdrop);
+          }
+        }, 200);
+        
+        // Additional debugging
+        setTimeout(() => {
+          console.log('Modal visibility after show:', modalElement.style.display);
+          console.log('Modal classes after show:', modalElement.className);
+          console.log('Modal backdrop exists:', document.querySelector('.modal-backdrop'));
+          console.log('All modals:', document.querySelectorAll('.modal'));
+          console.log('All elements with high z-index:', Array.from(document.querySelectorAll('*')).filter(el => {
+            const zIndex = window.getComputedStyle(el).zIndex;
+            return zIndex && parseInt(zIndex) >= 9999;
+          }));
+        }, 100);
       } catch (error) {
         console.error('Error showing store selection modal:', error);
       }
@@ -2528,6 +2589,18 @@
     }
     
     /* Store Selection Modal Styles */
+    #storeSelectionModal {
+      z-index: 10001 !important;
+    }
+    
+    #storeSelectionModal .modal-dialog {
+      z-index: 10002 !important;
+    }
+    
+    #storeSelectionModal .modal-content {
+      z-index: 10003 !important;
+    }
+    
     .store-options-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -4669,6 +4742,13 @@
                 <div class="store-location">Walla Walla, WA</div>
               </div>
             </button>
+            
+            <button class="btn btn-store-option" onclick="selectStore('Test')">
+              <div class="store-option-content">
+                <div class="store-name">Test Store</div>
+                <div class="store-location">Development/Testing</div>
+              </div>
+            </button>
           </div>
         </div>
       </div>
@@ -6172,7 +6252,6 @@
     };
   </script>
   
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="{{ url_for('static', filename='js/main.js') }}?v={{ cache_bust }}"></script>
   
@@ -9972,6 +10051,13 @@
       // Refresh metrics every 30 seconds
       setInterval(refreshPerformanceMetrics, 30000);
     }
+    
+    // Test store selection modal
+    console.log('=== TESTING STORE SELECTION MODAL ===');
+    setTimeout(() => {
+      console.log('Testing store selection modal after 3 seconds...');
+      showStoreSelectionModal();
+    }, 3000);
   </script>
 
   </body>
