@@ -31,7 +31,7 @@ def _load_font_sizing_config():
                 'mini': {
                     'description': [(5, 18), (20, 16), (40, 14), (60, 12), (80, 10), (100, 9), (float('inf'), 8)],
                     'brand': [(5, 12), (20, 10), (30, 8), (40, 7), (float('inf'), 6.5)],
-                    'price': [(2, 18), (3, 16), (float('inf'), 14)],
+                    'price': [(1, 18), (2, 16), (float('inf'), 14)],
                     'lineage': [(5, 12), (10, 11), (15, 10), (20, 9), (float('inf'), 8)],
                     'ratio': [(3, 12), (6, 11), (9, 10), (12, 9), (float('inf'), 8)],
                     'thc_cbd': [(5, 10), (10, 9), (15, 8), (20, 7), (float('inf'), 6)],
@@ -125,13 +125,9 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
             final_size = 20 * scale_factor
             logger.debug(f"Mini template price rule: '{text}' has {num_digits} digits, using 20pt font")
             return Pt(final_size)
-        elif num_digits == 3:  # Three digit prices (e.g., $100, $195)
-            final_size = 18 * scale_factor
-            logger.debug(f"Mini template price rule: '{text}' has {num_digits} digits, using 18pt font")
-            return Pt(final_size)
-        else:  # Four or more digits (e.g., $1000+)
-            final_size = 14 * scale_factor
-            logger.debug(f"Mini template price rule: '{text}' has {num_digits} digits, using 14pt font")
+        else:  # Three or more digits (e.g., $100, $1000+) - use 15pt font
+            final_size = 15 * scale_factor
+            logger.debug(f"Mini template price rule: '{text}' has {num_digits} digits, using 15pt font")
             return Pt(final_size)
     
     if not text:

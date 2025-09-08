@@ -389,8 +389,26 @@ def process_chunk(args):
             if ak_value in ['nan', 'NaN', '']:
                 ak_value = ""
             
-            label_data["THC"] = wrap_with_marker(ai_value, "THC")
-            label_data["CBD"] = wrap_with_marker(ak_value, "CBD")
+            # Apply formatting to individual THC and CBD values
+            if ai_value:
+                # Format THC value with percentage formatting rules
+                from src.core.generation.text_processing import format_thc_cbd_percentages
+                formatted_thc = format_thc_cbd_percentages(f"THC: {ai_value}%")
+                # Extract just the value part (remove "THC: " prefix, keep % symbol)
+                thc_value = formatted_thc.replace("THC: ", "")
+                label_data["THC"] = wrap_with_marker(thc_value, "THC")
+            else:
+                label_data["THC"] = wrap_with_marker("", "THC")
+            
+            if ak_value:
+                # Format CBD value with percentage formatting rules
+                from src.core.generation.text_processing import format_thc_cbd_percentages
+                formatted_cbd = format_thc_cbd_percentages(f"CBD: {ak_value}%")
+                # Extract just the value part (remove "CBD: " prefix, keep % symbol)
+                cbd_value = formatted_cbd.replace("CBD: ", "")
+                label_data["CBD"] = wrap_with_marker(cbd_value, "CBD")
+            else:
+                label_data["CBD"] = wrap_with_marker("", "CBD")
             
             # Combine Description and WeightUnits (use JointRatio for pre-roll products)
             # Use the processed Description and WeightUnits fields from above

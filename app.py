@@ -12,6 +12,14 @@ from werkzeug.utils import secure_filename
 IS_PYTHONANYWHERE = 'pythonanywhere.com' in os.environ.get('HTTP_HOST', '')
 IS_PRODUCTION = os.environ.get('FLASK_ENV') == 'production' or IS_PYTHONANYWHERE
 
+# OPTIMIZATION: Disable startup file loading for faster app startup
+# Set to False to enable default file loading on startup
+DISABLE_STARTUP_FILE_LOADING = False
+
+# OPTIMIZATION: Enable lazy loading for faster app startup
+# Set to False to load files immediately
+LAZY_LOADING_ENABLED = False
+
 # Use consistent settings for both local and production to ensure identical generation
 CHUNK_SIZE_LIMIT = 50
 MAX_PROCESSING_TIME_PER_CHUNK = 30
@@ -21,8 +29,19 @@ UPLOAD_CHUNK_SIZE = 16384  # 16KB chunks for uploads
 
 if IS_PRODUCTION:
     # Production optimizations (logging only)
-    logging.getLogger().setLevel(logging.WARNING)
+    logging.getLogger().setLevel(logging.ERROR)
     os.environ['FLASK_ENV'] = 'production'
+else:
+    # Development optimizations - reduce logging for faster startup
+    logging.getLogger().setLevel(logging.ERROR)
+
+# Suppress verbose logging from libraries for faster startup
+logging.getLogger('werkzeug').setLevel(logging.ERROR)
+logging.getLogger('urllib3').setLevel(logging.ERROR)
+logging.getLogger('requests').setLevel(logging.ERROR)
+logging.getLogger('pandas').setLevel(logging.ERROR)
+logging.getLogger('openpyxl').setLevel(logging.ERROR)
+logging.getLogger('xlrd').setLevel(logging.ERROR)
 from flask import (
     Flask, 
     request, 
@@ -387,8 +406,8 @@ def get_excel_processor():
                             logging.error(f"CRITICAL FIX: Failed to load session file: {session_file_path}")
                             _excel_processor.df = pd.DataFrame()  # Fallback to empty DataFrame
                     else:
-                        # Only load default file if not explicitly reset and no uploaded file exists
-                        if not _excel_processor_reset_flag:
+                        # OPTIMIZATION: Skip default file loading on startup for faster app loading
+                        if not _excel_processor_reset_flag and not DISABLE_STARTUP_FILE_LOADING:
                             # Try to load the default file
                             default_file = get_default_upload_file()
                             if default_file and os.path.exists(default_file):
@@ -429,15 +448,18 @@ def get_excel_processor():
                                 if not hasattr(_excel_processor, 'df'):
                                     _excel_processor.df = pd.DataFrame()
                         else:
-                            logging.info("Excel processor was reset - not loading default file automatically")
+                            if DISABLE_STARTUP_FILE_LOADING:
+                                logging.info("OPTIMIZATION: Skipping default file loading on startup for faster app loading")
+                            else:
+                                logging.info("Excel processor was reset - not loading default file automatically")
                             # Always ensure df attribute exists for reset processor
                             _excel_processor.df = pd.DataFrame()
                             # Clear the reset flag since we've handled it
                             _excel_processor_reset_flag = False
                 except Exception as session_error:
                     logging.warning(f"Error checking session for uploaded file: {session_error}")
-                    # Fall back to default file loading if session check fails
-                    if not _excel_processor_reset_flag:
+                    # OPTIMIZATION: Skip default file loading on startup for faster app loading
+                    if not _excel_processor_reset_flag and not DISABLE_STARTUP_FILE_LOADING:
                         default_file = get_default_upload_file()
                         if default_file and os.path.exists(default_file):
                             logging.info(f"Loading default file in get_excel_processor: {default_file}")
@@ -502,26 +524,8 @@ def get_product_database():
         # CRITICAL FIX: Use absolute path in uploads directory for database
         db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
         _product_database = ProductDatabase(db_path)
-        # CRITICAL FIX: Initialize the database immediately to ensure tables exist
-        try:
-            logging.info(f"Attempting to initialize database at: {db_path}")
-            _product_database.init_database()
-            logging.info(f"Product database initialized successfully at {db_path}")
-            
-            # Verify database was created and has tables
-            if os.path.exists(db_path):
-                db_size = os.path.getsize(db_path)
-                logging.info(f"Database file created successfully, size: {db_size} bytes")
-            else:
-                logging.error(f"Database file was not created at {db_path}")
-                
-        except Exception as e:
-            logging.error(f"Failed to initialize product database: {e}")
-            logging.error(f"Database path: {db_path}")
-            logging.error(f"Current directory: {os.getcwd()}")
-            logging.error(f"Directory exists: {os.path.exists(os.path.dirname(db_path))}")
-            logging.error(f"Directory writable: {os.access(os.path.dirname(db_path), os.W_OK) if os.path.exists(os.path.dirname(db_path)) else False}")
-            # Don't fail completely - return the uninitialized database
+        # OPTIMIZATION: Don't initialize database immediately - do it lazily on first use
+        logging.info(f"ProductDatabase created (lazy initialization) at: {db_path}")
     return _product_database
 
 def get_json_matcher():
@@ -614,8 +618,8 @@ def create_app():
     allowed_origins = [
         'https://www.agtpricetags.com',  # Your actual domain
         'https://agtpricetags.com',
-        'http://localhost:9090',  # For local development
-        'http://127.0.0.1:9090',
+        'http://localhost:5001',  # For local development
+        'http://127.0.0.1:5001',
         'https://adamcordova.pythonanywhere.com'  # PythonAnywhere domain
     ]
     CORS(app, resources={r"/api/*": {"origins": allowed_origins}})
@@ -887,8 +891,12 @@ class LabelMakerApp:
             
     def run(self):
         host = os.environ.get('HOST', '127.0.0.1')
-        port = int(os.environ.get('FLASK_PORT', 5003))  # Changed to 5003 to avoid port conflict
+        port = int(os.environ.get('FLASK_PORT', 5001))  # Changed to 5003 to avoid port conflict
         development_mode = self.app.config.get('DEVELOPMENT_MODE', False)
+        
+        # Show optimization status
+        if DISABLE_STARTUP_FILE_LOADING:
+            logging.info("🚀 PERFORMANCE OPTIMIZATION: Startup file loading disabled for faster app startup")
         
         logging.info(f"Starting Label Maker application on {host}:{port}")
         self.app.run(
@@ -3313,9 +3321,9 @@ def generate_labels():
             logging.info(f"   - Sample tags: {selected_tags_from_request[:3]}")
         logging.debug(f"Selected tags from request: {selected_tags_from_request}")
 
-        # Disable product DB integration for faster loads
+        # Enable product DB integration for proper tag matching
         excel_processor = get_excel_processor()
-        excel_processor.enable_product_db_integration(False)
+        excel_processor.enable_product_db_integration(True)
 
         # CRITICAL FIX: Preserve JSON matched products when reloading Excel data
         json_matched_products = None
@@ -3400,9 +3408,42 @@ def generate_labels():
                         except Exception as cache_error:
                             logging.error(f"CRITICAL FIX: Error restoring JSON matched products from cache: {cache_error}")
 
-        if excel_processor.df is None or excel_processor.df.empty:
-            logging.error("No data loaded in Excel processor")
-            return jsonify({'error': 'No data loaded. Please upload an Excel file.'}), 400
+        # Check if we have data in Excel processor OR database
+        has_excel_data = excel_processor.df is not None and not excel_processor.df.empty
+        has_database = False
+        
+        # If no Excel data, try to load the default inventory file
+        if not has_excel_data:
+            try:
+                default_file = "uploads/A Greener Today - Bothell_inventory_08-29-2025  8_38 PM.xlsx"
+                logging.info(f"Loading default Excel file: {default_file}")
+                excel_processor.load_file(default_file)
+                has_excel_data = excel_processor.df is not None and not excel_processor.df.empty
+                if has_excel_data:
+                    logging.info(f"Successfully loaded default Excel file with {len(excel_processor.df)} records")
+                else:
+                    logging.warning("Default Excel file loaded but DataFrame is empty")
+            except Exception as e:
+                logging.warning(f"Could not load default Excel file: {e}")
+        
+        # Check if database is available
+        try:
+            from src.core.data.product_database import get_product_database
+            product_db = get_product_database()
+            if product_db:
+                # Test if database has data
+                conn = product_db._get_connection()
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM products")
+                count = cursor.fetchone()[0]
+                has_database = count > 0
+                logging.info(f"Database has {count} products")
+        except Exception as e:
+            logging.warning(f"Could not check database: {e}")
+        
+        if not has_excel_data and not has_database:
+            logging.error("No data loaded in Excel processor or database")
+            return jsonify({'error': 'No data loaded. Please upload an Excel file or ensure database is populated.'}), 400
 
         # Apply filters early
         filtered_df = excel_processor.apply_filters(filters) if filters else excel_processor.df
@@ -3594,8 +3635,82 @@ def generate_labels():
             return jsonify({'error': 'No tags selected. Please select at least one tag before generating labels.'}), 400
         
         # Get the fully processed records using the dedicated method
-        records = excel_processor.get_selected_records(template_type)
-        logging.debug(f"Records returned from get_selected_records: {len(records) if records else 0}")
+        if has_excel_data:
+            records = excel_processor.get_selected_records(template_type)
+            logging.debug(f"Records returned from get_selected_records: {len(records) if records else 0}")
+        else:
+            # Use database directly when Excel data is not available
+            logging.info("Using database directly for record generation")
+            try:
+                from src.core.data.product_database import get_product_database
+                product_db = get_product_database()
+                if product_db:
+                    # Get products from database using the selected tags
+                    db_records = product_db.get_products_by_names(valid_selected_tags)
+                    if db_records:
+                        # Convert database records to the format expected by TemplateProcessor
+                        records = []
+                        for db_record in db_records:
+                            # Map database fields to template fields
+                            record = {
+                                'Product Name*': db_record.get('Product Name*', ''),
+                                'ProductType': db_record.get('Product Type*', ''),
+                                'Lineage': db_record.get('Lineage', ''),
+                                'ProductBrand': db_record.get('Product Brand', ''),
+                                'Vendor': db_record.get('Vendor/Supplier*', ''),
+                                'Product Strain': db_record.get('Product Strain', ''),
+                                'Price': db_record.get('Price', ''),
+                                'DOH': db_record.get('DOH', ''),
+                                'Ratio': db_record.get('Ratio', ''),
+                                'Weight*': db_record.get('Weight*', ''),
+                                'Units': db_record.get('Weight Unit* (grams/gm or ounces/oz)', ''),
+                                'Description': db_record.get('Description', ''),
+                                'THC test result': db_record.get('THC test result', ''),
+                                'CBD test result': db_record.get('CBD test result', ''),
+                                'Test result unit (% or mg)': db_record.get('Test result unit (% or mg)', ''),
+                                'Quantity*': db_record.get('Quantity*', ''),
+                                'Concentrate Type': db_record.get('Concentrate Type', ''),
+                                'JointRatio': db_record.get('JointRatio', ''),
+                                'State': db_record.get('State', ''),
+                                'Is Sample? (yes/no)': db_record.get('Is Sample? (yes/no)', ''),
+                                'Is MJ product?(yes/no)': db_record.get('Is MJ product?(yes/no)', ''),
+                                'Discountable? (yes/no)': db_record.get('Discountable? (yes/no)', ''),
+                                'Room*': db_record.get('Room*', ''),
+                                'Batch Number': db_record.get('Batch Number', ''),
+                                'Lot Number': db_record.get('Lot Number', ''),
+                                'Barcode*': db_record.get('Barcode*', ''),
+                                'Cost*': db_record.get('Cost*', ''),
+                                'Medical Only (Yes/No)': db_record.get('Medical Only (Yes/No)', ''),
+                                'Med Price': db_record.get('Med Price', ''),
+                                'Expiration Date(YYYY-MM-DD)': db_record.get('Expiration Date(YYYY-MM-DD)', ''),
+                                'Is Archived? (yes/no)': db_record.get('Is Archived? (yes/no)', ''),
+                                'THC Per Serving': db_record.get('THC Per Serving', ''),
+                                'Allergens': db_record.get('Allergens', ''),
+                                'Solvent': db_record.get('Solvent', ''),
+                                'Accepted Date': db_record.get('Accepted Date', ''),
+                                'Internal Product Identifier': db_record.get('Internal Product Identifier', ''),
+                                'Product Tags (comma separated)': db_record.get('Product Tags (comma separated)', ''),
+                                'Image URL': db_record.get('Image URL', ''),
+                                'Ingredients': db_record.get('Ingredients', ''),
+                                'CombinedWeight': db_record.get('CombinedWeight', ''),
+                                'Ratio_or_THC_CBD': db_record.get('Ratio_or_THC_CBD', ''),
+                                'Description_Complexity': db_record.get('Description_Complexity', ''),
+                                'Total THC': db_record.get('Total THC', ''),
+                                'THCA': db_record.get('THCA', ''),
+                                'CBDA': db_record.get('CBDA', ''),
+                                'CBN': db_record.get('CBN', '')
+                            }
+                            records.append(record)
+                        logging.info(f"Generated {len(records)} records from database")
+                    else:
+                        logging.error("No database records found for selected tags")
+                        records = []
+                else:
+                    logging.error("Product database not available")
+                    records = []
+            except Exception as e:
+                logging.error(f"Error getting records from database: {e}")
+                records = []
 
         if not records:
             logging.error("No selected tags found in the data or failed to process records.")
@@ -5177,19 +5292,19 @@ def database_view():
         with sqlite3.connect(product_db.db_path) as conn:
             # Get strains
             strains_df = pd.read_sql_query('''
-                SELECT strain_name, canonical_lineage, total_occurrences, first_seen_date, last_seen_date
+                SELECT strain_name, canonical_lineage, 1 as total_occurrences, 'N/A' as first_seen_date, 'N/A' as last_seen_date
                 FROM strains
-                ORDER BY total_occurrences DESC
+                ORDER BY strain_name
                 LIMIT 50
             ''', conn)
             
             # Get products
             products_df = pd.read_sql_query('''
-                SELECT p.product_name, p.product_type, p.vendor, p.brand, p.lineage,
-                       s.strain_name, p.total_occurrences, p.first_seen_date, p.last_seen_date
+                SELECT p."Product Name*" as product_name, p."Product Type*" as product_type, 
+                       p."Vendor/Supplier*" as vendor, p."Product Brand" as brand, p."Lineage" as lineage,
+                       p."Product Strain" as strain_name, 1 as total_occurrences, 'N/A' as first_seen_date, 'N/A' as last_seen_date
                 FROM products p
-                LEFT JOIN strains s ON p.strain_id = s.id
-                ORDER BY p.total_occurrences DESC
+                ORDER BY p.id DESC
                 LIMIT 50
             ''', conn)
             
@@ -5243,15 +5358,13 @@ def database_analytics():
                 LIMIT 10
             ''', conn)
             
-            # Get recent activity (last 30 days)
-            thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+            # Get recent activity (last 30 days) - using id as proxy for recent activity
+            # Since last_seen_date column doesn't exist in this schema, use id ordering
             recent_activity_df = pd.read_sql_query('''
-                SELECT DATE(last_seen_date) as date, COUNT(*) as new_products
+                SELECT 'Recent' as date, COUNT(*) as new_products
                 FROM products
-                WHERE last_seen_date >= ?
-                GROUP BY DATE(last_seen_date)
-                ORDER BY date DESC
-            ''', conn, params=[thirty_days_ago])
+                WHERE id > (SELECT MAX(id) - 100 FROM products)
+            ''', conn)
             
             return jsonify({
                 'product_type_distribution': dict(zip(product_types_df['product_type'], product_types_df['count'])),
@@ -5872,20 +5985,32 @@ def create_backup():
             with sqlite3.connect(backup_path) as backup_conn:
                 with sqlite3.connect(product_db.db_path) as source_conn:
                     if backup_type == 'products':
-                        backup_conn.execute('''
-                            CREATE TABLE products AS 
-                            SELECT * FROM source_conn.products
-                        ''')
+                        # First create the table structure
+                        source_conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='products'")
+                        create_sql = source_conn.fetchone()[0]
+                        backup_conn.execute(create_sql)
+                        # Then copy the data
+                        backup_conn.execute("ATTACH DATABASE ? AS source", (str(product_db.db_path),))
+                        backup_conn.execute("INSERT INTO products SELECT * FROM source.products")
+                        backup_conn.execute("DETACH DATABASE source")
                     elif backup_type == 'strains':
-                        backup_conn.execute('''
-                            CREATE TABLE strains AS 
-                            SELECT * FROM source_conn.strains
-                        ''')
+                        # First create the table structure
+                        source_conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='strains'")
+                        create_sql = source_conn.fetchone()[0]
+                        backup_conn.execute(create_sql)
+                        # Then copy the data
+                        backup_conn.execute("ATTACH DATABASE ? AS source", (str(product_db.db_path),))
+                        backup_conn.execute("INSERT INTO strains SELECT * FROM source.strains")
+                        backup_conn.execute("DETACH DATABASE source")
                     elif backup_type == 'vendors':
-                        backup_conn.execute('''
-                            CREATE TABLE products AS 
-                            SELECT * FROM source_conn.products
-                        ''')
+                        # First create the table structure
+                        source_conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='products'")
+                        create_sql = source_conn.fetchone()[0]
+                        backup_conn.execute(create_sql)
+                        # Then copy the data
+                        backup_conn.execute("ATTACH DATABASE ? AS source", (str(product_db.db_path),))
+                        backup_conn.execute("INSERT INTO products SELECT * FROM source.products")
+                        backup_conn.execute("DETACH DATABASE source")
         
         # Compress if requested
         if compress:
@@ -5968,14 +6093,14 @@ def trend_analysis():
         with sqlite3.connect(product_db.db_path) as conn:
             # Get product trends over time
             trends_df = pd.read_sql_query('''
-                SELECT p.product_name, s.canonical_lineage,
+                SELECT p."Product Name*" as product_name, p."Lineage" as canonical_lineage,
                        COUNT(*) as occurrence_count,
-                       DATE(p.last_seen_date) as date
+                       'Recent' as date
                 FROM products p
-                LEFT JOIN strains s ON p.strain_id = s.id
-                WHERE p.last_seen_date >= date('now', '-90 days')
-                GROUP BY p.product_name, DATE(p.last_seen_date)
-                ORDER BY date DESC, occurrence_count DESC
+                WHERE p.id > (SELECT MAX(id) - 50 FROM products)
+                GROUP BY p."Product Name*"
+                ORDER BY occurrence_count DESC
+                LIMIT 20
             ''', conn)
             
             # Calculate trend metrics
@@ -9144,7 +9269,7 @@ def get_all_strains():
         conn = product_db._get_connection()
         cursor = conn.cursor()
         cursor.execute('''
-            SELECT strain_name, canonical_lineage, sovereign_lineage, total_occurrences, last_seen_date
+            SELECT strain_name, canonical_lineage, 'N/A' as sovereign_lineage, 1 as total_occurrences, 'N/A' as last_seen_date
             FROM strains 
             ORDER BY strain_name
         ''')
@@ -9419,10 +9544,10 @@ def strain_search():
                 COUNT(p.id) as product_count,
                 COUNT(DISTINCT p.vendor) as vendor_count,
                 COUNT(DISTINCT p.brand) as brand_count,
-                GROUP_CONCAT(DISTINCT p.vendor) as vendors,
-                GROUP_CONCAT(DISTINCT p.brand) as brands,
-                s.last_seen_date,
-                s.first_seen_date
+                GROUP_CONCAT(DISTINCT p."Vendor/Supplier*") as vendors,
+                GROUP_CONCAT(DISTINCT p."Product Brand") as brands,
+                'N/A' as last_seen_date,
+                'N/A' as first_seen_date
             FROM strains s
             LEFT JOIN products p ON s.id = p.strain_id
         '''

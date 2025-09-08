@@ -428,7 +428,9 @@ class TemplateProcessor:
         tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
         
         # Set up table properties
-        tblPr = tbl._element.find(qn('w:tblPr')) or OxmlElement('w:tblPr')
+        tblPr = tbl._element.find(qn('w:tblPr'))
+        if tblPr is None:
+            tblPr = OxmlElement('w:tblPr')
         
         # Preserve original shading if it exists
         if original_shd is not None:
@@ -769,7 +771,9 @@ class TemplateProcessor:
 
         tbl = doc.add_table(rows=num_rows, cols=num_cols)
         tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
-        tblPr = tbl._element.find(qn('w:tblPr')) or OxmlElement('w:tblPr')
+        tblPr = tbl._element.find(qn('w:tblPr'))
+        if tblPr is None:
+            tblPr = OxmlElement('w:tblPr')
         shd = OxmlElement('w:shd')
         shd.set(qn('w:val'), 'clear')
         shd.set(qn('w:color'), 'auto')
@@ -1308,6 +1312,11 @@ class TemplateProcessor:
                 if cbd_val:
                     ratio_parts.append(f"CBD: {cbd_val}%")
                 ratio_val = " ".join(ratio_parts)
+                
+                # Apply the new THC/CBD percentage formatting rules
+                from src.core.generation.text_processing import format_thc_cbd_percentages
+                ratio_val = format_thc_cbd_percentages(ratio_val)
+                
                 self.logger.debug(f"Combined THC/CBD values into ratio: '{ratio_val}'")
         
         if ratio_val:
@@ -1329,6 +1338,11 @@ class TemplateProcessor:
             elif is_classic and not is_percentage_based:
                 cleaned_ratio = self.format_classic_ratio(cleaned_ratio, record)
             
+            # Apply THC/CBD percentage formatting to any existing ratio content
+            if cleaned_ratio and ('THC:' in cleaned_ratio or 'CBD:' in cleaned_ratio):
+                from src.core.generation.text_processing import format_thc_cbd_percentages
+                cleaned_ratio = format_thc_cbd_percentages(cleaned_ratio)
+            
             # Fast marker wrapping
             content = cleaned_ratio.replace('|BR|', '\n')
             # Apply new bold label formatting for THC/CBD content
@@ -1338,8 +1352,8 @@ class TemplateProcessor:
             # Force line breaks for vertical, double, and mini templates
             elif self.template_type in ['vertical', 'double', 'mini'] and content.strip().startswith('THC:') and 'CBD:' in content:
                 content = content.replace('THC: CBD:', 'THC:\nCBD:').replace('THC:  CBD:', 'THC:\nCBD:')
-                # For vertical template, format with right-aligned percentages
-                if self.template_type == 'vertical':
+                # For vertical, mini, and double templates, format with right-aligned percentages
+                if self.template_type in ['vertical', 'mini', 'double']:
                     content = self.format_thc_cbd_vertical_alignment(content)
             
             marker = 'THC_CBD' if is_classic else 'RATIO'
@@ -1431,6 +1445,10 @@ class TemplateProcessor:
         label_context['Ratio_END'] = 'RATIO_END'
         label_context['JointRatio_START'] = 'JOINT_RATIO_START'
         label_context['JointRatio_END'] = 'JOINT_RATIO_END'
+        label_context['THC_START'] = 'THC_START'
+        label_context['THC_END'] = 'THC_END'
+        label_context['CBD_START'] = 'CBD_START'
+        label_context['CBD_END'] = 'CBD_END'
 
         # Fast joint ratio handling
         if label_context.get('JointRatio'):
@@ -2531,11 +2549,11 @@ class TemplateProcessor:
                         spacing.set(qn('w:line'), str(int(line_spacing * 240)))
                         spacing.set(qn('w:lineRule'), 'auto')
                     
-                    # For vertical template THC_CBD content, use right alignment for percentage values
-                    if self.template_type == 'vertical' and marker_name == 'THC_CBD':
+                    # For vertical, mini, and double template THC_CBD content, use right alignment for percentage values
+                    if self.template_type in ['vertical', 'mini', 'double'] and marker_name == 'THC_CBD':
                         # Set paragraph alignment to right for proper percentage alignment
                         paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-                        self.logger.debug(f"Set right alignment for vertical template THC_CBD content")
+                        self.logger.debug(f"Set right alignment for {self.template_type} template THC_CBD content")
                     # All content now uses standard spacing
                     # For all other Ratio content in horizontal template, set vertical alignment to top
                     elif self.template_type == 'horizontal' and marker_name in ['THC_CBD', 'RATIO', 'THC_CBD_LABEL']:
@@ -3658,16 +3676,23 @@ class TemplateProcessor:
                 if cbd_value in ['nan', 'NaN', '']:
                     cbd_value = ''
                 
-                # Format with actual values if available
+                # Format with actual values if available, round THC to 1 decimal place
                 if thc_value and cbd_value:
-                    return f"THC: {thc_value}% CBD: {cbd_value}%"
+                    # Round THC to 1 decimal place, keep CBD original precision
+                    thc_rounded = round(float(thc_value), 1) if thc_value.replace('.', '').replace('-', '').isdigit() else thc_value
+                    return f"THC: {thc_rounded}% CBD: {cbd_value}%"
                 elif thc_value:
-                    return f"THC: {thc_value}%"
+                    # Round THC to 1 decimal place
+                    thc_rounded = round(float(thc_value), 1) if thc_value.replace('.', '').replace('-', '').isdigit() else thc_value
+                    return f"THC: {thc_rounded}% CBD: 0%"
                 elif cbd_value:
-                    return f"CBD: {cbd_value}%"
+                    return f"THC: 0% CBD: {cbd_value}%"
+                else:
+                    # Both THC and CBD are empty
+                    return "THC: 0% CBD: 0%"
             
             # Fallback to default format if no record data or no values
-            return "THC: CBD:"
+            return "THC: 0% CBD: 0%"
         
         # If the text already contains THC/CBD format, return as-is
         if 'THC:' in text and 'CBD:' in text:
@@ -3719,11 +3744,18 @@ class TemplateProcessor:
         # If we found both values, format them
         if thc_value and cbd_value:
             # Keep on same line without line breaks
-            return f"THC: {thc_value}% CBD: {cbd_value}%"
+            formatted_text = f"THC: {thc_value}% CBD: {cbd_value}%"
+            # Apply the new THC/CBD percentage formatting rules
+            from src.core.generation.text_processing import format_thc_cbd_percentages
+            return format_thc_cbd_percentages(formatted_text)
         elif thc_value:
-            return f"THC: {thc_value}%"
+            formatted_text = f"THC: {thc_value}%"
+            from src.core.generation.text_processing import format_thc_cbd_percentages
+            return format_thc_cbd_percentages(formatted_text)
         elif cbd_value:
-            return f"CBD: {cbd_value}%"
+            formatted_text = f"CBD: {cbd_value}%"
+            from src.core.generation.text_processing import format_thc_cbd_percentages
+            return format_thc_cbd_percentages(formatted_text)
         else:
             # If no clear THC/CBD pattern found, return the original text
             return text
@@ -3784,7 +3816,7 @@ class TemplateProcessor:
 
     def format_thc_cbd_vertical_alignment(self, text):
         """
-        Format THC_CBD content for vertical templates with right-aligned percentages.
+        Format THC_CBD content for vertical, mini, and double templates with right-aligned percentages.
         Splits THC and CBD into separate lines and right-aligns the percentage values.
         Adds extra line spacing between THC percentage and CBD line.
         """
