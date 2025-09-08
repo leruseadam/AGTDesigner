@@ -9,7 +9,7 @@ import time
 
 def demo_json_matching():
     """Demonstrate JSON matching functionality"""
-    base_url = 'http://127.0.0.1:9090'
+    base_url = 'http://127.0.0.1:5001'
     
     print("🚀 JSON Matching Demonstration")
     print("=" * 50)
@@ -105,7 +105,7 @@ def demo_json_matching():
    url = "https://your-inventory-api.com/transfer-data"
    data = {'url': url}
    
-   response = requests.post('http://127.0.0.1:9090/api/json-match', 
+   response = requests.post('http://127.0.0.1:5001/api/json-match', 
                           json=data, 
                           headers={'Content-Type': 'application/json'})
    
@@ -118,7 +118,7 @@ def demo_json_matching():
     
     print("\n" + "=" * 50)
     print("🎉 JSON matching is ready to use!")
-    print("   Open http://127.0.0.1:9090 in your browser")
+    print("   Open http://127.0.0.1:5001 in your browser")
     print("   Click 'Match products from JSON URL' button")
     print("   Enter your inventory JSON URL and start matching!")
 

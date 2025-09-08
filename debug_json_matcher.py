@@ -99,7 +99,7 @@ def test_json_url(url):
         flask_data = {'url': url}
         start_time = time.time()
         
-        response = requests.post('http://127.0.0.1:9090/api/json-match',
+        response = requests.post('http://127.0.0.1:5001/api/json-match',
                                json=flask_data,
                                headers={'Content-Type': 'application/json'},
                                timeout=120)  # 2 minute timeout

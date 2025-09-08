@@ -7302,3 +7302,29 @@ window.addEventListener('unhandledrejection', function(e) {
 
 // TagManager is already initialized in the main DOMContentLoaded event listener above
 // This duplicate initialization has been removed to prevent conflicts
+
+// Add click event listener to title header for page reload
+document.addEventListener('DOMContentLoaded', function() {
+    const titleElement = document.querySelector('.vibrant-title');
+    if (titleElement) {
+        titleElement.style.cursor = 'pointer';
+        titleElement.title = 'Click to reload the application';
+        
+        titleElement.addEventListener('click', function() {
+            // Add a subtle visual feedback
+            titleElement.style.opacity = '0.7';
+            titleElement.style.transform = 'scale(0.98)';
+            
+            // Reset visual state after a brief moment
+            setTimeout(() => {
+                titleElement.style.opacity = '1';
+                titleElement.style.transform = 'scale(1)';
+            }, 150);
+            
+            // Reload the page after a brief delay for visual feedback
+            setTimeout(() => {
+                window.location.reload();
+            }, 200);
+        });
+    }
+});
