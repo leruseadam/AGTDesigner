@@ -1,3 +1,10 @@
+def make_nonbreaking_spaces(text):
+    """
+    Replace all spaces in the input text with non-breaking spaces to prevent line breaks.
+    """
+    if not text or not isinstance(text, str):
+        return text
+    return text.replace(' ', '\u00A0')
 import re
 from typing import Optional
 
@@ -6,65 +13,33 @@ DEBUG_ENABLED = False
 
 def format_thc_cbd_percentages(text):
     """
-    Format THC and CBD percentage values according to specific rules:
-    - THC: If between 15-20%, call it "15%+", if 20-25%, "20%+", and so on. If below 15%, list exact value.
-    - CBD: If 0%, just leave as is. If under 1%, simply put <1%, <2%, so on.
+    Output the exact, unrounded THC and CBD percentage values from the input, with no custom formatting or rounding logic.
     """
     if not text:
         return text
-    
     text = str(text).strip()
-    
-    # Extract THC and CBD values using regex
-    thc_match = re.search(r'THC[:\s]*([0-9.]+)(%|mg)?', text, re.IGNORECASE)
-    cbd_match = re.search(r'CBD[:\s]*([0-9.]+)(%|mg)?', text, re.IGNORECASE)
-    
-    if not thc_match and not cbd_match:
-        return text
-    
-    # Process THC value
-    if thc_match:
-        thc_value = thc_match.group(1)
-        thc_unit = thc_match.group(2)
-        
-        if thc_unit == '%':
-            try:
-                thc_float = float(thc_value)
-                # Round THC to 1 decimal place
-                formatted_thc = f"{thc_float:.1f}%"
-                
-                # Replace the original THC value in the text
-                text = re.sub(r'THC[:\s]*([0-9.]+)%', f'THC: {formatted_thc}', text, flags=re.IGNORECASE)
-            except (ValueError, TypeError):
-                pass
-    
-    # Process CBD value
-    if cbd_match:
-        cbd_value = cbd_match.group(1)
-        cbd_unit = cbd_match.group(2)
-        
-        if cbd_unit == '%':
-            try:
-                cbd_float = float(cbd_value)
-                if cbd_float == 0:
-                    # 0%, keep as is
-                    formatted_cbd = "0%"
-                elif cbd_float < 1:
-                    # Under 1%, use <1%
-                    formatted_cbd = "<1%"
-                elif cbd_float == 2:
-                    # Exactly 2%, keep as is
-                    formatted_cbd = "2%"
-                else:
-                    # 1% and above (except exactly 2%), round up to next integer and use <X%
-                    cbd_rounded = int(cbd_float) + 1
-                    formatted_cbd = f"<{cbd_rounded}%"
-                
-                # Replace the original CBD value in the text
-                text = re.sub(r'CBD[:\s]*([0-9.]+)%', f'CBD: {formatted_cbd}', text, flags=re.IGNORECASE)
-            except (ValueError, TypeError):
-                pass
-    
+    # Replace THC value with 1 decimal place (if present)
+    def replace_thc(match):
+        value = match.group(1)
+        unit = match.group(2) or ''
+        try:
+            value_float = float(value)
+            value_str = f"{value_float:.1f}"
+        except Exception:
+            value_str = value
+        return f"THC: {value_str}{unit}"
+    text = re.sub(r'THC[:\s]*([0-9.]+)(%|mg)?', replace_thc, text, flags=re.IGNORECASE)
+    # Replace CBD value with 1 decimal place (if present)
+    def replace_cbd(match):
+        value = match.group(1)
+        unit = match.group(2) or ''
+        try:
+            value_float = float(value)
+            value_str = f"{value_float:.1f}"
+        except Exception:
+            value_str = value
+        return f"CBD: {value_str}{unit}"
+    text = re.sub(r'CBD[:\s]*([0-9.]+)(%|mg)?', replace_cbd, text, flags=re.IGNORECASE)
     return text
 
 def insert_newline_every_2nd_space(text):
@@ -350,7 +325,7 @@ def format_thc_cbd_bold_labels(text, template_type='vertical'):
         if cbd_value:
             result.append(f"CBD: {cbd_value}{cbd_unit}")
         else:
-            result.append("CBD: 0%")
+            result.append("CBD:")
         
         return "  ".join(result)
     elif template_type == 'mini':
@@ -386,9 +361,9 @@ def format_thc_cbd_bold_labels(text, template_type='vertical'):
                 result.append(f"{cbd_value}{cbd_unit}")
         else:
             result.append("THC:")
-            result.append("0%")
+            result.append("")
             result.append("CBD:")
-            result.append("0%")
+            result.append("")
         
         return "\n".join(result)
     else:
@@ -398,11 +373,11 @@ def format_thc_cbd_bold_labels(text, template_type='vertical'):
         if thc_value:
             result.append(f"THC: {thc_value}{thc_unit}")
         else:
-            result.append("THC: 0%")
+            result.append("THC:")
         
         if cbd_value:
             result.append(f"CBD: {cbd_value}{cbd_unit}")
         else:
-            result.append("CBD: 0%")
+            result.append("CBD:")
         
         return "\n".join(result) 
