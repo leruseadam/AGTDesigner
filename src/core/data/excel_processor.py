@@ -2409,10 +2409,16 @@ class ExcelProcessor:
         
         # Find matching records
         matching_records = []
+        logger.info(f"Looking for {len(selected_tags)} tags in Excel data")
+        logger.info(f"Sample tags to find: {selected_tags[:3]}")
+        logger.info(f"Sample normalized names in mapping: {list(name_mapping.keys())[:5]}")
+        
         for tag in selected_tags:
             normalized_tag = self._normalize_product_name(tag)
+            logger.debug(f"Looking for tag '{tag}' -> normalized: '{normalized_tag}'")
             if normalized_tag in name_mapping:
                 actual_name = name_mapping[normalized_tag]
+                logger.debug(f"Found mapping: '{normalized_tag}' -> '{actual_name}'")
                 # Find the row with this exact name
                 matching_rows = self.df[self.df[product_name_col].str.strip() == actual_name]
                 if not matching_rows.empty:
@@ -2420,11 +2426,15 @@ class ExcelProcessor:
                         record = self._create_record_from_row(row, template_type)
                         if record:
                             matching_records.append(record)
-                    logger.debug(f"Found {len(matching_rows)} records for tag '{tag}' -> '{actual_name}'")
+                    logger.info(f"Found {len(matching_rows)} records for tag '{tag}' -> '{actual_name}'")
                 else:
                     logger.warning(f"No matching rows found for actual name '{actual_name}'")
             else:
                 logger.warning(f"No mapping found for tag '{tag}' (normalized: '{normalized_tag}')")
+                # Let's see what similar names exist
+                similar_names = [name for name in name_mapping.keys() if normalized_tag.lower() in name.lower() or name.lower() in normalized_tag.lower()]
+                if similar_names:
+                    logger.warning(f"Similar names found: {similar_names[:3]}")
         
         logger.info(f"Found {len(matching_records)} matching records from Excel data")
         return matching_records

@@ -3735,8 +3735,14 @@ def generate_labels():
         
         # Get the fully processed records using the dedicated method
         if has_excel_data:
+            logging.info(f"Getting records from Excel data for {len(valid_selected_tags)} selected tags")
+            logging.info(f"Selected tags: {valid_selected_tags[:5]}...")  # Show first 5 tags
             records = excel_processor.get_selected_records(template_type)
-            logging.debug(f"Records returned from get_selected_records: {len(records) if records else 0}")
+            logging.info(f"Records returned from get_selected_records: {len(records) if records else 0}")
+            if not records:
+                logging.error("No records returned from get_selected_records - this is the problem!")
+                logging.error(f"Excel processor df shape: {excel_processor.df.shape if excel_processor.df is not None else 'None'}")
+                logging.error(f"Excel processor selected_tags: {excel_processor.selected_tags}")
         else:
             # Use database directly when Excel data is not available
             logging.info("Using database directly for record generation")
