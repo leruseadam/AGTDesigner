@@ -1440,31 +1440,48 @@ def upload_file():
             if app.config.get('DEVELOPMENT_MODE', False):
                 logging.debug("[UPLOAD] Cleared g.excel_processor context")
         
-        # Start ultra-optimized background processing (includes database storage)
-        try:
-            if app.config.get('DEVELOPMENT_MODE', False):
-                logging.debug(f"[UPLOAD] Starting ultra-optimized background processing for {file.filename}")
-            thread = threading.Thread(target=ultra_fast_background_processing, args=(file.filename, temp_path))
-            thread.daemon = True  # Make thread daemon so it doesn't block app shutdown
-            thread.start()
-            if app.config.get('DEVELOPMENT_MODE', False):
-                logging.debug(f"[UPLOAD] Ultra-optimized background processing started successfully for {file.filename}")
-        except Exception as thread_error:
-            logging.error(f"[UPLOAD] Failed to start ultra-optimized background processing: {thread_error}")
-            # Fallback: Try synchronous processing
-            logging.info(f"[UPLOAD] Attempting synchronous fallback processing for {file.filename}")
+        # ULTRA-FAST UPLOAD: Process small files synchronously for instant response
+        if file_size < 5 * 1024 * 1024:  # Files under 5MB process synchronously
+            logging.info(f"[UPLOAD] Small file ({file_size} bytes), processing synchronously for instant response")
             try:
                 success = process_excel_synchronous(file.filename, temp_path)
                 if success:
                     update_processing_status(file.filename, 'ready')
-                    logging.info(f"[UPLOAD] Synchronous fallback processing succeeded for {file.filename}")
+                    logging.info(f"[UPLOAD] Synchronous processing completed successfully for {file.filename}")
                 else:
                     update_processing_status(file.filename, 'error: Synchronous processing failed')
                     return jsonify({'error': 'File processing failed'}), 500
             except Exception as sync_error:
-                logging.error(f"[UPLOAD] Synchronous fallback also failed: {sync_error}")
-                update_processing_status(file.filename, f'error: Both background and sync processing failed')
+                logging.error(f"[UPLOAD] Synchronous processing failed: {sync_error}")
+                update_processing_status(file.filename, f'error: Synchronous processing failed: {sync_error}')
                 return jsonify({'error': 'Failed to process file'}), 500
+        else:
+            # Large files use background processing
+            logging.info(f"[UPLOAD] Large file ({file_size} bytes), using background processing")
+            try:
+                if app.config.get('DEVELOPMENT_MODE', False):
+                    logging.debug(f"[UPLOAD] Starting ultra-optimized background processing for {file.filename}")
+                thread = threading.Thread(target=ultra_fast_background_processing, args=(file.filename, temp_path))
+                thread.daemon = True  # Make thread daemon so it doesn't block app shutdown
+                thread.start()
+                if app.config.get('DEVELOPMENT_MODE', False):
+                    logging.debug(f"[UPLOAD] Ultra-optimized background processing started successfully for {file.filename}")
+            except Exception as thread_error:
+                logging.error(f"[UPLOAD] Failed to start ultra-optimized background processing: {thread_error}")
+                # Fallback: Try synchronous processing
+                logging.info(f"[UPLOAD] Attempting synchronous fallback processing for {file.filename}")
+                try:
+                    success = process_excel_synchronous(file.filename, temp_path)
+                    if success:
+                        update_processing_status(file.filename, 'ready')
+                        logging.info(f"[UPLOAD] Synchronous fallback processing succeeded for {file.filename}")
+                    else:
+                        update_processing_status(file.filename, 'error: Synchronous processing failed')
+                        return jsonify({'error': 'File processing failed'}), 500
+                except Exception as sync_error:
+                    logging.error(f"[UPLOAD] Synchronous fallback also failed: {sync_error}")
+                    update_processing_status(file.filename, f'error: Both background and sync processing failed')
+                    return jsonify({'error': 'Failed to process file'}), 500
         
         upload_time = time.time() - start_time
         if app.config.get('DEVELOPMENT_MODE', False):
@@ -1508,16 +1525,29 @@ def upload_file():
                         logging.error(f"[UPLOAD] Timeout fallback failed: {timeout_error}")
                         update_processing_status(file.filename, 'error: Timeout fallback failed')
         
-        timeout_thread = threading.Thread(target=timeout_monitor)
-        timeout_thread.daemon = True
-        timeout_thread.start()
+        # Only start timeout monitor for background processing
+        if file_size >= 5 * 1024 * 1024:
+            timeout_thread = threading.Thread(target=timeout_monitor)
+            timeout_thread.daemon = True
+            timeout_thread.start()
+        
+        # Determine processing method for response
+        if file_size < 5 * 1024 * 1024:
+            processing_status = 'ready'
+            performance = 'synchronous'
+            message = 'File uploaded and processed successfully'
+        else:
+            processing_status = 'background'
+            performance = 'ultra_fast'
+            message = 'File uploaded, processing in background'
         
         return jsonify({
-            'message': 'File uploaded, processing in background', 
+            'message': message, 
             'filename': sanitized_filename,
             'upload_time': f"{upload_response_time:.3f}s",
-            'processing_status': 'background',
-            'performance': 'ultra_fast'
+            'processing_status': processing_status,
+            'performance': performance,
+            'file_size_mb': f"{file_size / (1024*1024):.2f}"
         })
     except Exception as e:
         logging.error(f"=== UPLOAD REQUEST FAILED ===")
@@ -1639,6 +1669,82 @@ def process_excel_sync(filename, temp_path):
     except Exception as e:
         logging.error(f"[SYNC] ===== SYNCHRONOUS PROCESSING ERROR =====")
         logging.error(f"[SYNC] Error: {str(e)}")
+        logging.error(f"[SYNC] Traceback: {traceback.format_exc()}")
+        return False
+
+def process_excel_synchronous(filename, temp_path):
+    """Ultra-fast synchronous processing for small files"""
+    try:
+        logging.info(f"[SYNC] Starting synchronous processing: {filename}")
+        start_time = time.time()
+        
+        # Step 1: Quick file validation
+        if not os.path.exists(temp_path):
+            logging.error(f"[SYNC] File not found: {temp_path}")
+            return False
+        
+        # Step 2: Create ExcelProcessor with fast loading
+        logging.info(f"[SYNC] Creating ExcelProcessor...")
+        from src.core.data.excel_processor import ExcelProcessor
+        processor = ExcelProcessor()
+        logging.info(f"[SYNC] ExcelProcessor created successfully")
+        
+        # Disable heavy processing for speed
+        if hasattr(processor, 'enable_product_db_integration'):
+            processor.enable_product_db_integration(False)
+            logging.info(f"[SYNC] Disabled product DB integration for Excel-first processing")
+        
+        # Step 3: Use fast loading mode
+        logging.info(f"[SYNC] Loading file with fast mode: {temp_path}")
+        load_start = time.time()
+        
+        # Use the fast_load_file method
+        logging.info(f"[SYNC] Calling processor.fast_load_file...")
+        success = processor.fast_load_file(temp_path)
+        load_time = time.time() - load_start
+        
+        logging.info(f"[SYNC] Fast load completed in {load_time:.3f}s, success: {success}")
+        logging.info(f"[SYNC] Processor df is None: {processor.df is None}")
+        if processor.df is not None:
+            logging.info(f"[SYNC] Processor df shape: {processor.df.shape}")
+            logging.info(f"[SYNC] Processor df empty: {processor.df.empty}")
+        
+        if not success or processor.df is None or processor.df.empty:
+            logging.error(f"[SYNC] Failed to load file data - success: {success}, df is None: {processor.df is None}")
+            if processor.df is not None:
+                logging.error(f"[SYNC] df empty: {processor.df.empty}")
+            return False
+        
+        # Step 4: Minimal additional processing
+        logging.info(f"[SYNC] Applying minimal additional processing to {len(processor.df)} rows")
+        process_start = time.time()
+        
+        # Only do essential additional processing
+        try:
+            apply_essential_processing(processor.df)
+            logging.info(f"[SYNC] Essential processing completed in {time.time() - process_start:.3f}s")
+        except Exception as processing_error:
+            logging.error(f"[SYNC] Essential processing failed: {processing_error}")
+            logging.error(f"[SYNC] Processing traceback: {traceback.format_exc()}")
+            # Continue anyway - the file might still be usable
+        
+        # Step 5: Update global processor (skip database storage for speed)
+        logging.info(f"[SYNC] Updating global processor...")
+        try:
+            update_global_processor_fast(processor, temp_path)
+            logging.info(f"[SYNC] Global processor updated successfully")
+        except Exception as update_error:
+            logging.error(f"[SYNC] Failed to update global processor: {update_error}")
+            logging.error(f"[SYNC] Update traceback: {traceback.format_exc()}")
+            # This is critical - if we can't update the global processor, the upload failed
+            return False
+        
+        total_time = time.time() - start_time
+        logging.info(f"[SYNC] Synchronous processing completed in {total_time:.3f}s")
+        return True
+        
+    except Exception as e:
+        logging.error(f"[SYNC] Processing error: {str(e)}")
         logging.error(f"[SYNC] Traceback: {traceback.format_exc()}")
         return False
 
@@ -2259,6 +2365,48 @@ def process_excel_background(filename, temp_path):
         logging.error(f"[BG] Error in background processing: {str(e)}")
         logging.error(f"[BG] Traceback: {traceback.format_exc()}")
         update_processing_status(filename, f'error: {str(e)}')
+
+@app.route('/api/debug-selected-tags', methods=['GET'])
+def debug_selected_tags():
+    """Debug endpoint to check selected tags and Excel data"""
+    try:
+        excel_processor = get_excel_processor()
+        
+        # Get selected tags from session
+        session_selected_tags = session.get('selected_tags', [])
+        
+        # Get Excel data info
+        excel_info = {
+            'has_data': excel_processor.df is not None and not excel_processor.df.empty,
+            'shape': excel_processor.df.shape if excel_processor.df is not None else None,
+            'columns': list(excel_processor.df.columns) if excel_processor.df is not None else [],
+            'sample_products': []
+        }
+        
+        if excel_processor.df is not None and not excel_processor.df.empty:
+            # Get sample product names
+            product_name_col = 'ProductName'
+            if product_name_col not in excel_processor.df.columns:
+                possible_cols = ['Product Name*', 'Product Name', 'Description']
+                product_name_col = next((col for col in possible_cols if col in excel_processor.df.columns), None)
+            
+            if product_name_col:
+                sample_products = excel_processor.df[product_name_col].head(10).tolist()
+                excel_info['sample_products'] = [str(p) for p in sample_products if pd.notna(p)]
+        
+        return jsonify({
+            'success': True,
+            'session_selected_tags': session_selected_tags,
+            'excel_processor_selected_tags': excel_processor.selected_tags,
+            'excel_info': excel_info,
+            'session_keys': list(session.keys())
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
 
 @app.route('/api/test-background-processing', methods=['GET'])
 def test_background_processing():
