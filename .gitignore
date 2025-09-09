@@ -80,3 +80,5 @@ backup/
 
 # PythonAnywhere specific
 pythonanywhere.log product_database_fixed.db.gz
+*.xlsx
+*.tar.gz
