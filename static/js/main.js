@@ -720,7 +720,7 @@ const AppLoadingSplash = {
 const TagManager = {
     state: {
         selectedTags: new Set(),
-        persistentSelectedTags: new Set(), // New: persistent selected tags independent of filters
+        persistentSelectedTags: [], // Changed to array for easier manipulation
         initialized: false,
         filters: {},
         loading: false,
@@ -2125,6 +2125,9 @@ const TagManager = {
         // Add event listeners
         this.updateSelectAllCheckboxes();
         this.initializeSelectAllCheckbox();
+        
+        // Update all checkbox states to match persistent selected tags
+        this.updateAllCheckboxStates();
     },
 
     createTagElement(tag, isForSelectedTags = false) {
@@ -2153,6 +2156,14 @@ const TagManager = {
         checkbox.value = displayName;
         checkbox.checked = this.state.persistentSelectedTags.includes(displayName);
         console.log('Checkbox created for:', displayName, 'value:', checkbox.value, 'checked:', checkbox.checked);
+        console.log('Current persistentSelectedTags:', this.state.persistentSelectedTags);
+        
+        // Force the checkbox to reflect the correct state
+        if (this.state.persistentSelectedTags.includes(displayName)) {
+            checkbox.setAttribute('checked', 'checked');
+        } else {
+            checkbox.removeAttribute('checked');
+        }
         
         // Add event listener with proper error handling and improved logic
         const handleCheckboxChange = async (e) => {
@@ -5189,6 +5200,29 @@ const TagManager = {
                 brandSelectAll.indeterminate = brandChecked.length > 0 && brandChecked.length < brandCheckboxes.length;
             }
         });
+    },
+
+    updateAllCheckboxStates() {
+        // Update all checkbox states to match persistentSelectedTags
+        console.log('Updating all checkbox states...');
+        console.log('Current persistentSelectedTags:', this.state.persistentSelectedTags);
+        
+        const allCheckboxes = document.querySelectorAll('.tag-checkbox');
+        allCheckboxes.forEach(checkbox => {
+            const isSelected = this.state.persistentSelectedTags.includes(checkbox.value);
+            checkbox.checked = isSelected;
+            
+            if (isSelected) {
+                checkbox.setAttribute('checked', 'checked');
+            } else {
+                checkbox.removeAttribute('checked');
+            }
+            
+            console.log(`Checkbox ${checkbox.value}: checked=${checkbox.checked}, isSelected=${isSelected}`);
+        });
+        
+        // Update select all checkboxes
+        this.updateSelectAllCheckboxes();
     },
 
     // Initialize Select All checkbox with proper event listener
