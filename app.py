@@ -891,7 +891,7 @@ class LabelMakerApp:
             
     def run(self):
         host = os.environ.get('HOST', '127.0.0.1')
-        port = int(os.environ.get('FLASK_PORT', 5001))  # Changed to 5003 to avoid port conflict
+        port = int(os.environ.get('FLASK_PORT', 5000))  # Changed to 5003 to avoid port conflict
         development_mode = self.app.config.get('DEVELOPMENT_MODE', False)
         
         # Show optimization status
@@ -5985,32 +5985,20 @@ def create_backup():
             with sqlite3.connect(backup_path) as backup_conn:
                 with sqlite3.connect(product_db.db_path) as source_conn:
                     if backup_type == 'products':
-                        # First create the table structure
-                        source_conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='products'")
-                        create_sql = source_conn.fetchone()[0]
-                        backup_conn.execute(create_sql)
-                        # Then copy the data
-                        backup_conn.execute("ATTACH DATABASE ? AS source", (str(product_db.db_path),))
-                        backup_conn.execute("INSERT INTO products SELECT * FROM source.products")
-                        backup_conn.execute("DETACH DATABASE source")
+                        backup_conn.execute('''
+                            CREATE TABLE products AS 
+                            SELECT * FROM source_conn.products
+                        ''')
                     elif backup_type == 'strains':
-                        # First create the table structure
-                        source_conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='strains'")
-                        create_sql = source_conn.fetchone()[0]
-                        backup_conn.execute(create_sql)
-                        # Then copy the data
-                        backup_conn.execute("ATTACH DATABASE ? AS source", (str(product_db.db_path),))
-                        backup_conn.execute("INSERT INTO strains SELECT * FROM source.strains")
-                        backup_conn.execute("DETACH DATABASE source")
+                        backup_conn.execute('''
+                            CREATE TABLE strains AS 
+                            SELECT * FROM source_conn.strains
+                        ''')
                     elif backup_type == 'vendors':
-                        # First create the table structure
-                        source_conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='products'")
-                        create_sql = source_conn.fetchone()[0]
-                        backup_conn.execute(create_sql)
-                        # Then copy the data
-                        backup_conn.execute("ATTACH DATABASE ? AS source", (str(product_db.db_path),))
-                        backup_conn.execute("INSERT INTO products SELECT * FROM source.products")
-                        backup_conn.execute("DETACH DATABASE source")
+                        backup_conn.execute('''
+                            CREATE TABLE products AS 
+                            SELECT * FROM source_conn.products
+                        ''')
         
         # Compress if requested
         if compress:
