@@ -2379,6 +2379,97 @@ class ExcelProcessor:
         """Return the list of selected tag names in order."""
         return self.selected_tags if self.selected_tags else []
 
+    def _get_excel_records_for_tags(self, selected_tags: List[str], template_type: str = 'vertical') -> List[Dict[str, Any]]:
+        """Get records from Excel data for the selected tags."""
+        if self.df is None or self.df.empty:
+            logger.warning("No Excel data available for tag lookup")
+            return []
+        
+        logger.info(f"Looking up {len(selected_tags)} tags in Excel data")
+        
+        # Build a mapping from normalized product names to canonical names
+        product_name_col = 'ProductName'  # The actual column name in the DataFrame
+        if product_name_col not in self.df.columns:
+            possible_cols = ['Product Name*', 'Product Name', 'Description']
+            product_name_col = next((col for col in possible_cols if col in self.df.columns), None)
+            if not product_name_col:
+                product_name_col = 'Description'  # Fallback to Description
+        
+        logger.info(f"Using column '{product_name_col}' for product name lookup")
+        
+        # Create a mapping from normalized names to actual names
+        name_mapping = {}
+        for _, row in self.df.iterrows():
+            actual_name = str(row.get(product_name_col, '')).strip()
+            if actual_name and actual_name != 'nan':
+                normalized_name = self._normalize_product_name(actual_name)
+                name_mapping[normalized_name] = actual_name
+        
+        logger.info(f"Created name mapping with {len(name_mapping)} entries")
+        
+        # Find matching records
+        matching_records = []
+        for tag in selected_tags:
+            normalized_tag = self._normalize_product_name(tag)
+            if normalized_tag in name_mapping:
+                actual_name = name_mapping[normalized_tag]
+                # Find the row with this exact name
+                matching_rows = self.df[self.df[product_name_col].str.strip() == actual_name]
+                if not matching_rows.empty:
+                    for _, row in matching_rows.iterrows():
+                        record = self._create_record_from_row(row, template_type)
+                        if record:
+                            matching_records.append(record)
+                    logger.debug(f"Found {len(matching_rows)} records for tag '{tag}' -> '{actual_name}'")
+                else:
+                    logger.warning(f"No matching rows found for actual name '{actual_name}'")
+            else:
+                logger.warning(f"No mapping found for tag '{tag}' (normalized: '{normalized_tag}')")
+        
+        logger.info(f"Found {len(matching_records)} matching records from Excel data")
+        return matching_records
+
+    def _create_record_from_row(self, row: pd.Series, template_type: str = 'vertical') -> Optional[Dict[str, Any]]:
+        """Create a record from a DataFrame row for label generation."""
+        try:
+            # Get product name
+            product_name_col = 'ProductName'
+            if product_name_col not in self.df.columns:
+                possible_cols = ['Product Name*', 'Product Name', 'Description']
+                product_name_col = next((col for col in possible_cols if col in self.df.columns), None)
+                if not product_name_col:
+                    product_name_col = 'Description'
+            
+            product_name = str(row.get(product_name_col, '')).strip()
+            if not product_name or product_name == 'nan':
+                return None
+            
+            # Create basic record structure
+            record = {
+                'Product Name*': product_name,
+                'ProductName': product_name,
+                'Vendor': str(row.get('Vendor', '')).strip(),
+                'Product Brand': str(row.get('Product Brand', '')).strip(),
+                'Lineage': str(row.get('Lineage', 'MIXED')).strip().upper(),
+                'Product Type*': str(row.get('Product Type*', '')).strip(),
+                'Weight*': str(row.get('Weight*', '')).strip(),
+                'Quantity*': str(row.get('Quantity*', '')).strip(),
+                'DOH': str(row.get('DOH', '')).strip(),
+                'Ratio': str(row.get('Ratio', '')).strip(),
+                'Description': str(row.get('Description', '')).strip(),
+            }
+            
+            # Add any additional fields that might be needed
+            for col in self.df.columns:
+                if col not in record:
+                    record[col] = str(row.get(col, '')).strip()
+            
+            return record
+            
+        except Exception as e:
+            logger.error(f"Error creating record from row: {e}")
+            return None
+
     def get_selected_records(self, template_type: str = 'vertical') -> List[Dict[str, Any]]:
         """Get selected records from the DataFrame, ordered by lineage."""
         try:
@@ -2412,37 +2503,40 @@ class ExcelProcessor:
             
             logger.debug(f"Selected tag names: {selected_tag_names}")
             
-            # Try to get records from database first
-            try:
-                from .product_database import get_product_database
-                product_db = get_product_database()
-                if product_db:
-                    logger.info("Attempting to get selected records from database...")
-                    db_records = product_db.get_products_by_names(selected_tags)
-                    if db_records:
-                        logger.info(f"Successfully retrieved {len(db_records)} records from database")
-                        logger.info(f"CRITICAL FIX: Expected {len(selected_tags)} records, got {len(db_records)} from database")
-                        
-                        # CRITICAL FIX: Use database records even if some are missing
-                        if len(db_records) > 0:
-                            logger.info(f"CRITICAL FIX: Using {len(db_records)} database records for generation")
-                            logger.info(f"CRITICAL FIX: {len(selected_tags) - len(db_records)} products not found in database")
+            # PRIORITY FIX: Use Excel data first, database as fallback only
+            logger.info("Using Excel data for selected records (Excel-first approach)")
+            
+            # Get records from Excel data
+            excel_records = self._get_excel_records_for_tags(selected_tags, template_type)
+            if excel_records:
+                logger.info(f"Successfully retrieved {len(excel_records)} records from Excel data")
+                return excel_records
+            else:
+                logger.warning("No Excel records found, trying database as fallback")
+                
+                # Fallback to database only if Excel data fails
+                try:
+                    from .product_database import get_product_database
+                    product_db = get_product_database()
+                    if product_db:
+                        logger.info("Attempting to get selected records from database as fallback...")
+                        db_records = product_db.get_products_by_names(selected_tags)
+                        if db_records:
+                            logger.info(f"Successfully retrieved {len(db_records)} records from database fallback")
                             
                             # Process database records to match the expected format
                             processed_records = self._process_database_records(db_records, template_type)
-                            logger.info(f"CRITICAL FIX: Generated {len(processed_records)} records from database")
+                            logger.info(f"Generated {len(processed_records)} records from database fallback")
                             return processed_records
                         else:
-                            logger.warning("No database records found, falling back to Excel data")
+                            logger.warning("No database records found in fallback")
                     else:
-                        logger.warning("No database records found, falling back to Excel data")
-                else:
-                    logger.warning("Product database not available, falling back to Excel data")
-            except Exception as e:
-                logger.warning(f"Database lookup failed, falling back to Excel data: {e}")
+                        logger.warning("Product database not available for fallback")
+                except Exception as e:
+                    logger.warning(f"Database lookup failed, falling back to Excel data: {e}")
             
-            # Fallback to Excel data if database lookup fails or returns no results
-            logger.info("Using Excel data for selected records")
+            # Final fallback to Excel data if all else fails
+            logger.info("Using Excel data for selected records (final fallback)")
             
             # Build a mapping from normalized product names to canonical names
             product_name_col = 'ProductName'  # The actual column name in the DataFrame
