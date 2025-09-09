@@ -1493,7 +1493,7 @@ def upload_file():
         
         # Start a timeout monitor for the background processing
         def timeout_monitor():
-            time.sleep(30)  # Wait 30 seconds
+            time.sleep(15)  # Wait 15 seconds (reduced from 30)
             with processing_lock:
                 if processing_status.get(file.filename) == 'processing':
                     logging.warning(f"[UPLOAD] Background processing timeout for {file.filename}, trying synchronous fallback")
@@ -1694,14 +1694,25 @@ def ultra_fast_background_processing(filename, temp_path):
         process_start = time.time()
         
         # Only do essential additional processing
-        apply_essential_processing(processor.df)
-        
-        logging.info(f"[ULTRA-FAST-BG] Essential processing completed in {time.time() - process_start:.3f}s")
+        try:
+            apply_essential_processing(processor.df)
+            logging.info(f"[ULTRA-FAST-BG] Essential processing completed in {time.time() - process_start:.3f}s")
+        except Exception as processing_error:
+            logging.error(f"[ULTRA-FAST-BG] Essential processing failed: {processing_error}")
+            logging.error(f"[ULTRA-FAST-BG] Processing traceback: {traceback.format_exc()}")
+            # Continue anyway - the file might still be usable
         
         # Step 5: Update global processor (skip database storage for speed)
         logging.info(f"[ULTRA-FAST-BG] Updating global processor...")
-        update_global_processor_fast(processor, temp_path)
-        logging.info(f"[ULTRA-FAST-BG] Global processor updated successfully")
+        try:
+            update_global_processor_fast(processor, temp_path)
+            logging.info(f"[ULTRA-FAST-BG] Global processor updated successfully")
+        except Exception as update_error:
+            logging.error(f"[ULTRA-FAST-BG] Failed to update global processor: {update_error}")
+            logging.error(f"[ULTRA-FAST-BG] Update traceback: {traceback.format_exc()}")
+            # This is critical - if we can't update the global processor, the upload failed
+            update_processing_status(filename, f'error: Failed to update global processor: {update_error}')
+            return
         
         # Step 6: Mark as ready
         logging.info(f"[ULTRA-FAST-BG] Marking as ready...")
@@ -1720,6 +1731,8 @@ def apply_essential_processing(df):
     """Apply only the most essential data processing for speed"""
     try:
         logging.info("[ULTRA-FAST-BG] Applying essential processing...")
+        logging.info(f"[ULTRA-FAST-BG] DataFrame shape: {df.shape}")
+        logging.info(f"[ULTRA-FAST-BG] DataFrame columns: {list(df.columns)}")
         
         # Only do the most critical processing that's needed for the UI
         import pandas as pd
@@ -2246,6 +2259,40 @@ def process_excel_background(filename, temp_path):
         logging.error(f"[BG] Error in background processing: {str(e)}")
         logging.error(f"[BG] Traceback: {traceback.format_exc()}")
         update_processing_status(filename, f'error: {str(e)}')
+
+@app.route('/api/test-background-processing', methods=['GET'])
+def test_background_processing():
+    """Test endpoint to check if background processing is working"""
+    try:
+        # Create a simple test processor
+        from src.core.data.excel_processor import ExcelProcessor
+        processor = ExcelProcessor()
+        processor.enable_product_db_integration(False)
+        
+        # Test with a simple DataFrame
+        import pandas as pd
+        test_df = pd.DataFrame({
+            'Product Name*': ['Test Product'],
+            'Product Type*': ['Flower'],
+            'Lineage': ['HYBRID'],
+            'Weight*': ['3.5g']
+        })
+        processor.df = test_df
+        
+        # Test the essential processing
+        apply_essential_processing(processor.df)
+        
+        return jsonify({
+            'success': True,
+            'message': 'Background processing test successful',
+            'processor_df_shape': processor.df.shape if processor.df is not None else 'None'
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
 
 @app.route('/api/upload-status', methods=['GET'])
 def upload_status():
