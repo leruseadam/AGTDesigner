@@ -1,10 +1,3 @@
-def make_nonbreaking_spaces(text):
-    """
-    Replace all spaces in the input text with non-breaking spaces to prevent line breaks.
-    """
-    if not text or not isinstance(text, str):
-        return text
-    return text.replace(' ', '\u00A0')
 import re
 from typing import Optional
 
