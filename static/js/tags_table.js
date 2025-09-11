@@ -182,6 +182,8 @@ class TagsTable {
     const tagItem = selectElement.closest(".tag-item");
     const oldLineage = tagItem.dataset.lineage;
 
+    console.log(`🔄 Updating lineage for ${tagName}: ${oldLineage} → ${newLineage}`);
+
     try {
       const response = await fetch("/api/update-lineage", {
         method: "POST",
@@ -191,6 +193,7 @@ class TagsTable {
       
       if (!response.ok) {
         const error = await response.json();
+        console.error(`❌ API Error: ${error.error || "Failed to update lineage"}`);
         throw new Error(error.error || "Failed to update lineage");
       }
 
@@ -198,36 +201,31 @@ class TagsTable {
       tagItem.dataset.lineage = newLineage;
       
       // Show success message
-                  console.log(`Updated lineage for ${tagName} (${oldLineage} → ${newLineage})`);
+      console.log(`✅ Successfully updated lineage for ${tagName} (${oldLineage} → ${newLineage})`);
 
       // Update the tag in TagManager state without refreshing the entire list
       const tag = TagManager.state.tags.find(t => t['Product Name*'] === tagName);
       if (tag) {
         tag.lineage = newLineage;
+        console.log(`📝 Updated tag in TagManager.state.tags`);
       }
       
       // Update the tag in original tags as well
       const originalTag = TagManager.state.originalTags.find(t => t['Product Name*'] === tagName);
       if (originalTag) {
         originalTag.lineage = newLineage;
+        console.log(`📝 Updated tag in TagManager.state.originalTags`);
       }
       
       // Only update selected tags if the changed tag is in the selected list
       if (TagManager.state.selectedTags.has(tagName)) {
+        console.log(`🔄 Updating selected tags for ${tagName}`);
         await TagManager.fetchAndUpdateSelectedTags();
       }
 
-      // Refresh available tags from backend to ensure UI shows updated lineage
-      if (TagManager.fetchAndUpdateAvailableTags) {
-        try {
-          console.log('Refreshing available tags to show updated lineage...');
-          await TagManager.fetchAndUpdateAvailableTags();
-          console.log('Available tags refreshed successfully');
-        } catch (refreshError) {
-          console.warn('Failed to refresh available tags:', refreshError);
-          // Don't fail the lineage update if refresh fails
-        }
-      }
+      // CRITICAL FIX: Don't refresh available tags - just update the UI directly
+      // This prevents the available tags list from being wiped when lineage changes
+      console.log('✅ Lineage updated successfully - skipping full refresh to preserve available tags');
 
     } catch (error) {
       console.error('Error updating lineage:', error);
