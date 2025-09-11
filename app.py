@@ -4061,119 +4061,65 @@ def get_session_cache_key(base_key):
 
 @app.route('/api/available-tags', methods=['GET'])
 def get_available_tags():
+    """
+    1. Try to load tags from Excel (uploads or ExcelProcessor)
+    2. If Excel is empty, fall back to product database
+    3. If both are empty, return []
+    """
+    import math
+    import glob
+    import os
+    import pandas as pd
     try:
         logging.info("=== AVAILABLE TAGS DEBUG START ===")
         logging.info(f"Available tags request at {datetime.now().strftime('%H:%M:%S')}")
-        
-        # Get Excel processor using the proper function
-        excel_processor = get_excel_processor()
-        if excel_processor is None:
-            logging.warning("No Excel processor available, returning empty tags")
-            return jsonify([])
-        
-        if excel_processor.df is None:
-            logging.warning("Excel processor has no data, returning empty tags")
-            return jsonify([])
-        
-        # Store validation to prevent cross-store data access
-        current_store = session.get('selected_store', '')
-        file_store = session.get('file_store', '')
-        
-        if file_store and current_store and file_store != current_store:
-            logging.warning(f"Store mismatch! File was uploaded for {file_store}, but current store is {current_store}")
-            logging.warning("Returning empty tags to prevent cross-store data access")
-            return jsonify([])
-        
-        # Use the Excel processor we already obtained
-        logging.info(f"Using Excel processor: {excel_processor is not None}")
-        if excel_processor is not None:
-            logging.info(f"Processor df is None: {excel_processor.df is None}")
-            if excel_processor.df is not None:
-                logging.info(f"Processor df shape: {excel_processor.df.shape}")
-                logging.info(f"Processor df empty: {excel_processor.df.empty}")
-            else:
-                logging.warning("Processor has no DataFrame!")
-        
-        # ALWAYS try direct file loading like debug columns (since debug columns works)
-        logging.info("ALWAYS DIRECT: Using direct file loading like debug columns")
-        try:
-            import glob
-            import os
-            import pandas as pd
-            
-            uploads_dir = os.path.join(os.getcwd(), 'uploads')
-            if os.path.exists(uploads_dir):
-                xlsx_files = glob.glob(os.path.join(uploads_dir, '*.xlsx'))
-                if xlsx_files:
-                    xlsx_files.sort(key=os.path.getmtime, reverse=True)
-                    latest_file = xlsx_files[0]
-                    logging.info(f"ALWAYS DIRECT: Loading {latest_file} directly")
-                    
-                    # Load the file directly
-                    df = pd.read_excel(latest_file)
-                    if not df.empty:
-                        # Convert to the format expected by the frontend
-                        tags = df.to_dict('records')
-                        
-                        # Clean the data
-                        import math
-                        def clean_dict(d):
-                            if not isinstance(d, dict):
-                                return {}
-                            return {k: ('' if (v is None or (isinstance(v, float) and math.isnan(v))) else v) for k, v in d.items()}
-                        
-                        cleaned_tags = [clean_dict(tag) for tag in tags if isinstance(tag, dict)]
-                        logging.info(f"ALWAYS DIRECT: Successfully loaded {len(cleaned_tags)} tags directly")
-                        
-                        # Return the data immediately
-                        logging.info(f"ALWAYS DIRECT: Returning {len(cleaned_tags)} tags directly")
-                        return jsonify(cleaned_tags)
-                    else:
-                        logging.warning(f"ALWAYS DIRECT: File is empty: {latest_file}")
+
+        # 1. Try direct Excel file in uploads dir
+        uploads_dir = os.path.join(os.getcwd(), 'uploads')
+        if os.path.exists(uploads_dir):
+            xlsx_files = glob.glob(os.path.join(uploads_dir, '*.xlsx'))
+            if xlsx_files:
+                xlsx_files.sort(key=os.path.getmtime, reverse=True)
+                latest_file = xlsx_files[0]
+                logging.info(f"EXCEL PRIORITY: Loading {latest_file} directly")
+                df = pd.read_excel(latest_file)
+                if not df.empty:
+                    tags = df.to_dict('records')
+                    def clean_dict(d):
+                        return {k: ('' if (v is None or (isinstance(v, float) and math.isnan(v))) else v) for k, v in d.items()} if isinstance(d, dict) else {}
+                    cleaned_tags = [clean_dict(tag) for tag in tags if isinstance(tag, dict)]
+                    logging.info(f"EXCEL PRIORITY: Returning {len(cleaned_tags)} tags from Excel file")
+                    return jsonify(cleaned_tags)
                 else:
-                    logging.warning(f"ALWAYS DIRECT: No Excel files found in {uploads_dir}")
-            else:
-                logging.warning(f"ALWAYS DIRECT: Uploads directory not found: {uploads_dir}")
-        except Exception as e:
-            logging.error(f"ALWAYS DIRECT: Direct loading failed: {e}")
-        
-        # Check if we have data in the Excel processor
-        if excel_processor.df is None or excel_processor.df.empty:
-            logging.warning(f"Excel processor has no data - df is None: {excel_processor.df is None}, empty: {excel_processor.df.empty if excel_processor.df is not None else 'N/A'}")
-            logging.warning(f"Last loaded file: {getattr(excel_processor, '_last_loaded_file', 'None')}")
-            return jsonify([])
-        
-        # Convert DataFrame to list of dictionaries for frontend
-        try:
-            logging.info(f"CRITICAL FIX: Excel processor has {len(excel_processor.df)} rows, {len(excel_processor.df.columns)} columns")
-            logging.info(f"CRITICAL FIX: Last loaded file: {getattr(excel_processor, '_last_loaded_file', 'None')}")
-            
-            # Get all rows as dictionaries
+                    logging.warning(f"EXCEL PRIORITY: File is empty: {latest_file}")
+
+        # 2. Try ExcelProcessor in memory
+        excel_processor = get_excel_processor()
+        if excel_processor is not None and getattr(excel_processor, 'df', None) is not None and not excel_processor.df.empty:
             tags = excel_processor.df.to_dict('records')
-            logging.info(f"CRITICAL FIX: Converted to {len(tags)} records")
-            
-            # Clean the data (remove NaN values, etc.)
-            import math
             def clean_dict(d):
-                if not isinstance(d, dict):
-                    return {}
-                return {k: ('' if (v is None or (isinstance(v, float) and math.isnan(v))) else v) for k, v in d.items()}
-            
+                return {k: ('' if (v is None or (isinstance(v, float) and math.isnan(v))) else v) for k, v in d.items()} if isinstance(d, dict) else {}
             cleaned_tags = [clean_dict(tag) for tag in tags if isinstance(tag, dict)]
-            logging.info(f"CRITICAL FIX: Cleaned to {len(cleaned_tags)} tags")
-            
-            # Log sample data for debugging
-            if len(cleaned_tags) > 0:
-                sample = cleaned_tags[0]
-                logging.info(f"CRITICAL FIX: Sample tag: {sample.get('Product Name*', 'N/A')} - {sample.get('Lineage', 'N/A')}")
-            
-            logging.info(f"CRITICAL FIX: Returning {len(cleaned_tags)} fresh tags from Excel processor")
-            logging.info("=== AVAILABLE TAGS DEBUG END ===")
+            logging.info(f"EXCEL PROCESSOR: Returning {len(cleaned_tags)} tags from ExcelProcessor")
             return jsonify(cleaned_tags)
-            
-        except Exception as e:
-            logging.error(f"Error converting Excel data to tags: {e}")
-            return jsonify([])
+
+        # 3. Fall back to product database
+        logging.info("FALLBACK: Trying product database for tags")
+        product_db = get_product_database()
+        if product_db is not None:
+            try:
+                db_tags = product_db.get_all_tags() if hasattr(product_db, 'get_all_tags') else []
+                if db_tags:
+                    logging.info(f"FALLBACK: Returning {len(db_tags)} tags from product database")
+                    return jsonify(db_tags)
+                else:
+                    logging.warning("FALLBACK: No tags found in product database")
+            except Exception as db_e:
+                logging.error(f"FALLBACK: Error loading tags from product database: {db_e}")
+
+        # 4. If all fail, return empty
+        logging.warning("No tags found in Excel or database, returning empty list")
+        return jsonify([])
     except Exception as e:
         logging.error(f"Error getting available tags: {str(e)}")
         logging.error(traceback.format_exc())
