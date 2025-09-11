@@ -4075,7 +4075,17 @@ def get_available_tags():
         logging.info(f"Available tags request at {datetime.now().strftime('%H:%M:%S')}")
 
 
-        # 1. Try the most recently uploaded Excel file from session (if available)
+        # 1. Always use the in-memory _excel_processor.df if available and not empty
+        global _excel_processor
+        if _excel_processor is not None and hasattr(_excel_processor, 'df') and _excel_processor.df is not None and not _excel_processor.df.empty:
+            tags = _excel_processor.df.to_dict('records')
+            def clean_dict(d):
+                return {k: ('' if (v is None or (isinstance(v, float) and math.isnan(v))) else v) for k, v in d.items()} if isinstance(d, dict) else {}
+            cleaned_tags = [clean_dict(tag) for tag in tags if isinstance(tag, dict)]
+            logging.info(f"EXCEL PROCESSOR PRIMARY: Returning {len(cleaned_tags)} tags from in-memory ExcelProcessor")
+            return jsonify(cleaned_tags)
+
+        # 2. Try the most recently uploaded Excel file from session (if available)
         file_path = session.get('file_path')
         if file_path and os.path.exists(file_path):
             logging.info(f"EXCEL SESSION PRIORITY: Loading {file_path} from session['file_path']")
@@ -4090,7 +4100,7 @@ def get_available_tags():
             else:
                 logging.warning(f"EXCEL SESSION PRIORITY: Uploaded file is empty: {file_path}")
 
-        # 2. Fallback: Try direct Excel file in uploads dir
+        # 3. Fallback: Try direct Excel file in uploads dir
         uploads_dir = os.path.join(os.getcwd(), 'uploads')
         if os.path.exists(uploads_dir):
             xlsx_files = glob.glob(os.path.join(uploads_dir, '*.xlsx'))
