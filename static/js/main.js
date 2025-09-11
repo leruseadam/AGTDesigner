@@ -720,7 +720,7 @@ const AppLoadingSplash = {
 const TagManager = {
     state: {
         selectedTags: new Set(),
-        persistentSelectedTags: [], // Changed to array for easier manipulation
+        persistentSelectedTags: new Set(), // New: persistent selected tags independent of filters
         initialized: false,
         filters: {},
         loading: false,
@@ -2125,9 +2125,6 @@ const TagManager = {
         // Add event listeners
         this.updateSelectAllCheckboxes();
         this.initializeSelectAllCheckbox();
-        
-        // Update all checkbox states to match persistent selected tags
-        this.updateAllCheckboxStates();
     },
 
     createTagElement(tag, isForSelectedTags = false) {
@@ -2156,14 +2153,6 @@ const TagManager = {
         checkbox.value = displayName;
         checkbox.checked = this.state.persistentSelectedTags.includes(displayName);
         console.log('Checkbox created for:', displayName, 'value:', checkbox.value, 'checked:', checkbox.checked);
-        console.log('Current persistentSelectedTags:', this.state.persistentSelectedTags);
-        
-        // Force the checkbox to reflect the correct state
-        if (this.state.persistentSelectedTags.includes(displayName)) {
-            checkbox.setAttribute('checked', 'checked');
-        } else {
-            checkbox.removeAttribute('checked');
-        }
         
         // Add event listener with proper error handling and improved logic
         const handleCheckboxChange = async (e) => {
@@ -2691,6 +2680,8 @@ const TagManager = {
 
     async updateLineageOnBackend(tagName, newLineage) {
         try {
+            console.log(`🔄 Updating lineage for ${tagName} to ${newLineage}`);
+            
             const payload = {
                 tag_name: tagName,
                 "Product Name*": tagName,
@@ -2704,6 +2695,7 @@ const TagManager = {
 
             if (!response.ok) {
                 const errorData = await response.json();
+                console.error(`❌ API Error: ${errorData.error || 'Failed to update lineage'}`);
                 throw new Error(errorData.error || 'Failed to update lineage');
             }
 
@@ -2711,26 +2703,23 @@ const TagManager = {
             const originalTag = this.state.originalTags.find(t => t['Product Name*'] === tagName);
             if (originalTag) {
                 originalTag.lineage = newLineage;
+                console.log(`📝 Updated tag in originalTags`);
             }
 
             // Update the tag in current tags list
             const currentTag = this.state.tags.find(t => t['Product Name*'] === tagName);
             if (currentTag) {
                 currentTag.lineage = newLineage;
+                console.log(`📝 Updated tag in current tags`);
             }
 
             // Optimized: Only update the specific tag elements instead of rebuilding everything
             this.updateTagLineageInUI(tagName, newLineage);
+            console.log(`🎨 Updated UI elements for ${tagName}`);
 
-            // Refresh available tags from backend to ensure UI shows updated lineage
-            try {
-                console.log('Refreshing available tags to show updated lineage...');
-                await this.fetchAndUpdateAvailableTags();
-                console.log('Available tags refreshed successfully');
-            } catch (refreshError) {
-                console.warn('Failed to refresh available tags:', refreshError);
-                // Don't fail the lineage update if refresh fails
-            }
+            // CRITICAL FIX: Don't refresh available tags - just update the UI directly
+            // This prevents the available tags list from being wiped when lineage changes
+            console.log('✅ Lineage updated successfully - skipping full refresh to preserve available tags');
 
         } catch (error) {
             console.error('Error updating lineage:', error);
@@ -5200,29 +5189,6 @@ const TagManager = {
                 brandSelectAll.indeterminate = brandChecked.length > 0 && brandChecked.length < brandCheckboxes.length;
             }
         });
-    },
-
-    updateAllCheckboxStates() {
-        // Update all checkbox states to match persistentSelectedTags
-        console.log('Updating all checkbox states...');
-        console.log('Current persistentSelectedTags:', this.state.persistentSelectedTags);
-        
-        const allCheckboxes = document.querySelectorAll('.tag-checkbox');
-        allCheckboxes.forEach(checkbox => {
-            const isSelected = this.state.persistentSelectedTags.includes(checkbox.value);
-            checkbox.checked = isSelected;
-            
-            if (isSelected) {
-                checkbox.setAttribute('checked', 'checked');
-            } else {
-                checkbox.removeAttribute('checked');
-            }
-            
-            console.log(`Checkbox ${checkbox.value}: checked=${checkbox.checked}, isSelected=${isSelected}`);
-        });
-        
-        // Update select all checkboxes
-        this.updateSelectAllCheckboxes();
     },
 
     // Initialize Select All checkbox with proper event listener

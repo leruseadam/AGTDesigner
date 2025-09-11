@@ -19,6 +19,8 @@ from docx.enum.section import WD_SECTION
 # from docx.oxml.shared import OxmlElement, qn  # Duplicate import removed
 import time
 import pandas as pd
+import qrcode
+from PIL import Image
 
 # Local imports
 from src.core.utils.common import safe_get
@@ -605,7 +607,8 @@ class TemplateProcessor:
                     'DescAndWeight', 
                     'Price',
                     'Ratio_or_THC_CBD',
-                    'DOH'
+                    'DOH',
+                    'QR'
                 ]
                 
                 # Keep adding missing placeholders until all are present
@@ -990,8 +993,45 @@ class TemplateProcessor:
                 self.logger.debug(f"Label{i+1} left blank (no data duplication)")
 
             # DOH images are already created in _build_label_context, no need for redundant creation here
+            
+            # Store original QR codes before replacing with placeholders
+            original_qr_codes = {}
+            if chunk:
+                for i in range(1, len(chunk) + 1):
+                    label_key = f'Label{i}'
+                    if label_key in context and 'QR' in context[label_key]:
+                        # Store the original QR code data before replacing with placeholder
+                        original_qr_codes[label_key] = context[label_key]['QR']
+                        # Replace with placeholder text for template rendering
+                        context[label_key]['QR'] = 'QR_PLACEHOLDER'
+                        self.logger.debug(f"Added QR placeholder for {label_key}")
 
             doc.render(context)
+            
+            # Manual QR code replacement after template rendering for all templates
+            # Handle QR code replacement for each label
+            if chunk and 'Label1' in context:
+                self.logger.info("Attempting QR placeholder replacement for all labels")
+                success_count = 0
+                total_labels = len([k for k in context.keys() if k.startswith('Label')])
+                
+                # Replace QR placeholders with actual QR codes using stored original data
+                for i in range(1, total_labels + 1):
+                    label_key = f'Label{i}'
+                    if label_key in original_qr_codes:
+                        success = self._replace_qr_placeholder(doc, original_qr_codes[label_key], label_key)
+                        if success:
+                            success_count += 1
+                            self.logger.debug(f"✓ QR code replaced for {label_key}")
+                        else:
+                            self.logger.warning(f"⚠ QR placeholder replacement failed for {label_key}")
+                
+                if success_count > 0:
+                    self.logger.info(f"✓ QR placeholder replacement completed: {success_count}/{total_labels} labels")
+                else:
+                    self.logger.warning("⚠ No QR codes were replaced")
+            else:
+                self.logger.debug("QR replacement skipped - no labels in context")
             
             # For double templates, use manual placeholder replacement as fallback
             # since DocxTemplate was not working reliably
@@ -1501,7 +1541,78 @@ class TemplateProcessor:
                 product_vendor = ''
             label_context['ProductVendor'] = wrap_with_marker(product_vendor, 'PRODUCTVENDOR')
 
+        # Generate QR code for Product Name
+        product_name = label_context.get('Product Name*') or label_context.get('ProductName') or label_context.get('Product Name', '')
+        if product_name and str(product_name).strip():
+            qr_code = self._generate_qr_code(product_name, doc)
+            if qr_code:
+                label_context['QR'] = qr_code
+                self.logger.debug(f"Generated QR code for product: '{product_name}'")
+            else:
+                label_context['QR'] = ''
+                self.logger.warning(f"Failed to generate QR code for product: '{product_name}'")
+        else:
+            label_context['QR'] = ''
+            self.logger.debug("No product name available for QR code generation")
+
         return label_context
+
+    def _generate_qr_code(self, product_name, doc):
+        """Generate QR code for the given product name and return as InlineImage."""
+        try:
+            if not product_name or str(product_name).strip() == '':
+                self.logger.warning("Empty product name provided for QR code generation")
+                return None
+            
+            # Clean the product name
+            clean_name = str(product_name).strip()
+            
+            # Create QR code instance
+            qr = qrcode.QRCode(
+                version=1,  # Auto-determine version based on content
+                error_correction=qrcode.constants.ERROR_CORRECT_L,
+                box_size=10,  # Size of each box in pixels
+                border=4,     # Border size in boxes
+            )
+            
+            # Add data to QR code
+            qr.add_data(clean_name)
+            qr.make(fit=True)
+            
+            # Create QR code image
+            qr_image = qr.make_image(fill_color="black", back_color="white")
+            
+            # Convert to BytesIO for InlineImage
+            img_buffer = BytesIO()
+            qr_image.save(img_buffer, format='PNG')
+            img_buffer.seek(0)
+            
+            # Determine QR code size based on template type
+            # Smaller QR codes for mini templates, larger for others
+            size_map = {
+                'mini': 15,      # 15mm for mini templates
+                'double': 18,    # 18mm for double templates  
+                'vertical': 20,  # 20mm for vertical templates
+                'horizontal': 20, # 20mm for horizontal templates
+                'inventory': 25  # 25mm for inventory templates
+            }
+            
+            qr_size = Mm(size_map.get(self.template_type, 20))
+            
+            # Create InlineImage for the document
+            qr_inline_image = InlineImage(doc, img_buffer, width=qr_size)
+            
+            # Store the raw image data for manual replacement
+            img_buffer.seek(0)  # Reset buffer position
+            qr_inline_image._raw_image_data = img_buffer.read()
+            qr_inline_image._raw_image_width = qr_size
+            
+            self.logger.debug(f"Generated QR code for product: '{clean_name}' with size: {qr_size}")
+            return qr_inline_image
+            
+        except Exception as e:
+            self.logger.error(f"Error generating QR code for product '{product_name}': {e}")
+            return None
 
     def _post_process_and_replace_content(self, doc):
         """Post-process the document after template rendering."""
@@ -3438,6 +3549,7 @@ class TemplateProcessor:
                                     'RATIO_END' not in run_text and    # Don't mark content already in RATIO markers
                                     '{{' not in run_text and 
                                     '}}' not in run_text and
+                                    'QR_PLACEHOLDER' not in run_text and  # Don't mark QR placeholders
                                     len(run_text.strip()) > 0 and
                                     # Only mark content that looks like brand names (not numbers, not empty)
                                     not run_text.strip().isdigit() and
@@ -4457,6 +4569,40 @@ class TemplateProcessor:
         except Exception as e:
             self.logger.warning(f"Error cleaning DOH cells: {e}")
 
+    def _replace_qr_placeholder(self, doc, qr_inline_image, label_key="Label1"):
+        """Replace QR placeholder with actual QR code image for specific label."""
+        try:
+            self.logger.debug(f"Starting QR placeholder replacement for {label_key}")
+            
+            # Find and replace QR_PLACEHOLDER text with actual QR code
+            # We'll replace the first QR_PLACEHOLDER we find for this label
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for para in cell.paragraphs:
+                            if 'QR_PLACEHOLDER' in para.text:
+                                self.logger.debug(f"Found QR placeholder in paragraph for {label_key}")
+                                
+                                # Clear the paragraph and add the QR code
+                                para.clear()
+                                para.alignment = 1  # Center alignment
+                                
+                                # Add the QR code image using raw image data
+                                run = para.add_run()
+                                from io import BytesIO
+                                img_buffer = BytesIO(qr_inline_image._raw_image_data)
+                                run.add_picture(img_buffer, width=qr_inline_image._raw_image_width)
+                                
+                                self.logger.debug(f"✓ QR code replaced successfully for {label_key}")
+                                return True
+            
+            self.logger.warning(f"QR placeholder not found in document for {label_key}")
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"Error replacing QR placeholder: {e}")
+            return False
+
     def _manual_replace_placeholders(self, doc, context):
         """Manually replace placeholders in the document when DocxTemplate fails."""
         try:
@@ -4483,6 +4629,22 @@ class TemplateProcessor:
                                     for field_key, field_value in label_context.items():
                                         placeholder = f"{{{{{label_key}.{field_key}}}}}"
                                         if placeholder in text:
+                                            # Special handling for QR codes (InlineImage objects)
+                                            if field_key == 'QR' and hasattr(field_value, 'image'):
+                                                # Clear the run and add the QR code image
+                                                run.clear()
+                                                run.add_picture(field_value.image, width=field_value.width)
+                                                self.logger.debug(f"Replaced {placeholder} with QR code image")
+                                                continue
+                                            
+                                            # Handle simple QR placeholder {{QR}}
+                                            if placeholder == '{{QR}}' and field_key == 'QR' and hasattr(field_value, 'image'):
+                                                # Clear the run and add the QR code image
+                                                run.clear()
+                                                run.add_picture(field_value.image, width=field_value.width)
+                                                self.logger.debug(f"Replaced simple {{QR}} placeholder with QR code image")
+                                                continue
+                                            
                                             # For double templates, unwrap markers to get clean content
                                             if self.template_type == 'double':
                                                 # Unwrap common markers to get clean content
@@ -4509,7 +4671,8 @@ class TemplateProcessor:
                                                     'Lineage': 'lineage',
                                                     'ProductStrain': 'strain',
                                                     'ProductVendor': 'vendor',
-                                                    'DOH': 'doh'
+                                                    'DOH': 'doh',
+                                                    'QR': 'qr'
                                                 }
                                                 
                                                 field_type = field_type_mapping.get(field_key, 'default')
@@ -4530,6 +4693,24 @@ class TemplateProcessor:
                                 for field_key, field_value in label_context.items():
                                     placeholder = f"{{{{{label_key}.{field_key}}}}}"
                                     if placeholder in paragraph_text:
+                                        # Special handling for QR codes (InlineImage objects)
+                                        if field_key == 'QR' and hasattr(field_value, 'image'):
+                                            # Clear the paragraph and add the QR code image
+                                            paragraph.clear()
+                                            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                            paragraph.add_run().add_picture(field_value.image, width=field_value.width)
+                                            self.logger.debug(f"Replaced {placeholder} with QR code image in paragraph")
+                                            continue
+                                        
+                                        # Handle simple QR placeholder {{QR}}
+                                        if placeholder == '{{QR}}' and field_key == 'QR' and hasattr(field_value, 'image'):
+                                            # Clear the paragraph and add the QR code image
+                                            paragraph.clear()
+                                            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                            paragraph.add_run().add_picture(field_value.image, width=field_value.width)
+                                            self.logger.debug(f"Replaced simple {{QR}} placeholder with QR code image in paragraph")
+                                            continue
+                                        
                                         # For double templates, unwrap markers to get clean content
                                         if self.template_type == 'double':
                                             # Unwrap common markers to get clean content
@@ -4556,7 +4737,8 @@ class TemplateProcessor:
                                                 'Lineage': 'lineage',
                                                 'ProductStrain': 'strain',
                                                 'ProductVendor': 'vendor',
-                                                'DOH': 'doh'
+                                                'DOH': 'doh',
+                                                'QR': 'qr'
                                             }
                                             
                                             field_type = field_type_mapping.get(field_key, 'default')
