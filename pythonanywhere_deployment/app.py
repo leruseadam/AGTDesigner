@@ -9,6 +9,14 @@ import re
 # Startup Performance Optimization
 DISABLE_STARTUP_FILE_LOADING = True  # Disable startup file loading to prevent hangs
 
+# PythonAnywhere Performance Optimization
+PYTHONANYWHERE_OPTIMIZATION = os.environ.get('PYTHONANYWHERE_DOMAIN') is not None
+if PYTHONANYWHERE_OPTIMIZATION:
+    # Reduce memory usage on PythonAnywhere
+    MAX_CONTENT_LENGTH = 10 * 1024 * 1024  # 10MB instead of 100MB
+    SEND_FILE_MAX_AGE_DEFAULT = 300  # 5 minutes instead of 1 year
+    PERMANENT_SESSION_LIFETIME = 1800  # 30 minutes instead of 1 hour
+
 # Add timeout protection for file operations
 import signal
 import threading
@@ -633,6 +641,17 @@ def create_app():
     app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
     app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 31536000  # 1 year cache for static files
     app.config['PERMANENT_SESSION_LIFETIME'] = 3600  # 1 hour session timeout
+    
+    # PythonAnywhere-specific optimizations
+    if PYTHONANYWHERE_OPTIMIZATION:
+        app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 10MB for PythonAnywhere
+        app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 300  # 5 minutes for PythonAnywhere
+        app.config['PERMANENT_SESSION_LIFETIME'] = 1800  # 30 minutes for PythonAnywhere
+        # Reduce logging verbosity for PythonAnywhere
+        logging.getLogger('werkzeug').setLevel(logging.WARNING)
+        logging.getLogger('urllib3').setLevel(logging.WARNING)
+        logging.getLogger('requests').setLevel(logging.WARNING)
+        logging.info("PythonAnywhere optimizations applied")
     
     # Compression for better performance
     if Compress:
@@ -2388,6 +2407,9 @@ def upload_status():
     filename = request.args.get('filename')
     if not filename:
         return jsonify({'error': 'No filename provided'}), 400
+    
+    # Ensure filename is properly sanitized
+    filename = sanitize_filename(filename)
     
     # Clean up old entries periodically (but not on every request to reduce overhead)
     if random.random() < 0.05:  # Only cleanup 5% of the time (reduced from 10%)
