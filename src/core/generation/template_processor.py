@@ -19,6 +19,8 @@ from docx.enum.section import WD_SECTION
 # from docx.oxml.shared import OxmlElement, qn  # Duplicate import removed
 import time
 import pandas as pd
+import qrcode
+from PIL import Image
 
 # Local imports
 from src.core.utils.common import safe_get
@@ -605,7 +607,8 @@ class TemplateProcessor:
                     'DescAndWeight', 
                     'Price',
                     'Ratio_or_THC_CBD',
-                    'DOH'
+                    'DOH',
+                    'QR'
                 ]
                 
                 # Keep adding missing placeholders until all are present
@@ -990,8 +993,45 @@ class TemplateProcessor:
                 self.logger.debug(f"Label{i+1} left blank (no data duplication)")
 
             # DOH images are already created in _build_label_context, no need for redundant creation here
+            
+            # Store original QR codes before replacing with placeholders
+            original_qr_codes = {}
+            if chunk:
+                for i in range(1, len(chunk) + 1):
+                    label_key = f'Label{i}'
+                    if label_key in context and 'QR' in context[label_key]:
+                        # Store the original QR code data before replacing with placeholder
+                        original_qr_codes[label_key] = context[label_key]['QR']
+                        # Replace with placeholder text for template rendering
+                        context[label_key]['QR'] = 'QR_PLACEHOLDER'
+                        self.logger.debug(f"Added QR placeholder for {label_key}")
 
             doc.render(context)
+            
+            # Manual QR code replacement after template rendering for all templates
+            # Handle QR code replacement for each label
+            if chunk and 'Label1' in context:
+                self.logger.info("Attempting QR placeholder replacement for all labels")
+                success_count = 0
+                total_labels = len([k for k in context.keys() if k.startswith('Label')])
+                
+                # Replace QR placeholders with actual QR codes using stored original data
+                for i in range(1, total_labels + 1):
+                    label_key = f'Label{i}'
+                    if label_key in original_qr_codes:
+                        success = self._replace_qr_placeholder(doc, original_qr_codes[label_key], label_key)
+                        if success:
+                            success_count += 1
+                            self.logger.debug(f"✓ QR code replaced for {label_key}")
+                        else:
+                            self.logger.warning(f"⚠ QR placeholder replacement failed for {label_key}")
+                
+                if success_count > 0:
+                    self.logger.info(f"✓ QR placeholder replacement completed: {success_count}/{total_labels} labels")
+                else:
+                    self.logger.warning("⚠ No QR codes were replaced")
+            else:
+                self.logger.debug("QR replacement skipped - no labels in context")
             
             # For double templates, use manual placeholder replacement as fallback
             # since DocxTemplate was not working reliably
@@ -1170,33 +1210,42 @@ class TemplateProcessor:
         classic_types = CLASSIC_TYPES
         edible_types = {"edible (solid)", "edible (liquid)", "high cbd edible liquid", "tincture", "topical", "capsule"}
 
-        # Fast Description and WeightUnits combination
-        desc = label_context.get('Description', '') or ''
-        weight = (label_context.get('WeightUnits', '') or '').replace('\u202F', '')
-        
-        # Ultra-fast string operations
-        if desc.endswith('- '):
-            desc = desc[:-2]
-        if weight.startswith('- '):
-            weight = weight[2:]
-        
-        # Template-specific handling
-        if self.template_type == 'mini':
-            # For mini templates, include both description and weight in DescAndWeight
-            # Use regular space instead of non-breaking space to allow proper line breaking
-            if desc and weight:
-                # Format for mini template with proper text wrapping
-                combined_text = f"{desc} - {weight}"
-                # Apply mini template text wrapping to prevent line breaks in the middle of words
-                wrapped_text = self._format_mini_template_text(combined_text)
-                label_context['DescAndWeight'] = wrap_with_marker(wrapped_text, 'DESC')
-            else:
-                label_context['DescAndWeight'] = wrap_with_marker(desc or weight, 'DESC')
+        # Use DescAndWeight from record if it exists, otherwise construct it
+        if 'DescAndWeight' in label_context and label_context['DescAndWeight']:
+            # DescAndWeight is already set correctly in the record, use it as-is
+            # Just ensure it's wrapped with the DESC marker if not already wrapped
+            desc_and_weight = label_context['DescAndWeight']
+            if not is_already_wrapped(desc_and_weight, 'DESC'):
+                label_context['DescAndWeight'] = wrap_with_marker(desc_and_weight, 'DESC')
         else:
-            if desc and weight:
-                label_context['DescAndWeight'] = wrap_with_marker(f"{desc} -\u00A0{weight}", 'DESC')
+            # Fallback: construct DescAndWeight from Description and WeightUnits
+            desc = label_context.get('Description', '') or ''
+            weight = (label_context.get('WeightUnits', '') or '').replace('\u202F', '')
+            
+            # Ultra-fast string operations
+            if desc.endswith('- '):
+                desc = desc[:-2]
+            if weight.startswith('- '):
+                weight = weight[2:]
+            
+            # Template-specific handling
+            if self.template_type == 'mini':
+                # For mini templates, include both description and weight in DescAndWeight
+                # Use regular space instead of non-breaking space to allow proper line breaking
+                if desc and weight:
+                    # Format for mini template with proper text wrapping
+                    combined_text = f"{desc} - {weight}"
+                    # Apply mini template text wrapping to prevent line breaks in the middle of words
+                    wrapped_text = self._format_mini_template_text(combined_text)
+                    label_context['DescAndWeight'] = wrap_with_marker(wrapped_text, 'DESC')
+                else:
+                    label_context['DescAndWeight'] = wrap_with_marker(desc or weight, 'DESC')
             else:
-                label_context['DescAndWeight'] = wrap_with_marker(desc or weight, 'DESC')
+                if desc and weight:
+                    combined_text = f"{desc} -\u00A0{weight}"
+                    label_context['DescAndWeight'] = wrap_with_marker(combined_text, 'DESC')
+                else:
+                    label_context['DescAndWeight'] = wrap_with_marker(desc or weight, 'DESC')
 
         # Fast DOH image processing - only if needed
         if label_context.get('DOH'):
@@ -1297,9 +1346,10 @@ class TemplateProcessor:
         ratio_val = label_context.get('Ratio_or_THC_CBD') or label_context.get('Ratio', '')
         
         # If no ratio value but we have individual THC/CBD values, combine them
+        # PRIORITY: Excel THC/CBD values are used directly (from Excel sheet processing)
         if not ratio_val:
-            thc_val = label_context.get('THC', '')
-            cbd_val = label_context.get('CBD', '')
+            thc_val = label_context.get('THC', '')  # Excel THC value
+            cbd_val = label_context.get('CBD', '')  # Excel CBD value
             if thc_val or cbd_val:
                 # Combine THC and CBD values into ratio format
                 ratio_parts = []
@@ -1313,7 +1363,7 @@ class TemplateProcessor:
                 from src.core.generation.text_processing import format_thc_cbd_percentages
                 ratio_val = format_thc_cbd_percentages(ratio_val)
                 
-                self.logger.debug(f"Combined THC/CBD values into ratio: '{ratio_val}'")
+                self.logger.debug(f"Combined Excel THC/CBD values into ratio: '{ratio_val}'")
         
         if ratio_val:
             cleaned_ratio = ratio_val.lstrip('- ')
@@ -1412,7 +1462,7 @@ class TemplateProcessor:
         if product_strain:
             # Always show the actual strain value from the Excel column
             # This ensures the ProductStrain placeholder displays the intended strain information
-            label_context['ProductStrain'] = product_strain
+            label_context['ProductStrain'] = wrap_with_marker(product_strain, 'PRODUCTSTRAIN')
         else:
             label_context['ProductStrain'] = ''
 
@@ -1501,7 +1551,78 @@ class TemplateProcessor:
                 product_vendor = ''
             label_context['ProductVendor'] = wrap_with_marker(product_vendor, 'PRODUCTVENDOR')
 
+        # Generate QR code for Product Name
+        product_name = label_context.get('Product Name*') or label_context.get('ProductName') or label_context.get('Product Name', '')
+        if product_name and str(product_name).strip():
+            qr_code = self._generate_qr_code(product_name, doc)
+            if qr_code:
+                label_context['QR'] = qr_code
+                self.logger.debug(f"Generated QR code for product: '{product_name}'")
+            else:
+                label_context['QR'] = ''
+                self.logger.warning(f"Failed to generate QR code for product: '{product_name}'")
+        else:
+            label_context['QR'] = ''
+            self.logger.debug("No product name available for QR code generation")
+
         return label_context
+
+    def _generate_qr_code(self, product_name, doc):
+        """Generate QR code for the given product name and return as InlineImage."""
+        try:
+            if not product_name or str(product_name).strip() == '':
+                self.logger.warning("Empty product name provided for QR code generation")
+                return None
+            
+            # Clean the product name
+            clean_name = str(product_name).strip()
+            
+            # Create QR code instance
+            qr = qrcode.QRCode(
+                version=1,  # Auto-determine version based on content
+                error_correction=qrcode.constants.ERROR_CORRECT_L,
+                box_size=10,  # Size of each box in pixels
+                border=4,     # Border size in boxes
+            )
+            
+            # Add data to QR code
+            qr.add_data(clean_name)
+            qr.make(fit=True)
+            
+            # Create QR code image
+            qr_image = qr.make_image(fill_color="black", back_color="white")
+            
+            # Convert to BytesIO for InlineImage
+            img_buffer = BytesIO()
+            qr_image.save(img_buffer, format='PNG')
+            img_buffer.seek(0)
+            
+            # Determine QR code size based on template type
+            # Smaller QR codes for mini templates, larger for others
+            size_map = {
+                'mini': 15,      # 15mm for mini templates
+                'double': 18,    # 18mm for double templates  
+                'vertical': 20,  # 20mm for vertical templates
+                'horizontal': 20, # 20mm for horizontal templates
+                'inventory': 25  # 25mm for inventory templates
+            }
+            
+            qr_size = Mm(size_map.get(self.template_type, 20))
+            
+            # Create InlineImage for the document
+            qr_inline_image = InlineImage(doc, img_buffer, width=qr_size)
+            
+            # Store the raw image data for manual replacement
+            img_buffer.seek(0)  # Reset buffer position
+            qr_inline_image._raw_image_data = img_buffer.read()
+            qr_inline_image._raw_image_width = qr_size
+            
+            self.logger.debug(f"Generated QR code for product: '{clean_name}' with size: {qr_size}")
+            return qr_inline_image
+            
+        except Exception as e:
+            self.logger.error(f"Error generating QR code for product '{product_name}': {e}")
+            return None
 
     def _post_process_and_replace_content(self, doc):
         """Post-process the document after template rendering."""
@@ -2362,6 +2483,10 @@ class TemplateProcessor:
                     from src.core.constants import CLASSIC_TYPES
                     is_classic_product = product_type and product_type.lower() in CLASSIC_TYPES
                     
+                    # Debug logging for vape cartridge lineage alignment
+                    if product_type and 'vape' in product_type.lower():
+                        self.logger.debug(f"VAPE CARTRIDGE DEBUG: product_type='{product_type}', is_classic_product={is_classic_product}, CLASSIC_TYPES={CLASSIC_TYPES}")
+                    
                     # Classic product types should have LEFT alignment for lineage
                     if is_classic_product:
                         paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
@@ -2376,6 +2501,13 @@ class TemplateProcessor:
                         # Ensure consistent spacing above lineage section for equal margins
                         paragraph.paragraph_format.space_before = Pt(2)
                         paragraph.paragraph_format.space_after = Pt(1)
+                    
+                    # SPECIFIC OVERRIDE: Ensure Vape Cartridge products always have LEFT-aligned lineage
+                    if product_type and 'vape' in product_type.lower():
+                        paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                        paragraph.paragraph_format.left_indent = Inches(0)
+                        self.logger.debug(f"VAPE CARTRIDGE OVERRIDE: Forced LEFT alignment for lineage")
+                    
                     continue
                 # Always center ProductBrand and ProductBrand_Center markers
                 if marker_name in ('PRODUCTBRAND', 'PRODUCTBRAND_CENTER') or 'PRODUCTBRAND' in marker_name:
@@ -2624,6 +2756,9 @@ class TemplateProcessor:
                         # Check if the product type is classic
                         if product_type:
                             is_classic_product = product_type.lower() in CLASSIC_TYPES
+                            # Debug logging for vape cartridge lineage alignment in fallback
+                            if 'vape' in product_type.lower():
+                                self.logger.debug(f"VAPE CARTRIDGE FALLBACK DEBUG: product_type='{product_type}', is_classic_product={is_classic_product}, CLASSIC_TYPES={CLASSIC_TYPES}")
                         
                         # Also check if the content is a classic lineage value
                         content_upper = content.upper()
@@ -2642,6 +2777,12 @@ class TemplateProcessor:
                             # Only center if it's NOT a classic type and NOT a classic lineage
                             paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                             self.logger.debug(f"Centered lineage for non-classic content: '{content}' (product_type: {product_type})")
+                        
+                        # SPECIFIC OVERRIDE: Ensure Vape Cartridge products always have LEFT-aligned lineage (fallback)
+                        if product_type and 'vape' in product_type.lower():
+                            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                            paragraph.paragraph_format.left_indent = Inches(0)
+                            self.logger.debug(f"VAPE CARTRIDGE FALLBACK OVERRIDE: Forced LEFT alignment for lineage")
                 
                 self.logger.debug(f"Applied template-specific font sizing: {font_size.pt}pt for {marker_name} marker")
 
@@ -3438,6 +3579,7 @@ class TemplateProcessor:
                                     'RATIO_END' not in run_text and    # Don't mark content already in RATIO markers
                                     '{{' not in run_text and 
                                     '}}' not in run_text and
+                                    'QR_PLACEHOLDER' not in run_text and  # Don't mark QR placeholders
                                     len(run_text.strip()) > 0 and
                                     # Only mark content that looks like brand names (not numbers, not empty)
                                     not run_text.strip().isdigit() and
@@ -3648,37 +3790,59 @@ class TemplateProcessor:
         text = text.strip()
         
         # Handle the default "THC:|BR|CBD:" format from excel processor
-        if text == "THC:|BR|CBD:":
-            # If we have record data, try to get actual THC and CBD values from columns
+        if text == "THC:|BR|CBD:" or text == "THC: | BR | CBD:":
+            self.logger.debug(f"Processing THC:|BR|CBD: placeholder for record: {record.get('Product Name*', 'Unknown')}")
+            # If we have record data, prioritize Excel THC/CBD values over database values
             if record:
-                # Get THC value from AI column (Total THC)
-                thc_value = record.get('AI', '')
-                if thc_value:
-                    thc_value = str(thc_value).strip()
-                    # If Total THC is 0 or lower than THCA, use AJ column instead
-                    if thc_value == '0' or thc_value == '0.0' or thc_value == '':
-                        thc_value = record.get('AJ', '')
-                        if thc_value:
-                            thc_value = str(thc_value).strip()
+                # PRIORITY 1: Use Excel THC/CBD values directly (these come from the Excel sheet)
+                thc_value = str(record.get('THC', '')).strip()
+                cbd_value = str(record.get('CBD', '')).strip()
                 
-                # Get CBD value from AK column
-                cbd_value = record.get('AK', '')
-                if cbd_value:
-                    cbd_value = str(cbd_value).strip()
+                self.logger.debug(f"Excel THC/CBD values - THC: '{thc_value}', CBD: '{cbd_value}'")
+                
+                # If Excel values are empty or 0, fall back to database values
+                if not thc_value or thc_value == '0' or thc_value == '0.0':
+                    total_thc_value = str(record.get('Total THC', '')).strip()
+                    thc_test_result = str(record.get('THC test result', '')).strip()
+                    
+                    if total_thc_value and total_thc_value != '0' and total_thc_value != '0.0':
+                        thc_value = total_thc_value
+                        self.logger.debug(f"Using database Total THC: '{thc_value}'")
+                    elif thc_test_result and thc_test_result != '0' and thc_test_result != '0.0':
+                        thc_value = thc_test_result
+                        self.logger.debug(f"Using database THC test result: '{thc_value}'")
+                
+                if not cbd_value or cbd_value == '0' or cbd_value == '0.0':
+                    total_cbd_value = str(record.get('Total CBD', '')).strip()
+                    cbd_test_result = str(record.get('CBD test result', '')).strip()
+                    
+                    if total_cbd_value and total_cbd_value != '0' and total_cbd_value != '0.0':
+                        cbd_value = total_cbd_value
+                        self.logger.debug(f"Using database Total CBD: '{cbd_value}'")
+                    elif cbd_test_result and cbd_test_result != '0' and cbd_test_result != '0.0':
+                        cbd_value = cbd_test_result
+                        self.logger.debug(f"Using database CBD test result: '{cbd_value}'")
                 
                 # Clean up values (remove 'nan', empty strings, etc.)
                 if thc_value in ['nan', 'NaN', '']:
-                    thc_value = ''
+                    thc_value = '0'
                 if cbd_value in ['nan', 'NaN', '']:
-                    cbd_value = ''
+                    cbd_value = '0'
                 
-                # Format with actual values if available
+                self.logger.debug(f"THC/CBD values found - THC: '{thc_value}', CBD: '{cbd_value}'")
+                
+                # Format with actual values - always show both THC and CBD
                 if thc_value and cbd_value:
-                    return f"THC: {thc_value}% CBD: {cbd_value}%"
+                    result = f"THC: {thc_value}% CBD: {cbd_value}%"
                 elif thc_value:
-                    return f"THC: {thc_value}% CBD:"
+                    result = f"THC: {thc_value}% CBD: 0%"
                 elif cbd_value:
-                    return f"THC: CBD: {cbd_value}%"
+                    result = f"THC: 0% CBD: {cbd_value}%"
+                else:
+                    result = f"THC: 0% CBD: 0%"
+                
+                self.logger.debug(f"Formatted THC/CBD result: '{result}'")
+                return result
             
             # Fallback to default format if no record data or no values
             return "THC: 0% CBD: 0%"
@@ -4457,6 +4621,40 @@ class TemplateProcessor:
         except Exception as e:
             self.logger.warning(f"Error cleaning DOH cells: {e}")
 
+    def _replace_qr_placeholder(self, doc, qr_inline_image, label_key="Label1"):
+        """Replace QR placeholder with actual QR code image for specific label."""
+        try:
+            self.logger.debug(f"Starting QR placeholder replacement for {label_key}")
+            
+            # Find and replace QR_PLACEHOLDER text with actual QR code
+            # We'll replace the first QR_PLACEHOLDER we find for this label
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for para in cell.paragraphs:
+                            if 'QR_PLACEHOLDER' in para.text:
+                                self.logger.debug(f"Found QR placeholder in paragraph for {label_key}")
+                                
+                                # Clear the paragraph and add the QR code
+                                para.clear()
+                                para.alignment = 1  # Center alignment
+                                
+                                # Add the QR code image using raw image data
+                                run = para.add_run()
+                                from io import BytesIO
+                                img_buffer = BytesIO(qr_inline_image._raw_image_data)
+                                run.add_picture(img_buffer, width=qr_inline_image._raw_image_width)
+                                
+                                self.logger.debug(f"✓ QR code replaced successfully for {label_key}")
+                                return True
+            
+            self.logger.warning(f"QR placeholder not found in document for {label_key}")
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"Error replacing QR placeholder: {e}")
+            return False
+
     def _manual_replace_placeholders(self, doc, context):
         """Manually replace placeholders in the document when DocxTemplate fails."""
         try:
@@ -4483,8 +4681,24 @@ class TemplateProcessor:
                                     for field_key, field_value in label_context.items():
                                         placeholder = f"{{{{{label_key}.{field_key}}}}}"
                                         if placeholder in text:
-                                            # For double templates, unwrap markers to get clean content
-                                            if self.template_type == 'double':
+                                            # Special handling for QR codes (InlineImage objects)
+                                            if field_key == 'QR' and hasattr(field_value, 'image'):
+                                                # Clear the run and add the QR code image
+                                                run.clear()
+                                                run.add_picture(field_value.image, width=field_value.width)
+                                                self.logger.debug(f"Replaced {placeholder} with QR code image")
+                                                continue
+                                            
+                                            # Handle simple QR placeholder {{QR}}
+                                            if placeholder == '{{QR}}' and field_key == 'QR' and hasattr(field_value, 'image'):
+                                                # Clear the run and add the QR code image
+                                                run.clear()
+                                                run.add_picture(field_value.image, width=field_value.width)
+                                                self.logger.debug(f"Replaced simple {{QR}} placeholder with QR code image")
+                                                continue
+                                            
+                                            # For all templates, unwrap markers to get clean content
+                                            if True:  # Apply to all templates
                                                 # Unwrap common markers to get clean content
                                                 clean_value = str(field_value)
                                                 if 'DESC_START' in clean_value and 'DESC_END' in clean_value:
@@ -4495,6 +4709,16 @@ class TemplateProcessor:
                                                     clean_value = unwrap_marker(clean_value, 'THC_CBD')
                                                 elif 'RATIO_START' in clean_value and 'RATIO_END' in clean_value:
                                                     clean_value = unwrap_marker(clean_value, 'RATIO')
+                                                elif 'PRODUCTNAME_START' in clean_value and 'PRODUCTNAME_END' in clean_value:
+                                                    clean_value = unwrap_marker(clean_value, 'PRODUCTNAME')
+                                                elif 'PRODUCTBRAND_START' in clean_value and 'PRODUCTBRAND_END' in clean_value:
+                                                    clean_value = unwrap_marker(clean_value, 'PRODUCTBRAND')
+                                                elif 'WEIGHTUNITS_START' in clean_value and 'WEIGHTUNITS_END' in clean_value:
+                                                    clean_value = unwrap_marker(clean_value, 'WEIGHTUNITS')
+                                                elif 'PRODUCTVENDOR_START' in clean_value and 'PRODUCTVENDOR_END' in clean_value:
+                                                    clean_value = unwrap_marker(clean_value, 'PRODUCTVENDOR')
+                                                elif 'PRODUCTSTRAIN_START' in clean_value and 'PRODUCTSTRAIN_END' in clean_value:
+                                                    clean_value = unwrap_marker(clean_value, 'PRODUCTSTRAIN')
                                                 
                                                 # Replace placeholder with clean value
                                                 text = text.replace(placeholder, clean_value)
@@ -4509,7 +4733,8 @@ class TemplateProcessor:
                                                     'Lineage': 'lineage',
                                                     'ProductStrain': 'strain',
                                                     'ProductVendor': 'vendor',
-                                                    'DOH': 'doh'
+                                                    'DOH': 'doh',
+                                                    'QR': 'qr'
                                                 }
                                                 
                                                 field_type = field_type_mapping.get(field_key, 'default')
@@ -4530,8 +4755,26 @@ class TemplateProcessor:
                                 for field_key, field_value in label_context.items():
                                     placeholder = f"{{{{{label_key}.{field_key}}}}}"
                                     if placeholder in paragraph_text:
-                                        # For double templates, unwrap markers to get clean content
-                                        if self.template_type == 'double':
+                                        # Special handling for QR codes (InlineImage objects)
+                                        if field_key == 'QR' and hasattr(field_value, 'image'):
+                                            # Clear the paragraph and add the QR code image
+                                            paragraph.clear()
+                                            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                            paragraph.add_run().add_picture(field_value.image, width=field_value.width)
+                                            self.logger.debug(f"Replaced {placeholder} with QR code image in paragraph")
+                                            continue
+                                        
+                                        # Handle simple QR placeholder {{QR}}
+                                        if placeholder == '{{QR}}' and field_key == 'QR' and hasattr(field_value, 'image'):
+                                            # Clear the paragraph and add the QR code image
+                                            paragraph.clear()
+                                            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                            paragraph.add_run().add_picture(field_value.image, width=field_value.width)
+                                            self.logger.debug(f"Replaced simple {{QR}} placeholder with QR code image in paragraph")
+                                            continue
+                                        
+                                        # For all templates, unwrap markers to get clean content
+                                        if True:  # Apply to all templates
                                             # Unwrap common markers to get clean content
                                             clean_value = str(field_value)
                                             if 'DESC_START' in clean_value and 'DESC_END' in clean_value:
@@ -4542,6 +4785,16 @@ class TemplateProcessor:
                                                 clean_value = unwrap_marker(clean_value, 'THC_CBD')
                                             elif 'RATIO_START' in clean_value and 'RATIO_END' in clean_value:
                                                 clean_value = unwrap_marker(clean_value, 'RATIO')
+                                            elif 'PRODUCTNAME_START' in clean_value and 'PRODUCTNAME_END' in clean_value:
+                                                clean_value = unwrap_marker(clean_value, 'PRODUCTNAME')
+                                            elif 'PRODUCTBRAND_START' in clean_value and 'PRODUCTBRAND_END' in clean_value:
+                                                clean_value = unwrap_marker(clean_value, 'PRODUCTBRAND')
+                                            elif 'WEIGHTUNITS_START' in clean_value and 'WEIGHTUNITS_END' in clean_value:
+                                                clean_value = unwrap_marker(clean_value, 'WEIGHTUNITS')
+                                            elif 'PRODUCTVENDOR_START' in clean_value and 'PRODUCTVENDOR_END' in clean_value:
+                                                clean_value = unwrap_marker(clean_value, 'PRODUCTVENDOR')
+                                            elif 'PRODUCTSTRAIN_START' in clean_value and 'PRODUCTSTRAIN_END' in clean_value:
+                                                clean_value = unwrap_marker(clean_value, 'PRODUCTSTRAIN')
                                             
                                             # Replace placeholder with clean value
                                             paragraph_text = paragraph_text.replace(placeholder, clean_value)
@@ -4556,7 +4809,8 @@ class TemplateProcessor:
                                                 'Lineage': 'lineage',
                                                 'ProductStrain': 'strain',
                                                 'ProductVendor': 'vendor',
-                                                'DOH': 'doh'
+                                                'DOH': 'doh',
+                                                'QR': 'qr'
                                             }
                                             
                                             field_type = field_type_mapping.get(field_key, 'default')

@@ -296,6 +296,15 @@ def process_chunk(args):
             product_type   = str(row.get("Product Type*", "")).strip().lower()
             product_strain = str(row.get("Product Strain", "")).strip()
             
+            # Fix brand name for paraphernalia products
+            if product_brand == "Paraphernalia" and product_type == "paraphernalia":
+                product_name = str(row.get("ProductName", ""))
+                if " by " in product_name:
+                    product_brand = product_name.split(" by ")[-1].strip()
+                else:
+                    # Fallback to vendor if no "by" in name
+                    product_brand = str(row.get("Vendor", "")).strip()
+            
             # Only add brand markers for non-classic types
             # Classic types should show lineage instead of brand
             from src.core.constants import CLASSIC_TYPES
@@ -307,20 +316,43 @@ def process_chunk(args):
                 pass
             else:
                 # For non-classic types, add brand markers
-                label_data["ProductBrand"] = wrap_with_marker(product_brand.upper(), "PRODUCTBRAND")
-                label_data["ProductBrand_Center"] = wrap_with_marker(product_brand.upper(), "PRODUCTBRAND_CENTER")
+                label_data["ProductBrand"] = product_brand.upper()  # Don't wrap with markers for template rendering
+                label_data["ProductBrand_Center"] = product_brand.upper()  # Don't wrap with markers for template rendering
             
             # Add other fields to label_data
-            # Use the processed Description and WeightUnits fields from the excel processor
-            description = str(row.get("Description", ""))
-            weight_units = str(row.get("WeightUnits", ""))
+            # Get product name
+            product_name = str(row.get("ProductName", ""))
             
-            # If Description is empty, fallback to Product Name
-            if not description:
-                description = str(row.get("ProductName", "")) or str(row.get("Product Name*", ""))
+            # Use Description as the primary field (never force ProductName here)
+            description_raw = row.get("Description", "")
+            # Normalize None/NaN to empty string to avoid literal 'None'
+            try:
+                import math  # local import to avoid module overhead at top level
+                if description_raw is None:
+                    description = ""
+                elif isinstance(description_raw, float) and math.isnan(description_raw):
+                    description = ""
+                else:
+                    description = str(description_raw)
+                    if description.lower() == "nan":
+                        description = ""
+            except Exception:
+                description = str(description_raw or "")
             
-            label_data["Description"] = wrap_with_marker(description, "DESC")
-            label_data["WeightUnits"] = wrap_with_marker(weight_units, "WEIGHTUNITS")
+            # Construct WeightUnits from Weight* and Units
+            weight = str(row.get("Weight*", "")).strip()
+            units = str(row.get("Units", "")).strip()
+            if weight and units:
+                weight_units = f"{weight}{units}"
+            elif weight:
+                weight_units = weight
+            else:
+                weight_units = ""
+            
+            # Preserve original ProductName; keep Description as the clean field
+            label_data["ProductName"] = product_name  # Do not repurpose ProductName
+            label_data["Description"] = description  # Primary clean display field
+            label_data["WeightUnits"] = weight_units  # Don't wrap with markers for template rendering
             
             # For edibles, use brand instead of lineage in the label
             edible_types = {"edible (solid)", "edible (liquid)", "high cbd edible liquid", "tincture", "topical", "capsule"}
@@ -352,25 +384,25 @@ def process_chunk(args):
                 lineage_val = lineage_text.upper() if lineage_text else ""
                 
             # No extra space before Lineage in the output
-            label_data["Lineage"] = wrap_with_marker(lineage_val, "LINEAGE")
+            label_data["Lineage"] = lineage_val  # Don't wrap with markers for template rendering
             
             # For classic types, set ProductBrand and ProductBrand_Center to lineage
             if is_classic_type:
                 if lineage_val:
                     # Use the lineage value from database or Excel
-                    label_data["ProductBrand"] = wrap_with_marker(lineage_val.strip(), "PRODUCTBRAND")
-                    label_data["ProductBrand_Center"] = wrap_with_marker(lineage_val.strip(), "PRODUCTBRAND_CENTER")
+                    label_data["ProductBrand"] = lineage_val.strip()  # Don't wrap with markers for template rendering
+                    label_data["ProductBrand_Center"] = lineage_val.strip()  # Don't wrap with markers for template rendering
                 else:
                     # Fallback to Excel lineage if no database lineage found
                     fallback_lineage = lineage_text.upper() if lineage_text else ""
                     if fallback_lineage:
-                        label_data["ProductBrand"] = wrap_with_marker(fallback_lineage.strip(), "PRODUCTBRAND")
-                        label_data["ProductBrand_Center"] = wrap_with_marker(fallback_lineage.strip(), "PRODUCTBRAND_CENTER")
+                        label_data["ProductBrand"] = fallback_lineage.strip()  # Don't wrap with markers for template rendering
+                        label_data["ProductBrand_Center"] = fallback_lineage.strip()  # Don't wrap with markers for template rendering
                     else:
                         # No lineage available, set to empty
                         label_data["ProductBrand"] = ""
                         label_data["ProductBrand_Center"] = ""
-            label_data["Ratio_or_THC_CBD"] = wrap_with_marker(str(row.get("Ratio", "")), "THC_CBD")
+            label_data["Ratio_or_THC_CBD"] = str(row.get("Ratio", ""))  # Don't wrap with markers for template rendering
             # ProductStrain is now handled by the template processor to ensure proper conversion
             # of non-classic types to "Mixed" or "CBD Blend"
             # Fix: Handle NaN values in JointRatio
@@ -410,10 +442,9 @@ def process_chunk(args):
             else:
                 label_data["CBD"] = wrap_with_marker("", "CBD")
             
-            # Combine Description and WeightUnits (use JointRatio for pre-roll products)
-            # Use the processed Description and WeightUnits fields from above
+            # DescAndWeight should contain only the description text (mapped to DESC marker in template)
+            # Use the processed Description field from above
             desc = description  # Use the processed description from above
-            weight = weight_units  # Use the processed weight_units from above
             
             if desc:
                 desc = re.sub(r'[-\s]+$', '', desc)
@@ -425,40 +456,11 @@ def process_chunk(args):
                 # Use Product Brand instead of Description for edibles in double template
                 desc = product_brand if product_brand else desc
             
-            # For pre-rolls, the processed WeightUnits field already contains the JointRatio
-            # For other products, use the processed WeightUnits field
-            # The weight processing is already done in the excel processor
-            if product_type in {"pre-roll", "infused pre-roll"}:
-                # For pre-rolls, WeightUnits field contains the processed JointRatio
-                weight = weight_units  # Use the processed weight_units from above
-            else:
-                # For other products, use the processed WeightUnits field
-                weight = weight_units  # Use the processed weight_units from above
-                
-            if desc and weight:
-                lines = desc.splitlines()
-                if lines:
-                    # For Pre-rolls and Infused Pre-rolls, ensure joint ratio stays together
-                    if product_type in {"pre-roll", "infused pre-roll"}:
-                        # Check if the last line of description would cause joint ratio to split
-                        last_line = lines[-1]
-                        # If the last line is long enough that adding joint ratio would cause wrapping,
-                        # move joint ratio to a completely new line (but keep the hyphen)
-                        if len(last_line) + len(weight) > 40:  # Threshold for line length
-                            combined = "\n".join(lines) + f"\n- {weight}"
-                        else:
-                            # If there's enough space, keep the current format
-                            combined = "\n".join(lines) + f"\n- {weight}"
-                    else:
-                        # For other products, use the standard format
-                        combined = "\n".join(lines) + f"\n- {weight}"
-                else:
-                    combined = f"- {weight}"
-            else:
-                combined = desc or weight
-            # DEBUG DescAndWeight (before wrap): '{combined}'
+            # DescAndWeight should only contain the description text, not description + weight
+            # This field is mapped to the DESC marker in templates
+            combined = desc  # Just use the description, no weight combination
+            
             label_data["DescAndWeight"] = wrap_with_marker(combined, "DESC")
-            # DEBUG DescAndWeight: {repr(label_data['DescAndWeight'])}
             
             context[f"Label{i+1}"] = label_data
             if DEBUG_ENABLED:

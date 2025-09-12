@@ -34,6 +34,29 @@ VALID_LINEAGES = [
     "SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", "CBD", "MIXED", "PARAPHERNALIA"
 ]
 
+def normalize_lineage(lineage: str) -> str:
+    """Normalize lineage to proper ALL CAPS format."""
+    if not lineage or pd.isna(lineage):
+        return "HYBRID"  # Default to HYBRID
+    
+    lineage = str(lineage).strip().lower()
+    
+    # Map common variations to standard ALL CAPS format
+    lineage_mapping = {
+        'hybrid': 'HYBRID',
+        'indica_hybrid': 'HYBRID/INDICA',
+        'indica': 'INDICA',
+        'sativa': 'SATIVA',
+        'sativa_hybrid': 'HYBRID/SATIVA',
+        'cbd': 'CBD',
+        'mixed': 'HYBRID',  # Default mixed to hybrid
+        'unknown': 'HYBRID',  # Default unknown to hybrid
+        'none': 'HYBRID',  # Default none to hybrid
+        '': 'HYBRID'  # Default empty to hybrid
+    }
+    
+    return lineage_mapping.get(lineage, 'HYBRID')
+
 # Performance optimization flags - STANDARDIZED FOR BOTH LOCAL AND PYTHONANYWHERE
 ENABLE_STRAIN_SIMILARITY_PROCESSING = True  # ALWAYS ENABLED: Lineage persistence is critical
 ENABLE_FAST_LOADING = True
@@ -102,7 +125,7 @@ def fast_ratio_extraction(product_names, product_types, classic_types):
     
     # Apply ratio extraction rules vectorized
     classic_mask = product_types.isin(classic_types)
-    ratios[classic_mask] = 'THC:|BR|CBD:'
+    ratios[classic_mask] = 'THC: | BR | CBD:'
     
     return ratios
 
@@ -387,8 +410,6 @@ def safe_product_name(name):
     
     # Remove problematic characters
     name_str = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', name_str)
-    from src.core.generation.text_processing import make_nonbreaking_spaces
-    return make_nonbreaking_spaces(name_str)
     
     return name_str
 
@@ -898,23 +919,31 @@ class ExcelProcessor:
             # Log all available columns for debugging
             self.logger.info(f"All columns in uploaded file: {df.columns.tolist()}")
             
-            # Keep all columns but ensure required ones exist
-            required_columns = [
-                'Product Name*', 'ProductName', 'Description',
-                'Product Type*', 'Lineage', 'Product Brand', 'Vendor/Supplier*',
-                'Weight*', 'Weight Unit* (grams/gm or ounces/oz)', 'Units',
-                'Price* (Tier Name for Bulk)', 'Price',
-                'DOH Compliant (Yes/No)', 'DOH',
-                'Concentrate Type', 'Ratio',
-                'Joint Ratio', 'JointRatio',
-                'Product Strain',
-                'Quantity*', 'Quantity Received*', 'Quantity', 'qty'
+            # Keep all columns but ensure only truly essential ones exist
+            essential_columns = [
+                'Product Name*', 'ProductName',  # Product name (at least one variant)
+                'Product Type*',  # Product type
+                'Vendor/Supplier*', 'Vendor'  # Vendor (at least one variant)
             ]
             
-            # Check which required columns are missing
-            missing_columns = [col for col in required_columns if col not in df.columns]
+            # Check which essential columns are missing, but only warn if ALL variants are missing
+            missing_columns = []
+            has_product_name = any(col in df.columns for col in ['Product Name*', 'ProductName', 'Product Name'])
+            has_vendor = any(col in df.columns for col in ['Vendor/Supplier*', 'Vendor', 'Vendor/Supplier'])
+            has_product_type = 'Product Type*' in df.columns
+            
+            if not has_product_name:
+                missing_columns.extend(['Product Name*', 'ProductName'])
+            if not has_vendor:
+                missing_columns.extend(['Vendor/Supplier*', 'Vendor'])
+            if not has_product_type:
+                missing_columns.append('Product Type*')
+            
+            # Only warn if we're actually missing essential columns
             if missing_columns:
-                self.logger.warning(f"Missing required columns: {missing_columns}")
+                self.logger.warning(f"Missing essential columns: {missing_columns}")
+            else:
+                self.logger.info("All essential columns found")
             
             # Apply minimal processing only if ENABLE_MINIMAL_PROCESSING is True
             if ENABLE_MINIMAL_PROCESSING:
@@ -959,6 +988,13 @@ class ExcelProcessor:
                     rename_mapping["DOH Compliant (Yes/No)"] = "DOH"
                 if "Concentrate Type" in df.columns and "Ratio" not in df.columns:
                     rename_mapping["Concentrate Type"] = "Ratio"
+                # Excel compatibility column mappings
+                if "Joint Ratio" in df.columns and "JointRatio" not in df.columns:
+                    rename_mapping["Joint Ratio"] = "JointRatio"
+                if "Quantity Received*" in df.columns and "Quantity*" not in df.columns:
+                    rename_mapping["Quantity Received*"] = "Quantity*"
+                if "qty" in df.columns and "Quantity*" not in df.columns:
+                    rename_mapping["qty"] = "Quantity*"
                 
                 if rename_mapping:
                     df.rename(columns=rename_mapping, inplace=True)
@@ -966,6 +1002,8 @@ class ExcelProcessor:
                 # 5. Basic lineage standardization (vectorized)
                 if "Lineage" in df.columns:
                     from src.core.constants import CLASSIC_TYPES
+                    # Normalize all lineage values to ALL CAPS format
+                    df["Lineage"] = df["Lineage"].apply(normalize_lineage)
                     df["Lineage"] = optimized_lineage_assignment(
                         df, 
                         df["Product Type*"], 
@@ -978,7 +1016,29 @@ class ExcelProcessor:
                     df["Product Strain"] = ""
                 df["Product Strain"] = df["Product Strain"].fillna("Mixed")
                 
-                # 7. Convert key fields to categorical for memory efficiency
+                # 7. Process THC/CBD values for database storage
+                if "THC test result" in df.columns:
+                    # Convert THC test result to numeric, handling errors
+                    df["THC test result"] = pd.to_numeric(df["THC test result"], errors='coerce').fillna(0.0)
+                    self.logger.debug("Processed THC test result column")
+                else:
+                    df["THC test result"] = 0.0
+                    self.logger.debug("Added default THC test result column")
+                
+                if "CBD test result" in df.columns:
+                    # Convert CBD test result to numeric, handling errors
+                    df["CBD test result"] = pd.to_numeric(df["CBD test result"], errors='coerce').fillna(0.0)
+                    self.logger.debug("Processed CBD test result column")
+                else:
+                    df["CBD test result"] = 0.0
+                    self.logger.debug("Added default CBD test result column")
+                
+                # Add test result unit if missing
+                if "Test result unit (% or mg)" not in df.columns:
+                    df["Test result unit (% or mg)"] = "%"
+                    self.logger.debug("Added default test result unit column")
+                
+                # 8. Convert key fields to categorical for memory efficiency
                 for col in ["Product Type*", "Lineage", "Product Brand", "Vendor", "Product Strain"]:
                     if col in df.columns:
                         df[col] = df[col].fillna("Unknown")
@@ -987,6 +1047,13 @@ class ExcelProcessor:
                 self.logger.debug("Minimal processing complete")
             else:
                 self.logger.debug("Skipping minimal processing - using raw data")
+                # Even in non-minimal mode, ensure THC/CBD columns exist for database storage
+                if "THC test result" not in df.columns:
+                    df["THC test result"] = 0.0
+                if "CBD test result" not in df.columns:
+                    df["CBD test result"] = 0.0
+                if "Test result unit (% or mg)" not in df.columns:
+                    df["Test result unit (% or mg)"] = "%"
 
             self.df = df
             self.logger.debug(f"Original columns: {self.df.columns.tolist()}")
@@ -998,6 +1065,9 @@ class ExcelProcessor:
             
             # Apply strain extraction for Moonshot products
             self.apply_strain_extraction()
+            
+            # Process Description values using our established formula
+            self._process_descriptions_from_product_names()
             
             self._last_loaded_file = file_path
             self.logger.info(f"Ultra-fast load successful: {len(self.df)} rows, {len(self.df.columns)} columns")
@@ -1128,23 +1198,31 @@ class ExcelProcessor:
             # Log all available columns for debugging
             self.logger.info(f"All columns in uploaded file: {df.columns.tolist()}")
             
-            # Keep all columns but ensure required ones exist
-            required_columns = [
-                'Product Name*', 'ProductName', 'Description',
-                'Product Type*', 'Lineage', 'Product Brand', 'Vendor/Supplier*',
-                'Weight*', 'Weight Unit* (grams/gm or ounces/oz)', 'Units',
-                'Price* (Tier Name for Bulk)', 'Price',
-                'DOH Compliant (Yes/No)', 'DOH',
-                'Concentrate Type', 'Ratio',
-                'Joint Ratio', 'JointRatio',
-                'Product Strain',
-                'Quantity*', 'Quantity Received*', 'Quantity', 'qty'
+            # Keep all columns but ensure only truly essential ones exist
+            essential_columns = [
+                'Product Name*', 'ProductName',  # Product name (at least one variant)
+                'Product Type*',  # Product type
+                'Vendor/Supplier*', 'Vendor'  # Vendor (at least one variant)
             ]
             
-            # Check which required columns are missing
-            missing_columns = [col for col in required_columns if col not in df.columns]
+            # Check which essential columns are missing, but only warn if ALL variants are missing
+            missing_columns = []
+            has_product_name = any(col in df.columns for col in ['Product Name*', 'ProductName', 'Product Name'])
+            has_vendor = any(col in df.columns for col in ['Vendor/Supplier*', 'Vendor', 'Vendor/Supplier'])
+            has_product_type = 'Product Type*' in df.columns
+            
+            if not has_product_name:
+                missing_columns.extend(['Product Name*', 'ProductName'])
+            if not has_vendor:
+                missing_columns.extend(['Vendor/Supplier*', 'Vendor'])
+            if not has_product_type:
+                missing_columns.append('Product Type*')
+            
+            # Only warn if we're actually missing essential columns
             if missing_columns:
-                self.logger.warning(f"Missing required columns: {missing_columns}")
+                self.logger.warning(f"Missing essential columns: {missing_columns}")
+            else:
+                self.logger.info("All essential columns found")
             
             # Keep all columns - don't filter them out
             # df = df[existing_required]  # REMOVED - this was causing column loss
@@ -1219,6 +1297,13 @@ class ExcelProcessor:
                 rename_mapping["DOH Compliant (Yes/No)"] = "DOH"
             if "Concentrate Type" in self.df.columns and "Ratio" not in self.df.columns:
                 rename_mapping["Concentrate Type"] = "Ratio"
+            # Excel compatibility column mappings
+            if "Joint Ratio" in self.df.columns and "JointRatio" not in self.df.columns:
+                rename_mapping["Joint Ratio"] = "JointRatio"
+            if "Quantity Received*" in self.df.columns and "Quantity*" not in self.df.columns:
+                rename_mapping["Quantity Received*"] = "Quantity*"
+            if "qty" in self.df.columns and "Quantity*" not in self.df.columns:
+                rename_mapping["qty"] = "Quantity*"
             
             if rename_mapping:
                 self.df.rename(columns=rename_mapping, inplace=True)
@@ -1396,11 +1481,14 @@ class ExcelProcessor:
                         
                         # Ensure product_names is a Series before calling .str
                         if isinstance(product_names, pd.Series):
-                            # Set Description to ProductName values, but remove weight part to prevent duplication
+                            # CRITICAL FIX: Replace ALL Description values with processed Product Name
+                            # This ensures consistent Description formatting using our established formula
                             self.df["Description"] = product_names.str.strip()
+                            self.logger.debug(f"Replaced all Description values with processed Product Name")
                         else:
                             # Fallback: convert to string and strip manually
                             self.df["Description"] = product_names.astype(str).str.strip()
+                            self.logger.debug(f"Replaced all Description values with processed Product Name (fallback)")
                         
                         # Handle ' by ' pattern for all Description values
                         mask_by = self.df["Description"].str.contains(' by ', na=False)
@@ -1468,15 +1556,20 @@ class ExcelProcessor:
                         self.df.loc[non_classic_mask, "Ratio"] = extracted_ratios
                 else:
                     self.df["Ratio"] = ""
-                self.logger.debug(f"Sample cannabinoid content values before processing: {self.df['Ratio'].head()}")
+                if 'Ratio' in self.df.columns:
+                    self.logger.debug(f"Sample cannabinoid content values before processing: {self.df['Ratio'].head()}")
+                else:
+                    self.logger.debug("Ratio column not found, skipping ratio processing")
                 
                 # Replace "/" with space to remove backslash formatting
-                self.df["Ratio"] = self.df["Ratio"].str.replace(r"/", " ", regex=True)
+                if 'Ratio' in self.df.columns:
+                    self.df["Ratio"] = self.df["Ratio"].str.replace(r"/", " ", regex=True)
+                    
+                    # Replace "nan" values with empty string to trigger default THC: CBD: formatting
+                    self.df["Ratio"] = self.df["Ratio"].replace("nan", "")
                 
-                # Replace "nan" values with empty string to trigger default THC: CBD: formatting
-                self.df["Ratio"] = self.df["Ratio"].replace("nan", "")
-                
-                self.logger.debug(f"Sample cannabinoid content values after processing: {self.df['Ratio'].head()}")
+                if 'Ratio' in self.df.columns:
+                    self.logger.debug(f"Sample cannabinoid content values after processing: {self.df['Ratio'].head()}")
 
                 # Set Ratio_or_THC_CBD based on product type
                 def set_ratio_or_thc_cbd(row):
@@ -1486,6 +1579,10 @@ class ExcelProcessor:
                     # Handle "nan" values by replacing with empty string
                     if ratio.lower() == "nan":
                         ratio = ""
+                    
+                    # If product type is empty, treat as classic type (flower)
+                    if not product_type:
+                        product_type = "flower"
                     
                     classic_types = [
                         "flower", "pre-roll", "infused pre-roll", "concentrate", "solventless concentrate", "vape cartridge", "rso/co2 tankers"
@@ -1501,7 +1598,7 @@ class ExcelProcessor:
                             if joint_ratio.startswith("- "):
                                 joint_ratio = joint_ratio[2:]
                             return joint_ratio
-                        return "THC:|BR|CBD:"
+                        return "THC: | BR | CBD:"
                     
                     # For solventless concentrate, check if ratio is a weight + unit format
                     if product_type == "solventless concentrate":
@@ -1511,7 +1608,7 @@ class ExcelProcessor:
                     
                     if product_type in classic_types:
                         if not ratio or ratio in BAD_VALUES:
-                            return "THC:|BR|CBD:"
+                            return "THC: | BR | CBD:"
                         # If ratio contains THC/CBD values, use it directly
                         if any(cannabinoid in ratio.upper() for cannabinoid in ['THC', 'CBD', 'CBC', 'CBG', 'CBN']):
                             return ratio
@@ -1522,13 +1619,13 @@ class ExcelProcessor:
                         if is_weight_with_unit(ratio):
                             return ratio
                         # Otherwise, use default THC:CBD format
-                        return "THC:|BR|CBD:"
+                        return "THC: | BR | CBD:"
                     
                     # For Edibles, Topicals, Tinctures, etc., use the ratio if it contains cannabinoid content
                     edible_types = {"edible (solid)", "edible (liquid)", "high cbd edible liquid", "tincture", "topical", "capsule"}
                     if product_type in edible_types:
                         if not ratio or ratio in BAD_VALUES:
-                            return "THC:|BR|CBD:"
+                            return "THC: | BR | CBD:"
                         # If ratio contains cannabinoid content, use it
                         if any(cannabinoid in ratio.upper() for cannabinoid in ['THC', 'CBD', 'CBC', 'CBG', 'CBN']):
                             return ratio
@@ -1536,7 +1633,7 @@ class ExcelProcessor:
                         if is_weight_with_unit(ratio):
                             return ratio
                         # Otherwise, use default THC:CBD format
-                        return "THC:|BR|CBD:"
+                        return "THC: | BR | CBD:"
                     
                     # For any other product type, return the ratio as-is
                     return ratio
@@ -1549,7 +1646,7 @@ class ExcelProcessor:
                 except Exception as e:
                     self.logger.warning(f"Error applying ratio function: {e}")
                     # Fallback: use default values
-                    self.df["Ratio_or_THC_CBD"] = "THC:|BR|CBD:"
+                    self.df["Ratio_or_THC_CBD"] = "THC: | BR | CBD:"
                 # Reset index after apply operation to prevent duplicate labels
                 self.df.reset_index(drop=True, inplace=True)
                 self.logger.debug(f"Ratio_or_THC_CBD values: {self.df['Ratio_or_THC_CBD'].head()}")
@@ -1585,9 +1682,12 @@ class ExcelProcessor:
                     self.df.loc[mask_para, "Product Strain"] = "Paraphernalia"
 
                 # Force CBD Blend for any ratio containing CBD, CBC, CBN or CBG
-                mask_cbd_ratio = self.df["Ratio"].str.contains(
-                    r"\b(?:CBD|CBC|CBN|CBG)\b", case=False, na=False
-                )
+                if 'Ratio' in self.df.columns:
+                    mask_cbd_ratio = self.df["Ratio"].str.contains(
+                        r"\b(?:CBD|CBC|CBN|CBG)\b", case=False, na=False
+                    )
+                else:
+                    mask_cbd_ratio = pd.Series([False] * len(self.df), index=self.df.index)
                 # Use .any() to avoid Series boolean ambiguity
                 if mask_cbd_ratio.any():
                     self.df.loc[mask_cbd_ratio, "Product Strain"] = "CBD Blend"
@@ -1772,8 +1872,20 @@ class ExcelProcessor:
 
             # 11) Normalize Weight* and CombinedWeight
             if "Weight*" in self.df.columns:
-                self.df["Weight*"] = pd.to_numeric(self.df["Weight*"], errors="coerce") \
-                    .apply(lambda x: str(int(x)) if pd.notnull(x) and float(x).is_integer() else str(x))
+                def format_weight_value(x):
+                    if pd.isna(x) or x is None or x == '':
+                        return ''
+                    try:
+                        float_val = float(x)
+                        if float_val.is_integer():
+                            return str(int(float_val))
+                        else:
+                            # Round to 2 decimal places and remove trailing zeros
+                            return f"{float_val:.2f}".rstrip("0").rstrip(".")
+                    except (ValueError, TypeError):
+                        return str(x)
+                
+                self.df["Weight*"] = self.df["Weight*"].apply(format_weight_value)
             if "Weight*" in self.df.columns and "Units" in self.df.columns:
                 # Fill null values before converting to categorical
                 combined_weight = (self.df["Weight*"] + self.df["Units"]).fillna("Unknown")
@@ -1814,7 +1926,8 @@ class ExcelProcessor:
             
             self.logger.debug("Applying special pre-roll ratio logic")
             self.df["Ratio"] = self.df.apply(process_ratio, axis=1)
-            self.logger.debug(f"Final Ratio values after pre-roll processing: {self.df['Ratio'].head()}")
+            if 'Ratio' in self.df.columns:
+                self.logger.debug(f"Final Ratio values after pre-roll processing: {self.df['Ratio'].head()}")
 
             # Create JointRatio column for Pre-Roll and Infused Pre-Roll products
             preroll_mask = self.df["Product Type*"].str.strip().str.lower().isin(["pre-roll", "infused pre-roll"])
@@ -1876,17 +1989,16 @@ class ExcelProcessor:
                     if pd.notna(weight_value) and str(weight_value).strip() != '' and str(weight_value).lower() != 'nan':
                         try:
                             weight_float = float(weight_value)
-                            # Generate a more descriptive format: "1g x 1" for single units
+                            # Generate simplified format: "1g" for single units
                             if weight_float == 1.0:
-                                default_joint_ratio = "1g x 1"
+                                default_joint_ratio = "1g"
                             else:
-                                # Ensure proper formatting for decimal weights (e.g., 0.5g not .5g)
-                                if weight_float < 1.0 and weight_float > 0:
-                                    default_joint_ratio = f"{weight_float:.2f}".rstrip("0").rstrip(".") + "g"
-                                    if default_joint_ratio.startswith('.'):
-                                        default_joint_ratio = '0' + default_joint_ratio
+                                # Format weight similar to price formatting - no decimals unless original has decimals
+                                if weight_float.is_integer():
+                                    default_joint_ratio = f"{int(weight_float)}g"
                                 else:
-                                    default_joint_ratio = f"{weight_float}g"
+                                    # Round to 2 decimal places and remove trailing zeros
+                                    default_joint_ratio = f"{weight_float:.2f}".rstrip("0").rstrip(".") + "g"
                             self.df.loc[idx, 'JointRatio'] = default_joint_ratio
                             self.logger.debug(f"Generated JointRatio for record {idx}: '{default_joint_ratio}' from Weight {weight_value}")
                         except (ValueError, TypeError):
@@ -1906,17 +2018,16 @@ class ExcelProcessor:
                 if pd.notna(weight_value) and str(weight_value).strip() != '' and str(weight_value).lower() != 'nan':
                     try:
                         weight_float = float(weight_value)
-                        # Generate a more descriptive format: "1g x 1" for single units
+                        # Generate simplified format: "1g" for single units
                         if weight_float == 1.0:
-                            default_joint_ratio = "1g x 1"
+                            default_joint_ratio = "1g"
                         else:
-                            # Ensure proper formatting for decimal weights (e.g., 0.5g not .5g)
-                            if weight_float < 1.0 and weight_float > 0:
-                                default_joint_ratio = f"{weight_float:.2f}".rstrip("0").rstrip(".") + "g"
-                                if default_joint_ratio.startswith('.'):
-                                    default_joint_ratio = '0' + default_joint_ratio
+                            # Format weight similar to price formatting - no decimals unless original has decimals
+                            if weight_float.is_integer():
+                                default_joint_ratio = f"{int(weight_float)}g"
                             else:
-                                default_joint_ratio = f"{weight_float}g"
+                                # Round to 2 decimal places and remove trailing zeros
+                                default_joint_ratio = f"{weight_float:.2f}".rstrip("0").rstrip(".") + "g"
                         self.df.loc[idx, 'JointRatio'] = default_joint_ratio
                         self.logger.debug(f"Fixed JointRatio for record {idx}: Generated default '{default_joint_ratio}' from Weight")
                     except (ValueError, TypeError):
@@ -2286,6 +2397,60 @@ class ExcelProcessor:
                 logger.debug(f"Vendor field is empty for product '{product_name}'. Available vendor columns: {[col for col in row.index if 'vendor' in col.lower() or 'supplier' in col.lower()]}")
                 logger.debug(f"Row vendor values: Vendor/Supplier*='{row.get('Vendor/Supplier*', '')}', Vendor='{row.get('Vendor', '')}', Vendor/Supplier='{row.get('Vendor/Supplier', '')}'")
             
+            # Extract THC/CBD values from the appropriate columns
+            # Use the actual column names from the Excel file
+            total_thc_value = safe_get_value(row.get('Total THC', ''))
+            thc_content_value = safe_get_value(row.get('THC Content', ''))  # Use THC Content
+            thc_test_result = safe_get_value(row.get('THC Content', ''))  # Use THC Content
+            total_cbd_value = safe_get_value(row.get('Total CBD', ''))  # Use Total CBD
+            cbd_content_value = safe_get_value(row.get('CBD Content', ''))  # Use CBD Content
+            
+            # Helper function to safely convert to float for comparison
+            def safe_float(value):
+                if not value or value in ['nan', 'NaN', '']:
+                    return 0.0
+                try:
+                    return float(value)
+                except (ValueError, TypeError):
+                    return 0.0
+            
+            # For THC: Use the highest value among Total THC, THC test result, and THCA
+            total_thc_float = safe_float(total_thc_value)
+            thc_test_float = safe_float(thc_test_result)
+            thc_content_float = safe_float(thc_content_value)
+            
+            if total_thc_float > 0:
+                if thc_test_float > total_thc_float:
+                    ai_value = thc_test_result
+                else:
+                    ai_value = total_thc_value
+            else:
+                # Total THC is 0 or empty, compare THCA vs THC test result
+                if thc_content_float > 0 and thc_content_float >= thc_test_float:
+                    ai_value = thc_content_value
+                elif thc_test_float > 0:
+                    ai_value = thc_test_result
+                else:
+                    ai_value = ''
+            
+            # For CBD: merge CBDA with CBD test result, use highest value
+            total_cbd_float = safe_float(total_cbd_value)
+            cbd_content_float = safe_float(cbd_content_value)
+            
+            if cbd_content_float > total_cbd_float:
+                ak_value = cbd_content_value
+            else:
+                ak_value = total_cbd_value
+            
+            # Clean up the values (remove 'nan', empty strings, etc.)
+            if ai_value in ['nan', 'NaN', '']:
+                ai_value = ''
+            if ak_value in ['nan', 'NaN', '']:
+                ak_value = ''
+            
+            # Get price value - use the actual column name from Excel file
+            price_value = safe_get_value(row.get('Price*', '')) or safe_get_value(row.get('Price', '')) or safe_get_value(row.get('Price* (Tier Name for Bulk)', ''))
+            
             tag = {
                 'Product Name*': product_name,
                 'Vendor': vendor_value,
@@ -2303,6 +2468,17 @@ class ExcelProcessor:
                 'Quantity Received*': safe_get_value(quantity),
                 'quantity': safe_get_value(quantity),
                 'DOH': safe_get_value(row.get('DOH', '')),  # Add DOH field for UI display
+                'Price': price_value,  # Add Price field
+                'THC': ai_value,  # Add THC value
+                'CBD': ak_value,  # Add CBD value
+                'AI': ai_value,  # Add AI field for THC
+                'AJ': thc_content_value,  # Add AJ field for THC Content
+                'AK': ak_value,  # Add AK field for CBD
+                'Total THC': total_thc_value,  # Add Total THC field
+                'THCA': thc_content_value,  # Add THC Content field
+                'CBDA': total_cbd_value,  # Add Total CBD field
+                'THC test result': thc_test_result,  # Add THC test result field
+                'CBD test result': cbd_content_value,  # Add CBD Content field
                 # Also include the lowercase versions for backward compatibility
                 'vendor': vendor_value,
                 'productBrand': safe_get_value(row.get('Product Brand', '')),
@@ -2379,107 +2555,6 @@ class ExcelProcessor:
         """Return the list of selected tag names in order."""
         return self.selected_tags if self.selected_tags else []
 
-    def _get_excel_records_for_tags(self, selected_tags: List[str], template_type: str = 'vertical') -> List[Dict[str, Any]]:
-        """Get records from Excel data for the selected tags."""
-        if self.df is None or self.df.empty:
-            logger.warning("No Excel data available for tag lookup")
-            return []
-        
-        logger.info(f"Looking up {len(selected_tags)} tags in Excel data")
-        
-        # Build a mapping from normalized product names to canonical names
-        product_name_col = 'ProductName'  # The actual column name in the DataFrame
-        if product_name_col not in self.df.columns:
-            possible_cols = ['Product Name*', 'Product Name', 'Description']
-            product_name_col = next((col for col in possible_cols if col in self.df.columns), None)
-            if not product_name_col:
-                product_name_col = 'Description'  # Fallback to Description
-        
-        logger.info(f"Using column '{product_name_col}' for product name lookup")
-        
-        # Create a mapping from normalized names to actual names
-        name_mapping = {}
-        for _, row in self.df.iterrows():
-            actual_name = str(row.get(product_name_col, '')).strip()
-            if actual_name and actual_name != 'nan':
-                normalized_name = self._normalize_product_name(actual_name)
-                name_mapping[normalized_name] = actual_name
-        
-        logger.info(f"Created name mapping with {len(name_mapping)} entries")
-        
-        # Find matching records
-        matching_records = []
-        logger.info(f"Looking for {len(selected_tags)} tags in Excel data")
-        logger.info(f"Sample tags to find: {selected_tags[:3]}")
-        logger.info(f"Sample normalized names in mapping: {list(name_mapping.keys())[:5]}")
-        
-        for tag in selected_tags:
-            normalized_tag = self._normalize_product_name(tag)
-            logger.debug(f"Looking for tag '{tag}' -> normalized: '{normalized_tag}'")
-            if normalized_tag in name_mapping:
-                actual_name = name_mapping[normalized_tag]
-                logger.debug(f"Found mapping: '{normalized_tag}' -> '{actual_name}'")
-                # Find the row with this exact name
-                matching_rows = self.df[self.df[product_name_col].str.strip() == actual_name]
-                if not matching_rows.empty:
-                    for _, row in matching_rows.iterrows():
-                        record = self._create_record_from_row(row, template_type)
-                        if record:
-                            matching_records.append(record)
-                    logger.info(f"Found {len(matching_rows)} records for tag '{tag}' -> '{actual_name}'")
-                else:
-                    logger.warning(f"No matching rows found for actual name '{actual_name}'")
-            else:
-                logger.warning(f"No mapping found for tag '{tag}' (normalized: '{normalized_tag}')")
-                # Let's see what similar names exist
-                similar_names = [name for name in name_mapping.keys() if normalized_tag.lower() in name.lower() or name.lower() in normalized_tag.lower()]
-                if similar_names:
-                    logger.warning(f"Similar names found: {similar_names[:3]}")
-        
-        logger.info(f"Found {len(matching_records)} matching records from Excel data")
-        return matching_records
-
-    def _create_record_from_row(self, row: pd.Series, template_type: str = 'vertical') -> Optional[Dict[str, Any]]:
-        """Create a record from a DataFrame row for label generation."""
-        try:
-            # Get product name
-            product_name_col = 'ProductName'
-            if product_name_col not in self.df.columns:
-                possible_cols = ['Product Name*', 'Product Name', 'Description']
-                product_name_col = next((col for col in possible_cols if col in self.df.columns), None)
-                if not product_name_col:
-                    product_name_col = 'Description'
-            
-            product_name = str(row.get(product_name_col, '')).strip()
-            if not product_name or product_name == 'nan':
-                return None
-            
-            # Create basic record structure
-            record = {
-                'Product Name*': product_name,
-                'ProductName': product_name,
-                'Vendor': str(row.get('Vendor', '')).strip(),
-                'Product Brand': str(row.get('Product Brand', '')).strip(),
-                'Lineage': str(row.get('Lineage', 'MIXED')).strip().upper(),
-                'Product Type*': str(row.get('Product Type*', '')).strip(),
-                'Weight*': str(row.get('Weight*', '')).strip(),
-                'Quantity*': str(row.get('Quantity*', '')).strip(),
-                'DOH': str(row.get('DOH', '')).strip(),
-                'Ratio': str(row.get('Ratio', '')).strip(),
-                'Description': str(row.get('Description', '')).strip(),
-            }
-            
-            # Add any additional fields that might be needed
-            for col in self.df.columns:
-                if col not in record:
-                    record[col] = str(row.get(col, '')).strip()
-            
-            return record
-            
-        except Exception as e:
-            logger.error(f"Error creating record from row: {e}")
-            return None
-
     def get_selected_records(self, template_type: str = 'vertical') -> List[Dict[str, Any]]:
         """Get selected records from the DataFrame, ordered by lineage."""
         try:
@@ -2513,40 +2588,12 @@ class ExcelProcessor:
             
             logger.debug(f"Selected tag names: {selected_tag_names}")
             
-            # PRIORITY FIX: Use Excel data first, database as fallback only
-            logger.info("Using Excel data for selected records (Excel-first approach)")
+            # TEMPORARY FIX: Skip database lookup and use Excel data directly
+            # This ensures we get the correct price and THC/CBD values
+            logger.info("Using Excel data directly for template generation (bypassing database)")
             
-            # Get records from Excel data
-            excel_records = self._get_excel_records_for_tags(selected_tags, template_type)
-            if excel_records:
-                logger.info(f"Successfully retrieved {len(excel_records)} records from Excel data")
-                return excel_records
-            else:
-                logger.warning("No Excel records found, trying database as fallback")
-                
-                # Fallback to database only if Excel data fails
-                try:
-                    from .product_database import get_product_database
-                    product_db = get_product_database()
-                    if product_db:
-                        logger.info("Attempting to get selected records from database as fallback...")
-                        db_records = product_db.get_products_by_names(selected_tags)
-                        if db_records:
-                            logger.info(f"Successfully retrieved {len(db_records)} records from database fallback")
-                            
-                            # Process database records to match the expected format
-                            processed_records = self._process_database_records(db_records, template_type)
-                            logger.info(f"Generated {len(processed_records)} records from database fallback")
-                            return processed_records
-                        else:
-                            logger.warning("No database records found in fallback")
-                    else:
-                        logger.warning("Product database not available for fallback")
-                except Exception as e:
-                    logger.warning(f"Database lookup failed, falling back to Excel data: {e}")
-            
-            # Final fallback to Excel data if all else fails
-            logger.info("Using Excel data for selected records (final fallback)")
+            # Fallback to Excel data if database lookup fails or returns no results
+            logger.info("Using Excel data for selected records")
             
             # Build a mapping from normalized product names to canonical names
             product_name_col = 'ProductName'  # The actual column name in the DataFrame
@@ -2571,7 +2618,16 @@ class ExcelProcessor:
             logger.debug(f"Canonical map sample: {dict(list(canonical_map.items())[:5])}")
             
             # Map incoming selected tags to canonical names
-            canonical_selected = [canonical_map.get(normalize_name(tag)) for tag in selected_tag_names if canonical_map.get(normalize_name(tag))]
+            # CRITICAL FIX: Preserve all selected tags, not just the first match
+            canonical_selected = []
+            for tag in selected_tag_names:
+                normalized_tag = normalize_name(tag)
+                if normalized_tag in canonical_map:
+                    canonical_selected.append(canonical_map[normalized_tag])
+                    logger.debug(f"CRITICAL FIX: Mapped '{tag}' -> '{canonical_map[normalized_tag]}'")
+                else:
+                    logger.warning(f"CRITICAL FIX: No canonical match for '{tag}' (normalized: '{normalized_tag}')")
+            
             logger.debug(f"Selected tag names: {selected_tag_names}")
             logger.debug(f"Canonical selected tags: {canonical_selected}")
             
@@ -2601,7 +2657,10 @@ class ExcelProcessor:
                         name_norm = str(name).strip().lower().replace(' ', '')
                         if tag_norm == name_norm:
                             fallback_selected.append(name)
+                            logger.debug(f"CRITICAL FIX: Fallback match '{tag}' -> '{name}'")
                             break
+                    else:
+                        logger.warning(f"CRITICAL FIX: No fallback match found for '{tag}'")
                 canonical_selected = fallback_selected
                 logger.debug(f"Fallback canonical selected tags: {canonical_selected}")
             
@@ -2626,6 +2685,8 @@ class ExcelProcessor:
                             if not case_insensitive_match.empty:
                                 direct_matches.append(tag)
                                 logger.info(f"CRITICAL FIX: Case-insensitive match found for '{tag}'")
+                            else:
+                                logger.warning(f"CRITICAL FIX: No direct match found for '{tag}'")
                     
                     if direct_matches:
                         canonical_selected = direct_matches
@@ -2653,6 +2714,7 @@ class ExcelProcessor:
                                         'ProductName': product.get('Product Name*', product.get('ProductName', '')),
                                         'Product Name*': product.get('Product Name*', product.get('ProductName', '')),
                                         'Description': product.get('Description', product.get('Product Name*', product.get('ProductName', ''))),
+                                        'DescAndWeight': product.get('Description', product.get('Product Name*', product.get('ProductName', ''))),  # Use Description for DescAndWeight field
                                         'Product Type*': product.get('Product Type*', 'Unknown'),
                                         'Product Brand': product.get('Product Brand', 'Unknown'),
                                         'Product Strain': product.get('Product Strain', 'Unknown'),
@@ -2739,6 +2801,9 @@ class ExcelProcessor:
                     
                     # Get ratio text and ensure it's a string
                     ratio_text = str(record.get('Ratio', '')).strip()
+                    # Handle 'nan' values
+                    if ratio_text in ['nan', 'NaN', '']:
+                        ratio_text = ''
                     
                     # Define classic types
                     classic_types = [
@@ -2750,7 +2815,7 @@ class ExcelProcessor:
                     if product_type in classic_types:
                         # Check if we have a valid ratio, otherwise use default
                         if not ratio_text or ratio_text in ["", "CBD", "THC", "CBD:", "THC:", "CBD:\n", "THC:\n"]:
-                            ratio_text = "THC:|BR|CBD:"
+                            ratio_text = "THC: | BR | CBD:"
                         # If ratio contains THC/CBD values, use it directly
                         elif any(cannabinoid in ratio_text.upper() for cannabinoid in ['THC', 'CBD', 'CBC', 'CBG', 'CBN']):
                             ratio_text = ratio_text  # Keep as is
@@ -2759,7 +2824,7 @@ class ExcelProcessor:
                             ratio_text = ratio_text  # Keep as is
                         # Otherwise, use default THC:CBD format
                         else:
-                            ratio_text = "THC:|BR|CBD:"
+                            ratio_text = "THC: | BR | CBD:"
                     
                     # For non-classic types, preserve the ratio value from Excel
                     # This ensures that edibles, tinctures, etc. show their actual ratio values
@@ -2775,7 +2840,7 @@ class ExcelProcessor:
                     # Ensure we have a valid ratio text
                     if not ratio_text:
                         if product_type in classic_types:
-                            ratio_text = "THC:|BR|CBD:"
+                            ratio_text = "THC: | BR | CBD:"
                         else:
                             ratio_text = ""
                     
@@ -2860,8 +2925,8 @@ class ExcelProcessor:
                     # Extract THC/CBD values from actual columns
                     # For THC: merge Total THC (AI) with THC test result (K), use highest value
                     total_thc_value = str(record.get('Total THC', '')).strip()
-                    thca_value = str(record.get('THCA', '')).strip()
-                    thc_test_result = str(record.get('THC test result', '')).strip()
+                    thc_content_value = str(record.get('THCA', '')).strip()  # Use THC Content
+                    thc_test_result = str(record.get('THCA', '')).strip()  # Use THC Content
                     
                     # Clean up THC test result value
                     if thc_test_result in ['nan', 'NaN', '']:
@@ -2879,10 +2944,10 @@ class ExcelProcessor:
                     # Compare Total THC vs THC test result, use highest
                     total_thc_float = safe_float(total_thc_value)
                     thc_test_float = safe_float(thc_test_result)
-                    thca_float = safe_float(thca_value)
+                    thc_content_float = safe_float(thc_content_value)
                     
-                    # For THC: Use the highest value among Total THC, THC test result, and THCA
-                    # But if Total THC is 0 or empty, prefer THCA over THC test result
+                    # For THC: Use the highest value among Total THC, THC Content, and THC test result
+                    # But if Total THC is 0 or empty, prefer THC Content over THC test result
                     if total_thc_float > 0:
                         # Total THC has a valid value, compare with THC test result
                         if thc_test_float > total_thc_float:
@@ -2891,31 +2956,39 @@ class ExcelProcessor:
                         else:
                             ai_value = total_thc_value
                     else:
-                        # Total THC is 0 or empty, compare THCA vs THC test result
-                        if thca_float > 0 and thca_float >= thc_test_float:
-                            ai_value = thca_value
+                        # Total THC is 0 or empty, compare THC Content vs THC test result
+                        if thc_content_float > 0 and thc_content_float >= thc_test_float:
+                            ai_value = thc_content_value
                         elif thc_test_float > 0:
                             ai_value = thc_test_result
                         else:
                             ai_value = ''
                     
-                    # For CBD: merge CBDA (AK) with CBD test result (L), use highest value
-                    cbda_value = str(record.get('CBDA', '')).strip()
-                    cbd_test_result = str(record.get('CBD test result', '')).strip()
+                    # For CBD: merge Total CBD with CBD test result, use highest value
+                    total_cbd_value = str(record.get('Total CBD', '')).strip()  # Use Total CBD
+                    cbd_test_result_value = str(record.get('CBDA', '')).strip()  # Use CBDA as content
+                    cbd_content_value = str(record.get('CBDA', '')).strip()  # Use CBDA as content
                     
-                    # Clean up CBD test result value
-                    if cbd_test_result in ['nan', 'NaN', '']:
-                        cbd_test_result = ''
+                    # Clean up CBD values
+                    if cbd_test_result_value in ['nan', 'NaN', '']:
+                        cbd_test_result_value = ''
+                    if cbd_content_value in ['nan', 'NaN', '']:
+                        cbd_content_value = ''
                     
-                    # Compare CBDA vs CBD test result, use highest
-                    cbda_float = safe_float(cbda_value)
-                    cbd_test_float = safe_float(cbd_test_result)
+                    # Compare Total CBD vs CBD test result vs CBD Content, use highest
+                    total_cbd_float = safe_float(total_cbd_value)
+                    cbd_test_result_float = safe_float(cbd_test_result_value)
+                    cbd_content_float = safe_float(cbd_content_value)
                     
-                    if cbd_test_float > cbda_float:
-                        ak_value = cbd_test_result
-                        logger.debug(f"Using CBD test result ({cbd_test_result}) over CBDA ({cbda_value}) for product: {product_name}")
+                    # Use the highest CBD value from all sources
+                    if cbd_test_result_float > 0 and cbd_test_result_float >= total_cbd_float and cbd_test_result_float >= cbd_content_float:
+                        ak_value = cbd_test_result_value
+                        logger.debug(f"Using CBD test result ({cbd_test_result_value}) for product: {product_name}")
+                    elif cbd_content_float > total_cbd_float:
+                        ak_value = cbd_content_value
+                        logger.debug(f"Using CBD Content ({cbd_content_value}) over Total CBD ({total_cbd_value}) for product: {product_name}")
                     else:
-                        ak_value = cbda_value
+                        ak_value = total_cbd_value
                     
                     # Clean up the values (remove 'nan', empty strings, etc.)
                     if ai_value in ['nan', 'NaN', '']:
@@ -2928,6 +3001,16 @@ class ExcelProcessor:
                     if pd.isna(vendor) or str(vendor).lower() == 'nan':
                         vendor = ''
                     
+                    # Define classic types
+                    classic_types = [
+                        "flower", "pre-roll", "infused pre-roll", "concentrate", 
+                        "solventless concentrate", "vape cartridge", "rso/co2 tankers"
+                    ]
+                    
+                    # If product type is empty, treat as classic type (flower)
+                    if not product_type:
+                        product_type = "flower"
+                    
                     # Build the processed record with raw values (no markers)
                     processed = {
                         'ProductName': product_name,  # Keep this for compatibility
@@ -2935,18 +3018,20 @@ class ExcelProcessor:
                         'Description': description,
                         'WeightUnits': record.get('JointRatio', '') if product_type in {"pre-roll", "infused pre-roll"} else self._format_weight_units(record),
                         'ProductBrand': product_brand,
-                        'Price': str(record.get('Price', '')).strip(),
+                        'Price': str(record.get('Price*', '')).strip() or str(record.get('Price', '')).strip(),
                         'Lineage': str(final_lineage) if str(final_lineage) else "",
                         'DOH': doh_value,  # Keep DOH as raw value
-                        'Ratio_or_THC_CBD': ratio_text,  # Use the processed ratio_text for all product types
+                        'Ratio_or_THC_CBD': self._construct_thc_cbd_field(ai_value, ak_value, product_type) if product_type in classic_types else ratio_text,  # Use THC_CBD for classic types, ratio for non-classic
                         'ProductStrain': wrap_with_marker(final_product_strain, "PRODUCTSTRAIN") if include_product_strain else '',
                         'ProductType': record.get('Product Type*', ''),
-                        'Ratio': str(record.get('Ratio', '')).strip(),
-                        'THC': self.wrap_with_marker(self._format_individual_thc_cbd(ai_value, 'THC'), "THC"),  # AI column for THC
-                        'CBD': self.wrap_with_marker(self._format_individual_thc_cbd(ak_value, 'CBD'), "CBD"),  # AK column for CBD
+                        'Ratio': str(record.get('Ratio_or_THC_CBD', '')).strip(),
+                        'THC': ai_value,  # Direct THC value for template processor
+                        'CBD': ak_value,  # Direct CBD value for template processor
+                        'THC_wrapped': self.wrap_with_marker(self._format_individual_thc_cbd(ai_value, 'THC'), "THC"),  # Wrapped THC for display
+                        'CBD_wrapped': self.wrap_with_marker(self._format_individual_thc_cbd(ak_value, 'CBD'), "CBD"),  # Wrapped CBD for display
                         'THC_CBD': self._construct_thc_cbd_field(ai_value, ak_value, product_type),  # Construct combined THC_CBD field
                         'AI': ai_value,  # Total THC or THCA value for THC
-                        'AJ': str(record.get('THCA', '')).strip(),  # THCA value for alternative THC
+                        'AJ': str(record.get('THCA', '')).strip(),  # THC Content value for alternative THC
                         'AK': ak_value,  # CBDA value for CBD
                         'Vendor': vendor,  # Add vendor information
                     }
@@ -3000,14 +3085,11 @@ class ExcelProcessor:
             cbd_clean = ""
         
         # Construct the combined field using exact values, no rounding or formatting
-        if thc_clean and cbd_clean:
-            return f"THC: {thc_clean} CBD: {cbd_clean}"
-        elif thc_clean:
-            return f"THC: {thc_clean}"
-        elif cbd_clean:
-            return f"CBD: {cbd_clean}"
-        else:
-            return "THC: 0 CBD: 0"
+        # Always show both THC and CBD, even if one is 0
+        thc_display = thc_clean if thc_clean else "0"
+        cbd_display = cbd_clean if cbd_clean else "0"
+        
+        return f"THC: {thc_display}% CBD: {cbd_display}%"
 
     def _format_individual_thc_cbd(self, value, cannabinoid_type):
         """
@@ -3090,14 +3172,11 @@ class ExcelProcessor:
 
             # Now we can safely check the values since they've been processed by safe_get_value
             if weight_val is not None and units_val:
-                # Format weight to always show leading zero for decimal values (e.g., 0.5g not .5g)
-                if weight_val < 1.0 and weight_val > 0:
-                    # For decimal weights less than 1, ensure leading zero is preserved
-                    weight_str = f"{weight_val:.2f}".rstrip("0").rstrip(".")
-                    if weight_str.startswith('.'):
-                        weight_str = '0' + weight_str
+                # Format weight similar to price formatting - no decimals unless original has decimals
+                if weight_val.is_integer():
+                    weight_str = f"{int(weight_val)}"
                 else:
-                    # For whole numbers or weights >= 1, use normal formatting
+                    # Round to 2 decimal places and remove trailing zeros
                     weight_str = f"{weight_val:.2f}".rstrip("0").rstrip(".")
                 result = f"{weight_str}{units_val}"
             elif weight_val is not None:
@@ -4607,7 +4686,7 @@ class ExcelProcessor:
                     'Quantity Received*': '1',
                     'Weight Unit* (grams/gm or ounces/oz)': educated_guess.get("units", "g"),
                     'CombinedWeight': educated_guess.get("weight", "1"),
-                    'DescAndWeight': educated_guess.get("description", product_name),
+                    'DescAndWeight': educated_guess.get('description', educated_guess.get('product_name', product_name)),
                     'Description_Complexity': '1',
                     'Ratio_or_THC_CBD': '',
                     'THC test result': '',
@@ -5008,10 +5087,12 @@ class ExcelProcessor:
                         if cleaned_description != original_description:
                             logger.info(f"🧹 Cleaned database description: '{original_description}' → '{cleaned_description}'")
                             description = cleaned_description
-                    product_type = record.get('Product Type*', '').strip().lower()
                     
-                    # Get ratio text and ensure it's a string
-                    ratio_text = str(record.get('Ratio', '')).strip()
+                    # Create DescAndWeight with "Product Name - Weight" format
+                    full_product_name = record.get('Product Name*', '') or record.get('ProductName', '')
+                    weight_units = record.get('Units', '') or record.get('Weight*', '')
+                    desc_and_weight = self._create_desc_and_weight(full_product_name, weight_units) if full_product_name else description
+                    product_type = record.get('Product Type*', '').strip().lower()
                     
                     # Define classic types
                     classic_types = [
@@ -5019,11 +5100,16 @@ class ExcelProcessor:
                         "solventless concentrate", "vape cartridge", "rso/co2 tankers"
                     ]
                     
-                    # For classic types, ensure proper ratio format
+                    # If product type is empty, treat as classic type (flower)
+                    if not product_type:
+                        product_type = "flower"
+                    
+                    # For classic types, use Ratio_or_THC_CBD (THC/CBD values)
                     if product_type in classic_types:
+                        ratio_text = str(record.get('Ratio_or_THC_CBD', '')).strip()
                         # Check if we have a valid ratio, otherwise use default
                         if not ratio_text or ratio_text in ["", "CBD", "THC", "CBD:", "THC:", "CBD:\n", "THC:\n"]:
-                            ratio_text = "THC:|BR|CBD:"
+                            ratio_text = "THC: | BR | CBD:"
                         # If ratio contains THC/CBD values, use it directly
                         elif any(cannabinoid in ratio_text.upper() for cannabinoid in ['THC', 'CBD', 'CBC', 'CBG', 'CBN']):
                             ratio_text = ratio_text  # Keep as is
@@ -5032,10 +5118,11 @@ class ExcelProcessor:
                             ratio_text = ratio_text  # Keep as is
                         # Otherwise, use default THC:CBD format
                         else:
-                            ratio_text = "THC:|BR|CBD:"
+                            ratio_text = "THC: | BR | CBD:"
                     
-                    # For non-classic types, preserve the ratio value from database
+                    # For non-classic types, use Ratio column value
                     else:
+                        ratio_text = str(record.get('Ratio', '')).strip()
                         # Keep the original ratio value from database for non-classic types
                         if not ratio_text or ratio_text in ["", "nan", "NaN"]:
                             ratio_text = ""  # Empty for non-classic types without ratio
@@ -5044,7 +5131,7 @@ class ExcelProcessor:
                     # Ensure we have a valid ratio text
                     if not ratio_text:
                         if product_type in classic_types:
-                            ratio_text = "THC:|BR|CBD:"
+                            ratio_text = "THC: | BR | CBD:"
                         else:
                             ratio_text = ""
                     
@@ -5116,8 +5203,8 @@ class ExcelProcessor:
                     
                     # Extract THC/CBD values from database columns
                     total_thc_value = str(record.get('Total THC', '')).strip()
-                    thca_value = str(record.get('THCA', '')).strip()
-                    thc_test_result = str(record.get('THC test result', '')).strip()
+                    thc_content_value = str(record.get('THCA', '')).strip()
+                    thc_test_result = str(record.get('THCA', '')).strip()  # Use THC Content
                     
                     # Clean up THC test result value
                     if thc_test_result in ['nan', 'NaN', '']:
@@ -5135,7 +5222,7 @@ class ExcelProcessor:
                     # Compare Total THC vs THC test result, use highest
                     total_thc_float = safe_float(total_thc_value)
                     thc_test_float = safe_float(thc_test_result)
-                    thca_float = safe_float(thca_value)
+                    thc_content_float = safe_float(thc_content_value)
                     
                     # For THC: Use the highest value among Total THC, THC test result, and THCA
                     if total_thc_float > 0:
@@ -5146,30 +5233,38 @@ class ExcelProcessor:
                             ai_value = total_thc_value
                     else:
                         # Total THC is 0 or empty, compare THCA vs THC test result
-                        if thca_float > 0 and thca_float >= thc_test_float:
-                            ai_value = thca_value
+                        if thc_content_float > 0 and thc_content_float >= thc_test_float:
+                            ai_value = thc_content_value
                         elif thc_test_float > 0:
                             ai_value = thc_test_result
                         else:
                             ai_value = ''
                     
-                    # For CBD: merge CBDA with CBD test result, use highest value
-                    cbda_value = str(record.get('CBDA', '')).strip()
-                    cbd_test_result = str(record.get('CBD test result', '')).strip()
+                    # For CBD: merge Total CBD with CBD test result, use highest value
+                    total_cbd_value = str(record.get('Total CBD', '')).strip()  # Use Total CBD
+                    cbd_test_result_value = str(record.get('CBDA', '')).strip()  # Use CBDA as content
+                    cbd_content_value = str(record.get('CBDA', '')).strip()  # Use CBDA as content
                     
-                    # Clean up CBD test result value
-                    if cbd_test_result in ['nan', 'NaN', '']:
-                        cbd_test_result = ''
+                    # Clean up CBD values
+                    if cbd_test_result_value in ['nan', 'NaN', '']:
+                        cbd_test_result_value = ''
+                    if cbd_content_value in ['nan', 'NaN', '']:
+                        cbd_content_value = ''
                     
-                    # Compare CBDA vs CBD test result, use highest
-                    cbda_float = safe_float(cbda_value)
-                    cbd_test_float = safe_float(cbd_test_result)
+                    # Compare Total CBD vs CBD test result vs CBD Content, use highest
+                    total_cbd_float = safe_float(total_cbd_value)
+                    cbd_test_result_float = safe_float(cbd_test_result_value)
+                    cbd_content_float = safe_float(cbd_content_value)
                     
-                    if cbd_test_float > cbda_float:
-                        ak_value = cbd_test_result
-                        logger.debug(f"Using CBD test result ({cbd_test_result}) over CBDA ({cbda_value}) for product: {product_name}")
+                    # Use the highest CBD value from all sources
+                    if cbd_test_result_float > 0 and cbd_test_result_float >= total_cbd_float and cbd_test_result_float >= cbd_content_float:
+                        ak_value = cbd_test_result_value
+                        logger.debug(f"Using CBD test result ({cbd_test_result_value}) for product: {product_name}")
+                    elif cbd_content_float > total_cbd_float:
+                        ak_value = cbd_content_value
+                        logger.debug(f"Using CBD Content ({cbd_content_value}) over Total CBD ({total_cbd_value}) for product: {product_name}")
                     else:
-                        ak_value = cbda_value
+                        ak_value = total_cbd_value
                     
                     # Clean up the values (remove 'nan', empty strings, etc.)
                     if ai_value in ['nan', 'NaN', '']:
@@ -5187,21 +5282,22 @@ class ExcelProcessor:
                         'ProductName': product_name,  # Keep this for compatibility
                         'Product Name*': product_name,  # Also store with original column name
                         'Description': description,
+                        'DescAndWeight': desc_and_weight,  # Use extracted product name for DescAndWeight field
                         'WeightUnits': record.get('JointRatio', '') if product_type in {"pre-roll", "infused pre-roll"} else self._format_weight_units(record),
                         'ProductBrand': product_brand,
-                        'Price': str(record.get('Price', '')).strip(),
+                        'Price': str(record.get('Price*', '')).strip() or str(record.get('Price', '')).strip(),  # Use correct price column
                         'Lineage': str(final_lineage) if str(final_lineage) else "",
                         'DOH': doh_value,  # Keep DOH as raw value
                         'Ratio_or_THC_CBD': ratio_text,  # Use the processed ratio_text for all product types
                         'ProductStrain': self.wrap_with_marker(final_product_strain, "PRODUCTSTRAIN") if final_product_strain else '',
                         'ProductType': record.get('Product Type*', ''),
-                        'Ratio': str(record.get('Ratio', '')).strip(),
+                        'Ratio': str(record.get('Ratio_or_THC_CBD', '')).strip(),
                         'THC': wrap_with_marker(ai_value, "THC"),  # AI column for THC
                         'CBD': wrap_with_marker(ak_value, "CBD"),  # AK column for CBD
                         'THC_CBD': self._construct_thc_cbd_field(ai_value, ak_value, product_type),  # Construct combined THC_CBD field
                         'AI': ai_value,  # Total THC or THCA value for THC
-                        'AJ': str(record.get('THCA', '')).strip(),  # THCA value for alternative THC
-                        'AK': ak_value,  # CBDA value for CBD
+                        'AJ': str(record.get('THCA', '')).strip(),  # THC Content value for alternative THC
+                        'AK': ak_value,  # Total CBD value for CBD
                         'Vendor': vendor,  # Add vendor information
                     }
                     
@@ -5248,6 +5344,46 @@ class ExcelProcessor:
         if not text or str(text).strip() == '':
             return ''
         return f"{marker}_START{text}{marker}_END"
+
+    def _extract_product_name_from_full_name(self, full_name):
+        """Extract just the product name from 'Product Name by Vendor - Weight' format."""
+        if not full_name or str(full_name).strip() == '':
+            return ''
+        
+        name = str(full_name).strip()
+        if not name:
+            return ''
+        
+        # Handle "Product Name by Vendor - Weight" format
+        if ' by ' in name and ' - ' in name:
+            # Extract just the product name part before " by "
+            return name.split(' by ')[0].strip()
+        elif ' by ' in name:
+            return name.split(' by ')[0].strip()
+        elif ' - ' in name:
+            # Only split on dashes followed by weight information (numbers, decimals, units)
+            import re
+            if re.search(r' - [\d.]', name):
+                # Remove weight part but preserve the dash in product names
+                return re.sub(r' - [\d.].*$', '', name).strip()
+            else:
+                # No weight information, return the name as-is
+                return name.strip()
+        return name.strip()
+
+    def _create_desc_and_weight(self, full_name, weight_units):
+        """Create DescAndWeight field with 'Product Name - Weight' format."""
+        # Extract just the product name from the full name
+        product_name = self._extract_product_name_from_full_name(full_name)
+        
+        # Get weight units, clean them up
+        weight = str(weight_units).strip() if weight_units else ''
+        if weight and weight.lower() not in ['nan', 'none', 'null', '']:
+            # Combine product name and weight
+            return f"{product_name} - {weight}"
+        else:
+            # Just return the product name if no weight
+            return product_name
 
     def clean_product_name(self, name: str) -> str:
         """Remove subtext and parenthetical information from product names."""
@@ -5374,8 +5510,72 @@ class ExcelProcessor:
                 logger.debug(f"Vendor field is empty for product '{product_name}'. Available vendor columns: {[col for col in row.index if 'vendor' in col.lower() or 'supplier' in col.lower()]}")
                 logger.debug(f"Row vendor values: Vendor/Supplier*='{row.get('Vendor/Supplier*', '')}', Vendor='{row.get('Vendor', '')}', Vendor/Supplier='{row.get('Vendor/Supplier', '')}'")
             
+            # Get description for DescAndWeight field
+            # DescAndWeight should contain just the description text (mapped to DESC marker in template)
+            description = safe_get_value(row.get('Description', ''))
+            product_name_for_desc = safe_get_value(row.get(product_name_col, ''))
+            
+            # Use Description if available, otherwise use Product Name
+            desc_and_weight = description if description else product_name_for_desc
+            
+            # Extract THC/CBD values from the appropriate columns
+            # Use the actual column names from the Excel file
+            total_thc_value = safe_get_value(row.get('Total THC', ''))
+            thc_content_value = safe_get_value(row.get('THC Content', ''))  # Use THC Content
+            thc_test_result = safe_get_value(row.get('THC Content', ''))  # Use THC Content
+            total_cbd_value = safe_get_value(row.get('Total CBD', ''))  # Use Total CBD
+            cbd_content_value = safe_get_value(row.get('CBD Content', ''))  # Use CBD Content
+            
+            # Helper function to safely convert to float for comparison
+            def safe_float(value):
+                if not value or value in ['nan', 'NaN', '']:
+                    return 0.0
+                try:
+                    return float(value)
+                except (ValueError, TypeError):
+                    return 0.0
+            
+            # For THC: Use the highest value among Total THC, THC test result, and THCA
+            total_thc_float = safe_float(total_thc_value)
+            thc_test_float = safe_float(thc_test_result)
+            thc_content_float = safe_float(thc_content_value)
+            
+            if total_thc_float > 0:
+                if thc_test_float > total_thc_float:
+                    ai_value = thc_test_result
+                else:
+                    ai_value = total_thc_value
+            else:
+                # Total THC is 0 or empty, compare THCA vs THC test result
+                if thc_content_float > 0 and thc_content_float >= thc_test_float:
+                    ai_value = thc_content_value
+                elif thc_test_float > 0:
+                    ai_value = thc_test_result
+                else:
+                    ai_value = ''
+            
+            # For CBD: merge CBDA with CBD test result, use highest value
+            total_cbd_float = safe_float(total_cbd_value)
+            cbd_content_float = safe_float(cbd_content_value)
+            
+            if cbd_content_float > total_cbd_float:
+                ak_value = cbd_content_value
+            else:
+                ak_value = total_cbd_value
+            
+            # Clean up the values (remove 'nan', empty strings, etc.)
+            if ai_value in ['nan', 'NaN', '']:
+                ai_value = ''
+            if ak_value in ['nan', 'NaN', '']:
+                ak_value = ''
+            
+            # Get price value - use the actual column name from Excel file
+            price_value = safe_get_value(row.get('Price*', '')) or safe_get_value(row.get('Price', '')) or safe_get_value(row.get('Price* (Tier Name for Bulk)', ''))
+            
             tag = {
                 'Product Name*': product_name,
+                'Description': safe_get_value(row.get('Description', '')),  # Add Description field
+                'DescAndWeight': desc_and_weight,  # Add DescAndWeight field
                 'Vendor': vendor_value,
                 'Vendor/Supplier*': vendor_value,
                 'Product Brand': safe_get_value(row.get('Product Brand', '')),
@@ -5391,6 +5591,17 @@ class ExcelProcessor:
                 'Quantity Received*': safe_get_value(quantity),
                 'quantity': safe_get_value(quantity),
                 'DOH': safe_get_value(row.get('DOH', '')),  # Add DOH field for UI display
+                'Price': price_value,  # Add Price field
+                'THC': ai_value,  # Add THC value
+                'CBD': ak_value,  # Add CBD value
+                'AI': ai_value,  # Add AI field for THC
+                'AJ': thc_content_value,  # Add AJ field for THC Content
+                'AK': ak_value,  # Add AK field for CBD
+                'Total THC': total_thc_value,  # Add Total THC field
+                'THCA': thc_content_value,  # Add THC Content field
+                'CBDA': total_cbd_value,  # Add Total CBD field
+                'THC test result': thc_test_result,  # Add THC test result field
+                'CBD test result': cbd_content_value,  # Add CBD Content field
                 # Also include the lowercase versions for backward compatibility
                 'vendor': vendor_value,
                 'productBrand': safe_get_value(row.get('Product Brand', '')),
@@ -5436,4 +5647,49 @@ class ExcelProcessor:
         sorted_tags = sorted(tags, key=sort_key)
         logger.info(f"get_available_tags: Returning {len(sorted_tags)} tags (removed {len(filtered_df) - len(sorted_tags)} duplicates)")
         return sorted_tags
+
+
+    def _process_descriptions_from_product_names(self):
+        """Process Description values using our established formula from Product Name."""
+        try:
+            if self.df is None or self.df.empty:
+                return
+            
+            # Find the product name column
+            product_name_col = "ProductName"
+            if product_name_col not in self.df.columns:
+                possible_cols = ["Product Name*", "Product Name", "Description"]
+                product_name_col = next((col for col in possible_cols if col in self.df.columns), None)
+                if not product_name_col:
+                    self.logger.warning("No product name column found for Description processing")
+                    return
+            
+            # Ensure we have a Description column
+            if "Description" not in self.df.columns:
+                self.df["Description"] = ""
+            
+            # Replace ALL Description values with processed Product Name
+            self.df["Description"] = self.df[product_name_col].astype(str).str.strip()
+            self.logger.debug(f"Replaced all Description values with processed Product Name from {product_name_col}")
+            
+            # Handle " by " pattern for all Description values
+            mask_by = self.df["Description"].str.contains(" by ", na=False)
+            if mask_by.any():
+                self.df.loc[mask_by, "Description"] = self.df.loc[mask_by, "Description"].str.split(" by ").str[0].str.strip()
+                self.logger.debug(f"Processed ' by ' pattern in {mask_by.sum()} Description values")
+            
+            # Handle weight removal from Description - only remove weight parts, preserve product names with hyphens
+            mask_weight_dash = self.df["Description"].str.contains(r" - [\d.]", na=False)
+            if mask_weight_dash.any():
+                # Remove weight part but preserve the dash in product names like "Pre-Roll"
+                df_temp = self.df.loc[mask_weight_dash, "Description"].copy()
+                # Use regex to find the weight part and remove it (handles both " - 1g" and " - .5g")
+                df_temp = df_temp.str.replace(r" - [\d.].*$", "", regex=True)
+                self.df.loc[mask_weight_dash, "Description"] = df_temp
+                self.logger.debug(f"Removed weight information from {mask_weight_dash.sum()} Description values")
+            
+            self.logger.info(f"Successfully processed Description values using Product Name formula")
+            
+        except Exception as e:
+            self.logger.error(f"Error processing descriptions from product names: {e}")
 

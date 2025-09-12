@@ -1029,7 +1029,7 @@ class JSONMatcher:
         
         # Sort by score and return top candidates
         scored_candidates.sort(key=lambda x: x[1], reverse=True)
-        return [candidate for candidate, score in scored_candidates if score > 0.2]  # Increased threshold for better accuracy
+        return [candidate for candidate, score in scored_candidates if score > 0.1]  # Reduced threshold from 0.2 to 0.1 for more candidates
         
     def _calculate_match_score(self, json_item: dict, cache_item: dict) -> float:
         """Calculate a match score between JSON item and cache item using enhanced field matching."""
@@ -1387,12 +1387,15 @@ class JSONMatcher:
                 weight = str(item.get("unit_weight", item.get("weight", ""))).strip()
                 strain = str(item.get("strain_name", item.get("strain", ""))).strip()
                 
-                # Find best match in Product Database first, then Excel data
+                # IMPROVED: Always try both database and Excel data, keep best match
                 best_score = 0.0
                 best_match = None
                 match_source = None
+                db_match = None
+                excel_match = None
+                excel_score = 0.0
                 
-                # PRIORITY 1: Try Product Database first (highest priority)
+                # PRIORITY 1: Try Product Database (always try this)
                 try:
                     from .product_database import ProductDatabase
                     product_db = ProductDatabase()
@@ -1406,20 +1409,36 @@ class JSONMatcher:
                     )
                     
                     if db_match:
-                        # Convert database match to proper format
-                        best_match = self._convert_database_match_to_excel_format(db_match)
-                        best_score = 90.0  # High score for database matches
-                        match_source = 'Product Database Match'
-                        logging.info(f"✅ Found Product Database match for '{product_name}': {db_match.get('product_name', 'Unknown')}")
+                        # Calculate score for database match
+                        db_score = 70.0  # Base score for database match
+                        
+                        # Add bonuses for better matches
+                        db_name = db_match.get('product_name', '').lower()
+                        if product_name.lower() == db_name:
+                            db_score += 20.0  # Exact name match
+                        elif product_name.lower() in db_name or db_name in product_name.lower():
+                            db_score += 15.0  # Contains match
+                        
+                        # Vendor match bonus
+                        if vendor and db_match.get('vendor'):
+                            if vendor.lower() == db_match.get('vendor', '').lower():
+                                db_score += 10.0
+                        
+                        # Strain match bonus
+                        if strain and db_match.get('product_strain'):
+                            if strain.lower() == db_match.get('product_strain', '').lower():
+                                db_score += 10.0
+                        
+                        db_score = min(100.0, db_score)  # Cap at 100
+                        logging.info(f"✅ Found Product Database match for '{product_name}': {db_match.get('product_name', 'Unknown')} (score: {db_score:.1f})")
                     else:
-                        logging.info(f"📝 No Product Database match found for '{product_name}' - will try Excel data")
+                        logging.info(f"📝 No Product Database match found for '{product_name}'")
                         
                 except Exception as db_error:
                     logging.warning(f"Error accessing Product Database: {db_error}")
-                    logging.info(f"📝 Will try Excel data for '{product_name}'")
                 
-                # PRIORITY 2: Try Excel data if no database match found
-                if best_match is None and self.excel_processor and self.excel_processor.df is not None and self._sheet_cache:
+                # PRIORITY 2: Try Excel data (always try this if available)
+                if self.excel_processor and self.excel_processor.df is not None and self._sheet_cache:
                     df = self.excel_processor.df
                     
                     # CRITICAL FIX: Track Excel matches by product name to prevent duplicates
@@ -1482,14 +1501,41 @@ class JSONMatcher:
                     # Find the best match from deduplicated Excel matches
                     if excel_matches_by_name:
                         best_excel_match = max(excel_matches_by_name.values(), key=lambda x: x['score'])
-                        if best_excel_match['score'] > best_score:
-                            best_score = best_excel_match['score']
-                            best_match = best_excel_match['row']
-                            match_source = 'Excel Match'
+                        excel_score = best_excel_match['score']
+                        excel_match = best_excel_match['row']
+                        logging.info(f"✅ Found Excel match for '{product_name}': {excel_score:.1f}")
+                    else:
+                        logging.info(f"📝 No Excel match found for '{product_name}'")
                 
-                # CRITICAL FIX: Process ALL items regardless of match score
-                # This ensures every single JSON item generates a tag
-                if best_match is not None and best_score >= 75.0:  # Higher threshold to prevent weak matches from Excel data
+                # IMPROVED: Choose the best match between database and Excel
+                if db_match and excel_match:
+                    # Both found - choose the better one
+                    if db_score >= excel_score:
+                        best_match = self._convert_database_match_to_excel_format(db_match)
+                        best_score = db_score
+                        match_source = 'Product Database Match'
+                        logging.info(f"🏆 Using Database match (score: {db_score:.1f} vs Excel: {excel_score:.1f})")
+                    else:
+                        best_match = excel_match
+                        best_score = excel_score
+                        match_source = 'Excel Match'
+                        logging.info(f"🏆 Using Excel match (score: {excel_score:.1f} vs Database: {db_score:.1f})")
+                elif db_match:
+                    # Only database match found
+                    best_match = self._convert_database_match_to_excel_format(db_match)
+                    best_score = db_score
+                    match_source = 'Product Database Match'
+                    logging.info(f"🏆 Using Database match (score: {db_score:.1f})")
+                elif excel_match:
+                    # Only Excel match found
+                    best_match = excel_match
+                    best_score = excel_score
+                    match_source = 'Excel Match'
+                    logging.info(f"🏆 Using Excel match (score: {excel_score:.1f})")
+                
+                # IMPROVED: Process items with more lenient matching - always create a product
+                # Lower thresholds to retain more matches
+                if best_match is not None and best_score >= 15.0:  # Much more lenient threshold
                     try:
                         # Check if this is a database match
                         if match_source == 'Product Database Match':
@@ -1568,13 +1614,33 @@ class JSONMatcher:
                         except Exception as db_entry_error:
                             logging.warning(f"Failed to create database entry for '{product_name}': {db_entry_error}")
                 else:
-                    # CRITICAL FIX: Always create product from JSON data if no match
+                    # IMPROVED: Always create product from JSON data if no match or low score
                     # This ensures all JSON items are included in the results
-                    product = self._create_product_from_json(item, global_vendor)
+                    logging.info(f"📝 No good match found for '{product_name}' (best score: {best_score:.1f}) - creating from JSON data")
+                    
+                    # Try to use partial match data if available
+                    if best_match is not None and best_score < 15.0:
+                        # Use the partial match but enhance it with JSON data
+                        try:
+                            if match_source == 'Product Database Match':
+                                product = self._convert_database_match_to_excel_format(best_match)
+                            else:
+                                product = self._create_product_from_excel_match(best_match, item, global_vendor)
+                            
+                            # Enhance with JSON data
+                            self._enhance_product_with_json_data(product, item)
+                            logging.info(f"📝 Enhanced partial match with JSON data for '{product_name}' (score: {best_score:.1f})")
+                        except Exception as enhance_error:
+                            logging.warning(f"Error enhancing partial match: {enhance_error}")
+                            product = self._create_product_from_json(item, global_vendor)
+                    else:
+                        # Create completely new product from JSON data
+                        product = self._create_product_from_json(item, global_vendor)
+                        logging.info(f"📝 Created new product from JSON data for '{product_name}'")
+                    
                     # Store original JSON product name for deduplication
                     product['Original JSON Product Name'] = str(item.get("product_name", ""))
                     matched_products.append(product)
-                    logging.info(f"📝 Created product from JSON data for '{product_name}' (no Excel match)")
                     
                     # Create new database entry for unmatched JSON tag
                     try:
@@ -2101,9 +2167,9 @@ class JSONMatcher:
             # Analyze similar products to infer missing data
             inferred_data = self._analyze_similar_products_for_inference(similar_products, product_name, vendor)
             
-            # ENHANCED: Add price and cost inference
+            # ENHANCED: Add price and cost inference with vendor context
             price_cost_data = self._infer_price_and_cost_from_similar_products(
-                similar_products, product_name, product_type, weight
+                similar_products, product_name, product_type, weight, vendor
             )
             inferred_data.update(price_cost_data)
             
@@ -2448,15 +2514,16 @@ class JSONMatcher:
             logging.warning(f"Error analyzing similar products for inference: {e}")
             return {}
     
-    def _infer_price_and_cost_from_similar_products(self, similar_products, product_name, product_type, weight):
+    def _infer_price_and_cost_from_similar_products(self, similar_products, product_name, product_type, weight, vendor=None):
         """
-        Infer price and cost from similar products in the database.
+        Infer price and cost from similar products in the database, prioritizing vendor context.
         
         Args:
             similar_products: List of similar product dictionaries
             product_name: The product name
             product_type: The product type
             weight: The weight
+            vendor: The vendor name for context-specific pricing
             
         Returns:
             Dictionary with inferred price and cost
@@ -2466,11 +2533,17 @@ class JSONMatcher:
         try:
             inferred_data = {}
             
-            # Extract prices and costs from similar products
+            # Extract prices and costs from similar products, prioritizing vendor context
             prices = []
             costs = []
+            vendor_prices = []
+            vendor_costs = []
             
             for product in similar_products:
+                # Check if this product is from the same vendor
+                product_vendor = product.get('vendor', '').strip().lower()
+                is_same_vendor = vendor and product_vendor == vendor.lower()
+                
                 # Extract price
                 price = product.get('price', '').strip()
                 if price and price.lower() not in ['unknown', 'nan', '', '0', '$0', '0.00']:
@@ -2480,6 +2553,8 @@ class JSONMatcher:
                         price_float = float(price_clean)
                         if price_float > 0:
                             prices.append(price_float)
+                            if is_same_vendor:
+                                vendor_prices.append(price_float)
                     except (ValueError, TypeError):
                         pass
                 
@@ -2492,28 +2567,57 @@ class JSONMatcher:
                         cost_float = float(cost_clean)
                         if cost_float > 0:
                             costs.append(cost_float)
+                            if is_same_vendor:
+                                vendor_costs.append(cost_float)
                     except (ValueError, TypeError):
                         pass
             
-            # Calculate inferred price
-            if prices:
-                # Use median price for more stable inference
+            # Calculate inferred price - prioritize vendor-specific pricing
+            if vendor_prices:
+                # Use vendor-specific pricing if available
+                vendor_prices.sort()
+                median_price = vendor_prices[len(vendor_prices) // 2]
+                if median_price.is_integer():
+                    inferred_data['price'] = f"${int(median_price)}"
+                else:
+                    inferred_data['price'] = f"${median_price:.2f}"
+                logging.info(f"💰 Inferred price ${median_price:.2f} from {len(vendor_prices)} vendor-specific products for '{product_name}' (vendor: {vendor})")
+            elif prices:
+                # Use all similar products if no vendor-specific data
                 prices.sort()
                 median_price = prices[len(prices) // 2]
-                inferred_data['price'] = f"${median_price:.2f}"
+                if median_price.is_integer():
+                    inferred_data['price'] = f"${int(median_price)}"
+                else:
+                    inferred_data['price'] = f"${median_price:.2f}"
                 logging.info(f"💰 Inferred price ${median_price:.2f} from {len(prices)} similar products for '{product_name}'")
             else:
                 # Fallback to intelligent price estimation based on product type and weight
                 estimated_price = self._estimate_price_by_type_and_weight(product_type, weight)
-                inferred_data['price'] = f"${estimated_price:.2f}"
+                if estimated_price.is_integer():
+                    inferred_data['price'] = f"${int(estimated_price)}"
+                else:
+                    inferred_data['price'] = f"${estimated_price:.2f}"
                 logging.info(f"💰 Estimated price ${estimated_price:.2f} based on type '{product_type}' and weight '{weight}' for '{product_name}'")
             
-            # Calculate inferred cost
-            if costs:
-                # Use median cost for more stable inference
+            # Calculate inferred cost - prioritize vendor-specific pricing
+            if vendor_costs:
+                # Use vendor-specific cost if available
+                vendor_costs.sort()
+                median_cost = vendor_costs[len(vendor_costs) // 2]
+                if median_cost.is_integer():
+                    inferred_data['cost'] = f"${int(median_cost)}"
+                else:
+                    inferred_data['cost'] = f"${median_cost:.2f}"
+                logging.info(f"💵 Inferred cost ${median_cost:.2f} from {len(vendor_costs)} vendor-specific products for '{product_name}' (vendor: {vendor})")
+            elif costs:
+                # Use all similar products if no vendor-specific data
                 costs.sort()
                 median_cost = costs[len(costs) // 2]
-                inferred_data['cost'] = f"${median_cost:.2f}"
+                if median_cost.is_integer():
+                    inferred_data['cost'] = f"${int(median_cost)}"
+                else:
+                    inferred_data['cost'] = f"${median_cost:.2f}"
                 logging.info(f"💵 Inferred cost ${median_cost:.2f} from {len(costs)} similar products for '{product_name}'")
             else:
                 # Estimate cost as 60-70% of price (typical wholesale markup)
@@ -2585,7 +2689,10 @@ class JSONMatcher:
                 try:
                     price_float = float(price_clean)
                     if price_float > 0:
-                        price = f"${price_float:.2f}"
+                        if price_float.is_integer():
+                            price = f"${int(price_float)}"
+                        else:
+                            price = f"${price_float:.2f}"
                         logging.info(f"💰 Using JSON price '{price}' for '{product_name}'")
                         return price
                 except (ValueError, TypeError):
@@ -2614,7 +2721,10 @@ class JSONMatcher:
                     if prices:
                         # Use average price from similar products
                         avg_price = sum(prices) / len(prices)
-                        price = f"${avg_price:.2f}"
+                        if avg_price.is_integer():
+                            price = f"${int(avg_price)}"
+                        else:
+                            price = f"${avg_price:.2f}"
                         logging.info(f"💰 Using average price '{price}' from {len(prices)} similar products for '{product_name}'")
                         return price
             except Exception as e:
@@ -2623,7 +2733,10 @@ class JSONMatcher:
             # Strategy 4: Use intelligent estimation based on product characteristics
             try:
                 estimated_price = self._estimate_price_by_type_and_weight(product_type, weight)
-                price = f"${estimated_price:.2f}"
+                if estimated_price.is_integer():
+                    price = f"${int(estimated_price)}"
+                else:
+                    price = f"${estimated_price:.2f}"
                 logging.info(f"💰 Using estimated price '{price}' for '{product_name}'")
                 return price
             except Exception as e:
@@ -2695,7 +2808,10 @@ class JSONMatcher:
                 try:
                     cost_float = float(cost_clean)
                     if cost_float > 0:
-                        cost = f"${cost_float:.2f}"
+                        if cost_float.is_integer():
+                            cost = f"${int(cost_float)}"
+                        else:
+                            cost = f"${cost_float:.2f}"
                         logging.info(f"💵 Using JSON cost '{cost}' for '{product_name}'")
                         return cost
                 except (ValueError, TypeError):
@@ -2724,7 +2840,10 @@ class JSONMatcher:
                     if costs:
                         # Use average cost from similar products
                         avg_cost = sum(costs) / len(costs)
-                        cost = f"${avg_cost:.2f}"
+                        if avg_cost.is_integer():
+                            cost = f"${int(avg_cost)}"
+                        else:
+                            cost = f"${avg_cost:.2f}"
                         logging.info(f"💵 Using average cost '{cost}' from {len(costs)} similar products for '{product_name}'")
                         return cost
             except Exception as e:
@@ -4146,8 +4265,8 @@ class JSONMatcher:
             
             # Step 3: Try fuzzy name matching with vendor filtering (adaptive threshold)
             if json_vendor:
-                # Use much higher threshold for vendor-based matching (very strict to prevent cross-vendor matches)
-                vendor_threshold = 95 if json_brand else 92  # Increased from 90/85 to 95/92
+                # Use reasonable threshold for vendor-based matching (balanced to allow valid matches)
+                vendor_threshold = 75 if json_brand else 70  # Reduced from 95/92 to 75/70 for better matching
                 fuzzy_matches = self._find_fuzzy_name_matches(json_name, json_vendor, threshold=vendor_threshold)
                 if fuzzy_matches:
                     best_match = fuzzy_matches[0]
@@ -4159,8 +4278,16 @@ class JSONMatcher:
             else:
                 logging.debug(f"⚠️ No vendor specified for '{json_name}', skipping vendor fuzzy matching")
             
-            # Step 4: REMOVED - No more fuzzy matching without vendor filtering to prevent cross-vendor matches
-            # This was causing products from different companies to be incorrectly matched
+            # Step 4: Try cross-vendor fuzzy matching as fallback (with lower threshold)
+            # This helps when vendor names don't match but products are similar
+            cross_vendor_matches = self._find_fuzzy_name_matches(json_name, threshold=60)  # Lower threshold for cross-vendor
+            if cross_vendor_matches:
+                best_match = cross_vendor_matches[0]
+                score = cross_vendor_matches[0]['fuzzy_score'] / 100.0
+                logging.debug(f"✅ CROSS-VENDOR FUZZY MATCH: '{json_name}' → '{best_match.get('original_name', 'Unknown')}' (score: {score:.2f}, threshold: 60)")
+                return best_match, score, "Cross-vendor fuzzy name match"
+            else:
+                logging.debug(f"❌ No cross-vendor fuzzy match for '{json_name}' (threshold: 60)")
             logging.debug(f"⚠️ Skipping general fuzzy matching without vendor filtering to prevent cross-vendor matches")
             
             # Step 5: Try strain-based matching (ONLY with vendor filtering)
@@ -4384,7 +4511,7 @@ class JSONMatcher:
             if weight_match: score += 0.2
             if vendor_match: score += 0.1
             
-            if score >= 0.6:  # Require at least brand + type match
+            if score >= 0.4:  # Require at least brand + type match (reduced from 0.6 to 0.4)
                 cache_item_copy = cache_item.copy()
                 cache_item_copy['composite_score'] = score
                 matches.append(cache_item_copy)
@@ -4754,15 +4881,20 @@ class JSONMatcher:
             image_url = str(db_info.get("image_url", ""))
             ingredients = str(db_info.get("ingredients", ""))
             
-            # Create tag using database information - follow same format as existing tags
-            # For strain-based lookups, use the formatted description
-            # For direct product lookups, use the product name
-            if strain and lineage:
-                # Strain-based lookup: use formatted description
-                primary_product_name = description if description else f"{strain} - {lineage} - {weight}{units}"
+            # Create tag using database information - prioritize Description from database
+            # Always use Description from database if available, otherwise create formatted description
+            if description and description.strip():
+                # Use Description from database as primary product name
+                primary_product_name = description.strip()
+                logging.info(f"📝 Using database Description as primary name: '{primary_product_name}'")
+            elif strain and lineage and weight and units:
+                # Strain-based lookup: create formatted description
+                primary_product_name = f"{strain} - {lineage} - {weight}{units}"
+                logging.info(f"📝 Created formatted description: '{primary_product_name}'")
             else:
                 # Direct product lookup: use product name
                 primary_product_name = db_info.get("product_name", "Unknown Product")
+                logging.info(f"📝 Using product name: '{primary_product_name}'")
             
             # CRITICAL FIX: Log the AI match information and ensure database values are used
             ai_match_score = db_info.get("ai_match_score", 0)
@@ -6188,6 +6320,83 @@ class JSONMatcher:
         except Exception as e:
             logging.error(f"Error in emergency fallback matching: {e}")
             return None
+
+    def _enhance_product_with_json_data(self, product: dict, json_item: dict) -> None:
+        """
+        Enhance a product with additional data from JSON item.
+        This is used when we have a partial match but want to add more data from JSON.
+        
+        Args:
+            product: The product dictionary to enhance
+            json_item: The original JSON item with additional data
+        """
+        try:
+            # Add JSON quantity if available and product doesn't have it
+            if not product.get('Quantity*') and json_item.get('qty'):
+                product['Quantity*'] = str(json_item.get('qty'))
+            
+            # Add JSON weight if available and product doesn't have it
+            if not product.get('Weight*') and json_item.get('unit_weight'):
+                product['Weight*'] = str(json_item.get('unit_weight'))
+            
+            # Add JSON price if available and product doesn't have it
+            if not product.get('Price') and json_item.get('price'):
+                product['Price'] = str(json_item.get('price'))
+            
+            # Add JSON strain if available and product doesn't have it
+            if not product.get('Product Strain') and json_item.get('strain_name'):
+                product['Product Strain'] = str(json_item.get('strain_name'))
+            
+            # Add JSON brand if available and product doesn't have it
+            if not product.get('Product Brand') and json_item.get('brand'):
+                product['Product Brand'] = str(json_item.get('brand'))
+            
+            # Add JSON vendor if available and product doesn't have it
+            if not product.get('Vendor') and json_item.get('vendor'):
+                product['Vendor'] = str(json_item.get('vendor'))
+            
+            # Add JSON product type if available and product doesn't have it
+            if not product.get('Product Type*') and json_item.get('inventory_type'):
+                product['Product Type*'] = str(json_item.get('inventory_type'))
+            
+            # Try to extract THC/CBD values from JSON data
+            if not product.get('THC test result') or product.get('THC test result') == '':
+                thc_value = (json_item.get('THC test result') or 
+                            json_item.get('thc') or 
+                            json_item.get('thc_percent') or 
+                            json_item.get('thc_percentage') or 
+                            json_item.get('total_thc') or 
+                            json_item.get('total_thc_percent'))
+                if thc_value:
+                    product['THC test result'] = str(thc_value)
+                    logging.info(f"🧪 Enhanced with THC value from JSON: {thc_value}")
+            
+            if not product.get('CBD test result') or product.get('CBD test result') == '':
+                cbd_value = (json_item.get('CBD test result') or 
+                            json_item.get('cbd') or 
+                            json_item.get('cbd_percent') or 
+                            json_item.get('cbd_percentage') or 
+                            json_item.get('total_cbd') or 
+                            json_item.get('total_cbd_percent'))
+                if cbd_value:
+                    product['CBD test result'] = str(cbd_value)
+                    logging.info(f"🧪 Enhanced with CBD value from JSON: {cbd_value}")
+            
+            # Try to extract from lab_result_data as well
+            lab_result_data = json_item.get("lab_result_data", {})
+            if lab_result_data:
+                cannabinoids = extract_cannabinoids(lab_result_data)
+                if 'thc' in cannabinoids and (not product.get('THC test result') or product.get('THC test result') == ''):
+                    product['THC test result'] = str(cannabinoids['thc'])
+                    logging.info(f"🧪 Enhanced with THC value from lab_result_data: {cannabinoids['thc']}")
+                if 'cbd' in cannabinoids and (not product.get('CBD test result') or product.get('CBD test result') == ''):
+                    product['CBD test result'] = str(cannabinoids['cbd'])
+                    logging.info(f"🧪 Enhanced with CBD value from lab_result_data: {cannabinoids['cbd']}")
+            
+            logging.info(f"✅ Enhanced product with JSON data: '{product.get('Product Name*', 'Unknown')}'")
+            
+        except Exception as e:
+            logging.warning(f"Error enhancing product with JSON data: {e}")
 
     def _create_database_entry_for_unmatched_json(self, tag: dict, product_db) -> None:
         """

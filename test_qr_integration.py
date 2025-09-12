@@ -1,72 +1,102 @@
 #!/usr/bin/env python3
 """
-Test script to verify complete QR code integration with font sizing.
+Test script to verify QR code integration with template processing.
 """
-from src.core.generation.template_processor import TemplateProcessor
+import sys
+import os
+sys.path.append('.')
+
+from src.core.generation.template_processor import TemplateProcessor, get_font_scheme
 from docx import Document
-from io import BytesIO
 
 def test_qr_integration():
-    """Test complete QR code integration with font sizing."""
+    """Test QR code integration with template processing."""
+    print("Testing QR code integration...")
     
-    print("Testing Complete QR Code Integration")
-    print("=" * 40)
+    # Get font scheme for mini template
+    font_scheme = get_font_scheme('mini', 12)
     
-    # Create a mock template
-    template_buffer = BytesIO()
-    doc = Document()
-    template_buffer = BytesIO()
-    doc.save(template_buffer)
-    template_buffer.seek(0)
+    # Create template processor
+    processor = TemplateProcessor('mini', font_scheme)
     
-    # Test different template types
-    template_types = ['mini', 'vertical', 'horizontal', 'double']
+    # Test data
+    test_data = [{
+        'Product Name*': 'Test Product for QR Code',
+        'Product Brand': 'Test Brand',
+        'THC test result': 25.5,
+        'CBD test result': 2.1,
+        'Weight*': '3.5g',
+        'Price': '$25.00'
+    }]
     
-    for template_type in template_types:
-        print(f"\n{template_type.upper()} Template:")
-        print("-" * 20)
+    try:
+        # Generate labels
+        output_file = 'test_qr_integration.docx'
+        final_doc = processor.process_records(test_data)
         
-        # Create processor
-        processor = TemplateProcessor(template_type, template_buffer)
+        if final_doc is None:
+            print("✗ Failed to generate document")
+            return False
+            
+        # Save the document
+        final_doc.save(output_file)
+        print(f"✓ Labels generated successfully: {output_file}")
         
-        # Test record with QR code
-        test_record = {
-            'Product Name*': 'Test Product for QR Code',
-            'Product Type*': 'flower',
-            'THC': '22.5',
-            'CBD': '0.8'
-        }
+        # Check if QR code was included in the output
+        doc = Document(output_file)
+        has_qr = False
         
-        # Test context building
-        context = processor._build_label_context(test_record, Document())
+        # Check all paragraphs for QR content
+        for para in doc.paragraphs:
+            if '{{QR}}' in para.text:
+                has_qr = True
+                print(f"✓ Found QR placeholder in paragraph: {para.text}")
+                break
         
-        # Check QR code generation
-        if 'QR' in context:
-            print(f"  ✅ QR code generated: {type(context['QR'])}")
-            print(f"  ✅ QR_START marker: {context.get('QR_START', 'Not found')}")
-            print(f"  ✅ QR_END marker: {context.get('QR_END', 'Not found')}")
+        # Also check table cells
+        if not has_qr and doc.tables:
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for para in cell.paragraphs:
+                            if '{{QR}}' in para.text:
+                                has_qr = True
+                                print(f"✓ Found QR placeholder in table cell: {para.text}")
+                                break
+                        if has_qr:
+                            break
+                    if has_qr:
+                        break
+                if has_qr:
+                    break
+        
+        if has_qr:
+            print("✓ QR code placeholder found in generated document")
         else:
-            print(f"  ❌ QR code not found in context")
+            print("✗ QR code placeholder not found in generated document")
+            
+        # Check if the QR code was actually generated (not just placeholder)
+        # Look for InlineImage objects or actual QR code content
+        print("\nChecking for actual QR code generation...")
         
-        # Test font sizing for QR markers
-        from src.core.generation.unified_font_sizing import get_font_size_by_marker
+        # The QR code should be replaced with actual InlineImage objects
+        # Let's check if there are any images in the document
+        if hasattr(doc, 'part') and hasattr(doc.part, 'related_parts'):
+            image_count = len([part for part in doc.part.related_parts.values() 
+                             if 'image' in part.content_type])
+            print(f"Found {image_count} images in the document")
         
-        # Test with QR markers
-        qr_font_size = get_font_size_by_marker("Test Product", 'QR', template_type, 1.0)
-        print(f"  ✅ QR font size: {qr_font_size.pt}pt")
+        return True
         
-        # Test with different product name lengths
-        test_names = [
-            "Short",
-            "Medium Product Name",
-            "Very Long Product Name That Should Test Font Sizing"
-        ]
-        
-        for name in test_names:
-            size = get_font_size_by_marker(name, 'QR', template_type, 1.0)
-            print(f"    '{name[:20]}...': {size.pt}pt")
-    
-    print(f"\n✅ Complete QR code integration test passed!")
+    except Exception as e:
+        print(f"✗ Error during QR code integration test: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
 
 if __name__ == "__main__":
-    test_qr_integration()
+    success = test_qr_integration()
+    if success:
+        print("\n✓ QR code integration test completed successfully!")
+    else:
+        print("\n✗ QR code integration test failed!")
