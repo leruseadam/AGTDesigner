@@ -840,11 +840,13 @@ def optimize_session_data():
 
 # Initialize Excel processor and load default data on startup
 
-def simple_# Use simple initialization on PythonAnywhere to prevent hangs
+# Use simple initialization on PythonAnywhere to prevent hangs
 if os.environ.get('PYTHONANYWHERE_DOMAIN'):
     simple_initialize_excel_processor()
 else:
-    initialize_excel_processor():
+    initialize_excel_processor()
+
+def simple_initialize_excel_processor():
     """Simple initialization that won't get stuck - for PythonAnywhere"""
     try:
         logging.info("Simple initialization starting...")
@@ -872,11 +874,7 @@ else:
         return False
 
 
-def # Use simple initialization on PythonAnywhere to prevent hangs
-if os.environ.get('PYTHONANYWHERE_DOMAIN'):
-    simple_initialize_excel_processor()
-else:
-    initialize_excel_processor():
+def initialize_excel_processor():
     """Initialize Excel processor and load default data."""
     try:
         # Skip initialization if startup file loading is disabled for performance
