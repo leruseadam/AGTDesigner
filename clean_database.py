@@ -51,7 +51,6 @@ def clean_database():
         'Batch Number',
         'Lot Number',
         'Barcode*',
-        'Cost*',
         'Medical Only (Yes/No)',
         'Med Price',
         'Expiration Date(YYYY-MM-DD)',

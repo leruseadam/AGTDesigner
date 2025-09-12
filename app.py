@@ -3819,7 +3819,6 @@ def generate_labels():
                                 'Batch Number': db_record.get('Batch Number', ''),  # Correct field name
                                 'Lot Number': db_record.get('Lot Number', ''),  # Correct field name
                                 'Barcode*': db_record.get('Barcode*', ''),  # Correct field name
-                                'Cost*': db_record.get('Cost*', ''),  # Correct field name
                                 'Medical Only (Yes/No)': db_record.get('Medical Only (Yes/No)', ''),  # Correct field name
                                 'Med Price': db_record.get('Med Price', ''),  # Correct field name
                                 'Expiration Date(YYYY-MM-DD)': db_record.get('Expiration Date(YYYY-MM-DD)', ''),  # Correct field name
@@ -5852,7 +5851,7 @@ def get_database_products():
                    p."Weight*", p."Description", p."Quantity*", p."DOH", p."Concentrate Type",
                    p."Ratio", p."JointRatio", p."State", p."Is Sample? (yes/no)",
                    p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*",
-                   p."Batch Number", p."Lot Number", p."Barcode*", p."Cost*",
+                   p."Batch Number", p."Lot Number", p."Barcode*",
                    p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)",
                    p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens",
                    p."Solvent", p."Accepted Date", p."Internal Product Identifier",
@@ -5904,7 +5903,6 @@ def get_database_products():
                     'Batch Number': result[19],
                     'Lot Number': result[20],
                     'Barcode*': result[21],
-                    'Cost*': result[22],
                     'Medical Only (Yes/No)': result[23],
                     'Med Price': result[24],
                     'Expiration Date(YYYY-MM-DD)': result[25],
@@ -11775,7 +11773,6 @@ def import_products():
                     'Batch Number': product.get('Batch Number'),
                     'Lot Number': product.get('Lot Number'),
                     'Barcode*': product.get('Barcode*'),
-                    'Cost*': product.get('Cost*'),
                     'Medical Only (Yes/No)': product.get('Medical Only (Yes/No)'),
                     'Med Price': product.get('Med Price'),
                     'Expiration Date(YYYY-MM-DD)': product.get('Expiration Date(YYYY-MM-DD)'),

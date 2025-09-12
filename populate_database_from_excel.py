@@ -78,7 +78,6 @@ def populate_database():
                 'Batch Number': 'Batch Number',
                 'Lot Number': 'Lot Number',
                 'Barcode*': 'Barcode*',
-                'Cost*': 'Cost*',
                 'Medical Only (Yes/No)': 'Medical Only (Yes/No)',
                 'Med Price': 'Med Price',
                 'Expiration Date(YYYY-MM-DD)': 'Expiration Date(YYYY-MM-DD)',
