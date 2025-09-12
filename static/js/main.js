@@ -5406,10 +5406,10 @@ const TagManager = {
     async pollUploadStatusAndUpdateUI(filename, displayName) {
         console.log(`Polling upload status for: ${filename}`);
         
-        const maxAttempts = 120; // 6 minutes max (3 seconds * 120 = 6 minutes)
+        const maxAttempts = 60; // 3 minutes max (3 seconds * 60 = 3 minutes)
         let attempts = 0;
         let consecutiveErrors = 0;
-        const maxConsecutiveErrors = 3;
+        const maxConsecutiveErrors = 5;
         
         // Add debug logging for upload processing
         console.log(`[UPLOAD DEBUG] Starting status polling for: ${filename}`);

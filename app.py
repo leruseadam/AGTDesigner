@@ -2389,6 +2389,9 @@ def upload_status():
     if not filename:
         return jsonify({'error': 'No filename provided'}), 400
     
+    # Ensure filename is properly sanitized
+    filename = sanitize_filename(filename)
+    
     # Clean up old entries periodically (but not on every request to reduce overhead)
     if random.random() < 0.05:  # Only cleanup 5% of the time (reduced from 10%)
         cleanup_old_processing_status()
