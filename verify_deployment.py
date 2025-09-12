@@ -1,86 +1,103 @@
 #!/usr/bin/env python3
 """
-Verify Database Deployment
-Checks if the database was deployed successfully
+Verify the deployment package works correctly
 """
 
-import requests
+import os
 import sys
+import sqlite3
+from pathlib import Path
 
-def verify_deployment(web_url):
-    """Verify that the database deployment was successful"""
-    print(f"🔍 Verifying deployment at {web_url}...")
-    print()
+def verify_deployment():
+    """Verify the deployment package"""
+    print("🔍 Verifying PythonAnywhere deployment package...")
     
-    try:
-        # Test basic connectivity
-        print("1. Testing basic connectivity...")
-        response = requests.get(f"{web_url}/api/status", timeout=10)
-        if response.status_code == 200:
-            print("   ✅ Web app is responding")
+    deploy_dir = "pythonanywhere_deployment"
+    
+    if not os.path.exists(deploy_dir):
+        print("❌ Deployment directory not found")
+        return False
+    
+    # Essential files check
+    essential_files = [
+        "app.py",
+        "requirements.txt",
+        "product_database.db",
+        "src/core/data/product_database.py",
+        "static/js/main.js",
+        "templates/index.html"
+    ]
+    
+    print("\n📁 Checking essential files...")
+    all_files_present = True
+    for file_path in essential_files:
+        full_path = os.path.join(deploy_dir, file_path)
+        if os.path.exists(full_path):
+            print(f"✅ {file_path}")
         else:
-            print(f"   ❌ Web app returned status {response.status_code}")
-            return False
-        
-        # Test database stats
-        print("2. Checking database stats...")
-        response = requests.get(f"{web_url}/api/database-stats", timeout=10)
-        if response.status_code == 200:
-            stats = response.json()
-            total_products = stats.get('stats', {}).get('total_products', 0)
-            unique_brands = stats.get('stats', {}).get('unique_brands', 0)
-            unique_vendors = stats.get('stats', {}).get('unique_vendors', 0)
+            print(f"❌ {file_path} - MISSING")
+            all_files_present = False
+    
+    if not all_files_present:
+        print("\n❌ Some essential files are missing")
+        return False
+    
+    # Database verification
+    print("\n🗄️  Checking database...")
+    db_path = os.path.join(deploy_dir, "product_database.db")
+    if os.path.exists(db_path):
+        try:
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
             
-            print(f"   📊 Total products: {total_products}")
-            print(f"   🏷️  Unique brands: {unique_brands}")
-            print(f"   🏪 Unique vendors: {unique_vendors}")
+            # Check if Cost* column is removed
+            cursor.execute("PRAGMA table_info(products)")
+            columns = [col[1] for col in cursor.fetchall()]
             
-            if total_products >= 7000:  # Should have around 7,870
-                print("   ✅ Database deployment successful!")
-                return True
-            else:
-                print("   ⚠️  Database seems incomplete")
+            if 'Cost*' in columns:
+                print("❌ Cost* column still exists in database")
+                conn.close()
                 return False
-        else:
-            print(f"   ❌ Database stats failed: {response.status_code}")
-            return False
+            else:
+                print("✅ Cost* column successfully removed")
             
-    except requests.exceptions.ConnectionError:
-        print("   ❌ Cannot connect to web app")
-        print("   💡 Make sure the web app is running and accessible")
-        return False
-    except requests.exceptions.Timeout:
-        print("   ❌ Request timed out")
-        print("   💡 Web app might be starting up, try again in a moment")
-        return False
-    except Exception as e:
-        print(f"   ❌ Error: {e}")
-        return False
-
-def main():
-    if len(sys.argv) != 2:
-        print("Usage: python verify_deployment.py <web_app_url>")
-        print("Example: python verify_deployment.py https://your-username.pythonanywhere.com")
-        sys.exit(1)
-    
-    web_url = sys.argv[1].rstrip('/')
-    
-    print("🚀 Database Deployment Verification")
-    print("=" * 40)
-    print()
-    
-    if verify_deployment(web_url):
-        print()
-        print("🎉 SUCCESS! Your database has been deployed successfully!")
-        print("   - 7,870+ products are now available on the web")
-        print("   - You can now upload Excel files and generate labels")
-        print("   - The web app should be much faster now")
+            # Check product count
+            cursor.execute("SELECT COUNT(*) FROM products")
+            product_count = cursor.fetchone()[0]
+            print(f"✅ Database contains {product_count} products")
+            
+            conn.close()
+        except Exception as e:
+            print(f"❌ Database error: {e}")
+            return False
     else:
-        print()
-        print("❌ DEPLOYMENT VERIFICATION FAILED")
-        print("   - Check that the web app is running")
-        print("   - Verify the database file was uploaded correctly")
-        print("   - Try the deployment steps again")
+        print("❌ Database file not found")
+        return False
+    
+    # Test app loading
+    print("\n🐍 Testing app loading...")
+    try:
+        sys.path.insert(0, deploy_dir)
+        from app import app
+        print("✅ Flask app loads successfully")
+    except Exception as e:
+        print(f"❌ App loading error: {e}")
+        return False
+    
+    # Test database connection
+    print("\n🔗 Testing database connection...")
+    try:
+        from src.core.data.product_database import ProductDatabase
+        db = ProductDatabase()
+        products = db.get_products_by_names(['Blue Dream'])
+        print(f"✅ Database connection works - found {len(products)} products")
+    except Exception as e:
+        print(f"❌ Database connection error: {e}")
+        return False
+    
+    print("\n🎉 Deployment package verification PASSED!")
+    print("✅ Ready for PythonAnywhere deployment")
+    return True
 
 if __name__ == "__main__":
-    main()
+    verify_deployment()
