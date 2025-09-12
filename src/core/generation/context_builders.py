@@ -59,7 +59,10 @@ def build_label_context(record):
     if context.get('price'):
         try:
             price_float = float(str(context['price']).replace('$', '').replace(',', ''))
-            context['formatted_price'] = f"${price_float:.2f}"
+            if price_float.is_integer():
+                context['formatted_price'] = f"${int(price_float)}"
+            else:
+                context['formatted_price'] = f"${price_float:.2f}"
         except (ValueError, TypeError):
             context['formatted_price'] = str(context['price'])
     

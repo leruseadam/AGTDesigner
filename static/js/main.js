@@ -19,7 +19,8 @@ if (typeof Toast === 'undefined') {
       if (type === 'error') {
         alert('Error: ' + msg);
       } else {
-        alert(msg);
+        // Don't show alerts for success/info messages to prevent popups
+        console.log(`Toast (${type}): ${msg}`);
       }
     }
   };
@@ -28,7 +29,7 @@ if (typeof Toast === 'undefined') {
 // Classic types that should show "Lineage" instead of "Brand"
 const CLASSIC_TYPES = [
     "flower", "pre-roll", "concentrate", "infused pre-roll", 
-    "solventless concentrate", "vape cartridge"
+    "solventless concentrate", "vape cartridge", "rso/co2 tankers"
 ];
 
 // Add this near the top of the file, before any code that uses it
@@ -720,7 +721,7 @@ const AppLoadingSplash = {
 const TagManager = {
     state: {
         selectedTags: new Set(),
-        persistentSelectedTags: [], // Changed to array for easier manipulation
+        persistentSelectedTags: new Set(), // New: persistent selected tags independent of filters
         initialized: false,
         filters: {},
         loading: false,
@@ -897,7 +898,7 @@ const TagManager = {
             const filteredTags = shouldLimitOptions ? tagsToFilter.filter(tag => {
                 // Check vendor filter - only apply if not empty and not "All"
                 if (currentFilters.vendor && currentFilters.vendor.trim() !== '' && currentFilters.vendor.toLowerCase() !== 'all') {
-                    const tagVendor = (tag.vendor || '').toString().trim();
+                    const tagVendor = (tag.Vendor || tag.vendor || '').toString().trim();
                     if (tagVendor.toLowerCase() !== currentFilters.vendor.toLowerCase()) {
                         return false;
                     }
@@ -905,7 +906,7 @@ const TagManager = {
                 
                 // Check brand filter - only apply if not empty and not "All"
                 if (currentFilters.brand && currentFilters.brand.trim() !== '' && currentFilters.brand.toLowerCase() !== 'all') {
-                    const tagBrand = (tag.productBrand || '').toString().trim();
+                    const tagBrand = (tag['Product Brand'] || tag.productBrand || '').toString().trim();
                     if (tagBrand.toLowerCase() !== currentFilters.brand.toLowerCase()) {
                         return false;
                     }
@@ -913,15 +914,16 @@ const TagManager = {
                 
                 // Check product type filter - only apply if not empty and not "All"
                 if (currentFilters.productType && currentFilters.productType.trim() !== '' && currentFilters.productType.toLowerCase() !== 'all') {
-                    const tagProductType = (tag.productType || '').toString().trim();
-                    if (tagProductType.toLowerCase() !== currentFilters.productType.toLowerCase()) {
+                    const tagProductType = (tag['Product Type*'] || tag.productType || '').toString().trim();
+                    const normalizedTagProductType = normalizeProductType(tagProductType);
+                    if (normalizedTagProductType.toLowerCase() !== currentFilters.productType.toLowerCase()) {
                         return false;
                     }
                 }
                 
                 // Check lineage filter - only apply if not empty and not "All"
                 if (currentFilters.lineage && currentFilters.lineage.trim() !== '' && currentFilters.lineage.toLowerCase() !== 'all') {
-                    const tagLineage = (tag.lineage || '').toString().trim();
+                    const tagLineage = (tag.Lineage || tag.lineage || '').toString().trim();
                     if (tagLineage.toLowerCase() !== currentFilters.lineage.toLowerCase()) {
                         return false;
                     }
@@ -930,7 +932,7 @@ const TagManager = {
                 // Check weight filter - only apply if not empty and not "All"
                 if (currentFilters.weight && currentFilters.weight.toString().trim() !== '' && currentFilters.weight.toString().toLowerCase() !== 'all') {
                     // Get the tag's weight in multiple possible formats
-                    const tagWeight = (tag.weight || tag['Weight*'] || '').toString().trim();
+                    const tagWeight = (tag['Weight*'] || tag.weight || '').toString().trim();
                     const tagWeightWithUnits = (tag.weightWithUnits || tag.WeightUnits || '').toString().trim();
                     const tagUnits = (tag.Units || '').toString().trim();
                     
@@ -959,6 +961,27 @@ const TagManager = {
                     }
                 }
                 
+                // Check DOH filter - only apply if not empty and not "All"
+                if (currentFilters.doh && currentFilters.doh.trim() !== '' && currentFilters.doh.toLowerCase() !== 'all') {
+                    const tagDoh = (tag.DOH || tag.doh || '').toString().trim().toUpperCase();
+                    const filterDoh = currentFilters.doh.toString().trim().toUpperCase();
+                    if (tagDoh !== filterDoh) {
+                        return false;
+                    }
+                }
+                
+                // Check High CBD filter - only apply if not empty and not "All"
+                if (currentFilters.highCbd && currentFilters.highCbd.trim() !== '' && currentFilters.highCbd.toLowerCase() !== 'all') {
+                    const tagProductType = (tag.productType || tag['Product Type*'] || '').toString().trim().toLowerCase();
+                    const isHighCbd = tagProductType.startsWith('high cbd');
+                    
+                    if (currentFilters.highCbd === 'High CBD Products' && !isHighCbd) {
+                        return false;
+                    } else if (currentFilters.highCbd === 'Non-High CBD Products' && isHighCbd) {
+                        return false;
+                    }
+                }
+                
                 return true;
             }) : tagsToFilter;
 
@@ -968,18 +991,34 @@ const TagManager = {
                 brand: new Set(),
                 productType: new Set(),
                 lineage: new Set(),
-                weight: new Set()
+                weight: new Set(),
+                doh: new Set(),
+                highCbd: new Set()
             };
 
             filteredTags.forEach(tag => {
-                if (tag.vendor) availableOptions.vendor.add((tag.vendor || '').toString().trim());
-                if (tag.productBrand) availableOptions.brand.add((tag.productBrand || '').toString().trim());
-                if (tag.productType) availableOptions.productType.add((tag.productType || '').toString().trim());
-                if (tag.lineage) availableOptions.lineage.add((tag.lineage || '').toString().trim());
-                if (tag.weightWithUnits || tag.WeightUnits || tag.weight) {
+                if (tag.Vendor || tag.vendor) availableOptions.vendor.add((tag.Vendor || tag.vendor || '').toString().trim());
+                if (tag['Product Brand'] || tag.productBrand) availableOptions.brand.add((tag['Product Brand'] || tag.productBrand || '').toString().trim());
+                if (tag['Product Type*'] || tag.productType) {
+                    const productType = (tag['Product Type*'] || tag.productType || '').toString().trim();
+                    const normalizedType = normalizeProductType(productType);
+                    if (normalizedType) availableOptions.productType.add(normalizedType);
+                }
+                if (tag.Lineage || tag.lineage) availableOptions.lineage.add((tag.Lineage || tag.lineage || '').toString().trim());
+                if (tag['Weight*'] || tag.weight || tag.weightWithUnits || tag.WeightUnits) {
                     // Always use the combined value for display and filtering
-                    const combined = (tag.weightWithUnits || tag.WeightUnits || tag.weight).toString().trim();
+                    const combined = (tag.weightWithUnits || tag.WeightUnits || tag['Weight*'] || tag.weight).toString().trim();
                     if (combined) availableOptions.weight.add(combined);
+                }
+                if (tag.DOH || tag.doh) availableOptions.doh.add((tag.DOH || tag.doh || '').toString().trim());
+                
+                // For High CBD, categorize the product type
+                const tagProductType = (tag['Product Type*'] || tag.productType || '').toString().trim().toLowerCase();
+                const isHighCbd = tagProductType.startsWith('high cbd');
+                if (isHighCbd) {
+                    availableOptions.highCbd.add('High CBD Products');
+                } else if (tagProductType) {
+                    availableOptions.highCbd.add('Non-High CBD Products');
                 }
             });
 
@@ -989,7 +1028,9 @@ const TagManager = {
                 brand: 'brandFilter',
                 productType: 'productTypeFilter',
                 lineage: 'lineageFilter',
-                weight: 'weightFilter'
+                weight: 'weightFilter',
+                doh: 'dohFilter',
+                highCbd: 'highCbdFilter'
             };
 
             Object.entries(filterFieldMap).forEach(([filterType, filterId]) => {
@@ -1721,7 +1762,7 @@ const TagManager = {
                 const isChecked = e.target.checked;
                 
                 // Get all visible tag checkboxes in available tags
-                const availableCheckboxes = document.querySelectorAll('#availableTags .tag-checkbox:not([style*="display: none"])');
+                const availableCheckboxes = document.querySelectorAll('#availableTags .tag-checkbox');
                 console.log('Found available tag checkboxes:', availableCheckboxes.length);
                 
                 availableCheckboxes.forEach(checkbox => {
@@ -2125,9 +2166,6 @@ const TagManager = {
         // Add event listeners
         this.updateSelectAllCheckboxes();
         this.initializeSelectAllCheckbox();
-        
-        // Update all checkbox states to match persistent selected tags
-        this.updateAllCheckboxStates();
     },
 
     createTagElement(tag, isForSelectedTags = false) {
@@ -2156,14 +2194,6 @@ const TagManager = {
         checkbox.value = displayName;
         checkbox.checked = this.state.persistentSelectedTags.includes(displayName);
         console.log('Checkbox created for:', displayName, 'value:', checkbox.value, 'checked:', checkbox.checked);
-        console.log('Current persistentSelectedTags:', this.state.persistentSelectedTags);
-        
-        // Force the checkbox to reflect the correct state
-        if (this.state.persistentSelectedTags.includes(displayName)) {
-            checkbox.setAttribute('checked', 'checked');
-        } else {
-            checkbox.removeAttribute('checked');
-        }
         
         // Add event listener with proper error handling and improved logic
         const handleCheckboxChange = async (e) => {
@@ -2632,12 +2662,11 @@ const TagManager = {
             
             this.updateSelectedTags(selectedTagObjects);
             
-            // If tag was checked in available list, hide it from available display
+            // FIXED: Don't hide selected tags from available display - keep all items visible
+            // This allows users to see all available options even after making selections
             if (isChecked && e.target.closest('#availableTags')) {
-                const tagElement = e.target.closest('.tag-item');
-                if (tagElement) {
-                    tagElement.style.display = 'none';
-                }
+                console.log('FIXED: Not hiding selected tag from available display - keeping all items visible');
+                // Tag remains visible in available list even after selection
             }
             
             // If tag was unchecked in selected list, show it in available display
@@ -2691,6 +2720,8 @@ const TagManager = {
 
     async updateLineageOnBackend(tagName, newLineage) {
         try {
+            console.log(`🔄 Updating lineage for ${tagName} to ${newLineage}`);
+            
             const payload = {
                 tag_name: tagName,
                 "Product Name*": tagName,
@@ -2704,6 +2735,7 @@ const TagManager = {
 
             if (!response.ok) {
                 const errorData = await response.json();
+                console.error(`❌ API Error: ${errorData.error || 'Failed to update lineage'}`);
                 throw new Error(errorData.error || 'Failed to update lineage');
             }
 
@@ -2711,26 +2743,23 @@ const TagManager = {
             const originalTag = this.state.originalTags.find(t => t['Product Name*'] === tagName);
             if (originalTag) {
                 originalTag.lineage = newLineage;
+                console.log(`📝 Updated tag in originalTags`);
             }
 
             // Update the tag in current tags list
             const currentTag = this.state.tags.find(t => t['Product Name*'] === tagName);
             if (currentTag) {
                 currentTag.lineage = newLineage;
+                console.log(`📝 Updated tag in current tags`);
             }
 
             // Optimized: Only update the specific tag elements instead of rebuilding everything
             this.updateTagLineageInUI(tagName, newLineage);
+            console.log(`🎨 Updated UI elements for ${tagName}`);
 
-            // Refresh available tags from backend to ensure UI shows updated lineage
-            try {
-                console.log('Refreshing available tags to show updated lineage...');
-                await this.fetchAndUpdateAvailableTags();
-                console.log('Available tags refreshed successfully');
-            } catch (refreshError) {
-                console.warn('Failed to refresh available tags:', refreshError);
-                // Don't fail the lineage update if refresh fails
-            }
+            // CRITICAL FIX: Don't refresh available tags - just update the UI directly
+            // This prevents the available tags list from being wiped when lineage changes
+            console.log('✅ Lineage updated successfully - skipping full refresh to preserve available tags');
 
         } catch (error) {
             console.error('Error updating lineage:', error);
@@ -3111,22 +3140,10 @@ const TagManager = {
                 
                 this.updateSelectedTags(selectedTagObjects);
                 
-                // CRITICAL FIX: Don't filter out JSON matched tags from available tags
-                // Check if we're in a JSON matched session
-                const isJsonMatchedSession = this.state.originalTags.some(tag => tag.Source === 'JSON Match');
-                
-                let updatedAvailableTags;
-                if (isJsonMatchedSession) {
-                    // For JSON matched sessions, don't filter out selected tags
-                    console.log('CRITICAL FIX: JSON matched session detected, not filtering out selected tags from available display');
-                    updatedAvailableTags = this.state.originalTags;
-                } else {
-                    // For regular sessions, filter out selected tags for better UX
-                    updatedAvailableTags = this.state.originalTags.filter(tag => 
-                        !this.state.persistentSelectedTags.includes(tag['Product Name*'])
-                    );
-                }
-                this._updateAvailableTags(this.state.originalTags, updatedAvailableTags);
+                // FIXED: Don't filter out selected tags from available tags - keep all items visible
+                // This allows users to see all available options even after making selections
+                console.log('FIXED: Not filtering out selected tags - keeping all items visible in available list');
+                this._updateAvailableTags(this.state.originalTags, this.state.originalTags);
             });
             
             // Add collapse/expand icon (will be placed to the right of the vendor name)
@@ -4460,14 +4477,10 @@ const TagManager = {
             // Hide selected tags from available tags display for better performance - batched DOM operations
             const availableTagsContainer = document.getElementById('availableTags');
             if (availableTagsContainer) {
-                const tagElementsToHide = checked.map(tagName => 
-                    availableTagsContainer.querySelector(`.tag-checkbox[value="${tagName}"]`)?.closest('.tag-item')
-                ).filter(Boolean);
-                
-                // Batch DOM updates
-                tagElementsToHide.forEach(tagItem => {
-                    tagItem.style.display = 'none';
-                });
+                // FIXED: Don't hide selected tags from available display - keep all items visible
+                // This allows users to see all available options even after making selections
+                console.log('FIXED: Not hiding selected tags from available display - keeping all items visible');
+                // All tags remain visible in available list even after selection
             }
             
             // Make API call to backend to persist the changes - non-blocking for better performance
@@ -5103,26 +5116,15 @@ const TagManager = {
         // Use requestAnimationFrame for smooth performance
         requestAnimationFrame(() => {
             // CRITICAL FIX: Don't filter out JSON matched tags from available tags
-            // Check if we're in a JSON matched session
-            const isJsonMatchedSession = this.state.isJsonMatchedSession || availableTags.some(tag => tag.Source === 'JSON Match');
+            // FIXED: Don't filter out selected tags - keep all items visible in available list
+            // This allows users to see all available options even after making selections
+            console.log('FIXED: Not filtering out selected tags - keeping all items visible in available list');
             
-            let filteredAvailableTags;
-            if (isJsonMatchedSession) {
-                // For JSON matched sessions, don't filter out selected tags
-                // This ensures all JSON matched tags remain available for generation
-                console.log('CRITICAL FIX: JSON matched session detected, not filtering out selected tags');
-                filteredAvailableTags = availableTags;
-            } else {
-                // For regular sessions, filter out selected tags for better UX
-                const selectedTagNames = new Set(this.state.persistentSelectedTags);
-                filteredAvailableTags = availableTags.filter(tag => !selectedTagNames.has(tag['Product Name*']));
-            }
+            // Update state with all available tags (no filtering)
+            this.state.tags = [...availableTags];
             
-            // Update state with filtered tags
-            this.state.tags = [...filteredAvailableTags];
-            
-            // Rebuild the available tags display with filtered tags
-            this._updateAvailableTags(this.state.originalTags, filteredAvailableTags);
+            // Rebuild the available tags display with all tags visible
+            this._updateAvailableTags(this.state.originalTags, availableTags);
             
             console.timeEnd('updateAvailableTagsOptimized');
             
@@ -5135,29 +5137,26 @@ const TagManager = {
 
     // Efficient helper to update available tags display without DOM rebuilding
     efficientlyUpdateAvailableTagsDisplay() {
-        const selectedTagNames = new Set(this.state.persistentSelectedTags);
+        // FIXED: Don't hide selected tags from available display - keep all items visible
+        // This allows users to see all available options even after making selections
+        console.log('FIXED: Not hiding selected tags from available display - keeping all items visible');
+        
         const availableTagElements = document.querySelectorAll('#availableTags .tag-item');
         
+        // Show all tags regardless of selection status
         availableTagElements.forEach(tagElement => {
-            const checkbox = tagElement.querySelector('.tag-checkbox');
-            if (checkbox) {
-                const tagName = checkbox.value;
-                if (selectedTagNames.has(tagName)) {
-                    tagElement.style.display = 'none';
-                } else {
-                    tagElement.style.display = 'block';
-                }
-            }
+            tagElement.style.display = 'block';
         });
         
-        // Update select all checkboxes state after hiding/showing tags
+        // Update select all checkboxes state
         this.updateSelectAllCheckboxes();
     },
 
     // Update select all checkboxes state
     updateSelectAllCheckboxes() {
-        const availableCheckboxes = document.querySelectorAll('#availableTags .tag-checkbox:not([style*="display: none"])');
-        const checkedCheckboxes = document.querySelectorAll('#availableTags .tag-checkbox:checked:not([style*="display: none"])');
+        // FIXED: Don't filter out hidden elements since we're not hiding any elements anymore
+        const availableCheckboxes = document.querySelectorAll('#availableTags .tag-checkbox');
+        const checkedCheckboxes = document.querySelectorAll('#availableTags .tag-checkbox:checked');
         
         // Update global select all for available tags
         const selectAllAvailable = document.getElementById('selectAllAvailable');
@@ -5179,8 +5178,8 @@ const TagManager = {
         // Update vendor and brand select all checkboxes for available tags
         const vendorSections = document.querySelectorAll('#availableTags .vendor-section');
         vendorSections.forEach(vendorSection => {
-            const vendorCheckboxes = vendorSection.querySelectorAll('.tag-checkbox:not([style*="display: none"])');
-            const vendorChecked = vendorSection.querySelectorAll('.tag-checkbox:checked:not([style*="display: none"])');
+            const vendorCheckboxes = vendorSection.querySelectorAll('.tag-checkbox');
+            const vendorChecked = vendorSection.querySelectorAll('.tag-checkbox:checked');
             const vendorSelectAll = vendorSection.querySelector('.select-all-checkbox');
             
             if (vendorSelectAll && vendorCheckboxes.length > 0) {
@@ -5191,8 +5190,8 @@ const TagManager = {
         
         const brandSections = document.querySelectorAll('#availableTags .brand-section');
         brandSections.forEach(brandSection => {
-            const brandCheckboxes = brandSection.querySelectorAll('.tag-checkbox:not([style*="display: none"])');
-            const brandChecked = brandSection.querySelectorAll('.tag-checkbox:checked:not([style*="display: none"])');
+            const brandCheckboxes = brandSection.querySelectorAll('.tag-checkbox');
+            const brandChecked = brandSection.querySelectorAll('.tag-checkbox:checked');
             const brandSelectAll = brandSection.querySelector('.select-all-checkbox');
             
             if (brandSelectAll && brandCheckboxes.length > 0) {
@@ -5200,29 +5199,6 @@ const TagManager = {
                 brandSelectAll.indeterminate = brandChecked.length > 0 && brandChecked.length < brandCheckboxes.length;
             }
         });
-    },
-
-    updateAllCheckboxStates() {
-        // Update all checkbox states to match persistentSelectedTags
-        console.log('Updating all checkbox states...');
-        console.log('Current persistentSelectedTags:', this.state.persistentSelectedTags);
-        
-        const allCheckboxes = document.querySelectorAll('.tag-checkbox');
-        allCheckboxes.forEach(checkbox => {
-            const isSelected = this.state.persistentSelectedTags.includes(checkbox.value);
-            checkbox.checked = isSelected;
-            
-            if (isSelected) {
-                checkbox.setAttribute('checked', 'checked');
-            } else {
-                checkbox.removeAttribute('checked');
-            }
-            
-            console.log(`Checkbox ${checkbox.value}: checked=${checkbox.checked}, isSelected=${isSelected}`);
-        });
-        
-        // Update select all checkboxes
-        this.updateSelectAllCheckboxes();
     },
 
     // Initialize Select All checkbox with proper event listener
@@ -5236,7 +5212,7 @@ const TagManager = {
                 const isChecked = e.target.checked;
                 
                 // Get all visible tag checkboxes in available tags
-                const availableCheckboxes = document.querySelectorAll('#availableTags .tag-checkbox:not([style*="display: none"])');
+                const availableCheckboxes = document.querySelectorAll('#availableTags .tag-checkbox');
                 console.log('Found available tag checkboxes:', availableCheckboxes.length);
                 
                 availableCheckboxes.forEach(checkbox => {
@@ -5644,10 +5620,13 @@ const TagManager = {
                     const filterType = self.getFilterTypeFromId(filterId);
                     const value = event.target.value;
                     
-                    // For immediate feedback, apply filters right away
-                    self.applyFilters();
+                    // Special handling for vendor filter - reset all other filters when vendor changes
+                    if (filterId === 'vendorFilter' && value && value.trim() !== '' && value.toLowerCase() !== 'all') {
+                        console.log('Vendor filter changed, resetting all other filters...');
+                        self.resetAllOtherFilters();
+                    }
                     
-                    // Then debounce the cascading filter updates
+                    // Only use debounced filter updates to prevent race conditions
                     debouncedFilterUpdate(filterType, value);
                 };
                 
@@ -5800,10 +5779,7 @@ const TagManager = {
             this.updateFilters(this.state.originalFilterOptions, false); // Don't preserve values when clearing
         }
         
-        // Show success message
-        if (window.Toast) {
-            window.Toast.show('All filters cleared successfully', 'success');
-        }
+        // Success message removed to prevent popup
         
         // Add visual feedback to the button
         const clearBtn = document.getElementById('clearFiltersBtn');
@@ -5815,6 +5791,36 @@ const TagManager = {
         }
         
         console.log('All filters cleared successfully');
+    },
+
+    // Function to reset all other filters when vendor changes (but keep vendor filter)
+    resetAllOtherFilters() {
+        console.log('Resetting all other filters while keeping vendor filter...');
+        
+        // Get the current vendor filter value to preserve it
+        const vendorFilter = document.getElementById('vendorFilter');
+        const currentVendorValue = vendorFilter ? vendorFilter.value : '';
+        
+        // List of all filters except vendor
+        const otherFilterIds = ['brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
+        
+        // Clear all other filter dropdowns
+        otherFilterIds.forEach(filterId => {
+            const filterElement = document.getElementById(filterId);
+            if (filterElement) {
+                filterElement.value = '';
+                console.log(`Cleared ${filterId}`);
+            }
+        });
+        
+        // Update filter options to reflect the new vendor selection
+        this.updateFilterOptions();
+        
+        // Apply the updated filters (vendor only)
+        this.applyFilters();
+        this.renderActiveFilters();
+        
+        console.log('All other filters reset successfully, vendor filter preserved:', currentVendorValue);
     },
 
     // Emergency function to clear stuck upload UI
@@ -6523,6 +6529,28 @@ document.addEventListener('DOMContentLoaded', function() {
     } else {
         console.error('Clear button not found');
     }
+
+    // Add Esc key event listener for clear filters shortcut
+    document.addEventListener('keydown', function(event) {
+        // Check if Esc key is pressed and no modal is open
+        if (event.key === 'Escape' || event.keyCode === 27) {
+            // Check if any modal is currently open
+            const openModals = document.querySelectorAll('.modal.show, .modal[style*="display: flex"], .modal[style*="display: block"]');
+            const isModalOpen = openModals.length > 0;
+            
+            // Only clear filters if no modal is open
+            if (!isModalOpen) {
+                console.log('Esc key pressed - clearing filters');
+                if (window.TagManager && TagManager.clearAllFilters) {
+                    TagManager.clearAllFilters();
+                } else if (window.TagManager && TagManager.clearSelected) {
+                    TagManager.clearSelected();
+                }
+                event.preventDefault(); // Prevent default Esc behavior
+            }
+        }
+    });
+    console.log('Esc key shortcut for clear filters attached');
 
     // Add event listener for the undo button with retry mechanism
     function attachUndoButtonListener() {
@@ -7236,14 +7264,40 @@ window.toggleJsonFilter = function() {
     .then(data => {
         if (data.success) {
             console.log('JSON filter toggled successfully:', data);
+            console.log('Available tags count:', data.available_tags ? data.available_tags.length : 0);
             
             // Update the available tags with the new filtered data
             if (typeof TagManager !== 'undefined' && data.available_tags) {
-                TagManager._updateAvailableTags(data.available_tags, null);
+                console.log('Updating TagManager with new tags...');
+                
+                // Update the TagManager state with the new tags
+                TagManager.state.originalTags = [...data.available_tags];
+                TagManager.state.tags = [...data.available_tags];
+                
+                console.log('TagManager state updated. Original tags:', TagManager.state.originalTags.length);
+                console.log('TagManager state updated. Current tags:', TagManager.state.tags.length);
+                
+                // Use requestAnimationFrame to ensure DOM is ready before updating
+                requestAnimationFrame(() => {
+                    // Call the update function to refresh the display
+                    TagManager._updateAvailableTags(data.available_tags, null);
+                    
+                    // Update tag counts
+                    TagManager.updateTagCount('available', data.available_tags.length);
+                    
+                    console.log('TagManager display updated successfully');
+                });
+            } else {
+                console.warn('TagManager not available or no available_tags in response');
             }
             
             // Update the toggle button text
             toggleText.textContent = data.mode_name || 'Toggle Filter';
+            
+            // Update the filter button visibility
+            if (typeof updateJsonFilterToggleVisibility === 'function') {
+                updateJsonFilterToggleVisibility();
+            }
             
             // Show notification
             const notificationDiv = document.createElement('div');
@@ -7273,13 +7327,18 @@ window.toggleJsonFilter = function() {
     })
     .catch(error => {
         console.error('JSON filter toggle error:', error);
+        console.error('Error details:', {
+            message: error.message,
+            stack: error.stack,
+            name: error.name
+        });
         
         // Show error notification
         const errorDiv = document.createElement('div');
         errorDiv.className = 'alert alert-danger alert-dismissible fade show';
         errorDiv.innerHTML = `
-            <strong>Toggle Error!</strong> 
-            ${error.message}
+            <strong>Filter Toggle Error!</strong> 
+            ${error.message || 'An unknown error occurred while toggling the filter.'}
             <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
         `;
         
@@ -7291,6 +7350,13 @@ window.toggleJsonFilter = function() {
         
         // Reset button text
         toggleText.textContent = originalText;
+        
+        // Auto-dismiss error notification after 8 seconds
+        setTimeout(() => {
+            if (errorDiv.parentNode) {
+                errorDiv.remove();
+            }
+        }, 8000);
     })
     .finally(() => {
         // Reset button state

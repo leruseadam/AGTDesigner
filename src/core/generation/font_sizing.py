@@ -299,7 +299,7 @@ def get_thresholded_font_size_thc_cbd(text, orientation='vertical', scale_factor
     # Multiple tiers based on content type and length
     length = len(clean_text)
     
-    # Tier 1: Basic THC/CBD format (e.g., "THC:|BR|CBD:")
+    # Tier 1: Basic THC/CBD format (e.g., "THC: | BR | C")
     if 'THC:' in clean_text and 'CBD:' in clean_text and length <= 10:
         size = base_size + 1
     
@@ -611,7 +611,7 @@ def get_thresholded_font_size_strain(text, orientation='vertical', scale_factor=
     return Pt(1) 
 
 def get_thresholded_font_size_thc_cbd_label(text, orientation='vertical', scale_factor=1.0):
-    """Font size for the 'THC:|BR|CBD:' label, separate from Ratio and THC_CBD content."""
+    """Font size for the 'THC: | BR | C' label, separate from Ratio and THC_CBD content."""
     if orientation == 'mini':
         base_size = 8
     if orientation == 'vertical':
