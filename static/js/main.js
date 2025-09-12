@@ -5294,7 +5294,7 @@ const TagManager = {
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
                 
-                const response = await fetch('/upload-simple', {
+                const response = await fetch('/upload', {
                     method: 'POST',
                     body: formData,
                     signal: controller.signal
@@ -5378,7 +5378,7 @@ const TagManager = {
             const formData = new FormData();
             formData.append('file', file);
             
-            const response = await fetch('/upload-simple', {
+            const response = await fetch('/upload', {
                 method: 'POST',
                 body: formData
             });
