@@ -50,6 +50,20 @@ const PRODUCT_TYPE_OVERRIDES = {
 };
 
 // Function to normalize product types (same as backend)
+
+    // Detect if running on PythonAnywhere
+    function isPythonAnywhere() {
+        return window.location.hostname.includes('pythonanywhere.com');
+    }
+    
+    // Choose upload endpoint based on environment
+    function getUploadEndpoint() {
+        if (isPythonAnywhere()) {
+            return '/upload-pythonanywhere';
+        } else {
+            return '/upload';
+        }
+    }
 function normalizeProductType(productType) {
   if (!productType) return productType;
   const normalized = PRODUCT_TYPE_OVERRIDES[productType.toLowerCase()];

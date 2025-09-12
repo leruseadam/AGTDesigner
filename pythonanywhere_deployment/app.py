@@ -5,7 +5,42 @@ import logging
 import threading
 import pandas as pd  # Add this import
 import time
-import requests
+import re
+# Startup Performance Optimization
+DISABLE_STARTUP_FILE_LOADING = True  # Disable startup file loading to prevent hangs
+
+# Add timeout protection for file operations
+import signal
+import threading
+
+def timeout_handler(signum, frame):
+    raise TimeoutError("File operation timed out")
+
+def safe_load_file_with_timeout(processor, file_path, timeout_seconds=30):
+    """Load file with timeout protection"""
+    try:
+        # Set up timeout
+        signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(timeout_seconds)
+        
+        # Load file
+        result = processor.load_file(file_path)
+        
+        # Cancel timeout
+        signal.alarm(0)
+        return result
+        
+    except TimeoutError:
+        logging.error(f"File loading timed out after {timeout_seconds} seconds")
+        return False
+    except Exception as e:
+        logging.error(f"Error in safe file loading: {e}")
+        return False
+    finally:
+        signal.alarm(0)  # Ensure timeout is cancelled
+LAZY_LOADING_ENABLED = True  # Enable lazy loading for better performance
+
+quests
 from pathlib import Path
 from werkzeug.utils import secure_filename
 
@@ -785,9 +820,53 @@ def optimize_session_data():
         return False
 
 # Initialize Excel processor and load default data on startup
-def initialize_excel_processor():
+
+def simple_# Use simple initialization on PythonAnywhere to prevent hangs
+if os.environ.get('PYTHONANYWHERE_DOMAIN'):
+    simple_initialize_excel_processor()
+else:
+    initialize_excel_processor():
+    """Simple initialization that won't get stuck - for PythonAnywhere"""
+    try:
+        logging.info("Simple initialization starting...")
+        
+        # Create Excel processor without loading any files
+        excel_processor = get_excel_processor()
+        excel_processor.logger.setLevel(logging.WARNING)
+        
+        # Initialize with empty DataFrame
+        if not hasattr(excel_processor, 'df') or excel_processor.df is None:
+            excel_processor.df = pd.DataFrame()
+            logging.info("Initialized with empty DataFrame")
+        
+        # Disable product database integration for faster startup
+        if hasattr(excel_processor, 'enable_product_db_integration'):
+            excel_processor.enable_product_db_integration(False)
+            logging.info("Product database integration disabled for startup performance")
+        
+        logging.info("Simple initialization completed successfully")
+        return True
+        
+    except Exception as e:
+        logging.error(f"Error in simple initialization: {e}")
+        logging.error(f"Traceback: {traceback.format_exc()}")
+        return False
+
+
+def # Use simple initialization on PythonAnywhere to prevent hangs
+if os.environ.get('PYTHONANYWHERE_DOMAIN'):
+    simple_initialize_excel_processor()
+else:
+    initialize_excel_processor():
     """Initialize Excel processor and load default data."""
     try:
+        # Skip initialization if startup file loading is disabled for performance
+        if DISABLE_STARTUP_FILE_LOADING:
+            logging.info("Startup file loading disabled for faster application startup")
+            excel_processor = get_excel_processor()
+            excel_processor.logger.setLevel(logging.WARNING)
+            return
+        
         excel_processor = get_excel_processor()
         excel_processor.logger.setLevel(logging.WARNING)
         
@@ -822,7 +901,11 @@ def initialize_excel_processor():
         logging.error(f"Traceback: {traceback.format_exc()}")
 
 # Initialize on startup
-initialize_excel_processor()
+# Use simple initialization on PythonAnywhere to prevent hangs
+if os.environ.get('PYTHONANYWHERE_DOMAIN'):
+    simple_initialize_excel_processor()
+else:
+    initialize_excel_processor()
 
 # Add missing function
 def save_template_settings(template_type, font_settings):
@@ -1498,6 +1581,70 @@ def upload_file():
         else:
             return jsonify({'error': 'Upload failed. Please try again.'}), 500
 
+
+@app.route('/upload-pythonanywhere', methods=['POST'])
+def upload_file_simple_pythonanywhere():
+    """Ultra-simple upload endpoint specifically for PythonAnywhere - no background processing"""
+    try:
+        logging.info("=== PYTHONANYWHERE UPLOAD START ===")
+        
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file uploaded'}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        if not file.filename.lower().endswith('.xlsx'):
+            return jsonify({'error': 'Only .xlsx files are allowed'}), 400
+        
+        # Sanitize filename
+        sanitized_filename = sanitize_filename(file.filename)
+        
+        # Save file temporarily
+        temp_path = os.path.join(tempfile.gettempdir(), f"upload_{sanitized_filename}")
+        file.save(temp_path)
+        
+        # Process immediately (no background processing)
+        try:
+            from src.core.data.excel_processor import ExcelProcessor
+            processor = ExcelProcessor()
+            
+            # Load file with full method (not fast_load_file)
+            success = processor.load_file(temp_path)
+            
+            if not success or processor.df is None or processor.df.empty:
+                return jsonify({'error': 'Failed to process file'}), 400
+            
+            # Store in global processor
+            global excel_processor
+            excel_processor = processor
+            
+            # Update session
+            session['file_path'] = temp_path
+            session['selected_tags'] = []
+            
+            # Clean up temp file
+            try:
+                os.remove(temp_path)
+            except:
+                pass
+            
+            return jsonify({
+                'message': 'File uploaded and processed successfully',
+                'filename': sanitized_filename,
+                'rows': len(processor.df),
+                'status': 'ready'
+            })
+            
+        except Exception as process_error:
+            logging.error(f"Processing error: {process_error}")
+            return jsonify({'error': f'Processing failed: {str(process_error)}'}), 500
+            
+    except Exception as e:
+        logging.error(f"Upload error: {e}")
+        return jsonify({'error': f'Upload failed: {str(e)}'}), 500
+
 @app.route('/upload-simple', methods=['POST'])
 def upload_file_simple():
     """Simple, reliable file upload for PythonAnywhere"""
@@ -1639,8 +1786,8 @@ def ultra_fast_background_processing(filename, temp_path):
         logging.info(f"[ULTRA-FAST-BG] Loading file with fast mode: {temp_path}")
         load_start = time.time()
         
-        # Use the fast_load_file method
-        success = processor.fast_load_file(temp_path)
+        # Use the reliable load_file method (fast_load_file can fail)
+        success = processor.load_file(temp_path)
         load_time = time.time() - load_start
         
         logging.info(f"[ULTRA-FAST-BG] Fast load completed in {load_time:.3f}s, success: {success}")
@@ -1658,13 +1805,13 @@ def ultra_fast_background_processing(filename, temp_path):
         
         logging.info(f"[ULTRA-FAST-BG] Essential processing completed in {time.time() - process_start:.3f}s")
         
-        # Step 5: Store products in database
+        # Step 5: Store products in database (with better error handling)
         logging.info(f"[ULTRA-FAST-BG] Storing {len(processor.df)} products in database")
         try:
             from app import get_product_database
             product_db = get_product_database()
             
-            if hasattr(product_db, 'store_excel_data'):
+            if product_db and hasattr(product_db, 'store_excel_data'):
                 # CRITICAL FIX: Load the original file data for database storage
                 # The fast_load_file method renames columns which breaks database storage
                 import pandas as pd
