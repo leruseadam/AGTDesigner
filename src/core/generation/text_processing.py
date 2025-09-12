@@ -1,10 +1,3 @@
-def make_nonbreaking_spaces(text):
-    """
-    Replace all spaces in the input text with non-breaking spaces to prevent line breaks.
-    """
-    if not text or not isinstance(text, str):
-        return text
-    return text.replace(' ', '\u00A0')
 import re
 from typing import Optional
 
@@ -167,7 +160,10 @@ def format_price(price):
     try:
         # Convert to float and format
         price_float = float(str(price).replace('$', '').replace(',', ''))
-        return f"${price_float:.2f}"
+        if price_float.is_integer():
+            return f"${int(price_float)}"
+        else:
+            return f"${price_float:.2f}"
     except (ValueError, TypeError):
         return str(price).strip()
 
@@ -295,7 +291,7 @@ def format_thc_cbd_bold_labels(text, template_type='vertical'):
     text = str(text).strip()
     
     # Handle the default placeholder format
-    if text == "THC:|BR|CBD:":
+    if text == "THC: | BR | C":
         if template_type == 'horizontal':
             return "THC:   CBD:"
         else:

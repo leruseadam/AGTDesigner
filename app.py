@@ -1,4 +1,5 @@
 import os
+
 import sys  # Add this import
 import logging
 import threading
@@ -178,7 +179,7 @@ cache = None
 
 # Rate limiting for API endpoints
 RATE_LIMIT_WINDOW = 60  # 1 minute window
-RATE_LIMIT_MAX_REQUESTS = 30  # Max requests per minute per IP
+RATE_LIMIT_MAX_REQUESTS = 100  # Max requests per minute per IP (increased for label generation)
 
 # Simple in-memory rate limiter
 rate_limit_data = defaultdict(list)
@@ -386,10 +387,10 @@ def get_excel_processor():
             if _excel_processor is None:
                 _excel_processor = ExcelProcessor()
                 
-                # Disable product database integration for Excel-first processing
+                # Enable product database integration by default
                 if hasattr(_excel_processor, 'enable_product_db_integration'):
-                    _excel_processor.enable_product_db_integration(False)
-                    logging.info("Product database integration disabled for Excel-first processing")
+                    _excel_processor.enable_product_db_integration(True)
+                    logging.info("Product database integration enabled by default")
                 
                 # CRITICAL FIX: Check if we have an uploaded file in session before loading default
                 try:
@@ -891,7 +892,7 @@ class LabelMakerApp:
             
     def run(self):
         host = os.environ.get('HOST', '127.0.0.1')
-        port = int(os.environ.get('FLASK_PORT', 5000))  # Changed to 5003 to avoid port conflict
+        port = int(os.environ.get('FLASK_PORT', 5001))  # Changed to 5003 to avoid port conflict
         development_mode = self.app.config.get('DEVELOPMENT_MODE', False)
         
         # Show optimization status
@@ -1440,48 +1441,19 @@ def upload_file():
             if app.config.get('DEVELOPMENT_MODE', False):
                 logging.debug("[UPLOAD] Cleared g.excel_processor context")
         
-        # ULTRA-FAST UPLOAD: Process small files synchronously for instant response
-        if file_size < 5 * 1024 * 1024:  # Files under 5MB process synchronously
-            logging.info(f"[UPLOAD] Small file ({file_size} bytes), processing synchronously for instant response")
-            try:
-                success = process_excel_synchronous(file.filename, temp_path)
-                if success:
-                    update_processing_status(file.filename, 'ready')
-                    logging.info(f"[UPLOAD] Synchronous processing completed successfully for {file.filename}")
-                else:
-                    update_processing_status(file.filename, 'error: Synchronous processing failed')
-                    return jsonify({'error': 'File processing failed'}), 500
-            except Exception as sync_error:
-                logging.error(f"[UPLOAD] Synchronous processing failed: {sync_error}")
-                update_processing_status(file.filename, f'error: Synchronous processing failed: {sync_error}')
-                return jsonify({'error': 'Failed to process file'}), 500
-        else:
-            # Large files use background processing
-            logging.info(f"[UPLOAD] Large file ({file_size} bytes), using background processing")
-            try:
-                if app.config.get('DEVELOPMENT_MODE', False):
-                    logging.debug(f"[UPLOAD] Starting ultra-optimized background processing for {file.filename}")
-                thread = threading.Thread(target=ultra_fast_background_processing, args=(file.filename, temp_path))
-                thread.daemon = True  # Make thread daemon so it doesn't block app shutdown
-                thread.start()
-                if app.config.get('DEVELOPMENT_MODE', False):
-                    logging.debug(f"[UPLOAD] Ultra-optimized background processing started successfully for {file.filename}")
-            except Exception as thread_error:
-                logging.error(f"[UPLOAD] Failed to start ultra-optimized background processing: {thread_error}")
-                # Fallback: Try synchronous processing
-                logging.info(f"[UPLOAD] Attempting synchronous fallback processing for {file.filename}")
-                try:
-                    success = process_excel_synchronous(file.filename, temp_path)
-                    if success:
-                        update_processing_status(file.filename, 'ready')
-                        logging.info(f"[UPLOAD] Synchronous fallback processing succeeded for {file.filename}")
-                    else:
-                        update_processing_status(file.filename, 'error: Synchronous processing failed')
-                        return jsonify({'error': 'File processing failed'}), 500
-                except Exception as sync_error:
-                    logging.error(f"[UPLOAD] Synchronous fallback also failed: {sync_error}")
-                    update_processing_status(file.filename, f'error: Both background and sync processing failed')
-                    return jsonify({'error': 'Failed to process file'}), 500
+        # Start ultra-optimized background processing (includes database storage)
+        try:
+            if app.config.get('DEVELOPMENT_MODE', False):
+                logging.debug(f"[UPLOAD] Starting ultra-optimized background processing for {file.filename}")
+            thread = threading.Thread(target=ultra_fast_background_processing, args=(file.filename, temp_path))
+            thread.daemon = True  # Make thread daemon so it doesn't block app shutdown
+            thread.start()
+            if app.config.get('DEVELOPMENT_MODE', False):
+                logging.debug(f"[UPLOAD] Ultra-optimized background processing started successfully for {file.filename}")
+        except Exception as thread_error:
+            logging.error(f"[UPLOAD] Failed to start ultra-optimized background processing: {thread_error}")
+            update_processing_status(file.filename, f'error: Failed to start processing')
+            return jsonify({'error': 'Failed to start file processing'}), 500
         
         upload_time = time.time() - start_time
         if app.config.get('DEVELOPMENT_MODE', False):
@@ -1508,46 +1480,12 @@ def upload_file():
         if app.config.get('DEVELOPMENT_MODE', False):
             logging.debug(f"[UPLOAD] Ultra-fast upload completed in {upload_response_time:.3f}s")
         
-        # Start a timeout monitor for the background processing
-        def timeout_monitor():
-            time.sleep(15)  # Wait 15 seconds (reduced from 30)
-            with processing_lock:
-                if processing_status.get(file.filename) == 'processing':
-                    logging.warning(f"[UPLOAD] Background processing timeout for {file.filename}, trying synchronous fallback")
-                    try:
-                        success = process_excel_synchronous(file.filename, temp_path)
-                        if success:
-                            update_processing_status(file.filename, 'ready')
-                            logging.info(f"[UPLOAD] Timeout fallback processing succeeded for {file.filename}")
-                        else:
-                            update_processing_status(file.filename, 'error: Timeout fallback processing failed')
-                    except Exception as timeout_error:
-                        logging.error(f"[UPLOAD] Timeout fallback failed: {timeout_error}")
-                        update_processing_status(file.filename, 'error: Timeout fallback failed')
-        
-        # Only start timeout monitor for background processing
-        if file_size >= 5 * 1024 * 1024:
-            timeout_thread = threading.Thread(target=timeout_monitor)
-            timeout_thread.daemon = True
-            timeout_thread.start()
-        
-        # Determine processing method for response
-        if file_size < 5 * 1024 * 1024:
-            processing_status = 'ready'
-            performance = 'synchronous'
-            message = 'File uploaded and processed successfully'
-        else:
-            processing_status = 'background'
-            performance = 'ultra_fast'
-            message = 'File uploaded, processing in background'
-        
         return jsonify({
-            'message': message, 
+            'message': 'File uploaded, processing in background', 
             'filename': sanitized_filename,
             'upload_time': f"{upload_response_time:.3f}s",
-            'processing_status': processing_status,
-            'performance': performance,
-            'file_size_mb': f"{file_size / (1024*1024):.2f}"
+            'processing_status': 'background',
+            'performance': 'ultra_fast'
         })
     except Exception as e:
         logging.error(f"=== UPLOAD REQUEST FAILED ===")
@@ -1650,6 +1588,11 @@ def process_excel_sync(filename, temp_path):
         from src.core.data.excel_processor import ExcelProcessor
         processor = ExcelProcessor()
         
+        # Enable database integration for new product storage
+        if hasattr(processor, 'enable_product_db_integration'):
+            processor.enable_product_db_integration(True)
+            logging.info("[SYNC] Product database integration enabled for new product storage")
+        
         # Load the file
         success = processor.load_file(temp_path)
         if not success or processor.df is None or processor.df.empty:
@@ -1672,126 +1615,37 @@ def process_excel_sync(filename, temp_path):
         logging.error(f"[SYNC] Traceback: {traceback.format_exc()}")
         return False
 
-def process_excel_synchronous(filename, temp_path):
-    """Ultra-fast synchronous processing for small files"""
-    try:
-        logging.info(f"[SYNC] Starting synchronous processing: {filename}")
-        start_time = time.time()
-        
-        # Step 1: Quick file validation
-        if not os.path.exists(temp_path):
-            logging.error(f"[SYNC] File not found: {temp_path}")
-            return False
-        
-        # Step 2: Create ExcelProcessor with fast loading
-        logging.info(f"[SYNC] Creating ExcelProcessor...")
-        from src.core.data.excel_processor import ExcelProcessor
-        processor = ExcelProcessor()
-        logging.info(f"[SYNC] ExcelProcessor created successfully")
-        
-        # Disable heavy processing for speed
-        if hasattr(processor, 'enable_product_db_integration'):
-            processor.enable_product_db_integration(False)
-            logging.info(f"[SYNC] Disabled product DB integration for Excel-first processing")
-        
-        # Step 3: Use fast loading mode
-        logging.info(f"[SYNC] Loading file with fast mode: {temp_path}")
-        load_start = time.time()
-        
-        # Use the fast_load_file method
-        logging.info(f"[SYNC] Calling processor.fast_load_file...")
-        success = processor.fast_load_file(temp_path)
-        load_time = time.time() - load_start
-        
-        logging.info(f"[SYNC] Fast load completed in {load_time:.3f}s, success: {success}")
-        logging.info(f"[SYNC] Processor df is None: {processor.df is None}")
-        if processor.df is not None:
-            logging.info(f"[SYNC] Processor df shape: {processor.df.shape}")
-            logging.info(f"[SYNC] Processor df empty: {processor.df.empty}")
-        
-        if not success or processor.df is None or processor.df.empty:
-            logging.error(f"[SYNC] Failed to load file data - success: {success}, df is None: {processor.df is None}")
-            if processor.df is not None:
-                logging.error(f"[SYNC] df empty: {processor.df.empty}")
-            return False
-        
-        # Step 4: Minimal additional processing
-        logging.info(f"[SYNC] Applying minimal additional processing to {len(processor.df)} rows")
-        process_start = time.time()
-        
-        # Only do essential additional processing
-        try:
-            apply_essential_processing(processor.df)
-            logging.info(f"[SYNC] Essential processing completed in {time.time() - process_start:.3f}s")
-        except Exception as processing_error:
-            logging.error(f"[SYNC] Essential processing failed: {processing_error}")
-            logging.error(f"[SYNC] Processing traceback: {traceback.format_exc()}")
-            # Continue anyway - the file might still be usable
-        
-        # Step 5: Update global processor (skip database storage for speed)
-        logging.info(f"[SYNC] Updating global processor...")
-        try:
-            update_global_processor_fast(processor, temp_path)
-            logging.info(f"[SYNC] Global processor updated successfully")
-        except Exception as update_error:
-            logging.error(f"[SYNC] Failed to update global processor: {update_error}")
-            logging.error(f"[SYNC] Update traceback: {traceback.format_exc()}")
-            # This is critical - if we can't update the global processor, the upload failed
-            return False
-        
-        total_time = time.time() - start_time
-        logging.info(f"[SYNC] Synchronous processing completed in {total_time:.3f}s")
-        return True
-        
-    except Exception as e:
-        logging.error(f"[SYNC] Processing error: {str(e)}")
-        logging.error(f"[SYNC] Traceback: {traceback.format_exc()}")
-        return False
-
 def ultra_fast_background_processing(filename, temp_path):
     """Ultra-fast background processing with minimal overhead for maximum speed"""
     try:
         logging.info(f"[ULTRA-FAST-BG] Starting ultra-fast processing: {filename}")
-        logging.info(f"[ULTRA-FAST-BG] Temp path: {temp_path}")
-        logging.info(f"[ULTRA-FAST-BG] File exists: {os.path.exists(temp_path) if temp_path else 'temp_path is None'}")
         start_time = time.time()
         
         # Step 1: Quick file validation
         if not os.path.exists(temp_path):
-            logging.error(f"[ULTRA-FAST-BG] File not found: {temp_path}")
             update_processing_status(filename, 'error: File not found')
             return
         
         # Step 2: Create ExcelProcessor with fast loading
-        logging.info(f"[ULTRA-FAST-BG] Creating ExcelProcessor...")
         from src.core.data.excel_processor import ExcelProcessor
         processor = ExcelProcessor()
-        logging.info(f"[ULTRA-FAST-BG] ExcelProcessor created successfully")
         
-        # Disable heavy processing for speed
+        # Enable database integration for new product storage
         if hasattr(processor, 'enable_product_db_integration'):
-            processor.enable_product_db_integration(False)
-            logging.info(f"[ULTRA-FAST-BG] Disabled product DB integration for Excel-first processing")
+            processor.enable_product_db_integration(True)
+            logging.info("[ULTRA-FAST-BG] Database integration enabled for new product storage")
         
         # Step 3: Use fast loading mode
         logging.info(f"[ULTRA-FAST-BG] Loading file with fast mode: {temp_path}")
         load_start = time.time()
         
         # Use the fast_load_file method
-        logging.info(f"[ULTRA-FAST-BG] Calling processor.fast_load_file...")
         success = processor.fast_load_file(temp_path)
         load_time = time.time() - load_start
         
         logging.info(f"[ULTRA-FAST-BG] Fast load completed in {load_time:.3f}s, success: {success}")
-        logging.info(f"[ULTRA-FAST-BG] Processor df is None: {processor.df is None}")
-        if processor.df is not None:
-            logging.info(f"[ULTRA-FAST-BG] Processor df shape: {processor.df.shape}")
-            logging.info(f"[ULTRA-FAST-BG] Processor df empty: {processor.df.empty}")
         
         if not success or processor.df is None or processor.df.empty:
-            logging.error(f"[ULTRA-FAST-BG] Failed to load file data - success: {success}, df is None: {processor.df is None}")
-            if processor.df is not None:
-                logging.error(f"[ULTRA-FAST-BG] df empty: {processor.df.empty}")
             update_processing_status(filename, 'error: Failed to load file data')
             return
         
@@ -1800,45 +1654,61 @@ def ultra_fast_background_processing(filename, temp_path):
         process_start = time.time()
         
         # Only do essential additional processing
-        try:
-            apply_essential_processing(processor.df)
-            logging.info(f"[ULTRA-FAST-BG] Essential processing completed in {time.time() - process_start:.3f}s")
-        except Exception as processing_error:
-            logging.error(f"[ULTRA-FAST-BG] Essential processing failed: {processing_error}")
-            logging.error(f"[ULTRA-FAST-BG] Processing traceback: {traceback.format_exc()}")
-            # Continue anyway - the file might still be usable
+        apply_essential_processing(processor.df)
         
-        # Step 5: Update global processor (skip database storage for speed)
-        logging.info(f"[ULTRA-FAST-BG] Updating global processor...")
-        try:
-            update_global_processor_fast(processor, temp_path)
-            logging.info(f"[ULTRA-FAST-BG] Global processor updated successfully")
-        except Exception as update_error:
-            logging.error(f"[ULTRA-FAST-BG] Failed to update global processor: {update_error}")
-            logging.error(f"[ULTRA-FAST-BG] Update traceback: {traceback.format_exc()}")
-            # This is critical - if we can't update the global processor, the upload failed
-            update_processing_status(filename, f'error: Failed to update global processor: {update_error}')
-            return
+        logging.info(f"[ULTRA-FAST-BG] Essential processing completed in {time.time() - process_start:.3f}s")
         
-        # Step 6: Mark as ready
-        logging.info(f"[ULTRA-FAST-BG] Marking as ready...")
+        # Step 5: Store products in database
+        logging.info(f"[ULTRA-FAST-BG] Storing {len(processor.df)} products in database")
+        try:
+            from app import get_product_database
+            product_db = get_product_database()
+            
+            if hasattr(product_db, 'store_excel_data'):
+                # CRITICAL FIX: Load the original file data for database storage
+                # The fast_load_file method renames columns which breaks database storage
+                import pandas as pd
+                original_df = pd.read_excel(temp_path)
+                logging.info(f"[ULTRA-FAST-BG] Using original DataFrame with {len(original_df)} rows for database storage")
+                
+                storage_result = product_db.store_excel_data(original_df, temp_path)
+                logging.info(f"[ULTRA-FAST-BG] Database storage completed: {storage_result}")
+                
+                # Log storage results
+                stored_count = storage_result.get('stored', 0)
+                updated_count = storage_result.get('updated', 0)
+                errors = storage_result.get('errors', 0)
+                
+                if stored_count > 0:
+                    logging.info(f"[ULTRA-FAST-BG] ✅ Stored {stored_count} new products in database")
+                if updated_count > 0:
+                    logging.info(f"[ULTRA-FAST-BG] ✅ Updated {updated_count} existing products in database")
+                if errors > 0:
+                    logging.warning(f"[ULTRA-FAST-BG] ⚠️ {errors} products had errors during storage")
+            else:
+                logging.error("[ULTRA-FAST-BG] ProductDatabase does not have store_excel_data method")
+        except Exception as db_error:
+            logging.error(f"[ULTRA-FAST-BG] Database storage failed: {db_error}")
+            import traceback
+            logging.error(f"[ULTRA-FAST-BG] Database storage traceback: {traceback.format_exc()}")
+        
+        # Step 6: Update global processor
+        update_global_processor_fast(processor, temp_path)
+        
+        # Step 7: Mark as ready
         update_processing_status(filename, 'ready')
-        logging.info(f"[ULTRA-FAST-BG] Status updated to 'ready'")
         
         total_time = time.time() - start_time
         logging.info(f"[ULTRA-FAST-BG] Ultra-fast processing completed in {total_time:.3f}s")
         
     except Exception as e:
         logging.error(f"[ULTRA-FAST-BG] Processing error: {str(e)}")
-        logging.error(f"[ULTRA-FAST-BG] Traceback: {traceback.format_exc()}")
         update_processing_status(filename, f'error: {str(e)}')
 
 def apply_essential_processing(df):
     """Apply only the most essential data processing for speed"""
     try:
         logging.info("[ULTRA-FAST-BG] Applying essential processing...")
-        logging.info(f"[ULTRA-FAST-BG] DataFrame shape: {df.shape}")
-        logging.info(f"[ULTRA-FAST-BG] DataFrame columns: {list(df.columns)}")
         
         # Only do the most critical processing that's needed for the UI
         import pandas as pd
@@ -1877,7 +1747,7 @@ def apply_essential_processing(df):
         if 'Ratio' in df.columns:
             df['Ratio'] = df['Ratio'].astype(str).str.strip()
             empty_ratio = (df['Ratio'] == '') | (df['Ratio'] == 'NAN')
-            df.loc[empty_ratio, 'Ratio'] = 'THC:|BR|CBD:'
+            df.loc[empty_ratio, 'Ratio'] = 'THC: | BR | C'
         
         # Ensure ProductName column exists for UI
         if 'Product Name*' in df.columns and 'ProductName' not in df.columns:
@@ -1975,13 +1845,13 @@ def process_excel_background(filename, temp_path):
         except Exception as set_error:
             logging.error(f"[BG] Error setting _last_loaded_file: {set_error}")
         
-        # Disable product database integration for faster loading
+        # Enable product database integration for new product storage
         try:
             if hasattr(new_processor, 'enable_product_db_integration'):
-                new_processor.enable_product_db_integration(False)
-                logging.info("[BG] Product database integration disabled for upload performance")
+                new_processor.enable_product_db_integration(True)
+                logging.info("[BG] Product database integration enabled for new product storage")
         except Exception as db_error:
-            logging.warning(f"[BG] Error disabling product database integration: {db_error}")
+            logging.warning(f"[BG] Error enabling product database integration: {db_error}")
         
         # Use full load_file method to ensure identical processing to local version
         logging.info(f"[BG] Loading file with full load_file method: {temp_path}")
@@ -2365,82 +2235,6 @@ def process_excel_background(filename, temp_path):
         logging.error(f"[BG] Error in background processing: {str(e)}")
         logging.error(f"[BG] Traceback: {traceback.format_exc()}")
         update_processing_status(filename, f'error: {str(e)}')
-
-@app.route('/api/debug-selected-tags', methods=['GET'])
-def debug_selected_tags():
-    """Debug endpoint to check selected tags and Excel data"""
-    try:
-        excel_processor = get_excel_processor()
-        
-        # Get selected tags from session
-        session_selected_tags = session.get('selected_tags', [])
-        
-        # Get Excel data info
-        excel_info = {
-            'has_data': excel_processor.df is not None and not excel_processor.df.empty,
-            'shape': excel_processor.df.shape if excel_processor.df is not None else None,
-            'columns': list(excel_processor.df.columns) if excel_processor.df is not None else [],
-            'sample_products': []
-        }
-        
-        if excel_processor.df is not None and not excel_processor.df.empty:
-            # Get sample product names
-            product_name_col = 'ProductName'
-            if product_name_col not in excel_processor.df.columns:
-                possible_cols = ['Product Name*', 'Product Name', 'Description']
-                product_name_col = next((col for col in possible_cols if col in excel_processor.df.columns), None)
-            
-            if product_name_col:
-                sample_products = excel_processor.df[product_name_col].head(10).tolist()
-                excel_info['sample_products'] = [str(p) for p in sample_products if pd.notna(p)]
-        
-        return jsonify({
-            'success': True,
-            'session_selected_tags': session_selected_tags,
-            'excel_processor_selected_tags': excel_processor.selected_tags,
-            'excel_info': excel_info,
-            'session_keys': list(session.keys())
-        })
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e),
-            'traceback': traceback.format_exc()
-        }), 500
-
-@app.route('/api/test-background-processing', methods=['GET'])
-def test_background_processing():
-    """Test endpoint to check if background processing is working"""
-    try:
-        # Create a simple test processor
-        from src.core.data.excel_processor import ExcelProcessor
-        processor = ExcelProcessor()
-        processor.enable_product_db_integration(False)
-        
-        # Test with a simple DataFrame
-        import pandas as pd
-        test_df = pd.DataFrame({
-            'Product Name*': ['Test Product'],
-            'Product Type*': ['Flower'],
-            'Lineage': ['HYBRID'],
-            'Weight*': ['3.5g']
-        })
-        processor.df = test_df
-        
-        # Test the essential processing
-        apply_essential_processing(processor.df)
-        
-        return jsonify({
-            'success': True,
-            'message': 'Background processing test successful',
-            'processor_df_shape': processor.df.shape if processor.df is not None else 'None'
-        })
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e),
-            'traceback': traceback.format_exc()
-        }), 500
 
 @app.route('/api/upload-status', methods=['GET'])
 def upload_status():
@@ -3440,6 +3234,46 @@ def _get_template_specific_font_size(content, marker_name, orientation, scale_fa
     complexity_type = 'mini' if orientation == 'mini' else 'standard'
     return get_font_size(content, field_type, orientation, scale_factor, complexity_type)
 
+def _extract_product_name_from_full_name(full_name):
+    """Extract just the product name from 'Product Name by Vendor - Weight' format."""
+    if not full_name or str(full_name).strip() == '':
+        return ''
+    
+    name = str(full_name).strip()
+    if not name:
+        return ''
+    
+    # Handle "Product Name by Vendor - Weight" format
+    if ' by ' in name and ' - ' in name:
+        # Extract just the product name part before " by "
+        return name.split(' by ')[0].strip()
+    elif ' by ' in name:
+        return name.split(' by ')[0].strip()
+    elif ' - ' in name:
+        # Only split on dashes followed by weight information (numbers, decimals, units)
+        import re
+        if re.search(r' - [\d.]', name):
+            # Remove weight part but preserve the dash in product names
+            return re.sub(r' - [\d.].*$', '', name).strip()
+        else:
+            # No weight information, return the name as-is
+            return name.strip()
+        return name.strip()
+
+def _create_desc_and_weight(full_name, weight_units):
+    """Create DescAndWeight field with 'Product Name - Weight' format."""
+    # Extract just the product name from the full name
+    product_name = _extract_product_name_from_full_name(full_name)
+    
+    # Get weight units, clean them up
+    weight = str(weight_units).strip() if weight_units else ''
+    if weight and weight.lower() not in ['nan', 'none', 'null', '']:
+        # Combine product name and weight
+        return f"{product_name} - {weight}"
+    else:
+        # Just return the product name if no weight
+        return product_name
+
 def _validate_tags_against_excel(excel_processor, selected_tags):
     """Helper function to validate tags against Excel data."""
     valid_selected_tags = []
@@ -3518,6 +3352,55 @@ def _validate_tags_against_excel(excel_processor, selected_tags):
             logging.warning(f"Selected tag not found in Excel data: '{tag}' (lowercase: '{tag_lower}', cleaned: '{clean_tag}')")
     
     return valid_selected_tags, invalid_selected_tags
+
+def _replace_json_tags_with_database_data(selected_tags, product_db):
+    """
+    Replace JSON matched tags with their corresponding database data.
+    
+    Args:
+        selected_tags: List of selected tag names
+        product_db: ProductDatabase instance
+        
+    Returns:
+        List of enhanced tag names with database data
+    """
+    try:
+        if not selected_tags or not product_db:
+            return selected_tags
+        
+        logging.info(f"🔄 Replacing JSON tags with database data for {len(selected_tags)} tags")
+        
+        enhanced_tags = []
+        replaced_count = 0
+        
+        for tag_name in selected_tags:
+            # Try to find this tag in the database
+            db_products = product_db.get_products_by_names([tag_name])
+            
+            if db_products and len(db_products) > 0:
+                # Found in database - use the database version
+                db_product = db_products[0]
+                db_name = db_product.get('Product Name*', '') or db_product.get('ProductName', '')
+                
+                if db_name and db_name != tag_name:
+                    logging.info(f"🔄 Replaced JSON tag '{tag_name}' with database tag '{db_name}'")
+                    enhanced_tags.append(db_name)
+                    replaced_count += 1
+                else:
+                    # Same name, but use database data
+                    enhanced_tags.append(tag_name)
+                    logging.info(f"✅ Using database data for '{tag_name}'")
+            else:
+                # Not found in database, keep original
+                enhanced_tags.append(tag_name)
+                logging.info(f"⚠️  Tag '{tag_name}' not found in database, keeping original")
+        
+        logging.info(f"✅ Enhanced {replaced_count}/{len(selected_tags)} tags with database data")
+        return enhanced_tags
+        
+    except Exception as e:
+        logging.error(f"Error replacing JSON tags with database data: {e}")
+        return selected_tags  # Return original tags if enhancement fails
 
 @app.route('/api/generate', methods=['POST'])
 @performance_monitor if PERFORMANCE_ENABLED else lambda x: x
@@ -3881,89 +3764,112 @@ def generate_labels():
             logging.warning("No selected_tags provided in request body or session")
             return jsonify({'error': 'No tags selected. Please select at least one tag before generating labels.'}), 400
         
-        # Get the fully processed records using the dedicated method
-        if has_excel_data:
-            logging.info(f"Getting records from Excel data for {len(valid_selected_tags)} selected tags")
-            logging.info(f"Selected tags: {valid_selected_tags[:5]}...")  # Show first 5 tags
-            records = excel_processor.get_selected_records(template_type)
-            logging.info(f"Records returned from get_selected_records: {len(records) if records else 0}")
-            if not records:
-                logging.error("No records returned from get_selected_records - this is the problem!")
-                logging.error(f"Excel processor df shape: {excel_processor.df.shape if excel_processor.df is not None else 'None'}")
-                logging.error(f"Excel processor selected_tags: {excel_processor.selected_tags}")
-        else:
-            # Use database directly when Excel data is not available
-            logging.info("Using database directly for record generation")
+        # PRIORITY: Use database data when available, fall back to Excel data
+        records = []
+        
+        # First, try to get records from database (preferred source)
+        if has_database:
+            logging.info("Using database for record generation (preferred source)")
             try:
                 from src.core.data.product_database import get_product_database
                 product_db = get_product_database()
                 if product_db:
-                    # Get products from database using the selected tags
-                    db_records = product_db.get_products_by_names(valid_selected_tags)
+                    # ENHANCED: Replace JSON matched tags with database data
+                    enhanced_tags = _replace_json_tags_with_database_data(valid_selected_tags, product_db)
+                    logging.info(f"Enhanced {len(valid_selected_tags)} tags with database data, result: {len(enhanced_tags)} tags")
+                    
+                    # Get products from database using the enhanced tags
+                    db_records = product_db.get_products_by_names(enhanced_tags)
                     if db_records:
                         # Convert database records to the format expected by TemplateProcessor
                         records = []
                         for db_record in db_records:
-                            # Map database fields to template fields
+                            print(f"DEBUG: Database record Description: '{db_record.get('Description', '')}'")
+                            # Map database fields to template fields (using correct field names from database)
                             record = {
                                 'Product Name*': db_record.get('Product Name*', ''),
+                                'ProductName': db_record.get('Product Name*', ''),  # Add ProductName for Excel processor compatibility
                                 'ProductType': db_record.get('Product Type*', ''),
                                 'Lineage': db_record.get('Lineage', ''),
                                 'ProductBrand': db_record.get('Product Brand', ''),
+                                'Product Brand': db_record.get('Product Brand', ''),  # Add Product Brand for template processor compatibility
                                 'Vendor': db_record.get('Vendor/Supplier*', ''),
-                                'Product Strain': db_record.get('Product Strain', ''),
+                                'Product Strain': db_record.get('Product Strain', ''),  # Correct field name
+                                'ProductStrain': db_record.get('Product Strain', ''),  # Add ProductStrain for template processor compatibility
                                 'Price': db_record.get('Price', ''),
                                 'DOH': db_record.get('DOH', ''),
                                 'Ratio': db_record.get('Ratio', ''),
                                 'Weight*': db_record.get('Weight*', ''),
-                                'Units': db_record.get('Weight Unit* (grams/gm or ounces/oz)', ''),
+                                'Units': db_record.get('Units', ''),  # Correct field name
+                                'WeightUnits': db_record.get('Units', ''),  # Add WeightUnits for template processor compatibility
                                 'Description': db_record.get('Description', ''),
+                                'DescAndWeight': self._create_desc_and_weight(db_record.get('Product Name*', ''), db_record.get('Units', '')),  # Create "Product Name - Weight" format
                                 'THC test result': db_record.get('THC test result', ''),
                                 'CBD test result': db_record.get('CBD test result', ''),
-                                'Test result unit (% or mg)': db_record.get('Test result unit (% or mg)', ''),
+                                'Test result unit (% or mg)': db_record.get('Test result unit (% or mg)', ''),  # Correct field name
                                 'Quantity*': db_record.get('Quantity*', ''),
-                                'Concentrate Type': db_record.get('Concentrate Type', ''),
+                                'Concentrate Type': db_record.get('Concentrate Type', ''),  # Correct field name
                                 'JointRatio': db_record.get('JointRatio', ''),
-                                'State': db_record.get('State', ''),
-                                'Is Sample? (yes/no)': db_record.get('Is Sample? (yes/no)', ''),
-                                'Is MJ product?(yes/no)': db_record.get('Is MJ product?(yes/no)', ''),
-                                'Discountable? (yes/no)': db_record.get('Discountable? (yes/no)', ''),
-                                'Room*': db_record.get('Room*', ''),
-                                'Batch Number': db_record.get('Batch Number', ''),
-                                'Lot Number': db_record.get('Lot Number', ''),
-                                'Barcode*': db_record.get('Barcode*', ''),
-                                'Cost*': db_record.get('Cost*', ''),
-                                'Medical Only (Yes/No)': db_record.get('Medical Only (Yes/No)', ''),
-                                'Med Price': db_record.get('Med Price', ''),
-                                'Expiration Date(YYYY-MM-DD)': db_record.get('Expiration Date(YYYY-MM-DD)', ''),
-                                'Is Archived? (yes/no)': db_record.get('Is Archived? (yes/no)', ''),
-                                'THC Per Serving': db_record.get('THC Per Serving', ''),
-                                'Allergens': db_record.get('Allergens', ''),
-                                'Solvent': db_record.get('Solvent', ''),
-                                'Accepted Date': db_record.get('Accepted Date', ''),
-                                'Internal Product Identifier': db_record.get('Internal Product Identifier', ''),
-                                'Product Tags (comma separated)': db_record.get('Product Tags (comma separated)', ''),
-                                'Image URL': db_record.get('Image URL', ''),
-                                'Ingredients': db_record.get('Ingredients', ''),
-                                'CombinedWeight': db_record.get('CombinedWeight', ''),
                                 'Ratio_or_THC_CBD': db_record.get('Ratio_or_THC_CBD', ''),
-                                'Description_Complexity': db_record.get('Description_Complexity', ''),
+                                'State': db_record.get('State', ''),
+                                'Is Sample? (yes/no)': db_record.get('Is Sample? (yes/no)', ''),  # Correct field name
+                                'Is MJ product?(yes/no)': db_record.get('Is MJ product?(yes/no)', ''),  # Correct field name
+                                'Discountable? (yes/no)': db_record.get('Discountable? (yes/no)', ''),  # Correct field name
+                                'Room*': db_record.get('Room*', ''),
+                                'Batch Number': db_record.get('Batch Number', ''),  # Correct field name
+                                'Lot Number': db_record.get('Lot Number', ''),  # Correct field name
+                                'Barcode*': db_record.get('Barcode*', ''),  # Correct field name
+                                'Cost*': db_record.get('Cost*', ''),  # Correct field name
+                                'Medical Only (Yes/No)': db_record.get('Medical Only (Yes/No)', ''),  # Correct field name
+                                'Med Price': db_record.get('Med Price', ''),  # Correct field name
+                                'Expiration Date(YYYY-MM-DD)': db_record.get('Expiration Date(YYYY-MM-DD)', ''),  # Correct field name
+                                'Is Archived? (yes/no)': db_record.get('Is Archived? (yes/no)', ''),  # Correct field name
+                                'THC Per Serving': db_record.get('THC Per Serving', ''),  # Correct field name
+                                'Allergens': db_record.get('Allergens', ''),  # Correct field name
+                                'Solvent': db_record.get('Solvent', ''),  # Correct field name
+                                'Accepted Date': db_record.get('Accepted Date', ''),  # Correct field name
+                                'Internal Product Identifier': db_record.get('Internal Product Identifier', ''),  # Correct field name
+                                'Product Tags (comma separated)': db_record.get('Product Tags (comma separated)', ''),  # Correct field name
+                                'Image URL': db_record.get('Image URL', ''),  # Correct field name
+                                'Ingredients': db_record.get('Ingredients', ''),  # Correct field name
+                                'CombinedWeight': db_record.get('CombinedWeight', ''),  # Correct field name
+                                'Ratio_or_THC_CBD': db_record.get('Ratio_or_THC_CBD', ''),  # Correct field name
+                                'Description_Complexity': db_record.get('Description_Complexity', ''),  # Correct field name
                                 'Total THC': db_record.get('Total THC', ''),
                                 'THCA': db_record.get('THCA', ''),
                                 'CBDA': db_record.get('CBDA', ''),
-                                'CBN': db_record.get('CBN', '')
+                                'CBN': db_record.get('CBN', ''),
+                                # Add missing fields for template processor compatibility
+                                'THC': db_record.get('THC', ''),
+                                'CBD': db_record.get('CBD', ''),
+                                'AI': db_record.get('Total THC', ''),  # Map Total THC to AI field for template processor
+                                'AJ': db_record.get('THCA', ''),  # Map THCA to AJ field for template processor
+                                'AK': db_record.get('CBDA', ''),  # Map CBDA to AK field for template processor
+                                'ProductVendor': db_record.get('Vendor/Supplier*', ''),
+                                'Quantity Received*': db_record.get('Quantity Received*', ''),
+                                'Barcode': db_record.get('Barcode*', ''),
+                                'Quantity': db_record.get('Quantity*', '')
                             }
+                            print(f"DEBUG: Final record DescAndWeight: '{record.get('DescAndWeight', '')}' (from: '{db_record.get('Product Name*', '')}' + '{db_record.get('Units', '')}')")
+                            print(f"DEBUG: THC/CBD values - THC: '{db_record.get('THC test result', '')}', CBD: '{db_record.get('CBD test result', '')}', Unit: '{db_record.get('Test result unit (% or mg)', '')}'")
+                            print(f"DEBUG: AI/AJ/AK values - AI (Total THC): '{db_record.get('Total THC', '')}', AJ (THCA): '{db_record.get('THCA', '')}', AK (CBDA): '{db_record.get('CBDA', '')}'")
                             records.append(record)
-                        logging.info(f"Generated {len(records)} records from database")
+                        logging.info(f"✅ Generated {len(records)} records from database")
                     else:
-                        logging.error("No database records found for selected tags")
+                        logging.warning("No database records found for selected tags, falling back to Excel data")
                         records = []
                 else:
-                    logging.error("Product database not available")
+                    logging.warning("Product database not available, falling back to Excel data")
                     records = []
             except Exception as e:
-                logging.error(f"Error getting records from database: {e}")
+                logging.warning(f"Error getting records from database, falling back to Excel data: {e}")
                 records = []
+        
+        # Fallback to Excel data if database didn't provide records
+        if not records and has_excel_data:
+            logging.info("Using Excel data for record generation (fallback)")
+            records = excel_processor.get_selected_records(template_type)
+            logging.debug(f"Records returned from get_selected_records: {len(records) if records else 0}")
 
         if not records:
             logging.error("No selected tags found in the data or failed to process records.")
@@ -5571,6 +5477,95 @@ def database_view():
         logging.error(f"Error viewing database: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/populate-missing-columns', methods=['POST'])
+def populate_missing_columns():
+    """Populate missing columns in existing database products."""
+    try:
+        product_db = get_product_database()
+        result = product_db.populate_missing_columns()
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logging.error(f"Error populating missing columns: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'Failed to populate missing columns: {str(e)}'
+        }), 500
+
+@app.route('/api/update-all-descriptions', methods=['POST'])
+def update_all_descriptions():
+    """Update ALL Description column values with formula-created values from Product Name*."""
+    try:
+        product_db = get_product_database()
+        result = product_db.update_all_descriptions()
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logging.error(f"Error updating descriptions: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'Failed to update descriptions: {str(e)}'
+        }), 500
+
+@app.route('/api/update-all-product-strains', methods=['POST'])
+def update_all_product_strains():
+    """Update all existing Product Strain column values using the _calculate_product_strain logic."""
+    try:
+        product_db = get_product_database()
+        result = product_db.update_all_product_strains()
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error updating product strains: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/update-all-ratio-or-thc-cbd', methods=['POST'])
+def update_all_ratio_or_thc_cbd():
+    """Update all existing Ratio_or_THC_CBD column values using the _calculate_ratio_or_thc_cbd logic."""
+    try:
+        product_db = get_product_database()
+        result = product_db.update_all_ratio_or_thc_cbd()
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error updating ratio_or_thc_cbd: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/update-all-joint-ratios', methods=['POST'])
+def update_all_joint_ratios():
+    """Update all JointRatio values to remove ' x 1' suffix."""
+    try:
+        product_db = get_product_database()
+        result = product_db.update_all_joint_ratios()
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error updating joint ratios: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/clear-rate-limit', methods=['POST'])
+def clear_rate_limit():
+    """Clear rate limit data to allow immediate requests."""
+    try:
+        global rate_limit_data
+        rate_limit_data.clear()
+        
+        # Also clear any processing requests
+        if hasattr(generate_labels, '_processing_requests'):
+            generate_labels._processing_requests.clear()
+        
+        logging.info("Rate limit data cleared")
+        return jsonify({
+            'success': True,
+            'message': 'Rate limit data cleared successfully'
+        })
+        
+    except Exception as e:
+        logging.error(f"Error clearing rate limit: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'Failed to clear rate limit: {str(e)}'
+        }), 500
+
 @app.route('/api/database-analytics', methods=['GET'])
 def database_analytics():
     """Get advanced analytics data for the database."""
@@ -5832,8 +5827,128 @@ def database_status():
         })
         
     except Exception as e:
-        logging.error(f"Database status check failed: {e}")
-        return jsonify({'error': f'Database status check failed: {e}'}), 500
+        logging.error(f"Error getting database status: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/database-products', methods=['GET'])
+def get_database_products():
+    """Get products from the database for the editor."""
+    try:
+        product_db = get_product_database()
+        
+        # Get query parameters
+        page = int(request.args.get('page', 0))
+        limit = int(request.args.get('limit', 100))
+        search = request.args.get('search', '')
+        
+        # Calculate offset
+        offset = page * limit
+        
+        # Build the query (using only existing columns)
+        query = '''
+            SELECT p.id, p."Product Name*", p."Product Type*", p."Product Brand", 
+                   p."Vendor/Supplier*", p."Lineage", p."Price* (Tier Name for Bulk)", 
+                   p."Weight*", p."Description", p."Quantity*", p."DOH", p."Concentrate Type",
+                   p."Ratio", p."JointRatio", p."State", p."Is Sample? (yes/no)",
+                   p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*",
+                   p."Batch Number", p."Lot Number", p."Barcode*", p."Cost*",
+                   p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)",
+                   p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens",
+                   p."Solvent", p."Accepted Date", p."Internal Product Identifier",
+                   p."Product Tags (comma separated)", p."Image URL", p."Ingredients",
+                   p."CombinedWeight", p."Ratio_or_THC_CBD", p."Total THC", p."THCA", p."CBDA", p."CBN",
+                   p."DOH Compliant (Yes/No)"
+            FROM products p
+        '''
+        
+        params = []
+        if search:
+            query += ' WHERE p."Product Name*" LIKE ? OR p."Description" LIKE ? OR p."Product Brand" LIKE ? OR p."Vendor/Supplier*" LIKE ?'
+            search_term = f'%{search}%'
+            params = [search_term, search_term, search_term, search_term]
+        
+        query += ' ORDER BY p.id LIMIT ? OFFSET ?'
+        params.extend([limit, offset])
+        
+        # Execute query
+        import sqlite3
+        with sqlite3.connect(product_db.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            results = cursor.fetchall()
+            
+            # Convert to list of dictionaries
+            products = []
+            for result in results:
+                product = {
+                    'id': result[0],
+                    'Product Name*': result[1],
+                    'Product Type*': result[2],
+                    'Product Brand': result[3],
+                    'Vendor/Supplier*': result[4],
+                    'Lineage': result[5],
+                    'Price': result[6],
+                    'Weight*': result[7],
+                    'Description': result[8],
+                    'Quantity*': result[9],
+                    'DOH': result[10],
+                    'Concentrate Type': result[11],
+                    'Ratio': result[12],
+                    'JointRatio': result[13],
+                    'State': result[14],
+                    'Is Sample? (yes/no)': result[15],
+                    'Is MJ product?(yes/no)': result[16],
+                    'Discountable? (yes/no)': result[17],
+                    'Room*': result[18],
+                    'Batch Number': result[19],
+                    'Lot Number': result[20],
+                    'Barcode*': result[21],
+                    'Cost*': result[22],
+                    'Medical Only (Yes/No)': result[23],
+                    'Med Price': result[24],
+                    'Expiration Date(YYYY-MM-DD)': result[25],
+                    'Is Archived? (yes/no)': result[26],
+                    'THC Per Serving': result[27],
+                    'Allergens': result[28],
+                    'Solvent': result[29],
+                    'Accepted Date': result[30],
+                    'Internal Product Identifier': result[31],
+                    'Product Tags (comma separated)': result[32],
+                    'Image URL': result[33],
+                    'Ingredients': result[34],
+                    'CombinedWeight': result[35],
+                    'Ratio_or_THC_CBD': result[36],
+                    'Total THC': result[37],
+                    'THCA': result[38],
+                    'CBDA': result[39],
+                    'CBN': result[40],
+                    'DOH Compliant (Yes/No)': result[41]
+                }
+                products.append(product)
+            
+            # Get total count
+            count_query = 'SELECT COUNT(*) FROM products p'
+            count_params = []
+            if search:
+                count_query += ' WHERE p."Product Name*" LIKE ? OR p."Description" LIKE ? OR p."Product Brand" LIKE ? OR p."Vendor/Supplier*" LIKE ?'
+                count_params = [search_term, search_term, search_term, search_term]
+            
+            cursor.execute(count_query, count_params)
+            total_count = cursor.fetchone()[0]
+        
+        return jsonify({
+            'success': True,
+            'products': products,
+            'total_count': total_count,
+            'page': page,
+            'limit': limit,
+            'has_more': (offset + limit) < total_count
+        })
+        
+    except Exception as e:
+        logging.error(f"Error getting database products: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/force-database-storage', methods=['POST'])
 def force_database_storage():
@@ -8347,7 +8462,7 @@ def match_json_tags():
                     best_match = tag
                     
             # Accept matches with reasonable confidence
-            if best_score >= 0.3:  # Lowered threshold for better matching
+            if best_score >= 0.2:  # Further lowered threshold for better matching (reduced from 0.3)
                 matched.append(best_match)
                 logging.info(f"Matched '{name}' to '{best_match.get('Product Name*', '')}' (score: {best_score:.2f})")
             else:
@@ -10492,18 +10607,18 @@ def upload_file_fast():
         session['file_path'] = str(file_path)
         session['selected_tags'] = []
         
-        # CRITICAL FIX: Do synchronous processing instead of background processing
-        # This bypasses any threading issues that might be causing failures
+        # CRITICAL FIX: Use background processing with database storage
+        # This ensures products are stored in the database
         try:
-            logging.info(f"Starting synchronous Excel processing for {file.filename}")
+            logging.info(f"Starting background processing with database storage for {file.filename}")
             
-            # Process the file immediately (synchronously)
-            process_excel_sync(file.filename, str(file_path))
-            logging.info(f"Synchronous processing completed for {file.filename}")
+            # Use the background processing function that includes database storage
+            ultra_fast_background_processing(file.filename, str(file_path))
+            logging.info(f"Background processing with database storage completed for {file.filename}")
             
-        except Exception as sync_error:
-            logging.error(f"Failed synchronous processing: {sync_error}")
-            logging.error(f"Sync error traceback: {traceback.format_exc()}")
+        except Exception as bg_error:
+            logging.error(f"Failed background processing: {bg_error}")
+            logging.error(f"Background error traceback: {traceback.format_exc()}")
             # Don't fail the upload - just log the error
             logging.warning("Continuing without processing - file uploaded but not processed")
         
@@ -10875,19 +10990,19 @@ def setup_database_endpoint():
         # Insert sample products
         sample_products = [
             ('Blue Dream Flower', 'blue dream flower', 1, 'flower', 'ABC Dispensary', 'Green Valley', 
-             'A balanced hybrid with sweet berry aroma', '3.5', 'grams', '45.00', 'HYBRID', 
+             'A balanced hybrid with sweet berry aroma', '3.5', 'g', '45.00', 'HYBRID', 
              '2025-01-01T00:00:00', '2025-01-01T00:00:00', '2025-01-01T00:00:00', '2025-01-01T00:00:00',
              'Blue Dream', '100', 'Yes', 'flower', '1:1', '1:1', '18.5', '0.5', '%', 'CA', 'No', 'Yes', 
              'Yes', 'Room A', 'BATCH-001', 'LOT-001', '123456789', '30.00', 'No', '40.00', '2025-12-31', 
              'No', '18.5', 'None', 'None', '2025-01-01', 'BD-001', 'premium,hybrid', '', 'Cannabis'),
             ('OG Kush Concentrate', 'og kush concentrate', 2, 'concentrate', 'XYZ Cannabis', 'Purple Labs',
-             'A potent indica concentrate', '1', 'gram', '60.00', 'INDICA', '2025-01-01T00:00:00', 
+             'A potent indica concentrate', '1', 'g', '60.00', 'INDICA', '2025-01-01T00:00:00', 
              '2025-01-01T00:00:00', '2025-01-01T00:00:00', '2025-01-01T00:00:00', 'OG Kush', '50', 'Yes', 
              'wax', '1:1', '1:1', '80.0', '2.0', '%', 'CA', 'No', 'Yes', 'Yes', 'Room B', 'BATCH-002', 
              'LOT-002', '123456790', '45.00', 'No', '55.00', '2025-12-31', 'No', '80.0', 'None', 'CO2', 
              '2025-01-01', 'OGK-001', 'indica,concentrate', '', 'Cannabis'),
             ('Sour Diesel Pre-Roll', 'sour diesel pre-roll', 3, 'pre-roll', 'Local Dispensary', 'Fire Brand',
-             'A energizing sativa pre-roll', '1', 'gram', '12.00', 'SATIVA', '2025-01-01T00:00:00', 
+             'A energizing sativa pre-roll', '1', 'g', '12.00', 'SATIVA', '2025-01-01T00:00:00', 
              '2025-01-01T00:00:00', '2025-01-01T00:00:00', '2025-01-01T00:00:00', 'Sour Diesel', '25', 'Yes', 
              'pre-roll', '1:1', '1:1', '22.0', '0.3', '%', 'CA', 'No', 'Yes', 'Yes', 'Room C', 'BATCH-003', 
              'LOT-003', '123456791', '8.00', 'No', '10.00', '2025-12-31', 'No', '22.0', 'None', 'None', 
@@ -10899,7 +11014,7 @@ def setup_database_endpoint():
              'LOT-004', '123456792', '15.00', 'No', '20.00', '2025-12-31', 'No', '10.0', 'None', 'None', 
              '2025-01-01', 'GEL-001', 'edible,hybrid', '', 'Cannabis'),
             ('Granddaddy Purple Vape', 'granddaddy purple vape', 5, 'vape cartridge', 'Vape Shop', 'Vape Pro',
-             'A relaxing indica vape cartridge', '0.5', 'gram', '35.00', 'INDICA', '2025-01-01T00:00:00', 
+             'A relaxing indica vape cartridge', '0.5', 'g', '35.00', 'INDICA', '2025-01-01T00:00:00', 
              '2025-01-01T00:00:00', '2025-01-01T00:00:00', '2025-01-01T00:00:00', 'Granddaddy Purple', '15', 'Yes', 
              'vape', '1:1', '1:1', '85.0', '5.0', '%', 'CA', 'No', 'Yes', 'Yes', 'Room E', 'BATCH-005', 
              'LOT-005', '123456793', '25.00', 'No', '30.00', '2025-12-31', 'No', '85.0', 'None', 'None', 
@@ -11811,6 +11926,30 @@ def enforce_fixed_cell_dimensions():
 def apply_lineage_colors():
     """Placeholder for apply_lineage_colors function."""
     pass
+
+@app.route('/api/backfill-missing-values', methods=['POST'])
+def backfill_missing_values():
+    """Backfill missing crucial values in existing database products."""
+    try:
+        product_db = get_product_database()
+        
+        # Run the backfill process
+        result = product_db.backfill_missing_crucial_values()
+        
+        if result is None:
+            return jsonify({'success': False, 'message': 'Failed to backfill missing values'})
+        
+        total_updated = sum(result.values())
+        
+        return jsonify({
+            'success': True,
+            'message': f'Successfully backfilled missing crucial values for {total_updated} total fields',
+            'details': result
+        })
+        
+    except Exception as e:
+        logger.error(f"Error backfilling missing values: {e}")
+        return jsonify({'success': False, 'message': f'Error backfilling missing values: {str(e)}'})
 
 if __name__ == '__main__':
     # Create and run the application

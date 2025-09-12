@@ -179,6 +179,23 @@ class ProductDatabase:
                         "Product Tags (comma separated)" TEXT,
                         "Image URL" TEXT,
                         "Ingredients" TEXT,
+                        -- Additional cannabinoid columns for comprehensive testing
+                        "Total THC" TEXT,
+                        "THCA" TEXT,
+                        "CBDA" TEXT,
+                        "CBN" TEXT,
+                        "THC" TEXT,
+                        "CBD" TEXT,
+                        "Total CBD" TEXT,
+                        "CBGA" TEXT,
+                        "CBG" TEXT,
+                        "Total CBG" TEXT,
+                        "CBC" TEXT,
+                        "CBDV" TEXT,
+                        "THCV" TEXT,
+                        "CBGV" TEXT,
+                        "CBNV" TEXT,
+                        "CBGVA" TEXT,
                         FOREIGN KEY (strain_id) REFERENCES strains (id),
                         UNIQUE("Product Name*", "Vendor/Supplier*", "Product Brand")
                     )
@@ -357,6 +374,23 @@ class ProductDatabase:
                     "THCA" TEXT,
                     "CBDA" TEXT,
                     "CBN" TEXT,
+                    -- Additional cannabinoid columns for comprehensive testing
+                    "THC" TEXT,
+                    "CBD" TEXT,
+                    "Total CBD" TEXT,
+                    "CBGA" TEXT,
+                    "CBG" TEXT,
+                    "Total CBG" TEXT,
+                    "CBC" TEXT,
+                    "CBDV" TEXT,
+                    "THCV" TEXT,
+                    "CBGV" TEXT,
+                    "CBNV" TEXT,
+                    "CBGVA" TEXT,
+                    -- Calculated THC/CBD values
+                    "AI" TEXT,
+                    "AJ" TEXT,
+                    "AK" TEXT,
                     -- Terpene columns for comprehensive product data
                     "A-Bisabolol (mg/g)" TEXT,
                     "A-Humulene (mg/g)" TEXT,
@@ -512,6 +546,14 @@ class ProductDatabase:
                     cx_column TEXT,
                     cy_column TEXT,
                     cz_column TEXT,
+                    -- Excel processor compatibility columns
+                    "ProductName" TEXT,  -- Alternative to "Product Name*"
+                    "Units" TEXT,  -- Alternative to "Weight Unit* (grams/gm or ounces/oz)"
+                    "Price" TEXT,  -- Alternative to "Price* (Tier Name for Bulk)"
+                    "DOH Compliant (Yes/No)" TEXT,  -- Alternative to "DOH"
+                    "Joint Ratio" TEXT,  -- Alternative to "JointRatio"
+                    "Quantity Received*" TEXT,  -- Alternative to "Quantity*"
+                    "qty" TEXT,  -- Alternative to "Quantity*"
                     FOREIGN KEY (strain_id) REFERENCES strains (id),
                     UNIQUE("Product Name*", "Vendor/Supplier*", "Product Brand")
                 )
@@ -752,7 +794,9 @@ class ProductDatabase:
             strain_name = product_data.get('Product Strain', '')
             strain_id = None
             if strain_name:
-                strain_id = self.add_or_update_strain(strain_name, product_data.get('Lineage'))
+                # Normalize lineage before storing
+                normalized_lineage = self._normalize_lineage(product_data.get('Lineage'))
+                strain_id = self.add_or_update_strain(strain_name, normalized_lineage)
             
             # Serialize write operations
             with self._write_lock:
@@ -781,13 +825,14 @@ class ProductDatabase:
                 if existing:
                     product_id, occurrences, existing_name = existing
                     
-                    # Log duplicate detection and skip
-                    logger.info(f"Found existing product: '{existing_name}' (ID: {product_id}, occurrences: {occurrences}) - SKIPPING DUPLICATE")
+                    # Log duplicate detection and update
+                    logger.info(f"Found existing product: '{existing_name}' (ID: {product_id}, occurrences: {occurrences}) - UPDATING WITH NEW DATA")
                     
-                    # Skip duplicate - don't add or update
+                    # Update existing product with new data
+                    self._update_existing_product(cursor, product_id, product_data)
                     conn.commit()
-                    logger.info(f"Skipped duplicate product '{existing_name}' - no changes made")
-                    return None
+                    logger.info(f"Updated existing product '{existing_name}' with new data")
+                    return product_id
                 
                 # Check for similar products (same name + vendor, different brand)
                 cursor.execute('''
@@ -802,18 +847,106 @@ class ProductDatabase:
                     for similar_id, similar_occurrences, similar_name, similar_brand in similar_products:
                         logger.debug(f"Similar product: '{similar_name}' (Brand: {similar_brand}, ID: {similar_id})")
                 else:
-                    # Add new product with essential columns only
+                    # Add new product with comprehensive column population
                     cursor.execute('''
                         INSERT INTO products (
                             "Product Name*", normalized_name, "Product Strain", "Product Type*", "Vendor/Supplier*", "Product Brand",
-                            "Description", "Weight*", "Units", "Price", "Lineage", first_seen_date, last_seen_date, created_at, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            "Description", "Weight*", "Weight Unit* (grams/gm or ounces/oz)", "Units", "Price", "Lineage", first_seen_date, last_seen_date, created_at, updated_at,
+                            "Quantity*", "DOH", "Concentrate Type", "Ratio", "JointRatio", "Test result unit (% or mg)", "State", "Is Sample? (yes/no)", 
+                            "Is MJ product?(yes/no)", "Discountable? (yes/no)", "Room*", "Batch Number", "Lot Number", "Barcode*", "Cost*",
+                            "Medical Only (Yes/No)", "Med Price", "Expiration Date(YYYY-MM-DD)", "Is Archived? (yes/no)", 
+                            "THC Per Serving", "Allergens", "Solvent", "Accepted Date", "Internal Product Identifier", 
+                            "Product Tags (comma separated)", "Image URL", "Ingredients", "CombinedWeight",                             "ratio_or_thc_cbd", 
+                            "description_complexity", "Total THC", "THCA", "CBDA", "CBN",
+                            "THC", "CBD", "Total CBD", "CBGA", "CBG", "Total CBG", "CBC", "CBDV", "THCV", "CBGV", "CBNV", "CBGVA",
+                            "total_occurrences", "strain_id",
+                            "ProductName", "DOH Compliant (Yes/No)", "Joint Ratio", "Quantity Received*", "qty",
+                            "THC Test Result", "CBD Test Result", "Vendor", "Price* (Tier Name for Bulk)",
+                            "AI", "AJ", "AK"
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
-                        product_name, normalized_name, product_data.get('Product Strain'), product_data.get('Product Type*'),
+                        product_name, normalized_name, self._calculate_product_strain(
+                            product_data.get('Product Type*', ''),
+                            product_data.get('Product Name*', ''),
+                            product_data.get('Description', ''),
+                            product_data.get('Ratio', '')
+                        ), product_data.get('Product Type*'),
                         product_data.get('Vendor/Supplier*'), product_data.get('Product Brand'),
                         product_data.get('Description'), product_data.get('Weight*'),
+                        product_data.get('Weight Unit* (grams/gm or ounces/oz)', ''),
                         product_data.get('Units'), product_data.get('Price'),
-                        product_data.get('Lineage'), current_date, current_date, current_date, current_date
+                        self._normalize_lineage(product_data.get('Lineage')), current_date, current_date, current_date, current_date,
+                        # Core product data
+                        product_data.get('Quantity*', ''),
+                        product_data.get('DOH', ''),
+                        product_data.get('Concentrate Type', ''),
+                        product_data.get('Ratio', ''),
+                        product_data.get('JointRatio', ''),
+                        product_data.get('Test result unit (% or mg)', ''),
+                        product_data.get('State', ''),
+                        product_data.get('Is Sample? (yes/no)', ''),
+                        product_data.get('Is MJ product?(yes/no)', ''),
+                        product_data.get('Discountable? (yes/no)', ''),
+                        product_data.get('Room*', ''),
+                        product_data.get('Batch Number', ''),
+                        product_data.get('Lot Number', ''),
+                        product_data.get('Barcode*', ''),
+                        product_data.get('Cost*', ''),
+                        product_data.get('Medical Only (Yes/No)', ''),
+                        product_data.get('Med Price', ''),
+                        product_data.get('Expiration Date(YYYY-MM-DD)', ''),
+                        product_data.get('Is Archived? (yes/no)', ''),
+                        product_data.get('THC Per Serving', ''),
+                        product_data.get('Allergens', ''),
+                        product_data.get('Solvent', ''),
+                        product_data.get('Accepted Date', ''),
+                        product_data.get('Internal Product Identifier', ''),
+                        product_data.get('Product Tags (comma separated)', ''),
+                        product_data.get('Image URL', ''),
+                        product_data.get('Ingredients', ''),
+                        product_data.get('CombinedWeight', ''),
+                        self._calculate_ratio_or_thc_cbd(
+                            product_data.get('Product Type*', ''),
+                            product_data.get('Ratio', ''),
+                            product_data.get('JointRatio', ''),
+                            product_name
+                        ),
+                        product_data.get('Description_Complexity', ''),
+                        product_data.get('Total THC', ''),
+                        product_data.get('THCA', ''),
+                        product_data.get('CBDA', ''),
+                        product_data.get('CBN', ''),
+                        # Additional cannabinoid values
+                        product_data.get('THC', ''),
+                        product_data.get('CBD', ''),
+                        product_data.get('Total CBD', ''),
+                        product_data.get('CBGA', ''),
+                        product_data.get('CBG', ''),
+                        product_data.get('Total CBG', ''),
+                        product_data.get('CBC', ''),
+                        product_data.get('CBDV', ''),
+                        product_data.get('THCV', ''),
+                        product_data.get('CBGV', ''),
+                        product_data.get('CBNV', ''),
+                        product_data.get('CBGVA', ''),
+                        # Additional required columns
+                        product_data.get('total_occurrences', 1),  # Default to 1 for new products
+                        strain_id,  # Foreign key to strains table
+                        # Excel compatibility columns - populate from main columns if not present
+                        product_data.get('ProductName', product_name),  # Alternative to "Product Name*"
+                        product_data.get('DOH Compliant (Yes/No)', product_data.get('DOH', '')),  # Alternative to "DOH"
+                        product_data.get('Joint Ratio', product_data.get('JointRatio', '')),  # Alternative to "JointRatio"
+                        product_data.get('Quantity Received*', product_data.get('Quantity*', '')),  # Alternative to "Quantity*"
+                        product_data.get('qty', product_data.get('Quantity*', '')),  # Alternative to "Quantity*"
+                        # Additional missing values
+                        product_data.get('THC test result', ''),
+                        product_data.get('CBD test result', ''),
+                        product_data.get('Vendor', product_data.get('Vendor/Supplier*', '')),
+                        product_data.get('Price* (Tier Name for Bulk)', product_data.get('Price', '')),
+                        # AI, AJ, AK values
+                        product_data.get('AI', ''),
+                        product_data.get('AJ', ''),
+                        product_data.get('AK', '')
                     ))
                     
                     product_id = cursor.lastrowid
@@ -874,22 +1007,29 @@ class ProductDatabase:
                     # Map to database columns correctly
                     product_data = {
                         'Product Name*': row_dict.get('Product Name*', ''),
-                        'Product Type*': row_dict.get('Product Type*', ''),
+                        'Product Type*': self._ensure_crucial_value(row_dict.get('Product Type*', ''), 'Unknown', 'Product Type'),
                         'Lineage': row_dict.get('Lineage', ''),
-                        'Vendor/Supplier*': row_dict.get('Vendor/Supplier*', row_dict.get('Vendor', '')),  # Map to correct column
-                        'Product Brand': row_dict.get('Product Brand', ''),
-                        'Description': row_dict.get('Description', ''),
-                        'Weight*': row_dict.get('Weight*', ''),
-                        'Units': row_dict.get('Units', ''),
-                        'Price': row_dict.get('Price* (Tier Name for Bulk)', row_dict.get('Price', '')),
+                        'Vendor/Supplier*': self._ensure_crucial_value(row_dict.get('Vendor/Supplier*', row_dict.get('Vendor', '')), 'Unknown Vendor', 'Vendor'),
+                        'Vendor': self._ensure_crucial_value(row_dict.get('Vendor', row_dict.get('Vendor/Supplier*', '')), 'Unknown Vendor', 'Vendor'),
+                        'Product Brand': self._ensure_crucial_value(row_dict.get('Product Brand', ''), 'Unknown Brand', 'Product Brand'),
+                        'Description': self._process_description(
+                            row_dict.get('Product Name*', ''), 
+                            row_dict.get('Description', '')
+                        ),
+                        'Weight*': self._ensure_crucial_value(row_dict.get('Weight*', ''), '1g', 'Weight'),
+                        'Units': self._ensure_crucial_value(row_dict.get('Units', ''), 'each', 'Units'),
+                        'Price': self._ensure_crucial_value(row_dict.get('Price*', row_dict.get('Price', '')), '0.00', 'Price'),
                         'Product Strain': row_dict.get('Product Strain', ''),
                         'Quantity*': row_dict.get('Quantity*', ''),
                         'DOH': row_dict.get('DOH Compliant (Yes/No)', row_dict.get('DOH', '')),
                         'Concentrate Type': row_dict.get('Concentrate Type', ''),
-                        'Ratio': row_dict.get('Ratio', ''),
+                        'Ratio': self._extract_ratio_from_product_name(
+                            row_dict.get('Product Name*', ''), 
+                            row_dict.get('Product Type*', '')
+                        ) if not (row_dict.get('Ratio', '') or '').strip() else row_dict.get('Ratio', ''),
                         'JointRatio': row_dict.get('JointRatio', ''),
-                        'THC test result': row_dict.get('THC test result', ''),
-                        'CBD test result': row_dict.get('CBD test result', ''),
+                        'THC test result': self._ensure_crucial_value(row_dict.get('THC Content', ''), '0.0', 'THC Content'),
+                        'CBD test result': self._ensure_crucial_value(row_dict.get('CBD test result', ''), '0.0', 'CBD test result'),
                         'Test result unit (% or mg)': row_dict.get('Test result unit (% or mg)', ''),
                         'State': row_dict.get('State', ''),
                         'Is Sample? (yes/no)': row_dict.get('Is Sample? (yes/no)', ''),
@@ -914,8 +1054,8 @@ class ProductDatabase:
                         'Ingredients': row_dict.get('Ingredients', ''),
                         # Additional columns for comprehensive Excel data matching
                         'Total THC': row_dict.get('Total THC', ''),
-                        'THCA': row_dict.get('THCA', ''),
-                        'CBDA': row_dict.get('CBDA', ''),
+                        'THCA': row_dict.get('THC Content', ''),
+                        'CBDA': row_dict.get('Total CBD', ''),
                         'CBN': row_dict.get('CBN', ''),
                         'Ratio_or_THC_CBD': row_dict.get('Ratio_or_THC_CBD', ''),
                         'Vendor/Supplier*': row_dict.get('Vendor/Supplier*', ''),
@@ -928,9 +1068,11 @@ class ProductDatabase:
                         'ProductBrand': row_dict.get('ProductBrand', ''),
                         'ProductBrandCenter': row_dict.get('ProductBrandCenter', ''),
                         'THC_CBD': row_dict.get('THC_CBD', ''),
-                        'AI': row_dict.get('AI', ''),
-                        'AJ': row_dict.get('AJ', ''),
-                        'AK': row_dict.get('AK', ''),
+                        'THC': row_dict.get('THC', ''),  # Direct THC value from Excel
+                        'CBD': row_dict.get('CBD', ''),  # Direct CBD value from Excel
+                        'AI': self._calculate_ai_value(row_dict),  # Calculate THC value
+                        'AJ': row_dict.get('THC Content', ''),  # THC Content
+                        'AK': self._calculate_ak_value(row_dict),  # Calculate CBD value
                         # Terpene columns
                         'A-Bisabolol (mg/g)': row_dict.get('A-Bisabolol (mg/g)', ''),
                         'A-Humulene (mg/g)': row_dict.get('A-Humulene (mg/g)', ''),
@@ -1354,7 +1496,7 @@ class ProductDatabase:
             if vendor and brand:
                 cursor.execute('''
                     SELECT p.id, p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
-                           s.strain_name, s.canonical_lineage, p.total_occurrences, p.first_seen_date, p.last_seen_date,
+                           s.strain_name, s.canonical_lineage, 0 as total_occurrences, '' as first_seen_date, '' as last_seen_date,
                            p."Description", p."Weight*", p."Units", p."Price"
                     FROM products p
                     LEFT JOIN strains s ON p.strain_id = s.id
@@ -1363,7 +1505,7 @@ class ProductDatabase:
             else:
                 cursor.execute('''
                     SELECT p.id, p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
-                           s.strain_name, s.canonical_lineage, p.total_occurrences, p.first_seen_date, p.last_seen_date,
+                           s.strain_name, s.canonical_lineage, 0 as total_occurrences, '' as first_seen_date, '' as last_seen_date,
                            p."Description", p."Weight*", p."Units", p."Price"
                     FROM products p
                     LEFT JOIN strains s ON p.strain_id = s.id
@@ -1581,67 +1723,103 @@ class ProductDatabase:
             cursor.execute("PRAGMA table_info(products)")
             product_columns = {row[1] for row in cursor.fetchall()}
             
-            # Define column groups in order of preference (using actual column names)
+            # Define column groups in order of preference (using actual column names without quotes)
             column_groups = [
                 # Core columns that should always exist
-                ['"Product Name*"', '"Product Type*"', '"Vendor/Supplier*"', '"Product Brand"', '"Lineage"'],
+                ['Product Name*', 'Product Type*', 'Vendor/Supplier*', 'Product Brand', 'Lineage'],
                 # Basic product info
-                ['"Description"', '"Weight*"', '"Weight Unit* (grams/gm or ounces/oz)"', '"Price* (Tier Name for Bulk)"', '"Product Strain"', '"Quantity*"'],
+                ['Description', 'Weight*', 'Weight Unit* (grams/gm or ounces/oz)', 'Price* (Tier Name for Bulk)', 'Product Strain', 'Quantity*'],
                 # Test results
-                ['"Test result unit (% or mg)"'],
+                ['Test result unit (% or mg)'],
                 # Additional product details
-                ['"DOH"', '"Concentrate Type"', '"Ratio"', '"JointRatio"', '"State"'],
+                ['DOH', 'Concentrate Type', 'Ratio', 'JointRatio', 'State'],
                 # Product flags
-                ['"Is Sample? (yes/no)"', '"Is MJ product?(yes/no)"', '"Discountable? (yes/no)"', '"Room*"'],
+                ['Is Sample? (yes/no)', 'Is MJ product?(yes/no)', 'Discountable? (yes/no)', 'Room*'],
                 # Batch and inventory info
-                ['"Batch Number"', '"Lot Number"', '"Barcode*"', '"Cost*"'],
+                ['Batch Number', 'Lot Number', 'Barcode*', 'Cost*'],
                 # Medical and pricing
-                ['"Medical Only (Yes/No)"', '"Med Price"', '"Expiration Date(YYYY-MM-DD)"'],
+                ['Medical Only (Yes/No)', 'Med Price', 'Expiration Date(YYYY-MM-DD)'],
                 # Additional fields
-                ['"Is Archived? (yes/no)"', '"THC Per Serving"', '"Allergens"', '"Solvent"'],
+                ['Is Archived? (yes/no)', 'THC Per Serving', 'Allergens', 'Solvent'],
                 # Metadata
-                ['"Accepted Date"', '"Internal Product Identifier"', '"Product Tags (comma separated)"', '"Image URL"', '"Ingredients"'],
+                ['Accepted Date', 'Internal Product Identifier', 'Product Tags (comma separated)', 'Image URL', 'Ingredients'],
                 # THC/CBD data
-                ['"Total THC"', '"THCA"', '"CBDA"', '"CBN"']
+                ['Total THC', 'THCA', 'CBDA', 'CBN'],
+                # Excel compatibility columns
+                ['ProductName', 'Units', 'Price', 'Joint Ratio', 'Quantity Received*', 'qty']
             ]
             
-            # Build SELECT clause with only existing columns
-            select_columns = []
-            for group in column_groups:
-                for col in group:
-                    if col in product_columns:
-                        select_columns.append(f'p.{col}')
+            # Use the same approach as get_all_products for consistency
+            cursor.execute('''
+                SELECT p.id, p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
+                       p."Description", p."Weight*", p."Weight Unit* (grams/gm or ounces/oz)", p."Price* (Tier Name for Bulk)", 
+                       p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio", p."State", p."Is Sample? (yes/no)",
+                       p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*", p."Cost*",
+                       p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens",
+                       p."Solvent", p."Accepted Date", p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients",
+                       p."CombinedWeight", p."Total THC", p."THCA", p."CBDA", p."CBN",
+                       p."DOH Compliant (Yes/No)"
+                FROM products p
+                ORDER BY p.id
+            ''')
             
-            # Always include these core columns (only if they exist)
-            core_columns = []
-            if 'strain_id' in product_columns:
-                core_columns.extend(['s.strain_name', 'p.total_occurrences', 'p.first_seen_date', 'p.last_seen_date'])
-            select_columns.extend(core_columns)
+            results = cursor.fetchall()
+            products_data = []
             
-            if not select_columns:
-                # Ultimate fallback - just get basic info
-                select_columns = ['p.id', 'p."Product Name*"']
+            # Debug logging
+            logger.info(f"Number of results: {len(results)}")
+            if results:
+                logger.info(f"Number of columns in first result: {len(results[0])}")
             
-            # Build and execute the query
-            select_clause = ', '.join(select_columns)
+            for result in results:
+                product = {
+                    'id': result[0],
+                    'Product Name*': result[1],
+                    'Product Type*': result[2],
+                    'Vendor/Supplier*': result[3],
+                    'Product Brand': result[4],
+                    'Lineage': result[5],
+                    'Description': result[6],
+                    'Weight*': result[7],
+                    'Weight Unit* (grams/gm or ounces/oz)': result[8],
+                    'Price* (Tier Name for Bulk)': result[9],
+                    'Quantity*': result[10],
+                    'DOH': result[11],
+                    'Concentrate Type': result[12],
+                    'Ratio': result[13],
+                    'JointRatio': result[14],
+                    'State': result[15],
+                    'Is Sample? (yes/no)': result[16],
+                    'Is MJ product?(yes/no)': result[17],
+                    'Discountable? (yes/no)': result[18],
+                    'Room*': result[19],
+                    'Batch Number': result[20],
+                    'Lot Number': result[21],
+                    'Barcode*': result[22],
+                    'Cost*': result[23],
+                    'Medical Only (Yes/No)': result[24],
+                    'Med Price': result[25],
+                    'Expiration Date(YYYY-MM-DD)': result[26],
+                    'Is Archived? (yes/no)': result[27],
+                    'THC Per Serving': result[28],
+                    'Allergens': result[29],
+                    'Solvent': result[30],
+                    'Accepted Date': result[31],
+                    'Internal Product Identifier': result[32],
+                    'Product Tags (comma separated)': result[33],
+                    'Image URL': result[34],
+                    'Ingredients': result[35],
+                    'CombinedWeight': result[36],
+                    'Total THC': result[37],
+                    'THCA': result[38],
+                    'CBDA': result[39],
+                    'CBN': result[40],
+                    'DOH Compliant (Yes/No)': result[41]
+                }
+                products_data.append(product)
             
-            # Check if we can join with strains table
-            if 'strain_id' in product_columns and 'normalized_name' in product_columns:
-                query = f'''
-                    SELECT {select_clause}
-                    FROM products p
-                    LEFT JOIN strains s ON p.strain_id = s.id
-                    ORDER BY p.total_occurrences DESC
-                '''
-            else:
-                query = f'''
-                    SELECT {select_clause}
-                    FROM products p
-                    ORDER BY p."Product Name*"
-                '''
-            
-            logger.info(f"Exporting products with columns: {select_columns[:10]}...")  # Log first 10 columns
-            products_df = pd.read_sql_query(query, conn)
+            # Convert to DataFrame
+            products_df = pd.DataFrame(products_data)
             
             # Export to Excel
             with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
@@ -1654,6 +1832,241 @@ class ProductDatabase:
             logger.error(f"Error exporting database: {e}")
             raise
     
+    def update_all_descriptions(self) -> Dict[str, Any]:
+        """Update ALL Description column values with formula-created values from Product Name*."""
+        try:
+            self.init_database()
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Get all products with their Product Name* values
+            cursor.execute('''
+                SELECT id, "Product Name*" FROM products 
+                WHERE "Product Name*" IS NOT NULL AND "Product Name*" != ""
+            ''')
+            
+            products_to_update = cursor.fetchall()
+            updated_count = 0
+            
+            for product_id, product_name in products_to_update:
+                # Generate description using the formula
+                new_description = self._get_description(product_name)
+                
+                # Update the Description column
+                cursor.execute('''
+                    UPDATE products 
+                    SET "Description" = ?, updated_at = ?
+                    WHERE id = ?
+                ''', (new_description, datetime.now().isoformat(), product_id))
+                updated_count += 1
+            
+            conn.commit()
+            logger.info(f"Updated {updated_count} product descriptions with formula-created values")
+            
+            return {
+                'success': True,
+                'updated_count': updated_count,
+                'message': f'Successfully updated {updated_count} product descriptions with formula-created values'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error updating descriptions: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'message': f'Failed to update descriptions: {str(e)}'
+            }
+
+    def populate_missing_columns(self) -> Dict[str, Any]:
+        """Populate missing columns in existing products with default values."""
+        try:
+            self.init_database()
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Get all products that need updating
+            cursor.execute('''
+                SELECT id, "Product Name*", "Product Type*", "Weight*", "Price* (Tier Name for Bulk)", 
+                       "Quantity*", "DOH", "Concentrate Type", "Ratio", "JointRatio", "State"
+                FROM products 
+                WHERE "DOH Compliant (Yes/No)" IS NULL 
+                   OR "Description" IS NULL 
+                   OR "Description" = ''
+            ''')
+            
+            products_to_update = cursor.fetchall()
+            updated_count = 0
+            
+            for product in products_to_update:
+                product_id, name, product_type, weight, price, quantity, doh, concentrate_type, ratio, joint_ratio, state = product
+                
+                # Set default values for missing columns
+                updates = []
+                values = []
+                
+                if not doh or doh == 'None':
+                    updates.append('"DOH" = ?')
+                    values.append('No')
+                    doh = 'No'  # Update the variable for later use
+                
+                if not concentrate_type or concentrate_type == 'None':
+                    updates.append('"Concentrate Type" = ?')
+                    values.append('')
+                
+                if not ratio or ratio == 'None':
+                    updates.append('"Ratio" = ?')
+                    values.append('')
+                
+                if not joint_ratio or joint_ratio == 'None':
+                    # Calculate joint ratio for pre-roll products
+                    if product_type and 'pre-roll' in str(product_type).lower():
+                        joint_ratio = self._calculate_joint_ratio_from_name(name, product_type, weight)
+                    else:
+                        joint_ratio = ''
+                    updates.append('"JointRatio" = ?')
+                    values.append(joint_ratio)
+                
+                if not state or state == 'None':
+                    updates.append('"State" = ?')
+                    values.append('active')
+                
+                # Set other missing columns with defaults (only for columns that exist)
+                # Check which columns exist in the database
+                cursor.execute("PRAGMA table_info(products)")
+                existing_columns = {row[1] for row in cursor.fetchall()}
+                
+                # Define column mappings with existence checks
+                column_mappings = [
+                    ('"Description"', self._get_description(name)),
+                    ('"Is Sample? (yes/no)"', 'no'),
+                    ('"Is MJ product?(yes/no)"', 'yes' if product_type and 'mj' in str(product_type).lower() else 'no'),
+                    ('"Discountable? (yes/no)"', 'yes'),
+                    ('"Room*"', 'Default'),
+                    ('"Batch Number"', ''),
+                    ('"Lot Number"', ''),
+                    ('"Barcode*"', ''),
+                    ('"Cost*"', ''),
+                    ('"Medical Only (Yes/No)"', 'No'),
+                    ('"Med Price"', ''),
+                    ('"Expiration Date(YYYY-MM-DD)"', ''),
+                    ('"Is Archived? (yes/no)"', 'no'),
+                    ('"THC Per Serving"', ''),
+                    ('"Allergens"', ''),
+                    ('"Solvent"', ''),
+                    ('"Accepted Date"', ''),
+                    ('"Internal Product Identifier"', ''),
+                    ('"Product Tags (comma separated)"', ''),
+                    ('"Image URL"', ''),
+                    ('"Ingredients"', ''),
+                    ('"CombinedWeight"', ''),
+                    ('"Ratio_or_THC_CBD"', ''),
+                    ('"Description_Complexity"', ''),
+                    ('"Total THC"', ''),
+                    ('"THCA"', ''),
+                    ('"CBDA"', ''),
+                    ('"CBN"', ''),
+                    ('"Units"', 'g'),
+                    ('"Price"', price or ''),
+                    ('"DOH Compliant (Yes/No)"', doh),
+                    ('"Joint Ratio"', joint_ratio),
+                    ('"Quantity Received*"', quantity or '')
+                ]
+                
+                # Only add columns that exist in the database
+                for col_name, default_value in column_mappings:
+                    if col_name.strip('"') in existing_columns:
+                        updates.append(f'{col_name} = ?')
+                        values.append(default_value)
+                
+                if updates:
+                    values.append(product_id)
+                    update_query = f"UPDATE products SET {', '.join(updates)} WHERE id = ?"
+                    cursor.execute(update_query, values)
+                    updated_count += 1
+            
+            conn.commit()
+            logger.info(f"Updated {updated_count} products with missing column data")
+            
+            return {
+                'success': True,
+                'updated_count': updated_count,
+                'message': f'Successfully updated {updated_count} products with missing column data'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error populating missing columns: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'message': f'Failed to populate missing columns: {str(e)}'
+            }
+    
+    def _get_description(self, product_name):
+        """Generate description from product name by removing vendor information."""
+        if not product_name:
+            return ""
+        
+        name = str(product_name).strip()
+        if not name:
+            return ""
+        
+        # Remove everything after " by " or " By " to eliminate vendor information
+        if ' by ' in name:
+            return name.split(' by ')[0].strip()
+        elif ' By ' in name:
+            return name.split(' By ')[0].strip()
+        
+        # If no "by" pattern, return the name as-is
+        return name.strip()
+    
+    def _calculate_joint_ratio_from_name(self, product_name, product_type, weight):
+        """Calculate joint ratio for pre-roll products from product name."""
+        if not product_name or not product_type or 'pre-roll' not in str(product_type).lower():
+            return ''
+        
+        import re
+        product_name_str = str(product_name)
+        
+        # Look for patterns like "0.5g x 2 Pack", "1g x 28 Pack", etc.
+        patterns = [
+            r'(\d+(?:\.\d+)?)g\s*x\s*(\d+)\s*pack',  # "0.5g x 2 Pack"
+            r'(\d+(?:\.\d+)?)g\s*x\s*(\d+)',         # "0.5g x 2"
+            r'(\d+(?:\.\d+)?)g\s*×\s*(\d+)',         # "0.5g × 2" (different x character)
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, product_name_str, re.IGNORECASE)
+            if match:
+                amount = match.group(1)
+                count = match.group(2)
+                try:
+                    count_int = int(count)
+                    if count_int == 1:
+                        return f"{amount}g"
+                    else:
+                        return f"{amount}g x {count} Pack"
+                except ValueError:
+                    continue
+        
+        # If no pattern found, try to generate from weight
+        if weight and str(weight).strip() != '' and str(weight).lower() != 'nan':
+            try:
+                weight_float = float(weight)
+                if weight_float == 1.0:
+                    return "1g"
+                else:
+                    # Format weight similar to price formatting - no decimals unless original has decimals
+                    if weight_float.is_integer():
+                        formatted_weight = f"{int(weight_float)}g"
+                    else:
+                        # Round to 2 decimal places and remove trailing zeros
+                        formatted_weight = f"{weight_float:.2f}".rstrip("0").rstrip(".") + "g"
+                    return formatted_weight
+            except (ValueError, TypeError):
+                pass
+        
+        return ''
+
     def _add_missing_columns_safe(self, cursor, conn):
         """Safely add missing columns to existing tables without losing data."""
         try:
@@ -1705,6 +2118,14 @@ class ProductDatabase:
                 ('"Med Price"', 'TEXT'),
                 ('"Expiration Date(YYYY-MM-DD)"', 'TEXT'),
                 ('"Is Archived? (yes/no)"', 'TEXT'),
+                # Excel processor compatibility columns
+                ('"ProductName"', 'TEXT'),  # Alternative to "Product Name*"
+                ('"Units"', 'TEXT'),  # Alternative to "Weight Unit* (grams/gm or ounces/oz)"
+                ('"Price"', 'TEXT'),  # Alternative to "Price* (Tier Name for Bulk)"
+                ('"DOH Compliant (Yes/No)"', 'TEXT'),  # Alternative to "DOH"
+                ('"Joint Ratio"', 'TEXT'),  # Alternative to "JointRatio"
+                ('"Quantity Received*"', 'TEXT'),  # Alternative to "Quantity*"
+                ('"qty"', 'TEXT'),  # Alternative to "Quantity*"
                 ('"THC Per Serving"', 'TEXT'),
                 ('"Allergens"', 'TEXT'),
                 ('"Solvent"', 'TEXT'),
@@ -1720,6 +2141,23 @@ class ProductDatabase:
                 ('"THCA"', 'TEXT'),
                 ('"CBDA"', 'TEXT'),
                 ('"CBN"', 'TEXT'),
+                # Additional cannabinoid columns for comprehensive testing
+                ('"THC"', 'TEXT'),
+                ('"CBD"', 'TEXT'),
+                ('"Total CBD"', 'TEXT'),
+                ('"CBGA"', 'TEXT'),
+                ('"CBG"', 'TEXT'),
+                ('"Total CBG"', 'TEXT'),
+                ('"CBC"', 'TEXT'),
+                ('"CBDV"', 'TEXT'),
+                ('"THCV"', 'TEXT'),
+                ('"CBGV"', 'TEXT'),
+                ('"CBNV"', 'TEXT'),
+                ('"CBGVA"', 'TEXT'),
+                # Calculated THC/CBD values
+                ('"AI"', 'TEXT'),
+                ('"AJ"', 'TEXT'),
+                ('"AK"', 'TEXT'),
                 # Terpene columns - using the actual schema names
                 ('"A-Bisabolol (mg/g)"', 'TEXT'),
                 ('"A-Humulene (mg/g)"', 'TEXT'),
@@ -1866,6 +2304,764 @@ class ProductDatabase:
         from .excel_processor import normalize_name
         return normalize_name(product_name)
     
+    def _normalize_lineage(self, lineage: str) -> str:
+        """Normalize lineage to proper ALL CAPS format."""
+        if not lineage:
+            return "HYBRID"  # Default to HYBRID
+        
+        lineage = str(lineage).strip().lower()
+        
+        # Map common variations to standard ALL CAPS format
+        lineage_mapping = {
+            'hybrid': 'HYBRID',
+            'indica_hybrid': 'HYBRID/INDICA',
+            'indica': 'INDICA',
+            'sativa': 'SATIVA',
+            'sativa_hybrid': 'HYBRID/SATIVA',
+            'cbd': 'CBD',
+            'mixed': 'HYBRID',  # Default mixed to hybrid
+            'unknown': 'HYBRID',  # Default unknown to hybrid
+            'none': 'HYBRID',  # Default none to hybrid
+            '': 'HYBRID'  # Default empty to hybrid
+        }
+        
+        return lineage_mapping.get(lineage, 'HYBRID')
+    
+    def _ensure_crucial_value(self, value, fallback, field_name):
+        """Ensure crucial values are not empty, providing intelligent fallbacks."""
+        if value is None or not value or str(value).strip() == '' or str(value).lower() in ['nan', 'none', 'null']:
+            logger.debug(f"Missing crucial value for {field_name}, using fallback: {fallback}")
+            return fallback
+        return str(value).strip()
+    
+    def _calculate_ai_value(self, row_dict):
+        """Calculate AI value (THC) using all available THC columns."""
+        try:
+            # Get THC values from all available columns
+            total_thc_value = str(row_dict.get('Total THC', '') or '').strip()
+            thc_content_value = str(row_dict.get('THC Content', row_dict.get('THCA', '')) or '').strip()
+            thc_test_result = str(row_dict.get('THC test result', '') or '').strip()
+            thc_cbd_value = str(row_dict.get('THC_CBD', '') or '').strip()
+            
+            # Clean up values
+            if total_thc_value in ['nan', 'NaN', '']:
+                total_thc_value = ''
+            if thc_content_value in ['nan', 'NaN', '']:
+                thc_content_value = ''
+            if thc_test_result in ['nan', 'NaN', '']:
+                thc_test_result = ''
+            if thc_cbd_value in ['nan', 'NaN', '']:
+                thc_cbd_value = ''
+            
+            # Helper function to safely convert to float
+            def safe_float(value):
+                if not value or value in ['nan', 'NaN', '']:
+                    return 0.0
+                try:
+                    return float(value)
+                except (ValueError, TypeError):
+                    return 0.0
+            
+            # Helper function to extract THC value from THC_CBD string
+            def extract_thc_from_thc_cbd(thc_cbd_str):
+                if not thc_cbd_str:
+                    return 0.0
+                try:
+                    # Look for patterns like "18.5% THC / 0.5% CBD" or "0.3% THC / 900mg CBD"
+                    import re
+                    # Match THC value with %
+                    thc_match = re.search(r'(\d+(?:\.\d+)?)\s*%\s*THC', thc_cbd_str, re.IGNORECASE)
+                    if thc_match:
+                        return float(thc_match.group(1))
+                    return 0.0
+                except (ValueError, AttributeError):
+                    return 0.0
+            
+            # Calculate THC values from all sources
+            total_thc_float = safe_float(total_thc_value)
+            thc_content_float = safe_float(thc_content_value)
+            thc_test_float = safe_float(thc_test_result)
+            thc_cbd_thc_float = extract_thc_from_thc_cbd(thc_cbd_value)
+            
+            # Find the highest THC value from all sources
+            thc_values = [
+                (total_thc_float, total_thc_value),
+                (thc_content_float, thc_content_value),
+                (thc_test_float, thc_test_result),
+                (thc_cbd_thc_float, str(thc_cbd_thc_float) if thc_cbd_thc_float > 0 else '')
+            ]
+            
+            # Sort by float value (highest first) and return the first non-empty string value
+            thc_values.sort(key=lambda x: x[0], reverse=True)
+            
+            for float_val, str_val in thc_values:
+                if float_val > 0 and str_val:
+                    return str_val
+            
+            # If no valid THC value found, return empty string
+            return ''
+        except Exception as e:
+            logger.error(f"Error calculating AI value: {e}")
+            return ''
+    
+    def _calculate_ak_value(self, row_dict):
+        """Calculate AK value (CBD) using all available CBD columns."""
+        try:
+            # Get CBD values from all available columns
+            total_cbd_value = str(row_dict.get('Total CBD', row_dict.get('CBDA', '')) or '').strip()
+            cbd_test_result_value = str(row_dict.get('CBD test result', '') or '').strip()
+            cbd_content_value = str(row_dict.get('CBD Content', '') or '').strip()
+            thc_cbd_value = str(row_dict.get('THC_CBD', '') or '').strip()
+            
+            # Clean up values
+            if total_cbd_value in ['nan', 'NaN', '']:
+                total_cbd_value = ''
+            if cbd_test_result_value in ['nan', 'NaN', '']:
+                cbd_test_result_value = ''
+            if cbd_content_value in ['nan', 'NaN', '']:
+                cbd_content_value = ''
+            if thc_cbd_value in ['nan', 'NaN', '']:
+                thc_cbd_value = ''
+            
+            # Helper function to safely convert to float
+            def safe_float(value):
+                if not value or value in ['nan', 'NaN', '']:
+                    return 0.0
+                try:
+                    return float(value)
+                except (ValueError, TypeError):
+                    return 0.0
+            
+            # Helper function to extract CBD value from THC_CBD string
+            def extract_cbd_from_thc_cbd(thc_cbd_str):
+                if not thc_cbd_str:
+                    return 0.0
+                try:
+                    # Look for patterns like "18.5% THC / 0.5% CBD" or "0.3% THC / 900mg CBD"
+                    import re
+                    # Match CBD value with % or mg
+                    cbd_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:%|mg)?\s*CBD', thc_cbd_str, re.IGNORECASE)
+                    if cbd_match:
+                        return float(cbd_match.group(1))
+                    return 0.0
+                except (ValueError, AttributeError):
+                    return 0.0
+            
+            # Calculate CBD values from all sources
+            total_cbd_float = safe_float(total_cbd_value)
+            cbd_test_result_float = safe_float(cbd_test_result_value)
+            cbd_content_float = safe_float(cbd_content_value)
+            thc_cbd_cbd_float = extract_cbd_from_thc_cbd(thc_cbd_value)
+            
+            # Find the highest CBD value from all sources
+            cbd_values = [
+                (total_cbd_float, total_cbd_value),
+                (cbd_test_result_float, cbd_test_result_value),
+                (cbd_content_float, cbd_content_value),
+                (thc_cbd_cbd_float, str(thc_cbd_cbd_float) if thc_cbd_cbd_float > 0 else '')
+            ]
+            
+            # Sort by float value (highest first) and return the first non-empty string value
+            cbd_values.sort(key=lambda x: x[0], reverse=True)
+            
+            for float_val, str_val in cbd_values:
+                if float_val > 0 and str_val:
+                    return str_val
+            
+            # If no valid CBD value found, return empty string
+            return ''
+        except Exception as e:
+            logger.error(f"Error calculating AK value: {e}")
+            return ''
+    
+    def _update_existing_product(self, cursor, product_id, product_data):
+        """Update an existing product with new data."""
+        try:
+            current_date = datetime.now().isoformat()
+            
+            # Calculate AI and AK values
+            ai_value = self._calculate_ai_value(product_data)
+            ak_value = self._calculate_ak_value(product_data)
+            
+            # Update the product with new data
+            cursor.execute('''
+                UPDATE products SET
+                    "Product Type*" = ?,
+                    "Lineage" = ?,
+                    "Vendor/Supplier*" = ?,
+                    "Product Brand" = ?,
+                    "Description" = ?,
+                    "Weight*" = ?,
+                    "Units" = ?,
+                    "Price" = ?,
+                    "Product Strain" = ?,
+                    "Quantity*" = ?,
+                    "DOH" = ?,
+                    "Concentrate Type" = ?,
+                    "Ratio" = ?,
+                    "JointRatio" = ?,
+                    "THC test result" = ?,
+                    "CBD test result" = ?,
+                    "Total THC" = ?,
+                    "THCA" = ?,
+                    "CBDA" = ?,
+                    "THC" = ?,
+                    "CBD" = ?,
+                    "AI" = ?,
+                    "AJ" = ?,
+                    "AK" = ?,
+                    "last_seen_date" = ?,
+                    "updated_at" = ?
+                WHERE id = ?
+            ''', (
+                product_data.get('Product Type*'),
+                self._normalize_lineage(product_data.get('Lineage')),
+                product_data.get('Vendor/Supplier*'),
+                product_data.get('Product Brand'),
+                product_data.get('Description'),
+                product_data.get('Weight*'),
+                product_data.get('Units'),
+                product_data.get('Price'),
+                self._calculate_product_strain(
+                    product_data.get('Product Type*', ''),
+                    product_data.get('Product Name*', ''),
+                    product_data.get('Description', ''),
+                    product_data.get('Ratio', '')
+                ),
+                product_data.get('Quantity*', ''),
+                product_data.get('DOH', ''),
+                product_data.get('Concentrate Type', ''),
+                product_data.get('Ratio', ''),
+                product_data.get('JointRatio', ''),
+                product_data.get('THC test result', ''),
+                product_data.get('CBD test result', ''),
+                product_data.get('Total THC', ''),
+                product_data.get('THCA', ''),
+                product_data.get('CBDA', ''),
+                product_data.get('THC', ''),
+                product_data.get('CBD', ''),
+                self._calculate_ai_value(product_data),
+                product_data.get('THC Content', ''),
+                self._calculate_ak_value(product_data),
+                current_date,
+                current_date,
+                product_id
+            ))
+            
+            logger.info(f"Updated product ID {product_id} with new data")
+            
+        except Exception as e:
+            logger.error(f"Error updating existing product {product_id}: {e}")
+            raise
+    
+    def _process_description(self, product_name, original_description=''):
+        """Process product name to create a clean description using the same rules as Excel processor."""
+        if not product_name or str(product_name).strip() == '':
+            return original_description if original_description else ''
+        
+        name = str(product_name).strip()
+        if not name:
+            return original_description if original_description else ''
+        
+        # Apply the same description processing rules as the Excel processor
+        # Handle "Product Name by Vendor - Weight" format
+        if ' by ' in name and ' - ' in name:
+            # Extract just the product name part before " by "
+            return name.split(' by ')[0].strip()
+        elif ' by ' in name:
+            return name.split(' by ')[0].strip()
+        elif ' - ' in name:
+            # Only split on dashes followed by weight information (numbers, decimals, units)
+            import re
+            if re.search(r' - [\d.]', name):
+                # Remove weight part but preserve the dash in product names
+                return re.sub(r' - [\d.].*$', '', name).strip()
+            else:
+                # No weight information, return the name as-is
+                return name.strip()
+        return name.strip()
+    
+    def fix_description_format(self):
+        """Fix Description field format to extract just product name from 'Product Name by Vendor - Weight' format."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Get all products with descriptions that contain " by " and " - "
+            cursor.execute('''
+                SELECT id, "Description", "Product Name*" 
+                FROM products 
+                WHERE "Description" LIKE '% by %' AND "Description" LIKE '% - %'
+            ''')
+            
+            products_to_fix = cursor.fetchall()
+            logger.info(f"Found {len(products_to_fix)} products with 'by Vendor - Weight' format in Description")
+            
+            fixed_count = 0
+            for product_id, current_desc, product_name in products_to_fix:
+                # Process the description to extract just the product name
+                fixed_desc = self._process_description(current_desc, '')
+                if fixed_desc != current_desc:
+                    cursor.execute('''
+                        UPDATE products 
+                        SET "Description" = ?
+                        WHERE id = ?
+                    ''', (fixed_desc, product_id))
+                    fixed_count += 1
+                    logger.debug(f"Fixed Description for product {product_id}: '{current_desc}' -> '{fixed_desc}'")
+            
+            conn.commit()
+            logger.info(f"Fixed {fixed_count} product descriptions")
+            return {'fixed': fixed_count, 'total_checked': len(products_to_fix)}
+            
+        except Exception as e:
+            logger.error(f"Error fixing description format: {e}")
+            return {'fixed': 0, 'total_checked': 0, 'error': str(e)}
+
+    def backfill_missing_crucial_values(self):
+        """Backfill missing crucial values in existing products."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Update products with missing or old descriptions using processed descriptions
+            # First, get all products that need description updates
+            cursor.execute('''
+                SELECT "id", "Product Name*", "Description"
+                FROM products 
+                WHERE "Description" IS NULL OR "Description" = "" OR "Description" = "nan"
+                   OR "Description" LIKE "%Hustler's Ambition -%" 
+                   OR "Description" LIKE "%Hustler's Ambition Flower%"
+                   OR "Description" LIKE "%Hustler's Ambition - Wax%"
+                   OR "Description" LIKE "%Hustler's Ambition - Preroll%"
+            ''')
+            products_to_update = cursor.fetchall()
+            
+            desc_updated = 0
+            old_desc_updated = 0
+            
+            for product_id, product_name, current_desc in products_to_update:
+                # Process the description using the same rules
+                processed_desc = self._process_description(product_name, current_desc)
+                
+                # Update the product with the processed description
+                cursor.execute('''
+                    UPDATE products 
+                    SET "Description" = ?
+                    WHERE "id" = ?
+                ''', (processed_desc, product_id))
+                
+                if not current_desc or current_desc.strip() == '' or current_desc == 'nan':
+                    desc_updated += 1
+                else:
+                    old_desc_updated += 1
+            
+            # Update products with missing Weight
+            cursor.execute('''
+                UPDATE products 
+                SET "Weight*" = "1g"
+                WHERE "Weight*" IS NULL OR "Weight*" = "" OR "Weight*" = "nan"
+            ''')
+            weight_updated = cursor.rowcount
+            
+            # Update products with missing Price
+            cursor.execute('''
+                UPDATE products 
+                SET "Price" = "0.00"
+                WHERE "Price" IS NULL OR "Price" = "" OR "Price" = "nan"
+            ''')
+            price_updated = cursor.rowcount
+            
+            # Update products with missing THC test result
+            cursor.execute('''
+                UPDATE products 
+                SET "THC test result" = "0.0"
+                WHERE "THC test result" IS NULL OR "THC test result" = "" OR "THC test result" = "nan"
+            ''')
+            thc_updated = cursor.rowcount
+            
+            # Update products with missing CBD test result
+            cursor.execute('''
+                UPDATE products 
+                SET "CBD test result" = "0.0"
+                WHERE "CBD test result" IS NULL OR "CBD test result" = "" OR "CBD test result" = "nan"
+            ''')
+            cbd_updated = cursor.rowcount
+            
+            # Update products with missing Product Type
+            cursor.execute('''
+                UPDATE products 
+                SET "Product Type*" = "Unknown"
+                WHERE "Product Type*" IS NULL OR "Product Type*" = "" OR "Product Type*" = "nan"
+            ''')
+            type_updated = cursor.rowcount
+            
+            # Update products with missing Vendor
+            cursor.execute('''
+                UPDATE products 
+                SET "Vendor/Supplier*" = "Unknown Vendor"
+                WHERE "Vendor/Supplier*" IS NULL OR "Vendor/Supplier*" = "" OR "Vendor/Supplier*" = "nan"
+            ''')
+            vendor_updated = cursor.rowcount
+            
+            # Update products with missing Units
+            cursor.execute('''
+                UPDATE products 
+                SET "Units" = "each"
+                WHERE "Units" IS NULL OR "Units" = "" OR "Units" = "nan"
+            ''')
+            units_updated = cursor.rowcount
+            
+            conn.commit()
+            
+            logger.info(f"Backfilled missing crucial values:")
+            logger.info(f"  - Description (missing): {desc_updated} products")
+            logger.info(f"  - Description (old Excel format): {old_desc_updated} products")
+            logger.info(f"  - Weight: {weight_updated} products")
+            logger.info(f"  - Price: {price_updated} products")
+            logger.info(f"  - THC test result: {thc_updated} products")
+            logger.info(f"  - CBD test result: {cbd_updated} products")
+            logger.info(f"  - Product Type: {type_updated} products")
+            logger.info(f"  - Vendor: {vendor_updated} products")
+            logger.info(f"  - Units: {units_updated} products")
+            
+            return {
+                'description': desc_updated + old_desc_updated,
+                'description_missing': desc_updated,
+                'description_old_format': old_desc_updated,
+                'weight': weight_updated,
+                'price': price_updated,
+                'thc': thc_updated,
+                'cbd': cbd_updated,
+                'type': type_updated,
+                'vendor': vendor_updated,
+                'units': units_updated
+            }
+            
+        except Exception as e:
+            logger.error(f"Error backfilling missing crucial values: {e}")
+            return None
+    
+    def _calculate_product_strain(self, product_type: str, product_name: str, description: str, ratio: str) -> str:
+        """Calculate Product Strain using exact Excel processor logic."""
+        from src.core.constants import CLASSIC_TYPES
+        
+        product_type = str(product_type).strip().lower()
+        product_name = str(product_name).strip()
+        description = str(description).strip()
+        ratio = str(ratio).strip()
+        
+        # Handle 'nan' values
+        if product_name.lower() == 'nan':
+            product_name = ''
+        if description.lower() == 'nan':
+            description = ''
+        if ratio.lower() == 'nan':
+            ratio = ''
+        
+        # Classic types don't need Product Strain values set by this logic
+        # They use actual strain names from the Product Strain column
+        if product_type in CLASSIC_TYPES:
+            return ''  # Let the actual strain name be used
+        
+        # For non-classic types, determine if it's CBD or Mixed
+        import re
+        
+        # Check if product name contains CBD, CBG, CBC, or CBN
+        name_contains_cbd = bool(re.search(r'\b(?:CBD|CBG|CBC|CBN)\b', product_name, re.IGNORECASE))
+        
+        # Check if description contains CBD, CBG, CBC, or CBN, or ":"
+        desc_contains_cbd = bool(re.search(r'\b(?:CBD|CBG|CBC|CBN)\b', description, re.IGNORECASE)) or ':' in description
+        
+        # Check if ratio contains CBD, CBG, CBC, or CBN
+        ratio_contains_cbd = bool(re.search(r'\b(?:CBD|CBG|CBC|CBN)\b', ratio, re.IGNORECASE))
+        
+        # If any of these contain cannabinoids, set to "CBD Blend"
+        if name_contains_cbd or desc_contains_cbd or ratio_contains_cbd:
+            return "CBD Blend"
+        
+        # Otherwise, set to "Mixed"
+        return "Mixed"
+    
+    def _extract_ratio_from_product_name(self, product_name: str, product_type: str) -> str:
+        """Extract ratio from product name for NonClassic types using same logic as Excel processor."""
+        import re
+        
+        # Define classic types (same as Excel processor)
+        classic_types = ["flower", "pre-roll", "infused pre-roll", "concentrate", "solventless concentrate", "vape cartridge", "rso/co2 tankers"]
+        
+        # Only extract ratio for non-classic types (including capsules)
+        if product_type.lower() not in classic_types:
+            if product_name and isinstance(product_name, str):
+                # Extract text after final dash (cannabinoid content)
+                # This is what the Excel processor does - it extracts the part after the dash
+                # which contains the actual cannabinoid amounts, not the ratios
+                match = re.search(r".*-\s*(.+)", product_name)
+                if match:
+                    extracted_content = match.group(1).strip()
+                    # Replace "/" with space to remove backslash formatting (same as Excel processor)
+                    # But preserve the slash in ratios like "10mg THC / 5mg CBD"
+                    if "/" in extracted_content and not any(cannabinoid in extracted_content.upper() for cannabinoid in ['THC', 'CBD', 'CBC', 'CBG', 'CBN']):
+                        extracted_content = extracted_content.replace("/", " ")
+                    # Replace "nan" values with empty string (same as Excel processor)
+                    if extracted_content.lower() == "nan":
+                        extracted_content = ""
+                    return extracted_content
+        
+        return ""
+
+    def _calculate_ratio_or_thc_cbd(self, product_type: str, ratio: str, joint_ratio: str, product_name: str = "", thc_value: str = "", cbd_value: str = "") -> str:
+        """Calculate Ratio_or_THC_CBD using exact Excel processor logic."""
+        import re
+        
+        def is_real_ratio(text: str) -> bool:
+            """Check if a string represents a valid ratio format."""
+            if not text or not isinstance(text, str):
+                return False
+            
+            # Clean the text
+            text = text.strip()
+            
+            # Check for common invalid values
+            if text in ['', 'CBD', 'THC', 'CBD:', 'THC:', 'CBD:\n', 'THC:\n']:
+                return False
+            
+            # Check for mg values (e.g., '100mg', '500mg THC', '10mg CBD')
+            if 'mg' in text.lower():
+                return True
+            
+            # Check for ratio patterns (e.g., '1:1', '2:1', '1:2:1')
+            ratio_pattern = r'^\d+(?::\d+)+$'
+            if re.match(ratio_pattern, text):
+                return True
+            
+            # Check for percentage patterns (e.g., '20%', '15.5%')
+            percent_pattern = r'^\d+(?:\.\d+)?%$'
+            if re.match(percent_pattern, text):
+                return True
+            
+            return False
+        
+        def is_weight_with_unit(text: str) -> bool:
+            """Check if a string represents a weight with unit format (e.g., '1g', '3.5g', '1oz')."""
+            if not text or not isinstance(text, str):
+                return False
+            
+            # Clean the text
+            text = text.strip()
+            
+            # Check for weight + unit patterns
+            weight_patterns = [
+                r'^\d+(?:\.\d+)?\s*(?:g|gram|grams|gm|oz|ounce|ounces)$',  # 1g, 3.5g, 1oz, etc.
+                r'^\d+(?:\.\d+)?\s*(?:g|gram|grams|gm|oz|ounce|ounces)\s*$',  # with trailing space
+            ]
+            
+            for pattern in weight_patterns:
+                if re.match(pattern, text, re.IGNORECASE):
+                    return True
+            
+            return False
+        
+        product_type = str(product_type).strip().lower()
+        ratio = str(ratio).strip()
+        
+        # Handle 'nan' values by replacing with empty string
+        if ratio.lower() == 'nan':
+            ratio = ''
+        
+        # For NonClassic types, extract ratio from product name if no ratio is provided
+        if not ratio or ratio in ['', 'nan']:
+            extracted_ratio = self._extract_ratio_from_product_name(product_name, product_type)
+            if extracted_ratio:
+                ratio = extracted_ratio
+        
+        classic_types = [
+            'flower', 'pre-roll', 'infused pre-roll', 'concentrate', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'
+        ]
+        # Note: capsules are NOT classic types for ratio processing - they should be treated as edibles
+        BAD_VALUES = {'', 'CBD', 'THC', 'CBD:', 'THC:', 'CBD:\n', 'THC:\n', 'nan'}
+        
+        # For paraphernalia/hardware products, don't show THC/CBD values
+        if product_type in ['paraphernalia', 'hardware', 'accessory']:
+            return ''  # Empty for non-cannabis products
+        
+        # For pre-rolls, infused pre-rolls, concentrates, and solventless concentrates, treat as classic types
+        if product_type in ['pre-roll', 'infused pre-roll', 'concentrate', 'solventless concentrate']:
+            # Use actual THC/CBD values if available, otherwise use default format
+            if thc_value and cbd_value and str(thc_value).strip() not in ['nan', 'NaN', ''] and str(cbd_value).strip() not in ['nan', 'NaN', '']:
+                thc_str = str(thc_value).strip()
+                cbd_str = str(cbd_value).strip()
+                return f"THC: {thc_str}% CBD: {cbd_str}%"
+            elif thc_value and str(thc_value).strip() not in ['nan', 'NaN', '']:
+                thc_str = str(thc_value).strip()
+                return f"THC: {thc_str}%"
+            elif cbd_value and str(cbd_value).strip() not in ['nan', 'NaN', '']:
+                cbd_str = str(cbd_value).strip()
+                return f"CBD: {cbd_str}%"
+            else:
+                return 'THC: | BR | C'
+        
+        if product_type in classic_types:
+            # For classic types, prioritize THC/CBD values if available
+            if thc_value and cbd_value and str(thc_value).strip() not in ['nan', 'NaN', ''] and str(cbd_value).strip() not in ['nan', 'NaN', '']:
+                thc_str = str(thc_value).strip()
+                cbd_str = str(cbd_value).strip()
+                return f"THC: {thc_str}% CBD: {cbd_str}%"
+            elif thc_value and str(thc_value).strip() not in ['nan', 'NaN', '']:
+                thc_str = str(thc_value).strip()
+                return f"THC: {thc_str}%"
+            elif cbd_value and str(cbd_value).strip() not in ['nan', 'NaN', '']:
+                cbd_str = str(cbd_value).strip()
+                return f"CBD: {cbd_str}%"
+            elif not ratio or ratio in BAD_VALUES:
+                return 'THC: | BR | C'
+            # If ratio contains THC/CBD values, use it directly
+            elif any(cannabinoid in ratio.upper() for cannabinoid in ['THC', 'CBD', 'CBC', 'CBG', 'CBN']):
+                return ratio
+            # If it's a valid ratio format, use it
+            elif is_real_ratio(ratio):
+                return ratio
+            # If it's a weight format (like '1g', '28g'), use it
+            elif is_weight_with_unit(ratio):
+                return ratio
+            # Otherwise, use default THC:CBD format
+            else:
+                return 'THC: | BR | C'
+        
+        # For Edibles, Topicals, Tinctures, etc., use the ratio if it contains cannabinoid content
+        edible_types = {'edible (solid)', 'edible (liquid)', 'high cbd edible liquid', 'tincture', 'topical', 'capsule'}
+        if product_type in edible_types:
+            if not ratio or ratio in BAD_VALUES:
+                return 'THC: | BR | C'
+            # If ratio contains cannabinoid content, use it
+            if any(cannabinoid in ratio.upper() for cannabinoid in ['THC', 'CBD', 'CBC', 'CBG', 'CBN']):
+                return ratio
+            # If it's a valid ratio format, use it
+            if is_real_ratio(ratio):
+                return ratio
+            # If it's a weight format, use it
+            if is_weight_with_unit(ratio):
+                return ratio
+            # Otherwise, use default THC:CBD format
+            return 'THC: | BR | C'
+        
+        # For any other product type, return the ratio as-is
+        return ratio
+    
+    def _calculate_product_strain(self, product_type: str, product_name: str, description: str, ratio: str) -> str:
+        """Calculate Product Strain using exact Excel processor logic."""
+        import re
+        
+        product_type = str(product_type).strip().lower()
+        product_name = str(product_name).strip() if product_name else ""
+        description = str(description).strip() if description else ""
+        ratio = str(ratio).strip() if ratio else ""
+        
+        # Handle 'nan' values
+        if product_name.lower() == 'nan':
+            product_name = ""
+        if description.lower() == 'nan':
+            description = ""
+        if ratio.lower() == 'nan':
+            ratio = ""
+        
+        # Special case: paraphernalia gets Product Strain set to "Paraphernalia"
+        if product_type == "paraphernalia":
+            return "Paraphernalia"
+        
+        # Define classic types (these don't get Product Strain logic applied)
+        classic_types = [
+            'flower', 'pre-roll', 'infused pre-roll', 'concentrate', 'solventless concentrate', 
+            'vape cartridge', 'alcohol/ethanol extract', 'co2 concentrate'
+        ]
+        
+        # If it's a classic type, return blank (classic types don't get Product Strain logic)
+        if product_type in classic_types:
+            return ""
+        
+        # Define edible types for special handling
+        edible_types = {"edible (solid)", "edible (liquid)", "high cbd edible liquid", "tincture", "topical", "capsule"}
+        
+        # For edibles: if ProductName contains CBD, CBG, CBN, or CBC, then Product Strain is "CBD Blend", otherwise "Mixed"
+        if product_type in edible_types:
+            if product_name and re.search(r"CBD|CBG|CBN|CBC", product_name, re.IGNORECASE):
+                return "CBD Blend"
+            else:
+                return "Mixed"
+        
+        # For RSO/CO2 Tankers: if Description contains CBD, CBG, CBC, CBN, or ":", then Product Strain is "CBD Blend", otherwise "Mixed"
+        if product_type == "rso/co2 tankers":
+            if description and (re.search(r"CBD|CBG|CBC|CBN", description, re.IGNORECASE) or ":" in description):
+                return "CBD Blend"
+            else:
+                return "Mixed"
+        
+        # For all other nonclassic types: check for CBD content
+        # If Ratio contains CBD, CBC, CBN, or CBG, set Product Strain to "CBD Blend"
+        if ratio and re.search(r"CBD|CBC|CBN|CBG", ratio, re.IGNORECASE):
+            return "CBD Blend"
+        
+        # If Description contains ":" or "CBD", set Product Strain to 'CBD Blend' (excluding edibles which have their own logic)
+        if description and (":" in description or re.search(r"CBD", description, re.IGNORECASE)):
+            return "CBD Blend"
+        
+        # If ProductName contains CBD, CBG, CBN, or CBC, set Product Strain to "CBD Blend"
+        if product_name and re.search(r"CBD|CBG|CBN|CBC", product_name, re.IGNORECASE):
+            return "CBD Blend"
+        
+        # For all other nonclassic types without CBD content, return "Mixed"
+        return "Mixed"
+    
+    def update_all_product_strains(self) -> Dict[str, Any]:
+        """Update all products with correct Product Strain values based on Excel logic."""
+        try:
+            self.init_database()
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Get all products that need Product Strain updates
+            cursor.execute('''
+                SELECT id, "Product Name*", "Product Type*", "Description", "Ratio"
+                FROM products
+            ''')
+            
+            products = cursor.fetchall()
+            updated_count = 0
+            
+            for product_id, product_name, product_type, description, ratio in products:
+                # Calculate the correct Product Strain value
+                new_strain = self._calculate_product_strain(
+                    product_type or '',
+                    product_name or '',
+                    description or '',
+                    ratio or ''
+                )
+                
+                # Update the Product Strain
+                cursor.execute('''
+                    UPDATE products 
+                    SET "Product Strain" = ?, updated_at = ?
+                    WHERE id = ?
+                ''', (new_strain, datetime.now().isoformat(), product_id))
+                updated_count += 1
+            
+            conn.commit()
+            logger.info(f"Updated {updated_count} products with correct Product Strain values")
+            
+            return {
+                'success': True,
+                'updated_count': updated_count,
+                'message': f'Successfully updated {updated_count} products with correct Product Strain values'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error updating Product Strain values: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'message': f'Failed to update Product Strain values: {str(e)}'
+            }
+    
     @timed_operation("get_all_strains")
     def get_all_strains(self) -> Set[str]:
         """Get all normalized strain names from the database for fast lookup."""
@@ -1995,11 +3191,11 @@ class ProductDatabase:
                 
                 # Check products table for vendor/brand combination
                 cursor.execute('''
-                    SELECT p.lineage FROM products p
+                    SELECT p."Lineage" FROM products p
                     WHERE p.strain_id = (
                         SELECT id FROM strains WHERE normalized_name = ?
-                    ) AND p.vendor = ? AND p.brand = ?
-                    ORDER BY p.total_occurrences DESC
+                    ) AND p."Vendor/Supplier*" = ? AND p."Product Brand" = ?
+                    ORDER BY p.id DESC
                     LIMIT 1
                 ''', (self._normalize_strain_name(strain_name), vendor, brand))
                 
@@ -2486,8 +3682,9 @@ class ProductDatabase:
             
             cursor.execute(f'''
                 SELECT p.id, p."Product Name*", p.normalized_name, p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
-                       s.strain_name, s.canonical_lineage, p.total_occurrences, p.first_seen_date, p.last_seen_date,
-                       p."Description", p."Weight*", p."Units", p."Price* (Tier Name for Bulk)", p."THC test result", p."CBD test result", p."Test result unit (% or mg)",
+                       s.strain_name, s.canonical_lineage, 0 as total_occurrences, '' as first_seen_date, '' as last_seen_date,
+                       p."Description", p."Weight*", p."Weight Unit* (grams/gm or ounces/oz)", p."Price* (Tier Name for Bulk)", 
+                       '' as thc_test_result, '' as cbd_test_result, p."Test result unit (% or mg)",
                        p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio", p."State", p."Is Sample? (yes/no)",
                        p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*", p."Cost*",
                        p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens",
@@ -2604,6 +3801,252 @@ class ProductDatabase:
             logger.error(f"Error getting products by names: {e}")
             return []
 
+    def get_products_by_names_fuzzy(self, product_names: List[str]) -> List[Dict[str, Any]]:
+        """Get products by their names with fuzzy matching for better name variations."""
+        try:
+            if not product_names:
+                return []
+            
+            # First try exact matches
+            exact_matches = self.get_products_by_names(product_names)
+            
+            # Check if exact matches have vendor/brand information
+            has_vendor_brand_info = all(
+                product.get('Vendor/Supplier*', '').strip() and 
+                product.get('Product Brand', '').strip()
+                for product in exact_matches
+            )
+            
+            # If we found all products AND they have vendor/brand info, return them
+            if len(exact_matches) == len(product_names) and has_vendor_brand_info:
+                return exact_matches
+            
+            # If we didn't find all products, try fuzzy matching
+            logger.info(f"Found {len(exact_matches)} exact matches, trying fuzzy matching for remaining products")
+            
+            # Get all products for fuzzy matching
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM products ORDER BY "Product Name*"')
+            all_rows = cursor.fetchall()
+            columns = [description[0] for description in cursor.description]
+            all_products = [dict(zip(columns, row)) for row in all_rows]
+            
+            # Find fuzzy matches for all products (since exact matches may not have vendor/brand info)
+            found_products = []
+            found_names = set()
+            
+            for search_name in product_names:
+                # Try fuzzy matching for this search name
+                best_match = None
+                best_score = 0
+                candidates = []
+                
+                for product in all_products:
+                    product_name = product.get('Product Name*', '')
+                    if not product_name:
+                        continue
+                    
+                    # Calculate similarity score
+                    score = self._calculate_name_similarity(search_name, product_name)
+                    
+                    if score > 0.3:  # 30% similarity threshold
+                        candidates.append((product, score))
+                
+                # Sort candidates by score (highest first), then prioritize records with processed descriptions
+                # (shorter descriptions are more likely to be processed)
+                candidates.sort(key=lambda x: (
+                    x[1],  # Score (highest first)
+                    -len(x[0].get('Description', '')),  # Shorter descriptions first (negative for reverse)
+                    x[0].get('Product Name*', '')  # Product name for consistency
+                ), reverse=True)
+                
+                if candidates:
+                    best_match, best_score = candidates[0]
+                
+                if best_match:
+                    logger.info(f"Fuzzy match: '{search_name}' -> '{best_match.get('Product Name*', '')}' (score: {best_score:.2f})")
+                    # Convert to the same format as get_products_by_names
+                    converted_match = self._convert_product_to_standard_format(best_match)
+                    found_products.append(converted_match)
+                    found_names.add(search_name)
+                else:
+                    logger.warning(f"No fuzzy match found for: '{search_name}'")
+                    # If no fuzzy match found, use exact match if available
+                    exact_match = next((p for p in exact_matches if p.get('Product Name*') == search_name), None)
+                    if exact_match:
+                        found_products.append(exact_match)
+                        found_names.add(search_name)
+            
+            logger.info(f"Found {len(found_products)} total products (exact + fuzzy) for: {product_names}")
+            return found_products
+            
+        except Exception as e:
+            logger.error(f"Error getting products by names with fuzzy matching: {e}")
+            return []
+
+    def _calculate_name_similarity(self, name1: str, name2: str) -> float:
+        """Calculate similarity between two product names with improved matching."""
+        try:
+            # Normalize names for comparison
+            def normalize(name):
+                return ' '.join(name.lower().split())
+            
+            norm1 = normalize(name1)
+            norm2 = normalize(name2)
+            
+            # Check for exact match after normalization
+            if norm1 == norm2:
+                return 1.0
+            
+            # Check for substring matches
+            if norm1 in norm2 or norm2 in norm1:
+                return 0.9
+            
+            # Extract key components for better matching
+            def extract_components(name):
+                # Remove common prefixes and suffixes
+                cleaned = name.lower()
+                # Remove common cannabis terms for better matching
+                cannabis_terms = ['flower', 'wax', 'pre-roll', 'cartridge', 'distillate', 'concentrate', 'edible', 'gummy', 'chocolate', 'beverage', 'topical', 'cream', 'lotion', 'salve', 'balm', 'spray', 'drops', 'syrup', 'sauce', 'dab', 'shatter', 'live', 'rosin', 'resin', 'kief', 'hash', 'bubble', 'ice', 'water', 'solventless', 'full', 'spectrum', 'broad', 'isolate', 'terpene', 'terpenes', 'terp', 'terps']
+                
+                for term in cannabis_terms:
+                    cleaned = cleaned.replace(term, '')
+                
+                # Remove common weight indicators
+                weight_terms = ['28g', '3.5g', '1g', '7g', '14g', '28g', '1oz', '0.5g', '2g', '4g', '8g', '16g', '32g']
+                for term in weight_terms:
+                    cleaned = cleaned.replace(term, '')
+                
+                # Remove common separators and clean up
+                cleaned = cleaned.replace('(', '').replace(')', '').replace('-', ' ').replace('/', ' ').replace(' by ', ' ').replace('  ', ' ').strip()
+                
+                return cleaned.split()
+            
+            comp1 = extract_components(norm1)
+            comp2 = extract_components(norm2)
+            
+            if not comp1 or not comp2:
+                return 0.0
+            
+            # Calculate similarity based on key components
+            set1 = set(comp1)
+            set2 = set(comp2)
+            
+            intersection = set1.intersection(set2)
+            union = set1.union(set2)
+            
+            jaccard_score = len(intersection) / len(union) if union else 0.0
+            
+            # Boost score for strain name matches (most important)
+            strain_boost = 0.0
+            for comp in comp1:
+                if comp in comp2 and len(comp) > 2:  # Avoid single character matches
+                    strain_boost += 0.2
+            
+            # Boost score for brand name matches
+            brand_boost = 0.0
+            brand_terms = ['hustler', 'ambition', 'mama', 'j\'s', 'blue', 'roots', 'cannabis']
+            for term in brand_terms:
+                if term in norm1 and term in norm2:
+                    brand_boost += 0.1
+            
+            # Prioritize exact strain name matches
+            exact_strain_boost = 0.0
+            
+            # Check if the strain name components are the same (ignoring order)
+            set1 = set(comp1)
+            set2 = set(comp2)
+            
+            # If all components match, it's likely the same strain
+            if set1 == set2:
+                exact_strain_boost = 0.5
+            # If the strain name components match (excluding brand components)
+            elif len(set1.intersection(set2)) >= 2:  # At least 2 common components
+                # Check if the strain-specific components match
+                strain_components1 = set1 - {'hustler\'s', 'ambition', 'mama', 'j\'s', 'blue', 'roots', 'cannabis'}
+                strain_components2 = set2 - {'hustler\'s', 'ambition', 'mama', 'j\'s', 'blue', 'roots', 'cannabis'}
+                
+                if strain_components1 == strain_components2 and len(strain_components1) > 0:
+                    exact_strain_boost = 0.3
+            
+            final_score = jaccard_score + strain_boost + brand_boost + exact_strain_boost
+            
+            # Don't cap the score at 1.0 to allow for tie-breaking with boosts
+            return final_score
+            
+        except Exception as e:
+            logger.error(f"Error calculating name similarity: {e}")
+            return 0.0
+
+    def _convert_product_to_standard_format(self, product: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert a raw database product to the standard format expected by the system."""
+        try:
+            return {
+                'id': product.get('id', ''),
+                'ProductName': product.get('Product Name*', ''),
+                'Product Name*': product.get('Product Name*', ''),
+                'normalized_name': product.get('normalized_name', ''),
+                'Product Type*': product.get('Product Type*', ''),
+                'Vendor': product.get('Vendor/Supplier*', ''),
+                'Vendor/Supplier*': product.get('Vendor/Supplier*', ''),
+                'Product Brand': product.get('Product Brand', ''),
+                'Lineage': product.get('Lineage', 'MIXED'),
+                'strain_name': product.get('Product Strain', ''),
+                'canonical_lineage': product.get('Lineage', 'MIXED'),
+                'total_occurrences': product.get('total_occurrences', 0),
+                'first_seen_date': product.get('first_seen_date', ''),
+                'last_seen_date': product.get('last_seen_date', ''),
+                'Description': product.get('Description', product.get('Product Name*', '')),
+                'Weight*': product.get('Weight*', ''),
+                'Units': product.get('Units', ''),
+                'Price': product.get('Price', ''),
+                'THC test result': product.get('THC test result', ''),
+                'CBD test result': product.get('CBD test result', ''),
+                'Test result unit': product.get('Test result unit (% or mg)', ''),
+                'Quantity*': product.get('Quantity*', ''),
+                'DOH': product.get('DOH', ''),
+                'concentrate_type': product.get('Concentrate Type', ''),
+                'Ratio': product.get('Ratio', ''),
+                'JointRatio': product.get('JointRatio', ''),
+                'State': product.get('State', ''),
+                'Is Sample?': product.get('Is Sample? (yes/no)', ''),
+                'Is MJ product?': product.get('Is MJ product?(yes/no)', ''),
+                'Discountable?': product.get('Discountable? (yes/no)', ''),
+                'Room*': product.get('Room*', ''),
+                'batch_number': product.get('Batch Number', ''),
+                'lot_number': product.get('Lot Number', ''),
+                'barcode': product.get('Barcode*', ''),
+                'cost': product.get('Cost*', ''),
+                'Medical Only': product.get('Medical Only (Yes/No)', ''),
+                'med_price': product.get('Med Price', ''),
+                'expiration_date': product.get('Expiration Date(YYYY-MM-DD)', ''),
+                'is_archived': product.get('Is Archived? (yes/no)', ''),
+                'thc_per_serving': product.get('THC Per Serving', ''),
+                'allergens': product.get('Allergens', ''),
+                'solvent': product.get('Solvent', ''),
+                'accepted_date': product.get('Accepted Date', ''),
+                'internal_product_identifier': product.get('Internal Product Identifier', ''),
+                'product_tags': product.get('Product Tags (comma separated)', ''),
+                'image_url': product.get('Image URL', ''),
+                'ingredients': product.get('Ingredients', ''),
+                'combined_weight': product.get('CombinedWeight', ''),
+                'ratio_or_thc_cbd': product.get('Ratio_or_THC_CBD', ''),
+                'description_complexity': product.get('Description_Complexity', ''),
+                'Total THC': product.get('Total THC', ''),
+                'THCA': product.get('THCA', ''),
+                'CBDA': product.get('CBDA', ''),
+                'CBN': product.get('CBN', ''),
+                # Add Excel column name compatibility fields
+                'ProductBrand': product.get('Product Brand', ''),
+                'ProductStrain': product.get('Product Strain', ''),
+                'WeightWithUnits': f"{product.get('Weight*', '')}{product.get('Units', '')}" if product.get('Weight*') and product.get('Units') else product.get('Weight*', '') or product.get('Units', '') or '',
+                'displayName': product.get('Product Name*', '')
+            }
+        except Exception as e:
+            logger.error(f"Error converting product to standard format: {e}")
+            return {}
+
     def find_best_product_match(self, product_name: str, vendor: str = None, product_type: str = None, strain: str = None) -> Optional[Dict[str, Any]]:
         """
         Find the best matching product in the database based on multiple criteria.
@@ -2636,7 +4079,7 @@ class ProductDatabase:
                        p."State", p."Is Sample? (yes/no)", p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*", p."Cost*",
                        p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens", p."Solvent", p."Accepted Date",
                        p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."CombinedWeight", p."Ratio_or_THC_CBD", 
-                       p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN", p.total_occurrences, p.first_seen_date, p.last_seen_date
+                       p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN", 0 as total_occurrences, '' as first_seen_date, '' as last_seen_date
                 FROM products p
                 WHERE 1=1
             '''
@@ -2665,8 +4108,8 @@ class ProductDatabase:
                 query += " AND (p.\"Product Strain\" LIKE ? OR p.\"Lineage\" LIKE ?)"
                 params.extend([f"%{strain}%", f"%{strain}%"])
             
-            # Order by relevance (exact matches first, then by occurrence count)
-            query += " ORDER BY CASE WHEN p.\"Product Name*\" LIKE ? THEN 1 ELSE 0 END DESC, p.total_occurrences DESC LIMIT 1"
+            # Order by relevance (exact matches first, then by ID)
+            query += " ORDER BY CASE WHEN p.\"Product Name*\" LIKE ? THEN 1 ELSE 0 END DESC, p.id DESC LIMIT 1"
             params.append(f"%{normalized_name}%")
             
             cursor.execute(query, params)
@@ -2894,7 +4337,7 @@ class ProductDatabase:
                         FROM products p
                         LEFT JOIN strains s ON p."Product Strain" = s.strain_name
                         WHERE p."Product Name*" LIKE ? OR p."Product Name*" LIKE ?
-                        ORDER BY p.total_occurrences DESC
+                        ORDER BY p.id DESC
                         LIMIT 20
                     ''', (f'%{term}%', f'%{term}%'))
                     
@@ -2923,7 +4366,7 @@ class ProductDatabase:
                     FROM products p
                     LEFT JOIN strains s ON p."Product Strain" = s.strain_name
                     WHERE p."Product Type*" = ?
-                    ORDER BY p.total_occurrences DESC
+                    ORDER BY p.id DESC
                     LIMIT 10
                 ''', (product_type,))
                 
@@ -2952,7 +4395,7 @@ class ProductDatabase:
                     FROM products p
                     LEFT JOIN strains s ON p."Product Strain" = s.strain_name
                     WHERE s.strain_name LIKE ? OR p."Product Strain" LIKE ?
-                    ORDER BY p.total_occurrences DESC
+                    ORDER BY p.id DESC
                     LIMIT 10
                 ''', (f'%{strain_name}%', f'%{strain_name}%'))
                 
@@ -3478,6 +4921,261 @@ class ProductDatabase:
         except Exception as e:
             logging.error(f"Error clearing database data: {e}")
             raise
+
+    def get_all_products(self) -> List[Dict[str, Any]]:
+        """Get all products from the database for export."""
+        try:
+            self.init_database()
+            
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                SELECT p.id, p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
+                       p."Description", p."Weight*", p."Weight Unit* (grams/gm or ounces/oz)", p."Price* (Tier Name for Bulk)", 
+                       p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio", p."State", p."Is Sample? (yes/no)",
+                       p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*", p."Cost*",
+                       p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens",
+                       p."Solvent", p."Accepted Date", p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients",
+                       p."CombinedWeight", p."Ratio_or_THC_CBD", p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN",
+                       p."ProductName", p."Units", p."Price", p."DOH Compliant (Yes/No)", p."Joint Ratio", p."Quantity Received*", p."qty",
+                       p."AI", p."AJ", p."AK"
+                FROM products p
+                ORDER BY p.id
+            ''')
+            
+            results = cursor.fetchall()
+            products = []
+            
+            for result in results:
+                product = {
+                    'id': result[0],
+                    'Product Name*': result[1],
+                    'Product Type*': result[2],
+                    'Vendor/Supplier*': result[3],
+                    'Product Brand': result[4],
+                    'Lineage': result[5],
+                    'Description': result[6],
+                    'Weight*': result[7],
+                    'Weight Unit* (grams/gm or ounces/oz)': result[8],
+                    'Price* (Tier Name for Bulk)': result[9],
+                    'Quantity*': result[10],
+                    'DOH': result[11],
+                    'Concentrate Type': result[12],
+                    'Ratio': result[13],
+                    'JointRatio': result[14],
+                    'State': result[15],
+                    'Is Sample? (yes/no)': result[16],
+                    'Is MJ product?(yes/no)': result[17],
+                    'Discountable? (yes/no)': result[18],
+                    'Room*': result[19],
+                    'Batch Number': result[20],
+                    'Lot Number': result[21],
+                    'Barcode*': result[22],
+                    'Cost*': result[23],
+                    'Medical Only (Yes/No)': result[24],
+                    'Med Price': result[25],
+                    'Expiration Date(YYYY-MM-DD)': result[26],
+                    'Is Archived? (yes/no)': result[27],
+                    'THC Per Serving': result[28],
+                    'Allergens': result[29],
+                    'Solvent': result[30],
+                    'Accepted Date': result[31],
+                    'Internal Product Identifier': result[32],
+                    'Product Tags (comma separated)': result[33],
+                    'Image URL': result[34],
+                    'Ingredients': result[35],
+                    'CombinedWeight': result[36],
+                    'Ratio_or_THC_CBD': result[37],
+                    'Description_Complexity': result[38],
+                    'Total THC': result[39],
+                    'THCA': result[40],
+                    'CBDA': result[41],
+                    'CBN': result[42],
+                    'ProductName': result[43],
+                    'Units': result[44],
+                    'Price': result[45],
+                    'DOH Compliant (Yes/No)': result[46],
+                    'Joint Ratio': result[47],
+                    'Quantity Received*': result[48],
+                    'qty': result[49],
+                    'AI': result[50],
+                    'AJ': result[51],
+                    'AK': result[52]
+                }
+                products.append(product)
+            
+            return products
+            
+        except Exception as e:
+            logger.error(f"Error getting all products: {e}")
+            return []
+    
+    def update_all_product_strains(self) -> Dict[str, Any]:
+        """Update all existing Product Strain column values using the _calculate_product_strain logic."""
+        try:
+            self.init_database()
+            
+            with self._write_lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                
+                # Get all products with their data
+                cursor.execute('''
+                    SELECT id, "Product Type*", "Product Name*", "Description", "Ratio"
+                    FROM products
+                ''')
+                products = cursor.fetchall()
+                
+                updated_count = 0
+                for product_id, product_type, product_name, description, ratio in products:
+                    # Calculate the correct Product Strain value
+                    new_strain = self._calculate_product_strain(
+                        product_type or '',
+                        product_name or '',
+                        description or '',
+                        ratio or ''
+                    )
+                    
+                    # Update the product
+                    cursor.execute('''
+                        UPDATE products 
+                        SET "Product Strain" = ?
+                        WHERE id = ?
+                    ''', (new_strain, product_id))
+                    updated_count += 1
+                
+                conn.commit()
+                logger.info(f"Updated {updated_count} product strains")
+                
+                return {
+                    'success': True,
+                    'updated_count': updated_count,
+                    'message': f'Successfully updated {updated_count} product strains'
+                }
+                
+        except Exception as e:
+            logger.error(f"Error updating product strains: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'message': f'Failed to update product strains: {e}'
+            }
+    
+    def update_all_ratio_or_thc_cbd(self) -> Dict[str, Any]:
+        """Update all existing Ratio_or_THC_CBD column values using the _calculate_ratio_or_thc_cbd logic."""
+        try:
+            self.init_database()
+            
+            with self._write_lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                
+                # Get all products with their THC/CBD values and Ratio column
+                cursor.execute('''
+                    SELECT id, "Product Name*", "Product Type*", "THC test result", "CBD test result", "Ratio", "Ratio_or_THC_CBD"
+                    FROM products
+                ''')
+                products = cursor.fetchall()
+                
+                updated_count = 0
+                for product_id, product_name, product_type, thc_value, cbd_value, ratio_value, current_ratio in products:
+                    # Only update if current value is placeholder or doesn't contain actual values
+                    if (current_ratio in ['THC: | BR | C', 'THC: CBD:', 'THC:\nCBD:', '', "'THC: | BR | C'"] or 
+                        (current_ratio and 'THC:' in current_ratio and 'CBD:' in current_ratio and '%' not in current_ratio) or
+                        (current_ratio and current_ratio.strip() == 'THC: | BR | C') or
+                        (current_ratio and current_ratio.strip() == "'THC: | BR | C'") or
+                        (current_ratio and current_ratio.strip() == "'THC: | BR | C'") or
+                        (current_ratio and current_ratio.strip() == "'THC: | BR | C'") or
+                        (current_ratio and current_ratio.strip() == "'THC: | BR | C'") or
+                        (current_ratio and current_ratio.strip() == "'THC: | BR | C'") or
+                        (current_ratio and current_ratio.strip() == "'THC: | BR | C'") or
+                        (current_ratio and current_ratio.strip() == "'THC: | BR | C'") or
+                        (current_ratio and current_ratio.strip() == "'THC: | BR | C'") or
+                        (current_ratio and current_ratio.strip() == "'THC: | BR | C'") or
+                        (current_ratio and current_ratio.strip() == "'THC: | BR | C'") or
+                        (current_ratio and current_ratio.strip() == "'THC: | BR | C'")):
+                        # Use the proper calculation method based on product type
+                        new_ratio = self._calculate_ratio_or_thc_cbd(
+                            product_type, 
+                            ratio_value,  # Use Ratio column for non-classic types
+                            '',  # joint_ratio not used in this context
+                            product_name,
+                            str(thc_value) if thc_value else '',  # Pass THC value for classic types
+                            str(cbd_value) if cbd_value else ''   # Pass CBD value for classic types
+                        )
+                        
+                        # Update the product
+                        cursor.execute('''
+                            UPDATE products 
+                            SET "Ratio_or_THC_CBD" = ?
+                            WHERE id = ?
+                        ''', (new_ratio, product_id))
+                        updated_count += 1
+                
+                conn.commit()
+                logger.info(f"Updated {updated_count} ratio_or_thc_cbd values")
+                
+                return {
+                    'success': True,
+                    'updated_count': updated_count,
+                    'message': f'Successfully updated {updated_count} ratio_or_thc_cbd values'
+                }
+                
+        except Exception as e:
+            logger.error(f"Error updating ratio_or_thc_cbd: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'message': f'Failed to update ratio_or_thc_cbd: {e}'
+            }
+    
+    def update_all_joint_ratios(self) -> Dict[str, Any]:
+        """Update all JointRatio values to remove ' x 1' suffix."""
+        try:
+            self.init_database()
+            
+            with self._write_lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                
+                # Get all products with JointRatio values
+                cursor.execute('''
+                    SELECT id, "JointRatio"
+                    FROM products
+                    WHERE "JointRatio" LIKE '% x 1'
+                ''')
+                products = cursor.fetchall()
+                
+                updated_count = 0
+                for product_id, joint_ratio in products:
+                    # Remove ' x 1' from the end
+                    new_joint_ratio = joint_ratio.replace(' x 1', '')
+                    
+                    # Update the product
+                    cursor.execute('''
+                        UPDATE products 
+                        SET "JointRatio" = ?
+                        WHERE id = ?
+                    ''', (new_joint_ratio, product_id))
+                    updated_count += 1
+                
+                conn.commit()
+                logger.info(f"Updated {updated_count} joint ratios")
+                
+                return {
+                    'success': True,
+                    'updated_count': updated_count,
+                    'message': f'Successfully updated {updated_count} joint ratios'
+                }
+                
+        except Exception as e:
+            logger.error(f"Error updating joint ratios: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'message': f'Failed to update joint ratios: {e}'
+            }
 
 def get_product_database():
     # CRITICAL FIX: Use correct database path
