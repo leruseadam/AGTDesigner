@@ -166,7 +166,6 @@ class ProductDatabase:
                         "Batch Number" TEXT,
                         "Lot Number" TEXT,
                         "Barcode*" TEXT,
-                        "Cost*" TEXT,
                         "Medical Only (Yes/No)" TEXT,
                         "Med Price" TEXT,
                         "Expiration Date(YYYY-MM-DD)" TEXT,
@@ -353,7 +352,6 @@ class ProductDatabase:
                     "Batch Number" TEXT,
                     "Lot Number" TEXT,
                     "Barcode*" TEXT,
-                    "Cost*" TEXT,
                     "Medical Only (Yes/No)" TEXT,
                     "Med Price" TEXT,
                     "Expiration Date(YYYY-MM-DD)" TEXT,
@@ -853,7 +851,7 @@ class ProductDatabase:
                             "Product Name*", normalized_name, "Product Strain", "Product Type*", "Vendor/Supplier*", "Product Brand",
                             "Description", "Weight*", "Weight Unit* (grams/gm or ounces/oz)", "Units", "Price", "Lineage", first_seen_date, last_seen_date, created_at, updated_at,
                             "Quantity*", "DOH", "Concentrate Type", "Ratio", "JointRatio", "Test result unit (% or mg)", "State", "Is Sample? (yes/no)", 
-                            "Is MJ product?(yes/no)", "Discountable? (yes/no)", "Room*", "Batch Number", "Lot Number", "Barcode*", "Cost*",
+                            "Is MJ product?(yes/no)", "Discountable? (yes/no)", "Room*", "Batch Number", "Lot Number", "Barcode*",
                             "Medical Only (Yes/No)", "Med Price", "Expiration Date(YYYY-MM-DD)", "Is Archived? (yes/no)", 
                             "THC Per Serving", "Allergens", "Solvent", "Accepted Date", "Internal Product Identifier", 
                             "Product Tags (comma separated)", "Image URL", "Ingredients", "CombinedWeight",                             "ratio_or_thc_cbd", 
@@ -891,7 +889,6 @@ class ProductDatabase:
                         product_data.get('Batch Number', ''),
                         product_data.get('Lot Number', ''),
                         product_data.get('Barcode*', ''),
-                        product_data.get('Cost*', ''),
                         product_data.get('Medical Only (Yes/No)', ''),
                         product_data.get('Med Price', ''),
                         product_data.get('Expiration Date(YYYY-MM-DD)', ''),
@@ -1039,7 +1036,6 @@ class ProductDatabase:
                         'Batch Number': row_dict.get('Batch Number', ''),
                         'Lot Number': row_dict.get('Lot Number', ''),
                         'Barcode*': row_dict.get('Barcode*', ''),
-                        'Cost*': row_dict.get('Cost*', ''),
                         'Medical Only (Yes/No)': row_dict.get('Medical Only (Yes/No)', ''),
                         'Med Price': row_dict.get('Med Price', ''),
                         'Expiration Date(YYYY-MM-DD)': row_dict.get('Expiration Date(YYYY-MM-DD)', ''),
@@ -1736,7 +1732,7 @@ class ProductDatabase:
                 # Product flags
                 ['Is Sample? (yes/no)', 'Is MJ product?(yes/no)', 'Discountable? (yes/no)', 'Room*'],
                 # Batch and inventory info
-                ['Batch Number', 'Lot Number', 'Barcode*', 'Cost*'],
+                ['Batch Number', 'Lot Number', 'Barcode*'],
                 # Medical and pricing
                 ['Medical Only (Yes/No)', 'Med Price', 'Expiration Date(YYYY-MM-DD)'],
                 # Additional fields
@@ -1754,7 +1750,7 @@ class ProductDatabase:
                 SELECT p.id, p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
                        p."Description", p."Weight*", p."Weight Unit* (grams/gm or ounces/oz)", p."Price* (Tier Name for Bulk)", 
                        p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio", p."State", p."Is Sample? (yes/no)",
-                       p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*", p."Cost*",
+                       p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*",
                        p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens",
                        p."Solvent", p."Accepted Date", p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients",
                        p."CombinedWeight", p."Total THC", p."THCA", p."CBDA", p."CBN",
@@ -1796,24 +1792,23 @@ class ProductDatabase:
                     'Batch Number': result[20],
                     'Lot Number': result[21],
                     'Barcode*': result[22],
-                    'Cost*': result[23],
-                    'Medical Only (Yes/No)': result[24],
-                    'Med Price': result[25],
-                    'Expiration Date(YYYY-MM-DD)': result[26],
-                    'Is Archived? (yes/no)': result[27],
-                    'THC Per Serving': result[28],
-                    'Allergens': result[29],
-                    'Solvent': result[30],
-                    'Accepted Date': result[31],
-                    'Internal Product Identifier': result[32],
-                    'Product Tags (comma separated)': result[33],
-                    'Image URL': result[34],
-                    'Ingredients': result[35],
-                    'CombinedWeight': result[36],
-                    'Total THC': result[37],
-                    'THCA': result[38],
-                    'CBDA': result[39],
-                    'CBN': result[40],
+                    'Medical Only (Yes/No)': result[23],
+                    'Med Price': result[24],
+                    'Expiration Date(YYYY-MM-DD)': result[25],
+                    'Is Archived? (yes/no)': result[26],
+                    'THC Per Serving': result[27],
+                    'Allergens': result[28],
+                    'Solvent': result[29],
+                    'Accepted Date': result[30],
+                    'Internal Product Identifier': result[31],
+                    'Product Tags (comma separated)': result[32],
+                    'Image URL': result[33],
+                    'Ingredients': result[34],
+                    'CombinedWeight': result[35],
+                    'Total THC': result[36],
+                    'THCA': result[37],
+                    'CBDA': result[38],
+                    'CBN': result[39],
                     'DOH Compliant (Yes/No)': result[41]
                 }
                 products_data.append(product)
@@ -1945,7 +1940,6 @@ class ProductDatabase:
                     ('"Batch Number"', ''),
                     ('"Lot Number"', ''),
                     ('"Barcode*"', ''),
-                    ('"Cost*"', ''),
                     ('"Medical Only (Yes/No)"', 'No'),
                     ('"Med Price"', ''),
                     ('"Expiration Date(YYYY-MM-DD)"', ''),
@@ -2113,7 +2107,6 @@ class ProductDatabase:
                 ('"Batch Number"', 'TEXT'),
                 ('"Lot Number"', 'TEXT'),
                 ('"Barcode*"', 'TEXT'),
-                ('"Cost*"', 'TEXT'),
                 ('"Medical Only (Yes/No)"', 'TEXT'),
                 ('"Med Price"', 'TEXT'),
                 ('"Expiration Date(YYYY-MM-DD)"', 'TEXT'),
@@ -3686,7 +3679,7 @@ class ProductDatabase:
                        p."Description", p."Weight*", p."Weight Unit* (grams/gm or ounces/oz)", p."Price* (Tier Name for Bulk)", 
                        '' as thc_test_result, '' as cbd_test_result, p."Test result unit (% or mg)",
                        p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio", p."State", p."Is Sample? (yes/no)",
-                       p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*", p."Cost*",
+                       p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*",
                        p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens",
                        p."Solvent", p."Accepted Date", p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients",
                        p."CombinedWeight", p."Ratio_or_THC_CBD", p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN"
@@ -3748,26 +3741,25 @@ class ProductDatabase:
                         'batch_number': result[29],  # batch_number
                         'lot_number': result[30],  # lot_number
                         'barcode': result[31],  # barcode
-                        'cost': result[32],  # cost
-                        'Medical Only': result[33],  # medical_only
-                        'med_price': result[34],  # med_price
-                        'expiration_date': result[35],  # expiration_date
-                        'is_archived': result[36],  # is_archived
-                        'thc_per_serving': result[37],  # thc_per_serving
-                        'allergens': result[38],  # allergens
-                        'solvent': result[39],  # solvent
-                        'accepted_date': result[40],  # accepted_date
-                        'internal_product_identifier': result[41],  # internal_product_identifier
-                        'product_tags': result[42],  # product_tags
-                        'image_url': result[43],  # image_url
-                        'ingredients': result[44],  # ingredients
-                        'combined_weight': result[45],  # combined_weight
-                        'ratio_or_thc_cbd': result[46],  # ratio_or_thc_cbd
-                        'description_complexity': result[47],  # description_complexity
-                        'Total THC': result[48],  # total_thc
-                        'THCA': result[49],  # thca
-                        'CBDA': result[50],  # cbda
-                        'CBN': result[51],  # cbn
+                        'Medical Only': result[32],  # medical_only
+                        'med_price': result[33],  # med_price
+                        'expiration_date': result[34],  # expiration_date
+                        'is_archived': result[35],  # is_archived
+                        'thc_per_serving': result[36],  # thc_per_serving
+                        'allergens': result[37],  # allergens
+                        'solvent': result[38],  # solvent
+                        'accepted_date': result[39],  # accepted_date
+                        'internal_product_identifier': result[40],  # internal_product_identifier
+                        'product_tags': result[41],  # product_tags
+                        'image_url': result[42],  # image_url
+                        'ingredients': result[43],  # ingredients
+                        'combined_weight': result[44],  # combined_weight
+                        'ratio_or_thc_cbd': result[45],  # ratio_or_thc_cbd
+                        'description_complexity': result[46],  # description_complexity
+                        'Total THC': result[47],  # total_thc
+                        'THCA': result[48],  # thca
+                        'CBDA': result[49],  # cbda
+                        'CBN': result[50],  # cbn
                         # Add Excel column name compatibility fields
                         'ProductName': result[1],
                         'ProductBrand': result[5],
@@ -4017,7 +4009,6 @@ class ProductDatabase:
                 'batch_number': product.get('Batch Number', ''),
                 'lot_number': product.get('Lot Number', ''),
                 'barcode': product.get('Barcode*', ''),
-                'cost': product.get('Cost*', ''),
                 'Medical Only': product.get('Medical Only (Yes/No)', ''),
                 'med_price': product.get('Med Price', ''),
                 'expiration_date': product.get('Expiration Date(YYYY-MM-DD)', ''),
@@ -4934,7 +4925,7 @@ class ProductDatabase:
                 SELECT p.id, p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
                        p."Description", p."Weight*", p."Weight Unit* (grams/gm or ounces/oz)", p."Price* (Tier Name for Bulk)", 
                        p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio", p."State", p."Is Sample? (yes/no)",
-                       p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*", p."Cost*",
+                       p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*",
                        p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens",
                        p."Solvent", p."Accepted Date", p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients",
                        p."CombinedWeight", p."Ratio_or_THC_CBD", p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN",
@@ -4972,20 +4963,19 @@ class ProductDatabase:
                     'Batch Number': result[20],
                     'Lot Number': result[21],
                     'Barcode*': result[22],
-                    'Cost*': result[23],
-                    'Medical Only (Yes/No)': result[24],
-                    'Med Price': result[25],
-                    'Expiration Date(YYYY-MM-DD)': result[26],
-                    'Is Archived? (yes/no)': result[27],
-                    'THC Per Serving': result[28],
-                    'Allergens': result[29],
-                    'Solvent': result[30],
-                    'Accepted Date': result[31],
-                    'Internal Product Identifier': result[32],
-                    'Product Tags (comma separated)': result[33],
-                    'Image URL': result[34],
-                    'Ingredients': result[35],
-                    'CombinedWeight': result[36],
+                    'Medical Only (Yes/No)': result[23],
+                    'Med Price': result[24],
+                    'Expiration Date(YYYY-MM-DD)': result[25],
+                    'Is Archived? (yes/no)': result[26],
+                    'THC Per Serving': result[27],
+                    'Allergens': result[28],
+                    'Solvent': result[29],
+                    'Accepted Date': result[30],
+                    'Internal Product Identifier': result[31],
+                    'Product Tags (comma separated)': result[32],
+                    'Image URL': result[33],
+                    'Ingredients': result[34],
+                    'CombinedWeight': result[35],
                     'Ratio_or_THC_CBD': result[37],
                     'Description_Complexity': result[38],
                     'Total THC': result[39],
