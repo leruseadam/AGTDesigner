@@ -1540,14 +1540,14 @@ def upload_file_simple():
         # Clear any existing status for this filename and mark as processing
         update_processing_status(file.filename, 'processing')
         
-        # Start background thread for fast processing
+        # Start background thread for ultra-fast processing
         try:
-            thread = threading.Thread(target=process_excel_background, args=(file.filename, file_path))
+            thread = threading.Thread(target=ultra_fast_background_processing, args=(file.filename, file_path))
             thread.daemon = True
             thread.start()
-            logging.info(f"Background processing thread started for {file.filename}")
+            logging.info(f"Ultra-fast background processing thread started for {file.filename}")
         except Exception as thread_error:
-            logging.error(f"Failed to start background thread: {thread_error}")
+            logging.error(f"Failed to start ultra-fast background thread: {thread_error}")
             update_processing_status(file.filename, f'error: Failed to start processing')
             return jsonify({'error': 'Failed to start file processing'}), 500
         
