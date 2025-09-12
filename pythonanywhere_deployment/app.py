@@ -12096,6 +12096,6 @@ def backfill_missing_values():
         return jsonify({'success': False, 'message': f'Error backfilling missing values: {str(e)}'})
 
 if __name__ == '__main__':
-    # Create and run the application
-    label_maker = LabelMakerApp()
-    label_maker.run()
+    # Create and run the Flask application
+    app = create_app()
+    app.run(host='0.0.0.0', port=5000, debug=False)
