@@ -92,7 +92,7 @@ async function handleFiles(files) {
         TagManager.clearUIStateForNewFile(true); // Preserve filters during upload
       }
       
-      const response = await fetch('/upload-fast', {
+      const response = await fetch('/upload', {
         method: 'POST',
         body: formData
       });
