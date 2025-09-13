@@ -109,6 +109,9 @@ def process_file_chunked(filepath, filename):
         
         print(f"Completed processing {filename}: {len(all_data)} rows")
         print(f"File still exists at: {filepath}")
+        print(f"Stored in processed_data: {filename in processed_data}")
+        print(f"Processed data keys: {list(processed_data.keys())}")
+        print(f"Data sample: {all_data[0] if all_data else 'No data'}")
         
     except Exception as e:
         print(f"Error processing {filename}: {str(e)}")
@@ -225,7 +228,9 @@ def available_tags():
         all_tags = []
         for filename, data in processed_data.items():
             if data['status'] == 'completed':
-                all_tags.extend(data['data'])
+                # Clean the data before adding
+                cleaned_data = clean_nan_values(data['data'])
+                all_tags.extend(cleaned_data)
         
         return jsonify({
             'success': True,
@@ -234,6 +239,9 @@ def available_tags():
             'message': f'Retrieved {len(all_tags)} tags'
         })
     except Exception as e:
+        print(f"Error in available_tags: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
         return jsonify({'error': f'Failed to get tags: {str(e)}'}), 500
 
 @app.route('/api/initial-data', methods=['GET'])
@@ -243,7 +251,32 @@ def initial_data():
         all_data = []
         for filename, data in processed_data.items():
             if data['status'] == 'completed':
-                all_data.extend(data['data'])
+                print(f"Processing data from {filename}: {len(data['data'])} items")
+                # Clean the data before adding
+                cleaned_data = clean_nan_values(data['data'])
+                all_data.extend(cleaned_data)
+        
+        print(f"Total items to return: {len(all_data)}")
+        
+        # Test JSON serialization step by step
+        try:
+            print("Testing JSON serialization...")
+            json.dumps(all_data[:5])  # Test first 5
+            print("First 5 items JSON serialization successful")
+            
+            json.dumps(all_data)  # Test all data
+            print("Full data JSON serialization successful")
+            
+        except Exception as json_error:
+            print(f"JSON serialization error: {json_error}")
+            # Find the problematic item
+            for i, item in enumerate(all_data):
+                try:
+                    json.dumps(item)
+                except Exception as item_error:
+                    print(f"Problematic item {i}: {item}")
+                    print(f"Item error: {item_error}")
+                    break
         
         return jsonify({
             'success': True,
@@ -252,6 +285,9 @@ def initial_data():
             'message': f'Retrieved {len(all_data)} items'
         })
     except Exception as e:
+        print(f"Error in initial_data: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
         return jsonify({'error': f'Failed to get initial data: {str(e)}'}), 500
 
 @app.route('/api/file-info', methods=['GET'])
@@ -261,19 +297,22 @@ def file_info():
         files_info = []
         for filename, data in processed_data.items():
             file_info = {
-                    'filename': filename,
+                'filename': filename,
                 'status': data['status'],
                 'total_rows': data['total_rows'],
                 'filepath': data.get('filepath', 'Unknown')
             }
             files_info.append(file_info)
-            
-            return jsonify({
-                'success': True,
+        
+        return jsonify({
+            'success': True,
             'files': files_info,
             'total_files': len(files_info)
-            })
+        })
     except Exception as e:
+        print(f"Error in file_info: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
         return jsonify({'error': f'Failed to get file info: {str(e)}'}), 500
 
 @app.route('/api/performance/status', methods=['GET'])
@@ -297,6 +336,16 @@ def clear_cache():
         'message': 'Cache cleared'
     })
 
+@app.route('/api/clear-upload-status', methods=['POST'])
+def clear_upload_status():
+    """Clear upload status endpoint"""
+    global processing_status
+    processing_status = {}
+    return jsonify({
+        'success': True,
+        'message': 'Upload status cleared'
+    })
+
 if __name__ == '__main__':
     print("Starting Flask app...")
-    app.run(debug=True, host='0.0.0.0', port=5001)
+    app.run(debug=True, host='0.0.0.0', port=5002)
