@@ -880,7 +880,7 @@ class JSONMatcher:
             for norm_name, norm_candidates in self._indexed_cache['normalized_names'].items():
                 # Use simple similarity check
                 similarity = SequenceMatcher(None, json_name, norm_name).ratio()
-                if similarity >= 0.7:  # 70% similarity threshold
+                if similarity >= 0.5:  # 50% similarity threshold - lowered for better matching
                     for candidate in norm_candidates:
                         if candidate["idx"] not in candidate_indices:
                             candidates.add(candidate["idx"])
@@ -1473,11 +1473,11 @@ class JSONMatcher:
                             try:
                                 from fuzzywuzzy import fuzz
                                 similarity = fuzz.ratio(product_name.lower(), excel_product_name)
-                                if similarity >= 80:
+                                if similarity >= 70:  # Lowered from 80
                                     score += 35.0
-                                elif similarity >= 60:
+                                elif similarity >= 50:  # Lowered from 60
                                     score += 25.0
-                                elif similarity >= 40:
+                                elif similarity >= 30:  # Lowered from 40
                                     score += 15.0
                             except ImportError:
                                 # Fallback if fuzzywuzzy is not available
@@ -1485,7 +1485,7 @@ class JSONMatcher:
                                 total_chars = max(len(product_name), len(excel_product_name))
                                 if total_chars > 0:
                                     char_similarity = common_chars / total_chars
-                                    if char_similarity >= 0.3:
+                                    if char_similarity >= 0.2:  # Lowered from 0.3
                                         score += 10.0
                             
                             # Store match by product name to prevent duplicates
@@ -1540,7 +1540,7 @@ class JSONMatcher:
                 # IMPROVED: Process items with more lenient matching - always create a product
                 # Lower thresholds to retain more matches
                 best_score_num = float(best_score) if best_score is not None else 0.0
-                if best_match is not None and not (hasattr(best_match, 'empty') and best_match.empty) and best_score_num >= 15.0:  # Much more lenient threshold
+                if best_match is not None and not (hasattr(best_match, 'empty') and best_match.empty) and best_score_num >= 5.0:  # Much more lenient threshold - lowered from 15.0
                     try:
                         # Check if this is a database match
                         if match_source == 'Product Database Match':
@@ -1629,7 +1629,7 @@ class JSONMatcher:
                     logging.info(f"📝 No good match found for '{product_name}' (best score: {best_score:.1f}) - creating from JSON data")
                     
                     # Try to use partial match data if available
-                    if best_match is not None and not (hasattr(best_match, 'empty') and best_match.empty) and best_score_num < 15.0:
+                    if best_match is not None and not (hasattr(best_match, 'empty') and best_match.empty) and best_score_num < 5.0:
                         # Use the partial match but enhance it with JSON data
                         try:
                             if match_source == 'Product Database Match':
@@ -3033,8 +3033,8 @@ class JSONMatcher:
                     # Use the higher of the two similarity scores
                     max_similarity = max(similarity, partial_similarity)
                     
-                    # Include products with 60% or higher similarity
-                    if max_similarity >= 60:
+                    # Include products with 40% or higher similarity - lowered for better matching
+                    if max_similarity >= 40:
                         product['similarity_score'] = max_similarity
                         similar_products.append(product)
             
