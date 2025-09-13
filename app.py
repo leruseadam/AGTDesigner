@@ -115,7 +115,7 @@ def process_file_chunked(filepath, filename):
                 import traceback
                 traceback.print_exc()
                 raise
-            
+
             # Add to all_data
             all_data.extend(chunk_data)
             
@@ -204,7 +204,7 @@ def upload_file():
             }
             
             # Start background processing
-            thread = threading.Thread(target=process_file_chunked, args=(filepath, filename))
+            thread = threading.Thread(target=process_file_chunked, args=(filename, filepath))
             thread.daemon = True
             thread.start()
             
@@ -271,7 +271,10 @@ def available_tags():
             if data['status'] == 'completed':
                 # Clean the data before adding
                 cleaned_data = clean_nan_values(data['data'])
-                all_tags.extend(cleaned_data)
+                if isinstance(cleaned_data, list):
+                    all_tags.extend(cleaned_data)
+            else:
+                    all_tags.append(cleaned_data)
         
         return jsonify({
             'success': True,
@@ -306,7 +309,7 @@ def initial_data():
                 except Exception as e:
                     print(f"Error processing {filename}: {e}")
                     continue
-        
+                
         print(f"Total items to return: {len(all_data)}")
         
         return jsonify({
@@ -377,6 +380,43 @@ def clear_upload_status():
         'message': 'Upload status cleared'
     })
 
+@app.route('/api/selected-tags')
+def selected_tags():
+    """Get selected tags endpoint"""
+    try:
+        # For now, return empty list - this can be enhanced later
+        return jsonify({
+                'success': True,
+            'selected_tags': []
+        })
+    except Exception as e:
+        print(f"Error in selected_tags: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/filter-options')
+def filter_options():
+    """Get filter options endpoint"""
+    try:
+        # For now, return empty filter options - this can be enhanced later
+        return jsonify({
+            'success': True,
+            'filter_options': {
+                'product_types': [],
+                'brands': [],
+                'rooms': [],
+                'states': []
+            }
+        })
+    except Exception as e:
+        print(f"Error in filter_options: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 if __name__ == '__main__':
     print("Starting Flask app...")
-    app.run(debug=True, host='0.0.0.0', port=5002)
+    app.run(debug=False, host='0.0.0.0', port=5002)
