@@ -35,7 +35,7 @@ def clean_nan_values(obj):
         return [clean_nan_values(item) for item in obj]
     elif isinstance(obj, float) and np.isnan(obj):
         return None  # Convert NaN to None for JSON
-    else:
+        else:
         return obj
 
 def process_file_chunked(filepath, filename):
@@ -165,16 +165,16 @@ def upload_file():
             thread.start()
             
             # Return immediate response
-            return jsonify({
+        return jsonify({
                 'success': True,
                 'message': f'File {filename} uploaded successfully. Processing in background...',
                 'filename': filename,
                 'status': 'processing',
                 'file_size': file_size
             })
-        else:
+            else:
             return jsonify({'error': 'Invalid file type. Please upload Excel files only.'}), 400
-            
+        
     except Exception as e:
         print(f"Upload error: {str(e)}")
         print(traceback.format_exc())
@@ -184,10 +184,10 @@ def upload_file():
 def upload_status():
     """Upload status endpoint with progress tracking"""
     try:
-        filename = request.args.get('filename')
-        if not filename:
-            return jsonify({'error': 'No filename provided'}), 400
-        
+    filename = request.args.get('filename')
+    if not filename:
+        return jsonify({'error': 'No filename provided'}), 400
+    
         print(f"Status check for filename: {filename}")
         print(f"Processing status keys: {list(processing_status.keys())}")
         print(f"Processed data keys: {list(processed_data.keys())}")
@@ -206,15 +206,15 @@ def upload_status():
                 'success': True,
                 'total_rows': processed_data[filename]['total_rows']
             })
-        else:
-            return jsonify({
+            else:
+                return jsonify({
                 'status': 'not_found',
                 'filename': filename,
                 'message': 'File not found',
                 'progress': 0,
                 'success': False
             })
-    except Exception as e:
+        except Exception as e:
         print(f"Status check error: {str(e)}")
         return jsonify({'error': f'Status check failed: {str(e)}'}), 500
 
@@ -245,8 +245,8 @@ def initial_data():
             if data['status'] == 'completed':
                 all_data.extend(data['data'])
         
-        return jsonify({
-            'success': True,
+                    return jsonify({
+                'success': True,
             'data': all_data,
             'total_count': len(all_data),
             'message': f'Retrieved {len(all_data)} items'
@@ -261,25 +261,25 @@ def file_info():
         files_info = []
         for filename, data in processed_data.items():
             file_info = {
-                'filename': filename,
+                    'filename': filename,
                 'status': data['status'],
                 'total_rows': data['total_rows'],
                 'filepath': data.get('filepath', 'Unknown')
             }
             files_info.append(file_info)
-        
-        return jsonify({
-            'success': True,
+            
+            return jsonify({
+                'success': True,
             'files': files_info,
             'total_files': len(files_info)
-        })
+            })
     except Exception as e:
         return jsonify({'error': f'Failed to get file info: {str(e)}'}), 500
 
 @app.route('/api/performance/status', methods=['GET'])
 def performance_status():
     """Performance status endpoint"""
-    return jsonify({
+        return jsonify({
         'status': 'ok',
         'message': 'Performance monitoring active',
         'processed_files': len(processed_data),
@@ -292,10 +292,10 @@ def clear_cache():
     global processed_data, processing_status
     processed_data = {}
     processing_status = {}
-    return jsonify({
-        'success': True,
+        return jsonify({
+            'success': True,
         'message': 'Cache cleared'
-    })
+        })
 
 if __name__ == '__main__':
     print("Starting Flask app...")
