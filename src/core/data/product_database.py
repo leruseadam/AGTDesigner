@@ -4067,7 +4067,7 @@ class ProductDatabase:
             query = '''
                 SELECT p.id, p."Product Name*", p."Product Strain", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
                        p."Description", p."Weight*", p."Units", p."Price", p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio",
-                       p."State", p."Is Sample? (yes/no)", p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*", p."Cost*",
+                       p."State", p."Is Sample? (yes/no)", p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*",
                        p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens", p."Solvent", p."Accepted Date",
                        p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."CombinedWeight", p."Ratio_or_THC_CBD", 
                        p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN", 0 as total_occurrences, '' as first_seen_date, '' as last_seen_date
@@ -4135,29 +4135,28 @@ class ProductDatabase:
                     'batch_number': result[21],  # Batch Number
                     'lot_number': result[22],  # Lot Number
                     'barcode': result[23],  # Barcode
-                    'cost': result[24],  # Cost
-                    'Medical Only': result[25],  # Medical Only
-                    'med_price': result[26],  # Med Price
-                    'expiration_date': result[27],  # Expiration Date
-                    'is_archived': result[28],  # Is Archived
-                    'thc_per_serving': result[29],  # THC Per Serving
-                    'allergens': result[30],  # Allergens
-                    'solvent': result[31],  # Solvent
-                    'accepted_date': result[32],  # Accepted Date
-                    'internal_product_identifier': result[33],  # Internal Product Identifier
-                    'product_tags': result[34],  # Product Tags
-                    'image_url': result[35],  # Image URL
-                    'ingredients': result[36],  # Ingredients
-                    'combined_weight': result[37],  # Combined Weight
-                    'ratio_or_thc_cbd': result[38],  # Ratio or THC/CBD
-                    'description_complexity': result[39],  # Description Complexity
-                    'Total THC': result[40],  # Total THC
-                    'THCA': result[41],  # THCA
-                    'CBDA': result[42],  # CBDA
-                    'CBN': result[43],  # CBN
-                    'total_occurrences': result[44],
-                    'first_seen_date': result[45],
-                    'last_seen_date': result[46],
+                    'Medical Only': result[24],  # Medical Only
+                    'med_price': result[25],  # Med Price
+                    'expiration_date': result[26],  # Expiration Date
+                    'is_archived': result[27],  # Is Archived
+                    'thc_per_serving': result[28],  # THC Per Serving
+                    'allergens': result[29],  # Allergens
+                    'solvent': result[30],  # Solvent
+                    'accepted_date': result[31],  # Accepted Date
+                    'internal_product_identifier': result[32],  # Internal Product Identifier
+                    'product_tags': result[33],  # Product Tags
+                    'image_url': result[34],  # Image URL
+                    'ingredients': result[35],  # Ingredients
+                    'combined_weight': result[36],  # Combined Weight
+                    'ratio_or_thc_cbd': result[37],  # Ratio or THC/CBD
+                    'description_complexity': result[38],  # Description Complexity
+                    'Total THC': result[39],  # Total THC
+                    'THCA': result[40],  # THCA
+                    'CBDA': result[41],  # CBDA
+                    'CBN': result[42],  # CBN
+                    'total_occurrences': result[43],
+                    'first_seen_date': result[44],
+                    'last_seen_date': result[45],
                     # Add Excel column name compatibility fields
                     'ProductBrand': result[5],
                     'ProductStrain': result[2],
@@ -4822,10 +4821,16 @@ class ProductDatabase:
             
             # Search for products with exact name match
             cursor.execute('''
-                SELECT p.*, s.canonical_lineage, s.sovereign_lineage
+                SELECT p.id, p."Product Name*", p.normalized_name, p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
+                       p."Description", p."Weight*", p."Units", p."Price", p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio",
+                       p."State", p."Is Sample? (yes/no)", p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*",
+                       p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens", p."Solvent", p."Accepted Date",
+                       p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."CombinedWeight", p."Ratio_or_THC_CBD", 
+                       p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN", p.total_occurrences, p.first_seen_date, p.last_seen_date,
+                       s.canonical_lineage, s.sovereign_lineage
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
-                WHERE p.product_name = ?
+                WHERE p."Product Name*" = ?
                 ORDER BY p.last_seen_date DESC
             ''', (product_name,))
             
@@ -4848,10 +4853,16 @@ class ProductDatabase:
             
             # Search for products with matching strain
             cursor.execute('''
-                SELECT p.*, s.canonical_lineage, s.sovereign_lineage
+                SELECT p.id, p."Product Name*", p.normalized_name, p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
+                       p."Description", p."Weight*", p."Units", p."Price", p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio",
+                       p."State", p."Is Sample? (yes/no)", p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*",
+                       p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens", p."Solvent", p."Accepted Date",
+                       p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."CombinedWeight", p."Ratio_or_THC_CBD", 
+                       p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN", p.total_occurrences, p.first_seen_date, p.last_seen_date,
+                       s.canonical_lineage, s.sovereign_lineage
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
-                WHERE p.product_strain LIKE ? OR s.strain_name LIKE ?
+                WHERE p."Product Strain" LIKE ? OR s.strain_name LIKE ?
                 ORDER BY p.last_seen_date DESC
             ''', (f'%{strain_name}%', f'%{strain_name}%'))
             
@@ -4874,7 +4885,13 @@ class ProductDatabase:
             
             # Search for products with matching type and strain
             cursor.execute('''
-                SELECT p.*, s.canonical_lineage, s.sovereign_lineage
+                SELECT p.id, p."Product Name*", p.normalized_name, p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
+                       p."Description", p."Weight*", p."Units", p."Price", p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio",
+                       p."State", p."Is Sample? (yes/no)", p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*",
+                       p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens", p."Solvent", p."Accepted Date",
+                       p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."CombinedWeight", p."Ratio_or_THC_CBD", 
+                       p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN", p.total_occurrences, p.first_seen_date, p.last_seen_date,
+                       s.canonical_lineage, s.sovereign_lineage
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
                 WHERE p."Product Type*" = ? AND (p."Product Strain" = ? OR s.strain_name = ?)
