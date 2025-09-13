@@ -165,14 +165,14 @@ def upload_file():
             thread.start()
             
             # Return immediate response
-        return jsonify({
+            return jsonify({
                 'success': True,
                 'message': f'File {filename} uploaded successfully. Processing in background...',
                 'filename': filename,
                 'status': 'processing',
                 'file_size': file_size
             })
-            else:
+        else:
             return jsonify({'error': 'Invalid file type. Please upload Excel files only.'}), 400
         
     except Exception as e:
