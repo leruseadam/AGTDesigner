@@ -5385,7 +5385,7 @@ const TagManager = {
             
             const data = await response.json();
             
-            if (response.ok && data.status === 'ready') {
+            if (response.ok && data.status === 'completed') {
                 console.log('Fallback upload successful');
                 this.updateUploadUI(file.name, 'File uploaded successfully', 'success');
                 // Refresh the page to load the new file
@@ -5430,7 +5430,7 @@ const TagManager = {
                 console.log(`Upload status: ${status} (age: ${age}s, total files: ${totalFiles})`);
                 consecutiveErrors = 0; // Reset error counter on successful response
                 
-                if (status === 'ready' || status === 'done') {
+                if (status === 'completed' || status === 'done') {
                     // File is ready for basic operations
                     console.log(`[UPLOAD DEBUG] File marked as ready: ${filename}`);
                     this.hideExcelLoadingSplash();
