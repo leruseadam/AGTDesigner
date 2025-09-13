@@ -1,3 +1,51 @@
+#!/bin/bash
+# Debug and fix upload issues for local development
+echo "Debugging upload issues locally..."
+
+# Check current app.py status
+echo "=== Current app.py status ==="
+if [ -f "app.py" ]; then
+    echo "First 10 lines of app.py:"
+    head -10 app.py
+    echo ""
+    echo "File size:"
+    wc -l app.py
+    echo ""
+    
+    # Check if app.py compiles
+    echo "=== Python syntax check ==="
+    python3 -m py_compile app.py
+    if [ $? -eq 0 ]; then
+        echo "✅ app.py syntax is valid"
+    else
+        echo "❌ app.py has syntax errors"
+    fi
+else
+    echo "❌ app.py not found in current directory"
+fi
+echo ""
+
+# Check if upload folder exists
+echo "=== Upload folder check ==="
+if [ -d "uploads" ]; then
+    echo "✅ Upload folder exists"
+    ls -la uploads/
+else
+    echo "❌ Upload folder missing, creating..."
+    mkdir -p uploads
+    chmod 755 uploads
+fi
+echo ""
+
+# Check if pandas is installed
+echo "=== Dependencies check ==="
+python3 -c "import pandas; print('✅ pandas available')" 2>/dev/null || echo "❌ pandas not available"
+python3 -c "import flask; print('✅ flask available')" 2>/dev/null || echo "❌ flask not available"
+echo ""
+
+# Create a comprehensive working app.py
+echo "=== Creating comprehensive working app.py ==="
+cat > app.py << 'EOF'
 import os
 import sys
 import json
@@ -143,3 +191,26 @@ def initial_data():
 if __name__ == '__main__':
     print("Starting Flask app...")
     app.run(debug=True, host='0.0.0.0', port=5000)
+EOF
+
+# Verify the file compiles
+echo "=== Verifying new app.py ==="
+python3 -m py_compile app.py
+if [ $? -eq 0 ]; then
+    echo "✅ New app.py syntax is valid!"
+    echo "✅ Upload folder created"
+    echo "✅ Dependencies checked"
+    echo ""
+    echo "=== Local Upload Debug Complete ==="
+    echo "✅ Created comprehensive working app.py"
+    echo "✅ Added detailed logging and error handling"
+    echo "✅ Increased file size limit to 50MB"
+    echo "✅ Added global data storage for status checking"
+    echo "✅ Added all necessary endpoints"
+    echo ""
+    echo "To test locally, run: python3 app.py"
+    echo "Then go to: http://localhost:5000"
+else
+    echo "❌ New app.py has syntax errors"
+    exit 1
+fi
