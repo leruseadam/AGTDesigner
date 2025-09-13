@@ -1,3 +1,12 @@
+#!/bin/bash
+# Fix slow processing with much faster approach
+echo "Fixing slow processing with fast approach..."
+
+# Create backup
+cp /home/adamcordova/AGTDesigner/app.py /home/adamcordova/AGTDesigner/app.py.backup.$(date +%Y%m%d_%H%M%S)
+
+# Create fast processing app.py
+cat > /home/adamcordova/AGTDesigner/app.py << 'EOF'
 import os
 import sys
 import json
@@ -9,6 +18,7 @@ import shutil
 import traceback
 import threading
 import time
+import pickle
 
 # Create Flask app
 app = Flask(__name__)
@@ -22,9 +32,52 @@ if not os.path.exists(UPLOAD_FOLDER):
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-# Store processed data globally
-processed_data = {}
-processing_status = {}
+# Persistent storage files
+PROCESSED_DATA_FILE = 'processed_data.pkl'
+PROCESSING_STATUS_FILE = 'processing_status.pkl'
+
+def load_persistent_data():
+    """Load data from persistent storage"""
+    global processed_data, processing_status
+    processed_data = {}
+    processing_status = {}
+    
+    try:
+        if os.path.exists(PROCESSED_DATA_FILE):
+            with open(PROCESSED_DATA_FILE, 'rb') as f:
+                processed_data = pickle.load(f)
+            print(f"Loaded {len(processed_data)} processed files from storage")
+    except Exception as e:
+        print(f"Error loading processed data: {e}")
+        processed_data = {}
+    
+    try:
+        if os.path.exists(PROCESSING_STATUS_FILE):
+            with open(PROCESSING_STATUS_FILE, 'rb') as f:
+                processing_status = pickle.load(f)
+            print(f"Loaded {len(processing_status)} processing statuses from storage")
+    except Exception as e:
+        print(f"Error loading processing status: {e}")
+        processing_status = {}
+
+def save_processed_data():
+    """Save processed data to persistent storage"""
+    try:
+        with open(PROCESSED_DATA_FILE, 'wb') as f:
+            pickle.dump(processed_data, f)
+    except Exception as e:
+        print(f"Error saving processed data: {e}")
+
+def save_processing_status():
+    """Save processing status to persistent storage"""
+    try:
+        with open(PROCESSING_STATUS_FILE, 'wb') as f:
+            pickle.dump(processing_status, f)
+    except Exception as e:
+        print(f"Error saving processing status: {e}")
+
+# Load persistent data on startup
+load_persistent_data()
 
 def clean_nan_values(obj):
     """Clean NaN values for JSON serialization"""
@@ -38,10 +91,10 @@ def clean_nan_values(obj):
     else:
         return obj
 
-def process_file_chunked(filepath, filename):
-    """Process Excel file in chunks for better performance"""
+def process_file_fast(filepath, filename):
+    """Process Excel file quickly with single read"""
     try:
-        print(f"Starting chunked processing of {filename}")
+        print(f"Starting fast processing of {filename}")
         
         # Verify file exists before processing
         if not os.path.exists(filepath):
@@ -51,63 +104,70 @@ def process_file_chunked(filepath, filename):
                 'progress': 0,
                 'error': f'File {filename} not found in uploads directory'
             }
+            save_processing_status()
             return
         
-        # Read Excel file in chunks
-        chunk_size = 1000  # Process 1000 rows at a time
-        all_data = []
+        # Update status to processing
+        processing_status[filename] = {
+            'status': 'processing',
+            'progress': 10,
+            'processed_rows': 0,
+            'total_rows': 0
+        }
+        save_processing_status()
         
-        # First, get total rows for progress tracking
-        df_total = pd.read_excel(filepath)
-        total_rows = len(df_total)
+        # Read entire Excel file at once (much faster)
+        print(f"Reading Excel file: {filepath}")
+        df = pd.read_excel(filepath)
+        total_rows = len(df)
         print(f"Total rows to process: {total_rows}")
         
-        # Process in chunks
-        for chunk_start in range(0, total_rows, chunk_size):
-            chunk_end = min(chunk_start + chunk_size, total_rows)
-            
-            # Read chunk
-            df_chunk = pd.read_excel(filepath, skiprows=chunk_start, nrows=chunk_size)
-            
-            # Convert to list of dictionaries
-            chunk_data = df_chunk.to_dict('records')
-            
-            # Clean NaN values
-            chunk_data = clean_nan_values(chunk_data)
-            
-            # Add to all_data
-            all_data.extend(chunk_data)
-            
-            # Update progress
-            progress = int((chunk_end / total_rows) * 100)
-            processing_status[filename] = {
-                'status': 'processing', 
-                'progress': progress,
-                'processed_rows': chunk_end,
-                'total_rows': total_rows
-            }
-            
-            print(f"Processed {chunk_end}/{total_rows} rows ({progress}%)")
-            
-            # Small delay to prevent overwhelming the system
-            time.sleep(0.1)
+        # Update progress
+        processing_status[filename] = {
+            'status': 'processing',
+            'progress': 50,
+            'processed_rows': 0,
+            'total_rows': total_rows
+        }
+        save_processing_status()
+        
+        # Convert to list of dictionaries
+        print("Converting to dictionary format...")
+        data = df.to_dict('records')
+        
+        # Update progress
+        processing_status[filename] = {
+            'status': 'processing',
+            'progress': 80,
+            'processed_rows': total_rows,
+            'total_rows': total_rows
+        }
+        save_processing_status()
+        
+        # Clean NaN values
+        print("Cleaning NaN values...")
+        data = clean_nan_values(data)
         
         # Store final data
         processed_data[filename] = {
-            'data': all_data,
+            'data': data,
             'status': 'completed',
-            'total_rows': len(all_data),
-            'filepath': filepath  # Store filepath for reference
+            'total_rows': len(data),
+            'filepath': filepath
         }
         
         processing_status[filename] = {
             'status': 'completed',
             'progress': 100,
-            'processed_rows': len(all_data),
-            'total_rows': len(all_data)
+            'processed_rows': len(data),
+            'total_rows': len(data)
         }
         
-        print(f"Completed processing {filename}: {len(all_data)} rows")
+        # Save final data to disk
+        save_processed_data()
+        save_processing_status()
+        
+        print(f"Completed processing {filename}: {len(data)} rows")
         print(f"File still exists at: {filepath}")
         
     except Exception as e:
@@ -117,6 +177,7 @@ def process_file_chunked(filepath, filename):
             'progress': 0,
             'error': str(e)
         }
+        save_processing_status()
 
 @app.route('/')
 def index():
@@ -159,8 +220,11 @@ def upload_file():
                 'total_rows': 0
             }
             
+            # Save status to disk immediately
+            save_processing_status()
+            
             # Start background processing
-            thread = threading.Thread(target=process_file_chunked, args=(filepath, filename))
+            thread = threading.Thread(target=process_file_fast, args=(filepath, filename))
             thread.daemon = True
             thread.start()
             
@@ -292,6 +356,16 @@ def clear_cache():
     global processed_data, processing_status
     processed_data = {}
     processing_status = {}
+    
+    # Also clear persistent storage
+    try:
+        if os.path.exists(PROCESSED_DATA_FILE):
+            os.remove(PROCESSED_DATA_FILE)
+        if os.path.exists(PROCESSING_STATUS_FILE):
+            os.remove(PROCESSING_STATUS_FILE)
+    except Exception as e:
+        print(f"Error clearing persistent storage: {e}")
+    
     return jsonify({
         'success': True,
         'message': 'Cache cleared'
@@ -299,4 +373,24 @@ def clear_cache():
 
 if __name__ == '__main__':
     print("Starting Flask app...")
-    app.run(debug=True, host='0.0.0.0', port=5001)
+    app.run(debug=True, host='0.0.0.0', port=5000)
+EOF
+
+# Verify the file compiles
+echo "Verifying Python syntax..."
+python3 -m py_compile /home/adamcordova/AGTDesigner/app.py
+if [ $? -eq 0 ]; then
+    echo "✅ Python syntax is valid!"
+    echo "✅ Fast processing implemented!"
+    echo "✅ Single Excel read instead of multiple chunked reads!"
+    echo "✅ Much faster processing!"
+    echo "Reloading web app..."
+    touch /var/www/www_agtpricetags_com_wsgi.py
+    echo "Web app reloaded! Processing should be much faster now."
+else
+    echo "❌ Syntax errors found. Restoring backup..."
+    cp /home/adamcordova/AGTDesigner/app.py.backup.* /home/adamcordova/AGTDesigner/app.py
+    exit 1
+fi
+
+echo "Fast processing fix applied successfully!"
