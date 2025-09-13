@@ -1,3 +1,51 @@
+#!/bin/bash
+# Debug and fix upload issues for PythonAnywhere
+echo "Debugging upload issues on PythonAnywhere..."
+
+# Check current app.py status
+echo "=== Current app.py status ==="
+if [ -f "/home/adamcordova/AGTDesigner/app.py" ]; then
+    echo "First 10 lines of app.py:"
+    head -10 /home/adamcordova/AGTDesigner/app.py
+    echo ""
+    echo "File size:"
+    wc -l /home/adamcordova/AGTDesigner/app.py
+    echo ""
+    
+    # Check if app.py compiles
+    echo "=== Python syntax check ==="
+    python3 -m py_compile /home/adamcordova/AGTDesigner/app.py
+    if [ $? -eq 0 ]; then
+        echo "✅ app.py syntax is valid"
+    else
+        echo "❌ app.py has syntax errors"
+    fi
+else
+    echo "❌ app.py not found at /home/adamcordova/AGTDesigner/app.py"
+fi
+echo ""
+
+# Check if upload folder exists
+echo "=== Upload folder check ==="
+if [ -d "/home/adamcordova/AGTDesigner/uploads" ]; then
+    echo "✅ Upload folder exists"
+    ls -la /home/adamcordova/AGTDesigner/uploads/
+else
+    echo "❌ Upload folder missing, creating..."
+    mkdir -p /home/adamcordova/AGTDesigner/uploads
+    chmod 755 /home/adamcordova/AGTDesigner/uploads
+fi
+echo ""
+
+# Check if pandas is installed
+echo "=== Dependencies check ==="
+python3 -c "import pandas; print('✅ pandas available')" 2>/dev/null || echo "❌ pandas not available"
+python3 -c "import flask; print('✅ flask available')" 2>/dev/null || echo "❌ flask not available"
+echo ""
+
+# Create a comprehensive working app.py
+echo "=== Creating comprehensive working app.py ==="
+cat > /home/adamcordova/AGTDesigner/app.py << 'EOF'
 import os
 import sys
 import json
@@ -143,3 +191,26 @@ def initial_data():
 if __name__ == '__main__':
     print("Starting Flask app...")
     app.run(debug=True, host='0.0.0.0', port=5000)
+EOF
+
+# Verify the file compiles
+echo "=== Verifying new app.py ==="
+python3 -m py_compile /home/adamcordova/AGTDesigner/app.py
+if [ $? -eq 0 ]; then
+    echo "✅ New app.py syntax is valid!"
+    echo "Reloading web app..."
+    touch /var/www/www_agtpricetags_com_wsgi.py
+    echo "Web app reloaded!"
+    echo ""
+    echo "=== PythonAnywhere Upload Debug Complete ==="
+    echo "✅ Created comprehensive working app.py"
+    echo "✅ Added detailed logging and error handling"
+    echo "✅ Increased file size limit to 50MB"
+    echo "✅ Added global data storage for status checking"
+    echo "✅ Added all necessary endpoints"
+    echo ""
+    echo "Try uploading a file at https://www.agtpricetags.com now!"
+else
+    echo "❌ New app.py has syntax errors"
+    exit 1
+fi
