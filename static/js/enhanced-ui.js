@@ -298,7 +298,7 @@ function pollUploadStatus(filename) {
       console.log(`Upload status for ${filename}: ${data.status}`);
       console.log('Upload status response:', data);
       
-      if (data.status === 'completed') {
+      if (data.status === 'ready') {
         // File processing is complete, fetch updated data
         console.log(`File processing complete for ${filename}, fetching updated data...`);
         
