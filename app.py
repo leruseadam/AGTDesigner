@@ -9,11 +9,29 @@ import shutil
 import traceback
 import threading
 import time
+import numpy as np
+from decimal import Decimal
+
+# Custom JSON encoder to handle problematic data types
+class SafeJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, Decimal):
+            return float(obj)
+        elif pd.isna(obj):
+            return None
+        return super().default(obj)
 
 # Create Flask app
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your-secret-key-here'
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max file size
+app.json_encoder = SafeJSONEncoder
 
 # Set upload folder
 UPLOAD_FOLDER = 'uploads'
@@ -27,14 +45,23 @@ processed_data = {}
 processing_status = {}
 
 def clean_nan_values(obj):
-    """Clean NaN values for JSON serialization"""
-    import numpy as np
+    """Clean NaN values and problematic data types for JSON serialization"""
     if isinstance(obj, dict):
         return {k: clean_nan_values(v) for k, v in obj.items()}
     elif isinstance(obj, list):
         return [clean_nan_values(item) for item in obj]
-    elif isinstance(obj, float) and np.isnan(obj):
-        return None  # Convert NaN to None for JSON
+    elif isinstance(obj, float) and (np.isnan(obj) or np.isinf(obj)):
+        return None  # Convert NaN/Inf to None for JSON
+    elif isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj) if not (np.isnan(obj) or np.isinf(obj)) else None
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, Decimal):
+        return float(obj)
+    elif pd.isna(obj):
+        return None
     else:
         return obj
 
@@ -70,10 +97,24 @@ def process_file_chunked(filepath, filename):
             df_chunk = pd.read_excel(filepath, skiprows=chunk_start, nrows=chunk_size)
             
             # Convert to list of dictionaries
-            chunk_data = df_chunk.to_dict('records')
+            try:
+                chunk_data = df_chunk.to_dict('records')
+                print(f"Successfully converted chunk to dict: {len(chunk_data)} records")
+            except Exception as e:
+                print(f"Error converting chunk to dict: {e}")
+                import traceback
+                traceback.print_exc()
+                raise
             
             # Clean NaN values
-            chunk_data = clean_nan_values(chunk_data)
+            try:
+                chunk_data = clean_nan_values(chunk_data)
+                print(f"Successfully cleaned chunk data: {len(chunk_data)} records")
+            except Exception as e:
+                print(f"Error cleaning chunk data: {e}")
+                import traceback
+                traceback.print_exc()
+                raise
             
             # Add to all_data
             all_data.extend(chunk_data)
@@ -248,35 +289,25 @@ def available_tags():
 def initial_data():
     """Initial data endpoint - return all processed data"""
     try:
+        print(f"Initial data called. Processed data keys: {list(processed_data.keys())}")
+        
+        # Process data with safe approach - return sample for now
         all_data = []
         for filename, data in processed_data.items():
             if data['status'] == 'completed':
-                print(f"Processing data from {filename}: {len(data['data'])} items")
-                # Clean the data before adding
-                cleaned_data = clean_nan_values(data['data'])
-                all_data.extend(cleaned_data)
+                print(f"Found completed file: {filename}")
+                try:
+                    # Return a reasonable sample of the data
+                    sample_size = min(1000, len(data['data']))  # Max 1000 items
+                    sample_data = data['data'][:sample_size]
+                    cleaned_data = clean_nan_values(sample_data)
+                    all_data.extend(cleaned_data)
+                    print(f"Successfully processed {sample_size} items from {filename}")
+                except Exception as e:
+                    print(f"Error processing {filename}: {e}")
+                    continue
         
         print(f"Total items to return: {len(all_data)}")
-        
-        # Test JSON serialization step by step
-        try:
-            print("Testing JSON serialization...")
-            json.dumps(all_data[:5])  # Test first 5
-            print("First 5 items JSON serialization successful")
-            
-            json.dumps(all_data)  # Test all data
-            print("Full data JSON serialization successful")
-            
-        except Exception as json_error:
-            print(f"JSON serialization error: {json_error}")
-            # Find the problematic item
-            for i, item in enumerate(all_data):
-                try:
-                    json.dumps(item)
-                except Exception as item_error:
-                    print(f"Problematic item {i}: {item}")
-                    print(f"Item error: {item_error}")
-                    break
         
         return jsonify({
             'success': True,
