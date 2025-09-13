@@ -1491,7 +1491,7 @@ class ProductDatabase:
             
             if vendor and brand:
                 cursor.execute('''
-                    SELECT p.id, p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
+                    SELECT p.id, p."Product Name*", p.normalized_name, p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
                            s.strain_name, s.canonical_lineage, 0 as total_occurrences, '' as first_seen_date, '' as last_seen_date,
                            p."Description", p."Weight*", p."Units", p."Price"
                     FROM products p
@@ -1500,7 +1500,7 @@ class ProductDatabase:
                 ''', (normalized_name, vendor, brand))
             else:
                 cursor.execute('''
-                    SELECT p.id, p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
+                    SELECT p.id, p."Product Name*", p.normalized_name, p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
                            s.strain_name, s.canonical_lineage, 0 as total_occurrences, '' as first_seen_date, '' as last_seen_date,
                            p."Description", p."Weight*", p."Units", p."Price"
                     FROM products p
@@ -1513,19 +1513,20 @@ class ProductDatabase:
                 product_info = {
                     'id': result[0],
                     'product_name': result[1],
-                    'product_type': result[2],
-                    'vendor': result[3],
-                    'brand': result[4],
-                    'lineage': result[5],
-                    'strain_name': result[6],
-                    'canonical_lineage': result[7],
-                    'total_occurrences': result[8],
-                    'first_seen_date': result[9],
-                    'last_seen_date': result[10],
-                    'description': result[11],
-                    'weight': result[12],
-                    'units': result[13],
-                    'price': result[14]
+                    'normalized_name': result[2],
+                    'product_type': result[3],
+                    'vendor': result[4],
+                    'brand': result[5],
+                    'lineage': result[6],
+                    'strain_name': result[7],
+                    'canonical_lineage': result[8],
+                    'total_occurrences': result[9],
+                    'first_seen_date': result[10],
+                    'last_seen_date': result[11],
+                    'description': result[12],
+                    'weight': result[13],
+                    'units': result[14],
+                    'price': result[15]
                 }
                 
                 # Cache the result for 5 minutes
