@@ -35,7 +35,7 @@ def clean_nan_values(obj):
         return [clean_nan_values(item) for item in obj]
     elif isinstance(obj, float) and np.isnan(obj):
         return None  # Convert NaN to None for JSON
-        else:
+    else:
         return obj
 
 def process_file_chunked(filepath, filename):
