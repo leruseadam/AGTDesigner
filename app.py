@@ -184,10 +184,10 @@ def upload_file():
 def upload_status():
     """Upload status endpoint with progress tracking"""
     try:
-    filename = request.args.get('filename')
-    if not filename:
-        return jsonify({'error': 'No filename provided'}), 400
-    
+        filename = request.args.get('filename')
+        if not filename:
+            return jsonify({'error': 'No filename provided'}), 400
+        
         print(f"Status check for filename: {filename}")
         print(f"Processing status keys: {list(processing_status.keys())}")
         print(f"Processed data keys: {list(processed_data.keys())}")
@@ -206,15 +206,15 @@ def upload_status():
                 'success': True,
                 'total_rows': processed_data[filename]['total_rows']
             })
-            else:
-                return jsonify({
+        else:
+            return jsonify({
                 'status': 'not_found',
                 'filename': filename,
                 'message': 'File not found',
                 'progress': 0,
                 'success': False
             })
-        except Exception as e:
+    except Exception as e:
         print(f"Status check error: {str(e)}")
         return jsonify({'error': f'Status check failed: {str(e)}'}), 500
 
@@ -245,8 +245,8 @@ def initial_data():
             if data['status'] == 'completed':
                 all_data.extend(data['data'])
         
-                    return jsonify({
-                'success': True,
+        return jsonify({
+            'success': True,
             'data': all_data,
             'total_count': len(all_data),
             'message': f'Retrieved {len(all_data)} items'
@@ -279,7 +279,7 @@ def file_info():
 @app.route('/api/performance/status', methods=['GET'])
 def performance_status():
     """Performance status endpoint"""
-        return jsonify({
+    return jsonify({
         'status': 'ok',
         'message': 'Performance monitoring active',
         'processed_files': len(processed_data),
@@ -292,10 +292,10 @@ def clear_cache():
     global processed_data, processing_status
     processed_data = {}
     processing_status = {}
-        return jsonify({
-            'success': True,
+    return jsonify({
+        'success': True,
         'message': 'Cache cleared'
-        })
+    })
 
 if __name__ == '__main__':
     print("Starting Flask app...")
