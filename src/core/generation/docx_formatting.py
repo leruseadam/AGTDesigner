@@ -830,6 +830,15 @@ def disable_autofit(table):
         logger.error(f"Error disabling autofit: {str(e)}")
         raise
 
+def truncate_text_for_cell(text, max_length=50):
+    """Truncate text to fit within cell boundaries."""
+    if not text or len(text) <= max_length:
+        return text
+    
+    # Truncate and add ellipsis
+    return text[:max_length-3] + "..."
+
+
 def enforce_fixed_cell_dimensions(table, template_type=None):
     """Enforce fixed cell dimensions to prevent any cell growth with text."""
     try:
@@ -989,6 +998,32 @@ def enforce_fixed_cell_dimensions(table, template_type=None):
                             # Clear any cell margins that might allow expansion
                             clear_cell_margins(cell)
                             
+                            # CRITICAL: Force cell to maintain exact dimensions
+                            tcPr = cell._tc.get_or_add_tcPr()
+                            
+                            # Set cell width to exact value to prevent expansion
+                            tcW = tcPr.find(qn('w:tcW'))
+                            if tcW is None:
+                                tcW = OxmlElement('w:tcW')
+                                tcPr.append(tcW)
+                            tcW.set(qn('w:w'), '1440')  # Fixed width in twips
+                            tcW.set(qn('w:type'), 'dxa')  # Fixed width type
+                            
+                            # Disable cell auto-sizing
+                            tcFitText = tcPr.find(qn('w:tcFitText'))
+                            if tcFitText is None:
+                                tcFitText = OxmlElement('w:tcFitText')
+                                tcPr.append(tcFitText)
+                            tcFitText.set(qn('w:val'), '0')  # Disable fit text
+                            
+                            # Set cell height to exact value
+                            tcH = tcPr.find(qn('w:tcH'))
+                            if tcH is None:
+                                tcH = OxmlElement('w:tcH')
+                                tcPr.append(tcH)
+                            tcH.set(qn('w:w'), '1440')  # Fixed height in twips
+                            tcH.set(qn('w:hRule'), 'exact')  # Exact height rule
+                            
                             # Process paragraphs in the cell to prevent text overflow
                             for paragraph in cell.paragraphs:
                                 # Set paragraph spacing to minimum
@@ -996,11 +1031,63 @@ def enforce_fixed_cell_dimensions(table, template_type=None):
                                 paragraph.paragraph_format.space_after = Pt(0)
                                 paragraph.paragraph_format.line_spacing = 1.0
                                 
-                                # Ensure text doesn't wrap beyond cell boundaries
-                                for run in paragraph.runs:
+                                # CRITICAL: Set paragraph alignment to prevent expansion
+                                paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                                
+                                # CRITICAL: Enable text wrapping and prevent overflow
+                                pPr = paragraph._element.get_or_add_pPr()
+                                
+                                # Add text wrapping control
+                                wrap = pPr.find(qn('w:wordWrap'))
+                                if wrap is None:
+                                    wrap = OxmlElement('w:wordWrap')
+                                    pPr.append(wrap)
+                                wrap.set(qn('w:val'), '1')  # Enable word wrapping
+                                
+                                # Add overflow control
+                                overflow = pPr.find(qn('w:overflowPunct'))
+                                if overflow is None:
+                                    overflow = OxmlElement('w:overflowPunct')
+                                    pPr.append(overflow)
+                                overflow.set(qn('w:val'), '0')  # Disable overflow punctuation
+                                
+                                # CRITICAL: Truncate text if it's too long for the cell
+                                full_text = paragraph.text
+                                if full_text and len(full_text) > 50:  # Adjust max length as needed
+                                    truncated_text = truncate_text_for_cell(full_text, 50)
+                                    # Clear existing runs and add truncated text
+                                    paragraph.clear()
+                                    run = paragraph.add_run(truncated_text)
+                                    
                                     # Set font properties to prevent text expansion
                                     if not run.font.size:
                                         run.font.size = Pt(12)  # Set default size if none
+                                    
+                                    # CRITICAL: Force text to wrap within cell boundaries
+                                    rPr = run._element.get_or_add_rPr()
+                                    
+                                    # Add text wrapping control to run
+                                    wrap_run = rPr.find(qn('w:wordWrap'))
+                                    if wrap_run is None:
+                                        wrap_run = OxmlElement('w:wordWrap')
+                                        rPr.append(wrap_run)
+                                    wrap_run.set(qn('w:val'), '1')  # Enable word wrapping
+                                else:
+                                    # Ensure text doesn't wrap beyond cell boundaries
+                                    for run in paragraph.runs:
+                                        # Set font properties to prevent text expansion
+                                        if not run.font.size:
+                                            run.font.size = Pt(12)  # Set default size if none
+                                        
+                                        # CRITICAL: Force text to wrap within cell boundaries
+                                        rPr = run._element.get_or_add_rPr()
+                                        
+                                        # Add text wrapping control to run
+                                        wrap_run = rPr.find(qn('w:wordWrap'))
+                                        if wrap_run is None:
+                                            wrap_run = OxmlElement('w:wordWrap')
+                                            rPr.append(wrap_run)
+                                        wrap_run.set(qn('w:val'), '1')  # Enable word wrapping
                         except Exception as cell_error:
                             logger.warning(f"Error processing cell in row: {cell_error}")
                             continue
@@ -1026,6 +1113,27 @@ def enforce_fixed_cell_dimensions(table, template_type=None):
                 tblLayout = OxmlElement('w:tblLayout')
                 tblLayout.set(qn('w:type'), 'fixed')
                 tblPr.append(tblLayout)
+            
+            # CRITICAL: Add table width constraint to prevent expansion
+            tblW = tblPr.find(qn('w:tblW'))
+            if tblW is None:
+                tblW = OxmlElement('w:tblW')
+                tblPr.append(tblW)
+            tblW.set(qn('w:w'), '4320')  # Fixed table width in twips (3 inches)
+            tblW.set(qn('w:type'), 'dxa')  # Fixed width type
+            
+            # CRITICAL: Disable table auto-sizing completely
+            tblLook = tblPr.find(qn('w:tblLook'))
+            if tblLook is None:
+                tblLook = OxmlElement('w:tblLook')
+                tblPr.append(tblLook)
+            tblLook.set(qn('w:val'), '0000')  # Disable all auto-sizing
+            tblLook.set(qn('w:firstRow'), '0')
+            tblLook.set(qn('w:lastRow'), '0')
+            tblLook.set(qn('w:firstColumn'), '0')
+            tblLook.set(qn('w:lastColumn'), '0')
+            tblLook.set(qn('w:noHBand'), '0')
+            tblLook.set(qn('w:noVBand'), '0')
         
         logger.debug(f"Enforced fixed cell dimensions for table (template: {template_type})")
         return table
