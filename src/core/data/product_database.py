@@ -3660,10 +3660,6 @@ class ProductDatabase:
     def get_products_by_names(self, product_names: List[str]) -> List[Dict[str, Any]]:
         """Get information about multiple products by their names (with caching)."""
         try:
-            # Temporarily disable database lookups to prevent errors
-            logger.warning("Database lookup temporarily disabled due to schema issues")
-            return []
-            
             self.init_database()  # Ensure DB is initialized
             
             if not product_names:
@@ -3678,19 +3674,19 @@ class ProductDatabase:
             # Use placeholders for the IN clause
             placeholders = ','.join(['?' for _ in normalized_names])
             
+            # Fixed query - use products table directly without alias to avoid column issues
             cursor.execute(f'''
-                SELECT p.id, p."Product Name*", p.normalized_name, p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
-                       s.strain_name, s.canonical_lineage, 0 as total_occurrences, '' as first_seen_date, '' as last_seen_date,
-                       p."Description", p."Weight*", p."Weight Unit* (grams/gm or ounces/oz)", p."Price* (Tier Name for Bulk)", 
-                       '' as thc_test_result, '' as cbd_test_result, p."Test result unit (% or mg)",
-                       p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio", p."State", p."Is Sample? (yes/no)",
-                       p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*",
-                       p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens",
-                       p."Solvent", p."Accepted Date", p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients",
-                       p."CombinedWeight", p."Ratio_or_THC_CBD", p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN"
-                FROM products p
-                LEFT JOIN strains s ON p.strain_id = s.id
-                WHERE p.normalized_name IN ({placeholders})
+                SELECT id, "Product Name*", normalized_name, "Product Type*", "Vendor/Supplier*", "Product Brand", "Lineage",
+                       '' as strain_name, '' as canonical_lineage, 0 as total_occurrences, '' as first_seen_date, '' as last_seen_date,
+                       "Description", "Weight*", "Weight Unit* (grams/gm or ounces/oz)", "Price* (Tier Name for Bulk)", 
+                       '' as thc_test_result, '' as cbd_test_result, "Test result unit (% or mg)",
+                       "Quantity*", "DOH", "Concentrate Type", "Ratio", "JointRatio", "State", "Is Sample? (yes/no)",
+                       "Is MJ product?(yes/no)", "Discountable? (yes/no)", "Room*", "Batch Number", "Lot Number", "Barcode*",
+                       "Medical Only (Yes/No)", "Med Price", "Expiration Date(YYYY-MM-DD)", "Is Archived? (yes/no)", "THC Per Serving", "Allergens",
+                       "Solvent", "Accepted Date", "Internal Product Identifier", "Product Tags (comma separated)", "Image URL", "Ingredients",
+                       "CombinedWeight", "Ratio_or_THC_CBD", "Description_Complexity", "Total THC", "THCA", "CBDA", "CBN"
+                FROM products
+                WHERE normalized_name IN ({placeholders})
             ''', normalized_names)
             
             results = cursor.fetchall()
@@ -3720,9 +3716,9 @@ class ProductDatabase:
                         'Vendor': result[4],  # vendor
                         'Vendor/Supplier*': result[4],  # Excel column name compatibility
                         'Product Brand': result[5],  # brand
-                        'Lineage': result[6] or result[8] or 'MIXED',  # lineage or canonical_lineage
-                        'strain_name': result[7],  # strain_name
-                        'canonical_lineage': result[8],  # canonical_lineage
+                        'Lineage': result[6] or 'MIXED',  # lineage
+                        'strain_name': result[7],  # strain_name (empty string)
+                        'canonical_lineage': result[8],  # canonical_lineage (empty string)
                         'total_occurrences': result[9],
                         'first_seen_date': result[10],
                         'last_seen_date': result[11],
