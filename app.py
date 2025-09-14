@@ -5208,7 +5208,7 @@ def database_stats():
                 # If store-specific database doesn't have products table, fall back to main database
                 if current_store:
                     logging.info(f"Falling back to main database for store {current_store}")
-                    # Force creation of main database instance
+                    # Force creation of main database instance by clearing the global variable
                     global _product_database
                     _product_database = None
                     product_db = get_product_database()  # Use main database
@@ -5219,7 +5219,10 @@ def database_stats():
                     test_cursor = test_conn.cursor()
                     test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
                     if not test_cursor.fetchone():
+                        logging.error("Products table not found in main database either")
                         return jsonify({'error': 'Products table not found in any database'}), 500
+                    test_conn.close()
+                    logging.info(f"Successfully fell back to main database: {product_db.db_path}")
                 else:
                     return jsonify({'error': 'Products table not found in database'}), 500
             test_conn.close()
@@ -5408,6 +5411,15 @@ def database_vendor_stats():
                 product_db = get_product_database()  # Use main database
                 if not product_db._initialized:
                     product_db.init_database()
+                # Test main database
+                test_conn = sqlite3.connect(product_db.db_path)
+                test_cursor = test_conn.cursor()
+                test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+                if not test_cursor.fetchone():
+                    logging.error("Products table not found in main database either")
+                    return jsonify({'error': 'Products table not found in any database'}), 500
+                test_conn.close()
+                logging.info(f"Successfully fell back to main database: {product_db.db_path}")
             test_conn.close()
         except Exception as test_error:
             logging.error(f"Database connection test failed: {test_error}")
@@ -5833,6 +5845,34 @@ def database_analytics():
         from datetime import datetime, timedelta
         
         product_db = get_product_database()
+        
+        # Test database connection and fallback if needed
+        try:
+            test_conn = sqlite3.connect(product_db.db_path)
+            test_cursor = test_conn.cursor()
+            test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+            if not test_cursor.fetchone():
+                logging.error(f"Products table not found in database at {product_db.db_path}")
+                # Fall back to main database
+                logging.info("Falling back to main database for analytics")
+                global _product_database
+                _product_database = None
+                product_db = get_product_database()  # Use main database
+                if not product_db._initialized:
+                    product_db.init_database()
+                # Test main database
+                test_conn = sqlite3.connect(product_db.db_path)
+                test_cursor = test_conn.cursor()
+                test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+                if not test_cursor.fetchone():
+                    logging.error("Products table not found in main database either")
+                    return jsonify({'error': 'Products table not found in any database'}), 500
+                test_conn.close()
+                logging.info(f"Successfully fell back to main database: {product_db.db_path}")
+            test_conn.close()
+        except Exception as test_error:
+            logging.error(f"Database connection test failed: {test_error}")
+            return jsonify({'error': f'Database connection failed: {test_error}'}), 500
         
         with sqlite3.connect(product_db.db_path) as conn:
             # Get product type distribution
