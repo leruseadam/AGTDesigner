@@ -50,6 +50,20 @@ const PRODUCT_TYPE_OVERRIDES = {
 };
 
 // Function to normalize product types (same as backend)
+
+    // Detect if running on PythonAnywhere
+    function isPythonAnywhere() {
+        return window.location.hostname.includes('pythonanywhere.com');
+    }
+    
+    // Choose upload endpoint based on environment
+    function getUploadEndpoint() {
+        if (isPythonAnywhere()) {
+            return '/upload-pythonanywhere';
+        } else {
+            return '/upload';
+        }
+    }
 function normalizeProductType(productType) {
   if (!productType) return productType;
   const normalized = PRODUCT_TYPE_OVERRIDES[productType.toLowerCase()];
@@ -5280,7 +5294,7 @@ const TagManager = {
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
                 
-                const response = await fetch('/upload-simple', {
+                const response = await fetch('/upload', {
                     method: 'POST',
                     body: formData,
                     signal: controller.signal
@@ -5364,7 +5378,7 @@ const TagManager = {
             const formData = new FormData();
             formData.append('file', file);
             
-            const response = await fetch('/upload-simple', {
+            const response = await fetch('/upload', {
                 method: 'POST',
                 body: formData
             });
@@ -5392,10 +5406,10 @@ const TagManager = {
     async pollUploadStatusAndUpdateUI(filename, displayName) {
         console.log(`Polling upload status for: ${filename}`);
         
-        const maxAttempts = 120; // 6 minutes max (3 seconds * 120 = 6 minutes)
+        const maxAttempts = 60; // 3 minutes max (3 seconds * 60 = 3 minutes)
         let attempts = 0;
         let consecutiveErrors = 0;
-        const maxConsecutiveErrors = 3;
+        const maxConsecutiveErrors = 5;
         
         // Add debug logging for upload processing
         console.log(`[UPLOAD DEBUG] Starting status polling for: ${filename}`);
@@ -6886,7 +6900,7 @@ window.performJsonMatch = function() {
     // Show progress message
     resultsDiv.classList.remove('d-none');
     matchCount.textContent = 'Processing...';
-    matchedProductsList.innerHTML = '<div class="text-info">Matching products from JSON URL. This may take up to 10 minutes for large datasets. Progress will be logged in the browser console.</div>';
+    matchedProductsList.innerHTML = '<div class="text-info">Matching products from JSON URL. This may take up to 2 minutes for large datasets. Progress will be logged in the browser console.</div>';
 
     // Add timeout to prevent hanging
     const controller = new AbortController();

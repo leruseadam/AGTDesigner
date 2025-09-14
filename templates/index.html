@@ -61,6 +61,30 @@
   <script>
     console.log('Defining global functions early in head...');
     
+    // CRITICAL: Set Bothell as default store IMMEDIATELY - this runs before any other code
+    (function() {
+      console.log('IMMEDIATE: Setting Bothell as default store...');
+      // Set localStorage immediately
+      localStorage.setItem('selectedStore', 'AGT_Bothell');
+      
+      // Try to update display immediately if elements exist
+      setTimeout(function() {
+        const displayElement = document.getElementById('currentStoreDisplay');
+        if (displayElement) {
+          displayElement.textContent = 'AGT Bothell';
+          displayElement.style.color = '#4ade80';
+          console.log('IMMEDIATE: Set display to AGT Bothell');
+        }
+        
+        const statusElement = document.getElementById('storeStatus');
+        if (statusElement) {
+          statusElement.textContent = 'Store: AGT Bothell';
+          statusElement.className = 'store-status active';
+          console.log('IMMEDIATE: Set status to AGT Bothell');
+        }
+      }, 100);
+    })();
+    
     // VIEWPORT NORMALIZATION FOR CONSISTENT SCALING
     // This ensures viewport units behave identically across local and web environments
     (function() {
@@ -265,15 +289,21 @@
     }
     
     function updateCurrentStoreDisplay(storeValue) {
+      console.log('updateCurrentStoreDisplay called with:', storeValue);
       const displayElement = document.getElementById('currentStoreDisplay');
+      console.log('displayElement found:', !!displayElement);
       if (displayElement) {
         if (storeValue) {
           displayElement.textContent = storeValue.replace(/_/g, ' ');
           displayElement.style.color = '#4ade80';
+          console.log('Set display to:', storeValue.replace(/_/g, ' '));
         } else {
           displayElement.textContent = 'No store selected';
           displayElement.style.color = '#f87171';
+          console.log('Set display to: No store selected');
         }
+      } else {
+        console.error('currentStoreDisplay element not found!');
       }
     }
     
@@ -303,17 +333,10 @@
     }
     
     function loadSavedStore() {
-      const savedStore = localStorage.getItem('selectedStore');
-      if (savedStore) {
-        // Update the display
-        updateCurrentStoreDisplay(savedStore);
-        // Set the store in backend
-        changeStore(savedStore);
-      } else {
-        // No store saved, default to Bothell
-        console.log('No store saved in localStorage, defaulting to AGT_Bothell');
-        changeStore('AGT_Bothell');
-      }
+      // Always default to Bothell upon loading
+      console.log('Setting default store to AGT_Bothell upon loading');
+      changeStore('AGT_Bothell');
+      updateCurrentStoreDisplay('AGT_Bothell');
       
       // Also check backend for current store status
       updateStoreStatusFromBackend();
@@ -328,22 +351,15 @@
             updateCurrentStoreDisplay(data.store);
             updateStoreStatus(`Store: ${data.store.replace(/_/g, ' ')}`, 'active');
           } else {
-            // No store set in backend, default to Bothell if not already set
-            const currentStore = localStorage.getItem('selectedStore');
-            if (!currentStore) {
-              console.log('No store in backend, defaulting to AGT_Bothell');
-              changeStore('AGT_Bothell');
-            }
+            // No store set in backend, ensure Bothell is set
+            console.log('No store in backend, ensuring AGT_Bothell is set');
+            changeStore('AGT_Bothell');
           }
         })
         .catch(error => {
-          console.log('No store set in backend yet');
-          // Default to Bothell if no store is set
-          const currentStore = localStorage.getItem('selectedStore');
-          if (!currentStore) {
-            console.log('Error checking backend, defaulting to AGT_Bothell');
-            changeStore('AGT_Bothell');
-          }
+          console.log('Error checking backend, ensuring AGT_Bothell is set');
+          // Ensure Bothell is set as default
+          changeStore('AGT_Bothell');
         });
     }
     
@@ -4478,6 +4494,31 @@
             </div>
             <div class="store-status text-center" id="storeStatus"></div>
 
+            <!-- IMMEDIATE STORE SETTING SCRIPT -->
+            <script>
+              // Set Bothell as default store IMMEDIATELY after elements are created
+              (function() {
+                console.log('INLINE: Setting Bothell as default store immediately...');
+                const displayElement = document.getElementById('currentStoreDisplay');
+                const statusElement = document.getElementById('storeStatus');
+                
+                if (displayElement) {
+                  displayElement.textContent = 'AGT Bothell';
+                  displayElement.style.color = '#4ade80';
+                  console.log('INLINE: Set display to AGT Bothell');
+                }
+                
+                if (statusElement) {
+                  statusElement.textContent = 'Store: AGT Bothell';
+                  statusElement.className = 'store-status active';
+                  console.log('INLINE: Set status to AGT Bothell');
+                }
+                
+                // Also set localStorage
+                localStorage.setItem('selectedStore', 'AGT_Bothell');
+              })();
+            </script>
+
             <!-- Database and Lineage Management Buttons -->
             <div class="header-buttons-container mt-3 d-flex justify-content-center gap-3">
               <button class="btn btn-header-action" onclick="showProductDatabaseManager()" title="Open Data & Analytics">
@@ -6597,12 +6638,27 @@
       scrollToTop();
     });
     
+    // Set Bothell as default store IMMEDIATELY - before DOMContentLoaded
+    console.log('Setting Bothell as default store IMMEDIATELY...');
+    updateCurrentStoreDisplay('AGT_Bothell');
+    updateStoreStatus('Store: AGT Bothell', 'active');
+    localStorage.setItem('selectedStore', 'AGT_Bothell');
+
     document.addEventListener('DOMContentLoaded', function () {
       console.log('DOM Content Loaded - initializing TagManager...');
+      
+      // Ensure Bothell is still set as default store display
+      console.log('DOMContentLoaded: Ensuring Bothell display is set...');
+      updateCurrentStoreDisplay('AGT_Bothell');
+      updateStoreStatus('Store: AGT Bothell', 'active');
+      
       TagManager.init();
       
-      // Immediately sync store with backend
-      console.log('DOMContentLoaded: Starting store sync...');
+      // Also set the store in backend
+      console.log('DOMContentLoaded: Setting Bothell as default store...');
+      changeStore('AGT_Bothell');
+      
+      // Also sync with backend to ensure consistency
       fetch('/api/get-store')
         .then(response => {
           console.log('Store API response:', response);
@@ -6612,7 +6668,7 @@
           console.log('Store API data:', data);
           if (data.success && data.store) {
             console.log('DOMContentLoaded: Backend store is', data.store);
-            // Force update the display
+            // Update the display
             const displayElement = document.getElementById('currentStoreDisplay');
             if (displayElement) {
               displayElement.textContent = data.store.replace(/_/g, ' ');
@@ -6624,11 +6680,13 @@
             localStorage.setItem('selectedStore', data.store);
             console.log('Store sync completed successfully');
           } else {
-            console.log('No store in backend data:', data);
+            console.log('No store in backend data, Bothell should be set as default');
           }
         })
         .catch(error => {
           console.error('Error syncing store on DOMContentLoaded:', error);
+          // Ensure Bothell is still set as default even if backend check fails
+          changeStore('AGT_Bothell');
         });
       
       console.log('TagManager initialized, waiting for Bootstrap...');

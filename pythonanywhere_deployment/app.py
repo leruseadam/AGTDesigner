@@ -1,11 +1,11 @@
 import os
-
 import sys  # Add this import
 import logging
 import threading
 import pandas as pd  # Add this import
 import time
 import re
+import json
 # Startup Performance Optimization
 DISABLE_STARTUP_FILE_LOADING = True  # Disable startup file loading to prevent hangs
 
@@ -47,6 +47,8 @@ def safe_load_file_with_timeout(processor, file_path, timeout_seconds=30):
     finally:
         signal.alarm(0)  # Ensure timeout is cancelled
 LAZY_LOADING_ENABLED = True  # Enable lazy loading for better performance
+
+# Browser-based store persistence (handled by frontend JavaScript)
 
 from pathlib import Path
 from werkzeug.utils import secure_filename
@@ -559,16 +561,23 @@ def get_excel_processor():
             # Return None and let the calling code handle it
             return None
 
-def get_product_database():
+def get_product_database(store_name=None):
     """Lazy load ProductDatabase to avoid startup delay."""
     global _product_database
-    if _product_database is None:
+    if _product_database is None or (store_name and getattr(_product_database, '_store_name', None) != store_name):
         from src.core.data.product_database import ProductDatabase
-        # CRITICAL FIX: Use absolute path in uploads directory for database
-        db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
-        _product_database = ProductDatabase(db_path)
-        # OPTIMIZATION: Don't initialize database immediately - do it lazily on first use
-        logging.info(f"ProductDatabase created (lazy initialization) at: {db_path}")
+        # Use store-specific database path
+        if store_name:
+            db_filename = f'product_database_{store_name}.db'
+            db_path = os.path.join(current_dir, 'uploads', db_filename)
+            _product_database = ProductDatabase(db_path)
+            _product_database._store_name = store_name
+            logging.info(f"ProductDatabase created for store '{store_name}' at: {db_path}")
+        else:
+            # Default database for backward compatibility
+            db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
+            _product_database = ProductDatabase(db_path)
+            logging.info(f"ProductDatabase created (default) at: {db_path}")
     return _product_database
 
 def get_json_matcher():
@@ -762,12 +771,15 @@ def check_session_size():
         session_data = pickle.dumps(session_copy)
         if len(session_data) > 3000:  # 3KB limit to stay well under 4KB
             logging.warning(f"Session too large ({len(session_data)} bytes), clearing session data")
-            # Store selected tags before clearing
+            # Store essential data before clearing
             selected_tags = session.get('selected_tags', [])
+            selected_store = session.get('selected_store', '')
             session.clear()
-            # Restore selected tags after clearing
+            # Restore essential data after clearing
             if selected_tags:
                 session['selected_tags'] = selected_tags
+            if selected_store:
+                session['selected_store'] = selected_store
                 logging.info(f"Preserved {len(selected_tags)} selected tags during session optimization")
             return True
     except Exception as e:
@@ -818,13 +830,16 @@ def optimize_session_data():
             pickle.dumps(session_copy)
             
             # Clear and restore only essential data
-            # Store selected tags before clearing
+            # Store essential data before clearing
             selected_tags = session.get('selected_tags', [])
+            selected_store = session.get('selected_store', '')
             session.clear()
             session.update(session_copy)
-            # Restore selected tags if they weren't in the optimized data
+            # Restore essential data if they weren't in the optimized data
             if selected_tags and 'selected_tags' not in session_copy:
                 session['selected_tags'] = selected_tags
+            if selected_store and 'selected_store' not in session_copy:
+                session['selected_store'] = selected_store
                 logging.info(f"Restored {len(selected_tags)} selected tags after session optimization")
             
             logging.info("Session data optimized")
@@ -838,12 +853,6 @@ def optimize_session_data():
         return False
 
 # Initialize Excel processor and load default data on startup
-
-# Use simple initialization on PythonAnywhere to prevent hangs
-if os.environ.get('PYTHONANYWHERE_DOMAIN'):
-    simple_initialize_excel_processor()
-else:
-    initialize_excel_processor()
 
 def simple_initialize_excel_processor():
     """Simple initialization that won't get stuck - for PythonAnywhere"""
@@ -1361,6 +1370,8 @@ def index():
         if uploaded_file:
             logging.info(f"Cleared uploaded file from session: {uploaded_file}")
         # Don't clear selected_tags - they should persist across page loads
+        
+        # Store selection will be handled by frontend JavaScript using localStorage
         
         # Remove uploaded file if it exists and is not the default file
         if uploaded_file:
@@ -3087,12 +3098,17 @@ def set_store():
         session['selected_store'] = store_value
         
         # Clear any existing data to ensure fresh start with new store
+        # (but keep the selected_store we just set)
         session.pop('file_path', None)
         session.pop('file_store', None)
         session.pop('selected_tags', None)
         
         # Clear global Excel processor to force reload with new store context
         reset_excel_processor()
+        
+        # Clear global database cache to force reload with new store context
+        global _product_database
+        _product_database = None
         
         # Clear any cached data that might contain old store information
         try:
@@ -3135,6 +3151,13 @@ def get_store():
     """Get the current store for the session."""
     try:
         current_store = session.get('selected_store', '')
+        
+        # If no store is set, default to Bothell
+        if not current_store:
+            current_store = 'AGT_Bothell'
+            session['selected_store'] = current_store
+            logging.info(f"No store set, defaulting to {current_store}")
+        
         return jsonify({
             'success': True,
             'store': current_store
@@ -3148,6 +3171,13 @@ def check_store_required():
     """Check if store selection is required for the current session."""
     try:
         current_store = session.get('selected_store', '')
+        
+        # If no store is set, default to Bothell
+        if not current_store:
+            current_store = 'AGT_Bothell'
+            session['selected_store'] = current_store
+            logging.info(f"No store set in check-store-required, defaulting to {current_store}")
+        
         requires_store = not bool(current_store)
         
         return jsonify({
@@ -3667,7 +3697,7 @@ def generate_labels():
                 # Try to restore from cache
                 json_matched_cache_key = session.get('json_matched_cache_key')
                 if json_matched_cache_key:
-                    json_matched_tags = cache.get(json_matched_cache_key)
+                    json_matched_tags = cache.get(json_matched_cache_key) or []
                     if json_matched_tags:
                         logging.info(f"CRITICAL FIX: Restoring {len(json_matched_tags)} JSON matched products from cache")
                         try:
@@ -3938,7 +3968,8 @@ def generate_labels():
             logging.info("Using database for record generation (preferred source)")
             try:
                 from src.core.data.product_database import get_product_database
-                product_db = get_product_database()
+                current_store = session.get('selected_store', '')
+                product_db = get_product_database(current_store)
                 if product_db:
                     # ENHANCED: Replace JSON matched tags with database data
                     enhanced_tags = _replace_json_tags_with_database_data(valid_selected_tags, product_db)
@@ -5158,7 +5189,49 @@ def debug_columns():
 def database_stats():
     """Get statistics about the product database."""
     try:
-        product_db = get_product_database()
+        # Get current store from session
+        current_store = session.get('selected_store', '')
+        product_db = get_product_database(current_store)
+        
+        # Ensure database is initialized
+        if not product_db._initialized:
+            product_db.init_database()
+        
+        # Test database connection
+        try:
+            import sqlite3
+            test_conn = sqlite3.connect(product_db.db_path)
+            test_cursor = test_conn.cursor()
+            test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+            if not test_cursor.fetchone():
+                logging.error(f"Products table not found in database at {product_db.db_path}")
+                # If store-specific database doesn't have products table, fall back to main database
+                if current_store:
+                    logging.info(f"Falling back to main database for store {current_store}")
+                    # Force creation of main database instance by clearing the global variable
+                    global _product_database
+                    _product_database = None
+                    # Create main database instance directly
+                    from src.core.data.product_database import ProductDatabase
+                    main_db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
+                    product_db = ProductDatabase(main_db_path)
+                    if not product_db._initialized:
+                        product_db.init_database()
+                    # Test main database
+                    test_conn = sqlite3.connect(product_db.db_path)
+                    test_cursor = test_conn.cursor()
+                    test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+                    if not test_cursor.fetchone():
+                        logging.error("Products table not found in main database either")
+                        return jsonify({'error': 'Products table not found in any database'}), 500
+                    test_conn.close()
+                    logging.info(f"Successfully fell back to main database: {product_db.db_path}")
+                else:
+                    return jsonify({'error': 'Products table not found in database'}), 500
+            test_conn.close()
+        except Exception as test_error:
+            logging.error(f"Database connection test failed: {test_error}")
+            return jsonify({'error': f'Database connection failed: {test_error}'}), 500
         
         # Get vendor stats for the frontend
         vendor_stats = {}
@@ -5246,6 +5319,8 @@ def database_stats():
                 
         except Exception as db_error:
             logging.error(f"Error querying database: {db_error}")
+            logging.error(f"Database path: {product_db.db_path}")
+            logging.error(f"Database exists: {os.path.exists(product_db.db_path)}")
             stats = {
                 'total_products': 0,
                 'unique_vendors': 0,
@@ -5268,7 +5343,8 @@ def database_stats():
 def database_schema():
     """Get database schema information for debugging."""
     try:
-        product_db = get_product_database()
+        current_store = session.get('selected_store', '')
+        product_db = get_product_database(current_store)
         
         import sqlite3
         with sqlite3.connect(product_db.db_path) as conn:
@@ -5318,6 +5394,42 @@ def database_vendor_stats():
         import sqlite3
         
         product_db = get_product_database()
+        
+        # Ensure database is initialized
+        if not product_db._initialized:
+            product_db.init_database()
+        
+        # Test database connection and fallback if needed
+        try:
+            test_conn = sqlite3.connect(product_db.db_path)
+            test_cursor = test_conn.cursor()
+            test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+            if not test_cursor.fetchone():
+                logging.error(f"Products table not found in database at {product_db.db_path}")
+                # If store-specific database doesn't have products table, fall back to main database
+                logging.info("Falling back to main database for vendor stats")
+                # Force creation of main database instance
+                global _product_database
+                _product_database = None
+                # Create main database instance directly
+                from src.core.data.product_database import ProductDatabase
+                main_db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
+                product_db = ProductDatabase(main_db_path)
+                if not product_db._initialized:
+                    product_db.init_database()
+                # Test main database
+                test_conn = sqlite3.connect(product_db.db_path)
+                test_cursor = test_conn.cursor()
+                test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+                if not test_cursor.fetchone():
+                    logging.error("Products table not found in main database either")
+                    return jsonify({'error': 'Products table not found in any database'}), 500
+                test_conn.close()
+                logging.info(f"Successfully fell back to main database: {product_db.db_path}")
+            test_conn.close()
+        except Exception as test_error:
+            logging.error(f"Database connection test failed: {test_error}")
+            return jsonify({'error': f'Database connection failed: {test_error}'}), 500
         
         with sqlite3.connect(product_db.db_path) as conn:
             # Get all vendors with their product counts
@@ -5740,6 +5852,37 @@ def database_analytics():
         
         product_db = get_product_database()
         
+        # Test database connection and fallback if needed
+        try:
+            test_conn = sqlite3.connect(product_db.db_path)
+            test_cursor = test_conn.cursor()
+            test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+            if not test_cursor.fetchone():
+                logging.error(f"Products table not found in database at {product_db.db_path}")
+                # Fall back to main database
+                logging.info("Falling back to main database for analytics")
+                global _product_database
+                _product_database = None
+                # Create main database instance directly
+                from src.core.data.product_database import ProductDatabase
+                main_db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
+                product_db = ProductDatabase(main_db_path)
+                if not product_db._initialized:
+                    product_db.init_database()
+                # Test main database
+                test_conn = sqlite3.connect(product_db.db_path)
+                test_cursor = test_conn.cursor()
+                test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+                if not test_cursor.fetchone():
+                    logging.error("Products table not found in main database either")
+                    return jsonify({'error': 'Products table not found in any database'}), 500
+                test_conn.close()
+                logging.info(f"Successfully fell back to main database: {product_db.db_path}")
+            test_conn.close()
+        except Exception as test_error:
+            logging.error(f"Database connection test failed: {test_error}")
+            return jsonify({'error': f'Database connection failed: {test_error}'}), 500
+        
         with sqlite3.connect(product_db.db_path) as conn:
             # Get product type distribution
             product_types_df = pd.read_sql_query('''
@@ -6000,7 +6143,8 @@ def database_status():
 def get_database_products():
     """Get products from the database for the editor."""
     try:
-        product_db = get_product_database()
+        current_store = session.get('selected_store', '')
+        product_db = get_product_database(current_store)
         
         # Get query parameters
         page = int(request.args.get('page', 0))
@@ -7348,6 +7492,8 @@ def product_db_status():
 def json_match():
     """Simplified JSON matching endpoint with better error handling."""
     try:
+        logging.info("JSON match endpoint called")
+        
         # Clear the available tags cache to force refresh after JSON matching
         cache_key = get_session_cache_key('available_tags')
         cache.delete(cache_key)
@@ -7360,1026 +7506,94 @@ def json_match():
         if not (url.lower().startswith('http') or url.lower().startswith('data:')):
             return jsonify({'error': 'Please provide a valid HTTP URL or data URL'}), 400
             
+        logging.info(f"Processing URL: {url[:50]}...")
+        
         excel_processor = get_session_excel_processor()
         json_matcher = get_session_json_matcher()
         
-        # Check if we have Excel data or if we should use product database
-        use_product_db = excel_processor.df is None or excel_processor.df.empty
+        # Check if json_matcher was successfully created
+        if json_matcher is None:
+            logging.error("Failed to create JSON matcher")
+            return jsonify({'error': 'Failed to initialize JSON matcher'}), 500
         
-        if use_product_db:
-            logging.info("No Excel data loaded, using product database for JSON matching")
-            
-            # Use product database matching
-            try:
-                # CRITICAL FIX: Use fetch_and_match to get ALL JSON items
-                logging.info(f"Starting JSON matching for URL: {url}")
-                matched_products = json_matcher.fetch_and_match(url)
-                logging.info(f"CRITICAL FIX: JSON matcher returned {len(matched_products) if matched_products else 0} products")
-                
-                # CRITICAL FIX: Verify that we have all the items from the JSON
-                if not matched_products:
-                    logging.error("❌ CRITICAL: JSON matcher returned no products - this indicates a failure")
-                    return jsonify({'error': 'JSON matching failed - no products returned'}), 500
-                else:
-                    logging.info(f"✅ CRITICAL: JSON matcher successfully processed {len(matched_products)} products")
-                    
-            except Exception as match_error:
-                logging.error(f"Product database JSON matching failed: {match_error}")
-                if "timeout" in str(match_error).lower():
-                    return jsonify({'error': 'JSON matching timed out. The dataset may be too large or the URL may be slow to respond.'}), 408
-                elif "connection" in str(match_error).lower():
-                    return jsonify({'error': 'Failed to connect to the JSON URL. Please check the URL and try again.'}), 503
-                else:
-                    return jsonify({'error': f'JSON matching failed: {str(match_error)}'}), 500
-            
-            # ENHANCED: Use Product Database to expand the matched products list
-            # This ensures we get the same comprehensive product list as Excel generation
-            expanded_products = []
-            if matched_products:
-                logging.info(f"Expanding {len(matched_products)} matched products using Product Database rules")
-                
-                # Get the product database instance
-                product_db = get_session_product_database()
-                
-                # Extract product names from matched products
-                matched_names = []
-                for product in matched_products:
-                    if isinstance(product, dict):
-                        product_name = product.get('Product Name*', '') or product.get('ProductName', '') or product.get('product_name', '')
-                        if product_name:
-                            matched_names.append(product_name)
-                    else:
-                        logging.warning(f"Product is not a dictionary: {type(product)} - {product}")
-                
-                # Use Product Database to get comprehensive product information
-                if matched_names and product_db:
-                    try:
-                        # Get detailed product information from the database
-                        db_products = product_db.get_products_by_names(matched_names)
-                        logging.info(f"Retrieved {len(db_products)} products from Product Database")
-                        
-                        # Add the database products to expanded list
-                        expanded_products.extend(db_products)
-                        
-                        # Also add the original matched products to ensure we have all data
-                        for matched_product in matched_products:
-                            if isinstance(matched_product, dict):
-                                # Check if this product is already in expanded_products
-                                product_name = matched_product.get('Product Name*', '') or matched_product.get('ProductName', '')
-                                if product_name:
-                                    # Find if this product exists in db_products
-                                    exists = False
-                                    for db_product in db_products:
-                                        db_name = db_product.get('Product Name*', '') or db_product.get('ProductName', '')
-                                        if db_name and db_name.lower() == product_name.lower():
-                                            exists = True
-                                            # Update database product with any additional JSON data
-                                            for key, value in matched_product.items():
-                                                if key not in db_product or not db_product[key]:
-                                                    db_product[key] = value
-                                            break
-                                    
-                                    if not exists:
-                                        # Add the matched product if it's not in the database
-                                        expanded_products.append(matched_product)
-                        
-                        logging.info(f"Expanded product list now contains {len(expanded_products)} products")
-                        
-                    except Exception as db_error:
-                        logging.error(f"Error expanding products using Product Database: {db_error}")
-                        # Fallback to just using matched products
-                        expanded_products = matched_products.copy()
-                else:
-                    # Fallback to just using matched products
-                    expanded_products = matched_products.copy()
-            else:
-                expanded_products = []
-                matched_names = []
-            
-            # Use the expanded products list
-            available_tags = expanded_products
-            json_matched_tags = expanded_products
-            cache_status = "Product Database (Expanded)"
-            logging.info(f"Product Database mode: Using {len(expanded_products)} expanded products for available tags")
-            
-            # CRITICAL FIX: Integrate JSON-matched products directly into existing Excel system
-            if matched_products:
-                try:
-                    logging.info(f"Integrating {len(matched_products)} JSON-matched products into existing Excel system")
-                    
-                    # Add matched products directly to the existing Excel DataFrame
-                    integration_success = excel_processor.add_json_matched_products(matched_products)
-                    
-                    if integration_success:
-                        logging.info("✅ Successfully integrated JSON products into Excel system")
-                        
-                        # Update available tags from the integrated Excel data
-                        available_tags = excel_processor.get_available_tags() if excel_processor else []
-                        
-                        # Add matched products to available tags instead of selected tags for customization
-                        available_tag_objects = available_tags.copy() if available_tags else []
-                        if available_tag_objects:
-                            logging.info(f"Excel integration mode: Added {len(available_tag_objects)} matched products to available tags")
-                        
-                        # Store the updated available tags in cache for the available-tags endpoint
-                        cache_key = get_session_cache_key('available_tags')
-                        cache.set(cache_key, available_tags, timeout=3600)  # 1 hour timeout
-                        logging.info(f"Updated available tags cache with {len(available_tags)} items")
-                        
-                        # REPAIR MISSING DATA FOR INTEGRATED PRODUCTS
-                        if available_tag_objects:
-                            logging.info(f"Repairing missing data for {len(available_tag_objects)} integrated products")
-                            try:
-                                # Use the Excel processor's data repair system
-                                repaired_products = excel_processor.repair_missing_data_for_json_matches(available_tag_objects)
-                                logging.info(f"Data repair completed. {len(repaired_products)} products repaired")
-                                
-                                # Update the available_tag_objects with repaired data
-                                available_tag_objects = repaired_products
-                                
-                                # Extract product names for selected tags from repaired products
-                                selected_product_names = []
-                                for tag in repaired_products:
-                                    if isinstance(tag, dict):
-                                        product_name = tag.get('Product Name*', tag.get('ProductName', ''))
-                                        if product_name:
-                                            selected_product_names.append(product_name)
-                                
-                                # Set selected tags in both session and Excel processor
-                                session['selected_tags'] = selected_product_names
-                                excel_processor.selected_tags = selected_product_names
-                                
-                                # CRITICAL FIX: Update selected_tag_objects for the response
-                                selected_tag_objects = available_tag_objects.copy() if available_tag_objects else []
-                                
-                                logging.info(f"Automatically selected {len(selected_product_names)} repaired integrated products for output generation")
-                                
-                            except Exception as repair_error:
-                                logging.error(f"Error during data repair: {repair_error}")
-                                # Fallback to original selection without repair
-                                selected_product_names = []
-                                for tag in available_tag_objects:
-                                    if isinstance(tag, dict):
-                                        product_name = tag.get('Product Name*', tag.get('ProductName', ''))
-                                        if product_name:
-                                            selected_product_names.append(product_name)
-                                
-                                session['selected_tags'] = selected_product_names
-                                excel_processor.selected_tags = selected_product_names
-                                
-                                # CRITICAL FIX: Update selected_tag_objects for the response
-                                selected_tag_objects = available_tag_objects.copy() if available_tag_objects else []
-                                
-                                logging.info(f"Fallback: selected {len(selected_product_names)} integrated products without repair")
-                        else:
-                            # Clear selected tags if no matches found
-                            session['selected_tags'] = []
-                            excel_processor.selected_tags = []
-                            logging.info(f"Cleared selected tags - no integrated products found")
-                    else:
-                        logging.error("❌ Failed to integrate JSON products into Excel system")
-                        # Fallback to original approach
-                        available_tags = matched_products
-                        available_tag_objects = matched_products.copy() if matched_products else []
-                        
-                except Exception as integration_error:
-                    logging.error(f"Error during Excel integration: {integration_error}")
-                    # Fallback to original approach
-                    available_tags = matched_products
-                    available_tag_objects = matched_products.copy() if matched_products else []
-                    
-                    # Force session to be saved
-                    session.modified = True
-                    
-                    # Update cache status
-                    cache_status = f"JSON Generated Excel ({len(available_tag_objects)} products Auto-Selected)"
-                except Exception as excel_error:
-                    logging.error(f"Error generating/uploading Excel file: {excel_error}")
-                    # Fallback to available tags behavior
-                    available_tag_objects = matched_products.copy() if matched_products else []
-                    if available_tag_objects:
-                        logging.info(f"Product database mode: Fallback - added {len(available_tag_objects)} matched products to available tags")
-                        
-                        # Store the updated available tags in cache for the available-tags endpoint
-                        cache_key = get_session_cache_key('available_tags')
-                        cache.set(cache_key, available_tag_objects, timeout=3600)  # 1 hour timeout
-                        logging.info(f"Updated available tags cache with {len(available_tag_objects)} items")
-                        
-                        # REPAIR MISSING DATA FOR FALLBACK PRODUCT DATABASE MATCHES
-                        if available_tag_objects:
-                            logging.info(f"Repairing missing data for {len(available_tag_objects)} fallback product database matched products")
-                            try:
-                                # Use the Excel processor's data repair system
-                                repaired_products = excel_processor.repair_missing_data_for_json_matches(available_tag_objects)
-                                logging.info(f"Data repair completed. {len(repaired_products)} products repaired")
-                                
-                                # Update the available_tag_objects with repaired data
-                                available_tag_objects = repaired_products
-                                
-                                # Extract product names for selected tags from repaired products
-                                selected_product_names = []
-                                for tag in repaired_products:
-                                    if isinstance(tag, dict):
-                                        product_name = tag.get('Product Name*', tag.get('ProductName', ''))
-                                        if product_name:
-                                            selected_product_names.append(product_name)
-                                
-                                # Set selected tags in both session and Excel processor
-                                session['selected_tags'] = selected_product_names
-                                excel_processor.selected_tags = selected_product_names
-                                
-                                # CRITICAL FIX: Update selected_tag_objects for the response
-                                selected_tag_objects = available_tag_objects.copy() if available_tag_objects else []
-                                
-                                logging.info(f"Automatically selected {len(selected_product_names)} repaired fallback product database matched products for output generation")
-                                
-                            except Exception as repair_error:
-                                logging.error(f"Error during data repair: {repair_error}")
-                                # Fallback to original selection without repair
-                                selected_product_names = []
-                                for tag in available_tag_objects:
-                                    if isinstance(tag, dict):
-                                        product_name = tag.get('Product Name*', tag.get('ProductName', ''))
-                                        if product_name:
-                                            selected_product_names.append(product_name)
-                                
-                                session['selected_tags'] = selected_product_names
-                                excel_processor.selected_tags = selected_product_names
-                                
-                                # CRITICAL FIX: Update selected_tag_objects for the response
-                                selected_tag_objects = available_tag_objects.copy() if available_tag_objects else []
-                                
-                                logging.info(f"Fallback: selected {len(selected_product_names)} fallback product database matched products without repair")
-                        else:
-                            # Clear selected tags if no matches found
-                            session['selected_tags'] = []
-                            excel_processor.selected_tags = []
-                            logging.info(f"Cleared selected tags - no matched products found")
-                        
-                        # Force session to be saved
-                        session.modified = True
-                        cache_status = "Product Database (Fallback - Auto-Selected)"
-                        
-                        # CRITICAL FIX: Update selected_tag_objects for the response
-                        selected_tag_objects = available_tag_objects.copy() if available_tag_objects else []
-            else:
-                selected_tag_objects = []
-                cache_status = "Product Database (No Matches)"
-            
-        else:
-            logging.info("Excel data available, using Excel-based JSON matching")
-            
-            # Initialize product database for enhancement
-            product_db = get_session_product_database()
-            logging.info(f"Product database initialized for Excel-based JSON matching: {product_db is not None}")
-            
-            # Rebuild cache with better error handling
-            try:
-                json_matcher.rebuild_sheet_cache()
-            except Exception as cache_error:
-                logging.error(f"Failed to rebuild sheet cache: {cache_error}")
-                return jsonify({'error': f'Failed to build product cache: {str(cache_error)}'}), 500
-                
-            cache_status = json_matcher.get_sheet_cache_status()
-            if cache_status == "Not built" or cache_status == "Empty":
-                return jsonify({'error': f'Failed to build product cache: {cache_status}. Please ensure your Excel file has product data.'}), 400
-                
-            # Perform Excel-based matching with timeout handling
-            try:
-                # Use fetch_and_match instead of fetch_and_match_with_product_db
-                # This method now only returns matched database items
-                logging.info(f"CRITICAL FIX: About to call json_matcher.fetch_and_match(url)")
-                matched_products = json_matcher.fetch_and_match(url)
-                logging.info(f"CRITICAL FIX: json_matcher.fetch_and_match returned: {type(matched_products)}")
-                logging.info(f"CRITICAL FIX: matched_products length: {len(matched_products) if matched_products else 0}")
-                if matched_products:
-                    logging.info(f"CRITICAL FIX: Sample matched_product: {matched_products[0] if len(matched_products) > 0 else 'None'}")
-                    # Log the first few product names for debugging
-                    sample_names = [p.get('Product Name*', 'Unknown') for p in matched_products[:5] if isinstance(p, dict)]
-                    logging.info(f"CRITICAL FIX: Sample product names: {sample_names}")
-                # matched_products contains the full product objects from the JSON matcher
-                matched_tags = matched_products if matched_products else []
-                logging.info(f"CRITICAL FIX: matched_tags set to: {len(matched_tags)}")
-                
-                # CRITICAL FIX: Ensure all matched products are preserved
-                if not matched_tags:
-                    logging.warning("CRITICAL FIX: No matched tags found - this may indicate a matching issue")
-                else:
-                    logging.info(f"CRITICAL FIX: Successfully matched {len(matched_tags)} products from JSON")
-            except Exception as match_error:
-                logging.error(f"Excel-based JSON matching failed: {match_error}")
-                
-                # CRITICAL FIX: Fallback to Product Database matching if Excel-based fails
-                logging.info("Falling back to Product Database matching...")
-                try:
-                    matched_products = json_matcher.fetch_and_match(url)
-                    if matched_products:
-                        logging.info(f"Fallback Product Database matching successful: {len(matched_products)} products")
-                        matched_tags = matched_products
-                    else:
-                        logging.warning("Fallback Product Database matching returned no products")
-                        matched_tags = []
-                except Exception as fallback_error:
-                    logging.error(f"Fallback Product Database matching also failed: {fallback_error}")
-                    matched_tags = []
-                
-                if "timeout" in str(match_error).lower():
-                    return jsonify({'error': 'JSON matching timed out. The dataset may be too large or the URL may be slow to respond.'}), 408
-                elif "connection" in str(match_error).lower():
-                    return jsonify({'error': 'Failed to connect to the JSON URL. Please check the URL and try again.'}), 503
-                else:
-                    return jsonify({'error': f'JSON matching failed: {str(match_error)}'}), 500
-            
-            # Extract product names from the matched tags (Excel-based)
-            # matched_names is already populated from fetch_and_match
-            # matched_tags contains the dictionary data
-            
-            # Debug: Check what we got from JSON matching
-            logging.info(f"JSON matching results - matched_products count: {len(matched_products) if matched_products else 0}")
-            logging.info(f"JSON matching results - matched_tags count: {len(matched_tags) if matched_tags else 0}")
-            if matched_tags:
-                logging.info(f"Sample matched_tags: {matched_tags[:2]}")
-            else:
-                logging.warning("matched_tags is empty - this is the problem!")
-            
-            # CRITICAL FIX: Preserve ALL JSON matched tags and enhance with database data
-            # This ensures we show exactly the 40 tags that were matched, enhanced with database info
-            expanded_matched_tags = []
-            if matched_tags:
-                logging.info(f"CRITICAL FIX: Preserving ALL {len(matched_tags)} JSON-matched products and enhancing with database data")
-                
-                # Extract product names for database matching
-                matched_names = []
-                for tag in matched_tags:
-                    if isinstance(tag, dict):
-                        product_name = tag.get('Product Name*', tag.get('ProductName', ''))
-                        if product_name:
-                            matched_names.append(product_name.lower())
-                
-                logging.info(f"Extracted {len(matched_names)} product names for database matching")
-                
-                # Try to enhance products with Excel data using improved matching
-                try:
-                    if excel_processor and excel_processor.df is not None and not excel_processor.df.empty:
-                        logging.info(f"Attempting to enhance {len(matched_tags)} products with Excel data using improved matching")
-                        
-                        # Get all available products from Excel for better matching
-                        excel_products = excel_processor.get_available_tags()
-                        logging.info(f"Excel contains {len(excel_products) if excel_products else 0} total products")
-                        
-                        if excel_products:
-                            # Create a mapping of product names to Excel data with improved matching
-                            excel_product_map = {}
-                            enhanced_count = 0
-                            
-                            # First pass: exact matches
-                            for excel_product in excel_products:
-                                if isinstance(excel_product, dict):
-                                    excel_name = excel_product.get('Product Name*', '').lower()
-                                    if excel_name:
-                                        excel_product_map[excel_name] = excel_product
-                            
-                            # Second pass: enhanced matching for products not found with exact matching
-                            for json_tag in matched_tags:
-                                if isinstance(json_tag, dict):
-                                    json_name = json_tag.get('Product Name*', json_tag.get('ProductName', '')).lower()
-                                    if json_name:
-                                        # Try exact match first
-                                        if json_name in excel_product_map:
-                                            excel_product = excel_product_map[json_name]
-                                            # Enhanced mixing: preserve JSON data while adding Excel data
-                                            enhanced_tag = _enhance_json_with_excel_data(json_tag, excel_product)
-                                            json_tag.update(enhanced_tag)
-                                            json_tag['Source'] = 'JSON + Excel Match (Exact)'
-                                            enhanced_count += 1
-                                        else:
-                                            # Try STRICT partial matching for strain names with vendor/brand validation
-                                            best_match = None
-                                            best_score = 0
-                                            
-                                            # Extract strain name from JSON product (e.g., "Hawaiian Golden Pineapple" from "Hawaiian Golden Pineapple Live Resin Cartridge")
-                                            strain_keywords = json_name.split()
-                                            if len(strain_keywords) >= 2:
-                                                # Get JSON vendor and brand for strict matching
-                                                json_vendor = json_tag.get('Vendor', '').lower()
-                                                json_brand = json_tag.get('Product Brand', '').lower()
-                                                
-                                                # Only try to match if we have vendor/brand info from JSON
-                                                if json_vendor or json_brand:
-                                                    for excel_product in excel_products:
-                                                        if isinstance(excel_product, dict):
-                                                            excel_name = excel_product.get('Product Name*', '').lower()
-                                                            excel_strain = excel_product.get('Product Strain', '').lower()
-                                                            excel_vendor = excel_product.get('Vendor', '').lower()
-                                                            excel_brand = excel_product.get('Product Brand', '').lower()
-                                                            
-                                                            # STRICT MATCHING: Must have vendor OR brand match
-                                                            vendor_match = (json_vendor and excel_vendor and json_vendor in excel_vendor) or (json_vendor and excel_vendor and excel_vendor in json_vendor)
-                                                            brand_match = (json_brand and excel_brand and json_brand in excel_brand) or (json_brand and excel_brand and excel_brand in json_brand)
-                                                            
-                                                            if vendor_match or brand_match:
-                                                                # Now check strain similarity with higher threshold
-                                                                strain_similarity = 0
-                                                                
-                                                                # Check if strain names have significant overlap
-                                                                if excel_strain and len(excel_strain) > 3:
-                                                                    # Count how many strain keywords match
-                                                                    matching_keywords = sum(1 for keyword in strain_keywords[:3] if len(keyword) > 2 and keyword in excel_strain)
-                                                                    strain_similarity = matching_keywords
-                                                                
-                                                                # Check if product names have significant overlap
-                                                                elif excel_name and len(excel_name) > 3:
-                                                                    # Count how many strain keywords match in product name
-                                                                    matching_keywords = sum(1 for keyword in strain_keywords[:3] if len(keyword) > 2 and keyword in excel_name)
-                                                                    strain_similarity = matching_keywords
-                                                                
-                                                                # Only consider it a match if we have significant strain similarity AND vendor/brand match
-                                                                if strain_similarity >= 2:  # At least 2 keywords must match
-                                                                    score = strain_similarity + (2 if vendor_match else 0) + (2 if brand_match else 0)
-                                                                    if score > best_score:
-                                                                        best_score = score
-                                                                        best_match = excel_product
-                                            
-                                            if best_match and best_score >= 4:  # Higher threshold: must have good strain match + vendor/brand match
-                                                json_tag['Source'] = 'JSON + Excel Match (Strict)'
-                                                enhanced_count += 1
-                                                excel_product = best_match
-                                            else:
-                                                json_tag['Source'] = 'JSON Match'
-                                                excel_product = None
-                                        
-                                        # Apply Excel enhancement if we found a match
-                                        if excel_product:
-                                            # Enhanced mixing: preserve JSON data while adding Excel data
-                                            enhanced_tag = _enhance_json_with_excel_data(json_tag, excel_product)
-                                            json_tag.update(enhanced_tag)
-                                            logging.info(f"Enhanced JSON product '{json_name}' with Excel data (Source: {json_tag['Source']})")
-                                        else:
-                                            logging.info(f"JSON product '{json_name}' kept as JSON match (no Excel enhancement)")
-                            
-                            logging.info(f"Excel enhancement completed: {enhanced_count} products enhanced out of {len(matched_tags)} total")
-                        else:
-                            logging.info("No Excel products available for enhancement")
-                            # Mark all as JSON matches
-                            for json_tag in matched_tags:
-                                if isinstance(json_tag, dict):
-                                    json_tag['Source'] = 'JSON Match'
-                    else:
-                        logging.info("No Excel data available for enhancement")
-                        # Mark all as JSON matches
-                        for json_tag in matched_tags:
-                            if isinstance(json_tag, dict):
-                                json_tag['Source'] = 'JSON Match'
-                        
-                except Exception as excel_enhance_error:
-                    logging.error(f"Error enhancing products with Excel data: {excel_enhance_error}")
-                    # Mark all as JSON matches on error
-                    for json_tag in matched_tags:
-                        if isinstance(json_tag, dict):
-                            json_tag['Source'] = 'JSON Match'
-                
-                # Copy all enhanced tags to ensure none are lost
-                expanded_matched_tags = matched_tags.copy()
-                logging.info(f"CRITICAL FIX: Preserved and enhanced {len(expanded_matched_tags)} JSON matched tags")
-                
-                # Use the enhanced list for further processing
-                matched_tags = expanded_matched_tags
-            else:
-                expanded_matched_tags = []
-            
-            # CRITICAL CHANGE: Replace Excel data with JSON matched tags only
-            json_matched_tags = []
-            if matched_tags:
-                logging.info(f"Processing {len(matched_tags)} JSON-matched products")
-                
-                # CRITICAL CHANGE: Replace Excel data with JSON matched tags only
-                available_tags = []
-                json_matched_tags = []
-                
-                # Process each JSON tag and add it to the available tags
-                for json_tag in matched_tags:
-                    # Safety check: ensure json_tag is a dictionary
-                    if not isinstance(json_tag, dict):
-                        logging.warning(f"JSON tag is not a dictionary (type: {type(json_tag)}), skipping: {json_tag}")
-                        continue
-                    
-                    # Create tag from JSON data (now enhanced with database data)
-                    # Start with the enhanced json_tag data to preserve all database enhancements
-                    new_tag = json_tag.copy() if isinstance(json_tag, dict) else {}
-                    
-                    # Get and clean the product name
-                    json_name = json_tag.get('Product Name*', json_tag.get('ProductName', ''))
-                    
-                    # CRITICAL FIX: Process ALL products, even those with missing names
-                    # This ensures no products are lost due to missing product names
-                    
-                    # Clean product name by removing subtext and parenthetical information
-                    def clean_product_name(name):
-                        """Remove subtext and parenthetical information from product names."""
-                        if not name:
-                            return name
-                        
-                        import re
-                        
-                        # Remove parentheses but preserve their content
-                        cleaned = re.sub(r'\(([^)]*)\)', r'\1', name)  # Replace (text) with text
-                        cleaned = re.sub(r'\[([^\]]*)\]', r'\1', cleaned)  # Replace [text] with text
-                        
-                        # Remove "by Dabstract JSON" specifically
-                        cleaned = re.sub(r'\s*by\s+Dabstract\s+JSON\s*$', '', cleaned, flags=re.IGNORECASE)
-                        
-                        # Remove other "by vendor" patterns
-                        cleaned = re.sub(r'\s*by\s+[^-]*\s*$', '', cleaned, flags=re.IGNORECASE)
-                        
-                        # Remove trailing dash patterns
-                        cleaned = re.sub(r'\s*-\s*[^-]*\s*$', '', cleaned, flags=re.IGNORECASE)
-                        
-                        # Clean up extra whitespace
-                        cleaned = re.sub(r'\s+', ' ', cleaned)
-                        cleaned = cleaned.strip()
-                        
-                        return cleaned
-                    
-                    # Clean the product name (even if it's empty)
-                    cleaned_product_name = clean_product_name(json_name)
-                    
-                    # If no product name, try to create one from other fields
-                    if not cleaned_product_name:
-                        # Try to create a product name from other available fields
-                        vendor = json_tag.get('Vendor', json_tag.get('vendor', ''))
-                        brand = json_tag.get('Product Brand', json_tag.get('brand', ''))
-                        weight = json_tag.get('Weight*', json_tag.get('weight', ''))
-                        product_type = json_tag.get('Product Type*', json_tag.get('inventory_type', ''))
-                        
-                        # Create a fallback product name
-                        fallback_parts = []
-                        if brand:
-                            fallback_parts.append(brand)
-                        if product_type:
-                            fallback_parts.append(product_type)
-                        if weight:
-                            fallback_parts.append(weight)
-                        
-                        if fallback_parts:
-                            cleaned_product_name = " ".join(fallback_parts)
-                        else:
-                            cleaned_product_name = f"JSON Product {len(json_matched_tags) + 1}"
-                        
-                        logging.info(f"⚠️  Created fallback product name: '{cleaned_product_name}' for product with missing name")
-                    
-                    # Debug logging for cleaning process
-                    if json_name and json_name != cleaned_product_name:
-                        logging.info(f"🧹 Cleaned JSON tag product name: '{json_name}' → '{cleaned_product_name}'")
-                    
-                    # Update with cleaned product name
-                    new_tag['Product Name*'] = cleaned_product_name
-                    new_tag['ProductName'] = cleaned_product_name
-                    new_tag['Description'] = cleaned_product_name
-                    new_tag['displayName'] = cleaned_product_name
-                    
-                    # Ensure critical fields exist (use enhanced data if available, fallback to defaults)
-                    if 'Product Type*' not in new_tag or new_tag['Product Type*'] == 'Unknown':
-                        new_tag['Product Type*'] = map_inventory_type_to_product_type(
-                            json_tag.get('inventory_type'), 
-                            json_tag.get('inventory_category'),
-                            json_tag.get('Product Name*', json_tag.get('ProductName', ''))
-                        )
-                    
-                    if 'Product Brand' not in new_tag or new_tag['Product Brand'] == 'Unknown':
-                        new_tag['Product Brand'] = json_tag.get('Product Brand', json_tag.get('brand', 'Unknown'))
-                    
-                    if 'Product Strain' not in new_tag or new_tag['Product Strain'] == 'Unknown':
-                        new_tag['Product Strain'] = json_tag.get('Product Strain', json_tag.get('strain', 'Unknown'))
-                    
-                    if 'Lineage' not in new_tag or new_tag['Lineage'] == 'MIXED':
-                        new_tag['Lineage'] = json_tag.get('Lineage', 'MIXED')
-                    
-                    if 'Vendor' not in new_tag or new_tag['Vendor'] == 'Unknown':
-                        new_tag['Vendor'] = json_tag.get('Vendor', json_tag.get('vendor', 'Unknown'))
-                    
-                    # Ensure other required fields exist
-                    if 'Price' not in new_tag:
-                        new_tag['Price'] = json_tag.get('Price', json_tag.get('price', '$0'))
-                    if 'Weight*' not in new_tag:
-                        new_tag['Weight*'] = json_tag.get('Weight*', json_tag.get('weight', '0'))
-                    if 'Quantity*' not in new_tag:
-                        new_tag['Quantity*'] = json_tag.get('Quantity*', json_tag.get('quantity', '1'))
-                    if 'Units' not in new_tag:
-                        new_tag['Units'] = json_tag.get('Units', json_tag.get('unit_of_measure', 'each'))
-                    if 'THC test result' not in new_tag:
-                        new_tag['THC test result'] = json_tag.get('THC test result', json_tag.get('thc', 0.0))
-                    if 'CBD test result' not in new_tag:
-                        new_tag['CBD test result'] = json_tag.get('CBD test result', json_tag.get('cbd', 0.0))
-                    if 'Test result unit (% or mg)' not in new_tag:
-                        new_tag['Test result unit (% or mg)'] = json_tag.get('Test result unit (% or mg)', '%')
-                    
-                    # Set standard fields
-                    new_tag['State'] = 'active'
-                    new_tag['Is Sample? (yes/no)'] = 'no'
-                    new_tag['Is MJ product?(yes/no)'] = 'yes'
-                    new_tag['Discountable? (yes/no)'] = 'yes'
-                    new_tag['Room*'] = 'Default'
-                    new_tag['Medical Only (Yes/No)'] = 'No'
-                    new_tag['DOH'] = 'No'
-                    
-                    # Ensure Source field is preserved from database enhancement
-                    if 'Source' not in new_tag:
-                        new_tag['Source'] = 'JSON Match'
-                    
-                    # Add any additional fields from the JSON tag
-                    for key, value in json_tag.items():
-                        if key not in new_tag:
-                            new_tag[key] = value
-                    
-                    # Add the processed tag to both lists
-                    available_tags.append(new_tag)
-                    json_matched_tags.append(new_tag)
-                    logging.info(f"Added JSON item to available tags: {json_name}")
-                
-                logging.info(f"✅ Replaced Excel data with {len(available_tags)} JSON matched tags")
-            else:
-                # Fallback: if no JSON tags, use Excel data
-                logging.info("No JSON matched tags found - using Excel data as fallback")
-                available_tags = excel_processor.get_available_tags()
-                json_matched_tags = []
-            
-            # Debug logging for JSON matched tags
-            logging.info(f"DEBUG: json_matched_tags length: {len(json_matched_tags)}")
-            logging.info(f"DEBUG: json_matched_tags type: {type(json_matched_tags)}")
-            if json_matched_tags and len(json_matched_tags) > 0:
-                sample_tag = json_matched_tags[0]
-                logging.info(f"DEBUG: Sample JSON matched tag keys: {list(sample_tag.keys()) if isinstance(sample_tag, dict) else 'Not a dict'}")
-                if isinstance(sample_tag, dict):
-                    logging.info(f"DEBUG: Sample tag displayName: {sample_tag.get('displayName', 'NOT SET')}")
-                    logging.info(f"DEBUG: Sample tag Product Name*: {sample_tag.get('Product Name*', 'NOT SET')}")
-                    logging.info(f"DEBUG: Sample tag Source: {sample_tag.get('Source', 'NOT SET')}")
+        logging.info("JSON matcher created successfully")
         
-        # Simplified processing - focus on core functionality
-        selected_tag_objects = []
+        # Perform JSON matching
+        matched_products = json_matcher.fetch_and_match(url)
+        logging.info(f"JSON matching returned {len(matched_products) if matched_products else 0} products")
         
-        # CRITICAL FIX: Store JSON matched tags in available_tags cache for frontend display
-        # This ensures the frontend can find and display the JSON matched tags
-        logging.info(f"CRITICAL FIX: Setting available_tags cache with {len(json_matched_tags)} JSON matched items")
+        if not matched_products:
+            return jsonify({'error': 'No products found in JSON data'}), 400
         
-        # Store JSON matched tags in the main available_tags cache
-        if json_matched_tags:
-            cache_key = get_session_cache_key('available_tags')
-            cache.set(cache_key, json_matched_tags, timeout=3600)
-            logging.info(f"Updated available_tags cache with {len(json_matched_tags)} JSON matched tags")
-            
-            # Also store in separate cache for reference
-            cache_key_json = f"json_matched_tags_{session.get('session_id', 'default')}"
-            cache.set(cache_key_json, json_matched_tags, timeout=3600)
-            session['json_matched_cache_key'] = cache_key_json
-            # CRITICAL: Force session to be saved
-            session['_last_update'] = time.time()
-            logging.info(f"Stored {len(json_matched_tags)} JSON matched tags in separate cache with key: {cache_key_json}")
-            logging.info(f"Session json_matched_cache_key set to: {cache_key_json}")
-            
-            # CRITICAL FIX: Add JSON matched products to Excel data so they can be generated
-            logging.info(f"CRITICAL FIX: Adding {len(json_matched_tags)} JSON matched products to Excel data")
-            try:
-                # Convert JSON matched tags to DataFrame format
-                json_df_data = []
-                
-                # CRITICAL FIX: Determine the correct product name column to use
-                # Check what column name the existing Excel data uses
-                product_name_column = 'ProductName'  # Default
-                if excel_processor.df is not None and not excel_processor.df.empty:
-                    possible_cols = ['ProductName', 'Product Name*', 'Product Name', 'Description']
-                    for col in possible_cols:
-                        if col in excel_processor.df.columns:
-                            product_name_column = col
-                            logging.info(f"CRITICAL FIX: Using product name column '{product_name_column}' to match existing Excel data")
-                            break
-                else:
-                    logging.info(f"CRITICAL FIX: No existing Excel data, using default column '{product_name_column}'")
-                
-                for tag in json_matched_tags:
-                    if isinstance(tag, dict):
-                        # Create a row that matches Excel format using the correct column name
-                        row = {
-                            product_name_column: tag.get('Product Name*', tag.get('ProductName', '')),
-                            'Product Brand': tag.get('Product Brand', ''),
-                            'Product Type*': tag.get('Product Type*', ''),
-                            'Vendor/Supplier*': tag.get('Vendor/Supplier*', ''),
-                            'Description': tag.get('Description', ''),
-                            'Lineage': tag.get('Lineage', 'HYBRID'),
-                            'THC test result': tag.get('THC test result', '0.00'),
-                            'CBD test result': tag.get('CBD test result', '0.00'),
-                            'Test result unit (% or mg)': tag.get('Test result unit (% or mg)', '%'),
-                            'Weight*': tag.get('Weight*', '1g'),
-                            'CombinedWeight': tag.get('CombinedWeight', tag.get('Weight*', '1g')),  # Add CombinedWeight for JSON data
-                            'Price': tag.get('Price', '0.00'),
-                            'Quantity*': tag.get('Quantity*', '1'),
-                            'displayName': tag.get('displayName', tag.get('Product Name*', tag.get('ProductName', ''))),
-                            'Source': 'JSON Match'
-                        }
-                        json_df_data.append(row)
-                
-                if json_df_data:
-                    # Add to Excel processor's DataFrame
-                    import pandas as pd
-                    json_df = pd.DataFrame(json_df_data)
-                    
-                    # Append to existing Excel data
-                    if excel_processor.df is not None and not excel_processor.df.empty:
-                        excel_processor.df = pd.concat([excel_processor.df, json_df], ignore_index=True)
-                        logging.info(f"✅ Added {len(json_df)} JSON products to existing Excel data")
-                    else:
-                        excel_processor.df = json_df
-                        logging.info(f"✅ Created new Excel data with {len(json_df)} JSON products")
-                    
-                    # Update the processor's last loaded file to indicate it has JSON data
-                    excel_processor._last_loaded_file = "JSON_MATCHED_DATA"
-                    logging.info(f"✅ JSON matched products are now available for generation")
-                else:
-                    logging.warning("No valid JSON data to add to Excel")
-                    
-            except Exception as add_error:
-                logging.error(f"Error adding JSON products to Excel data: {add_error}")
-                logging.warning("JSON products will not be available for generation")
-        
-        # Basic data repair without complex processing
-        if json_matched_tags:
-            try:
-                # Clean product names by removing subtext and parenthetical information
-                def clean_product_name(name):
-                    """Remove subtext and parenthetical information from product names."""
-                    if not name:
-                        return name
-                    
-                    import re
-                    
-                    # Remove parentheses but preserve their content
-                    cleaned = re.sub(r'\(([^)]*)\)', r'\1', name)  # Replace (text) with text
-                    cleaned = re.sub(r'\[([^\]]*)\]', r'\1', cleaned)  # Replace [text] with text
-                    
-                    # Remove "by Dabstract JSON" specifically
-                    cleaned = re.sub(r'\s*by\s+Dabstract\s+JSON\s*$', '', cleaned, flags=re.IGNORECASE)
-                    
-                    # Remove other "by vendor" patterns
-                    cleaned = re.sub(r'\s*by\s+[^-]*\s*$', '', cleaned, flags=re.IGNORECASE)
-                    
-                    # Remove trailing dash patterns
-                    cleaned = re.sub(r'\s*-\s*[^-]*\s*$', '', cleaned, flags=re.IGNORECASE)
-                    
-                    # Clean up extra whitespace
-                    cleaned = re.sub(r'\s+', ' ', cleaned)
-                    cleaned = cleaned.strip()
-                    
-                    return cleaned
-                
-                # Simple repair - just ensure basic fields exist
-                for tag in json_matched_tags:
-                    if isinstance(tag, dict):
-                        # Ensure required fields exist and clean product names
-                        if 'Product Name*' not in tag:
-                            tag['Product Name*'] = tag.get('ProductName', 'Unknown Product')
-                        
-                        # Clean the product name by removing subtext and parenthetical information
-                        if 'Product Name*' in tag:
-                            original_name = tag['Product Name*']
-                            cleaned_name = clean_product_name(original_name)
-                            
-                            # Debug logging for cleaning process
-                            if original_name != cleaned_name:
-                                logging.info(f"🧹 Cleaned repair tag product name: '{original_name}' → '{cleaned_name}'")
-                            
-                            tag['Product Name*'] = cleaned_name
-                            # Also update displayName if it exists
-                            if 'displayName' in tag:
-                                tag['displayName'] = cleaned_name
-                            # Also update ProductName if it exists
-                            if 'ProductName' in tag:
-                                tag['ProductName'] = cleaned_name
-                        # Preserve vendor from intelligent matching - don't force JSM LLC
-                        # The intelligent matching system will set the correct vendor
-                        if 'Vendor' not in tag:
-                            tag['Vendor'] = tag.get('vendor', 'Unknown Vendor')
-                        if 'vendor' not in tag:
-                            tag['vendor'] = tag.get('Vendor', 'Unknown Vendor')
-                        
-                        # Extract brand from product name if not already set
-                        product_name = tag.get('Product Name*', '').lower()
-                        if 'dank czar' in product_name:
-                            tag['Product Brand'] = 'Dank Czar'
-                            tag['brand'] = 'Dank Czar'
-                        elif 'omega' in product_name:
-                            tag['Product Brand'] = 'Omega Labs'
-                            tag['brand'] = 'Omega Labs'
-                        elif 'medically compliant' in product_name:
-                            # Medically Compliant products are typically Dank Czar products
-                            # Check if it's a specific type that might be Omega
-                            if any(x in product_name for x in ['distillate cartridge', 'omega']):
-                                tag['Product Brand'] = 'Omega Labs'
-                                tag['brand'] = 'Omega Labs'
-                            else:
-                                tag['Product Brand'] = 'Dank Czar'
-                                tag['brand'] = 'Dank Czar'
-                        elif not tag.get('Product Brand'):
-                            tag['Product Brand'] = tag.get('brand', 'Unknown Brand')
-                
-                # CRITICAL FIX: Debug logging to see what's happening
-                logging.info(f"CRITICAL FIX: json_matched_tags length: {len(json_matched_tags)}")
-                logging.info(f"CRITICAL FIX: json_matched_tags type: {type(json_matched_tags)}")
-                if json_matched_tags:
-                    sample_tag = json_matched_tags[0]
-                    logging.info(f"CRITICAL FIX: Sample tag type: {type(sample_tag)}")
-                    if isinstance(sample_tag, dict):
-                        logging.info(f"CRITICAL FIX: Sample tag keys: {list(sample_tag.keys())}")
-                        logging.info(f"CRITICAL FIX: Sample tag Product Name*: {sample_tag.get('Product Name*', 'NOT SET')}")
-                        logging.info(f"CRITICAL FIX: Sample tag ProductName: {sample_tag.get('ProductName', 'NOT SET')}")
-                
-                # Extract product names for selected tags
-                selected_product_names = []
-                for tag in json_matched_tags:
-                    if isinstance(tag, dict):
-                        product_name = tag.get('Product Name*', tag.get('ProductName', ''))
-                        if product_name:
-                            selected_product_names.append(product_name)
-                
-                # CRITICAL FIX: Set selected tags in both session and Excel processor
-                session['selected_tags'] = selected_product_names
-                excel_processor.selected_tags = selected_product_names
-                
-                # CRITICAL FIX: Force session to be saved and persist across requests
-                session.modified = True
-                session.permanent = True
-                
-                # CRITICAL FIX: Ensure session is saved by explicitly calling session.save()
-                try:
-                    session.save()
-                    logging.info("CRITICAL FIX: Session explicitly saved")
-                except Exception as save_error:
-                    logging.warning(f"CRITICAL FIX: Could not explicitly save session: {save_error}")
-                
-                # CRITICAL FIX: Additional session persistence measures
-                try:
-                    # Force session to be marked as modified
-                    session['session_timestamp'] = time.time()
-                    session['last_json_match_time'] = time.time()
-                    session['json_match_success'] = True
-                    session.save()
-                    logging.info("CRITICAL FIX: Additional session data saved")
-                except Exception as additional_save_error:
-                    logging.warning(f"CRITICAL FIX: Could not save additional session data: {additional_save_error}")
-                
-                # CRITICAL FIX: Store selected tags in multiple session locations for redundancy
-                session['json_selected_tags'] = selected_product_names
-                session['last_json_match_count'] = len(selected_product_names)
-                session['json_match_timestamp'] = time.time()
-                
-                # CRITICAL FIX: Store ALL matched products in session for redundancy
-                session['all_json_matched_products'] = matched_products
-                session['total_json_products'] = len(matched_products) if matched_products else 0
-                
-                # CRITICAL FIX: Add JSON matched products to Excel processor DataFrame
-                if matched_products and excel_processor.df is not None:
-                    try:
-                        # Convert JSON matched products to DataFrame format
-                        json_df = pd.DataFrame(matched_products)
-                        
-                        # Ensure all required columns exist
-                        required_columns = ['ProductName', 'Product Name*', 'Description', 'Product Type*', 'Product Brand', 'Product Strain', 'Lineage', 'Vendor', 'Price', 'Weight*', 'CombinedWeight', 'Quantity*', 'Units', 'THC test result', 'CBD test result', 'Test result unit (% or mg)']
-                        for col in required_columns:
-                            if col not in json_df.columns:
-                                if col == 'ProductName':
-                                    json_df[col] = json_df.get('Product Name*', '')
-                                elif col == 'Description':
-                                    json_df[col] = json_df.get('Product Name*', '')
-                                else:
-                                    json_df[col] = ''
-                        
-                        # Add Source column to identify JSON matched products
-                        json_df['Source'] = 'JSON Match'
-                        
-                        # Append to existing DataFrame
-                        excel_processor.df = pd.concat([excel_processor.df, json_df], ignore_index=True)
-                        logging.info(f"CRITICAL FIX: Added {len(json_df)} JSON matched products to DataFrame")
-                        logging.info(f"CRITICAL FIX: DataFrame now has {len(excel_processor.df)} total products")
-                        
-                    except Exception as df_error:
-                        logging.error(f"CRITICAL FIX: Error adding JSON products to DataFrame: {df_error}")
-                else:
-                    logging.warning("CRITICAL FIX: Cannot add JSON products to DataFrame - either no products or DataFrame is None")
-                
-                # CRITICAL FIX: Store selected tags in cache as backup
-                cache_key_selected = f"selected_tags_{session.get('session_id', 'default')}"
-                cache.set(cache_key_selected, selected_product_names, timeout=3600)
-                session['selected_tags_cache_key'] = cache_key_selected
-                
-                # CRITICAL FIX: Also store in the main selected tags cache key
-                main_selected_cache_key = get_session_cache_key('selected_tags')
-                cache.set(main_selected_cache_key, selected_product_names, timeout=3600)
-                logging.info(f"CRITICAL FIX: Stored selected tags in main cache key: {main_selected_cache_key}")
-                
-                # CRITICAL FIX: Update selected_tag_objects for the response
-                selected_tag_objects = json_matched_tags.copy()
-                
-                logging.info(f"CRITICAL FIX: Set {len(selected_product_names)} selected tags in session and Excel processor")
-                logging.info(f"CRITICAL FIX: Session selected_tags: {session['selected_tags']}")
-                logging.info(f"CRITICAL FIX: Session json_selected_tags: {session['json_selected_tags']}")
-                logging.info(f"CRITICAL FIX: Excel processor selected_tags: {excel_processor.selected_tags}")
-                logging.info(f"CRITICAL FIX: Session modified flag: {session.modified}")
-                logging.info(f"CRITICAL FIX: Session permanent flag: {session.permanent}")
-                logging.info(f"CRITICAL FIX: Cache key for selected tags: {cache_key_selected}")
-                
-            except Exception as repair_error:
-                logging.error(f"Error during data repair: {repair_error}")
-                # Fallback - just use the original tags
-                selected_product_names = []
-                for tag in json_matched_tags:
-                    if isinstance(tag, dict):
-                        product_name = tag.get('Product Name*', tag.get('ProductName', ''))
-                        if product_name:
-                            selected_product_names.append(product_name)
-                
-                session['selected_tags'] = selected_product_names
-                excel_processor.selected_tags = selected_product_names
-                
-                # CRITICAL FIX: Update selected_tag_objects for the response
-                selected_tag_objects = json_matched_tags.copy()
-        else:
-            # Clear selected tags if no matches found
-            session['selected_tags'] = []
-            excel_processor.selected_tags = []
-        
-        # CRITICAL FIX: Force session to be saved and persist
-        session.modified = True
-        session.permanent = True
-        
-        # CRITICAL FIX: Set filter mode
-        session['current_filter_mode'] = 'json_matched'
-        
-        # CRITICAL FIX: Store ALL matched products in cache
-        cache_key_json = f"json_matched_tags_{session.get('session_id', 'default')}"
-        cache.set(cache_key_json, matched_products, timeout=3600)  # Store the original matched_products
-        session['json_matched_cache_key'] = cache_key_json
-        
-        # CRITICAL FIX: Store JSON matched products in available_tags cache for frontend display
-        # This ensures the frontend can find and display the JSON matched tags
-        logging.info(f"CRITICAL FIX: Setting available_tags cache with {len(matched_products)} JSON matched items")
-        
-        # Store JSON matched products in the main available_tags cache
-        if matched_products:
-            cache_key = get_session_cache_key('available_tags')
-            cache.set(cache_key, matched_products, timeout=3600)
-            logging.info(f"Updated available_tags cache with {len(matched_products)} JSON matched products")
-            
-            # Also store in separate cache for reference
-            cache_key_json = f"json_matched_tags_{session.get('session_id', 'default')}"
-            cache.set(cache_key_json, matched_products, timeout=3600)
-            session['json_matched_cache_key'] = cache_key_json
-            logging.info(f"Stored {len(matched_products)} JSON matched products in separate cache with key: {cache_key_json}")
-            logging.info(f"Session json_matched_cache_key set to: {cache_key_json}")
-        
-        # CRITICAL FIX: Ensure session is saved by setting a dummy value
-        session['_last_update'] = time.time()
-        
-        # CRITICAL FIX: Final session verification
-        logging.info(f"CRITICAL FIX: Final session verification:")
-        logging.info(f"   Session selected_tags: {len(session.get('selected_tags', []))}")
-        logging.info(f"   Session json_selected_tags: {len(session.get('json_selected_tags', []))}")
-        logging.info(f"   Session modified: {session.modified}")
-        logging.info(f"   Session permanent: {session.permanent}")
-        logging.info(f"   Session ID: {session.get('session_id', 'default')}")
-        
-        # CRITICAL FIX: Ensure all matched products are included in response
-        # Use the actual matched_products from the JSON matcher, not the processed matched_tags
-        actual_matched_count = len(matched_products) if matched_products else 0
-        actual_matched_names = []
-        if matched_products:
-            for product in matched_products:
-                if isinstance(product, dict):
-                    product_name = product.get('Product Name*', product.get('ProductName', ''))
-                    if product_name:
-                        actual_matched_names.append(product_name)
-        
-        # CRITICAL FIX: Return JSON matched products in available_tags so they appear in the UI
+        # Create response data
         response_data = {
             'success': True,
-            'matched_count': actual_matched_count,
-            'matched_names': actual_matched_names,
-            'available_tags': matched_products if matched_products else [],  # Send JSON matched products as available tags
-            'selected_tags': matched_products if matched_products else [],  # Return JSON matched products as selected
-            'json_matched_tags': matched_products if matched_products else [],  # Keep for reference
-            'cache_status': f'JSON Match Complete - {actual_matched_count} products processed',
+            'matched_count': len(matched_products),
+            'matched_names': [p.get('Product Name*', p.get('ProductName', '')) for p in matched_products if isinstance(p, dict)],
+            'available_tags': matched_products,
+            'selected_tags': matched_products,
+            'json_matched_tags': matched_products,
+            'cache_status': f'JSON Match Complete - {len(matched_products)} products processed',
             'filter_mode': 'json_matched',
-            'has_full_excel': True,  # Indicate that Excel data is still available
-            'message': f"JSON matched {actual_matched_count} products. They are now available for selection alongside your Excel data.",
-            'auto_selected': True,  # CRITICAL FIX: Indicate that tags were automatically selected
-            'selected_count': len(selected_product_names) if 'selected_product_names' in locals() else 0
+            'has_full_excel': True,
+            'message': f"JSON matched {len(matched_products)} products successfully.",
+            'auto_selected': True,
+            'selected_count': len(matched_products)
         }
         
-        logging.info(f"CRITICAL FIX: Response data contains {actual_matched_count} matched products")
-        logging.info(f"CRITICAL FIX: This ensures ALL JSON items are preserved in the response")
-        
-        logging.info(f"Sending simplified JSON match response with {len(available_tags) if available_tags else 0} available tags")
+        logging.info(f"Sending JSON match response with {len(matched_products)} products")
         return jsonify(response_data)
+        
     except Exception as e:
         logging.error(f"Error in JSON matching: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        import traceback
+        logging.error(f"Full traceback: {traceback.format_exc()}")
+        return jsonify({'error': f'JSON matching failed: {str(e)}'}), 500
+
+@app.route('/api/json-process', methods=['POST'])
+def json_process():
+    """Process JSON inventory and return matched products."""
+    try:
+        # Get request data
+        data = request.get_json()
+        url = data.get('url', '').strip()
+        
+        if not url:
+            return jsonify({'error': 'URL is required'}), 400
+            
+        if not url.lower().startswith('http'):
+            return jsonify({'error': 'Please provide a valid HTTP URL'}), 400
+            
+        # Process JSON data directly
+        json_matcher = get_json_matcher()
+        matched_products = json_matcher.fetch_and_match_with_product_db(url)
+        
+        if matched_products:
+            logging.info(f'✅ Successfully matched {len(matched_products)} products from JSON')
+            
+            # Store in cache
+            cache_key = get_session_cache_key('available_tags')
+            cache.set(cache_key, matched_products, timeout=3600)
+            
+            return jsonify({
+                'success': True,
+                'matched_count': len(matched_products),
+                'available_tags': matched_products,
+                'selected_tags': matched_products,
+                'message': f'Successfully processed {len(matched_products)} JSON matched products'
+            })
+        else:
+            return jsonify({
+                'success': True,
+                'matched_count': 0,
+                'available_tags': [],
+                'selected_tags': [],
+                'message': 'No JSON matched products found'
+            })
+        
+    except Exception as e:
+        logging.error(f'Error in JSON matching: {str(e)}')
+        return jsonify({'error': f'JSON matching failed: {str(e)}'}), 500
         
 @app.route('/api/json-inventory', methods=['POST'])
 def json_inventory():
@@ -10434,12 +9648,12 @@ def get_filter_status():
             available_tags = cache.get(cache_key)
             if available_tags:
                 # Count JSON matched tags (includes "JSON Match", "Excel Match (Strict)", etc.)
-                json_matched_tags = [tag for tag in available_tags if isinstance(tag, dict) and tag.get('Source') and 'JSON' in tag.get('Source', '')]
-                if not json_matched_tags:
+                json_matched_items = [tag for tag in available_tags if isinstance(tag, dict) and tag.get('Source') and 'JSON' in tag.get('Source', '')]
+                if not json_matched_items:
                     # Fallback: count tags with Excel Match (Strict) source
-                    json_matched_tags = [tag for tag in available_tags if isinstance(tag, dict) and tag.get('Source') in ['JSON Match', 'JSON + Excel Match (Exact)', 'JSON + Excel Match (Strict)', 'Excel Match (Strict)', 'Excel Match (Exact)', 'Product Database Match']]
+                    json_matched_items = [tag for tag in available_tags if isinstance(tag, dict) and tag.get('Source') in ['JSON Match', 'JSON + Excel Match (Exact)', 'JSON + Excel Match (Strict)', 'Excel Match (Strict)', 'Excel Match (Exact)', 'Product Database Match']]
                 
-                json_matched_count = len(json_matched_tags)
+                json_matched_count = len(json_matched_items)
                 has_json_matched = json_matched_count > 0
                 
                 logging.info(f"Filter status: Found {json_matched_count} JSON matched tags in available_tags cache")
@@ -12115,6 +11329,6 @@ def backfill_missing_values():
         return jsonify({'success': False, 'message': f'Error backfilling missing values: {str(e)}'})
 
 if __name__ == '__main__':
-    # Create and run the Flask application
-    app = create_app()
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    # Use the global app instance that has all routes registered
+    port = int(os.environ.get('FLASK_PORT', 5001))  # Use port 5001 by default
+    app.run(host='0.0.0.0', port=port, debug=False)

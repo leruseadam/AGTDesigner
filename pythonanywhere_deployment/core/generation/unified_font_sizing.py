@@ -57,7 +57,7 @@ def _load_font_sizing_config():
                 'vertical': {
                     'description': [(5, 34), (30, 32), (40, 28), (60, 26), (70, 24), (80, 22), (100, 20), (float('inf'), 14)],
                     'brand': [(10, 16), (20, 14), (30, 12), (float('inf'), 10)],
-                    'price': [(2, 30), (5, 28), (float('inf'), 14)],
+                    'price': [(2, 30), (5, 26), (float('inf'), 14)],
                     'lineage': [(20, 18), (40, 16), (60, 12), (float('inf'), 8)],
                     'ratio': [(10, 14), (20, 12), (30, 9), (float('inf'), 9)],
                     'thc_cbd': [(10, 12), (float('inf'), 12)],
