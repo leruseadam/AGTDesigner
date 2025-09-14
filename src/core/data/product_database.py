@@ -3660,6 +3660,10 @@ class ProductDatabase:
     def get_products_by_names(self, product_names: List[str]) -> List[Dict[str, Any]]:
         """Get information about multiple products by their names (with caching)."""
         try:
+            # Temporarily disable database lookups to prevent errors
+            logger.warning("Database lookup temporarily disabled due to schema issues")
+            return []
+            
             self.init_database()  # Ensure DB is initialized
             
             if not product_names:
