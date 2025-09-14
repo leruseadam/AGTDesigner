@@ -1,0 +1,84 @@
+{
+  "inventory_transfer_items": [
+    {
+      "product_name": "Blue Dream",
+      "vendor": "Test Vendor",
+      "brand": "Test Brand",
+      "product_type": "Flower",
+      "weight": "3.5g",
+      "price": "45.00",
+      "thc_percentage": "22.5",
+      "cbd_percentage": "0.8"
+    },
+    {
+      "product_name": "Wedding Cake",
+      "vendor": "Test Vendor 2",
+      "brand": "Test Brand 2", 
+      "product_type": "Flower",
+      "weight": "1g",
+      "price": "15.00",
+      "thc_percentage": "28.0",
+      "cbd_percentage": "0.5"
+    },
+    {
+      "product_name": "Gelato",
+      "vendor": "Test Vendor 3",
+      "brand": "Test Brand 3",
+      "product_type": "Flower", 
+      "weight": "7g",
+      "price": "80.00",
+      "thc_percentage": "25.0",
+      "cbd_percentage": "0.3"
+    },
+    {
+      "product_name": "OG Kush",
+      "vendor": "Test Vendor 4",
+      "brand": "Test Brand 4",
+      "product_type": "Flower",
+      "weight": "14g", 
+      "price": "150.00",
+      "thc_percentage": "24.0",
+      "cbd_percentage": "0.7"
+    },
+    {
+      "product_name": "Strawberry Cough",
+      "vendor": "Test Vendor 5",
+      "brand": "Test Brand 5",
+      "product_type": "Flower",
+      "weight": "3.5g",
+      "price": "40.00", 
+      "thc_percentage": "20.0",
+      "cbd_percentage": "1.2"
+    },
+    {
+      "product_name": "Purple Haze",
+      "vendor": "Test Vendor 6",
+      "brand": "Test Brand 6",
+      "product_type": "Flower",
+      "weight": "1g",
+      "price": "12.00",
+      "thc_percentage": "18.0",
+      "cbd_percentage": "0.9"
+    },
+    {
+      "product_name": "Sour Diesel",
+      "vendor": "Test Vendor 7", 
+      "brand": "Test Brand 7",
+      "product_type": "Flower",
+      "weight": "7g",
+      "price": "75.00",
+      "thc_percentage": "26.0",
+      "cbd_percentage": "0.4"
+    },
+    {
+      "product_name": "White Widow",
+      "vendor": "Test Vendor 8",
+      "brand": "Test Brand 8",
+      "product_type": "Flower",
+      "weight": "3.5g",
+      "price": "42.00",
+      "thc_percentage": "23.0",
+      "cbd_percentage": "0.6"
+    }
+  ]
+}
