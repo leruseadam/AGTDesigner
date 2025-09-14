@@ -61,6 +61,58 @@
   <script>
     console.log('Defining global functions early in head...');
     
+    // VIEWPORT NORMALIZATION FOR CONSISTENT SCALING
+    // This ensures viewport units behave identically across local and web environments
+    (function() {
+      'use strict';
+      
+      // Normalize viewport units for consistent scaling
+      function normalizeViewport() {
+        const vw = window.innerWidth / 100;
+        const vh = window.innerHeight / 100;
+        const vmin = Math.min(vw, vh);
+        const vmax = Math.max(vw, vh);
+        
+        // Set normalized viewport units as CSS custom properties
+        document.documentElement.style.setProperty('--vw', vw + 'px');
+        document.documentElement.style.setProperty('--vh', vh + 'px');
+        document.documentElement.style.setProperty('--vmin', vmin + 'px');
+        document.documentElement.style.setProperty('--vmax', vmax + 'px');
+        
+        // Environment detection and scaling adjustment
+        const isLocal = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost';
+        const isPythonAnywhere = window.location.hostname.includes('pythonanywhere.com');
+        
+        // Apply environment-specific scaling factors
+        let envScaleFactor = 1;
+        let envFontMultiplier = 1;
+        
+        if (isLocal) {
+          // Local environment - ensure consistent scaling
+          envScaleFactor = 1;
+          envFontMultiplier = 1;
+        } else if (isPythonAnywhere) {
+          // PythonAnywhere - apply normalization
+          envScaleFactor = 0.95;
+          envFontMultiplier = 1.05;
+        }
+        
+        document.documentElement.style.setProperty('--env-scale-factor', envScaleFactor);
+        document.documentElement.style.setProperty('--env-font-multiplier', envFontMultiplier);
+        
+        console.log(`Viewport normalized: ${vw}px/vw, ${vh}px/vh, env-scale: ${envScaleFactor}, font-mult: ${envFontMultiplier}`);
+      }
+      
+      // Run normalization on load and resize
+      normalizeViewport();
+      window.addEventListener('resize', normalizeViewport);
+      window.addEventListener('orientationchange', normalizeViewport);
+      
+      // Re-normalize after a short delay to catch any late-loading elements
+      setTimeout(normalizeViewport, 100);
+      setTimeout(normalizeViewport, 500);
+    })();
+    
     // Define showDatabaseEditor function immediately to prevent errors
     window.showDatabaseEditor = function() {
       console.log('Opening Edit DB...');
