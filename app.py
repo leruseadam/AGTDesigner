@@ -5193,6 +5193,40 @@ def database_stats():
         current_store = session.get('selected_store', '')
         product_db = get_product_database(current_store)
         
+        # Ensure database is initialized
+        if not product_db._initialized:
+            product_db.init_database()
+        
+        # Test database connection
+        try:
+            import sqlite3
+            test_conn = sqlite3.connect(product_db.db_path)
+            test_cursor = test_conn.cursor()
+            test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+            if not test_cursor.fetchone():
+                logging.error(f"Products table not found in database at {product_db.db_path}")
+                # If store-specific database doesn't have products table, fall back to main database
+                if current_store:
+                    logging.info(f"Falling back to main database for store {current_store}")
+                    # Force creation of main database instance
+                    global _product_database
+                    _product_database = None
+                    product_db = get_product_database()  # Use main database
+                    if not product_db._initialized:
+                        product_db.init_database()
+                    # Test main database
+                    test_conn = sqlite3.connect(product_db.db_path)
+                    test_cursor = test_conn.cursor()
+                    test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+                    if not test_cursor.fetchone():
+                        return jsonify({'error': 'Products table not found in any database'}), 500
+                else:
+                    return jsonify({'error': 'Products table not found in database'}), 500
+            test_conn.close()
+        except Exception as test_error:
+            logging.error(f"Database connection test failed: {test_error}")
+            return jsonify({'error': f'Database connection failed: {test_error}'}), 500
+        
         # Get vendor stats for the frontend
         vendor_stats = {}
         try:
@@ -5279,6 +5313,8 @@ def database_stats():
                 
         except Exception as db_error:
             logging.error(f"Error querying database: {db_error}")
+            logging.error(f"Database path: {product_db.db_path}")
+            logging.error(f"Database exists: {os.path.exists(product_db.db_path)}")
             stats = {
                 'total_products': 0,
                 'unique_vendors': 0,
@@ -5352,6 +5388,30 @@ def database_vendor_stats():
         import sqlite3
         
         product_db = get_product_database()
+        
+        # Ensure database is initialized
+        if not product_db._initialized:
+            product_db.init_database()
+        
+        # Test database connection and fallback if needed
+        try:
+            test_conn = sqlite3.connect(product_db.db_path)
+            test_cursor = test_conn.cursor()
+            test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+            if not test_cursor.fetchone():
+                logging.error(f"Products table not found in database at {product_db.db_path}")
+                # If store-specific database doesn't have products table, fall back to main database
+                logging.info("Falling back to main database for vendor stats")
+                # Force creation of main database instance
+                global _product_database
+                _product_database = None
+                product_db = get_product_database()  # Use main database
+                if not product_db._initialized:
+                    product_db.init_database()
+            test_conn.close()
+        except Exception as test_error:
+            logging.error(f"Database connection test failed: {test_error}")
+            return jsonify({'error': f'Database connection failed: {test_error}'}), 500
         
         with sqlite3.connect(product_db.db_path) as conn:
             # Get all vendors with their product counts
