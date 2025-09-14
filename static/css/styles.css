@@ -435,10 +435,10 @@ img, video, canvas, svg {
     position: relative;
     z-index: 5;
     transform: translateY(0);
-    min-width: 160px;
+    min-width: 140px;
     min-height: 48px;
     flex: 1;
-    max-width: 200px;
+    max-width: 180px;
   }
 
   .btn-header-action:hover {
@@ -473,7 +473,7 @@ img, video, canvas, svg {
     justify-content: center !important;
     align-items: stretch !important;
     gap: 1rem !important;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     max-width: 900px;
     margin-left: auto;
     margin-right: auto;
@@ -511,6 +511,13 @@ img, video, canvas, svg {
       min-width: 200px;
       width: 100%;
       max-width: 280px;
+    }
+  }
+
+  /* Keep buttons side by side on larger screens */
+  @media (min-width: 481px) {
+    .header-buttons-container {
+      flex-wrap: nowrap !important;
     }
   }
   
