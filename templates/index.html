@@ -258,9 +258,9 @@
         // Set the store in backend
         changeStore(savedStore);
       } else {
-        // No store saved, show the modal
-        console.log('No store saved in localStorage, showing modal');
-        showStoreSelectionModal();
+        // No store saved, default to Bothell
+        console.log('No store saved in localStorage, defaulting to AGT_Bothell');
+        changeStore('AGT_Bothell');
       }
       
       // Also check backend for current store status
@@ -276,19 +276,21 @@
             updateCurrentStoreDisplay(data.store);
             updateStoreStatus(`Store: ${data.store.replace(/_/g, ' ')}`, 'active');
           } else {
-            // No store set in backend, show modal if not already shown
+            // No store set in backend, default to Bothell if not already set
             const currentStore = localStorage.getItem('selectedStore');
             if (!currentStore) {
-              showStoreSelectionModal();
+              console.log('No store in backend, defaulting to AGT_Bothell');
+              changeStore('AGT_Bothell');
             }
           }
         })
         .catch(error => {
           console.log('No store set in backend yet');
-          // Show modal if no store is set
+          // Default to Bothell if no store is set
           const currentStore = localStorage.getItem('selectedStore');
           if (!currentStore) {
-            showStoreSelectionModal();
+            console.log('Error checking backend, defaulting to AGT_Bothell');
+            changeStore('AGT_Bothell');
           }
         });
     }
@@ -6463,26 +6465,21 @@
     window.addEventListener('load', function () {
       scrollToTop();
       
-      // Final check to ensure store selection modal appears if needed
+      // Final check to ensure store is set - default to Bothell if needed
       setTimeout(() => {
         const savedStore = localStorage.getItem('selectedStore');
         if (!savedStore) {
-          console.log('Window load: No store saved, showing modal');
-          showStoreSelectionModal();
+          console.log('Window load: No store saved, defaulting to AGT_Bothell');
+          changeStore('AGT_Bothell');
         }
       }, 1000);
       
-      // Emergency fallback - show modal after 3 seconds if still no store
+      // Emergency fallback - default to Bothell after 3 seconds if still no store
       setTimeout(() => {
         const savedStore = localStorage.getItem('selectedStore');
         if (!savedStore) {
-          console.log('Emergency fallback: No store saved after 3 seconds, forcing modal');
-          if (!verifyModalExists()) {
-            console.log('Modal element not found, using force show');
-            forceShowModal();
-          } else {
-            showStoreSelectionModal();
-          }
+          console.log('Emergency fallback: No store saved after 3 seconds, defaulting to AGT_Bothell');
+          changeStore('AGT_Bothell');
         }
       }, 3000);
     });

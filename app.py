@@ -1,11 +1,11 @@
 import os
-
 import sys  # Add this import
 import logging
 import threading
 import pandas as pd  # Add this import
 import time
 import re
+import json
 # Startup Performance Optimization
 DISABLE_STARTUP_FILE_LOADING = True  # Disable startup file loading to prevent hangs
 
@@ -47,6 +47,8 @@ def safe_load_file_with_timeout(processor, file_path, timeout_seconds=30):
     finally:
         signal.alarm(0)  # Ensure timeout is cancelled
 LAZY_LOADING_ENABLED = True  # Enable lazy loading for better performance
+
+# Browser-based store persistence (handled by frontend JavaScript)
 
 from pathlib import Path
 from werkzeug.utils import secure_filename
@@ -769,12 +771,15 @@ def check_session_size():
         session_data = pickle.dumps(session_copy)
         if len(session_data) > 3000:  # 3KB limit to stay well under 4KB
             logging.warning(f"Session too large ({len(session_data)} bytes), clearing session data")
-            # Store selected tags before clearing
+            # Store essential data before clearing
             selected_tags = session.get('selected_tags', [])
+            selected_store = session.get('selected_store', '')
             session.clear()
-            # Restore selected tags after clearing
+            # Restore essential data after clearing
             if selected_tags:
                 session['selected_tags'] = selected_tags
+            if selected_store:
+                session['selected_store'] = selected_store
                 logging.info(f"Preserved {len(selected_tags)} selected tags during session optimization")
             return True
     except Exception as e:
@@ -825,13 +830,16 @@ def optimize_session_data():
             pickle.dumps(session_copy)
             
             # Clear and restore only essential data
-            # Store selected tags before clearing
+            # Store essential data before clearing
             selected_tags = session.get('selected_tags', [])
+            selected_store = session.get('selected_store', '')
             session.clear()
             session.update(session_copy)
-            # Restore selected tags if they weren't in the optimized data
+            # Restore essential data if they weren't in the optimized data
             if selected_tags and 'selected_tags' not in session_copy:
                 session['selected_tags'] = selected_tags
+            if selected_store and 'selected_store' not in session_copy:
+                session['selected_store'] = selected_store
                 logging.info(f"Restored {len(selected_tags)} selected tags after session optimization")
             
             logging.info("Session data optimized")
@@ -1362,6 +1370,8 @@ def index():
         if uploaded_file:
             logging.info(f"Cleared uploaded file from session: {uploaded_file}")
         # Don't clear selected_tags - they should persist across page loads
+        
+        # Store selection will be handled by frontend JavaScript using localStorage
         
         # Remove uploaded file if it exists and is not the default file
         if uploaded_file:
@@ -3088,6 +3098,7 @@ def set_store():
         session['selected_store'] = store_value
         
         # Clear any existing data to ensure fresh start with new store
+        # (but keep the selected_store we just set)
         session.pop('file_path', None)
         session.pop('file_store', None)
         session.pop('selected_tags', None)
