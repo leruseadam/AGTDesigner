@@ -10,11 +10,22 @@ from functools import lru_cache
 import threading
 import os
 
-def get_database_path():
+def get_database_path(store_name=None):
     """Get the correct database path for ProductDatabase instances."""
     # Get the current directory of this file
     current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-    return os.path.join(current_dir, 'uploads', 'product_database.db')
+    uploads_dir = os.path.join(current_dir, 'uploads')
+    
+    # Create uploads directory if it doesn't exist
+    os.makedirs(uploads_dir, exist_ok=True)
+    
+    if store_name:
+        # Create store-specific database file
+        db_filename = f'product_database_{store_name}.db'
+        return os.path.join(uploads_dir, db_filename)
+    else:
+        # Default database for backward compatibility
+        return os.path.join(uploads_dir, 'product_database.db')
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +68,11 @@ def retry_on_lock(max_retries=3, delay=0.5):
 class ProductDatabase:
     """Database for storing and managing product and strain information."""
     
-    def __init__(self, db_path: str = "product_database.db"):
-        self.db_path = db_path
+    def __init__(self, db_path: str = None, store_name: str = None):
+        if db_path is None:
+            self.db_path = get_database_path(store_name)
+        else:
+            self.db_path = db_path
         self._connection_pool = {}
         self._cache = {}
         self._cache_lock = threading.Lock()
@@ -5185,9 +5199,9 @@ class ProductDatabase:
                 'message': f'Failed to update joint ratios: {e}'
             }
 
-def get_product_database():
-    # CRITICAL FIX: Use correct database path
-    return ProductDatabase(get_database_path()) 
+def get_product_database(store_name=None):
+    """Get a ProductDatabase instance for the specified store."""
+    return ProductDatabase(store_name=store_name) 
 
 if __name__ == "__main__":
     import argparse
