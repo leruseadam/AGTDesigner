@@ -6517,13 +6517,37 @@
     window.addEventListener('load', function () {
       scrollToTop();
       
-      // Final check to ensure store is set - default to Bothell if needed
+      // Sync store with backend and update display
       setTimeout(() => {
-        const savedStore = localStorage.getItem('selectedStore');
-        if (!savedStore) {
-          console.log('Window load: No store saved, defaulting to AGT_Bothell');
-          changeStore('AGT_Bothell');
-        }
+        // First check what store the backend has
+        fetch('/api/get-store')
+          .then(response => response.json())
+          .then(data => {
+            if (data.success && data.store) {
+              console.log('Backend store:', data.store);
+              // Update the display to match backend
+              updateCurrentStoreDisplay(data.store);
+              updateStoreStatus(`Store: ${data.store.replace(/_/g, ' ')}`, 'active');
+              // Also save to localStorage for consistency
+              localStorage.setItem('selectedStore', data.store);
+            } else {
+              // No store in backend, default to Bothell
+              console.log('No store in backend, defaulting to AGT_Bothell');
+              changeStore('AGT_Bothell');
+            }
+          })
+          .catch(error => {
+            console.error('Error checking backend store:', error);
+            // Fallback to localStorage or default
+            const savedStore = localStorage.getItem('selectedStore');
+            if (savedStore) {
+              updateCurrentStoreDisplay(savedStore);
+              updateStoreStatus(`Store: ${savedStore.replace(/_/g, ' ')}`, 'active');
+            } else {
+              console.log('No store saved, defaulting to AGT_Bothell');
+              changeStore('AGT_Bothell');
+            }
+          });
       }, 1000);
       
       // Emergency fallback - default to Bothell after 3 seconds if still no store
@@ -6544,6 +6568,21 @@
     document.addEventListener('DOMContentLoaded', function () {
       console.log('DOM Content Loaded - initializing TagManager...');
       TagManager.init();
+      
+      // Immediately sync store with backend
+      fetch('/api/get-store')
+        .then(response => response.json())
+        .then(data => {
+          if (data.success && data.store) {
+            console.log('DOMContentLoaded: Backend store is', data.store);
+            updateCurrentStoreDisplay(data.store);
+            updateStoreStatus(`Store: ${data.store.replace(/_/g, ' ')}`, 'active');
+            localStorage.setItem('selectedStore', data.store);
+          }
+        })
+        .catch(error => {
+          console.error('Error syncing store on DOMContentLoaded:', error);
+        });
       
       console.log('TagManager initialized, waiting for Bootstrap...');
       
