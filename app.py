@@ -5211,7 +5211,10 @@ def database_stats():
                     # Force creation of main database instance by clearing the global variable
                     global _product_database
                     _product_database = None
-                    product_db = get_product_database()  # Use main database
+                    # Create main database instance directly
+                    from src.core.data.product_database import ProductDatabase
+                    main_db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
+                    product_db = ProductDatabase(main_db_path)
                     if not product_db._initialized:
                         product_db.init_database()
                     # Test main database
@@ -5408,7 +5411,10 @@ def database_vendor_stats():
                 # Force creation of main database instance
                 global _product_database
                 _product_database = None
-                product_db = get_product_database()  # Use main database
+                # Create main database instance directly
+                from src.core.data.product_database import ProductDatabase
+                main_db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
+                product_db = ProductDatabase(main_db_path)
                 if not product_db._initialized:
                     product_db.init_database()
                 # Test main database
@@ -5857,7 +5863,10 @@ def database_analytics():
                 logging.info("Falling back to main database for analytics")
                 global _product_database
                 _product_database = None
-                product_db = get_product_database()  # Use main database
+                # Create main database instance directly
+                from src.core.data.product_database import ProductDatabase
+                main_db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
+                product_db = ProductDatabase(main_db_path)
                 if not product_db._initialized:
                     product_db.init_database()
                 # Test main database
