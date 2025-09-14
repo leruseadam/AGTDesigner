@@ -61,9 +61,85 @@
   <script>
     console.log('Defining global functions early in head...');
     
+    // CRITICAL: Set Bothell as default store IMMEDIATELY - this runs before any other code
+    (function() {
+      console.log('IMMEDIATE: Setting Bothell as default store...');
+      // Set localStorage immediately
+      localStorage.setItem('selectedStore', 'AGT_Bothell');
+      
+      // Try to update display immediately if elements exist
+      setTimeout(function() {
+        const displayElement = document.getElementById('currentStoreDisplay');
+        if (displayElement) {
+          displayElement.textContent = 'AGT Bothell';
+          displayElement.style.color = '#4ade80';
+          console.log('IMMEDIATE: Set display to AGT Bothell');
+        }
+        
+        const statusElement = document.getElementById('storeStatus');
+        if (statusElement) {
+          statusElement.textContent = 'Store: AGT Bothell';
+          statusElement.className = 'store-status active';
+          console.log('IMMEDIATE: Set status to AGT Bothell');
+        }
+      }, 100);
+    })();
+    
+    // VIEWPORT NORMALIZATION FOR CONSISTENT SCALING
+    // This ensures viewport units behave identically across local and web environments
+    (function() {
+      'use strict';
+      
+      // Normalize viewport units for consistent scaling
+      function normalizeViewport() {
+        const vw = window.innerWidth / 100;
+        const vh = window.innerHeight / 100;
+        const vmin = Math.min(vw, vh);
+        const vmax = Math.max(vw, vh);
+        
+        // Set normalized viewport units as CSS custom properties
+        document.documentElement.style.setProperty('--vw', vw + 'px');
+        document.documentElement.style.setProperty('--vh', vh + 'px');
+        document.documentElement.style.setProperty('--vmin', vmin + 'px');
+        document.documentElement.style.setProperty('--vmax', vmax + 'px');
+        
+        // Environment detection and scaling adjustment
+        const isLocal = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost';
+        const isPythonAnywhere = window.location.hostname.includes('pythonanywhere.com');
+        
+        // Apply environment-specific scaling factors
+        let envScaleFactor = 1;
+        let envFontMultiplier = 1;
+        
+        if (isLocal) {
+          // Local environment - ensure consistent scaling
+          envScaleFactor = 1;
+          envFontMultiplier = 1;
+        } else if (isPythonAnywhere) {
+          // PythonAnywhere - apply normalization
+          envScaleFactor = 0.95;
+          envFontMultiplier = 1.05;
+        }
+        
+        document.documentElement.style.setProperty('--env-scale-factor', envScaleFactor);
+        document.documentElement.style.setProperty('--env-font-multiplier', envFontMultiplier);
+        
+        console.log(`Viewport normalized: ${vw}px/vw, ${vh}px/vh, env-scale: ${envScaleFactor}, font-mult: ${envFontMultiplier}`);
+      }
+      
+      // Run normalization on load and resize
+      normalizeViewport();
+      window.addEventListener('resize', normalizeViewport);
+      window.addEventListener('orientationchange', normalizeViewport);
+      
+      // Re-normalize after a short delay to catch any late-loading elements
+      setTimeout(normalizeViewport, 100);
+      setTimeout(normalizeViewport, 500);
+    })();
+    
     // Define showDatabaseEditor function immediately to prevent errors
     window.showDatabaseEditor = function() {
-      console.log('Opening Database Editor...');
+      console.log('Opening Edit DB...');
       // Check if the modal exists
       const modalElement = document.getElementById('databaseEditorModal');
       if (modalElement) {
@@ -85,7 +161,7 @@
           });
         }
       } else {
-        console.error('Database Editor Modal not found');
+        console.error('Edit DB Modal not found');
       }
     };
     
@@ -213,15 +289,21 @@
     }
     
     function updateCurrentStoreDisplay(storeValue) {
+      console.log('updateCurrentStoreDisplay called with:', storeValue);
       const displayElement = document.getElementById('currentStoreDisplay');
+      console.log('displayElement found:', !!displayElement);
       if (displayElement) {
         if (storeValue) {
           displayElement.textContent = storeValue.replace(/_/g, ' ');
           displayElement.style.color = '#4ade80';
+          console.log('Set display to:', storeValue.replace(/_/g, ' '));
         } else {
           displayElement.textContent = 'No store selected';
           displayElement.style.color = '#f87171';
+          console.log('Set display to: No store selected');
         }
+      } else {
+        console.error('currentStoreDisplay element not found!');
       }
     }
     
@@ -251,17 +333,10 @@
     }
     
     function loadSavedStore() {
-      const savedStore = localStorage.getItem('selectedStore');
-      if (savedStore) {
-        // Update the display
-        updateCurrentStoreDisplay(savedStore);
-        // Set the store in backend
-        changeStore(savedStore);
-      } else {
-        // No store saved, show the modal
-        console.log('No store saved in localStorage, showing modal');
-        showStoreSelectionModal();
-      }
+      // Always default to Bothell upon loading
+      console.log('Setting default store to AGT_Bothell upon loading');
+      changeStore('AGT_Bothell');
+      updateCurrentStoreDisplay('AGT_Bothell');
       
       // Also check backend for current store status
       updateStoreStatusFromBackend();
@@ -276,20 +351,15 @@
             updateCurrentStoreDisplay(data.store);
             updateStoreStatus(`Store: ${data.store.replace(/_/g, ' ')}`, 'active');
           } else {
-            // No store set in backend, show modal if not already shown
-            const currentStore = localStorage.getItem('selectedStore');
-            if (!currentStore) {
-              showStoreSelectionModal();
-            }
+            // No store set in backend, ensure Bothell is set
+            console.log('No store in backend, ensuring AGT_Bothell is set');
+            changeStore('AGT_Bothell');
           }
         })
         .catch(error => {
-          console.log('No store set in backend yet');
-          // Show modal if no store is set
-          const currentStore = localStorage.getItem('selectedStore');
-          if (!currentStore) {
-            showStoreSelectionModal();
-          }
+          console.log('Error checking backend, ensuring AGT_Bothell is set');
+          // Ensure Bothell is set as default
+          changeStore('AGT_Bothell');
         });
     }
     
@@ -1737,11 +1807,11 @@
                   <div class="spinner-border text-info" role="status">
                     <span class="visually-hidden">Loading...</span>
                   </div>
-                  <p class="mt-3">Loading Product Database Manager...</p>
+                  <p class="mt-3">Loading Data & Analytics...</p>
                 </div>
               `;
               
-              showDatabaseModal('Product Database Manager', loadingHtml, 'database-modal');
+              showDatabaseModal('Data & Analytics', loadingHtml, 'database-modal');
               
               // Fetch database statistics and display enhanced interface
               fetch('/api/database-stats')
@@ -4393,13 +4463,9 @@
         <div style="display: flex; justify-content: center; align-items: center; margin-bottom: 1rem;">
           <div style="text-align: center; background: rgba(45, 34, 58, 0.95); backdrop-filter: blur(15px); -webkit-backdrop-filter: blur(15px); border: 2px solid rgba(160, 132, 232, 0.3); border-radius: 18px; padding: 2rem; box-shadow: 0 4px 24px rgba(80, 40, 160, 0.18); max-width: 600px;">
             <div class="d-flex align-items-center justify-content-center gap-2 mb-1">
-              
               <h1 class="vibrant-title mb-0" data-text="AGT Designer">
                 AGT Designer
               </h1>
-              <button class="big-glow-help-btn p-0" id="help-btn" title="Click for help with downloading LOTs data and using the application" data-bs-toggle="modal" data-bs-target="#helpModal">
-                <span style="font-size: 18px; font-weight: bold; color: white;">?</span>
-              </button>
             </div>
             <p class="vibrant-subtitle">
               <span class="larger-letter">A</span>uto-<span class="larger-letter">G</span>enerating <span class="larger-letter">T</span>ag Designer
@@ -4409,7 +4475,7 @@
             </p>
 
             <!-- Store Selection -->
-            <div class="store-selection-container mt-3 mb-3">
+            <div class="store-selection-container mt-3 mb-3 d-flex align-items-center justify-content-between">
               <div class="d-flex align-items-center gap-2">
                 <span class="store-label">Store:</span>
                 <span class="current-store-display" id="currentStoreDisplay">No store selected</span>
@@ -4422,25 +4488,53 @@
                   Change
                 </button>
               </div>
-              <div class="store-status" id="storeStatus"></div>
+              <button class="big-glow-help-btn p-0" id="help-btn" title="Click for help with downloading LOTs data and using the application" data-bs-toggle="modal" data-bs-target="#helpModal">
+                <span style="font-size: 16px; font-weight: bold; color: white;">?</span>
+              </button>
             </div>
+            <div class="store-status text-center" id="storeStatus"></div>
+
+            <!-- IMMEDIATE STORE SETTING SCRIPT -->
+            <script>
+              // Set Bothell as default store IMMEDIATELY after elements are created
+              (function() {
+                console.log('INLINE: Setting Bothell as default store immediately...');
+                const displayElement = document.getElementById('currentStoreDisplay');
+                const statusElement = document.getElementById('storeStatus');
+                
+                if (displayElement) {
+                  displayElement.textContent = 'AGT Bothell';
+                  displayElement.style.color = '#4ade80';
+                  console.log('INLINE: Set display to AGT Bothell');
+                }
+                
+                if (statusElement) {
+                  statusElement.textContent = 'Store: AGT Bothell';
+                  statusElement.className = 'store-status active';
+                  console.log('INLINE: Set status to AGT Bothell');
+                }
+                
+                // Also set localStorage
+                localStorage.setItem('selectedStore', 'AGT_Bothell');
+              })();
+            </script>
 
             <!-- Database and Lineage Management Buttons -->
             <div class="header-buttons-container mt-3 d-flex justify-content-center gap-3">
-              <button class="btn btn-header-action" onclick="showProductDatabaseManager()" title="Open Product Database Manager">
+              <button class="btn btn-header-action" onclick="showProductDatabaseManager()" title="Open Data & Analytics">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
                   <path d="M12 8v8"></path>
                   <path d="M8 12h8"></path>
                 </svg>
-                Database Manager
+                Data & Analytics
               </button>
-              <button class="btn btn-header-action" onclick="showDatabaseEditor()" title="Open Database Editor">
+              <button class="btn btn-header-action" onclick="showDatabaseEditor()" title="Open Edit DB">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
                   <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
                 </svg>
-                Database Editor
+                Edit DB
               </button>
               <button class="btn btn-header-action" onclick="openLineageEditor()" title="Open lineage editor for strain management">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -6464,26 +6558,77 @@
     window.addEventListener('load', function () {
       scrollToTop();
       
-      // Final check to ensure store selection modal appears if needed
+      // Sync store with backend and update display
       setTimeout(() => {
-        const savedStore = localStorage.getItem('selectedStore');
-        if (!savedStore) {
-          console.log('Window load: No store saved, showing modal');
-          showStoreSelectionModal();
-        }
+        console.log('Window load: Starting store sync...');
+        // First check what store the backend has
+        fetch('/api/get-store')
+          .then(response => response.json())
+          .then(data => {
+            console.log('Window load: Backend store data:', data);
+            if (data.success && data.store) {
+              console.log('Window load: Backend store:', data.store);
+              // Force update the display directly
+              const displayElement = document.getElementById('currentStoreDisplay');
+              if (displayElement) {
+                displayElement.textContent = data.store.replace(/_/g, ' ');
+                displayElement.style.color = '#4ade80';
+                console.log('Window load: Updated display to:', data.store.replace(/_/g, ' '));
+              }
+              // Also update the store status
+              updateStoreStatus(`Store: ${data.store.replace(/_/g, ' ')}`, 'active');
+              // Also save to localStorage for consistency
+              localStorage.setItem('selectedStore', data.store);
+              console.log('Window load: Store sync completed');
+            } else {
+              // No store in backend, default to Bothell
+              console.log('No store in backend, defaulting to AGT_Bothell');
+              changeStore('AGT_Bothell');
+            }
+          })
+          .catch(error => {
+            console.error('Error checking backend store:', error);
+            // Fallback to localStorage or default
+            const savedStore = localStorage.getItem('selectedStore');
+            if (savedStore) {
+              const displayElement = document.getElementById('currentStoreDisplay');
+              if (displayElement) {
+                displayElement.textContent = savedStore.replace(/_/g, ' ');
+                displayElement.style.color = '#4ade80';
+              }
+              updateStoreStatus(`Store: ${savedStore.replace(/_/g, ' ')}`, 'active');
+            } else {
+              console.log('No store saved, defaulting to AGT_Bothell');
+              changeStore('AGT_Bothell');
+            }
+          });
       }, 1000);
       
-      // Emergency fallback - show modal after 3 seconds if still no store
+      // Additional sync after 3 seconds to ensure it works
+      setTimeout(() => {
+        console.log('Delayed sync: Checking store again...');
+        const displayElement = document.getElementById('currentStoreDisplay');
+        if (displayElement && displayElement.textContent === 'No store selected') {
+          console.log('Delayed sync: Still showing no store, forcing update...');
+          fetch('/api/get-store')
+            .then(response => response.json())
+            .then(data => {
+              if (data.success && data.store) {
+                displayElement.textContent = data.store.replace(/_/g, ' ');
+                displayElement.style.color = '#4ade80';
+                updateStoreStatus(`Store: ${data.store.replace(/_/g, ' ')}`, 'active');
+                console.log('Delayed sync: Forced update to:', data.store.replace(/_/g, ' '));
+              }
+            });
+        }
+      }, 3000);
+      
+      // Emergency fallback - default to Bothell after 3 seconds if still no store
       setTimeout(() => {
         const savedStore = localStorage.getItem('selectedStore');
         if (!savedStore) {
-          console.log('Emergency fallback: No store saved after 3 seconds, forcing modal');
-          if (!verifyModalExists()) {
-            console.log('Modal element not found, using force show');
-            forceShowModal();
-          } else {
-            showStoreSelectionModal();
-          }
+          console.log('Emergency fallback: No store saved after 3 seconds, defaulting to AGT_Bothell');
+          changeStore('AGT_Bothell');
         }
       }, 3000);
     });
@@ -6493,9 +6638,56 @@
       scrollToTop();
     });
     
+    // Set Bothell as default store IMMEDIATELY - before DOMContentLoaded
+    console.log('Setting Bothell as default store IMMEDIATELY...');
+    updateCurrentStoreDisplay('AGT_Bothell');
+    updateStoreStatus('Store: AGT Bothell', 'active');
+    localStorage.setItem('selectedStore', 'AGT_Bothell');
+
     document.addEventListener('DOMContentLoaded', function () {
       console.log('DOM Content Loaded - initializing TagManager...');
+      
+      // Ensure Bothell is still set as default store display
+      console.log('DOMContentLoaded: Ensuring Bothell display is set...');
+      updateCurrentStoreDisplay('AGT_Bothell');
+      updateStoreStatus('Store: AGT Bothell', 'active');
+      
       TagManager.init();
+      
+      // Also set the store in backend
+      console.log('DOMContentLoaded: Setting Bothell as default store...');
+      changeStore('AGT_Bothell');
+      
+      // Also sync with backend to ensure consistency
+      fetch('/api/get-store')
+        .then(response => {
+          console.log('Store API response:', response);
+          return response.json();
+        })
+        .then(data => {
+          console.log('Store API data:', data);
+          if (data.success && data.store) {
+            console.log('DOMContentLoaded: Backend store is', data.store);
+            // Update the display
+            const displayElement = document.getElementById('currentStoreDisplay');
+            if (displayElement) {
+              displayElement.textContent = data.store.replace(/_/g, ' ');
+              displayElement.style.color = '#4ade80';
+              console.log('Updated display element to:', data.store.replace(/_/g, ' '));
+            }
+            // Also update the store status
+            updateStoreStatus(`Store: ${data.store.replace(/_/g, ' ')}`, 'active');
+            localStorage.setItem('selectedStore', data.store);
+            console.log('Store sync completed successfully');
+          } else {
+            console.log('No store in backend data, Bothell should be set as default');
+          }
+        })
+        .catch(error => {
+          console.error('Error syncing store on DOMContentLoaded:', error);
+          // Ensure Bothell is still set as default even if backend check fails
+          changeStore('AGT_Bothell');
+        });
       
       console.log('TagManager initialized, waiting for Bootstrap...');
       
@@ -6940,7 +7132,7 @@
     let filteredProducts = [];
 
     function showDatabaseEditor() {
-      console.log('Opening Database Editor...');
+      console.log('Opening Edit DB...');
       const modal = new bootstrap.Modal(document.getElementById('databaseEditorModal'));
       modal.show();
       
@@ -7554,7 +7746,7 @@
       // Show progress message
       resultsDiv.classList.remove('d-none');
       matchCount.textContent = 'Processing...';
-      matchedProductsList.innerHTML = '<div class="text-info">Matching products from JSON URL. This may take up to 10 minutes for large datasets. Progress will be logged in the browser console.</div>';
+      matchedProductsList.innerHTML = '<div class="text-info">Matching products from JSON URL. This may take up to 2 minutes for large datasets. Progress will be logged in the browser console.</div>';
 
       // Add timeout to prevent hanging
       const controller = new AbortController();
@@ -10230,7 +10422,7 @@
               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
               <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
             </svg>
-            Database Editor
+            Edit DB
           </h5>
           <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close database editor modal"></button>
         </div>
