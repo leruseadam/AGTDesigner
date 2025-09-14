@@ -3151,6 +3151,13 @@ def get_store():
     """Get the current store for the session."""
     try:
         current_store = session.get('selected_store', '')
+        
+        # If no store is set, default to Bothell
+        if not current_store:
+            current_store = 'AGT_Bothell'
+            session['selected_store'] = current_store
+            logging.info(f"No store set, defaulting to {current_store}")
+        
         return jsonify({
             'success': True,
             'store': current_store
@@ -3164,6 +3171,13 @@ def check_store_required():
     """Check if store selection is required for the current session."""
     try:
         current_store = session.get('selected_store', '')
+        
+        # If no store is set, default to Bothell
+        if not current_store:
+            current_store = 'AGT_Bothell'
+            session['selected_store'] = current_store
+            logging.info(f"No store set in check-store-required, defaulting to {current_store}")
+        
         requires_store = not bool(current_store)
         
         return jsonify({
