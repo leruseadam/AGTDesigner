@@ -559,16 +559,23 @@ def get_excel_processor():
             # Return None and let the calling code handle it
             return None
 
-def get_product_database():
+def get_product_database(store_name=None):
     """Lazy load ProductDatabase to avoid startup delay."""
     global _product_database
-    if _product_database is None:
+    if _product_database is None or (store_name and getattr(_product_database, '_store_name', None) != store_name):
         from src.core.data.product_database import ProductDatabase
-        # CRITICAL FIX: Use absolute path in uploads directory for database
-        db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
-        _product_database = ProductDatabase(db_path)
-        # OPTIMIZATION: Don't initialize database immediately - do it lazily on first use
-        logging.info(f"ProductDatabase created (lazy initialization) at: {db_path}")
+        # Use store-specific database path
+        if store_name:
+            db_filename = f'product_database_{store_name}.db'
+            db_path = os.path.join(current_dir, 'uploads', db_filename)
+            _product_database = ProductDatabase(db_path)
+            _product_database._store_name = store_name
+            logging.info(f"ProductDatabase created for store '{store_name}' at: {db_path}")
+        else:
+            # Default database for backward compatibility
+            db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
+            _product_database = ProductDatabase(db_path)
+            logging.info(f"ProductDatabase created (default) at: {db_path}")
     return _product_database
 
 def get_json_matcher():
@@ -3088,6 +3095,10 @@ def set_store():
         # Clear global Excel processor to force reload with new store context
         reset_excel_processor()
         
+        # Clear global database cache to force reload with new store context
+        global _product_database
+        _product_database = None
+        
         # Clear any cached data that might contain old store information
         try:
             cache_keys_to_clear = [
@@ -3932,7 +3943,8 @@ def generate_labels():
             logging.info("Using database for record generation (preferred source)")
             try:
                 from src.core.data.product_database import get_product_database
-                product_db = get_product_database()
+                current_store = session.get('selected_store', '')
+                product_db = get_product_database(current_store)
                 if product_db:
                     # ENHANCED: Replace JSON matched tags with database data
                     enhanced_tags = _replace_json_tags_with_database_data(valid_selected_tags, product_db)
@@ -5152,7 +5164,9 @@ def debug_columns():
 def database_stats():
     """Get statistics about the product database."""
     try:
-        product_db = get_product_database()
+        # Get current store from session
+        current_store = session.get('selected_store', '')
+        product_db = get_product_database(current_store)
         
         # Get vendor stats for the frontend
         vendor_stats = {}
@@ -5262,7 +5276,8 @@ def database_stats():
 def database_schema():
     """Get database schema information for debugging."""
     try:
-        product_db = get_product_database()
+        current_store = session.get('selected_store', '')
+        product_db = get_product_database(current_store)
         
         import sqlite3
         with sqlite3.connect(product_db.db_path) as conn:
@@ -5994,7 +6009,8 @@ def database_status():
 def get_database_products():
     """Get products from the database for the editor."""
     try:
-        product_db = get_product_database()
+        current_store = session.get('selected_store', '')
+        product_db = get_product_database(current_store)
         
         # Get query parameters
         page = int(request.args.get('page', 0))
