@@ -651,14 +651,24 @@ class ProductDatabase:
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
+            
+            # First get the strain name from the strains table
+            cursor.execute('SELECT strain_name FROM strains WHERE id = ?', (strain_id,))
+            strain_result = cursor.fetchone()
+            if not strain_result:
+                return None
+            
+            strain_name = strain_result[0]
+            
+            # Then find the most common lineage for this strain in products
             cursor.execute('''
-                SELECT lineage, COUNT(*) as count
+                SELECT "Lineage", COUNT(*) as count
                 FROM products
-                WHERE strain_id = ? AND lineage IS NOT NULL AND lineage != ''
-                GROUP BY lineage
+                WHERE "Product Strain" = ? AND "Lineage" IS NOT NULL AND "Lineage" != ''
+                GROUP BY "Lineage"
                 ORDER BY count DESC
                 LIMIT 1
-            ''', (strain_id,))
+            ''', (strain_name,))
             result = cursor.fetchone()
             if result:
                 return result[0]
