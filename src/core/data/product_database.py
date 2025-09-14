@@ -838,12 +838,12 @@ class ProductDatabase:
                     product_id, occurrences, existing_name = existing
                     
                     # Log duplicate detection and update
-                    logger.info(f"Found existing product: '{existing_name}' (ID: {product_id}, occurrences: {occurrences}) - UPDATING WITH NEW DATA")
+                    logger.info(f"Found existing product: '{existing_name}' (ID: {product_id}, occurrences: {occurrences}) - REPLACING WITH NEW EXCEL DATA")
                     
-                    # Update existing product with new data
+                    # Update existing product with new data (new data always replaces old values)
                     self._update_existing_product(cursor, product_id, product_data)
                     conn.commit()
-                    logger.info(f"Updated existing product '{existing_name}' with new data")
+                    logger.info(f"Successfully replaced existing product '{existing_name}' with new Excel data")
                     return product_id
                 
                 # Check for similar products (same name + vendor, different brand)
@@ -972,7 +972,7 @@ class ProductDatabase:
             raise
     
     def store_excel_data(self, df: pd.DataFrame, source_file: str = None) -> Dict[str, Any]:
-        """Store Excel data in the database. This is the main method for storing uploaded Excel files."""
+        """Store Excel data in the database. New data replaces existing data when duplicates are found."""
         try:
             self.init_database()  # Ensure DB is initialized
             logger.info(f"Starting to store Excel data with {len(df)} rows from {source_file}")
@@ -1301,7 +1301,7 @@ class ProductDatabase:
                 'total_rows': len(df),
                 'filtered_rows': len(filtered_df),
                 'source_file': source_file,
-                'message': f'Successfully stored {stored_count} products, skipped {skipped_duplicates} duplicates, {error_count} errors, excluded {excluded_count} JSON matched tags, skipped {blank_entries_skipped} blank entries'
+                'message': f'Successfully processed {stored_count} products (new data replaces existing), skipped {skipped_duplicates} duplicates, {error_count} errors, excluded {excluded_count} JSON matched tags, skipped {blank_entries_skipped} blank entries'
             }
             
             if errors:
@@ -2483,15 +2483,45 @@ class ProductDatabase:
             return ''
     
     def _update_existing_product(self, cursor, product_id, product_data):
-        """Update an existing product with new data."""
+        """Update an existing product with new data. New data always replaces old values."""
         try:
             current_date = datetime.now().isoformat()
+            
+            # Get current product data for comparison
+            cursor.execute('SELECT "Price", "THC test result", "CBD test result", "Weight*", "Units" FROM products WHERE id = ?', (product_id,))
+            current_data = cursor.fetchone()
+            
+            # Log changes for important fields
+            if current_data:
+                old_price, old_thc, old_cbd, old_weight, old_units = current_data
+                new_price = product_data.get('Price', '')
+                new_thc = product_data.get('THC test result', '')
+                new_cbd = product_data.get('CBD test result', '')
+                new_weight = product_data.get('Weight*', '')
+                new_units = product_data.get('Units', '')
+                
+                changes = []
+                if str(old_price) != str(new_price):
+                    changes.append(f"Price: {old_price} → {new_price}")
+                if str(old_thc) != str(new_thc):
+                    changes.append(f"THC: {old_thc} → {new_thc}")
+                if str(old_cbd) != str(new_cbd):
+                    changes.append(f"CBD: {old_cbd} → {new_cbd}")
+                if str(old_weight) != str(new_weight):
+                    changes.append(f"Weight: {old_weight} → {new_weight}")
+                if str(old_units) != str(new_units):
+                    changes.append(f"Units: {old_units} → {new_units}")
+                
+                if changes:
+                    logger.info(f"Product ID {product_id} data changes: {'; '.join(changes)}")
+                else:
+                    logger.info(f"Product ID {product_id} updated with same values (no changes detected)")
             
             # Calculate AI and AK values
             ai_value = self._calculate_ai_value(product_data)
             ak_value = self._calculate_ak_value(product_data)
             
-            # Update the product with new data
+            # Update the product with new data - NEW DATA ALWAYS REPLACES OLD VALUES
             cursor.execute('''
                 UPDATE products SET
                     "Product Type*" = ?,
@@ -2556,7 +2586,7 @@ class ProductDatabase:
                 product_id
             ))
             
-            logger.info(f"Updated product ID {product_id} with new data")
+            logger.info(f"Successfully updated product ID {product_id} with new Excel data (old values replaced)")
             
         except Exception as e:
             logger.error(f"Error updating existing product {product_id}: {e}")
