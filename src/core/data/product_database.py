@@ -120,11 +120,24 @@ class ProductDatabase:
                 return
                 
             start_time = time.time()
-            logger.info("Initializing product database...")
+            logger.info(f"Initializing product database at {self.db_path}...")
             
             try:
                 conn = self._get_connection()
                 cursor = conn.cursor()
+                
+                # Check if products table exists and has data
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+                products_exists = cursor.fetchone() is not None
+                
+                if products_exists:
+                    # Check if table has data
+                    cursor.execute("SELECT COUNT(*) FROM products")
+                    count = cursor.fetchone()[0]
+                    if count > 0:
+                        logger.info(f"Database already initialized with {count} products")
+                        self._initialized = True
+                        return
                 
                 # Create strains table
                 cursor.execute('''
@@ -2230,6 +2243,11 @@ class ProductDatabase:
                 try:
                     cursor.execute(f"ALTER TABLE products ADD COLUMN {col_name} {col_type}")
                     logger.info(f"Added missing column: {col_name}")
+                except sqlite3.OperationalError as e:
+                    if "duplicate column name" in str(e).lower():
+                        logger.debug(f"Column {col_name} already exists, skipping")
+                    else:
+                        logger.warning(f"Could not add column {col_name}: {e}")
                 except Exception as e:
                     logger.warning(f"Could not add column {col_name}: {e}")
             
