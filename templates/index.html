@@ -4406,18 +4406,19 @@
 
             <!-- Store Selection -->
             <div class="store-selection-container mt-3 mb-3">
-              <div class="d-flex align-items-center gap-2">
-                <span class="store-label">Store:</span>
-                <span class="current-store-display" id="currentStoreDisplay">No store selected</span>
-                <button class="btn btn-sm btn-outline-primary" onclick="showStoreSelectionModal()" title="Change store">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                    <polyline points="7 10 12 15 17 10"></polyline>
-                    <line x1="12" y1="15" x2="12" y2="3"></line>
-                  </svg>
-                  Change
-                </button>
-                <div class="ms-2"></div>
+              <div class="d-flex align-items-center justify-content-between">
+                <div class="d-flex align-items-center gap-2">
+                  <span class="store-label">Store:</span>
+                  <span class="current-store-display" id="currentStoreDisplay">No store selected</span>
+                  <button class="btn btn-sm btn-outline-primary" onclick="showStoreSelectionModal()" title="Change store">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                      <polyline points="7 10 12 15 17 10"></polyline>
+                      <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                    Change
+                  </button>
+                </div>
                 <button class="big-glow-help-btn p-0" id="help-btn" title="Click for help with downloading LOTs data and using the application" data-bs-toggle="modal" data-bs-target="#helpModal">
                   <span style="font-size: 16px; font-weight: bold; color: white;">?</span>
                 </button>
