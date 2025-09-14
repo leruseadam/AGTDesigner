@@ -117,11 +117,11 @@ class AIProductMatcher:
             'lineage_match': 0.10,        # Lineage matching
         }
         
-        # Thresholds for confidence levels
+        # Thresholds for confidence levels - Lowered for better matching
         self.confidence_thresholds = {
-            'high': 0.85,
-            'medium': 0.70,
-            'low': 0.50
+            'high': 0.75,    # Lowered from 0.85
+            'medium': 0.55,  # Lowered from 0.70
+            'low': 0.35      # Lowered from 0.50
         }
     
     def _build_caches(self):

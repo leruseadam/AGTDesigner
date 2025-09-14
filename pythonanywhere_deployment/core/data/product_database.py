@@ -10,11 +10,22 @@ from functools import lru_cache
 import threading
 import os
 
-def get_database_path():
+def get_database_path(store_name=None):
     """Get the correct database path for ProductDatabase instances."""
     # Get the current directory of this file
     current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-    return os.path.join(current_dir, 'uploads', 'product_database.db')
+    uploads_dir = os.path.join(current_dir, 'uploads')
+    
+    # Create uploads directory if it doesn't exist
+    os.makedirs(uploads_dir, exist_ok=True)
+    
+    if store_name:
+        # Create store-specific database file
+        db_filename = f'product_database_{store_name}.db'
+        return os.path.join(uploads_dir, db_filename)
+    else:
+        # Default database for backward compatibility
+        return os.path.join(uploads_dir, 'product_database.db')
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +68,11 @@ def retry_on_lock(max_retries=3, delay=0.5):
 class ProductDatabase:
     """Database for storing and managing product and strain information."""
     
-    def __init__(self, db_path: str = "product_database.db"):
-        self.db_path = db_path
+    def __init__(self, db_path: str = None, store_name: str = None):
+        if db_path is None:
+            self.db_path = get_database_path(store_name)
+        else:
+            self.db_path = db_path
         self._connection_pool = {}
         self._cache = {}
         self._cache_lock = threading.Lock()
@@ -106,11 +120,24 @@ class ProductDatabase:
                 return
                 
             start_time = time.time()
-            logger.info("Initializing product database...")
+            logger.info(f"Initializing product database at {self.db_path}...")
             
             try:
                 conn = self._get_connection()
                 cursor = conn.cursor()
+                
+                # Check if products table exists and has data
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+                products_exists = cursor.fetchone() is not None
+                
+                if products_exists:
+                    # Check if table has data
+                    cursor.execute("SELECT COUNT(*) FROM products")
+                    count = cursor.fetchone()[0]
+                    if count > 0:
+                        logger.info(f"Database already initialized with {count} products")
+                        self._initialized = True
+                        return
                 
                 # Create strains table
                 cursor.execute('''
@@ -637,14 +664,24 @@ class ProductDatabase:
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
+            
+            # First get the strain name from the strains table
+            cursor.execute('SELECT strain_name FROM strains WHERE id = ?', (strain_id,))
+            strain_result = cursor.fetchone()
+            if not strain_result:
+                return None
+            
+            strain_name = strain_result[0]
+            
+            # Then find the most common lineage for this strain in products
             cursor.execute('''
-                SELECT lineage, COUNT(*) as count
+                SELECT "Lineage", COUNT(*) as count
                 FROM products
-                WHERE strain_id = ? AND lineage IS NOT NULL AND lineage != ''
-                GROUP BY lineage
+                WHERE "Product Strain" = ? AND "Lineage" IS NOT NULL AND "Lineage" != ''
+                GROUP BY "Lineage"
                 ORDER BY count DESC
                 LIMIT 1
-            ''', (strain_id,))
+            ''', (strain_name,))
             result = cursor.fetchone()
             if result:
                 return result[0]
@@ -824,12 +861,12 @@ class ProductDatabase:
                     product_id, occurrences, existing_name = existing
                     
                     # Log duplicate detection and update
-                    logger.info(f"Found existing product: '{existing_name}' (ID: {product_id}, occurrences: {occurrences}) - UPDATING WITH NEW DATA")
+                    logger.info(f"Found existing product: '{existing_name}' (ID: {product_id}, occurrences: {occurrences}) - REPLACING WITH NEW EXCEL DATA")
                     
-                    # Update existing product with new data
+                    # Update existing product with new data (new data always replaces old values)
                     self._update_existing_product(cursor, product_id, product_data)
                     conn.commit()
-                    logger.info(f"Updated existing product '{existing_name}' with new data")
+                    logger.info(f"Successfully replaced existing product '{existing_name}' with new Excel data")
                     return product_id
                 
                 # Check for similar products (same name + vendor, different brand)
@@ -958,7 +995,7 @@ class ProductDatabase:
             raise
     
     def store_excel_data(self, df: pd.DataFrame, source_file: str = None) -> Dict[str, Any]:
-        """Store Excel data in the database. This is the main method for storing uploaded Excel files."""
+        """Store Excel data in the database. New data replaces existing data when duplicates are found."""
         try:
             self.init_database()  # Ensure DB is initialized
             logger.info(f"Starting to store Excel data with {len(df)} rows from {source_file}")
@@ -1287,7 +1324,7 @@ class ProductDatabase:
                 'total_rows': len(df),
                 'filtered_rows': len(filtered_df),
                 'source_file': source_file,
-                'message': f'Successfully stored {stored_count} products, skipped {skipped_duplicates} duplicates, {error_count} errors, excluded {excluded_count} JSON matched tags, skipped {blank_entries_skipped} blank entries'
+                'message': f'Successfully processed {stored_count} products (new data replaces existing), skipped {skipped_duplicates} duplicates, {error_count} errors, excluded {excluded_count} JSON matched tags, skipped {blank_entries_skipped} blank entries'
             }
             
             if errors:
@@ -1491,7 +1528,7 @@ class ProductDatabase:
             
             if vendor and brand:
                 cursor.execute('''
-                    SELECT p.id, p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
+                    SELECT p.id, p."Product Name*", p.normalized_name, p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
                            s.strain_name, s.canonical_lineage, 0 as total_occurrences, '' as first_seen_date, '' as last_seen_date,
                            p."Description", p."Weight*", p."Units", p."Price"
                     FROM products p
@@ -1500,7 +1537,7 @@ class ProductDatabase:
                 ''', (normalized_name, vendor, brand))
             else:
                 cursor.execute('''
-                    SELECT p.id, p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
+                    SELECT p.id, p."Product Name*", p.normalized_name, p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
                            s.strain_name, s.canonical_lineage, 0 as total_occurrences, '' as first_seen_date, '' as last_seen_date,
                            p."Description", p."Weight*", p."Units", p."Price"
                     FROM products p
@@ -1513,19 +1550,20 @@ class ProductDatabase:
                 product_info = {
                     'id': result[0],
                     'product_name': result[1],
-                    'product_type': result[2],
-                    'vendor': result[3],
-                    'brand': result[4],
-                    'lineage': result[5],
-                    'strain_name': result[6],
-                    'canonical_lineage': result[7],
-                    'total_occurrences': result[8],
-                    'first_seen_date': result[9],
-                    'last_seen_date': result[10],
-                    'description': result[11],
-                    'weight': result[12],
-                    'units': result[13],
-                    'price': result[14]
+                    'normalized_name': result[2],
+                    'product_type': result[3],
+                    'vendor': result[4],
+                    'brand': result[5],
+                    'lineage': result[6],
+                    'strain_name': result[7],
+                    'canonical_lineage': result[8],
+                    'total_occurrences': result[9],
+                    'first_seen_date': result[10],
+                    'last_seen_date': result[11],
+                    'description': result[12],
+                    'weight': result[13],
+                    'units': result[14],
+                    'price': result[15]
                 }
                 
                 # Cache the result for 5 minutes
@@ -2205,6 +2243,11 @@ class ProductDatabase:
                 try:
                     cursor.execute(f"ALTER TABLE products ADD COLUMN {col_name} {col_type}")
                     logger.info(f"Added missing column: {col_name}")
+                except sqlite3.OperationalError as e:
+                    if "duplicate column name" in str(e).lower():
+                        logger.debug(f"Column {col_name} already exists, skipping")
+                    else:
+                        logger.warning(f"Could not add column {col_name}: {e}")
                 except Exception as e:
                     logger.warning(f"Could not add column {col_name}: {e}")
             
@@ -2468,15 +2511,45 @@ class ProductDatabase:
             return ''
     
     def _update_existing_product(self, cursor, product_id, product_data):
-        """Update an existing product with new data."""
+        """Update an existing product with new data. New data always replaces old values."""
         try:
             current_date = datetime.now().isoformat()
+            
+            # Get current product data for comparison
+            cursor.execute('SELECT "Price", "THC test result", "CBD test result", "Weight*", "Units" FROM products WHERE id = ?', (product_id,))
+            current_data = cursor.fetchone()
+            
+            # Log changes for important fields
+            if current_data:
+                old_price, old_thc, old_cbd, old_weight, old_units = current_data
+                new_price = product_data.get('Price', '')
+                new_thc = product_data.get('THC test result', '')
+                new_cbd = product_data.get('CBD test result', '')
+                new_weight = product_data.get('Weight*', '')
+                new_units = product_data.get('Units', '')
+                
+                changes = []
+                if str(old_price) != str(new_price):
+                    changes.append(f"Price: {old_price} → {new_price}")
+                if str(old_thc) != str(new_thc):
+                    changes.append(f"THC: {old_thc} → {new_thc}")
+                if str(old_cbd) != str(new_cbd):
+                    changes.append(f"CBD: {old_cbd} → {new_cbd}")
+                if str(old_weight) != str(new_weight):
+                    changes.append(f"Weight: {old_weight} → {new_weight}")
+                if str(old_units) != str(new_units):
+                    changes.append(f"Units: {old_units} → {new_units}")
+                
+                if changes:
+                    logger.info(f"Product ID {product_id} data changes: {'; '.join(changes)}")
+                else:
+                    logger.info(f"Product ID {product_id} updated with same values (no changes detected)")
             
             # Calculate AI and AK values
             ai_value = self._calculate_ai_value(product_data)
             ak_value = self._calculate_ak_value(product_data)
             
-            # Update the product with new data
+            # Update the product with new data - NEW DATA ALWAYS REPLACES OLD VALUES
             cursor.execute('''
                 UPDATE products SET
                     "Product Type*" = ?,
@@ -2541,7 +2614,7 @@ class ProductDatabase:
                 product_id
             ))
             
-            logger.info(f"Updated product ID {product_id} with new data")
+            logger.info(f"Successfully updated product ID {product_id} with new Excel data (old values replaced)")
             
         except Exception as e:
             logger.error(f"Error updating existing product {product_id}: {e}")
@@ -3673,19 +3746,19 @@ class ProductDatabase:
             # Use placeholders for the IN clause
             placeholders = ','.join(['?' for _ in normalized_names])
             
+            # Fixed query - use products table directly without alias to avoid column issues
             cursor.execute(f'''
-                SELECT p.id, p."Product Name*", p.normalized_name, p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
-                       s.strain_name, s.canonical_lineage, 0 as total_occurrences, '' as first_seen_date, '' as last_seen_date,
-                       p."Description", p."Weight*", p."Weight Unit* (grams/gm or ounces/oz)", p."Price* (Tier Name for Bulk)", 
-                       '' as thc_test_result, '' as cbd_test_result, p."Test result unit (% or mg)",
-                       p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio", p."State", p."Is Sample? (yes/no)",
-                       p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*",
-                       p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens",
-                       p."Solvent", p."Accepted Date", p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients",
-                       p."CombinedWeight", p."Ratio_or_THC_CBD", p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN"
-                FROM products p
-                LEFT JOIN strains s ON p.strain_id = s.id
-                WHERE p.normalized_name IN ({placeholders})
+                SELECT id, "Product Name*", normalized_name, "Product Type*", "Vendor/Supplier*", "Product Brand", "Lineage",
+                       '' as strain_name, '' as canonical_lineage, 0 as total_occurrences, '' as first_seen_date, '' as last_seen_date,
+                       "Description", "Weight*", "Weight Unit* (grams/gm or ounces/oz)", "Price* (Tier Name for Bulk)", 
+                       '' as thc_test_result, '' as cbd_test_result, "Test result unit (% or mg)",
+                       "Quantity*", "DOH", "Concentrate Type", "Ratio", "JointRatio", "State", "Is Sample? (yes/no)",
+                       "Is MJ product?(yes/no)", "Discountable? (yes/no)", "Room*", "Batch Number", "Lot Number", "Barcode*",
+                       "Medical Only (Yes/No)", "Med Price", "Expiration Date(YYYY-MM-DD)", "Is Archived? (yes/no)", "THC Per Serving", "Allergens",
+                       "Solvent", "Accepted Date", "Internal Product Identifier", "Product Tags (comma separated)", "Image URL", "Ingredients",
+                       "CombinedWeight", "Ratio_or_THC_CBD", "Description_Complexity", "Total THC", "THCA", "CBDA", "CBN"
+                FROM products
+                WHERE normalized_name IN ({placeholders})
             ''', normalized_names)
             
             results = cursor.fetchall()
@@ -3715,9 +3788,9 @@ class ProductDatabase:
                         'Vendor': result[4],  # vendor
                         'Vendor/Supplier*': result[4],  # Excel column name compatibility
                         'Product Brand': result[5],  # brand
-                        'Lineage': result[6] or result[8] or 'MIXED',  # lineage or canonical_lineage
-                        'strain_name': result[7],  # strain_name
-                        'canonical_lineage': result[8],  # canonical_lineage
+                        'Lineage': result[6] or 'MIXED',  # lineage
+                        'strain_name': result[7],  # strain_name (empty string)
+                        'canonical_lineage': result[8],  # canonical_lineage (empty string)
                         'total_occurrences': result[9],
                         'first_seen_date': result[10],
                         'last_seen_date': result[11],
@@ -4067,7 +4140,7 @@ class ProductDatabase:
             query = '''
                 SELECT p.id, p."Product Name*", p."Product Strain", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
                        p."Description", p."Weight*", p."Units", p."Price", p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio",
-                       p."State", p."Is Sample? (yes/no)", p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*", p."Cost*",
+                       p."State", p."Is Sample? (yes/no)", p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*",
                        p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens", p."Solvent", p."Accepted Date",
                        p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."CombinedWeight", p."Ratio_or_THC_CBD", 
                        p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN", 0 as total_occurrences, '' as first_seen_date, '' as last_seen_date
@@ -4135,29 +4208,28 @@ class ProductDatabase:
                     'batch_number': result[21],  # Batch Number
                     'lot_number': result[22],  # Lot Number
                     'barcode': result[23],  # Barcode
-                    'cost': result[24],  # Cost
-                    'Medical Only': result[25],  # Medical Only
-                    'med_price': result[26],  # Med Price
-                    'expiration_date': result[27],  # Expiration Date
-                    'is_archived': result[28],  # Is Archived
-                    'thc_per_serving': result[29],  # THC Per Serving
-                    'allergens': result[30],  # Allergens
-                    'solvent': result[31],  # Solvent
-                    'accepted_date': result[32],  # Accepted Date
-                    'internal_product_identifier': result[33],  # Internal Product Identifier
-                    'product_tags': result[34],  # Product Tags
-                    'image_url': result[35],  # Image URL
-                    'ingredients': result[36],  # Ingredients
-                    'combined_weight': result[37],  # Combined Weight
-                    'ratio_or_thc_cbd': result[38],  # Ratio or THC/CBD
-                    'description_complexity': result[39],  # Description Complexity
-                    'Total THC': result[40],  # Total THC
-                    'THCA': result[41],  # THCA
-                    'CBDA': result[42],  # CBDA
-                    'CBN': result[43],  # CBN
-                    'total_occurrences': result[44],
-                    'first_seen_date': result[45],
-                    'last_seen_date': result[46],
+                    'Medical Only': result[24],  # Medical Only
+                    'med_price': result[25],  # Med Price
+                    'expiration_date': result[26],  # Expiration Date
+                    'is_archived': result[27],  # Is Archived
+                    'thc_per_serving': result[28],  # THC Per Serving
+                    'allergens': result[29],  # Allergens
+                    'solvent': result[30],  # Solvent
+                    'accepted_date': result[31],  # Accepted Date
+                    'internal_product_identifier': result[32],  # Internal Product Identifier
+                    'product_tags': result[33],  # Product Tags
+                    'image_url': result[34],  # Image URL
+                    'ingredients': result[35],  # Ingredients
+                    'combined_weight': result[36],  # Combined Weight
+                    'ratio_or_thc_cbd': result[37],  # Ratio or THC/CBD
+                    'description_complexity': result[38],  # Description Complexity
+                    'Total THC': result[39],  # Total THC
+                    'THCA': result[40],  # THCA
+                    'CBDA': result[41],  # CBDA
+                    'CBN': result[42],  # CBN
+                    'total_occurrences': result[43],
+                    'first_seen_date': result[44],
+                    'last_seen_date': result[45],
                     # Add Excel column name compatibility fields
                     'ProductBrand': result[5],
                     'ProductStrain': result[2],
@@ -4822,10 +4894,16 @@ class ProductDatabase:
             
             # Search for products with exact name match
             cursor.execute('''
-                SELECT p.*, s.canonical_lineage, s.sovereign_lineage
+                SELECT p.id, p."Product Name*", p.normalized_name, p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
+                       p."Description", p."Weight*", p."Units", p."Price", p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio",
+                       p."State", p."Is Sample? (yes/no)", p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*",
+                       p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens", p."Solvent", p."Accepted Date",
+                       p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."CombinedWeight", p."Ratio_or_THC_CBD", 
+                       p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN", p.total_occurrences, p.first_seen_date, p.last_seen_date,
+                       s.canonical_lineage, s.sovereign_lineage
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
-                WHERE p.product_name = ?
+                WHERE p."Product Name*" = ?
                 ORDER BY p.last_seen_date DESC
             ''', (product_name,))
             
@@ -4848,10 +4926,16 @@ class ProductDatabase:
             
             # Search for products with matching strain
             cursor.execute('''
-                SELECT p.*, s.canonical_lineage, s.sovereign_lineage
+                SELECT p.id, p."Product Name*", p.normalized_name, p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
+                       p."Description", p."Weight*", p."Units", p."Price", p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio",
+                       p."State", p."Is Sample? (yes/no)", p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*",
+                       p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens", p."Solvent", p."Accepted Date",
+                       p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."CombinedWeight", p."Ratio_or_THC_CBD", 
+                       p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN", p.total_occurrences, p.first_seen_date, p.last_seen_date,
+                       s.canonical_lineage, s.sovereign_lineage
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
-                WHERE p.product_strain LIKE ? OR s.strain_name LIKE ?
+                WHERE p."Product Strain" LIKE ? OR s.strain_name LIKE ?
                 ORDER BY p.last_seen_date DESC
             ''', (f'%{strain_name}%', f'%{strain_name}%'))
             
@@ -4874,7 +4958,13 @@ class ProductDatabase:
             
             # Search for products with matching type and strain
             cursor.execute('''
-                SELECT p.*, s.canonical_lineage, s.sovereign_lineage
+                SELECT p.id, p."Product Name*", p.normalized_name, p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
+                       p."Description", p."Weight*", p."Units", p."Price", p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio",
+                       p."State", p."Is Sample? (yes/no)", p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*",
+                       p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens", p."Solvent", p."Accepted Date",
+                       p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."CombinedWeight", p."Ratio_or_THC_CBD", 
+                       p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN", p.total_occurrences, p.first_seen_date, p.last_seen_date,
+                       s.canonical_lineage, s.sovereign_lineage
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
                 WHERE p."Product Type*" = ? AND (p."Product Strain" = ? OR s.strain_name = ?)
@@ -5167,9 +5257,9 @@ class ProductDatabase:
                 'message': f'Failed to update joint ratios: {e}'
             }
 
-def get_product_database():
-    # CRITICAL FIX: Use correct database path
-    return ProductDatabase(get_database_path()) 
+def get_product_database(store_name=None):
+    """Get a ProductDatabase instance for the specified store."""
+    return ProductDatabase(store_name=store_name) 
 
 if __name__ == "__main__":
     import argparse

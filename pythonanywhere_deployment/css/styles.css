@@ -1,3 +1,88 @@
+/* ========================================
+   VIEWPORT NORMALIZATION FOR CONSISTENT SCALING
+   ======================================== */
+
+/* Normalize viewport units across all environments (local vs web) */
+:root {
+  /* Standardize viewport calculations */
+  --viewport-width: 100vw;
+  --viewport-height: 100vh;
+  
+  /* Normalized viewport units for consistent scaling */
+  --vw: 1vw;
+  --vh: 1vh;
+  --vmin: 1vmin;
+  --vmax: 1vmax;
+  
+  /* Fallback values for environments with different viewport calculations */
+  --base-viewport-width: 1920px; /* Standard desktop width */
+  --base-viewport-height: 1080px; /* Standard desktop height */
+  
+  /* Normalized scaling factors */
+  --scale-factor: min(1vw, 1vh);
+  --responsive-scale: clamp(0.8, var(--scale-factor), 1.2);
+}
+
+/* Ensure consistent viewport behavior across browsers and environments */
+@media screen {
+  :root {
+    /* Force consistent viewport unit calculations */
+    --vw: calc(100vw / 100);
+    --vh: calc(100vh / 100);
+    --vmin: calc(100vmin / 100);
+    --vmax: calc(100vmax / 100);
+  }
+}
+
+/* Override problematic clamp() functions with normalized equivalents */
+:root {
+  /* Normalized font sizing that works consistently across environments */
+  --font-scale-base: clamp(0.8, var(--vw) * 2, 1.2);
+  --font-scale-small: clamp(0.7, var(--vw) * 1.5, 1.0);
+  --font-scale-large: clamp(1.0, var(--vw) * 2.5, 1.5);
+  
+  /* Normalized button scaling */
+  --btn-scale: clamp(0.9, var(--vw) * 1.8, 1.1);
+  --btn-font-scale: clamp(0.8, var(--vw) * 1.6, 1.2);
+  
+  /* Environment-specific viewport fixes */
+  --env-scale-factor: 1;
+  --env-font-multiplier: 1;
+}
+
+/* Detect and normalize for different environments */
+@media screen and (min-width: 1200px) {
+  :root {
+    /* Desktop normalization - ensure consistent scaling */
+    --env-scale-factor: 1;
+    --env-font-multiplier: 1;
+  }
+}
+
+@media screen and (max-width: 1199px) {
+  :root {
+    /* Tablet/mobile normalization */
+    --env-scale-factor: 0.9;
+    --env-font-multiplier: 1.1;
+  }
+}
+
+/* Force consistent viewport behavior for all clamp() functions */
+:root {
+  /* Override the most problematic clamp functions with normalized versions */
+  --normalized-clamp-small: clamp(8px, calc(2 * var(--vw) * var(--env-font-multiplier)), 14px);
+  --normalized-clamp-medium: clamp(10px, calc(3 * var(--vw) * var(--env-font-multiplier)), 16px);
+  --normalized-clamp-large: clamp(12px, calc(4 * var(--vw) * var(--env-font-multiplier)), 20px);
+  
+  /* Button scaling normalization */
+  --normalized-btn-height: clamp(36px, calc(1.5 * var(--vh) * var(--env-scale-factor)), 72px);
+  --normalized-btn-font: clamp(0.8rem, calc(0.45 * var(--vw) + 0.45 * var(--vh)) * var(--env-font-multiplier), 1.15rem);
+}
+
+/* ========================================
+   PERFORMANCE OPTIMIZATIONS
+   ======================================== */
+
 /* Performance optimizations to prevent GUI glitchiness and flashing */
 .tag-item, .tag-row, .vendor-section, .brand-section, .product-type-section, .weight-section {
   /* Prevent layout shifts during rapid updates */
@@ -226,11 +311,12 @@ img, video, canvas, svg {
 
   /* Responsive sizing variables for center column buttons (scales across monitors) */
   :root {
-    --center-btn-min-h: clamp(48px, 1.5vh + 1vw, 72px);
-    --center-btn-font: clamp(0.9rem, 0.45vw + 0.45vh, 1.15rem);
-    --center-btn-icon: clamp(12px, 0.55vw + 0.55vh, 18px);
-    --center-btn-pad-v: clamp(0.5rem, 0.5vh + 0.25vw, 0.9rem);
-    --center-gap: clamp(0.4rem, 0.35vh + 0.35vw, 0.8rem);
+    /* Use normalized viewport units for consistent scaling across environments */
+    --center-btn-min-h: var(--normalized-btn-height);
+    --center-btn-font: var(--normalized-btn-font);
+    --center-btn-icon: clamp(12px, calc(0.55 * var(--vw) + 0.55 * var(--vh)) * var(--env-font-multiplier), 18px);
+    --center-btn-pad-v: clamp(0.5rem, calc(0.5 * var(--vh) + 0.25 * var(--vw)) * var(--env-scale-factor), 0.9rem);
+    --center-gap: clamp(0.4rem, calc(0.35 * var(--vh) + 0.35 * var(--vw)) * var(--env-scale-factor), 0.8rem);
   }
   
   /* Maximize space for AGT Designer UI */
@@ -419,13 +505,14 @@ img, video, canvas, svg {
     border: 2px solid rgba(33, 150, 243, 0.7) !important;
     border-radius: 12px;
     color: #fff;
-    padding: 0.44rem 0.85rem;
-    font-size: 0.75rem;
+    padding: 0.6rem 0.8rem;
+    font-size: 0.8rem;
     font-weight: 700;
-    letter-spacing: 0.75px;
+    letter-spacing: 0.3px;
     display: inline-flex;
     align-items: center;
-    gap: 0.7rem;
+    justify-content: center;
+    gap: 0.5rem;
     transition: all 0.3s ease;
     text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
     box-shadow: 
@@ -434,6 +521,10 @@ img, video, canvas, svg {
     position: relative;
     z-index: 5;
     transform: translateY(0);
+    min-width: 120px;
+    min-height: 44px;
+    flex: 1;
+    max-width: 150px;
   }
 
   .btn-header-action:hover {
@@ -454,8 +545,9 @@ img, video, canvas, svg {
 
   .btn-header-action svg {
     flex-shrink: 0;
-    width: 14px;
-    height: 14px;
+    width: 16px;
+    height: 16px;
+    opacity: 0.9;
   }
 
   .header-buttons-container {
@@ -465,8 +557,54 @@ img, video, canvas, svg {
     margin-top: 1rem;
     display: flex !important;
     justify-content: center !important;
-    align-items: center !important;
-    gap: 2.25rem !important;
+    align-items: stretch !important;
+    gap: 0.75rem !important;
+    flex-wrap: nowrap;
+    max-width: 800px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  /* Responsive button adjustments */
+  @media (max-width: 768px) {
+    .header-buttons-container {
+      gap: 0.75rem !important;
+      max-width: 100%;
+      padding: 0 1rem;
+    }
+    
+    .btn-header-action {
+      min-width: 140px;
+      min-height: 44px;
+      font-size: 0.8rem;
+      padding: 0.65rem 1rem;
+    }
+    
+    .btn-header-action svg {
+      width: 16px;
+      height: 16px;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .header-buttons-container {
+      flex-direction: column;
+      gap: 0.5rem !important;
+      align-items: center;
+    }
+    
+    .btn-header-action {
+      min-width: 200px;
+      width: 100%;
+      max-width: 280px;
+    }
+  }
+
+  /* Keep buttons side by side on larger screens */
+  @media (min-width: 481px) {
+    .header-buttons-container {
+      flex-wrap: nowrap !important;
+    }
   }
   
   /* Header Container - Groups title, subtitle, and copyright with tight background */
@@ -691,13 +829,7 @@ img, video, canvas, svg {
       min-width: 120px !important;
     }
     
-    /* Header buttons on mobile */
-    .btn-header-action {
-      padding: 10px 16px !important;
-      font-size: 0.95rem !important;
-      min-height: 46px !important;
-      min-width: 128px !important;
-    }
+    /* Header buttons on mobile - removed conflicting styles */
     
     /* Upload buttons on mobile */
     .upload-btn-modern {
@@ -742,13 +874,7 @@ img, video, canvas, svg {
       min-width: 110px !important;
     }
     
-    /* Header buttons on small tablets */
-    .btn-header-action {
-      padding: 10px 18px !important;
-      font-size: 0.9rem !important;
-      min-height: 46px !important;
-      min-width: 130px !important;
-    }
+    /* Header buttons on small tablets - removed conflicting styles */
     
     /* Upload buttons on small tablets */
     .upload-btn-modern {
@@ -793,13 +919,7 @@ img, video, canvas, svg {
       min-width: 100px !important;
     }
     
-    /* Header buttons on medium tablets */
-    .btn-header-action {
-      padding: 8px 16px !important;
-      font-size: 0.85rem !important;
-      min-height: 44px !important;
-      min-width: 120px !important;
-    }
+    /* Header buttons on medium tablets - removed conflicting styles */
     
     /* Upload buttons on medium tablets */
     .upload-btn-modern {
@@ -844,13 +964,7 @@ img, video, canvas, svg {
       min-width: 90px !important;
     }
     
-    /* Header buttons on large screens */
-    .btn-header-action {
-      padding: 7px 14px !important;
-      font-size: 0.8rem !important;
-      min-height: 40px !important;
-      min-width: 110px !important;
-    }
+    /* Header buttons on large screens - removed conflicting styles */
     
     /* Upload buttons on large screens */
     .upload-btn-modern {
@@ -895,13 +1009,7 @@ img, video, canvas, svg {
       min-width: 95px !important;
     }
     
-    /* Header buttons on extra large screens */
-    .btn-header-action {
-      padding: 8px 16px !important;
-      font-size: 0.85rem !important;
-      min-height: 42px !important;
-      min-width: 115px !important;
-    }
+    /* Header buttons on extra large screens - removed conflicting styles */
     
     /* Upload buttons on extra large screens */
     .upload-btn-modern {
@@ -946,13 +1054,7 @@ img, video, canvas, svg {
       min-width: 100px !important;
     }
     
-    /* Header buttons on ultra-wide screens */
-    .btn-header-action {
-      padding: 9px 18px !important;
-      font-size: 0.9rem !important;
-      min-height: 46px !important;
-      min-width: 120px !important;
-    }
+    /* Header buttons on ultra-wide screens - removed conflicting styles */
     
     /* Upload buttons on ultra-wide screens */
     .upload-btn-modern {
@@ -6305,7 +6407,7 @@ img, video, canvas, svg {
     }
 
     .btn-header-action {
-      /* Button sizing now handled by responsive system above */
+      /* Button sizing now handled by main styles above */
       margin-bottom: 0.5rem !important;
     }
 
@@ -6334,7 +6436,7 @@ img, video, canvas, svg {
     }
 
     .btn-header-action {
-      /* Button sizing now handled by responsive system above */
+      /* Button sizing now handled by main styles above */
       margin-bottom: 0.25rem !important;
     }
 
@@ -7497,60 +7599,60 @@ img, video, canvas, svg {
     box-sizing: border-box;
   }
   
-  /* Font size adjustment classes */
+  /* Font size adjustment classes - using normalized viewport units */
   .font-size-auto {
-    font-size: clamp(var(--min-font-size), 2.5vw, var(--max-font-size)) !important;
+    font-size: clamp(var(--min-font-size), calc(2.5 * var(--vw) * var(--env-font-multiplier)), var(--max-font-size)) !important;
   }
   
   .font-size-small {
-    font-size: clamp(var(--min-font-size), 2vw, 14px) !important;
+    font-size: var(--normalized-clamp-small) !important;
   }
   
   .font-size-medium {
-    font-size: clamp(10px, 3vw, 16px) !important;
+    font-size: var(--normalized-clamp-medium) !important;
   }
   
   .font-size-large {
-    font-size: clamp(12px, 4vw, 20px) !important;
+    font-size: var(--normalized-clamp-large) !important;
   }
   
   .font-size-xlarge {
-    font-size: clamp(14px, 5vw, var(--max-font-size)) !important;
+    font-size: clamp(14px, calc(5 * var(--vw) * var(--env-font-multiplier)), var(--max-font-size)) !important;
   }
   
-  /* Responsive font sizing based on container width */
+  /* Responsive font sizing based on container width - using normalized viewport units */
   .responsive-text {
-    font-size: clamp(var(--min-font-size), 2.5vw, var(--max-font-size)) !important;
+    font-size: clamp(var(--min-font-size), calc(2.5 * var(--vw) * var(--env-font-multiplier)), var(--max-font-size)) !important;
     line-height: 1.2 !important;
     white-space: nowrap !important;
     overflow: hidden !important;
     text-overflow: ellipsis !important;
   }
   
-  /* Container-specific font sizing */
+  /* Container-specific font sizing - using normalized viewport units */
   .tag-item .text-container {
-    font-size: clamp(8px, 2vw, 14px) !important;
+    font-size: var(--normalized-clamp-small) !important;
     max-width: calc(100% - 40px) !important;
     padding-right: 8px !important;
   }
   
   .vendor-header .text-container {
-    font-size: clamp(10px, 2.5vw, 16px) !important;
+    font-size: clamp(10px, calc(2.5 * var(--vw) * var(--env-font-multiplier)), 16px) !important;
     font-weight: 600 !important;
   }
   
   .brand-header .text-container {
-    font-size: clamp(9px, 2.2vw, 15px) !important;
+    font-size: clamp(9px, calc(2.2 * var(--vw) * var(--env-font-multiplier)), 15px) !important;
     font-weight: 500 !important;
   }
   
   .product-type-header .text-container {
-    font-size: clamp(8px, 2vw, 14px) !important;
+    font-size: var(--normalized-clamp-small) !important;
     font-weight: 500 !important;
   }
   
   .weight-header .text-container {
-    font-size: clamp(8px, 2vw, 14px) !important;
+    font-size: var(--normalized-clamp-small) !important;
     font-weight: 500 !important;
   }
   
