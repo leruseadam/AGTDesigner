@@ -6519,17 +6519,26 @@
       
       // Sync store with backend and update display
       setTimeout(() => {
+        console.log('Window load: Starting store sync...');
         // First check what store the backend has
         fetch('/api/get-store')
           .then(response => response.json())
           .then(data => {
+            console.log('Window load: Backend store data:', data);
             if (data.success && data.store) {
-              console.log('Backend store:', data.store);
-              // Update the display to match backend
-              updateCurrentStoreDisplay(data.store);
+              console.log('Window load: Backend store:', data.store);
+              // Force update the display directly
+              const displayElement = document.getElementById('currentStoreDisplay');
+              if (displayElement) {
+                displayElement.textContent = data.store.replace(/_/g, ' ');
+                displayElement.style.color = '#4ade80';
+                console.log('Window load: Updated display to:', data.store.replace(/_/g, ' '));
+              }
+              // Also update the store status
               updateStoreStatus(`Store: ${data.store.replace(/_/g, ' ')}`, 'active');
               // Also save to localStorage for consistency
               localStorage.setItem('selectedStore', data.store);
+              console.log('Window load: Store sync completed');
             } else {
               // No store in backend, default to Bothell
               console.log('No store in backend, defaulting to AGT_Bothell');
@@ -6541,7 +6550,11 @@
             // Fallback to localStorage or default
             const savedStore = localStorage.getItem('selectedStore');
             if (savedStore) {
-              updateCurrentStoreDisplay(savedStore);
+              const displayElement = document.getElementById('currentStoreDisplay');
+              if (displayElement) {
+                displayElement.textContent = savedStore.replace(/_/g, ' ');
+                displayElement.style.color = '#4ade80';
+              }
               updateStoreStatus(`Store: ${savedStore.replace(/_/g, ' ')}`, 'active');
             } else {
               console.log('No store saved, defaulting to AGT_Bothell');
@@ -6549,6 +6562,25 @@
             }
           });
       }, 1000);
+      
+      // Additional sync after 3 seconds to ensure it works
+      setTimeout(() => {
+        console.log('Delayed sync: Checking store again...');
+        const displayElement = document.getElementById('currentStoreDisplay');
+        if (displayElement && displayElement.textContent === 'No store selected') {
+          console.log('Delayed sync: Still showing no store, forcing update...');
+          fetch('/api/get-store')
+            .then(response => response.json())
+            .then(data => {
+              if (data.success && data.store) {
+                displayElement.textContent = data.store.replace(/_/g, ' ');
+                displayElement.style.color = '#4ade80';
+                updateStoreStatus(`Store: ${data.store.replace(/_/g, ' ')}`, 'active');
+                console.log('Delayed sync: Forced update to:', data.store.replace(/_/g, ' '));
+              }
+            });
+        }
+      }, 3000);
       
       // Emergency fallback - default to Bothell after 3 seconds if still no store
       setTimeout(() => {
@@ -6570,14 +6602,29 @@
       TagManager.init();
       
       // Immediately sync store with backend
+      console.log('DOMContentLoaded: Starting store sync...');
       fetch('/api/get-store')
-        .then(response => response.json())
+        .then(response => {
+          console.log('Store API response:', response);
+          return response.json();
+        })
         .then(data => {
+          console.log('Store API data:', data);
           if (data.success && data.store) {
             console.log('DOMContentLoaded: Backend store is', data.store);
-            updateCurrentStoreDisplay(data.store);
+            // Force update the display
+            const displayElement = document.getElementById('currentStoreDisplay');
+            if (displayElement) {
+              displayElement.textContent = data.store.replace(/_/g, ' ');
+              displayElement.style.color = '#4ade80';
+              console.log('Updated display element to:', data.store.replace(/_/g, ' '));
+            }
+            // Also update the store status
             updateStoreStatus(`Store: ${data.store.replace(/_/g, ' ')}`, 'active');
             localStorage.setItem('selectedStore', data.store);
+            console.log('Store sync completed successfully');
+          } else {
+            console.log('No store in backend data:', data);
           }
         })
         .catch(error => {
