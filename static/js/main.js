@@ -6900,7 +6900,7 @@ window.performJsonMatch = function() {
     // Show progress message
     resultsDiv.classList.remove('d-none');
     matchCount.textContent = 'Processing...';
-    matchedProductsList.innerHTML = '<div class="text-info">Matching products from JSON URL. This may take up to 10 minutes for large datasets. Progress will be logged in the browser console.</div>';
+    matchedProductsList.innerHTML = '<div class="text-info">Matching products from JSON URL. This may take up to 2 minutes for large datasets. Progress will be logged in the browser console.</div>';
 
     // Add timeout to prevent hanging
     const controller = new AbortController();
