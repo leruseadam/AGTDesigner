@@ -1,3 +1,4 @@
+from .field_mapping import get_canonical_field
 import sqlite3
 import json
 import logging
@@ -274,6 +275,9 @@ class ProductDatabase:
                 # Only migrate if tables are empty or missing critical columns
                 self._migrate_database_schema_safe(cursor, conn)
                 
+                # CRITICAL FIX: Force check for essential columns and add if missing
+                self._ensure_essential_columns_exist(cursor, conn)
+                
                 self._initialized = True
                 
                 elapsed = time.time() - start_time
@@ -315,6 +319,58 @@ class ProductDatabase:
             logger.error(f"Error during safe schema migration: {e}")
             # Don't raise - continue with existing schema
     
+    def _ensure_essential_columns_exist(self, cursor, conn):
+        """Ensure essential columns exist that are needed for Excel processor compatibility."""
+        try:
+            # Get current columns
+            cursor.execute("PRAGMA table_info(products)")
+            existing_columns = {row[1] for row in cursor.fetchall()}
+            
+            # Essential columns that must exist for Excel processor compatibility
+            essential_columns = [
+                'ProductName',
+                'Units', 
+                'Price',
+                '"Price*"',
+                '"Price* (Tier Name for Bulk)"',
+                '"Product Name*"',
+                '"Vendor/Supplier*"',
+                '"Weight*"',
+                '"Weight Unit*"',
+                '"Quantity*"',
+                '"Quantity Received*"',
+                '"DOH Compliant*"',
+                '"DOH Compliant (Yes/No)"',
+                '"Joint Ratio"',
+                'qty',
+                '"Weight Unit* (grams/gm or ounces/oz)"',
+                'Vendor'
+            ]
+            
+            added_columns = []
+            for col_name in essential_columns:
+                # Strip quotes for comparison with existing columns
+                col_name_clean = col_name.strip('"')
+                if col_name_clean not in existing_columns:
+                    try:
+                        cursor.execute(f"ALTER TABLE products ADD COLUMN {col_name} TEXT")
+                        added_columns.append(col_name)
+                        logger.info(f"Added essential column: {col_name}")
+                    except sqlite3.OperationalError as e:
+                        if "duplicate column name" not in str(e).lower():
+                            logger.warning(f"Could not add essential column {col_name}: {e}")
+                    except Exception as e:
+                        logger.warning(f"Could not add essential column {col_name}: {e}")
+            
+            if added_columns:
+                conn.commit()
+                logger.info(f"Added {len(added_columns)} essential columns to products table")
+            else:
+                logger.debug("All essential columns already exist")
+                
+        except Exception as e:
+            logger.error(f"Error ensuring essential columns exist: {e}")
+
     def _migrate_database_schema(self, cursor, conn):
         """Force recreate database with correct schema - USE WITH CAUTION."""
         try:
@@ -821,7 +877,7 @@ class ProductDatabase:
             self.init_database()  # Ensure DB is initialized
             
             # Handle both 'ProductName' and 'Product Name*' column names
-            product_name = product_data.get('Product Name*', product_data.get('ProductName', ''))
+            product_name = product_data.get(get_canonical_field('Product Name*'), product_data.get(get_canonical_field('ProductName'), ''))
             normalized_name = self._normalize_product_name(product_name)
             current_date = datetime.now().isoformat()
             
@@ -853,7 +909,7 @@ class ProductDatabase:
                     SELECT id, total_occurrences, "Product Name*"
                     FROM products 
                     WHERE normalized_name = ? AND "Vendor/Supplier*" = ? AND "Product Brand" = ?
-                ''', (normalized_name, product_data.get('Vendor/Supplier*'), product_data.get('Product Brand')))
+                ''', (normalized_name, product_data.get(get_canonical_field('Vendor/Supplier*')), product_data.get(get_canonical_field('Product Brand'))))
                 
                 existing = cursor.fetchone()
                 
@@ -886,19 +942,19 @@ class ProductDatabase:
                     cursor.execute('''
                         INSERT INTO products (
                             "Product Name*", normalized_name, "Product Strain", "Product Type*", "Vendor/Supplier*", "Product Brand",
-                            "Description", "Weight*", "Weight Unit* (grams/gm or ounces/oz)", "Units", "Price", "Lineage", first_seen_date, last_seen_date, created_at, updated_at,
+                            "Description", "Weight*", "Units", "Price", "Lineage", first_seen_date, last_seen_date, created_at, updated_at,
                             "Quantity*", "DOH", "Concentrate Type", "Ratio", "JointRatio", "Test result unit (% or mg)", "State", "Is Sample? (yes/no)", 
                             "Is MJ product?(yes/no)", "Discountable? (yes/no)", "Room*", "Batch Number", "Lot Number", "Barcode*",
                             "Medical Only (Yes/No)", "Med Price", "Expiration Date(YYYY-MM-DD)", "Is Archived? (yes/no)", 
                             "THC Per Serving", "Allergens", "Solvent", "Accepted Date", "Internal Product Identifier", 
-                            "Product Tags (comma separated)", "Image URL", "Ingredients", "CombinedWeight",                             "ratio_or_thc_cbd", 
-                            "description_complexity", "Total THC", "THCA", "CBDA", "CBN",
+                            "Product Tags (comma separated)", "Image URL", "Ingredients", "CombinedWeight", "Ratio_or_THC_CBD", 
+                            "Description_Complexity", "Total THC", "THCA", "CBDA", "CBN",
                             "THC", "CBD", "Total CBD", "CBGA", "CBG", "Total CBG", "CBC", "CBDV", "THCV", "CBGV", "CBNV", "CBGVA",
                             "total_occurrences", "strain_id",
                             "ProductName", "DOH Compliant (Yes/No)", "Joint Ratio", "Quantity Received*", "qty",
-                            "THC Test Result", "CBD Test Result", "Vendor", "Price* (Tier Name for Bulk)",
+                            "THC test result", "CBD test result", "Vendor/Supplier*", "Price",
                             "AI", "AJ", "AK"
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         product_name, normalized_name, self._calculate_product_strain(
                             product_data.get('Product Type*', ''),
@@ -907,8 +963,7 @@ class ProductDatabase:
                             product_data.get('Ratio', '')
                         ), product_data.get('Product Type*'),
                         product_data.get('Vendor/Supplier*'), product_data.get('Product Brand'),
-                        product_data.get('Description'), product_data.get('Weight*'),
-                        product_data.get('Weight Unit* (grams/gm or ounces/oz)', ''),
+                        self._process_description(product_data.get('Product Name*', ''), product_data.get('Description', '')), product_data.get('Weight*'),
                         product_data.get('Units'), product_data.get('Price'),
                         self._normalize_lineage(product_data.get('Lineage')), current_date, current_date, current_date, current_date,
                         # Core product data
@@ -975,8 +1030,8 @@ class ProductDatabase:
                         # Additional missing values
                         product_data.get('THC test result', ''),
                         product_data.get('CBD test result', ''),
-                        product_data.get('Vendor', product_data.get('Vendor/Supplier*', '')),
-                        product_data.get('Price* (Tier Name for Bulk)', product_data.get('Price', '')),
+                        product_data.get('Vendor/Supplier*', ''),  # Map to Vendor/Supplier* column
+                        product_data.get('Price', ''),  # Map to Price column,
                         # AI, AJ, AK values
                         product_data.get('AI', ''),
                         product_data.get('AJ', ''),
@@ -1004,18 +1059,60 @@ class ProductDatabase:
                 logger.warning("No data to store - DataFrame is empty")
                 return {'stored': 0, 'updated': 0, 'errors': 0, 'message': 'No data to store'}
             
-            # Enhanced JSON match detection and filtering
-            filtered_df = self._filter_json_matched_tags(df)
+            # TEMPORARILY DISABLE JSON match filtering to test database storage
+            # filtered_df = self._filter_json_matched_tags(df)
+            filtered_df = df.copy()  # Use all data without filtering
+
+            # CRITICAL NORMALIZATION: map common column aliases used by different upload paths
+            try:
+                cols = set(filtered_df.columns)
+                # Product name
+                if 'Product Name*' not in cols and 'ProductName' in cols:
+                    filtered_df['Product Name*'] = filtered_df['ProductName']
+                    cols.add('Product Name*')
+                if 'Product Name*' in cols:
+                    filtered_df['Product Name*'] = filtered_df['Product Name*'].astype(str).str.strip()
+
+                # Vendor
+                if 'Vendor/Supplier*' not in cols and 'Vendor' in cols:
+                    filtered_df['Vendor/Supplier*'] = filtered_df['Vendor']
+                    cols.add('Vendor/Supplier*')
+                if 'Vendor/Supplier*' in cols:
+                    filtered_df['Vendor/Supplier*'] = filtered_df['Vendor/Supplier*'].astype(str).str.strip()
+
+                # Product type
+                if 'Product Type*' not in cols and 'Product Type' in cols:
+                    filtered_df['Product Type*'] = filtered_df['Product Type']
+                    cols.add('Product Type*')
+                if 'Product Type*' in cols:
+                    filtered_df['Product Type*'] = filtered_df['Product Type*'].astype(str).str.strip()
+
+                # Price
+                if 'Price' not in cols and 'Price* (Tier Name for Bulk)' in cols:
+                    filtered_df['Price'] = filtered_df['Price* (Tier Name for Bulk)']
+                    cols.add('Price')
+                if 'Price' in cols:
+                    filtered_df['Price'] = filtered_df['Price'].astype(str).str.strip()
+
+                # Ensure minimal required fields exist to avoid skipping rows later
+                for required_col in ['Product Name*', 'Product Type*', 'Vendor/Supplier*']:
+                    if required_col not in filtered_df.columns:
+                        filtered_df[required_col] = ''
+            except Exception as norm_err:
+                logger.warning(f"Column normalization failed: {norm_err}")
             
-            if filtered_df.empty:
-                logger.warning("All data was filtered out as JSON matched tags - nothing to store")
-                return {
-                    'stored': 0, 
-                    'updated': 0, 
-                    'errors': 0, 
-                    'excluded_json_matches': len(df),
-                    'message': f'All {len(df)} rows were JSON matched tags - excluded from database storage'
-                }
+            print(f"🔍 DEBUG: Database storage - Original rows: {len(df)}, Filtered rows: {len(filtered_df)}")
+            print(f"🔍 DEBUG: Database storage - Columns: {list(filtered_df.columns)}")
+            
+            # if filtered_df.empty:
+            #     logger.warning("All data was filtered out as JSON matched tags - nothing to store")
+            #     return {
+            #         'stored': 0, 
+            #         'updated': 0, 
+            #         'errors': 0, 
+            #         'excluded_json_matches': len(df),
+            #         'message': f'All {len(df)} rows were JSON matched tags - excluded from database storage'
+            #     }
             
             # Initialize duplicate tracking for this upload
             self._current_upload_products = set()
@@ -1027,8 +1124,11 @@ class ProductDatabase:
             errors = []
             
             # Process each row in the filtered DataFrame
+            print(f"🔍 DEBUG: Starting to process {len(filtered_df)} rows for database storage")
             for index, row in filtered_df.iterrows():
                 try:
+                    if index % 100 == 0:  # Log every 100 rows
+                        print(f"🔍 DEBUG: Processing row {index}/{len(filtered_df)}")
                     # Convert row to dictionary and handle NaN values
                     row_dict = {}
                     for col in filtered_df.columns:
@@ -1106,6 +1206,10 @@ class ProductDatabase:
                         'AI': self._calculate_ai_value(row_dict),  # Calculate THC value
                         'AJ': row_dict.get('THC Content', ''),  # THC Content
                         'AK': self._calculate_ak_value(row_dict),  # Calculate CBD value
+                        # Source field to track where the data came from
+                        'Source': row_dict.get('Source', f'Excel Import - {source_file}' if source_file else 'Excel Import'),
+                        # Date Added field to track when the data was added
+                        'Date Added': row_dict.get('Date Added', datetime.now().isoformat()),
                         # Terpene columns
                         'A-Bisabolol (mg/g)': row_dict.get('A-Bisabolol (mg/g)', ''),
                         'A-Humulene (mg/g)': row_dict.get('A-Humulene (mg/g)', ''),
@@ -1330,6 +1434,7 @@ class ProductDatabase:
             if errors:
                 result['error_details'] = errors[:10]  # Limit error details to first 10
             
+            print(f"🔍 DEBUG: Database storage completed - Stored: {stored_count}, Updated: {updated_count}, Errors: {error_count}")
             logger.info(f"Excel data storage completed: {result['message']}")
             return result
             
@@ -1847,7 +1952,7 @@ class ProductDatabase:
                     'THCA': result[37],
                     'CBDA': result[38],
                     'CBN': result[39],
-                    'DOH Compliant (Yes/No)': result[41]
+                    'DOH Compliant (Yes/No)': result[40]
                 }
                 products_data.append(product)
             
@@ -1882,8 +1987,8 @@ class ProductDatabase:
             updated_count = 0
             
             for product_id, product_name in products_to_update:
-                # Generate description using the formula
-                new_description = self._get_description(product_name)
+                # Generate description using the comprehensive processing formula
+                new_description = self._process_description(product_name, '')
                 
                 # Update the Description column
                 cursor.execute('''
@@ -2128,6 +2233,7 @@ class ProductDatabase:
             
             # Define all expected columns using the actual database schema names
             expected_columns = [
+                ('strain_id', 'INTEGER'),
                 ('"Product Strain"', 'TEXT'),
                 ('"Quantity*"', 'TEXT'),
                 ('"DOH"', 'TEXT'),
@@ -2235,7 +2341,9 @@ class ProductDatabase:
             ]
             
             for col_name, col_type in expected_columns:
-                if col_name not in existing_columns:
+                # Strip quotes for comparison with existing columns
+                col_name_clean = col_name.strip('"')
+                if col_name_clean not in existing_columns:
                     missing_columns.append((col_name, col_type))
             
             # Add missing columns
@@ -2684,6 +2792,106 @@ class ProductDatabase:
             logger.error(f"Error fixing description format: {e}")
             return {'fixed': 0, 'total_checked': 0, 'error': str(e)}
 
+    def fix_all_description_values(self):
+        """
+        Comprehensive fix for all description values to ensure they meet Product Name transformation criteria.
+        This function will:
+        1. Replace Description with Product Name (everything before 'by')
+        2. Remove vendor information after 'by'
+        3. Remove weight information after ' - ' followed by numbers
+        4. Clean parentheses and brackets but preserve content
+        """
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Get all products that have both Product Name and Description AND valid IDs
+            cursor.execute('''
+                SELECT id, "Product Name*", "Description"
+                FROM products 
+                WHERE "Product Name*" IS NOT NULL AND "Product Name*" != '' AND id IS NOT NULL
+            ''')
+            
+            all_products = cursor.fetchall()
+            logger.info(f"Found {len(all_products)} products with Product Name and valid IDs to process")
+            
+            fixed_count = 0
+            skipped_count = 0
+            
+            for product_id, product_name, current_desc in all_products:
+                # Apply the same transformation logic as Excel processing
+                # Use Product Name as base, everything before 'by'
+                transformed_desc = self._process_description(product_name, current_desc)
+                
+                # Only update if the description would change
+                if transformed_desc != current_desc:
+                    cursor.execute('''
+                        UPDATE products 
+                        SET "Description" = ?
+                        WHERE id = ?
+                    ''', (transformed_desc, product_id))
+                    fixed_count += 1
+                    logger.debug(f"Fixed Description for product {product_id}: '{current_desc}' -> '{transformed_desc}'")
+                else:
+                    skipped_count += 1
+            
+            conn.commit()
+            logger.info(f"Fixed {fixed_count} product descriptions, skipped {skipped_count} (already correct)")
+            return {
+                'fixed': fixed_count, 
+                'skipped': skipped_count,
+                'total_processed': len(all_products),
+                'success': True
+            }
+            
+        except Exception as e:
+            logger.error(f"Error fixing all description values: {e}")
+            return {'fixed': 0, 'skipped': 0, 'total_processed': 0, 'error': str(e), 'success': False}
+
+    def identify_bad_descriptions(self):
+        """
+        Identify all description values that don't meet the Product Name transformation criteria.
+        Returns a list of products that need fixing.
+        """
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Get all products that have both Product Name and Description
+            cursor.execute('''
+                SELECT id, "Product Name*", "Description"
+                FROM products 
+                WHERE "Product Name*" IS NOT NULL AND "Product Name*" != ''
+            ''')
+            
+            all_products = cursor.fetchall()
+            bad_descriptions = []
+            
+            for product_id, product_name, current_desc in all_products:
+                # Apply the transformation logic to see what the description should be
+                expected_desc = self._process_description(product_name, current_desc)
+                
+                # Check if current description doesn't match expected
+                if current_desc != expected_desc:
+                    bad_descriptions.append({
+                        'id': product_id,
+                        'product_name': product_name,
+                        'current_description': current_desc,
+                        'expected_description': expected_desc
+                    })
+            
+            logger.info(f"Found {len(bad_descriptions)} products with incorrect descriptions")
+            return {
+                'bad_descriptions': bad_descriptions,
+                'total_products': len(all_products),
+                'bad_count': len(bad_descriptions),
+                'success': True
+            }
+            
+        except Exception as e:
+            logger.error(f"Error identifying bad descriptions: {e}")
+            return {'bad_descriptions': [], 'total_products': 0, 'bad_count': 0, 'error': str(e), 'success': False}
+
     def backfill_missing_crucial_values(self):
         """Backfill missing crucial values in existing products."""
         try:
@@ -3048,31 +3256,43 @@ class ProductDatabase:
         # Define edible types for special handling
         edible_types = {"edible (solid)", "edible (liquid)", "high cbd edible liquid", "tincture", "topical", "capsule"}
         
-        # For edibles: if ProductName contains CBD, CBG, CBN, or CBC, then Product Strain is "CBD Blend", otherwise "Mixed"
+        # For edibles: if ProductName, Description, or Ratio contains CBD, CBG, CBN, CBC, or ":", then Product Strain is "CBD Blend", otherwise "Mixed"
         if product_type in edible_types:
-            if product_name and re.search(r"CBD|CBG|CBN|CBC", product_name, re.IGNORECASE):
+            # Check product name for cannabinoids or ratio patterns
+            name_has_cbd = bool(re.search(r'\b(?:CBD|CBG|CBC|CBN)\b', product_name, re.IGNORECASE)) or ':' in product_name
+            # Check description for cannabinoids or ratio patterns  
+            desc_has_cbd = bool(re.search(r'\b(?:CBD|CBG|CBC|CBN)\b', description, re.IGNORECASE)) or ':' in description
+            # Check ratio for cannabinoids
+            ratio_has_cbd = bool(re.search(r'\b(?:CBD|CBG|CBC|CBN)\b', ratio, re.IGNORECASE))
+            
+            if name_has_cbd or desc_has_cbd or ratio_has_cbd:
                 return "CBD Blend"
             else:
                 return "Mixed"
         
-        # For RSO/CO2 Tankers: if Description contains CBD, CBG, CBC, CBN, or ":", then Product Strain is "CBD Blend", otherwise "Mixed"
+        # For RSO/CO2 Tankers: if ProductName, Description, or Ratio contains CBD, CBG, CBC, CBN, or ":", then Product Strain is "CBD Blend", otherwise "Mixed"
         if product_type == "rso/co2 tankers":
-            if description and (re.search(r"CBD|CBG|CBC|CBN", description, re.IGNORECASE) or ":" in description):
+            # Check product name for cannabinoids or ratio patterns
+            name_has_cbd = bool(re.search(r'\b(?:CBD|CBG|CBC|CBN)\b', product_name, re.IGNORECASE)) or ':' in product_name
+            # Check description for cannabinoids or ratio patterns
+            desc_has_cbd = bool(re.search(r'\b(?:CBD|CBG|CBC|CBN)\b', description, re.IGNORECASE)) or ':' in description
+            # Check ratio for cannabinoids
+            ratio_has_cbd = bool(re.search(r'\b(?:CBD|CBG|CBC|CBN)\b', ratio, re.IGNORECASE))
+            
+            if name_has_cbd or desc_has_cbd or ratio_has_cbd:
                 return "CBD Blend"
             else:
                 return "Mixed"
         
-        # For all other nonclassic types: check for CBD content
-        # If Ratio contains CBD, CBC, CBN, or CBG, set Product Strain to "CBD Blend"
-        if ratio and re.search(r"CBD|CBC|CBN|CBG", ratio, re.IGNORECASE):
-            return "CBD Blend"
+        # For all other nonclassic types: check for CBD content in Product Name, Description, or Ratio
+        # Check product name for cannabinoids or ratio patterns
+        name_has_cbd = bool(re.search(r'\b(?:CBD|CBG|CBC|CBN)\b', product_name, re.IGNORECASE)) or ':' in product_name
+        # Check description for cannabinoids or ratio patterns
+        desc_has_cbd = bool(re.search(r'\b(?:CBD|CBG|CBC|CBN)\b', description, re.IGNORECASE)) or ':' in description
+        # Check ratio for cannabinoids
+        ratio_has_cbd = bool(re.search(r'\b(?:CBD|CBG|CBC|CBN)\b', ratio, re.IGNORECASE))
         
-        # If Description contains ":" or "CBD", set Product Strain to 'CBD Blend' (excluding edibles which have their own logic)
-        if description and (":" in description or re.search(r"CBD", description, re.IGNORECASE)):
-            return "CBD Blend"
-        
-        # If ProductName contains CBD, CBG, CBN, or CBC, set Product Strain to "CBD Blend"
-        if product_name and re.search(r"CBD|CBG|CBN|CBC", product_name, re.IGNORECASE):
+        if name_has_cbd or desc_has_cbd or ratio_has_cbd:
             return "CBD Blend"
         
         # For all other nonclassic types without CBD content, return "Mixed"
@@ -3346,6 +3566,40 @@ class ProductDatabase:
         except Exception as e:
             logger.error(f"Error getting vendor strain statistics: {e}")
             return {}
+
+    def update_product_doh(self, product_name: str, new_doh: str, vendor: str = None, brand: str = None) -> bool:
+        """Update the DOH status for a product in the database."""
+        try:
+            self.init_database()
+            normalized_name = self._normalize_product_name(product_name)
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            current_date = datetime.now().isoformat()
+            
+            # Update both DOH columns to be consistent
+            if vendor and brand:
+                cursor.execute('''
+                    UPDATE products
+                    SET "DOH" = ?, "DOH Compliant (Yes/No)" = ?, updated_at = ?
+                    WHERE normalized_name = ? AND "Vendor/Supplier*" = ? AND "Product Brand" = ?
+                ''', (new_doh, new_doh, current_date, normalized_name, vendor, brand))
+                logger.info(f"Updated DOH for product '{product_name}' (vendor={vendor}, brand={brand}) to '{new_doh}'")
+            else:
+                cursor.execute('''
+                    UPDATE products
+                    SET "DOH" = ?, "DOH Compliant (Yes/No)" = ?, updated_at = ?
+                    WHERE normalized_name = ?
+                ''', (new_doh, new_doh, current_date, normalized_name))
+                logger.info(f"Updated DOH for product '{product_name}' to '{new_doh}'")
+            
+            conn.commit()
+            rows_updated = cursor.rowcount
+            if rows_updated == 0:
+                logger.warning(f"No product found in database to update DOH: '{product_name}' (vendor={vendor}, brand={brand})")
+            return rows_updated > 0
+        except Exception as e:
+            logger.error(f"Error updating product DOH for '{product_name}': {e}")
+            return False
 
     def upsert_strain_vendor_lineage(self, strain_name: str, vendor: str, brand: str, lineage: str):
         """Insert or update lineage for a (strain_name, vendor, brand) combination."""
@@ -4152,9 +4406,73 @@ class ProductDatabase:
             
             # Add search conditions with priority using actual column names
             if normalized_name:
-                # Exact name match (highest priority)
-                query += " AND (p.\"Product Name*\" LIKE ? OR p.\"Description\" LIKE ?)"
-                params.extend([f"%{normalized_name}%", f"%{normalized_name}%"])
+                # Create multiple search patterns for better matching
+                # 1. Original normalized name
+                # 2. Individual words from the name
+                # 3. Partial matches
+                
+                search_patterns = [normalized_name]
+                
+                # Add individual words for partial matching
+                words = normalized_name.split('_')
+                search_patterns.extend(words)
+                
+                # Add space-separated version
+                space_name = normalized_name.replace('_', ' ')
+                search_patterns.append(space_name)
+                search_patterns.extend(space_name.split())
+                
+                # Build more intelligent search conditions
+                # Priority 1: Exact normalized name match
+                # Priority 2: Product name contains the full search term
+                # Priority 3: Product name contains the space-separated version
+                
+                pattern_conditions = []
+                
+                # Exact match (highest priority)
+                pattern_conditions.append("p.normalized_name = ?")
+                params.append(normalized_name)
+                
+                # Full search term in product name (high priority)
+                pattern_conditions.append("LOWER(p.\"Product Name*\") LIKE ?")
+                params.append(f"%{normalized_name.lower()}%")
+                
+                # Space-separated version in product name
+                space_name = normalized_name.replace('_', ' ')
+                pattern_conditions.append("LOWER(p.\"Product Name*\") LIKE ?")
+                params.append(f"%{space_name.lower()}%")
+                
+                # Only add individual word matches for very specific cases
+                # Only match individual words if they are meaningful (longer than 4 chars) and not common words
+                common_words = {'the', 'and', 'or', 'for', 'with', 'by', 'from', 'to', 'of', 'in', 'on', 'at', 'is', 'are', 'was', 'were', 'be', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can', 'must', 'shall'}
+                meaningful_words = [w for w in normalized_name.split('_') if len(w) > 4 and w.lower() not in common_words]
+                for word in meaningful_words:
+                    pattern_conditions.append("LOWER(p.\"Product Name*\") LIKE ?")
+                    params.append(f"%{word.lower()}%")
+                
+                if pattern_conditions:
+                    query += " AND (" + " OR ".join(pattern_conditions) + ")"
+            
+            # Add product type filtering for better accuracy
+            if product_type:
+                # Map product types to database values
+                product_type_mapping = {
+                    'capsule': ['capsule', 'pill', 'cap'],
+                    'solid edible': ['solid edible', 'edible', 'gummy', 'chocolate', 'candy', 'cookie', 'brownie'],
+                    'topical ointment': ['topical ointment', 'topical', 'cream', 'balm', 'lotion', 'salve'],
+                    'liquid edible': ['liquid edible', 'tincture', 'drops'],
+                    'core flower': ['core flower', 'flower', 'bud', 'nug']
+                }
+                
+                product_type_lower = product_type.lower().strip()
+                if product_type_lower in product_type_mapping:
+                    type_conditions = []
+                    for db_type in product_type_mapping[product_type_lower]:
+                        type_conditions.append("LOWER(p.\"Product Type*\") LIKE ?")
+                        params.append(f"%{db_type}%")
+                    
+                    if type_conditions:
+                        query += " AND (" + " OR ".join(type_conditions) + ")"
             
             if vendor:
                 # Vendor match
@@ -4168,16 +4486,161 @@ class ProductDatabase:
             #     params.append(f"%{product_type}%")
             
             if strain:
-                # Strain match
-                query += " AND (p.\"Product Strain\" LIKE ? OR p.\"Lineage\" LIKE ?)"
-                params.extend([f"%{strain}%", f"%{strain}%"])
+                # Strain match - be more flexible with strain matching
+                strain_conditions = []
+                
+                # Direct strain match
+                strain_conditions.append("p.\"Product Strain\" LIKE ?")
+                params.append(f"%{strain}%")
+                
+                # Lineage match
+                strain_conditions.append("p.\"Lineage\" LIKE ?")
+                params.append(f"%{strain}%")
+                
+                # Flexible strain matching for common variations
+                if strain.lower() in ['mix', 'mixed']:
+                    strain_conditions.append("p.\"Product Strain\" LIKE ?")
+                    params.append("%Mixed%")
+                    strain_conditions.append("p.\"Lineage\" LIKE ?")
+                    params.append("%MIXED%")
+                elif strain.lower() in ['sativa', 'sat']:
+                    strain_conditions.append("p.\"Product Strain\" LIKE ?")
+                    params.append("%Sativa%")
+                    strain_conditions.append("p.\"Lineage\" LIKE ?")
+                    params.append("%SATIVA%")
+                elif strain.lower() in ['indica', 'ind']:
+                    strain_conditions.append("p.\"Product Strain\" LIKE ?")
+                    params.append("%Indica%")
+                    strain_conditions.append("p.\"Lineage\" LIKE ?")
+                    params.append("%INDICA%")
+                
+                if strain_conditions:
+                    query += " AND (" + " OR ".join(strain_conditions) + ")"
             
-            # Order by relevance (exact matches first, then by ID)
-            query += " ORDER BY CASE WHEN p.\"Product Name*\" LIKE ? THEN 1 ELSE 0 END DESC, p.id DESC LIMIT 1"
-            params.append(f"%{normalized_name}%")
+            # Store the query for potential fallback
+            original_query = query
+            original_params = params.copy()
+            
+            # Order by relevance with product type priority
+            if product_type:
+                product_type_lower = product_type.lower().strip()
+                query += f""" ORDER BY 
+                    CASE WHEN LOWER(p."Product Type*") = ? THEN 1 ELSE 0 END DESC,
+                    CASE WHEN LOWER(p."Product Type*") LIKE ? THEN 1 ELSE 0 END DESC,
+                    CASE WHEN p.normalized_name = ? THEN 1 ELSE 0 END DESC,
+                    CASE WHEN p."Product Name*" = ? THEN 1 ELSE 0 END DESC,
+                    CASE WHEN p."Product Name*" LIKE ? THEN 1 ELSE 0 END DESC,
+                    CASE WHEN p."Description" LIKE ? THEN 1 ELSE 0 END DESC,
+                    p.id DESC 
+                    LIMIT 1"""
+                params.extend([product_type_lower, f"%{product_type_lower}%", normalized_name, normalized_name, f"%{normalized_name}%", f"%{normalized_name}%"])
+            else:
+                query += """ ORDER BY 
+                    CASE WHEN p.normalized_name = ? THEN 1 ELSE 0 END DESC,
+                    CASE WHEN p."Product Name*" = ? THEN 1 ELSE 0 END DESC,
+                    CASE WHEN p."Product Name*" LIKE ? THEN 1 ELSE 0 END DESC,
+                    CASE WHEN p."Description" LIKE ? THEN 1 ELSE 0 END DESC,
+                    p.id DESC 
+                    LIMIT 1"""
+                params.extend([normalized_name, normalized_name, f"%{normalized_name}%", f"%{normalized_name}%"])
+            
+            # DEBUG: Log the actual query being executed
+            print(f"🔍 DEBUG: Executing query: {query}")
+            print(f"🔍 DEBUG: With params: {params}")
             
             cursor.execute(query, params)
             result = cursor.fetchone()
+            
+            # DEBUG: Log database query results
+            print(f"🔍 DEBUG: Database query returned: {result is not None}")
+            if result:
+                print(f"🔍 DEBUG: Found database match: {result[1]}")  # Product Name*
+            else:
+                print(f"🔍 DEBUG: No database match found for '{normalized_name}'")
+                
+                # FALLBACK: Try without strain matching if strain was specified
+                if strain and 'original_query' in locals():
+                    print(f"🔍 DEBUG: Trying fallback query without strain matching...")
+                    
+                    # Remove strain conditions from the query
+                    fallback_query = original_query
+                    fallback_params = []
+                    
+                    # Rebuild query without strain conditions
+                    if normalized_name:
+                        fallback_query += " AND (p.normalized_name = ? OR LOWER(p.\"Product Name*\") LIKE ? OR LOWER(p.\"Product Name*\") LIKE ? OR LOWER(p.\"Product Name*\") LIKE ?)"
+                        fallback_params.extend([normalized_name, f"%{normalized_name.lower()}%", f"%{normalized_name.lower()}%", f"%{normalized_name.lower()}%"])
+                    
+                    if product_type:
+                        product_type_lower = product_type.lower().strip()
+                        product_type_mapping = {
+                            'capsule': ['capsule', 'pill', 'cap'],
+                            'solid edible': ['solid edible', 'edible', 'gummy', 'chocolate', 'candy', 'cookie', 'brownie'],
+                            'topical ointment': ['topical ointment', 'topical', 'cream', 'balm', 'lotion', 'salve'],
+                            'liquid edible': ['liquid edible', 'tincture', 'drops'],
+                            'core flower': ['core flower', 'flower', 'bud', 'nug']
+                        }
+                        
+                        if product_type_lower in product_type_mapping:
+                            type_conditions = []
+                            for db_type in product_type_mapping[product_type_lower]:
+                                type_conditions.append("LOWER(p.\"Product Type*\") LIKE ?")
+                                fallback_params.append(f"%{db_type}%")
+                            
+                            if type_conditions:
+                                fallback_query += " AND (" + " OR ".join(type_conditions) + ")"
+                    
+                    if vendor:
+                        fallback_query += " AND p.\"Vendor/Supplier*\" LIKE ?"
+                        fallback_params.append(f"%{vendor}%")
+                    
+                    # Add ordering
+                    if product_type:
+                        fallback_query += f""" ORDER BY 
+                            CASE WHEN LOWER(p."Product Type*") = ? THEN 1 ELSE 0 END DESC,
+                            CASE WHEN LOWER(p."Product Type*") LIKE ? THEN 1 ELSE 0 END DESC,
+                            CASE WHEN p.normalized_name = ? THEN 1 ELSE 0 END DESC,
+                            CASE WHEN p."Product Name*" = ? THEN 1 ELSE 0 END DESC,
+                            CASE WHEN p."Product Name*" LIKE ? THEN 1 ELSE 0 END DESC,
+                            CASE WHEN p."Description" LIKE ? THEN 1 ELSE 0 END DESC,
+                            p.id DESC 
+                            LIMIT 1"""
+                        fallback_params.extend([product_type_lower, f"%{product_type_lower}%", normalized_name, normalized_name, f"%{normalized_name}%", f"%{normalized_name}%"])
+                    else:
+                        fallback_query += """ ORDER BY 
+                            CASE WHEN p.normalized_name = ? THEN 1 ELSE 0 END DESC,
+                            CASE WHEN p."Product Name*" = ? THEN 1 ELSE 0 END DESC,
+                            CASE WHEN p."Product Name*" LIKE ? THEN 1 ELSE 0 END DESC,
+                            CASE WHEN p."Description" LIKE ? THEN 1 ELSE 0 END DESC,
+                            p.id DESC 
+                            LIMIT 1"""
+                        fallback_params.extend([normalized_name, normalized_name, f"%{normalized_name}%", f"%{normalized_name}%"])
+                    
+                    print(f"🔍 DEBUG: Executing fallback query: {fallback_query}")
+                    print(f"🔍 DEBUG: With fallback params: {fallback_params}")
+                    
+                    cursor.execute(fallback_query, fallback_params)
+                    result = cursor.fetchone()
+                    
+                    print(f"🔍 DEBUG: Fallback query returned: {result is not None}")
+                    if result:
+                        print(f"🔍 DEBUG: Found fallback database match: {result[1]}")  # Product Name*
+                
+                # DEBUG: Let's see what's actually in the database
+                try:
+                    debug_cursor = conn.cursor()
+                    debug_cursor.execute("SELECT \"Product Name*\", \"Description\" FROM products WHERE \"Product Name*\" LIKE ? OR \"Description\" LIKE ? LIMIT 5", [f"%{normalized_name}%", f"%{normalized_name}%"])
+                    debug_results = debug_cursor.fetchall()
+                    print(f"🔍 DEBUG: Database search for '{normalized_name}' returned {len(debug_results)} results")
+                    for i, row in enumerate(debug_results):
+                        print(f"🔍 DEBUG:   {i+1}. Product: '{row[0]}', Description: '{row[1][:50]}...'")
+                    
+                    # Also check what product names actually exist
+                    debug_cursor.execute("SELECT \"Product Name*\" FROM products WHERE \"Product Name*\" LIKE ? LIMIT 10", [f"%{normalized_name.split('_')[0]}%"])  # Search for first word
+                    debug_names = debug_cursor.fetchall()
+                    print(f"🔍 DEBUG: Products containing '{normalized_name.split('_')[0]}': {[row[0] for row in debug_names]}")
+                except Exception as debug_error:
+                    print(f"🔍 DEBUG: Debug query failed: {debug_error}")
             
             if result:
                 # Convert to the same format as get_products_by_names using actual column indices
@@ -5011,78 +5474,37 @@ class ProductDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
             
-            cursor.execute('''
-                SELECT p.id, p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
-                       p."Description", p."Weight*", p."Weight Unit* (grams/gm or ounces/oz)", p."Price* (Tier Name for Bulk)", 
-                       p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio", p."State", p."Is Sample? (yes/no)",
-                       p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*",
-                       p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens",
-                       p."Solvent", p."Accepted Date", p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients",
-                       p."CombinedWeight", p."Ratio_or_THC_CBD", p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN",
-                       p."ProductName", p."Units", p."Price", p."DOH Compliant (Yes/No)", p."Joint Ratio", p."Quantity Received*", p."qty",
-                       p."AI", p."AJ", p."AK"
+            # First, get the actual column names from the database
+            cursor.execute("PRAGMA table_info(products)")
+            columns_info = cursor.fetchall()
+            column_names = [col[1] for col in columns_info]
+            
+            # Build the SELECT query dynamically based on available columns
+            select_columns = []
+            for col_name in column_names:
+                if col_name != 'id':  # Skip id as it's handled separately
+                    select_columns.append(f'p."{col_name}"')
+            
+            query = f'''
+                SELECT p.id, {", ".join(select_columns)}
                 FROM products p
                 ORDER BY p.id
-            ''')
+            '''
             
+            cursor.execute(query)
             results = cursor.fetchall()
             products = []
             
             for result in results:
-                product = {
-                    'id': result[0],
-                    'Product Name*': result[1],
-                    'Product Type*': result[2],
-                    'Vendor/Supplier*': result[3],
-                    'Product Brand': result[4],
-                    'Lineage': result[5],
-                    'Description': result[6],
-                    'Weight*': result[7],
-                    'Weight Unit* (grams/gm or ounces/oz)': result[8],
-                    'Price* (Tier Name for Bulk)': result[9],
-                    'Quantity*': result[10],
-                    'DOH': result[11],
-                    'Concentrate Type': result[12],
-                    'Ratio': result[13],
-                    'JointRatio': result[14],
-                    'State': result[15],
-                    'Is Sample? (yes/no)': result[16],
-                    'Is MJ product?(yes/no)': result[17],
-                    'Discountable? (yes/no)': result[18],
-                    'Room*': result[19],
-                    'Batch Number': result[20],
-                    'Lot Number': result[21],
-                    'Barcode*': result[22],
-                    'Medical Only (Yes/No)': result[23],
-                    'Med Price': result[24],
-                    'Expiration Date(YYYY-MM-DD)': result[25],
-                    'Is Archived? (yes/no)': result[26],
-                    'THC Per Serving': result[27],
-                    'Allergens': result[28],
-                    'Solvent': result[29],
-                    'Accepted Date': result[30],
-                    'Internal Product Identifier': result[31],
-                    'Product Tags (comma separated)': result[32],
-                    'Image URL': result[33],
-                    'Ingredients': result[34],
-                    'CombinedWeight': result[35],
-                    'Ratio_or_THC_CBD': result[37],
-                    'Description_Complexity': result[38],
-                    'Total THC': result[39],
-                    'THCA': result[40],
-                    'CBDA': result[41],
-                    'CBN': result[42],
-                    'ProductName': result[43],
-                    'Units': result[44],
-                    'Price': result[45],
-                    'DOH Compliant (Yes/No)': result[46],
-                    'Joint Ratio': result[47],
-                    'Quantity Received*': result[48],
-                    'qty': result[49],
-                    'AI': result[50],
-                    'AJ': result[51],
-                    'AK': result[52]
-                }
+                product = {'id': result[0]}
+                
+                # Map remaining columns dynamically
+                for i, col_name in enumerate(column_names[1:], 1):  # Skip id column
+                    if i < len(result):
+                        product[col_name] = result[i]
+                    else:
+                        product[col_name] = None
+                
                 products.append(product)
             
             return products

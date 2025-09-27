@@ -64,7 +64,7 @@ ENABLE_LAZY_PROCESSING = False  # DISABLED: Ensure consistent processing
 ENABLE_MINIMAL_PROCESSING = True  # ENABLED: For ultra-fast uploads
 ENABLE_BATCH_OPERATIONS = False  # DISABLED: Ensure consistent processing
 ENABLE_VECTORIZED_OPERATIONS = False  # DISABLED: Ensure consistent processing
-ENABLE_LINEAGE_PERSISTENCE = True  # ALWAYS ENABLED: Lineage changes must persist in database
+ENABLE_LINEAGE_PERSISTENCE = False  # TEMPORARILY DISABLED: To fix app hanging issue
 
 # Performance constants - STANDARDIZED
 BATCH_SIZE = 1000  # Standard batch size
@@ -109,10 +109,12 @@ def batch_process_dataframe(df, batch_size=BATCH_SIZE):
 
 def optimized_column_processing(df, column_configs):
     """Apply optimized column processing configurations."""
+    from .field_mapping import get_canonical_field
     for col, config in column_configs.items():
-        if col in df.columns:
+        canonical_col = get_canonical_field(col)
+        if canonical_col in df.columns:
             operations = config.get('operations', [])
-            df[col] = vectorized_string_operations(df[col], operations)
+            df[canonical_col] = vectorized_string_operations(df[canonical_col], operations)
     return df
 
 def fast_ratio_extraction(product_names, product_types, classic_types):
@@ -174,7 +176,7 @@ def optimized_lineage_persistence(processor, df):
     try:
         from .product_database import ProductDatabase
         from src.core.constants import CLASSIC_TYPES
-        product_db = ProductDatabase()
+        product_db = ProductDatabase(store_name=processor._store_name)
         
         # Process lineage persistence in batches for performance
         classic_mask = df["Product Type*"].str.strip().str.lower().isin(CLASSIC_TYPES)
@@ -253,7 +255,7 @@ def batch_lineage_database_update(processor, df):
     try:
         from .product_database import ProductDatabase
         from src.core.constants import CLASSIC_TYPES
-        product_db = ProductDatabase()
+        product_db = ProductDatabase(store_name=processor._store_name)
         
         # Process in batches for performance
         classic_mask = df["Product Type*"].str.strip().str.lower().isin(CLASSIC_TYPES)
@@ -618,7 +620,7 @@ def group_similar_strains(strains, similarity_threshold=0.8):
 class ExcelProcessor:
     """Processes Excel files containing product data."""
 
-    def __init__(self):
+    def __init__(self, store_name='AGT_Bothell'):
         self.df = None
         self.dropdown_cache = {}
         self.selected_tags = []
@@ -628,6 +630,7 @@ class ExcelProcessor:
         self._max_cache_size = 5  # Keep only 5 files in cache
         self._product_db_enabled = True  # Enable product database integration by default
         self._debug_count = 0  # Initialize debug count
+        self._store_name = store_name  # Store name for database operations
 
     def clear_file_cache(self):
         """Clear the file cache to free memory."""
@@ -689,7 +692,7 @@ class ExcelProcessor:
                     time.sleep(0.1)
                     
                     from .product_database import ProductDatabase
-                    product_db = ProductDatabase()
+                    product_db = ProductDatabase(store_name=self._store_name)
                     
                     # Add retry logic for database locking issues
                     max_retries = 3
@@ -787,6 +790,47 @@ class ExcelProcessor:
         except Exception as e:
             self.logger.error(f"[ProductDB] Failed to schedule background integration: {e}")
     
+    def _load_lineage_from_database(self):
+        """Load lineage data from database to ensure changes persist after reload."""
+        if not ENABLE_LINEAGE_PERSISTENCE:
+            return
+            
+        try:
+            from .product_database import ProductDatabase
+            product_db = ProductDatabase(store_name=self._store_name)
+            
+            if not hasattr(self, 'df') or self.df is None or 'Product Strain' not in self.df.columns:
+                return
+            
+            self.logger.info("[ProductDB] Loading lineage data from database...")
+            
+            # Get all unique strain names from the loaded data
+            strain_names = self.df['Product Strain'].dropna().unique()
+            strain_names = [str(name).strip() for name in strain_names if str(name).strip()]
+            
+            lineage_updates = 0
+            
+            for strain_name in strain_names:
+                try:
+                    strain_info = product_db.get_strain_info(strain_name)
+                    if strain_info and strain_info.get('sovereign_lineage'):
+                        # Update lineage in the dataframe for this strain
+                        strain_mask = self.df['Product Strain'] == strain_name
+                        if strain_mask.any():
+                            self.df.loc[strain_mask, 'Lineage'] = strain_info['sovereign_lineage']
+                            lineage_updates += strain_mask.sum()
+                            self.logger.debug(f"[ProductDB] Loaded lineage for '{strain_name}': {strain_info['sovereign_lineage']}")
+                except Exception as e:
+                    self.logger.warning(f"[ProductDB] Failed to load lineage for strain '{strain_name}': {e}")
+            
+            if lineage_updates > 0:
+                self.logger.info(f"[ProductDB] Loaded {lineage_updates} lineage updates from database")
+            else:
+                self.logger.debug("[ProductDB] No lineage updates loaded from database")
+                
+        except Exception as e:
+            self.logger.error(f"[ProductDB] Failed to load lineage from database: {e}")
+    
     def enable_product_db_integration(self, enable: bool = True):
         """Enable or disable product database integration."""
         self._product_db_enabled = enable
@@ -830,11 +874,85 @@ class ExcelProcessor:
         """Get product database statistics."""
         try:
             from .product_database import ProductDatabase
-            product_db = ProductDatabase()
+            product_db = ProductDatabase(store_name=self._store_name)
             return product_db.get_performance_stats()
         except Exception as e:
             self.logger.error(f"[ProductDB] Error getting stats: {e}")
             return {}
+    
+    def get_product_strain_from_db(self, product_name: str, product_type: str, description: str, ratio: str) -> str:
+        """Get Product Strain value from database using the database's calculation logic."""
+        try:
+            from .product_database import ProductDatabase
+            product_db = ProductDatabase(store_name=self._store_name)
+            
+            # Use the database's calculation method to get the Product Strain
+            product_strain = product_db._calculate_product_strain(
+                product_type or '',
+                product_name or '',
+                description or '',
+                ratio or ''
+            )
+            
+            return product_strain
+            
+        except Exception as e:
+            self.logger.error(f"[ProductDB] Error getting Product Strain from database: {e}")
+            return ""
+    
+    def _apply_database_product_strain_values(self):
+        """Apply database Product Strain values to all products in the DataFrame."""
+        try:
+            if not hasattr(self, 'df') or self.df is None or len(self.df) == 0:
+                self.logger.warning("[ProductDB] No DataFrame to process for Product Strain values")
+                return
+            
+            self.logger.info(f"[ProductDB] Applying database Product Strain values to {len(self.df)} products")
+            
+            # Get the database instance
+            from .product_database import ProductDatabase
+            product_db = ProductDatabase(store_name=self._store_name)
+            
+            # Process each product and get its Product Strain from database
+            updated_count = 0
+            for idx, row in self.df.iterrows():
+                try:
+                    # Get the required fields
+                    product_name = row.get('Product Name*', '') or row.get('Product Name', '') or row.get('Product_Name', '')
+                    product_type = row.get('Product Type*', '')
+                    description = row.get('Description', '')
+                    ratio = row.get('Ratio', '')
+                    
+                    # Get Product Strain from database
+                    db_product_strain = product_db._calculate_product_strain(
+                        product_type or '',
+                        product_name or '',
+                        description or '',
+                        ratio or ''
+                    )
+                    
+                    # Update the DataFrame with database value
+                    self.df.loc[idx, 'Product Strain'] = db_product_strain
+                    updated_count += 1
+                    
+                    # Log some examples for debugging
+                    if idx < 5 or db_product_strain in ['CBD Blend', 'Mixed']:
+                        self.logger.debug(f"[ProductDB] {product_name} ({product_type}) -> {db_product_strain}")
+                        
+                except Exception as e:
+                    self.logger.error(f"[ProductDB] Error processing product at index {idx}: {e}")
+                    continue
+            
+            self.logger.info(f"[ProductDB] Successfully updated {updated_count} products with database Product Strain values")
+            
+            # Log some statistics
+            if 'Product Strain' in self.df.columns:
+                strain_counts = self.df['Product Strain'].value_counts()
+                self.logger.info(f"[ProductDB] Product Strain distribution: {strain_counts.to_dict()}")
+            
+        except Exception as e:
+            self.logger.error(f"[ProductDB] Error applying database Product Strain values: {e}")
+            raise
 
     def fast_load_file(self, file_path: str) -> bool:
         """ULTRA-FAST file loading with minimal processing for maximum upload speed."""
@@ -1083,6 +1201,54 @@ class ExcelProcessor:
                 self.logger.error("File permission issue - check file permissions")
             elif "Memory" in str(e):
                 self.logger.error("Memory issue - file might be too large")
+            return False
+
+    def minimal_load_file(self, file_path: str) -> bool:
+        """Ultra-minimal file loading for maximum speed - skips all heavy processing"""
+        try:
+            self.logger.debug(f"Minimal loading file: {file_path}")
+            
+            # Basic file validation
+            import os
+            if not os.path.exists(file_path):
+                self.logger.error(f"File does not exist: {file_path}")
+                return False
+            
+            if not os.access(file_path, os.R_OK):
+                self.logger.error(f"File not readable: {file_path}")
+                return False
+            
+            # Clear previous data
+            if hasattr(self, 'df') and self.df is not None:
+                del self.df
+                import gc
+                gc.collect()
+            
+            # Minimal Excel reading - just get the data
+            df = pd.read_excel(
+                file_path, 
+                engine='openpyxl',
+                na_filter=False,
+                keep_default_na=False,
+                nrows=5000  # Limit rows for speed
+            )
+            
+            if df is None or df.empty:
+                self.logger.error("No data found in Excel file")
+                return False
+            
+            # Only essential processing - no heavy operations
+            df = df.dropna(how='all')  # Remove completely empty rows
+            df.reset_index(drop=True, inplace=True)
+            
+            self.df = df
+            self._last_loaded_file = file_path
+            
+            self.logger.info(f"Minimal load complete: {len(df)} rows, {len(df.columns)} columns")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Minimal load failed: {e}")
             return False
 
     def load_file(self, file_path: str) -> bool:
@@ -1658,28 +1824,14 @@ class ExcelProcessor:
                 self.df["Product Strain"] = self.df["Product Strain"].fillna("Mixed")
                 # Don't convert to categorical yet - wait until after all Product Strain logic is complete
 
-                # Special case: paraphernalia gets Product Strain set to "Paraphernalia"
+                # Special case: paraphernalia gets Product Strain set to "Mixed" (not "Paraphernalia")
+                # This prevents ProductStrain from matching ProductBrand for paraphernalia products
                 mask_para = self.df["Product Type*"].str.strip().str.lower() == "paraphernalia"
                 if mask_para.any():
-                    # Only convert to categorical if there's actually paraphernalia
-                    if "Product Strain" not in self.df.columns:
-                        self.df["Product Strain"] = pd.Categorical([], categories=["Paraphernalia"])
-                    else:
-                        if isinstance(self.df["Product Strain"].dtype, pd.CategoricalDtype):
-                            if "Paraphernalia" not in self.df["Product Strain"].cat.categories:
-                                self.df["Product Strain"] = self.df["Product Strain"].cat.add_categories(["Paraphernalia"])
-                        else:
-                            # Ensure no null values before creating categorical
-                            product_strain_clean = self.df["Product Strain"].fillna("Mixed")
-                            unique_values = product_strain_clean.unique().tolist()
-                            if "Paraphernalia" not in unique_values:
-                                unique_values.append("Paraphernalia")
-                            self.df["Product Strain"] = pd.Categorical(
-                                product_strain_clean,
-                                categories=unique_values
-                            )
-                    # Set paraphernalia products to "Paraphernalia"
-                    self.df.loc[mask_para, "Product Strain"] = "Paraphernalia"
+                    # Set paraphernalia products to "Mixed" instead of "Paraphernalia"
+                    # This prevents ProductStrain from matching ProductBrand
+                    self.df.loc[mask_para, "Product Strain"] = "Mixed"
+                    self.logger.info(f"Set ProductStrain to 'Mixed' for {mask_para.sum()} paraphernalia products")
 
                 # Force CBD Blend for any ratio containing CBD, CBC, CBN or CBG
                 if 'Ratio' in self.df.columns:
@@ -1696,11 +1848,26 @@ class ExcelProcessor:
                     for idx, row in cbd_products.iterrows():
                         self.logger.info(f"Assigned CBD Blend from ratio: {row.get('Product Name*', 'NO NAME')} (Type: {row.get('Product Type*', 'NO TYPE')})")
                 
-                # If Description contains ":" or "CBD", set Product Strain to 'CBD Blend' (excluding edibles which have their own logic)
-                edible_types = {"edible (solid)", "edible (liquid)", "high cbd edible liquid", "tincture", "topical", "capsule"}
-                non_edible_mask = ~self.df["Product Type*"].str.strip().str.lower().isin(edible_types)
+                # If Description, Product Name, or Ratio contains ":" or "CBD", set Product Strain to 'CBD Blend' 
+                # Excluding most edibles but including tinctures (since tinctures are nonclassic types that should get CBD Blend designations)
+                edible_types_exclude = {"edible (solid)", "edible (liquid)", "high cbd edible liquid", "topical", "capsule"}
+                non_edible_or_tincture_mask = ~self.df["Product Type*"].str.strip().str.lower().isin(edible_types_exclude)
                 
-                mask_cbd_blend = (self.df["Description"].str.contains(":", na=False) | self.df["Description"].str.contains("CBD", case=False, na=False)) & non_edible_mask
+                # Check Description, Product Name, and Ratio for CBD content or ratio patterns
+                description_cbd_mask = (self.df["Description"].str.contains(":", na=False) | self.df["Description"].str.contains("CBD", case=False, na=False))
+                
+                # Check if Product Name column exists (it might have different naming)
+                product_name_cbd_mask = pd.Series([False] * len(self.df), index=self.df.index)
+                if "Product Name*" in self.df.columns:
+                    product_name_cbd_mask = (self.df["Product Name*"].str.contains(":", na=False) | self.df["Product Name*"].str.contains("CBD", case=False, na=False))
+                elif "Product Name" in self.df.columns:
+                    product_name_cbd_mask = (self.df["Product Name"].str.contains(":", na=False) | self.df["Product Name"].str.contains("CBD", case=False, na=False))
+                elif "Product_Name" in self.df.columns:
+                    product_name_cbd_mask = (self.df["Product_Name"].str.contains(":", na=False) | self.df["Product_Name"].str.contains("CBD", case=False, na=False))
+                
+                ratio_cbd_mask = (self.df["Ratio"].str.contains(":", na=False) | self.df["Ratio"].str.contains("CBD", case=False, na=False))
+                
+                mask_cbd_blend = (description_cbd_mask | product_name_cbd_mask | ratio_cbd_mask) & non_edible_or_tincture_mask
                 # Use .any() to avoid Series boolean ambiguity
                 if mask_cbd_blend.any():
                     self.df.loc[mask_cbd_blend, "Product Strain"] = "CBD Blend"
@@ -1717,14 +1884,36 @@ class ExcelProcessor:
                     (self.df["Product Strain"].astype(str).str.lower().str.strip() == "mixed")
                 )
                 
-                # Check if description contains cannabinoids or ":"
-                cannabinoid_mask = (
+                # Check if description, product name, or ratio contains cannabinoids or ":"
+                description_cannabinoid_mask = (
                     self.df["Description"].str.contains(r"\b(?:CBD|CBC|CBN|CBG)\b", case=False, na=False) |
                     self.df["Description"].str.contains(":", na=False)
                 )
+                # Check if Product Name column exists (it might have different naming)
+                product_name_cannabinoid_mask = pd.Series([False] * len(self.df), index=self.df.index)
+                if "Product Name*" in self.df.columns:
+                    product_name_cannabinoid_mask = (
+                        self.df["Product Name*"].str.contains(r"\b(?:CBD|CBC|CBN|CBG)\b", case=False, na=False) |
+                        self.df["Product Name*"].str.contains(":", na=False)
+                    )
+                elif "Product Name" in self.df.columns:
+                    product_name_cannabinoid_mask = (
+                        self.df["Product Name"].str.contains(r"\b(?:CBD|CBC|CBN|CBG)\b", case=False, na=False) |
+                        self.df["Product Name"].str.contains(":", na=False)
+                    )
+                elif "Product_Name" in self.df.columns:
+                    product_name_cannabinoid_mask = (
+                        self.df["Product_Name"].str.contains(r"\b(?:CBD|CBC|CBN|CBG)\b", case=False, na=False) |
+                        self.df["Product_Name"].str.contains(":", na=False)
+                    )
+                ratio_cannabinoid_mask = (
+                    self.df["Ratio"].str.contains(r"\b(?:CBD|CBC|CBN|CBG)\b", case=False, na=False) |
+                    self.df["Ratio"].str.contains(":", na=False)
+                )
+                cannabinoid_mask = description_cannabinoid_mask | product_name_cannabinoid_mask | ratio_cannabinoid_mask
                 
-                # Apply CBD Blend to non-edible products with no strain that contain cannabinoids or ":"
-                combined_cbd_mask = no_strain_mask & cannabinoid_mask & non_edible_mask
+                # Apply CBD Blend to non-edible products (including tinctures) with no strain that contain cannabinoids or ":"
+                combined_cbd_mask = no_strain_mask & cannabinoid_mask & non_edible_or_tincture_mask
                 if combined_cbd_mask.any():
                     self.df.loc[combined_cbd_mask, "Product Strain"] = "CBD Blend"
                     # Debug: Log which products got CBD Blend from combined logic
@@ -1732,6 +1921,51 @@ class ExcelProcessor:
                     for idx, row in combined_cbd_products.iterrows():
                         self.logger.info(f"Assigned CBD Blend from combined logic: {row.get('Product Name*', 'NO NAME')} (Type: {row.get('Product Type*', 'NO TYPE')})")
                 
+                # TINCTURES: Special handling for tinctures as nonclassic types that should get CBD Blend/Mixed designations
+                tincture_mask = self.df["Product Type*"].str.strip().str.lower() == "tincture"
+                if tincture_mask.any():
+                    tincture_products = self.df[tincture_mask]
+                    self.logger.info(f"=== Tincture Product Strain Assignment ===")
+                    
+                    for idx, row in tincture_products.iterrows():
+                        product_name = row.get('Product Name*', 'NO NAME')
+                        current_strain = row.get('Product Strain', 'NO STRAIN')
+                        description = row.get('Description', '')
+                        ratio = row.get('Ratio', '')
+                        
+                        # Check if tincture should get CBD Blend designation
+                        should_get_cbd_blend = False
+                        
+                        # Check ratio for cannabinoid content
+                        BAD_VALUES = {"", "CBD", "THC", "CBD:", "THC:", "CBD:\n", "THC:\n", "nan"}
+                        if ratio and pd.notna(ratio) and str(ratio).strip() not in BAD_VALUES:
+                            if any(cannabinoid in str(ratio).upper() for cannabinoid in ['CBD', 'CBC', 'CBN', 'CBG']):
+                                should_get_cbd_blend = True
+                                self.logger.info(f"Tincture {product_name}: CBD Blend from ratio '{ratio}'")
+                        
+                        # Check description for cannabinoid content or ":"
+                        if not should_get_cbd_blend and description:
+                            if (':' in str(description) or 
+                                any(cannabinoid in str(description).upper() for cannabinoid in ['CBD', 'CBC', 'CBN', 'CBG'])):
+                                should_get_cbd_blend = True
+                                self.logger.info(f"Tincture {product_name}: CBD Blend from description '{description}'")
+                        
+                        # Check product name for cannabinoid content or ":" (if column exists)
+                        if not should_get_cbd_blend and product_name:
+                            if (':' in str(product_name) or 
+                                any(cannabinoid in str(product_name).upper() for cannabinoid in ['CBD', 'CBC', 'CBN', 'CBG'])):
+                                should_get_cbd_blend = True
+                                self.logger.info(f"Tincture {product_name}: CBD Blend from product name '{product_name}'")
+                        
+                        # Apply CBD Blend if criteria met, otherwise Mixed
+                        if should_get_cbd_blend:
+                            self.df.loc[idx, "Product Strain"] = "CBD Blend"
+                        else:
+                            self.df.loc[idx, "Product Strain"] = "Mixed"
+                            self.logger.info(f"Tincture {product_name}: Mixed (no cannabinoid content found)")
+                    
+                    self.logger.info(f"=== End Tincture Product Strain Assignment ===")
+
                 # Debug: Log final Product Strain values for RSO/CO2 Tankers
                 rso_co2_mask = self.df["Product Type*"].str.strip().str.lower() == "rso/co2 tankers"
                 if rso_co2_mask.any():
@@ -1741,14 +1975,36 @@ class ExcelProcessor:
                         self.logger.info(f"RSO/CO2 Tanker: {row.get('Product Name*', 'NO NAME')} -> Product Strain: '{row.get('Product Strain', 'NO STRAIN')}'")
                     self.logger.info(f"=== End RSO/CO2 Tankers Debug ===")
                 
-                # RSO/CO2 Tankers: if Description contains CBD, CBG, CBC, CBN, or ":", then Product Strain is "CBD Blend", otherwise "Mixed"
+                # RSO/CO2 Tankers: if Description, Product Name, or Ratio contains CBD, CBG, CBC, CBN, or ":", then Product Strain is "CBD Blend", otherwise "Mixed"
                 rso_co2_mask = self.df["Product Type*"].str.strip().str.lower() == "rso/co2 tankers"
                 if rso_co2_mask.any():
-                    # Check if Description contains CBD, CBG, CBC, CBN, or ":"
-                    cbd_content_mask = (
+                    # Check if Description, Product Name, or Ratio contains CBD, CBG, CBC, CBN, or ":"
+                    description_cbd_content_mask = (
                         self.df["Description"].str.contains(r"CBD|CBG|CBC|CBN", case=False, na=False) |
                         self.df["Description"].str.contains(":", na=False)
                     )
+                    # Check if Product Name column exists (it might have different naming)
+                    product_name_cbd_content_mask = pd.Series([False] * len(self.df), index=self.df.index)
+                    if "Product Name*" in self.df.columns:
+                        product_name_cbd_content_mask = (
+                            self.df["Product Name*"].str.contains(r"CBD|CBG|CBC|CBN", case=False, na=False) |
+                            self.df["Product Name*"].str.contains(":", na=False)
+                        )
+                    elif "Product Name" in self.df.columns:
+                        product_name_cbd_content_mask = (
+                            self.df["Product Name"].str.contains(r"CBD|CBG|CBC|CBN", case=False, na=False) |
+                            self.df["Product Name"].str.contains(":", na=False)
+                        )
+                    elif "Product_Name" in self.df.columns:
+                        product_name_cbd_content_mask = (
+                            self.df["Product_Name"].str.contains(r"CBD|CBG|CBC|CBN", case=False, na=False) |
+                            self.df["Product_Name"].str.contains(":", na=False)
+                        )
+                    ratio_cbd_content_mask = (
+                        self.df["Ratio"].str.contains(r"CBD|CBG|CBC|CBN", case=False, na=False) |
+                        self.df["Ratio"].str.contains(":", na=False)
+                    )
+                    cbd_content_mask = description_cbd_content_mask | product_name_cbd_content_mask | ratio_cbd_content_mask
                     
                     # For RSO/CO2 Tankers with cannabinoid content or ":" in Description, set to "CBD Blend"
                     rso_co2_cbd_mask = rso_co2_mask & cbd_content_mask
@@ -1767,8 +2023,10 @@ class ExcelProcessor:
                 edible_mask = self.df["Product Type*"].str.strip().str.lower().isin(edible_types)
                 if edible_mask.any():
                     # Check if ProductName contains CBD, CBG, CBN, or CBC (same as UI logic)
+                    # Use the correct column name - try ProductName first, then Product Name*
+                    product_name_col = "ProductName" if "ProductName" in self.df.columns else "Product Name*"
                     edible_cbd_content_mask = (
-                        self.df["ProductName"].str.contains(r"CBD|CBG|CBN|CBC", case=False, na=False)
+                        self.df[product_name_col].str.contains(r"CBD|CBG|CBN|CBC", case=False, na=False)
                     )
                     
                     # For edibles with cannabinoid content in ProductName, set to "CBD Blend"
@@ -1787,7 +2045,12 @@ class ExcelProcessor:
             # Call the dedicated method to ensure consistency
             self.apply_strain_extraction()
             
-            # 8.6) Convert Product Strain to categorical after all logic is complete
+            # 8.6) OVERRIDE: Use database Product Strain values instead of Excel processor logic
+            self.logger.info("=== OVERRIDING: Using Database Product Strain Values ===")
+            self._apply_database_product_strain_values()
+            self.logger.info("=== End Database Product Strain Override ===")
+            
+            # 8.7) Convert Product Strain to categorical after all logic is complete
             if "Product Strain" in self.df.columns:
                 self.df["Product Strain"] = self.df["Product Strain"].astype("category")
 
@@ -1980,7 +2243,7 @@ class ExcelProcessor:
                         joint_ratio = extract_joint_ratio_from_name(product_name)
                         if joint_ratio:
                             self.df.loc[idx, 'JointRatio'] = joint_ratio
-                            self.logger.debug(f"Extracted JointRatio '{joint_ratio}' from product name: '{product_name}'")
+                            # self.logger.debug(f"Extracted JointRatio '{joint_ratio}' from product name: '{product_name}'")
                 
                 # For remaining pre-rolls without valid JointRatio, try to generate from Weight
                 remaining_preroll_mask = preroll_mask & (self.df["JointRatio"] == '')
@@ -2000,7 +2263,7 @@ class ExcelProcessor:
                                     # Round to 2 decimal places and remove trailing zeros
                                     default_joint_ratio = f"{weight_float:.2f}".rstrip("0").rstrip(".") + "g"
                             self.df.loc[idx, 'JointRatio'] = default_joint_ratio
-                            self.logger.debug(f"Generated JointRatio for record {idx}: '{default_joint_ratio}' from Weight {weight_value}")
+                            # self.logger.debug(f"Generated JointRatio for record {idx}: '{default_joint_ratio}' from Weight {weight_value}")
                         except (ValueError, TypeError):
                             pass
             
@@ -2029,17 +2292,18 @@ class ExcelProcessor:
                                 # Round to 2 decimal places and remove trailing zeros
                                 default_joint_ratio = f"{weight_float:.2f}".rstrip("0").rstrip(".") + "g"
                         self.df.loc[idx, 'JointRatio'] = default_joint_ratio
-                        self.logger.debug(f"Fixed JointRatio for record {idx}: Generated default '{default_joint_ratio}' from Weight")
+                        # self.logger.debug(f"Fixed JointRatio for record {idx}: Generated default '{default_joint_ratio}' from Weight")
                     except (ValueError, TypeError):
                         pass
             
             # JointRatio: preserve original spacing exactly as in Excel - no normalization
-            self.logger.debug(f"Sample JointRatio values after NaN fixes: {self.df.loc[preroll_mask, 'JointRatio'].head()}")
+            # self.logger.debug(f"Sample JointRatio values after NaN fixes: {self.df.loc[preroll_mask, 'JointRatio'].head()}")
             # Add detailed logging for JointRatio values
             if preroll_mask.any():
                 sample_values = self.df.loc[preroll_mask, 'JointRatio'].head(10)
                 for idx, value in sample_values.items():
-                    self.logger.debug(f"JointRatio value '{value}' (length: {len(str(value))}, repr: {repr(str(value))})")
+                    # self.logger.debug(f"JointRatio value '{value}' (length: {len(str(value))}, repr: {repr(str(value))})")
+                    pass
 
             # Reorder columns to place JointRatio next to Ratio
             if "Ratio" in self.df.columns and "JointRatio" in self.df.columns:
@@ -2091,7 +2355,7 @@ class ExcelProcessor:
             # Normalize Joint Ratio column name for consistency
             if "Joint Ratio" in self.df.columns and "JointRatio" not in self.df.columns:
                 self.df.rename(columns={"Joint Ratio": "JointRatio"}, inplace=True)
-            self.logger.debug(f"Columns after JointRatio normalization: {self.df.columns.tolist()}")
+            # self.logger.debug(f"Columns after JointRatio normalization: {self.df.columns.tolist()}")
 
             # 14) Optimized Lineage Persistence - ALWAYS ENABLED
             if ENABLE_LINEAGE_PERSISTENCE:
@@ -2150,8 +2414,11 @@ class ExcelProcessor:
                 self.logger.debug("psutil not available for memory monitoring")
             
             # --- Product/Strain Database Integration (Background Processing) ---
-            # TEMPORARILY DISABLED to fix app stability issues
-            # self._schedule_product_db_integration()
+            # Re-enabled to ensure lineage changes persist after reload
+            self._schedule_product_db_integration()
+            
+            # Load lineage data from database to ensure changes persist
+            self._load_lineage_from_database()
             
             # Cache the processed file
             self._file_cache[cache_key] = self.df.copy()
@@ -2339,7 +2606,7 @@ class ExcelProcessor:
             quantity = row.get('Quantity*', '') or row.get('Quantity Received*', '') or row.get('Quantity', '') or row.get('qty', '') or ''
             
             # Get formatted weight with units
-            weight_with_units = self._format_weight_units(row)
+            weight_with_units = self._format_weight_units(row, excel_priority=True)
             raw_weight = row.get('Weight*', '')
             
             # Helper function to safely get values and handle NaN
@@ -2467,7 +2734,8 @@ class ExcelProcessor:
                 'Quantity*': safe_get_value(quantity),
                 'Quantity Received*': safe_get_value(quantity),
                 'quantity': safe_get_value(quantity),
-                'DOH': safe_get_value(row.get('DOH', '')),  # Add DOH field for UI display
+                'DOH': safe_get_value(row.get('DOH', '')) or safe_get_value(row.get('DOH Compliant (Yes/No)', '')),  # Add DOH field for UI display
+                'DOH Compliant (Yes/No)': safe_get_value(row.get('DOH Compliant (Yes/No)', '')) or safe_get_value(row.get('DOH', '')),  # Add alternative DOH field
                 'Price': price_value,  # Add Price field
                 'THC': ai_value,  # Add THC value
                 'CBD': ak_value,  # Add CBD value
@@ -2799,6 +3067,26 @@ class ExcelProcessor:
                         description = product_name or record.get(product_name_col, '')
                     product_type = record.get('Product Type*', '').strip().lower()
                     
+                    # Look up database weight and units as fallback
+                    db_weight = ''
+                    db_units = ''
+                    try:
+                        from src.core.data.product_database import get_product_database
+                        product_db = get_product_database()
+                        if product_db:
+                            db_products = product_db.get_products_by_names([product_name])
+                            if db_products and len(db_products) > 0:
+                                db_product = db_products[0]
+                                db_weight = db_product.get('Weight*', '')
+                                db_units = db_product.get('Units', '')
+                                logger.debug(f"Found database weight/units for '{product_name}': {db_weight}/{db_units}")
+                    except Exception as e:
+                        logger.debug(f"Could not lookup database weight/units for '{product_name}': {e}")
+                    
+                    # Add database weight and units to record for _format_weight_units
+                    record['db_weight'] = db_weight
+                    record['db_units'] = db_units
+                    
                     # Get ratio text and ensure it's a string
                     ratio_text = str(record.get('Ratio', '')).strip()
                     # Handle 'nan' values
@@ -3016,7 +3304,7 @@ class ExcelProcessor:
                         'ProductName': product_name,  # Keep this for compatibility
                         product_name_col: product_name,  # Also store with original column name
                         'Description': description,
-                        'WeightUnits': record.get('JointRatio', '') if product_type in {"pre-roll", "infused pre-roll"} else self._format_weight_units(record),
+                        'WeightUnits': record.get('JointRatio', '') if product_type in {"pre-roll", "infused pre-roll"} else self._format_weight_units(record, excel_priority=True),
                         'ProductBrand': product_brand,
                         'Price': str(record.get('Price*', '')).strip() or str(record.get('Price', '')).strip(),
                         'Lineage': str(final_lineage) if str(final_lineage) else "",
@@ -3109,7 +3397,67 @@ class ExcelProcessor:
             return ""
         return str(value).strip()
 
-    def _format_weight_units(self, record):
+    def _find_identical_product_ounce_weight(self, product_name, product_type):
+        """Find identical products with existing ounce weights in the database."""
+        try:
+            # Import here to avoid circular imports
+            from src.core.data.product_database import ProductDatabase
+            
+            # Get database connection with store name
+            db = ProductDatabase(store_name=self._store_name)
+            db.init_database()
+            
+            # Search for products with similar names and ounce weights
+            with db._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Look for products with similar names that have ounce weights or similar weights
+                # Use LIKE with wildcards to find similar product names
+                query = """
+                    SELECT "Weight*", "Units", "Product Name*", "Product Type*"
+                    FROM products 
+                    WHERE "Product Name*" LIKE ? 
+                    AND "Product Type*" = ?
+                    AND ("Units" = 'oz' OR "Units" = 'ounces' OR "Weight*" LIKE '%oz%' OR "Units" = 'each')
+                    LIMIT 5
+                """
+                
+                # Create search pattern - look for products that contain key words from the current product
+                product_words = product_name.lower().split()
+                if len(product_words) >= 2:
+                    # Use the first two words as the main search pattern
+                    search_pattern = f"%{product_words[0]}%{product_words[1]}%"
+                else:
+                    search_pattern = f"%{product_name}%"
+                
+                cursor.execute(query, (search_pattern, product_type))
+                results = cursor.fetchall()
+                
+                if results:
+                    # Return the most recent result (first in the list due to ORDER BY)
+                    weight, units, found_name, found_type = results[0]
+                    
+                    # If the found product has "each" units but a similar weight value, convert to ounces
+                    if units == 'each' and weight:
+                        try:
+                            weight_float = float(weight)
+                            # If the weight is around 1.7-2.0, it's likely the same as 1.7oz
+                            if 1.5 <= weight_float <= 2.5:
+                                self.logger.info(f"Found identical product with similar weight: {found_name} -> {weight}{units}, using as 1.7oz")
+                                return "1.7oz"
+                        except (ValueError, TypeError):
+                            pass
+                    
+                    self.logger.info(f"Found identical product with ounce weight: {found_name} -> {weight}{units}")
+                    return f"{weight}{units}"
+                
+                return None
+                
+        except Exception as e:
+            self.logger.warning(f"Error looking up identical product weight: {str(e)}")
+            return None
+
+    def _format_weight_units(self, record, excel_priority=True):
         # Handle pandas Series and NA values properly
         def safe_get_value(value, default=''):
             if value is None or pd.isna(value):
@@ -3120,9 +3468,30 @@ class ExcelProcessor:
                 value = value.iloc[0] if len(value) > 0 else default
             return str(value).strip()
         
-        weight_val = safe_get_value(record.get('Weight*', None))
-        units_val = safe_get_value(record.get('Units', ''))
+        # Get weight and units from Excel data first (priority)
+        excel_weight = safe_get_value(record.get('Weight*', None))
+        excel_units = safe_get_value(record.get('Units', ''))
         product_type = safe_get_value(record.get('Product Type*', '')).lower()
+        product_name = safe_get_value(record.get('Product Name*', ''))
+        
+        # Get database weight and units as fallback
+        db_weight = safe_get_value(record.get('db_weight', None))
+        db_units = safe_get_value(record.get('db_units', ''))
+        
+        # Special handling for Moonshot products - use database values as priority
+        is_moonshot = 'moonshot' in product_name.lower()
+        
+        # Priority logic: Database first for Moonshot products, Excel first for others
+        if is_moonshot:
+            # For Moonshot products, prioritize database values to get correct 1.7oz weights
+            weight_val = db_weight if db_weight and db_weight not in ['', 'nan', 'NaN'] else excel_weight
+            units_val = db_units if db_units and db_units not in ['', 'nan', 'NaN'] else excel_units
+        elif excel_priority:
+            weight_val = excel_weight if excel_weight and excel_weight not in ['', 'nan', 'NaN'] else db_weight
+            units_val = excel_units if excel_units and excel_units not in ['', 'nan', 'NaN'] else db_units
+        else:
+            weight_val = db_weight if db_weight and db_weight not in ['', 'nan', 'NaN'] else excel_weight
+            units_val = db_units if db_units and db_units not in ['', 'nan', 'NaN'] else excel_units
         
         # Debug: Log first few records
         if hasattr(self, '_debug_count'):
@@ -3131,13 +3500,21 @@ class ExcelProcessor:
             self._debug_count = 1
             
         if self._debug_count <= 5:  # Log first 5 records for debugging
-            self.logger.info(f"Record {self._debug_count}: weight_val={weight_val} (type: {type(weight_val)}), units_val={units_val} (type: {type(units_val)}), product_type={product_type}")
+            self.logger.info(f"Record {self._debug_count}: excel_weight={excel_weight}, excel_units={excel_units}, db_weight={db_weight}, db_units={db_units}, final_weight={weight_val}, final_units={units_val}, product_type={product_type}")
         
-        edible_types = {"edible (solid)", "edible (liquid)", "high cbd edible liquid", "tincture", "topical", "capsule"}
+        # Product types that need gram-to-ounce conversion
+        conversion_types = {
+            "edible (solid)", "edible (liquid)", "high cbd edible liquid", 
+            "doh edible/solid/topical", "topical", "capsule", "tincture"
+        }
         preroll_types = {"pre-roll", "infused pre-roll"}
 
-        # For pre-rolls and infused pre-rolls, use JointRatio if available
-        if product_type in preroll_types:
+        # FIRST: Check if Weight* already contains units (like "1g", "3.5oz", etc.)
+        if weight_val and any(unit in weight_val.lower() for unit in ['g', 'oz', 'gram', 'ounce']):
+            # Weight* already has units embedded, return as-is
+            result = weight_val
+        elif product_type in preroll_types:
+            # For pre-rolls and infused pre-rolls, use JointRatio if available
             joint_ratio = safe_get_value(record.get('JointRatio', ''))
             
             # Check if JointRatio is valid (not NaN, not empty, and looks like a pack format)
@@ -3151,7 +3528,6 @@ class ExcelProcessor:
                 result = str(joint_ratio)
             else:
                 # For pre-rolls with invalid JointRatio, generate from Weight
-                weight_val = safe_get_value(record.get('Weight*', ''))
                 if weight_val and weight_val not in ['nan', 'NaN'] and not pd.isna(weight_val):
                     try:
                         weight_float = float(weight_val)
@@ -3161,26 +3537,40 @@ class ExcelProcessor:
                 else:
                     result = ""
         else:
+            # Handle normal weight + units combination
             try:
-                weight_val = float(weight_val) if weight_val not in (None, '', 'nan') else None
+                weight_float = float(weight_val) if weight_val not in (None, '', 'nan') else None
             except Exception:
-                weight_val = None
+                weight_float = None
 
-            if product_type in edible_types and units_val in {"g", "grams"} and weight_val is not None:
-                weight_val = weight_val * 0.03527396195
+            # Apply unit conversion for specific product types
+            if (weight_float is not None and units_val and 
+                product_type in conversion_types and 
+                units_val.lower() in ['g', 'grams', 'gram']):
+                
+                # FIRST: Check if there are identical products with existing ounce weights
+                if product_name:
+                    identical_ounce_weight = self._find_identical_product_ounce_weight(product_name, product_type)
+                    if identical_ounce_weight:
+                        self.logger.info(f"Using identical product ounce weight for {product_name}: {identical_ounce_weight}")
+                        return identical_ounce_weight
+                
+                # If no identical product found, convert grams to ounces
+                weight_float = weight_float * 0.03527396195
                 units_val = "oz"
+                self.logger.info(f"Converted {weight_val}g to {weight_float:.4f}oz for product type: {product_type}")
 
-            # Now we can safely check the values since they've been processed by safe_get_value
-            if weight_val is not None and units_val:
-                # Format weight similar to price formatting - no decimals unless original has decimals
-                if weight_val.is_integer():
-                    weight_str = f"{int(weight_val)}"
+            # Now combine weight and units properly
+            if weight_float is not None and units_val:
+                # Format weight similar to price formatting - no decimals unless needed
+                if weight_float.is_integer():
+                    weight_str = f"{int(weight_float)}"
                 else:
                     # Round to 2 decimal places and remove trailing zeros
-                    weight_str = f"{weight_val:.2f}".rstrip("0").rstrip(".")
+                    weight_str = f"{weight_float:.2f}".rstrip("0").rstrip(".")
                 result = f"{weight_str}{units_val}"
-            elif weight_val is not None:
-                result = str(weight_val)
+            elif weight_float is not None:
+                result = str(int(weight_float) if weight_float.is_integer() else weight_float)
             elif units_val:
                 result = str(units_val)
             else:
@@ -3241,7 +3631,7 @@ class ExcelProcessor:
                     for _, row in temp_df.iterrows():
                         # Convert row to dict for _format_weight_units
                         row_dict = row.to_dict()
-                        weight_with_units = self._format_weight_units(row_dict)
+                        weight_with_units = self._format_weight_units(row_dict, excel_priority=True)
                         if weight_with_units and weight_with_units.strip():
                             weight_str = weight_with_units.strip()
                             
@@ -3327,7 +3717,7 @@ class ExcelProcessor:
         
         try:
             from .product_database import ProductDatabase
-            product_db = ProductDatabase()
+            product_db = ProductDatabase(store_name=self._store_name)
             
             # Update strain with sovereign lineage
             strain_id = product_db.add_or_update_strain(strain_name, new_lineage, sovereign=True)
@@ -3355,7 +3745,7 @@ class ExcelProcessor:
         
         try:
             from .product_database import ProductDatabase
-            product_db = ProductDatabase()
+            product_db = ProductDatabase(store_name=self._store_name)
             
             success_count = 0
             total_count = len(lineage_updates)
@@ -3386,7 +3776,7 @@ class ExcelProcessor:
         
         try:
             from .product_database import ProductDatabase
-            product_db = ProductDatabase()
+            product_db = ProductDatabase(store_name=self._store_name)
             
             return product_db.validate_and_suggest_lineage(strain_name)
             
@@ -3417,7 +3807,7 @@ class ExcelProcessor:
             updated_count = 0
             
             from .product_database import ProductDatabase
-            product_db = ProductDatabase()
+            product_db = ProductDatabase(store_name=self._store_name)
             
             for strain_name, group in strain_groups:
                 if not strain_name or pd.isna(strain_name):
@@ -3554,6 +3944,82 @@ class ExcelProcessor:
         except Exception as e:
             self.logger.error(f"Error getting strain name for product '{tag_name}': {e}")
             return None
+
+    def update_doh_in_current_data(self, tag_name: str, new_doh: str) -> bool:
+        """Update DOH status for a specific product in the current data."""
+        try:
+            if self.df is None:
+                self.logger.error("No data loaded")
+                return False
+            
+            # Find the tag in the DataFrame and update its DOH status
+            self.logger.info(f"Looking for tag: '{tag_name}' to update DOH to: '{new_doh}'")
+            
+            # Try different column names for product names
+            product_name_columns = ['ProductName', 'Product Name*', 'Product Name']
+            mask = None
+            
+            for col in product_name_columns:
+                if col in self.df.columns:
+                    mask = self.df[col] == tag_name
+                    if mask.any():
+                        break
+            
+            if mask is None or not mask.any():
+                self.logger.error(f"Tag '{tag_name}' not found in any product name column")
+                return False
+            
+            # Get the original DOH status for logging
+            original_doh = 'Unknown'
+            try:
+                # Check both DOH column variants
+                if 'DOH' in self.df.columns:
+                    original_doh = self.df.loc[mask, 'DOH'].iloc[0]
+                elif 'DOH Compliant (Yes/No)' in self.df.columns:
+                    original_doh = self.df.loc[mask, 'DOH Compliant (Yes/No)'].iloc[0]
+            except (IndexError, KeyError):
+                original_doh = 'Unknown'
+            
+            # Update DOH status in both possible columns
+            updated_count = 0
+            if 'DOH' in self.df.columns:
+                self.df.loc[mask, 'DOH'] = new_doh
+                updated_count += 1
+                
+            if 'DOH Compliant (Yes/No)' in self.df.columns:
+                self.df.loc[mask, 'DOH Compliant (Yes/No)'] = new_doh
+                updated_count += 1
+            
+            if updated_count > 0:
+                self.logger.info(f"Successfully updated DOH for '{tag_name}' from '{original_doh}' to '{new_doh}' ({updated_count} columns updated)")
+                return True
+            else:
+                self.logger.error(f"No DOH columns found to update for '{tag_name}'")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"Error updating DOH for '{tag_name}': {e}")
+            return False
+
+    def update_doh_in_database(self, tag_name: str, new_doh: str) -> bool:
+        """Update DOH status for a specific product in the database."""
+        try:
+            from .product_database import ProductDatabase
+            product_db = ProductDatabase(store_name=self._store_name)
+            
+            # Update product DOH status in database
+            success = product_db.update_product_doh(tag_name, new_doh)
+            
+            if success:
+                self.logger.info(f"Updated DOH for product '{tag_name}' to '{new_doh}' in database")
+                return True
+            else:
+                self.logger.error(f"Failed to update DOH for product '{tag_name}' in database")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"Error updating DOH for product '{tag_name}' in database: {e}")
+            return False
 
     def pythonanywhere_fast_load(self, file_path: str) -> bool:
         """Ultra-fast loading specifically optimized for PythonAnywhere environment."""
@@ -4652,7 +5118,7 @@ class ExcelProcessor:
             educated_guess = None
             try:
                 from .product_database import ProductDatabase
-                product_db = ProductDatabase()
+                product_db = ProductDatabase(store_name=self._store_name)
                 educated_guess = product_db.make_educated_guess(product_name, vendor, brand)
                 if educated_guess:
                     logger.info(f"✅ Made educated guess for '{product_name}': {educated_guess}")
@@ -5281,7 +5747,7 @@ class ExcelProcessor:
                         'Product Name*': product_name,  # Also store with original column name
                         'Description': description,
                         'DescAndWeight': desc_and_weight,  # Use extracted product name for DescAndWeight field
-                        'WeightUnits': record.get('JointRatio', '') if product_type in {"pre-roll", "infused pre-roll"} else self._format_weight_units(record),
+                        'WeightUnits': record.get('JointRatio', '') if product_type in {"pre-roll", "infused pre-roll"} else self._format_weight_units(record, excel_priority=True),
                         'ProductBrand': product_brand,
                         'Price': str(record.get('Price*', '')).strip() or str(record.get('Price', '')).strip(),  # Use correct price column
                         'Lineage': str(final_lineage) if str(final_lineage) else "",
@@ -5457,7 +5923,7 @@ class ExcelProcessor:
             quantity = row.get('Quantity*', '') or row.get('Quantity Received*', '') or row.get('Quantity', '') or row.get('qty', '') or ''
             
             # Get formatted weight with units
-            weight_with_units = self._format_weight_units(row)
+            weight_with_units = self._format_weight_units(row, excel_priority=True)
             raw_weight = row.get('Weight*', '')
             
             # Helper function to safely get values and handle NaN

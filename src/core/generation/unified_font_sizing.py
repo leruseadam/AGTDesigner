@@ -35,10 +35,11 @@ def _load_font_sizing_config():
                     'lineage': [(5, 12), (10, 11), (15, 10), (20, 9), (float('inf'), 8)],
                     'ratio': [(3, 12), (6, 11), (9, 10), (12, 9), (float('inf'), 8)],
                     'thc_cbd': [(5, 10), (10, 9), (15, 8), (20, 7), (float('inf'), 6)],
-                    'strain': [(10, 8), (20, 7), (30, 6), (float('inf'), 5)],
+                    'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
                     'weight': [(5, 14), (10, 12), (15, 10), (float('inf'), 8)],
                     'doh': [(5, 12), (10, 11), (float('inf'), 10)],
-                    'vendor': [(5, 8), (10, 7), (15, 6), (20, 5), (float('inf'), 4)],
+                    'vendor': [(5, 1), (10, 1), (15, 1), (20, 1), (float('inf'), 1)],
+                    'qr': [(float('inf'), 24)],  # QR codes: Small size for mini template
                     'default': [(10, 12), (20, 11), (float('inf'), 10)]
                 },
                 'double': {
@@ -52,28 +53,31 @@ def _load_font_sizing_config():
                     'weight': [(15, 16), (25, 14), (35, 12), (float('inf'), 9)],
                     'doh': [(15, 20), (25, 16), (float('inf'), 13)],
                     'vendor': [(10, 5), (20, 4), (40, 3), (70, 2),(float('inf'), 1)],
+                    'qr': [(float('inf'), 36)],  # QR codes: Medium size for double template
                     'default': [(20, 16), (40, 14), (60, 12), (float('inf'), 10)]
                 },
                 'vertical': {
-                    'description': [(5, 34), (30, 32), (40, 28), (60, 26), (70, 24), (80, 22), (100, 20), (float('inf'), 14)],
-                    'brand': [(10, 16), (20, 14), (30, 12), (float('inf'), 10)],
-                    'price': [(2, 30), (5, 26), (float('inf'), 14)],
-                    'lineage': [(20, 18), (40, 16), (60, 12), (float('inf'), 8)],
+                    'description': [(5, 34), (30, 32), (40, 28), (60, 26), (70, 24), (80, 22), (100, 20), (float('inf'), 18)],
+                    'brand': [(10, 16), (15, 14), (20, 12), (float('inf'), 10)],
+                    'price': [(4, 34), (5, 30), (10, 28), (float('inf'), 26)],  # Updated: complexity-based thresholds for better vertical price sizing
+                    'lineage': [(20, 20), (40, 18), (60, 16), (float('inf'), 12)],
                     'ratio': [(10, 14), (20, 12), (30, 9), (float('inf'), 9)],
                     'thc_cbd': [(10, 12), (float('inf'), 12)],
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
                     'vendor': [(10, 6), (20, 5), (40, 4), (70, 3),(float('inf'), 2)],
+                    'qr': [(float('inf'), 45)],  # QR codes: Large size for vertical template
                     'default': [(30, 16), (60, 14), (100, 12), (float('inf'), 10)]
                 },
                 'horizontal': {
-                    'description': [(10, 36), (15, 34), (20, 32), (40, 28), (50, 26), (55, 23), (70, 22), (80, 21), (90, 20), (float('inf'), 18)],
-                    'brand': [(20, 18), (30, 16), (80, 14), (50, 12), (60, 10), (float('inf'), 10)],
-                    'price': [(5, 36), (10, 34), (80, 20), (float('inf'), 18)],
+                    'description': [(10, 36), (20, 34), (25, 32), (30, 28), (40, 26), (45, 24), (60, 23), (80, 21), (float('inf'), 18)],
+                    'brand': [(20, 18), (40, 16), (120, 14), (140, 12), (160, 10), (float('inf'), 10)],
+                    'price': [(10, 38), (20, 36), (80, 20), (float('inf'), 18)],
                     'lineage': [(10, 20), (20, 18), (30, 16), (50, 12), (60, 10), (float('inf'), 10)],
                     'ratio': [(10, 14), (20, 12), (30, 10), (40, 9), (50, 8), (60, 7), (70, 6), (float('inf'), 5)],
                     'thc_cbd': [(10, 14), (float('inf'), 14)],
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
                     'vendor': [(10, 6), (20, 5), (40, 4), (70, 3),(float('inf'), 2)],
+                    'qr': [(float('inf'), 45)],  # QR codes: Large size for horizontal template  
                     'default': [(20, 18), (40, 16), (60, 14), (float('inf'), 12)]
                 }
             }
@@ -96,24 +100,7 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
     Returns:
         Font size as Pt object
     """
-    # BULLETPROOF FIX: Force correct configuration for vertical price
-    if field_type.lower() == 'price' and orientation.lower() == 'vertical':
-        # Use hardcoded correct configuration for vertical price - BYPASS ALL OTHER SYSTEMS
-        comp = calculate_text_complexity(text)
-        
-        # Force the correct configuration regardless of any caching or other systems
-        if comp < 5:
-            final_size = 30 * scale_factor
-            logger.debug(f"BULLETPROOF: Vertical price '{text}' (complexity: {comp}) using 30pt font")
-            return Pt(final_size)
-        elif comp < 8:
-            final_size = 28 * scale_factor
-            logger.debug(f"BULLETPROOF: Vertical price '{text}' (complexity: {comp}) using 28pt font")
-            return Pt(final_size)
-        else:
-            final_size = 14 * scale_factor
-            logger.debug(f"BULLETPROOF: Vertical price '{text}' (complexity: {comp}) using 14pt font")
-            return Pt(final_size)
+  
     
     # Special rule: Mini template prices based on number of digits
     if field_type.lower() == 'price' and orientation.lower() == 'mini':
@@ -159,27 +146,11 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
                 logger.debug(f"Special vertical description rule: text='{text}', max_word_length={max_word_length}, using {font_size}pt font")
                 return Pt(final_size)
     
-    # Special rule: If brand contains 20 or more letters in horizontal template, force font size to 14
-    if field_type.lower() == 'brand' and orientation.lower() == 'horizontal':
-        if len(text) >= 20:
-            final_size = 14 * scale_factor
-            logger.debug(f"Special brand rule: text='{text}' ({len(text)} chars) >= 20, forcing 14pt font")
-            return Pt(final_size)
-        # Special rule: If brand contains multiple words and is greater than 9 characters, set font to 14
-        elif len(text.split()) > 1 and len(text) > 12:
-            final_size = 14 * scale_factor
-            logger.debug(f"Special brand rule: text='{text}' ({len(text)} chars, {len(text.split())} words) > 9 chars and multiple words, forcing 14pt font")
-            return Pt(final_size)
-        # Special rule: If brand is all caps and 9 or more characters, set font to 14
-        elif text.isupper() and len(text) >= 12:
-            final_size = 14 * scale_factor
-            logger.debug(f"Special brand rule: text='{text}' ({len(text)} chars) is all caps >= 9 chars, forcing 14pt font")
-            return Pt(final_size)
     
     # Special rule: Handle specific large brand names that are too big
     if field_type.lower() == 'brand' and orientation.lower() == 'double':
         # Force specific large brand names to use much smaller fonts
-        large_brands = ['CONSTELLATION', 'MARY JONES', 'MARY JONES CANNABIS', 'CONSTELLATION CANNABIS']
+        large_brands = ['CONSTELLATION', 'MARY JONES', 'MARY JONES CANNABIS']
         if any(brand in text.upper() for brand in large_brands):
             final_size = 5.5 * scale_factor
             logger.debug(f"Special double template brand rule: text='{text}' matches large brand list, forcing 5.5pt font")
@@ -220,15 +191,24 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
     # Calculate text complexity
     comp = calculate_text_complexity(text)
     
+    # Special debugging for price field
+    if field_type.lower() == 'price':
+        logger.info(f"PRICE DEBUG: '{text}' -> complexity: {comp}, orientation: {orientation}")
+        logger.info(f"PRICE DEBUG: Config: {config}")
+    
     logger.debug(f"Font sizing for '{text}' (field_type: {field_type}, orientation: {orientation}, complexity: {comp})")
     logger.debug(f"Config: {config}")
     
     # Find appropriate font size based on complexity
     for threshold, size in config:
         logger.debug(f"Checking threshold {threshold} -> size {size}")
-        if comp < threshold:
+        if field_type.lower() == 'price':
+            logger.info(f"PRICE DEBUG: threshold {threshold} -> size {size}, comp {comp} <= threshold? {comp <= threshold}")
+        if comp <= threshold:  # Fixed: Use <= instead of < for proper threshold matching
             final_size = size * scale_factor
             logger.debug(f"Selected size {size}pt (final: {final_size}pt)")
+            if field_type.lower() == 'price':
+                logger.info(f"PRICE DEBUG: SELECTED {size}pt for '{text}'")
             return Pt(final_size)
     
     # Fallback to smallest size - ensure price gets proper fallback
@@ -317,7 +297,8 @@ def get_font_size_by_marker(text, marker_type, template_type='vertical', scale_f
         'PRODUCTSTRAIN': 'strain',
         'DOH': 'doh',
         'VENDOR': 'vendor',
-        'PRODUCTVENDOR': 'vendor'
+        'PRODUCTVENDOR': 'vendor',
+        'QR': 'qr'  # QR code placeholders
     }
     field_type = marker_to_field.get(base_marker, 'default')
     return get_font_size(text, field_type, template_type, scale_factor, 'standard')
