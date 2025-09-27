@@ -277,6 +277,9 @@ async function openDatabaseAnalytics() {
 }
 
 async function exportDatabase() {
+  // Show splash screen
+  showExportSplash();
+  
   try {
     const response = await fetch('/api/database-export');
     if (!response.ok) {
@@ -301,16 +304,75 @@ async function exportDatabase() {
     window.URL.revokeObjectURL(url);
     a.remove();
     
-    // Show success message
+    // Hide splash screen and show success message
+    hideExportSplash();
     const successToast = new bootstrap.Toast(document.getElementById('successToast'));
     document.getElementById('successToastMessage').textContent = 'Database exported successfully';
     successToast.show();
     
   } catch (error) {
     console.error('Error exporting database:', error);
+    hideExportSplash();
     const errorToast = new bootstrap.Toast(document.getElementById('errorToast'));
     document.getElementById('errorToastMessage').textContent = `Failed to export database: ${error.message}`;
     errorToast.show();
+  }
+}
+
+function showExportSplash() {
+  // Create splash screen HTML
+  const splashHtml = `
+    <div id="exportSplash" class="export-splash-overlay">
+      <div class="export-splash-content">
+        <div class="export-splash-icon">
+          <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+          </div>
+        </div>
+        <h4 class="export-splash-title">Exporting Database</h4>
+        <p class="export-splash-message">Preparing your database export...</p>
+        <div class="export-splash-progress">
+          <div class="progress">
+            <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                 role="progressbar" style="width: 0%"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  
+  // Add to body
+  document.body.insertAdjacentHTML('beforeend', splashHtml);
+  
+  // Animate progress bar
+  const progressBar = document.querySelector('#exportSplash .progress-bar');
+  let progress = 0;
+  const interval = setInterval(() => {
+    progress += Math.random() * 15;
+    if (progress > 90) progress = 90;
+    progressBar.style.width = progress + '%';
+  }, 200);
+  
+  // Store interval ID for cleanup
+  document.getElementById('exportSplash').dataset.intervalId = interval;
+}
+
+function hideExportSplash() {
+  const splash = document.getElementById('exportSplash');
+  if (splash) {
+    // Clear progress animation
+    const intervalId = splash.dataset.intervalId;
+    if (intervalId) {
+      clearInterval(parseInt(intervalId));
+    }
+    
+    // Animate out
+    splash.style.opacity = '0';
+    splash.style.transform = 'scale(0.8)';
+    
+    setTimeout(() => {
+      splash.remove();
+    }, 300);
   }
 }
 

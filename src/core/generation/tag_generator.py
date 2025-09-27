@@ -315,9 +315,16 @@ def process_chunk(args):
                 # They will be set to lineage later if lineage is available
                 pass
             else:
-                # For non-classic types, add brand markers
-                label_data["ProductBrand"] = product_brand.upper()  # Don't wrap with markers for template rendering
-                label_data["ProductBrand_Center"] = product_brand.upper()  # Don't wrap with markers for template rendering
+                # For non-classic types, add brand with centering markers
+                # Include Product Strain info for color determination
+                product_strain = str(row.get("Product Strain", "")).strip()
+                if product_strain:
+                    brand_content = f"{product_strain} {product_brand.upper()}"
+                else:
+                    brand_content = product_brand.upper()
+                
+                label_data["ProductBrand"] = f"PRODUCTBRAND_CENTER_START{brand_content}PRODUCTBRAND_CENTER_END"
+                label_data["ProductBrand_Center"] = f"PRODUCTBRAND_CENTER_START{brand_content}PRODUCTBRAND_CENTER_END"
             
             # Add other fields to label_data
             # Get product name
@@ -421,26 +428,7 @@ def process_chunk(args):
             if ak_value in ['nan', 'NaN', '']:
                 ak_value = ""
             
-            # Apply formatting to individual THC and CBD values
-            if ai_value:
-                # Format THC value with percentage formatting rules
-                from src.core.generation.text_processing import format_thc_cbd_percentages
-                formatted_thc = format_thc_cbd_percentages(f"THC: {ai_value}%")
-                # Extract just the value part (remove "THC: " prefix, keep % symbol)
-                thc_value = formatted_thc.replace("THC: ", "")
-                label_data["THC"] = wrap_with_marker(thc_value, "THC")
-            else:
-                label_data["THC"] = wrap_with_marker("", "THC")
-            
-            if ak_value:
-                # Format CBD value with percentage formatting rules
-                from src.core.generation.text_processing import format_thc_cbd_percentages
-                formatted_cbd = format_thc_cbd_percentages(f"CBD: {ak_value}%")
-                # Extract just the value part (remove "CBD: " prefix, keep % symbol)
-                cbd_value = formatted_cbd.replace("CBD: ", "")
-                label_data["CBD"] = wrap_with_marker(cbd_value, "CBD")
-            else:
-                label_data["CBD"] = wrap_with_marker("", "CBD")
+            # Note: Individual THC/CBD values removed - QR codes now provide this information
             
             # DescAndWeight should contain only the description text (mapped to DESC marker in template)
             # Use the processed Description field from above

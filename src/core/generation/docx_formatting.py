@@ -15,6 +15,7 @@ COLORS = {
     'HYBRID_INDICA': '9900FF',
     'HYBRID_SATIVA': 'ED4123',
     'CBD': 'F1C232',
+    'CBD_BLEND': 'F1C232',  # Same color as CBD
     'MIXED': '0021F5',
     'PARA': 'FFC0CB'
 }
@@ -29,7 +30,7 @@ def apply_lineage_colors(doc):
                     color_hex = None
                     
                     # Remove marker wrappers for robust matching
-                    for marker in ["LINEAGE_START", "LINEAGE_END", "PRODUCTSTRAIN_START", "PRODUCTSTRAIN_END"]:
+                    for marker in ["LINEAGE_START", "LINEAGE_END", "PRODUCTSTRAIN_START", "PRODUCTSTRAIN_END", "PRODUCTBRAND_CENTER_START", "PRODUCTBRAND_CENTER_END"]:
                         text = text.replace(marker, "")
                     text = text.strip()
                     
@@ -48,6 +49,8 @@ def apply_lineage_colors(doc):
                         color_hex = COLORS['HYBRID']
                     elif "CBD" in text or "CBD_BLEND" in text:
                         color_hex = COLORS['CBD']
+                    elif "CBD BLEND" in text:
+                        color_hex = COLORS['CBD_BLEND']
                     elif "MIXED" in text:
                         # MIXED lineage always gets blue bars (this covers non-classic types like edibles)
                         color_hex = COLORS['MIXED']  # Blue for Mixed
@@ -89,7 +92,7 @@ def _final_lineage_cleanup_after_coloring(doc):
         # Define lineage values that should be cleaned
         lineage_values = [
             "SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", 
-            "CBD", "MIXED", "PARAPHERNALIA", "PARA"
+            "CBD", "CBD BLEND", "MIXED", "PARAPHERNALIA", "PARA"
         ]
         
         # Clean lineage content in all tables
@@ -991,9 +994,42 @@ def enforce_fixed_cell_dimensions(table, template_type=None):
                             cell = row.cells[cell_element._index] if hasattr(cell_element, '_index') else None
                             if cell is None:
                                 continue
-                                
+                            
+                            # Check if this cell contains a DOH image before setting TOP alignment
+                            from src.core.utils.common import cell_contains_doh_image
+                            has_doh_image = cell_contains_doh_image(cell)
+                            
                             # Set cell vertical alignment to top to prevent content from expanding cell
-                            cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
+                            # BUT preserve center alignment for cells with DOH images
+                            if not has_doh_image:
+                                cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
+                            else:
+                                # AGGRESSIVELY preserve center alignment for DOH images
+                                cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+                                
+                                # Apply XML-level vertical alignment to be absolutely sure
+                                try:
+                                    from docx.oxml import OxmlElement
+                                    from docx.oxml.ns import qn
+                                    tc_element = cell._tc
+                                    tcPr = tc_element.get_or_add_tcPr()
+                                    
+                                    # Force vertical alignment at cell level
+                                    vAlign = tcPr.find(qn('w:vAlign'))
+                                    if vAlign is None:
+                                        vAlign = OxmlElement('w:vAlign')
+                                        tcPr.append(vAlign)
+                                    vAlign.set(qn('w:val'), 'center')
+                                    
+                                    # Also ensure paragraph centering
+                                    from docx.enum.text import WD_ALIGN_PARAGRAPH
+                                    for paragraph in cell.paragraphs:
+                                        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                        
+                                except Exception as e:
+                                    logger.warning(f"Error enforcing DOH center alignment in docx_formatting: {e}")
+                                
+                                logger.debug("Preserved center alignment for cell with DOH image in enforce_fixed_cell_dimensions")
                             
                             # Clear any cell margins that might allow expansion
                             clear_cell_margins(cell)
@@ -1523,4 +1559,245 @@ def fix_page_margins_for_4x3_grid(doc):
         return doc
     except Exception as e:
         logger.error(f"Error fixing 4x3 grid page margins: {e}")
+        return doc
+
+def prevent_table_expansion_enhanced(doc, template_type=None):
+    """
+    Enhanced table expansion prevention with multiple layers of protection.
+    This function applies the most aggressive table expansion prevention measures.
+    """
+    try:
+        from docx.shared import Inches, Pt
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+        from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_CELL_VERTICAL_ALIGNMENT
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from src.core.constants import CELL_DIMENSIONS
+        
+        logger.info(f"Applying enhanced table expansion prevention for template: {template_type}")
+        
+        for table in doc.tables:
+            try:
+                # LAYER 1: Disable all auto-sizing features
+                table.autofit = False
+                if hasattr(table, 'allow_autofit'):
+                    table.allow_autofit = False
+                
+                # LAYER 2: Force fixed table layout at XML level
+                tblPr = table._element.find(qn('w:tblPr'))
+                if tblPr is None:
+                    tblPr = OxmlElement('w:tblPr')
+                    table._element.insert(0, tblPr)
+                
+                # Remove any existing layout
+                for existing_layout in tblPr.findall(qn('w:tblLayout')):
+                    tblPr.remove(existing_layout)
+                
+                # Force fixed layout
+                tblLayout = OxmlElement('w:tblLayout')
+                tblLayout.set(qn('w:type'), 'fixed')
+                tblPr.append(tblLayout)
+                
+                # LAYER 3: Set absolute table width constraints
+                if template_type and template_type in CELL_DIMENSIONS:
+                    cell_dims = CELL_DIMENSIONS[template_type]
+                    
+                    # Calculate total table width based on grid layout
+                    if template_type in ['horizontal', 'vertical']:
+                        # 3x3 grid
+                        total_width = cell_dims['width'] * 3
+                        total_height = cell_dims['height'] * 3
+                    elif template_type == 'mini':
+                        # 4x5 grid (20 labels)
+                        total_width = cell_dims['width'] * 4
+                        total_height = cell_dims['height'] * 5
+                    elif template_type == 'double':
+                        # 4x3 grid
+                        total_width = cell_dims['width'] * 4
+                        total_height = cell_dims['height'] * 3
+                    elif template_type == 'inventory':
+                        # 2x2 grid
+                        total_width = cell_dims['width'] * 2
+                        total_height = cell_dims['height'] * 2
+                    else:
+                        # Default 3x3
+                        total_width = cell_dims['width'] * 3
+                        total_height = cell_dims['height'] * 3
+                    
+                    # Set absolute table width
+                    tblW = tblPr.find(qn('w:tblW'))
+                    if tblW is None:
+                        tblW = OxmlElement('w:tblW')
+                        tblPr.append(tblW)
+                    tblW.set(qn('w:w'), str(int(total_width * 1440)))  # Convert to twips
+                    tblW.set(qn('w:type'), 'dxa')  # Absolute width
+                    
+                    # LAYER 4: Create precise column grid
+                    tblGrid = table._element.find(qn('w:tblGrid'))
+                    if tblGrid is not None:
+                        tblGrid.getparent().remove(tblGrid)
+                    
+                    tblGrid = OxmlElement('w:tblGrid')
+                    num_cols = len(table.rows[0].cells) if table.rows else 3
+                    
+                    for _ in range(num_cols):
+                        gridCol = OxmlElement('w:gridCol')
+                        gridCol.set(qn('w:w'), str(int(cell_dims['width'] * 1440)))
+                        tblGrid.append(gridCol)
+                    table._element.insert(0, tblGrid)
+                
+                # LAYER 5: Process each row with absolute height constraints
+                for row in table.rows:
+                    # Set exact row height
+                    if template_type and template_type in CELL_DIMENSIONS:
+                        row.height = Inches(CELL_DIMENSIONS[template_type]['height'])
+                    else:
+                        row.height = Inches(2.4)  # Default
+                    row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+                    
+                    # LAYER 6: Process each cell with absolute constraints
+                    for cell in row.cells:
+                        # Check if this cell contains a DOH image before setting TOP alignment
+                        from src.core.utils.common import cell_contains_doh_image
+                        has_doh_image = cell_contains_doh_image(cell)
+                        
+                        # Set vertical alignment to prevent content from expanding cell
+                        # BUT preserve center alignment for cells with DOH images
+                        if not has_doh_image:
+                            cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
+                        else:
+                            # AGGRESSIVELY preserve center alignment for DOH images
+                            cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+                            
+                            # Apply XML-level vertical alignment to be absolutely sure
+                            try:
+                                from docx.oxml import OxmlElement
+                                from docx.oxml.ns import qn
+                                tc_element = cell._tc
+                                tcPr = tc_element.get_or_add_tcPr()
+                                
+                                # Force vertical alignment at cell level
+                                vAlign = tcPr.find(qn('w:vAlign'))
+                                if vAlign is None:
+                                    vAlign = OxmlElement('w:vAlign')
+                                    tcPr.append(vAlign)
+                                vAlign.set(qn('w:val'), 'center')
+                                
+                                # Also ensure paragraph centering
+                                from docx.enum.text import WD_ALIGN_PARAGRAPH
+                                for paragraph in cell.paragraphs:
+                                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                    
+                            except Exception as e:
+                                logger.warning(f"Error enforcing DOH center alignment in prevent_table_expansion_enhanced: {e}")
+                            logger.debug("Preserved center alignment for cell with DOH image in prevent_table_expansion_enhanced")
+                        
+                        # Clear all margins and padding
+                        clear_cell_margins(cell)
+                        clear_table_cell_padding(cell)
+                        
+                        # Force absolute cell dimensions at XML level
+                        tcPr = cell._tc.get_or_add_tcPr()
+                        
+                        # Set absolute cell width
+                        tcW = tcPr.find(qn('w:tcW'))
+                        if tcW is None:
+                            tcW = OxmlElement('w:tcW')
+                            tcPr.append(tcW)
+                        if template_type and template_type in CELL_DIMENSIONS:
+                            tcW.set(qn('w:w'), str(int(CELL_DIMENSIONS[template_type]['width'] * 1440)))
+                        else:
+                            tcW.set(qn('w:w'), '3456')  # Default 2.4 inches in twips
+                        tcW.set(qn('w:type'), 'dxa')
+                        
+                        # Set absolute cell height
+                        tcH = tcPr.find(qn('w:tcH'))
+                        if tcH is None:
+                            tcH = OxmlElement('w:tcH')
+                            tcPr.append(tcH)
+                        if template_type and template_type in CELL_DIMENSIONS:
+                            tcH.set(qn('w:w'), str(int(CELL_DIMENSIONS[template_type]['height'] * 1440)))
+                        else:
+                            tcH.set(qn('w:w'), '3456')  # Default 2.4 inches in twips
+                        tcH.set(qn('w:hRule'), 'exact')
+                        
+                        # Disable cell auto-sizing
+                        tcFitText = tcPr.find(qn('w:tcFitText'))
+                        if tcFitText is None:
+                            tcFitText = OxmlElement('w:tcFitText')
+                            tcPr.append(tcFitText)
+                        tcFitText.set(qn('w:val'), '0')  # Disable fit text
+                        
+                        # LAYER 7: Process paragraphs to prevent text overflow
+                        for paragraph in cell.paragraphs:
+                            # Set minimal spacing
+                            paragraph.paragraph_format.space_before = Pt(0)
+                            paragraph.paragraph_format.space_after = Pt(0)
+                            paragraph.paragraph_format.line_spacing = 1.0
+                            
+                            # Force left alignment to prevent expansion
+                            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                            
+                            # Add text wrapping controls at XML level
+                            pPr = paragraph._element.get_or_add_pPr()
+                            
+                            # Enable word wrapping
+                            wrap = pPr.find(qn('w:wordWrap'))
+                            if wrap is None:
+                                wrap = OxmlElement('w:wordWrap')
+                                pPr.append(wrap)
+                            wrap.set(qn('w:val'), '1')
+                            
+                            # Disable overflow
+                            overflow = pPr.find(qn('w:overflowPunct'))
+                            if overflow is None:
+                                overflow = OxmlElement('w:overflowPunct')
+                                pPr.append(overflow)
+                            overflow.set(qn('w:val'), '0')
+                            
+                            # LAYER 8: Process runs to prevent font expansion
+                            for run in paragraph.runs:
+                                # Ensure text doesn't cause expansion
+                                if len(run.text) > 100:
+                                    # Truncate very long text
+                                    run.text = run.text[:97] + "..."
+                                
+                                # Set font properties to prevent expansion
+                                if not run.font.size:
+                                    run.font.size = Pt(12)
+                                
+                                # Add text wrapping control to run level
+                                rPr = run._element.get_or_add_rPr()
+                                
+                                wrap_run = rPr.find(qn('w:wordWrap'))
+                                if wrap_run is None:
+                                    wrap_run = OxmlElement('w:wordWrap')
+                                    rPr.append(wrap_run)
+                                wrap_run.set(qn('w:val'), '1')
+                
+                # LAYER 9: Final table-level constraints
+                # Disable all table auto-sizing features
+                tblLook = tblPr.find(qn('w:tblLook'))
+                if tblLook is None:
+                    tblLook = OxmlElement('w:tblLook')
+                    tblPr.append(tblLook)
+                tblLook.set(qn('w:val'), '0000')  # Disable all auto-sizing
+                tblLook.set(qn('w:firstRow'), '0')
+                tblLook.set(qn('w:lastRow'), '0')
+                tblLook.set(qn('w:firstColumn'), '0')
+                tblLook.set(qn('w:lastColumn'), '0')
+                tblLook.set(qn('w:noHBand'), '0')
+                tblLook.set(qn('w:noVBand'), '0')
+                
+                logger.debug(f"Applied enhanced table expansion prevention to table with {len(table.rows)} rows")
+                
+            except Exception as table_error:
+                logger.warning(f"Error applying enhanced expansion prevention to table: {table_error}")
+                continue
+        
+        logger.info("Enhanced table expansion prevention completed")
+        return doc
+        
+    except Exception as e:
+        logger.error(f"Error in enhanced table expansion prevention: {e}")
         return doc 

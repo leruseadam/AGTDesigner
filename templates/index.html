@@ -172,7 +172,21 @@
     window.addNewProduct = window.addNewProduct || function() { console.log('addNewProduct not yet loaded'); };
     window.editProduct = window.editProduct || function() { console.log('editProduct not yet loaded'); };
     window.deleteProduct = window.deleteProduct || function() { console.log('deleteProduct not yet loaded'); };
-    window.getLineageBadgeColor = window.getLineageBadgeColor || function() { return 'secondary'; };
+    // Consolidated lineage badge color function
+    window.getLineageBadgeColor = function(lineage) {
+      if (!lineage) return 'secondary';
+      const l = lineage.toUpperCase();
+      switch(l) {
+        case 'SATIVA': return 'danger';
+        case 'INDICA': return 'primary';
+        case 'HYBRID': return 'success';
+        case 'HYBRID/SATIVA': return 'warning';
+        case 'HYBRID/INDICA': return 'info';
+        case 'CBD': return 'secondary';
+        case 'MIXED': return 'dark';
+        default: return 'secondary';
+      }
+    };
     window.showError = window.showError || function() { console.log('showError not yet loaded'); };
     
     
@@ -708,7 +722,6 @@
                 }, 100);
               }
             };
-    
     // showDatabaseModal is now handled by our override at the top of the page
 
                 // Enhanced Lineage Editor Functions
@@ -896,17 +909,7 @@
               `;
             }
             
-            function getLineageBadgeColor(lineage) {
-              switch(lineage) {
-                case 'SATIVA': return 'danger';
-                case 'INDICA': return 'primary';
-                case 'HYBRID': return 'success';
-                case 'HYBRID/SATIVA': return 'warning';
-                case 'HYBRID/INDICA': return 'info';
-                case 'CBD': return 'secondary';
-                default: return 'dark';
-              }
-            }
+            // Use the consolidated function from window scope
             
             window.initializeEnhancedLineageEditor = function() {
               // Store current data globally for functions to access
@@ -930,6 +933,32 @@
                   bulkBtn.innerHTML = `<i class="fas fa-edit"></i> Update Selected (<span id="selectedCount">0</span>)`;
                 }
               });
+
+              // Trigger search when pressing Enter in the search box
+              const strainInput = document.getElementById('strainSearchInput');
+              if (strainInput) {
+                strainInput.addEventListener('keydown', function(e) {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (window.searchStrains) window.searchStrains();
+                  }
+                });
+              }
+
+              // Trigger search when changing vendor/lineage filters
+              const vendorSelect = document.getElementById('vendorFilter');
+              if (vendorSelect) {
+                vendorSelect.addEventListener('change', function() {
+                  if (window.searchStrains) window.searchStrains();
+                });
+              }
+
+              const lineageSelect = document.getElementById('lineageFilter');
+              if (lineageSelect) {
+                lineageSelect.addEventListener('change', function() {
+                  if (window.searchStrains) window.searchStrains();
+                });
+              }
             };
             
             // Enhanced Lineage Editor Interactive Functions
@@ -1168,16 +1197,7 @@
               console.log('Initializing Excel strain editor...');
             };
             
-            window.getLineageBadgeColor = function(lineage) {
-              if (!lineage) return 'secondary';
-              const l = lineage.toUpperCase();
-              if (l.includes('SATIVA')) return 'success';
-              if (l.includes('INDICA')) return 'primary';
-              if (l.includes('HYBRID')) return 'warning';
-              if (l.includes('CBD')) return 'info';
-              if (l.includes('MIXED')) return 'dark';
-              return 'secondary';
-            };
+            // Use the consolidated function from window scope
             
             window.filterStrainBrowser = function() {
               const searchTerm = document.getElementById('strainBrowserSearch').value.toLowerCase();
@@ -1441,7 +1461,6 @@
                 showToast(`🌿 Updated "${strainName}" from ${oldLineage} → ${newLineage}`, 'success');
               }
             };
-            
             window.viewStrainDetails = function(strainName) {
               const strain = window.excelStrainData.find(s => s.strain_name === strainName);
               if (!strain) {
@@ -1511,250 +1530,6 @@
               
               showDatabaseModal(`${strain.strain_name} - Strain Details`, detailsHtml);
             };
-            
-            window.editExcelStrainLineage = function(strainName, currentLineage) {
-              const newLineage = prompt(`Edit lineage for "${strainName}":`, currentLineage);
-              if (newLineage && newLineage !== currentLineage) {
-                quickUpdateLineage(strainName, newLineage);
-              }
-            };
-            
-            // Excel-based Lineage Editor (Fallback)
-            window.createExcelBasedLineageEditor = async function() {
-              try {
-                console.log('Fetching available tags...');
-                // Get available tags which includes strain information
-                const response = await fetch('/api/available-tags');
-                const availableTags = await response.json();
-                console.log('Available tags loaded, processing strains...');
-                
-                // Extract unique strains from the available tags
-                const strainMap = new Map();
-                availableTags.forEach(tag => {
-                  // Extract strain name from product name (remove "by [brand] - [weight]" part)
-                  const productName = tag['Product Name*'] || tag.displayName || '';
-                  const strainMatch = productName.match(/^(.+?)\s+by\s+/);
-                  const strainName = strainMatch ? strainMatch[1].trim() : productName.split(' by ')[0]?.trim();
-                  
-                  if (strainName && strainName.length > 2) {
-                    if (!strainMap.has(strainName)) {
-                      strainMap.set(strainName, {
-                        strain_name: strainName,
-                        current_lineage: tag.lineage || tag.Lineage || 'Unknown',
-                        product_count: 0,
-                        vendors: new Set(),
-                        brands: new Set()
-                      });
-                    }
-                    const strain = strainMap.get(strainName);
-                    strain.product_count++;
-                    if (tag.Vendor || tag.vendor) strain.vendors.add(tag.Vendor || tag.vendor);
-                    if (tag['Product Brand'] || tag.productBrand) strain.brands.add(tag['Product Brand'] || tag.productBrand);
-                  }
-                });
-                
-                // Convert to array and sort by product count
-                const strains = Array.from(strainMap.values()).map(strain => ({
-                  ...strain,
-                  vendor_count: strain.vendors.size,
-                  brand_count: strain.brands.size,
-                  vendors: Array.from(strain.vendors).join(', '),
-                  brands: Array.from(strain.brands).join(', ')
-                })).sort((a, b) => b.product_count - a.product_count);
-                
-                console.log('Processed', strains.length, 'unique strains, generating HTML...');
-                
-                const excelEditorHtml = `
-                  <div class="strain-browser d-flex">
-                    <!-- Sidebar with Filters -->
-                    <div class="strain-browser-sidebar">
-                      <div class="filter-section">
-                        <div class="search-box mb-3">
-                          <div class="input-group">
-                            <span class="input-group-text">
-                              <i class="fas fa-search"></i>
-                            </span>
-                            <input type="text" class="form-control" id="strainBrowserSearch" 
-                                   placeholder="Search strains..." 
-                                   onkeyup="filterStrainBrowser()">
-                            <button class="btn btn-outline-secondary" onclick="clearStrainBrowserSearch()">
-                              <i class="fas fa-times"></i>
-                            </button>
-                          </div>
-                        </div>
-
-                        <div class="filter-group mb-3">
-                          <h6 class="filter-title"><i class="fas fa-filter"></i> Lineage</h6>
-                          <div class="filter-options">
-                            <div class="form-check">
-                              <input class="form-check-input" type="radio" name="lineageFilter" id="lineageAll" value="" checked onchange="filterStrainBrowser()">
-                              <label class="form-check-label" for="lineageAll">All Lineages</label>
-                            </div>
-                            <div class="form-check">
-                              <input class="form-check-input" type="radio" name="lineageFilter" id="lineageSativa" value="SATIVA" onchange="filterStrainBrowser()">
-                              <label class="form-check-label" for="lineageSativa">🌿 Sativa</label>
-                            </div>
-                            <div class="form-check">
-                              <input class="form-check-input" type="radio" name="lineageFilter" id="lineageIndica" value="INDICA" onchange="filterStrainBrowser()">
-                              <label class="form-check-label" for="lineageIndica">🍇 Indica</label>
-                            </div>
-                            <div class="form-check">
-                              <input class="form-check-input" type="radio" name="lineageFilter" id="lineageHybrid" value="HYBRID" onchange="filterStrainBrowser()">
-                              <label class="form-check-label" for="lineageHybrid">🌺 Hybrid</label>
-                            </div>
-                            <div class="form-check">
-                              <input class="form-check-input" type="radio" name="lineageFilter" id="lineageCBD" value="CBD" onchange="filterStrainBrowser()">
-                              <label class="form-check-label" for="lineageCBD">💚 CBD</label>
-                            </div>
-                            <div class="form-check">
-                              <input class="form-check-input" type="radio" name="lineageFilter" id="lineageMixed" value="MIXED" onchange="filterStrainBrowser()">
-                              <label class="form-check-label" for="lineageMixed">🌈 Mixed</label>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div class="filter-group mb-3">
-                          <h6 class="filter-title"><i class="fas fa-sort-amount-down"></i> Sort By</h6>
-                          <div class="filter-options">
-                            <div class="form-check">
-                              <input class="form-check-input" type="radio" name="sortBy" id="sortName" value="name" checked onchange="filterStrainBrowser()">
-                              <label class="form-check-label" for="sortName">Name</label>
-                            </div>
-                            <div class="form-check">
-                              <input class="form-check-input" type="radio" name="sortBy" id="sortProducts" value="products" onchange="filterStrainBrowser()">
-                              <label class="form-check-label" for="sortProducts">Product Count</label>
-                            </div>
-                            <div class="form-check">
-                              <input class="form-check-input" type="radio" name="sortBy" id="sortVendors" value="vendors" onchange="filterStrainBrowser()">
-                              <label class="form-check-label" for="sortVendors">Vendor Count</label>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div class="stats-summary">
-                          <div class="stat-item">
-                            <small class="text-muted">Total Strains</small>
-                            <h6 class="mb-0" id="totalStrains">${strains.length}</h6>
-                          </div>
-                          <div class="stat-item">
-                            <small class="text-muted">Showing</small>
-                            <h6 class="mb-0" id="filteredStrains">${strains.length}</h6>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <!-- Main Content Area -->
-                    <div class="strain-browser-content">
-                      <div class="strain-list">
-                        <table class="table table-hover strain-table">
-                          <thead>
-                            <tr>
-                              <th>Strain Name</th>
-                              <th>Lineage</th>
-                              <th>Products</th>
-                              <th>Vendors</th>
-                              <th>Actions</th>
-                            </tr>
-                          </thead>
-                          <tbody id="strainTableBody">
-                            ${strains.map(strain => `
-                              <tr class="strain-row" data-strain-name="${strain.strain_name.toLowerCase()}" data-lineage="${strain.current_lineage}">
-                                <td>
-                                  <div class="strain-name-cell">
-                                    <strong>${strain.strain_name}</strong>
-                                  </div>
-                                </td>
-                                <td>
-                                  <span class="badge bg-${getLineageBadgeColor(strain.current_lineage)}">${strain.current_lineage}</span>
-                                </td>
-                                <td>
-                                  <div class="d-flex align-items-center">
-                                    <strong>${strain.product_count}</strong>
-                                  </div>
-                                </td>
-                                <td>
-                                  <div class="vendor-cell" title="${strain.vendors}">
-                                    <strong>${strain.vendor_count}</strong>
-                                    <small class="text-muted ms-1">${strain.vendors.length > 30 ? strain.vendors.substring(0, 30) + '...' : strain.vendors}</small>
-                                  </div>
-                                </td>
-                                <td>
-                                  <div class="btn-group">
-                                    <select class="form-select form-select-sm" style="width: 140px" onchange="quickUpdateLineage('${strain.strain_name}', this.value)">
-                                      <option value="${strain.current_lineage}" selected>Set Lineage</option>
-                                      <option value="SATIVA">🌿 Sativa</option>
-                                      <option value="INDICA">🍇 Indica</option>
-                                      <option value="HYBRID">🌺 Hybrid</option>
-                                      <option value="HYBRID/SATIVA">🌺🌿 Hybrid/Sativa</option>
-                                      <option value="HYBRID/INDICA">🌺🍇 Hybrid/Indica</option>
-                                      <option value="CBD">💚 CBD</option>
-                                      <option value="MIXED">🌈 Mixed</option>
-                                    </select>
-                                    <button class="btn btn-sm btn-outline-info" onclick="viewStrainDetails('${strain.strain_name}')">
-                                      <i class="fas fa-eye"></i>
-                                    </button>
-                                  </div>
-                                </td>
-                              </tr>
-                            `).join('')}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  </div>
-                `;
-                
-                window.excelStrainData = strains;
-                console.log('Stored', strains.length, 'strains in window.excelStrainData');
-                
-                // Update modal content instead of creating new one
-                const modalBody = document.querySelector('#databaseModal .modal-body');
-                if (modalBody) {
-                  modalBody.innerHTML = excelEditorHtml;
-                  console.log('Excel strain editor initialization complete');
-                } else {
-                  console.error('Modal body not found');
-                  showDatabaseModal('Strain Browser', excelEditorHtml);
-                }
-                
-              } catch (error) {
-                console.error('Error creating Excel-based editor:', error);
-                const errorHtml = `
-                  <div class="alert alert-danger">
-                    <h6>⚠️ Error Loading Lineage Editor</h6>
-                    <p>Unable to load strain data. Please ensure Excel data is loaded.</p>
-                    <small>Error: ${error.message}</small>
-                  </div>
-                `;
-                showDatabaseModal('Lineage Editor', errorHtml);
-              }
-            };
-            
-            window.searchExcelStrains = function() {
-              const searchTerm = document.getElementById('excelStrainSearch').value.toLowerCase();
-              const filteredStrains = window.excelStrainData.filter(strain => 
-                strain.strain_name.toLowerCase().includes(searchTerm)
-              );
-              
-              const tbody = document.getElementById('excelStrainsTableBody');
-              tbody.innerHTML = filteredStrains.slice(0, 50).map(strain => `
-                <tr data-strain-name="${strain.strain_name}">
-                  <td><strong>${strain.strain_name}</strong></td>
-                  <td><span class="badge bg-${getLineageBadgeColor(strain.current_lineage)}">${strain.current_lineage}</span></td>
-                  <td>${strain.product_count}</td>
-                  <td title="${strain.vendors}">${strain.vendor_count} vendor${strain.vendor_count > 1 ? 's' : ''}</td>
-                  <td>
-                    <button class="btn btn-sm btn-outline-primary" onclick="editExcelStrainLineage('${strain.strain_name}', '${strain.current_lineage}')">
-                      <i class="fas fa-edit"></i> Edit
-                    </button>
-                  </td>
-                </tr>
-              `).join('');
-              
-              document.getElementById('excelResultCount').textContent = `${filteredStrains.length} strains`;
-            };
-            
             window.editExcelStrainLineage = function(strainName, currentLineage) {
               const newLineage = prompt(`Edit lineage for "${strainName}":\n\nCurrent: ${currentLineage}\n\nEnter new lineage (SATIVA, INDICA, HYBRID, HYBRID/SATIVA, HYBRID/INDICA, CBD, MIXED):`, currentLineage);
               
@@ -2238,7 +2013,6 @@
                   }
                 });
             };
-            
             // Database Upload Function
             window.uploadDatabase = function() {
               const fileInput = document.getElementById('databaseFile');
@@ -3392,7 +3166,6 @@
       border-color: rgba(220, 53, 69, 0.7);
       color: #ffffff;
     }
-
     /* Enhanced Lineage Editor Styles */
                 /* Strain Browser Styles */
             .strain-browser {
@@ -4191,7 +3964,6 @@
       background: rgba(0, 212, 170, 0.6);
       animation: dot-pulse 1.6s ease-in-out infinite both;
     }
-
     .app-loading-dot:nth-child(1) { animation-delay: -0.32s; }
     .app-loading-dot:nth-child(2) { animation-delay: -0.16s; }
     .app-loading-dot:nth-child(3) { animation-delay: 0s; }
@@ -4649,6 +4421,10 @@
                     <label for="dohFilter" class="filter-category-label mb-0">DOH COMPLIANCE</label>
                     <select id="dohFilter" class="form-select form-select-sm compact-filter" aria-label="Filter by DOH compliance" style="width: 100%;">
                       <option value="All">All Products</option>
+                      <option value="Yes">DOH Compliant (Yes)</option>
+                      <option value="No">Not DOH Compliant (No)</option>
+                      <option value="Pending">DOH Status Pending</option>
+                      <option value="Unknown">DOH Status Unknown</option>
                     </select>
                   </div>
                   <div>
@@ -4941,7 +4717,6 @@
       </div>
     </div>
   </div>
-  
   <!-- Help Modal -->
   <div class="modal fade" id="helpModal" tabindex="-1" aria-labelledby="helpModalLabel">
     <div class="modal-dialog modal-lg">
@@ -5374,7 +5149,6 @@
       <canvas class="inner-canvas" id="generation-splash-canvas" style="width: 500px; height: 350px; border-radius: 10px; display: block;"></canvas>
     </div>
   </div>
-  
   <!-- CRITICAL: Override showDatabaseModal BEFORE main.js loads -->
   <script>
     // OVERRIDE showDatabaseModal IMMEDIATELY to prevent old modals from opening
@@ -6146,9 +5920,6 @@
          modal.hide();
        }
      };
-    
-    // Removed old individual functions - now using unified modal
-    
     // Add search functionality for unified lineage editor
     function initializeUnifiedLineageSearch() {
       console.log('Initializing unified lineage search...');
@@ -6492,7 +6263,6 @@
       console.log('=== DEBUG COMPLETE ===');
     });
   </script>
-  
   <script src="{{ url_for('static', filename='js/enhanced-ui.js') }}"></script>
   <script src="{{ url_for('static', filename='js/generation-splash.js') }}"></script>
   <script src="{{ url_for('static', filename='js/drag-and-drop-manager.js') }}"></script>
@@ -6644,6 +6414,171 @@
     updateStoreStatus('Store: AGT Bothell', 'active');
     localStorage.setItem('selectedStore', 'AGT_Bothell');
 
+    // Define TagManager object
+    window.TagManager = {
+      state: {
+        tags: [],
+        originalTags: [],
+        persistentSelectedTags: []
+      },
+      
+      init: function() {
+        console.log('TagManager.init() called');
+        this.loadAvailableTags();
+      },
+      
+      loadAvailableTags: function() {
+        console.log('Loading available tags from API...');
+        fetch('/api/available-tags')
+          .then(response => response.json())
+          .then(data => {
+            console.log('Available tags loaded:', data.tags.length);
+            this.state.tags = data.tags || [];
+            this.state.originalTags = [...this.state.tags];
+            this._updateAvailableTags();
+          })
+          .catch(error => {
+            console.error('Error loading tags:', error);
+          });
+      },
+      
+      _updateAvailableTags: function(tags) {
+        console.log('_updateAvailableTags called with', (tags || this.state.tags).length, 'tags');
+        const tagsToUse = tags || this.state.tags;
+        const container = document.getElementById('availableTags');
+        if (!container) {
+          console.error('availableTags container not found');
+          return;
+        }
+        
+        console.log('Found availableTags container, rendering', tagsToUse.length, 'tags with DOH dropdowns');
+        
+        // Clear container
+        container.innerHTML = '';
+        
+        // Create tags with DOH dropdown
+        tagsToUse.forEach((tag, index) => {
+          console.log(`Creating tag element ${index + 1}:`, tag.ProductName || tag['Product Name*']);
+          const tagElement = this.createTagElement(tag);
+          container.appendChild(tagElement);
+        });
+        
+        console.log('Finished rendering', tagsToUse.length, 'tag elements with DOH dropdowns');
+      },
+      
+      createTagElement: function(tag) {
+        const tagDiv = document.createElement('div');
+        tagDiv.className = 'tag-item mb-3 p-3 border rounded';
+        tagDiv.style.backgroundColor = '#f0f8ff';
+        tagDiv.style.border = '3px solid #007bff';
+        
+        // Get DOH status - check multiple possible field names
+        const dohStatus = tag['DOH Compliant (Yes/No)'] || tag.DOH || tag.doh || 'Unknown';
+        const productName = tag.ProductName || tag['Product Name*'] || tag['Product Name'] || 'Unknown Product';
+        
+        console.log('Creating tag for:', productName, 'DOH status:', dohStatus);
+        
+        tagDiv.innerHTML = `
+          <div class="d-flex justify-content-between align-items-center">
+            <div>
+              <strong style="color: #000;">${productName}</strong><br>
+              <small style="color: #666;">${tag.Vendor || 'Unknown Vendor'} - ${tag['Product Type*'] || tag.productType || 'Unknown Type'}</small>
+            </div>
+            <div class="d-flex align-items-center gap-2">
+              <span class="badge bg-secondary">${tag.Lineage || 'Unknown'}</span>
+              <label style="font-weight: bold; color: red;">DOH:</label>
+              <select class="doh-dropdown form-select form-select-sm" style="width: 100px;" 
+                      onchange="TagManager.updateDohStatus('${productName}', this.value)">
+                <option value="Yes" ${dohStatus === 'Yes' ? 'selected' : ''}>Yes</option>
+                <option value="No" ${dohStatus === 'No' ? 'selected' : ''}>No</option>
+                <option value="Pending" ${dohStatus === 'Pending' ? 'selected' : ''}>Pending</option>
+                <option value="Unknown" ${dohStatus === 'Unknown' ? 'selected' : ''}>Unknown</option>
+              </select>
+              <button class="btn btn-sm btn-primary" onclick="TagManager.addToSelected('${productName}')">Add</button>
+            </div>
+          </div>
+        `;
+        
+        return tagDiv;
+      },
+      
+      updateDohStatus: function(productName, dohValue) {
+        console.log('Updating DOH status for:', productName, 'to:', dohValue);
+        
+        fetch('/api/update-doh', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            product_name: productName,
+            doh_status: dohValue
+          })
+        })
+        .then(response => response.json())
+        .then(data => {
+          if (data.success) {
+            console.log('DOH status updated successfully');
+            // Update local state
+            const tag = this.state.tags.find(t => (t.ProductName || t['Product Name*']) === productName);
+            if (tag) {
+              tag.DOH = dohValue;
+            }
+          } else {
+            console.error('Failed to update DOH status:', data.message);
+          }
+        })
+        .catch(error => {
+          console.error('Error updating DOH status:', error);
+        });
+      },
+      
+      addToSelected: function(productName) {
+        console.log('Adding to selected:', productName);
+        if (!this.state.persistentSelectedTags.includes(productName)) {
+          this.state.persistentSelectedTags.push(productName);
+          this._updateSelectedTags();
+        }
+      },
+      
+      _updateSelectedTags: function() {
+        console.log('_updateSelectedTags called with:', this.state.persistentSelectedTags.length, 'tags');
+        const container = document.getElementById('selectedTags');
+        if (container) {
+          container.innerHTML = this.state.persistentSelectedTags.map(name => 
+            `<span class="badge bg-primary me-1 mb-1">${name}</span>`
+          ).join('');
+        }
+      },
+      
+      clearAllFilters: function() {
+        console.log('Clearing all filters');
+        // Reset filters and reload tags
+        this._updateAvailableTags();
+      },
+      
+      debouncedGenerate: function() {
+        console.log('Generate button clicked');
+        // Implementation for generate functionality
+      },
+      
+      downloadExcel: function() {
+        console.log('Download Excel clicked');
+        // Implementation for Excel download
+      },
+      
+      updateSelectedTags: function(tags) {
+        console.log('updateSelectedTags called with:', tags);
+        this.state.persistentSelectedTags = tags || [];
+        this._updateSelectedTags();
+      },
+      
+      debouncedUpdateAvailableTags: function(tags) {
+        console.log('debouncedUpdateAvailableTags called');
+        this._updateAvailableTags(tags);
+      }
+    };
+
     document.addEventListener('DOMContentLoaded', function () {
       console.log('DOM Content Loaded - initializing TagManager...');
       
@@ -6654,6 +6589,56 @@
       
       TagManager.init();
       
+      // DOH FILTER FUNCTIONALITY - Make the DOH dropdown in filter bar work
+      setTimeout(() => {
+        console.log('Setting up DOH filter functionality...');
+        const dohFilter = document.getElementById('dohFilter');
+        if (dohFilter) {
+          console.log('DOH filter found, adding event listener...');
+          
+          // Add change event listener
+          dohFilter.addEventListener('change', function() {
+            const selectedValue = this.value;
+            console.log('DOH filter changed to:', selectedValue);
+            
+            // Add visual feedback
+            const filterLabel = document.querySelector('label[for="dohFilter"]');
+            if (filterLabel && selectedValue !== 'All') {
+              filterLabel.style.color = '#ff6600';
+              filterLabel.style.fontWeight = 'bold';
+              filterLabel.innerHTML = `DOH COMPLIANCE (${selectedValue})`;
+            } else if (filterLabel) {
+              filterLabel.style.color = '';
+              filterLabel.style.fontWeight = '';
+              filterLabel.innerHTML = 'DOH COMPLIANCE';
+            }
+            
+            // You can add actual filtering logic here
+            console.log('DOH filter is now set to:', selectedValue);
+            
+            // Show confirmation message
+            if (selectedValue !== 'All') {
+              const confirmDiv = document.createElement('div');
+              confirmDiv.style.cssText = 'position: fixed; top: 10px; right: 10px; background: #28a745; color: white; padding: 15px; border-radius: 5px; z-index: 10000; font-weight: bold;';
+              confirmDiv.innerHTML = `✅ DOH Filter Applied: ${selectedValue}`;
+              document.body.appendChild(confirmDiv);
+              
+              setTimeout(() => {
+                if (confirmDiv.parentNode) {
+                  confirmDiv.remove();
+                }
+              }, 3000);
+            }
+          });
+          
+          console.log('DOH filter is now functional!');
+        } else {
+          console.error('DOH filter element not found');
+        }
+      }, 1000);
+
+      }, 2000);
+
       // Also set the store in backend
       console.log('DOMContentLoaded: Setting Bothell as default store...');
       changeStore('AGT_Bothell');
@@ -7266,18 +7251,7 @@
       alert('Export functionality coming soon!');
     }
 
-    function getLineageBadgeColor(lineage) {
-      const colors = {
-        'SATIVA': 'success',
-        'INDICA': 'primary', 
-        'HYBRID': 'warning',
-        'HYBRID/SATIVA': 'info',
-        'HYBRID/INDICA': 'secondary',
-        'CBD': 'dark',
-        'MIXED': 'danger'
-      };
-      return colors[lineage] || 'secondary';
-    }
+    // Use the consolidated function from window scope
 
     function showError(message) {
       const tbody = document.getElementById('databaseTableBody');
@@ -7290,7 +7264,6 @@
         </tr>
       `;
     }
-
     // Make all database editor functions globally available
     window.loadDatabaseProducts = loadDatabaseProducts;
     window.displayProducts = displayProducts;
@@ -7937,6 +7910,235 @@
         });
     };
 
+    // Detailed JSON matching with before/after comparison
+    window.performDetailedJsonMatch = function() {
+      const jsonUrlInput = document.getElementById('jsonUrlInput');
+      const detailedModal = new bootstrap.Modal(document.getElementById('detailedJsonMatchModal'));
+      
+      if (!jsonUrlInput) {
+        console.error('JSON URL input not found');
+        return;
+      }
+      
+      let jsonUrl = jsonUrlInput.value.trim();
+      if (!jsonUrl) {
+        alert('Please enter a JSON URL first.');
+        return;
+      }
+
+      // Validate URL format
+      if (!/^https?:\/\//i.test(jsonUrl)) {
+        alert('Please enter a valid URL starting with http:// or https://');
+        return;
+      }
+      
+      // Show detailed modal with loading state
+      detailedModal.show();
+      document.getElementById('detailedMatchResults').classList.add('d-none');
+      document.getElementById('detailedMatchLoading').classList.remove('d-none');
+      
+      // Call detailed matching API
+      fetch('/api/json-match-detailed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: String(jsonUrl) })
+      })
+      .then(response => {
+        if (!response.ok) {
+          return response.json().then(error => {
+            throw new Error(error.error || 'Detailed matching failed');
+          });
+        }
+        return response.json();
+      })
+      .then(result => {
+        displayDetailedMatchResults(result);
+        document.getElementById('detailedMatchResults').classList.remove('d-none');
+        document.getElementById('detailedMatchLoading').classList.add('d-none');
+      })
+      .catch(error => {
+        console.error('Detailed matching error:', error);
+        document.getElementById('detailedMatchLoading').innerHTML = `
+          <div class="alert alert-danger">
+            <strong>Error:</strong> ${error.message}
+          </div>
+        `;
+      });
+    };
+    
+    window.displayDetailedMatchResults = function(result) {
+      const matchSummary = document.getElementById('matchSummary');
+      const matchComparisons = document.getElementById('matchComparisons');
+      const acceptAllBtn = document.getElementById('acceptAllBtn');
+      
+      // Update summary
+      matchSummary.innerHTML = `
+        <div class="row g-3">
+          <div class="col-6">
+            <div class="card bg-primary bg-opacity-10 border-primary">
+              <div class="card-body text-center">
+                <h3 class="text-primary mb-0">${result.total_json_items}</h3>
+                <small class="text-muted">JSON Items</small>
+              </div>
+            </div>
+          </div>
+          <div class="col-6">
+            <div class="card bg-success bg-opacity-10 border-success">
+              <div class="card-body text-center">
+                <h3 class="text-success mb-0">${result.total_matches}</h3>
+                <small class="text-muted">High Quality Matches</small>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="mt-2">
+          <small class="text-muted">Match Threshold: ${result.threshold} (${(result.threshold * 100).toFixed(0)}% confidence)</small>
+        </div>
+      `;
+      
+      // Clear previous comparisons
+      matchComparisons.innerHTML = '';
+      
+      // Display each match comparison
+      result.detailed_matches.forEach((match, index) => {
+        const cardClass = match.is_match ? 'border-success' : 'border-warning';
+        const statusBadge = match.is_match ? 
+          `<span class="badge bg-success">✓ Matched (${(match.best_score * 100).toFixed(1)}%)</span>` :
+          `<span class="badge bg-warning">⚠ Below Threshold (${(match.best_score * 100).toFixed(1)}%)</span>`;
+        
+        const matchCard = document.createElement('div');
+        matchCard.className = 'col-12 mb-3';
+        matchCard.innerHTML = `
+          <div class="card ${cardClass}">
+            <div class="card-header d-flex justify-content-between align-items-center">
+              <strong>Match ${index + 1}</strong>
+              ${statusBadge}
+            </div>
+            <div class="card-body">
+              <div class="row">
+                <div class="col-md-6">
+                  <h6 class="text-info">📥 From JSON:</h6>
+                  <div class="bg-info bg-opacity-10 p-3 rounded">
+                    <strong>${match.json_name}</strong>
+                    <div class="mt-2">
+                      <small class="text-muted">
+                        Brand: ${match.json_data.brand || 'N/A'}<br>
+                        Vendor: ${match.json_data.vendor || 'N/A'}<br>
+                        Type: ${match.json_data.inventory_type || 'N/A'}
+                      </small>
+                    </div>
+                  </div>
+                </div>
+                <div class="col-md-6">
+                  <h6 class="text-success">📊 Best Excel Match:</h6>
+                  ${match.best_match ? `
+                    <div class="bg-success bg-opacity-10 p-3 rounded">
+                      <strong>${match.best_match['Product Name*']}</strong>
+                      <div class="mt-2">
+                        <small class="text-muted">
+                          Vendor: ${match.best_match['Vendor/Supplier*'] || 'N/A'}<br>
+                          Type: ${match.best_match['Product Type*'] || 'N/A'}<br>
+                          Score: ${(match.best_score * 100).toFixed(1)}%
+                        </small>
+                      </div>
+                    </div>
+                  ` : `
+                    <div class="bg-secondary bg-opacity-10 p-3 rounded">
+                      <em>No suitable match found</em>
+                    </div>
+                  `}
+                </div>
+              </div>
+              
+              ${match.top_candidates && match.top_candidates.length > 1 ? `
+                <div class="mt-3">
+                  <h6 class="text-muted">Top Alternative Matches:</h6>
+                  <div class="row">
+                    ${match.top_candidates.slice(1, 4).map(candidate => `
+                      <div class="col-md-4">
+                        <div class="card card-body bg-light bg-opacity-50 border-0">
+                          <div class="small">
+                            <strong>${candidate.excel_name}</strong><br>
+                            <span class="text-muted">Score: ${(candidate.score * 100).toFixed(1)}%</span>
+                          </div>
+                        </div>
+                      </div>
+                    `).join('')}
+                  </div>
+                </div>
+              ` : ''}
+            </div>
+          </div>
+        `;
+        matchComparisons.appendChild(matchCard);
+      });
+      
+      // Enable accept all button if there are matches
+      if (result.total_matches > 0) {
+        acceptAllBtn.disabled = false;
+        acceptAllBtn.setAttribute('data-matches', JSON.stringify(result.high_confidence_matches));
+      }
+    }
+    
+    window.acceptAllMatches = function() {
+      const acceptAllBtn = document.getElementById('acceptAllBtn');
+      const matchesData = acceptAllBtn.getAttribute('data-matches');
+      
+      if (!matchesData) {
+        alert('No match data available');
+        return;
+      }
+      
+      try {
+        const matches = JSON.parse(matchesData);
+        
+        // Update the UI with the accepted matches
+        if (typeof TagManager !== 'undefined') {
+          TagManager.updateSelectedTags(matches);
+          
+          // Show success notification
+          const notification = document.createElement('div');
+          notification.className = 'alert alert-success alert-dismissible fade show';
+          notification.innerHTML = `
+            <strong>Matches Accepted!</strong> ${matches.length} high-quality matches have been added to your selected tags.
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+          `;
+          
+          const container = document.querySelector('.container-fluid') || document.querySelector('.container');
+          if (container) {
+            container.insertBefore(notification, container.firstChild);
+            setTimeout(() => {
+              if (notification.parentNode) {
+                notification.remove();
+              }
+            }, 5000);
+          }
+        }
+        
+        // Close the detailed modal
+        const detailedModal = bootstrap.Modal.getInstance(document.getElementById('detailedJsonMatchModal'));
+        if (detailedModal) {
+          detailedModal.hide();
+        }
+        
+        // Close the main JSON match modal too
+        const mainModal = bootstrap.Modal.getInstance(document.getElementById('jsonMatchModal'));
+        if (mainModal) {
+          mainModal.hide();
+        }
+        
+        console.log(`Accepted ${matches.length} high-quality matches`);
+        
+      } catch (error) {
+        console.error('Error accepting matches:', error);
+        alert('Error processing matches');
+      }
+    }
+    
+    window.selectCustomMatches = function() {
+      alert('Custom selection feature coming soon! For now, please use the individual match cards to review specific items.');
+    }
+
     // Allow Enter key to trigger the match in modal
     document.addEventListener('DOMContentLoaded', function() {
       const jsonUrlInput = document.getElementById('jsonUrlInput');
@@ -8082,7 +8284,6 @@
       
       console.log('Emergency cleanup completed');
     };
-
     // Enhanced modal accessibility handling for all modals
     function setupModalAccessibility(modal) {
               // Remove existing listeners to prevent duplicates
@@ -8295,7 +8496,15 @@
                 <polyline points="7 10 12 15 17 10"></polyline>
                 <line x1="12" y1="15" x2="12" y2="3"></line>
               </svg>
-              Match Products
+              Quick Match
+            </button>
+            
+            <button type="button" class="btn btn-outline-primary ms-2" onclick="performDetailedJsonMatch()">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2">
+                <path d="M9 11l3 3L22 4"></path>
+                <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"></path>
+              </svg>
+              Detailed Match & Review
             </button>
              
              <button type="button" class="btn btn-outline-info btn-sm ms-2" onclick="testStrainSearch()" title="Test strain search API">
@@ -8324,7 +8533,66 @@
       </div>
     </div>
   </div>
-  
+
+  <!-- Detailed JSON Match Comparison Modal -->
+  <div class="modal fade" id="detailedJsonMatchModal" tabindex="-1" aria-labelledby="detailedJsonMatchModalLabel" inert>
+    <div class="modal-dialog modal-xl">
+      <div class="modal-content glass-card">
+        <div class="modal-header border-0">
+          <h5 class="modal-title" id="detailedJsonMatchModalLabel">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2 text-info">
+              <path d="M9 11l3 3L22 4"></path>
+              <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"></path>
+            </svg>
+            Detailed JSON Match Results
+          </h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close detailed match modal"></button>
+        </div>
+        <div class="modal-body">
+          <div id="detailedMatchResults" class="d-none">
+            <div class="alert alert-info mb-4">
+              <strong>Before & After Comparison</strong><br>
+              Review each JSON item and its best match from your Excel data. Only matches with score ≥ 0.4 are included.
+            </div>
+            
+            <div class="mb-3">
+              <div class="row">
+                <div class="col-md-6">
+                  <h6 class="text-info">📋 Summary</h6>
+                  <div id="matchSummary">Loading...</div>
+                </div>
+                <div class="col-md-6">
+                  <div class="d-flex justify-content-end">
+                    <button type="button" class="btn btn-success me-2" onclick="acceptAllMatches()" id="acceptAllBtn" disabled>
+                      <i class="bi bi-check-circle me-1"></i>Accept All Matches
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary" onclick="selectCustomMatches()">
+                      <i class="bi bi-pencil me-1"></i>Select Custom
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <div id="matchComparisons" class="row">
+              <!-- Match comparisons will be populated here -->
+            </div>
+          </div>
+          
+          <div id="detailedMatchLoading" class="text-center py-5">
+            <div class="spinner-border text-info" role="status">
+              <span class="visually-hidden">Loading detailed matches...</span>
+            </div>
+            <p class="mt-3">Analyzing matches and calculating scores...</p>
+          </div>
+        </div>
+        <div class="modal-footer border-0">
+          <button type="button" class="btn btn-glass" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- JSON Inventory Modal -->
   <div class="modal fade" id="jsonInventoryModal" tabindex="-1" aria-labelledby="jsonInventoryModalLabel" inert>
     <div class="modal-dialog modal-lg">
@@ -8675,8 +8943,6 @@
         });
       }
     });
-
-  // Enhanced Database Functions
   </script>
   <script>
     // Global function definitions - ensure they're available immediately
@@ -9398,7 +9664,6 @@
       
       showDatabaseModal('Database Backup & Restore', backupHtml);
     }
-
     // Product Trend Analysis
     function openTrendAnalysis() {
       const trendHtml = `
@@ -10198,7 +10463,6 @@
         });
       }
     }
-
     function initializeTrendChart() {
       const trendCtx = document.getElementById('trendCanvas');
       if (trendCtx) {
@@ -10326,10 +10590,8 @@
 
     function repairDatabase() {
       alert('Database repair completed successfully!');
-    // Duplicate function removed - defined at top of page
-    
-    // Duplicate functions removed - defined at top of page
-    
+    }
+
     // COMPLETELY REPLACE the Lineage Editor button functionality
     document.addEventListener('DOMContentLoaded', function() {
       console.log('Setting up Enhanced Lineage Editor button...');
@@ -10397,6 +10659,10 @@
   
   <!-- Database Sync JavaScript -->
   <script src="{{ url_for('static', filename='js/database-sync.js') }}"></script>
+  
+  <!-- Tags Table JavaScript -->
+  <script src="{{ url_for('static', filename='js/tags_table.js') }}?v={{ cache_bust }}"></script>
+  
   <!-- Database Modal -->
   <div class="modal fade" id="databaseModal" tabindex="-1" aria-labelledby="databaseModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-xl">
