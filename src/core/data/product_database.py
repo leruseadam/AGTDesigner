@@ -956,7 +956,7 @@ class ProductDatabase:
                             "AI", "AJ", "AK"
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
-                        product_name, normalized_name, self._calculate_product_strain(
+                        product_name, normalized_name, self._calculate_product_strain_original(
                             product_data.get('Product Type*', ''),
                             product_data.get('Product Name*', ''),
                             product_data.get('Description', ''),
@@ -2696,7 +2696,7 @@ class ProductDatabase:
                 product_data.get('Weight*'),
                 product_data.get('Units'),
                 product_data.get('Price'),
-                self._calculate_product_strain(
+                self._calculate_product_strain_original(
                     product_data.get('Product Type*', ''),
                     product_data.get('Product Name*', ''),
                     product_data.get('Description', ''),
@@ -3016,7 +3016,7 @@ class ProductDatabase:
             logger.error(f"Error backfilling missing crucial values: {e}")
             return None
     
-    def _calculate_product_strain(self, product_type: str, product_name: str, description: str, ratio: str) -> str:
+    def _calculate_product_strain_original(self, product_type: str, product_name: str, description: str, ratio: str) -> str:
         """Calculate Product Strain using exact Excel processor logic."""
         from src.core.constants import CLASSIC_TYPES
         
@@ -3222,7 +3222,7 @@ class ProductDatabase:
         # For any other product type, return the ratio as-is
         return ratio
     
-    def _calculate_product_strain(self, product_type: str, product_name: str, description: str, ratio: str) -> str:
+    def _calculate_product_strain_original(self, product_type: str, product_name: str, description: str, ratio: str) -> str:
         """Calculate Product Strain using exact Excel processor logic."""
         import re
         
@@ -3316,7 +3316,7 @@ class ProductDatabase:
             
             for product_id, product_name, product_type, description, ratio in products:
                 # Calculate the correct Product Strain value
-                new_strain = self._calculate_product_strain(
+                new_strain = self._calculate_product_strain_original(
                     product_type or '',
                     product_name or '',
                     description or '',
@@ -5532,7 +5532,7 @@ class ProductDatabase:
                 updated_count = 0
                 for product_id, product_type, product_name, description, ratio in products:
                     # Calculate the correct Product Strain value
-                    new_strain = self._calculate_product_strain(
+                    new_strain = self._calculate_product_strain_original(
                         product_type or '',
                         product_name or '',
                         description or '',
@@ -5678,6 +5678,26 @@ class ProductDatabase:
                 'error': str(e),
                 'message': f'Failed to update joint ratios: {e}'
             }
+
+    def _calculate_product_strain(self, product_data):
+        """Calculate Product Strain from product_data dictionary (overloaded version)."""
+        try:
+            # Handle both dict and individual parameter formats
+            if isinstance(product_data, dict):
+                product_type = product_data.get('Product Type*', '') or product_data.get('product_type', '')
+                product_name = product_data.get('Product Name*', '') or product_data.get('product_name', '')
+                description = product_data.get('Description', '') or product_data.get('description', '')
+                ratio = product_data.get('Ratio', '') or product_data.get('ratio', '')
+                
+                # Call the original method with extracted parameters
+                return self._calculate_product_strain_original(product_type, product_name, description, ratio)
+            else:
+                # If it's not a dict, assume it's the product_type parameter
+                return self._calculate_product_strain_original(product_data, '', '', '')
+                
+        except Exception as e:
+            print(f"Error in overloaded _calculate_product_strain: {e}")
+            return 'Mixed'
 
 def get_product_database(store_name=None):
     """Get a ProductDatabase instance for the specified store."""
