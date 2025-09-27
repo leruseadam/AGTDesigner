@@ -10,7 +10,7 @@ import logging
 
 # Configure the project directory - UPDATE THIS WITH YOUR USERNAME
 # Replace 'yourusername' with your actual PythonAnywhere username
-project_dir = '/home/yourusername/AGTDesigner'
+project_dir = '/home/adamcordova/AGTDesigner'
 
 # Verify directory exists and add to Python path
 if os.path.exists(project_dir):
@@ -22,6 +22,12 @@ else:
     if current_dir not in sys.path:
         sys.path.insert(0, current_dir)
     logging.error(f"Project directory {project_dir} not found, using {current_dir}")
+
+# Add user site-packages to Python path for --user installed packages
+import site
+user_site = site.getusersitepackages()
+if user_site and user_site not in sys.path:
+    sys.path.insert(0, user_site)
 
 # Set environment variables for PythonAnywhere
 os.environ['PYTHONANYWHERE_SITE'] = 'True'
