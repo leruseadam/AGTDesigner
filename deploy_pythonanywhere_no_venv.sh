@@ -164,10 +164,18 @@ if __name__ == "__main__":
     application.run(debug=False)
 EOF
 
-# Step 6: Initialize database (if needed)
-if [ -f "init_database.py" ]; then
-    print_status "Initializing database..."
-    python3.11 init_database.py || print_warning "Database initialization failed - may already exist"
+# Step 6: Initialize database
+print_status "Initializing database..."
+if [ -f "init_pythonanywhere_database.py" ]; then
+    python3.11 init_pythonanywhere_database.py
+else
+    print_warning "init_pythonanywhere_database.py not found - skipping database init"
+fi
+
+# Step 6.5: Import data if available
+if [ -f "database_export.json" ] && [ -f "import_pythonanywhere_database.py" ]; then
+    print_status "Importing database data..."
+    python3.11 import_pythonanywhere_database.py || print_warning "Database import failed - will use empty database"
 fi
 
 # Step 7: Test the application
