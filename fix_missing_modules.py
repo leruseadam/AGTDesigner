@@ -79,14 +79,14 @@ class ProductDatabase:
     def init_database(self):
         """Initialize the database with required tables."""
         if self._initialized:
-            return
+            return True
             
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             
             # Create strains table
-            cursor.execute('''
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS strains (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     strain_name TEXT UNIQUE NOT NULL,
@@ -100,10 +100,10 @@ class ProductDatabase:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
-            ''')
+            """)
             
             # Create products table
-            cursor.execute('''
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS products (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     "Product Name*" TEXT NOT NULL,
@@ -170,7 +170,7 @@ class ProductDatabase:
                     FOREIGN KEY (strain_id) REFERENCES strains (id),
                     UNIQUE("Product Name*", "Vendor/Supplier*", "Product Brand")
                 )
-            ''')
+            """)
             
             conn.commit()
             conn.close()
@@ -214,11 +214,11 @@ class ProductDatabase:
             placeholders = ', '.join(['?' for _ in columns])
             column_names = ', '.join([f'"{col}"' for col in columns])
             
-            sql = f'''
+            sql = f"""
                 INSERT OR REPLACE INTO products 
                 ({column_names})
                 VALUES ({placeholders})
-            '''
+            """
             
             values = [product_data[col] for col in columns]
             cursor.execute(sql, values)
