@@ -1,3 +1,50 @@
+// Performance optimization utilities
+const performanceUtils = {
+    // Debounce function for search inputs
+    debounce(func, wait) {
+        let timeout;
+        return function executedFunction(...args) {
+            const later = () => {
+                clearTimeout(timeout);
+                func(...args);
+            };
+            clearTimeout(timeout);
+            timeout = setTimeout(later, wait);
+        };
+    },
+    
+    // Throttle function for scroll events
+    throttle(func, limit) {
+        let inThrottle;
+        return function() {
+            const args = arguments;
+            const context = this;
+            if (!inThrottle) {
+                func.apply(context, args);
+                inThrottle = true;
+                setTimeout(() => inThrottle = false, limit);
+            }
+        }
+    },
+    
+    // Batch DOM updates to minimize reflows
+    batchDOMUpdate(callback) {
+        return requestAnimationFrame(() => {
+            callback();
+        });
+    },
+    
+    // Performance monitoring
+    startTiming: () => performance.now(),
+    endTiming: (start, operation) => {
+        const duration = performance.now() - start;
+        if (duration > 16) { // Log if slower than 60fps
+            console.warn(`Performance: ${operation} took ${duration.toFixed(2)}ms`);
+        }
+        return duration;
+    }
+};
+
 // Global error handler to prevent window from exiting
 window.addEventListener('error', function(event) {
     console.error('Global error caught:', event.error);
@@ -329,12 +376,21 @@ async function openStrainLineageEditor() {
     
     // Event listeners for search
     if (searchInput) {
+      // Create debounced filter function for better performance
+      const debouncedFilter = performanceUtils.debounce((value) => {
+        filterStrains(value);
+      }, 150); // 150ms debounce
+      
       searchInput.addEventListener('input', (e) => {
         const val = e.target.value;
-        filterStrains(val);
+        
+        // Immediate visual feedback
         const hasTerm = val && val.trim().length > 0;
         searchInput.classList.toggle('search-active', !!hasTerm);
-      });
+        
+        // Debounced filtering for performance
+        debouncedFilter(val);
+      }, { passive: true });
       
       // Focus on search input when modal opens
       searchInput.focus();
@@ -2347,10 +2403,12 @@ const TagManager = {
             tagElement.style.cursor = 'pointer';
             tagElement.addEventListener('click', (e) => {
                 try {
-                    // Don't trigger if clicking on the checkbox itself or lineage dropdown
+                    // Don't trigger if clicking on the checkbox itself, lineage dropdown, or DOH dropdown
                     if (e.target === checkbox || e.target.classList.contains('lineage-select') || 
                         e.target.closest('.lineage-select') || e.target.classList.contains('lineage-dropdown') ||
-                        e.target.closest('.lineage-dropdown')) {
+                        e.target.closest('.lineage-dropdown') || e.target.classList.contains('doh-select') ||
+                        e.target.closest('.doh-select') || e.target.classList.contains('doh-dropdown') ||
+                        e.target.closest('.doh-dropdown')) {
                         return;
                     }
                     
@@ -2406,47 +2464,76 @@ const TagManager = {
         
 
         
-        // Add DOH and High CBD images if applicable
+        // Add DOH and High CBD/THC images if applicable
         const dohValue = (tag.DOH || '').toString().toUpperCase();
         const productType = (tag['Product Type*'] || '').toString().toLowerCase();
         
-        if (dohValue === 'YES' || dohValue === 'Y') {
-            // Check if it's a High CBD product
-            if (productType.startsWith('high cbd')) {
-                // Add High CBD image
+        // Create image container for dynamic updates
+        const imageContainer = document.createElement('span');
+        imageContainer.className = 'doh-image-container';
+        
+        // Function to update images based on DOH status with performance optimization
+        const updateDohImage = (status) => {
+            const startTime = performanceUtils.startTiming();
+            
+            // Clear existing images efficiently
+            while (imageContainer.firstChild) {
+                imageContainer.removeChild(imageContainer.firstChild);
+            }
+            
+            if (status === 'CBD') {
+                // Add High CBD image with optimized loading
                 const highCbdImg = document.createElement('img');
                 highCbdImg.src = '/static/img/HighCBD.png';
                 highCbdImg.alt = 'High CBD';
                 highCbdImg.title = 'High CBD Product';
-                highCbdImg.style.height = '24px';
-                highCbdImg.style.width = 'auto';
-                highCbdImg.style.marginLeft = '6px';
-                highCbdImg.style.verticalAlign = 'middle';
-                tagInfo.appendChild(highCbdImg);
-            } else if (displayName.toLowerCase().includes('high thc')) {
-                // Add High THC image
+                highCbdImg.loading = 'lazy'; // Native lazy loading
+                highCbdImg.style.cssText = 'height:24px;width:auto;margin-left:6px;vertical-align:middle';
+                imageContainer.appendChild(highCbdImg);
+            } else if (status === 'THC') {
+                // Add High THC image with optimized loading
                 const highThcImg = document.createElement('img');
                 highThcImg.src = '/static/img/HighTHC.png';
                 highThcImg.alt = 'High THC';
                 highThcImg.title = 'High THC Product';
-                highThcImg.style.height = '24px';
-                highThcImg.style.width = 'auto';
-                highThcImg.style.marginLeft = '6px';
-                highThcImg.style.verticalAlign = 'middle';
-                tagInfo.appendChild(highThcImg);
-            } else {
-                // Add regular DOH image
+                highThcImg.loading = 'lazy';
+                highThcImg.style.cssText = 'height:24px;width:auto;margin-left:6px;vertical-align:middle';
+                imageContainer.appendChild(highThcImg);
+            } else if (status === 'DOH') {
+                // Add regular DOH image with optimized loading
                 const dohImg = document.createElement('img');
                 dohImg.src = '/static/img/DOH.png';
                 dohImg.alt = 'DOH Compliant';
                 dohImg.title = 'DOH Compliant Product';
-                dohImg.style.height = '21px';
-                dohImg.style.width = 'auto';
-                dohImg.style.marginLeft = '6px';
-                dohImg.style.verticalAlign = 'middle';
-                tagInfo.appendChild(dohImg);
+                dohImg.loading = 'lazy';
+                dohImg.style.cssText = 'height:21px;width:auto;margin-left:6px;vertical-align:middle';
+                imageContainer.appendChild(dohImg);
             }
+            // NONE shows no image
+            
+            performanceUtils.endTiming(startTime, 'DOH image update');
+        };
+        
+        // Set initial image based on current DOH status
+        let initialDohStatus = 'NONE'; // Default to NONE
+        
+        // Check explicit DOH field first
+        if (dohValue === 'DOH' || dohValue === 'YES' || dohValue === 'Y') {
+            initialDohStatus = 'DOH';
+        } else if (dohValue === 'THC') {
+            initialDohStatus = 'THC';
+        } else if (dohValue === 'CBD') {
+            initialDohStatus = 'CBD';
+        } 
+        // Then check product type for High CBD/THC indicators (DOH High CBD, DOH High THC)
+        else if (productType.startsWith('high cbd') || productType.includes('doh high cbd')) {
+            initialDohStatus = 'CBD';
+        } else if (productType.startsWith('high thc') || productType.includes('doh high thc') || productType.includes('high thc')) {
+            initialDohStatus = 'THC';
         }
+        
+        updateDohImage(initialDohStatus);
+        tagInfo.appendChild(imageContainer);
         
         // Add JSON match indicator if this tag came from JSON matching or educated guessing
         if (tag.Source && (tag.Source.includes('JSON Match') || tag.Source.includes('Educated Guess'))) {
@@ -2533,16 +2620,140 @@ const TagManager = {
                 lineageSelect.value = newLineage;
                 // Update the data-lineage attribute
                 tagElement.dataset.lineage = newLineage.toUpperCase();
-            } catch (err) {
-                // On error, revert to previous value
+                
+                // Remove saving option
+                lineageSelect.removeChild(savingOption);
+            } catch (error) {
+                console.error('Failed to update lineage:', error);
+                // On failure, revert to previous value
                 lineageSelect.value = prevValue;
-                console.error('Failed to update lineage');
+                // Show error message
+                alert('Failed to update lineage: ' + error.message);
+                // Remove saving option
+                if (savingOption.parentNode) {
+                    lineageSelect.removeChild(savingOption);
+                }
             } finally {
-                // Remove 'Saving...' option and re-enable
-                Array.from(lineageSelect.options).forEach(opt => { if (opt.textContent === 'Saving...') opt.remove(); });
                 lineageSelect.disabled = false;
             }
         });
+        tagInfo.appendChild(lineageSelect);
+
+        // Create DOH dropdown (same style as lineage dropdown)
+        const dohSelect = document.createElement('select');
+        dohSelect.className = 'form-select form-select-sm doh-select doh-dropdown doh-dropdown-mini';
+        dohSelect.style.height = '28px';
+        dohSelect.style.backgroundColor = 'rgba(255, 255, 255, 0.15)';
+        dohSelect.style.border = '1px solid rgba(255, 255, 255, 0.2)';
+        dohSelect.style.borderRadius = '6px';
+        dohSelect.style.cursor = 'pointer';
+        dohSelect.style.color = '#fff';
+        dohSelect.style.backdropFilter = 'blur(10px)';
+        dohSelect.style.transition = 'all 0.2s ease';
+        dohSelect.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.1)';
+        dohSelect.style.marginLeft = '4px';
+        dohSelect.style.minWidth = '60px';
+
+        // Add DOH options
+        const dohOptions = [
+            { value: 'NONE', label: '' },
+            { value: 'DOH', label: 'DOH' },
+            { value: 'THC', label: 'THC' },
+            { value: 'CBD', label: 'CBD' }
+        ];
+        
+        // Use the same logic as initialDohStatus to determine current dropdown state
+        let currentDropdownStatus = 'NONE'; // Default to NONE
+        
+        // Check explicit DOH field first
+        if (dohValue === 'DOH' || dohValue === 'YES' || dohValue === 'Y') {
+            currentDropdownStatus = 'DOH';
+        } else if (dohValue === 'THC') {
+            currentDropdownStatus = 'THC';
+        } else if (dohValue === 'CBD') {
+            currentDropdownStatus = 'CBD';
+        } 
+        // Then check product type for High CBD/THC indicators (DOH High CBD, DOH High THC)
+        else if (productType.startsWith('high cbd') || productType.includes('doh high cbd')) {
+            currentDropdownStatus = 'CBD';
+        } else if (productType.startsWith('high thc') || productType.includes('doh high thc') || productType.includes('high thc')) {
+            currentDropdownStatus = 'THC';
+        }
+        
+        dohOptions.forEach(option => {
+            const optionElement = document.createElement('option');
+            optionElement.value = option.value;
+            optionElement.textContent = option.label;
+            if (currentDropdownStatus === option.value) {
+                optionElement.selected = true;
+            }
+            dohSelect.appendChild(optionElement);
+        });
+
+        // Prevent DOH dropdown clicks from bubbling up to tag element (optimized)
+        dohSelect.addEventListener('click', (e) => {
+            e.stopPropagation();
+        }, { passive: true }); // Use passive listener for better performance
+        
+        dohSelect.addEventListener('change', async (e) => {
+            const newDohStatus = e.target.value;
+            const prevValue = currentDohStatus;
+            
+            // Immediate UI feedback - update image first for responsiveness
+            updateDohImage(newDohStatus);
+            
+            dohSelect.disabled = true;
+            
+            // Show temporary 'Saving...' option
+            const savingOption = document.createElement('option');
+            savingOption.value = '';
+            savingOption.textContent = 'Saving...';
+            savingOption.selected = true;
+            savingOption.disabled = true;
+            dohSelect.appendChild(savingOption);
+            
+            try {
+                const response = await fetch('/api/update-doh', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        product_name: displayName,
+                        doh_status: newDohStatus
+                    })
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    // On success, update tag DOH status in state
+                    tag.DOH = newDohStatus;
+                    tag.doh = newDohStatus;
+                    dohSelect.value = newDohStatus;
+                    console.log(`✅ DOH status updated for "${displayName}" to: ${newDohStatus}`);
+                    
+                    // Image already updated above for immediate feedback
+                } else {
+                    // Revert image on failure
+                    updateDohImage(prevValue);
+                    throw new Error(data.message || 'Failed to update DOH status');
+                }
+                
+                // Remove saving option
+                dohSelect.removeChild(savingOption);
+            } catch (error) {
+                console.error('Failed to update DOH status:', error);
+                // On failure, revert to previous value
+                dohSelect.value = prevValue;
+                alert('Failed to update DOH status: ' + error.message);
+                // Remove saving option
+                if (savingOption.parentNode) {
+                    dohSelect.removeChild(savingOption);
+                }
+            } finally {
+                dohSelect.disabled = false;
+            }
+        });
+        
+        tagInfo.appendChild(dohSelect);
         tagElement.addEventListener('contextmenu', (e) => {
             e.preventDefault();
             if (window.lineageEditor) {

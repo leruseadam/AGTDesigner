@@ -57,8 +57,8 @@ def unwrap_marker(value, marker):
         start_idx = value.find(start_marker) + len(start_marker)
         end_idx = value.find(end_marker)
         unwrapped = value[start_idx:end_idx]
-        # Only strip for non-JointRatio markers
-        if marker != 'JOINT_RATIO':
+        # Only strip for non-JointRatio and non-THC/CBD markers to preserve line breaks
+        if marker not in ['JOINT_RATIO', 'THC_CBD', 'RATIO']:
             unwrapped = unwrapped.strip()
         # Restore ampersands
         return unwrapped.replace('&amp;', '&')

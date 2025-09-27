@@ -20,13 +20,13 @@ from docx.enum.section import WD_SECTION
 import time
 import pandas as pd
 import qrcode
-from PIL import Image
 
 # Local imports
 from src.core.utils.common import safe_get
 from src.core.generation.docx_formatting import (
     apply_lineage_colors,
     enforce_fixed_cell_dimensions,
+    prevent_table_expansion_enhanced,
     clear_cell_background,
     clear_cell_margins,
     clear_table_cell_padding,
@@ -602,13 +602,15 @@ class TemplateProcessor:
                 tc = deepcopy(src_tc)
                 
                 # Define all required placeholders for double template
+                # Note: ProductBrand is excluded since it's empty for non-classic types
+                # and causes marker remnants when added
                 required_placeholders = [
-                    'ProductBrand',
                     'DescAndWeight', 
                     'Price',
                     'Ratio_or_THC_CBD',
                     'DOH',
-                    'QR'
+                    'QR',  # QR codes enabled
+                    'ProductStrain'
                 ]
                 
                 # Keep adding missing placeholders until all are present
@@ -665,7 +667,9 @@ class TemplateProcessor:
                                 'DescAndWeight': 'DESC',
                                 'Price': 'PRICE',
                                 'Ratio_or_THC_CBD': 'THC_CBD',
-                                'DOH': 'DOH'
+                                'DOH': 'DOH',
+                                'ProductStrain': 'PRODUCTSTRAIN',
+                                'Lineage': 'PRODUCTBRAND_CENTER'
                             }
                             
                             marker_type = marker_mapping.get(placeholder, 'DEFAULT')
@@ -692,6 +696,18 @@ class TemplateProcessor:
                         tc.append(new_para)
                         
                         self.logger.debug(f"Added ProductBrand to separate paragraph in cell {cnt}")
+                    
+                    # CRITICAL FIX: Add ProductStrain to ALL cells for visibility
+                    # Always add ProductStrain in its own separate paragraph for ALL cells
+                    strain_para = OxmlElement('w:p')
+                    strain_run = OxmlElement('w:r')
+                    strain_text = OxmlElement('w:t')
+                    strain_text.text = f'{{{{Label{cnt}.ProductStrain}}}}'
+                    strain_run.append(strain_text)
+                    strain_para.append(strain_run)
+                    tc.append(strain_para)
+                    
+                    self.logger.debug(f"Added ProductStrain to separate paragraph in cell {cnt}")
                     
                     if other_placeholders:
                         self.logger.debug(f"Added other placeholders to existing paragraph in cell {cnt}: {other_placeholders}")
@@ -817,8 +833,44 @@ class TemplateProcessor:
                         if 'Label1' in t.text:
                             t.text = t.text.replace('Label1', f'Label{cnt}')
                 
-                # CRITICAL FIX: The template uses Lineage and ProductVendor, not ProductBrand
-                # No need to add missing placeholders - just copy the existing template structure
+                # CRITICAL FIX: The template uses Lineage and ProductVendor, but for non-classic types
+                # we also need ProductBrand placeholder to ensure proper rendering
+                # Add ProductBrand placeholder if it's missing for non-classic type compatibility
+                
+                # Add ProductBrand placeholder if it's missing for non-classic type compatibility
+                if '{{Label1.ProductBrand}}' not in cell_text and 'ProductBrand' not in cell_text:
+                    self.logger.debug(f"Adding ProductBrand placeholder to cell {cnt}")
+                    # Find the position after the Lineage placeholder
+                    text_elements = list(tc.iter(qn('w:t')))
+                    lineage_end_index = -1
+                    
+                    # Find where the Lineage placeholder ends
+                    for i, t in enumerate(text_elements):
+                        if t.text and 'Lineage' in t.text:
+                            # Found the Lineage text element, look for the closing }}
+                            for j in range(i, len(text_elements)):
+                                if text_elements[j].text and '}}' in text_elements[j].text:
+                                    lineage_end_index = j
+                                    break
+                            break
+                    
+                    if lineage_end_index >= 0:
+                        self.logger.debug(f"Found Lineage end at index {lineage_end_index}")
+                        # Insert ProductBrand placeholder after the Lineage placeholder
+                        new_text = OxmlElement('w:t')
+                        new_text.text = f'{{{{Label{cnt}.ProductBrand}}}}'
+                        
+                        # Insert after the lineage end element
+                        lineage_end_element = text_elements[lineage_end_index]
+                        lineage_end_element.getparent().insert(
+                            lineage_end_element.getparent().index(lineage_end_element) + 1, 
+                            new_text
+                        )
+                        self.logger.debug(f"Inserted ProductBrand placeholder: {new_text.text}")
+                    else:
+                        self.logger.warning(f"Could not find Lineage end position for cell {cnt}")
+                else:
+                    self.logger.debug(f"ProductBrand placeholder already exists in cell {cnt}")
                 
                 # Add DOH placeholder if it's missing
                 self.logger.debug(f"Cell {cnt} - cell_text: '{cell_text}'")
@@ -994,55 +1046,22 @@ class TemplateProcessor:
 
             # DOH images are already created in _build_label_context, no need for redundant creation here
             
-            # Store original QR codes before replacing with placeholders
-            original_qr_codes = {}
-            if chunk:
-                for i in range(1, len(chunk) + 1):
-                    label_key = f'Label{i}'
-                    if label_key in context and 'QR' in context[label_key]:
-                        # Store the original QR code data before replacing with placeholder
-                        original_qr_codes[label_key] = context[label_key]['QR']
-                        # Replace with placeholder text for template rendering
-                        context[label_key]['QR'] = 'QR_PLACEHOLDER'
-                        self.logger.debug(f"Added QR placeholder for {label_key}")
-
-            doc.render(context)
-            
-            # Manual QR code replacement after template rendering for all templates
-            # Handle QR code replacement for each label
-            if chunk and 'Label1' in context:
-                self.logger.info("Attempting QR placeholder replacement for all labels")
-                success_count = 0
-                total_labels = len([k for k in context.keys() if k.startswith('Label')])
-                
-                # Replace QR placeholders with actual QR codes using stored original data
-                for i in range(1, total_labels + 1):
-                    label_key = f'Label{i}'
-                    if label_key in original_qr_codes:
-                        success = self._replace_qr_placeholder(doc, original_qr_codes[label_key], label_key)
-                        if success:
-                            success_count += 1
-                            self.logger.debug(f"✓ QR code replaced for {label_key}")
-                        else:
-                            self.logger.warning(f"⚠ QR placeholder replacement failed for {label_key}")
-                
-                if success_count > 0:
-                    self.logger.info(f"✓ QR placeholder replacement completed: {success_count}/{total_labels} labels")
-                else:
-                    self.logger.warning("⚠ No QR codes were replaced")
-            else:
-                self.logger.debug("QR replacement skipped - no labels in context")
-            
-            # For double templates, use manual placeholder replacement as fallback
-            # since DocxTemplate was not working reliably
-            if self.template_type == 'double':
-                self.logger.info("Using manual placeholder replacement for double template")
-                self._manual_replace_placeholders(doc, context)
+            # QR code functionality enabled
+            try:
+                doc.render(context)
+                self.logger.debug("DocxTemplate render completed successfully")
+            except Exception as render_error:
+                self.logger.warning(f"DocxTemplate render failed: {render_error}, using manual replacement")
             
             buffer = BytesIO()
             doc.save(buffer)
             buffer.seek(0)
             rendered_doc = Document(buffer)
+            
+            # Use manual placeholder replacement for all template types as fallback
+            # since DocxTemplate was not working reliably
+            self.logger.info(f"Using manual placeholder replacement for {self.template_type} template")
+            self._manual_replace_placeholders(rendered_doc, context)
             
             # Check timeout before post-processing
             if time.time() - chunk_start_time > MAX_PROCESSING_TIME_PER_CHUNK:
@@ -1069,6 +1088,11 @@ class TemplateProcessor:
             
             # Apply lineage colors last to ensure they are not overwritten
             apply_lineage_colors(rendered_doc)
+            
+            # CRITICAL FIX: For double template, ensure final marker cleanup is called
+            if self.template_type == 'double':
+                self.logger.info("Applying final marker cleanup for double template")
+                self._final_marker_cleanup(rendered_doc)
             
             # Final enforcement: prevent any cell/row expansion and force EXACT dimensions
             # Cell widths already standardized
@@ -1159,7 +1183,26 @@ class TemplateProcessor:
                         if prefix_pattern.search(run.text):
                             run.text = prefix_pattern.sub('', run.text)
             
+            # FINAL STEP: Clean up any remaining concatenated lineage+brand content for classic types
+            try:
+                self._clean_up_lineage_brand_concatenation(rendered_doc)
+            except Exception as e:
+                self.logger.warning(f"Lineage brand concatenation cleanup failed: {e}")
+            
+            # FINAL STEP: Ensure standalone cannabinoid text uses 1pt font size
+            try:
+                self._ensure_standalone_cannabinoid_font_sizing(rendered_doc)
+            except Exception as e:
+                self.logger.warning(f"Standalone cannabinoid font sizing failed: {e}")
+            
+            # FINAL STEP: Ensure Lineage field centering for nonclassic types (runs after everything else)
+            try:
+                self._ensure_lineage_centering_for_nonclassic_types(rendered_doc)
+            except Exception as e:
+                self.logger.warning(f"Final lineage centering fix failed: {e}")
+            
             return rendered_doc
+            
         except Exception as e:
             self.logger.error(f"Error in _process_chunk: {e}\n{traceback.format_exc()}")
             raise
@@ -1258,7 +1301,7 @@ class TemplateProcessor:
             image_path = process_doh_image(doh_value, product_type)
             if image_path:
                 # Fast width selection - reduced by 1mm for all template types
-                width_map = {'mini': 8, 'double': 7, 'vertical': 11, 'horizontal': 11}
+                width_map = {'mini': 8, 'double': 10, 'vertical': 13, 'horizontal': 13}
                 image_width = Mm(width_map.get(self.template_type, 11))
                 label_context['DOH'] = InlineImage(doc, image_path, width=image_width)
                 # Ensure DOH image takes priority - clear any other DOH-related content
@@ -1315,7 +1358,20 @@ class TemplateProcessor:
                 cleaned_lineage_val = lineage_val.strip()
                 self.logger.debug(f"DEBUG: Cleaned lineage_val: '{repr(cleaned_lineage_val)}'")
                 
-                label_context['Lineage'] = f"LINEAGE_START{cleaned_lineage_val}LINEAGE_END"
+                # CRITICAL FIX: If lineage contains brand name, extract only the lineage part
+                classic_lineages = ["SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", "CBD", "MIXED"]
+                for classic_lineage in classic_lineages:
+                    if cleaned_lineage_val.upper().startswith(classic_lineage.upper()):
+                        # Extract only the lineage part, not the brand
+                        cleaned_lineage_val = cleaned_lineage_val[:len(classic_lineage)]
+                        self.logger.debug(f"DEBUG: Extracted lineage only: '{cleaned_lineage_val}' from '{lineage_val}'")
+                        break
+                
+                # For vertical template, don't wrap with markers since it uses simple placeholders
+                if self.template_type == 'vertical':
+                    label_context['Lineage'] = cleaned_lineage_val
+                else:
+                    label_context['Lineage'] = f"LINEAGE_START{cleaned_lineage_val}LINEAGE_END"
                 self.logger.debug(f"Set Lineage to strain lineage: '{cleaned_lineage_val}' for classic type '{product_type}'")
             else:
                 label_context['Lineage'] = ""
@@ -1325,94 +1381,69 @@ class TemplateProcessor:
             # Get vendor from record, not from product_brand
             vendor_val = record.get('Vendor') or record.get('Vendor/Supplier*') or record.get('ProductVendor', '')
             if vendor_val and str(vendor_val).lower() != 'nan':
-                label_context['ProductVendor'] = f"PRODUCTVENDOR_START{str(vendor_val)}PRODUCTVENDOR_END"
+                # For vertical template, don't wrap with markers since it uses simple placeholders
+                if self.template_type == 'vertical':
+                    label_context['ProductVendor'] = str(vendor_val)
+                else:
+                    label_context['ProductVendor'] = f"PRODUCTVENDOR_START{str(vendor_val)}PRODUCTVENDOR_END"
                 self.logger.debug(f"Set ProductVendor to vendor: '{vendor_val}' for classic type '{product_type}'")
             else:
                 label_context['ProductVendor'] = ""
                 self.logger.debug(f"ProductVendor set to empty for classic type '{product_type}' (no vendor data)")
         else:
-            # For non-classic types, Lineage shows brand and ProductVendor is empty
+            # For ALL non-classic types (including tinctures), Lineage shows brand and ProductVendor is empty
+            # Color is determined by Product Strain (CBD Blend = yellow, Mixed = blue)
             self.logger.debug(f"Processing non-classic type '{product_type}' for Lineage and ProductVendor")
             if product_brand:
-                # For non-classic types, wrap brand with PRODUCTBRAND markers so it gets centered
-                label_context['Lineage'] = f"PRODUCTBRAND_START{product_brand}PRODUCTBRAND_END"
-                self.logger.debug(f"Set Lineage to brand with PRODUCTBRAND markers: '{product_brand}' for non-classic type '{product_type}'")
+                # For non-classic types, separate Product Strain and Product Brand for different font sizing
+                # Lineage shows Product Brand only (centered) - this is the primary field
+                # For vertical template, don't wrap with markers since it uses simple placeholders
+                if self.template_type == 'vertical':
+                    label_context['Lineage'] = product_brand
+                else:
+                    label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{product_brand}PRODUCTBRAND_CENTER_END"
+                # Set ProductBrand fields to empty to prevent duplication
+                label_context['ProductBrand'] = ""
+                label_context['ProductBrand_Center'] = ""
+                
+                # Product Strain gets its own field with small font size
+                if product_strain:
+                    # For vertical template, don't wrap with markers since it uses simple placeholders
+                    if self.template_type == 'vertical':
+                        label_context['ProductStrain'] = product_strain
+                    else:
+                        label_context['ProductStrain'] = f"PRODUCTSTRAIN_START{product_strain}PRODUCTSTRAIN_END"
+                else:
+                    label_context['ProductStrain'] = ""
+                
+                self.logger.debug(f"Set Lineage/ProductBrand to '{product_brand}' and ProductStrain to '{product_strain}' for non-classic type '{product_type}'")
             else:
                 label_context['Lineage'] = ""
-                self.logger.debug(f"Lineage set to empty for non-classic type '{product_type}'")
-            label_context['ProductVendor'] = ""
-        
-        # Fast ratio processing
-        ratio_val = label_context.get('Ratio_or_THC_CBD') or label_context.get('Ratio', '')
-        
-        # If no ratio value but we have individual THC/CBD values, combine them
-        # PRIORITY: Excel THC/CBD values are used directly (from Excel sheet processing)
-        if not ratio_val:
-            thc_val = label_context.get('THC', '')  # Excel THC value
-            cbd_val = label_context.get('CBD', '')  # Excel CBD value
-            if thc_val or cbd_val:
-                # Combine THC and CBD values into ratio format
-                ratio_parts = []
-                if thc_val:
-                    ratio_parts.append(f"THC: {thc_val}%")
-                if cbd_val:
-                    ratio_parts.append(f"CBD: {cbd_val}%")
-                ratio_val = " ".join(ratio_parts)
-                
-                # Apply the new THC/CBD percentage formatting rules
-                from src.core.generation.text_processing import format_thc_cbd_percentages
-                ratio_val = format_thc_cbd_percentages(ratio_val)
-                
-                self.logger.debug(f"Combined Excel THC/CBD values into ratio: '{ratio_val}'")
-        
-        if ratio_val:
-            cleaned_ratio = ratio_val.lstrip('- ')
-            product_type = (label_context.get('ProductType', '').lower() or 
-                          label_context.get('Product Type*', '').lower())
+                label_context['ProductBrand'] = ""
+                label_context['ProductBrand_Center'] = ""
+                self.logger.debug(f"Lineage, ProductBrand, and ProductBrand_Center set to empty for non-classic type '{product_type}'")
             
-            # Fast product type checking with sets
-            is_classic = product_type in classic_types
-            is_edible = product_type in edible_types
-            
-            # Check if this is percentage-based THC/CBD content (not mg-based)
-            is_percentage_based = '%' in cleaned_ratio and ('THC:' in cleaned_ratio or 'CBD:' in cleaned_ratio)
-            
-            if is_classic and 'mg' in cleaned_ratio.lower() and not is_percentage_based:
-                cleaned_ratio = format_ratio_multiline(cleaned_ratio)
-            elif is_edible and 'mg' in cleaned_ratio.lower() and not is_percentage_based:
-                cleaned_ratio = format_ratio_multiline(cleaned_ratio)
-            elif is_classic and not is_percentage_based:
-                cleaned_ratio = self.format_classic_ratio(cleaned_ratio, record)
-            
-            # Apply THC/CBD percentage formatting to any existing ratio content
-            if cleaned_ratio and ('THC:' in cleaned_ratio or 'CBD:' in cleaned_ratio):
-                from src.core.generation.text_processing import format_thc_cbd_percentages
-                cleaned_ratio = format_thc_cbd_percentages(cleaned_ratio)
-            
-            # Fast marker wrapping
-            content = cleaned_ratio.replace('|BR|', '\n')
-            # Apply new bold label formatting for THC/CBD content
-            if content.strip().startswith('THC:') and 'CBD:' in content:
-                from src.core.generation.text_processing import format_thc_cbd_bold_labels
-                content = format_thc_cbd_bold_labels(content, self.template_type)
-            # Force line breaks for vertical, double, and mini templates
-            elif self.template_type in ['vertical', 'double', 'mini'] and content.strip().startswith('THC:') and 'CBD:' in content:
-                content = content.replace('THC: CBD:', 'THC:\nCBD:').replace('THC:  CBD:', 'THC:\nCBD:')
-                # For vertical template, format with right-aligned percentages
-                if self.template_type == 'vertical':
-                    content = self.format_thc_cbd_vertical_alignment(content)
-            
-            marker = 'THC_CBD' if is_classic else 'RATIO'
-            label_context['Ratio_or_THC_CBD'] = wrap_with_marker(content, marker)
-            
-            # Also add separate THC_CBD field for template processing
-            if is_classic:
-                label_context['THC_CBD'] = wrap_with_marker(content, 'THC_CBD')
+            # Always set ProductStrain for nonclassic types, regardless of whether there's a product brand
+            if product_strain:
+                # All templates use wrapped format for consistent processing by manual_docx_replace()
+                label_context['ProductStrain'] = f"PRODUCTSTRAIN_START{product_strain}PRODUCTSTRAIN_END"
+                self.logger.debug(f"DEBUG: Set ProductStrain to '{label_context['ProductStrain']}' for {self.template_type} template")
             else:
-                label_context['THC_CBD'] = ''
-        else:
-            label_context['Ratio_or_THC_CBD'] = ''
-            label_context['THC_CBD'] = ''
+                label_context['ProductStrain'] = ""
+                self.logger.debug(f"DEBUG: ProductStrain set to empty (no product_strain value) for template {self.template_type}")
+            
+            # ProductVendor is not used for non-classic types - set to empty
+            label_context['ProductVendor'] = ""
+            self.logger.debug(f"ProductVendor set to empty for non-classic type '{product_type}' (not used for non-classic types)")
+        
+        # THC/CBD percentage display removed - QR codes now provide this information
+        # Empty ratio fields to prevent any THC/CBD content from appearing
+        label_context['Ratio_or_THC_CBD'] = ''
+        label_context['THC_CBD'] = ''
+
+        # DEBUG: Log ProductStrain value before template replacement
+        if self.template_type == 'vertical':
+            self.logger.debug(f"VERTICAL FINAL DEBUG: ProductStrain value before template replacement: '{label_context.get('ProductStrain', 'NOT_SET')}'")
 
         # Lineage and ProductVendor logic is now handled earlier in the method for classic types
 
@@ -1457,14 +1488,29 @@ class TemplateProcessor:
             label_context['ProductType'] = record.get('ProductType', '')
         
         # Fast strain handling - always show the actual strain value from Excel
-        product_strain = record.get('ProductStrain') or record.get('Product Strain', '')
+        # But don't override if ProductStrain was already set for nonclassic types
+        # CRITICAL FIX: Don't override ProductStrain if we already processed non-classic types
+        should_process_strain = (
+            'ProductStrain' not in label_context or 
+            (not label_context['ProductStrain'] and not self._is_non_classic_type(product_type))
+        )
         
-        if product_strain:
-            # Always show the actual strain value from the Excel column
-            # This ensures the ProductStrain placeholder displays the intended strain information
-            label_context['ProductStrain'] = wrap_with_marker(product_strain, 'PRODUCTSTRAIN')
+        if should_process_strain:
+            product_strain = record.get('ProductStrain') or record.get('Product Strain', '')
+            
+            self.logger.debug(f"STRAIN OVERRIDE DEBUG: Entering strain handling for {self.template_type}")
+            self.logger.debug(f"STRAIN OVERRIDE DEBUG: Current ProductStrain in context: '{label_context.get('ProductStrain', 'NOT_SET')}'")
+            self.logger.debug(f"STRAIN OVERRIDE DEBUG: Product strain from record: '{product_strain}'")
+            
+            if product_strain:
+                # All templates use wrapped format for consistent processing by manual_docx_replace()
+                label_context['ProductStrain'] = wrap_with_marker(product_strain, 'PRODUCTSTRAIN')
+                self.logger.debug(f"STRAIN OVERRIDE DEBUG: Set ProductStrain to '{label_context['ProductStrain']}' for {self.template_type} template (OVERRIDE)")
+            else:
+                label_context['ProductStrain'] = ''
+                self.logger.debug(f"STRAIN OVERRIDE DEBUG: Set ProductStrain to empty (no strain from record) (OVERRIDE)")
         else:
-            label_context['ProductStrain'] = ''
+            self.logger.debug(f"STRAIN OVERRIDE DEBUG: Skipping strain override - ProductStrain already set to '{label_context['ProductStrain']}' for non-classic type")
 
         # Lineage logic is now handled earlier in the method for both classic and non-classic types
 
@@ -1538,6 +1584,15 @@ class TemplateProcessor:
                 formatted_val = self.format_with_soft_hyphen(val)
                 label_context[key] = wrap_with_marker(unwrap_marker(formatted_val, marker), marker)
         
+        # Ensure JointRatio stays on the same line - no line break processing
+        if label_context.get('JointRatio'):
+            val = label_context['JointRatio']
+            # Remove any line breaks that might have been added
+            val = val.replace('\n', ' ').replace('\r', ' ')
+            # Clean up multiple spaces
+            val = ' '.join(val.split())
+            label_context['JointRatio'] = val
+        
         # Fast vendor handling - only override if ProductVendor wasn't already set by our logic
         # This preserves the ProductVendor logic for classic types
         if 'ProductVendor' not in label_context:
@@ -1597,27 +1652,39 @@ class TemplateProcessor:
             qr_image.save(img_buffer, format='PNG')
             img_buffer.seek(0)
             
-            # Determine QR code size based on template type
-            # Smaller QR codes for mini templates, larger for others
-            size_map = {
-                'mini': 15,      # 15mm for mini templates
-                'double': 18,    # 18mm for double templates  
-                'vertical': 20,  # 20mm for vertical templates
-                'horizontal': 20, # 20mm for horizontal templates
-                'inventory': 25  # 25mm for inventory templates
-            }
+            # Determine QR code size using unified font sizing system
+            # Get font size in points for QR field, then convert to millimeters
+            font_size_pt = get_font_size(clean_name, 'qr', self.template_type)
             
-            qr_size = Mm(size_map.get(self.template_type, 20))
+            # Convert font size points to millimeters for QR image size
+            # Using a conversion factor where 1 point ≈ 0.35mm for QR sizing
+            qr_size_mm = font_size_pt.pt * 0.35
             
-            # Create InlineImage for the document
-            qr_inline_image = InlineImage(doc, img_buffer, width=qr_size)
+            # Apply template scale factor (default 1.0) so QR scales with the rest of the layout
+            try:
+                scale_factor = getattr(self, 'scale_factor', 1.0) or 1.0
+            except Exception:
+                scale_factor = 1.0
+            qr_size_mm = qr_size_mm * scale_factor
+            qr_size = Mm(qr_size_mm)
+            
+            # Check if doc is a DocxTemplate or Document
+            if hasattr(doc, 'docx'):
+                # This is a DocxTemplate - use it directly for InlineImage
+                qr_inline_image = InlineImage(doc, img_buffer, width=qr_size)
+            else:
+                # This is a Document - create InlineImage with None template for manual insertion
+                qr_inline_image = InlineImage(None, img_buffer, width=qr_size)
+                # Store document reference for manual insertion
+                qr_inline_image._doc = doc
             
             # Store the raw image data for manual replacement
             img_buffer.seek(0)  # Reset buffer position
             qr_inline_image._raw_image_data = img_buffer.read()
             qr_inline_image._raw_image_width = qr_size
+            qr_inline_image._product_name = clean_name  # Store product name for reference
             
-            self.logger.debug(f"Generated QR code for product: '{clean_name}' with size: {qr_size}")
+            self.logger.debug(f"Generated QR code for product: '{clean_name}' with font size: {font_size_pt.pt}pt, converted to {qr_size_mm:.1f}mm")
             return qr_inline_image
             
         except Exception as e:
@@ -1664,6 +1731,10 @@ class TemplateProcessor:
                     enforce_fixed_cell_dimensions(table, 'mini')
                     self.logger.info("Applied fixed cell dimensions to mini template table")
                 
+                # CRITICAL: Enhanced table expansion prevention for mini template
+                doc = prevent_table_expansion_enhanced(doc, 'mini')
+                self.logger.info("Applied enhanced table expansion prevention to mini template")
+                
                 # Apply mini template specific font sizing
                 self._apply_mini_template_font_sizing(doc)
                     
@@ -1680,7 +1751,8 @@ class TemplateProcessor:
         # Fast double template processing
         if self.template_type == 'double':
             try:
-                self._add_brand_markers(doc)
+                # Skip _add_brand_markers for double template as it's designed for mini templates
+                # and might interfere with the centering logic
                 self._apply_brand_centering_for_double_template(doc)
             except Exception as e:
                 self.logger.warning(f"Double template processing failed: {e}")
@@ -1789,6 +1861,23 @@ class TemplateProcessor:
                 self.logger.info(f"Applied final fixed cell dimensions to {self.template_type} template table")
         except Exception as e:
             self.logger.warning(f"Final cell dimension enforcement failed: {e}")
+
+        
+        # CRITICAL: Enhanced table expansion prevention - additional layer of protection
+        try:
+            doc = prevent_table_expansion_enhanced(doc, self.template_type)
+            self.logger.info(f"Applied enhanced table expansion prevention to {self.template_type} template")
+        except Exception as e:
+            self.logger.warning(f"Enhanced table expansion prevention failed: {e}")
+
+        # FINAL DOH CENTERING PASS: Ensure DOH images remain centered after all other processing
+        try:
+            self.logger.debug("Performing final DOH image centering pass")
+            self._final_doh_centering_pass(doc)
+            # Additional pass to ensure DOH centering sticks
+            self._final_doh_centering_pass(doc)
+        except Exception as e:
+            self.logger.warning(f"Final DOH centering pass failed: {e}")
             
         return doc
 
@@ -2040,6 +2129,148 @@ class TemplateProcessor:
         except Exception as e:
             self.logger.warning(f"Error ensuring DOH logo vertical margins: {e}")
 
+    def _final_doh_centering_pass(self, doc):
+        """
+        Final pass to ensure DOH images remain centered after all processing.
+        This runs at the very end to override any alignment changes made by other processes.
+        """
+        try:
+            from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
+            from docx.enum.text import WD_ALIGN_PARAGRAPH
+            from docx.oxml.ns import qn
+            
+            doh_images_found = 0
+            for table in doc.tables:
+                # Validate table structure before processing
+                if not self._validate_and_repair_table_structure(table):
+                    self.logger.warning(f"Skipping table with invalid structure during final DOH centering")
+                    continue
+                
+                for row in table.rows:
+                    for cell in row.cells:
+                        # Check if this cell contains a DOH image
+                        has_doh_image = self._cell_contains_doh_image(cell)
+                        
+                        if has_doh_image:
+                            doh_images_found += 1
+                            
+                            # Add tiny vertical spacer above DOH image to push it down
+                            self._add_doh_vertical_spacer(cell)
+                            
+                            # FORCE center alignment for the entire cell
+                            cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+                            
+                            # Apply XML-level vertical alignment directly to cell
+                            try:
+                                from docx.oxml import OxmlElement
+                                tc_element = cell._tc
+                                tcPr = tc_element.get_or_add_tcPr()
+                                
+                                # Force vertical alignment at cell level
+                                vAlign = tcPr.find(qn('w:vAlign'))
+                                if vAlign is None:
+                                    vAlign = OxmlElement('w:vAlign')
+                                    tcPr.append(vAlign)
+                                vAlign.set(qn('w:val'), 'center')
+                                
+                            except Exception as e:
+                                self.logger.warning(f"Error setting XML cell vertical alignment: {e}")
+                            
+                            # FORCE center alignment for all paragraphs in the cell
+                            for paragraph in cell.paragraphs:
+                                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                
+                                # Apply XML-level centering to be absolutely sure
+                                try:
+                                    pPr = paragraph._element.get_or_add_pPr()
+                                    
+                                    # Force paragraph justification to center
+                                    from docx.oxml import OxmlElement
+                                    jc = pPr.find(qn('w:jc'))
+                                    if jc is None:
+                                        jc = OxmlElement('w:jc')
+                                        pPr.append(jc)
+                                    jc.set(qn('w:val'), 'center')
+                                    
+                                    # Ensure proper vertical spacing
+                                    spacing = pPr.find(qn('w:spacing'))
+                                    if spacing is None:
+                                        spacing = OxmlElement('w:spacing')
+                                        pPr.append(spacing)
+                                    spacing.set(qn('w:before'), '60')  # 3pt = 60 twips
+                                    spacing.set(qn('w:after'), '60')   # 3pt = 60 twips
+                                    spacing.set(qn('w:line'), '240')
+                                    spacing.set(qn('w:lineRule'), 'auto')
+                                    
+                                except Exception as xml_error:
+                                    self.logger.warning(f"Error applying XML-level DOH centering: {xml_error}")
+            
+            if doh_images_found > 0:
+                self.logger.info(f"Final DOH centering pass completed - processed {doh_images_found} DOH images")
+            else:
+                self.logger.debug("Final DOH centering pass - no DOH images found")
+                
+        except Exception as e:
+            self.logger.warning(f"Error in final DOH centering pass: {e}")
+
+    def _add_doh_vertical_spacer(self, cell):
+        """
+        Add a tiny invisible spacer above DOH images to push them down for better centering.
+        """
+        try:
+            # Find paragraphs with DOH images
+            doh_paragraphs = []
+            for i, paragraph in enumerate(cell.paragraphs):
+                paragraph_xml = paragraph._element.xml.decode('utf-8') if hasattr(paragraph._element, 'xml') else str(paragraph._element)
+                if any(doh_indicator in paragraph_xml for doh_indicator in ['w:drawing', 'w:pict']) or 'DOH' in paragraph.text:
+                    doh_paragraphs.append((i, paragraph))
+            
+            # Add spacer before the first DOH paragraph
+            if doh_paragraphs:
+                first_doh_index = doh_paragraphs[0][0]
+                
+                # Create spacer paragraph at the beginning of the cell
+                spacer_para = cell.paragraphs[0] if cell.paragraphs else cell.add_paragraph()
+                
+                # If first paragraph is not the DOH, insert before it
+                if first_doh_index > 0:
+                    # Insert a new paragraph at the beginning
+                    new_para = cell.add_paragraph()
+                    # Move it to the beginning
+                    cell._element.insert(0, new_para._element)
+                    spacer_para = new_para
+                
+                # Clear any existing content and add invisible spacer
+                spacer_para.clear()
+                spacer_run = spacer_para.add_run()
+                
+                # Use invisible character and line break for vertical spacing
+                spacer_run.text = "\u200B"  # Zero-width space character
+                spacer_run.font.size = Pt(1)  # Minimal font size
+                spacer_run.font.color.rgb = RGBColor(255, 255, 255)  # White (invisible)
+                
+                # Add line break for actual vertical spacing
+                spacer_run.add_break()
+                
+                # Center align the spacer
+                spacer_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                
+                # Add XML-level spacing to push content down
+                try:
+                    from docx.oxml import OxmlElement
+                    from docx.oxml.ns import qn
+                    pPr = spacer_para._element.get_or_add_pPr()
+                    spacing = OxmlElement('w:spacing')
+                    spacing.set(qn('w:after'), '120')  # 6pt = 120 twips after spacing
+                    pPr.append(spacing)
+                except Exception as xml_error:
+                    self.logger.debug(f"XML spacing addition failed: {xml_error}")
+                
+                self.logger.debug("Added vertical spacer above DOH image to push it down")
+                
+        except Exception as e:
+            self.logger.warning(f"Error adding DOH vertical spacer: {e}")
+
     def _final_marker_cleanup(self, doc):
         """
         Final marker cleanup to ensure ALL markers are stripped from the final output.
@@ -2055,34 +2286,97 @@ class TemplateProcessor:
                 r'\b\w+_END\b',                   # END markers specifically
                 r'PRODUCTBRAND_START\s*',         # PRODUCTBRAND_START with optional spaces
                 r'\s*PRODUCTBRAND_END\b',         # PRODUCTBRAND_END with optional spaces
+                r'PRODUCTBRAND_CENTER_START\s*',  # PRODUCTBRAND_CENTER_START with optional spaces
+                r'\s*PRODUCTBRAND_CENTER_END\b',  # PRODUCTBRAND_CENTER_END with optional spaces
                 r'PRODUCTSTRAIN_START\s*',        # PRODUCTSTRAIN_START with optional spaces
                 r'\s*PRODUCTSTRAIN_END\b',        # PRODUCTSTRAIN_END with optional spaces
                 r'LINEAGE_START\s*',              # LINEAGE_START with optional spaces
                 r'\s*LINEAGE_END\b',              # LINEAGE_END with optional spaces
                 r'PRODUCTVENDOR_START\s*',        # PRODUCTVENDOR_START with optional spaces
                 r'\s*PRODUCTVENDOR_END\b',        # PRODUCTVENDOR_END with optional spaces
+                r'THC_CBD_START\s*',              # THC_CBD_START with optional spaces
+                r'\s*THC_CBD_END\b',              # THC_CBD_END with optional spaces
+                r'RATIO_START\s*',                # RATIO_START with optional spaces
+                r'\s*RATIO_END\b',                # RATIO_END with optional spaces
+                r'WEIGHTUNITS_START\s*',          # WEIGHTUNITS_START with optional spaces
+                r'\s*WEIGHTUNITS_END\b',          # WEIGHTUNITS_END with optional spaces
+                r'PRICE_START\s*',                # PRICE_START with optional spaces
+                r'\s*PRICE_END\b',                # PRICE_END with optional spaces
+                r'DESC_START\s*',                 # DESC_START with optional spaces
+                r'\s*DESC_END\b',                 # DESC_END with optional spaces
                 r'\bPRODUCTBRAND\b',              # Standalone PRODUCTBRAND
                 r'\bPRODUCTSTRAIN\b',             # Standalone PRODUCTSTRAIN
                 r'\bLINEAGE\b',                   # Standalone LINEAGE
                 r'\bPRODUCTVENDOR\b',             # Standalone PRODUCTVENDOR
+                r'\bTHC_CBD\b',                   # Standalone THC_CBD
+                r'\bRATIO\b',                     # Standalone RATIO
+                r'\bWEIGHTUNITS\b',               # Standalone WEIGHTUNITS
+                r'\bPRICE\b',                     # Standalone PRICE
+                r'\bDESC\b',                      # Standalone DESC
             ]
             
             def clean_text(text):
-                """Clean text by removing all marker patterns."""
+                """Clean text by removing all marker patterns while preserving lineage content."""
                 cleaned = text
+                
+                # CRITICAL FIX: Handle lineage markers specially to preserve content
+                # Extract lineage content before removing markers
+                lineage_match = re.search(r'LINEAGE_START(.+?)LINEAGE_END', cleaned, re.IGNORECASE)
+                if lineage_match:
+                    lineage_content = lineage_match.group(1)
+                    # Replace the full lineage marker pattern with just the content
+                    cleaned = re.sub(r'LINEAGE_START(.+?)LINEAGE_END', lineage_content, cleaned, flags=re.IGNORECASE)
+                
+                # CRITICAL FIX: Handle product brand markers specially to preserve content
+                # Extract product brand content before removing markers (handle both PRODUCTBRAND and PRODUCTBRAND_CENTER)
+                brand_match = re.search(r'PRODUCTBRAND(?:_CENTER)?_START(.+?)PRODUCTBRAND(?:_CENTER)?_END', cleaned, re.IGNORECASE)
+                if brand_match:
+                    brand_content = brand_match.group(1)
+                    # Now that Product Strain is separate, brand content is just the brand name
+                    # No need to extract brand name from combined content
+                    
+                    # Replace the full product brand marker pattern with just the brand content
+                    cleaned = re.sub(r'PRODUCTBRAND(?:_CENTER)?_START(.+?)PRODUCTBRAND(?:_CENTER)?_END', brand_content, cleaned, flags=re.IGNORECASE)
+                
+                # CRITICAL FIX: Handle product strain markers specially to preserve content
+                # Extract product strain content before removing markers
+                strain_match = re.search(r'PRODUCTSTRAIN_START(.+?)PRODUCTSTRAIN_END', cleaned, re.IGNORECASE)
+                if strain_match:
+                    strain_content = strain_match.group(1)
+                    # Replace the full product strain marker pattern with just the content
+                    cleaned = re.sub(r'PRODUCTSTRAIN_START(.+?)PRODUCTSTRAIN_END', strain_content, cleaned, flags=re.IGNORECASE)
+                
+                # Remove other marker patterns
                 for pattern in marker_patterns:
                     cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
                 
                 # CRITICAL FIX: Remove partial marker remnants like "bis" from "PRODUCTBRAND_END"
                 partial_remnants = [
                     r'\bbis\b',                    # "bis" from PRODUCTBRAND_END
+                    r'PRODUCTBRAND_END',           # PRODUCTBRAND_END remnants (specific first)
+                    r'PRODUCTBRAND_',              # PRODUCTBRAND_ remnants (specific first)
+                    r'BRAND_',                     # BRAND_ remnants without word boundaries
+                    r'\bBRAND_\b',                 # BRAND_ remnants (but not standalone BRAND)
                     r'\bSTART\b',                  # Any remaining START
                     r'\bEND\b',                    # Any remaining END
                     r'\bPRODUCT\b',                # Any remaining PRODUCT
-                    r'\bBRAND\b',                  # Any remaining BRAND
+                    # REMOVED: r'\bBRAND\b' - Don't remove BRAND as it's part of brand names
                     r'\bSTRAIN\b',                 # Any remaining STRAIN
                     r'\bVENDOR\b',                 # Any remaining VENDOR
-                    r'\bLINEAGE\b',                # Any remaining LINEAGE
+                    # REMOVED: r'\bLINEAGE\b' - Don't remove LINEAGE as it might be part of content
+                    # REMOVED: r'\bCBD\b' - Don't remove CBD as it's part of lineage content like "CBD Blend"
+                    r'\bTHC\b',                    # Any remaining THC
+                    r'\bRATIO\b',                  # Any remaining RATIO
+                    r'\bWEIGHT\b',                 # Any remaining WEIGHT
+                    r'\bUNITS\b',                  # Any remaining UNITS
+                    r'\bPRICE\b',                  # Any remaining PRICE
+                    r'\bDESC\b',                   # Any remaining DESC
+                    r'\bTART\b',                   # "TART" from THC_CBD_START
+                    r'\bTADT\b',                   # "TADT" from THC_CBD_START
+                    r'\bTUC\b',                    # "TUC" from THC_CBD_START
+                    r'\bS\b',                      # Single "S" from THC_CBD_START
+                    r'\bC\b',                      # Single "C" from THC_CBD_START
+                    r'\bD\b',                      # Single "D" from THC_CBD_START
                 ]
                 
                 for remnant in partial_remnants:
@@ -2130,7 +2424,7 @@ class TemplateProcessor:
             # Define lineage values that should be cleaned
             lineage_values = [
                 "SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", 
-                "CBD", "MIXED", "PARAPHERNALIA", "PARA"
+                "CBD", "CBD BLEND", "MIXED", "PARAPHERNALIA", "PARA"
             ]
             
             # Clean lineage content in all tables
@@ -2319,6 +2613,9 @@ class TemplateProcessor:
         Process a single paragraph for multiple markers using template-specific font sizing.
         Handles all markers in a single pass to avoid conflicts.
         """
+        # Import functions used throughout this method
+        from src.core.generation.unified_font_sizing import get_font_size_by_marker, set_run_font_size
+        
         full_text = "".join(run.text for run in paragraph.runs)
         
         # DEBUG: Log the input parameters
@@ -2437,8 +2734,8 @@ class TemplateProcessor:
             
             # Apply special formatting for specific markers
             for marker_name, marker_data in processed_content.items():
-                # Special handling for ProductBrand markers in Double template
-                if ('PRODUCTBRAND' in marker_name) and self.template_type == 'double':
+                # Always center ProductBrand markers for ALL templates
+                if ('PRODUCTBRAND' in marker_name):
                     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     for run in paragraph.runs:
                         # Get product type for font sizing
@@ -2474,9 +2771,8 @@ class TemplateProcessor:
                     
                     # Use unified LINEAGE font sizing for all templates including double
                     for run in paragraph.runs:
-                        # Use unified font sizing system instead of old get_font_size_by_marker
-                        from src.core.generation.unified_font_sizing import get_font_size
-                        font_size = get_font_size(content, 'lineage', self.template_type, self.scale_factor)
+                        # Use get_font_size_by_marker for proper LINEAGE sizing
+                        font_size = get_font_size_by_marker(self.template_type, 'LINEAGE')
                         set_run_font_size(run, font_size)
                     
                     # Handle alignment based on PRODUCT TYPE, not just lineage content
@@ -2547,20 +2843,42 @@ class TemplateProcessor:
                 else:
                     product_type = None
                 
-                # Special handling for ProductStrain marker - always use 1pt font
+                # Special handling for ProductStrain marker - use unified font sizing system
                 if marker_name in ('PRODUCTSTRAIN', 'STRAIN'):
                     for run in paragraph.runs:
-                        # Only apply 1pt font to runs that contain strain content AND are actually ProductStrain markers
+                        # Only apply strain font sizing to runs that contain strain content AND are actually ProductStrain markers
                         # This prevents ProductStrain font sizing from affecting other fields like ProductBrand
                         if (marker_data['content'] in run.text and 
                             any(marker in run.text for marker in ['PRODUCTSTRAIN_START', 'STRAIN_START'])):
-                            # Force 1pt font size for ProductStrain markers
-                            strain_font_size = Pt(1 * self.scale_factor)
+                            # Use unified font sizing system for ProductStrain markers (1pt font size)
+                            strain_font_size = get_font_size_by_marker(self.template_type, 'PRODUCTSTRAIN')
+                            set_run_font_size(run, strain_font_size)
+                    continue
+                
+                # Special handling for standalone CBD text - treat as strain placeholder (1pt font size)
+                if marker_name in ('CBD', 'THC', 'CBC', 'CBG', 'CBN') and marker_data['content'].strip() in ['CBD', 'THC', 'CBC', 'CBG', 'CBN']:
+                    for run in paragraph.runs:
+                        # Only apply strain font sizing to runs that contain standalone cannabinoid text
+                        if (marker_data['content'] in run.text and 
+                            len(marker_data['content'].strip()) <= 3 and  # Short cannabinoid names only
+                            marker_data['content'].strip().upper() in ['CBD', 'THC', 'CBC', 'CBG', 'CBN']):
+                            # Use unified font sizing system for standalone cannabinoid text (1pt font size)
+                            strain_font_size = get_font_size_by_marker(self.template_type, 'PRODUCTSTRAIN')
                             set_run_font_size(run, strain_font_size)
                     continue
                 
                 # Apply normal font sizing for other markers
-                set_run_font_size(run, get_font_size_by_marker(marker_data['content'], marker_name, self.template_type, self.scale_factor, product_type))
+                for run in paragraph.runs:
+                    # Additional check for standalone cannabinoid text that might have slipped through
+                    if (marker_data['content'] in run.text and 
+                        len(marker_data['content'].strip()) <= 3 and
+                        marker_data['content'].strip().upper() in ['CBD', 'THC', 'CBC', 'CBG', 'CBN'] and
+                        not any(marker in run.text for marker in ['CBD_START', 'THC_START', 'CBC_START', 'CBG_START', 'CBN_START'])):
+                        # This is standalone cannabinoid text - use strain font sizing (1pt)
+                        strain_font_size = get_font_size_by_marker(self.template_type, 'PRODUCTSTRAIN')
+                        set_run_font_size(run, strain_font_size)
+                    else:
+                        set_run_font_size(run, get_font_size_by_marker(marker_data['content'], marker_name, self.template_type, self.scale_factor, product_type))
                 # Special handling for ProductVendor marker - now handled above with unified font sizing
                 # This section removed to prevent conflicts with the unified font sizing system
             
@@ -2667,7 +2985,9 @@ class TemplateProcessor:
                     line_spacing = get_line_spacing_by_marker(marker_name, self.template_type)
                     if line_spacing:
                         paragraph.paragraph_format.line_spacing = line_spacing
-                        paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                        # Only set LEFT alignment if the paragraph is not already centered
+                        if paragraph.alignment != WD_ALIGN_PARAGRAPH.CENTER:
+                            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
                         # Set at XML level for maximum compatibility
                         pPr = paragraph._element.get_or_add_pPr()
                         spacing = pPr.find(qn('w:spacing'))
@@ -2686,15 +3006,27 @@ class TemplateProcessor:
                     # For all other Ratio content in horizontal template, set vertical alignment to top
                     elif self.template_type == 'horizontal' and marker_name in ['THC_CBD', 'RATIO', 'THC_CBD_LABEL']:
                         # Set vertical alignment to top for the cell containing this paragraph
+                        # BUT preserve center alignment for cells with DOH images
                         if paragraph._element.getparent().tag.endswith('tc'):  # Check if in table cell
                             cell = paragraph._element.getparent()
-                            cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
+                            # Check if this cell contains a DOH image before setting to TOP
+                            has_doh_image = self._cell_contains_doh_image(cell)
+                            if not has_doh_image:
+                                cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
+                            else:
+                                self.logger.debug("Preserving center alignment for horizontal template cell with DOH image")
                     # For all other THC/CBD content in other templates, set vertical alignment to top
                     elif marker_name in ['THC_CBD', 'RATIO', 'THC_CBD_LABEL']:
                         # Set vertical alignment to top for the cell containing this paragraph
+                        # BUT preserve center alignment for cells with DOH images
                         if paragraph._element.getparent().tag.endswith('tc'):  # Check if in table cell
                             cell = paragraph._element.getparent()
-                            cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
+                            # Check if this cell contains a DOH image before setting to TOP
+                            has_doh_image = self._cell_contains_doh_image(cell)
+                            if not has_doh_image:
+                                cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
+                            else:
+                                self.logger.debug("Preserving center alignment for cell with DOH image")
                 
                 # Center alignment for brand names
                 if 'PRODUCTBRAND' in marker_name:
@@ -2707,30 +3039,53 @@ class TemplateProcessor:
                 # Special handling for lineage markers
                 if marker_name == 'LINEAGE':
                     self.logger.debug(f"Processing LINEAGE marker with content: '{content}'")
+                    
+                    # CRITICAL FIX: If Lineage contains PRODUCTBRAND_CENTER markers, process it as PRODUCTBRAND_CENTER
+                    if 'PRODUCTBRAND_CENTER_START' in content and 'PRODUCTBRAND_CENTER_END' in content:
+                        self.logger.debug(f"Lineage contains PRODUCTBRAND_CENTER markers, processing as PRODUCTBRAND_CENTER")
+                        # Extract the brand content from the PRODUCTBRAND_CENTER markers
+                        brand_start = content.find('PRODUCTBRAND_CENTER_START') + len('PRODUCTBRAND_CENTER_START')
+                        brand_end = content.find('PRODUCTBRAND_CENTER_END')
+                        brand_content = content[brand_start:brand_end]
+                        
+                        # Clear paragraph and recreate with brand content
+                        paragraph.clear()
+                        run = paragraph.add_run()
+                        run.font.name = "Arial"
+                        run.font.bold = True
+                        run.font.size = font_size
+                        set_run_font_size(run, font_size)
+                        run.add_text(brand_content)
+                        
+                        # Center the paragraph for nonclassic types (ProductBrand content)
+                        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        self.logger.debug(f"Centered Lineage (ProductBrand) content: '{brand_content}'")
+                        return  # Exit early since we've handled this as PRODUCTBRAND_CENTER
+                    
                     # Extract product type information from the content
                     if '_PRODUCT_TYPE_' in content and '_IS_CLASSIC_' in content:
                         parts = content.split('_PRODUCT_TYPE_')
                         if len(parts) == 2:
                             actual_lineage = parts[0]
+                            # Remove PRODUCTBRAND_CENTER_START marker if present
+                            if actual_lineage.startswith('PRODUCTBRAND_CENTER_START'):
+                                actual_lineage = actual_lineage[len('PRODUCTBRAND_CENTER_START'):]
                             type_info = parts[1]
                             type_parts = type_info.split('_IS_CLASSIC_')
                             if len(type_parts) == 2:
                                 product_type = type_parts[0]
                                 is_classic_raw = type_parts[1]
-                                # Remove LINEAGE_END marker if present
+                                # Remove LINEAGE_END or PRODUCTBRAND_CENTER_END marker if present
                                 if is_classic_raw.endswith('LINEAGE_END'):
                                     is_classic_raw = is_classic_raw[:-len('LINEAGE_END')]
+                                elif is_classic_raw.endswith('PRODUCTBRAND_CENTER_END'):
+                                    is_classic_raw = is_classic_raw[:-len('PRODUCTBRAND_CENTER_END')]
                                 is_classic = is_classic_raw.lower() == 'true'
                                 
-                                # Check if the lineage content itself is a classic lineage value
-                                classic_lineages = [
-                                    "SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", 
-                                    "CBD", "MIXED", "PARAPHERNALIA", "PARA"
-                                ]
-                                is_classic_lineage = actual_lineage.upper() in classic_lineages
-                                
-                                # Don't center if it's either a classic product type OR a classic lineage value
-                                if is_classic or is_classic_lineage:
+                                # For nonclassic types, Lineage field contains ProductBrand content which should always be centered
+                                # For classic types, Lineage field contains actual lineage content which should be left-aligned
+                                # Only check product type, not content, to determine alignment
+                                if is_classic:
                                     paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
                                 else:
                                     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -2738,6 +3093,8 @@ class TemplateProcessor:
                                 # Update the content to only show the actual lineage (remove any markers)
                                 if actual_lineage.startswith('LINEAGE_START'):
                                     actual_lineage = actual_lineage[len('LINEAGE_START'):]
+                                elif actual_lineage.startswith('PRODUCTBRAND_CENTER_START'):
+                                    actual_lineage = actual_lineage[len('PRODUCTBRAND_CENTER_START'):]
                                 content = actual_lineage
                     else:
                         # Fallback: check if this is a classic product type by using the context
@@ -2760,23 +3117,20 @@ class TemplateProcessor:
                             if 'vape' in product_type.lower():
                                 self.logger.debug(f"VAPE CARTRIDGE FALLBACK DEBUG: product_type='{product_type}', is_classic_product={is_classic_product}, CLASSIC_TYPES={CLASSIC_TYPES}")
                         
-                        # Also check if the content is a classic lineage value
-                        content_upper = content.upper()
-                        classic_lineages = [
-                            "SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", 
-                            "CBD", "MIXED", "PARAPHERNALIA", "PARA"
-                        ]
-                        is_classic_lineage = content_upper in classic_lineages
+                        # DEBUG: Log the centering decision for non-classic types
+                        self.logger.info(f"DEBUG: LINEAGE centering decision - product_type='{product_type}', is_classic_product={is_classic_product}, content='{content}'")
                         
-                        # If it's either a classic product type OR a classic lineage value, left-justify
-                        if is_classic_product or is_classic_lineage:
-                            # For Classic Types or Classic Lineages, left-justify the text
+                        # For nonclassic types, Lineage field contains ProductBrand content which should always be centered
+                        # For classic types, Lineage field contains actual lineage content which should be left-aligned
+                        # Only check product type, not content, to determine alignment
+                        if is_classic_product:
+                            # For Classic Types, left-justify the lineage text
                             paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                            self.logger.debug(f"Left-justified lineage for classic content: '{content}' (classic_product: {is_classic_product}, classic_lineage: {is_classic_lineage}, product_type: {product_type})")
+                            self.logger.debug(f"Left-justified lineage for classic product type: '{content}' (product_type: {product_type})")
                         else:
-                            # Only center if it's NOT a classic type and NOT a classic lineage
+                            # For non-classic types, center the ProductBrand content in Lineage field
                             paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                            self.logger.debug(f"Centered lineage for non-classic content: '{content}' (product_type: {product_type})")
+                            self.logger.debug(f"Centered lineage (ProductBrand) for non-classic product type: '{content}' (product_type: {product_type})")
                         
                         # SPECIFIC OVERRIDE: Ensure Vape Cartridge products always have LEFT-aligned lineage (fallback)
                         if product_type and 'vape' in product_type.lower():
@@ -3579,7 +3933,7 @@ class TemplateProcessor:
                                     'RATIO_END' not in run_text and    # Don't mark content already in RATIO markers
                                     '{{' not in run_text and 
                                     '}}' not in run_text and
-                                    'QR_PLACEHOLDER' not in run_text and  # Don't mark QR placeholders
+                                    # QR placeholder check removed
                                     len(run_text.strip()) > 0 and
                                     # Only mark content that looks like brand names (not numbers, not empty)
                                     not run_text.strip().isdigit() and
@@ -3670,6 +4024,8 @@ class TemplateProcessor:
         while classic types maintain their default alignment (left-aligned).
         """
         try:
+            self.logger.info("DEBUG: Starting _apply_brand_centering_for_double_template")
+            
             # Import CLASSIC_TYPES to check if current product type is classic
             from src.core.constants import CLASSIC_TYPES
             
@@ -3685,9 +4041,12 @@ class TemplateProcessor:
             is_classic_type = False
             if current_product_type:
                 is_classic_type = current_product_type.lower() in [ct.lower() for ct in CLASSIC_TYPES]
-                self.logger.debug(f"Double template brand centering - Product type: {current_product_type}, Is classic: {is_classic_type}")
+                self.logger.info(f"DEBUG: Double template brand centering - Product type: {current_product_type}, Is classic: {is_classic_type}")
             else:
-                self.logger.debug(f"Double template brand centering - No current_product_type available")
+                # If no current_product_type available, assume non-classic (tinctures, etc.)
+                # This ensures that brand content gets centered by default
+                is_classic_type = False
+                self.logger.info(f"DEBUG: Double template brand centering - No current_product_type available, assuming non-classic (will center brand content)")
             
             for table in doc.tables:
                 # Validate table structure before processing
@@ -3720,19 +4079,161 @@ class TemplateProcessor:
                                 len(paragraph_text) < 50
                             )
                             
-                            if is_brand_content:
+                            self.logger.info(f"DEBUG: Brand content detection - Text: '{paragraph_text}', Is brand: {is_brand_content}, Current alignment: {paragraph.alignment}")
+                            
+                            # CRITICAL FIX: Don't override paragraphs that are already centered
+                            # This prevents interference with the manual replacement centering
+                            if is_brand_content and paragraph.alignment != WD_ALIGN_PARAGRAPH.CENTER:
                                 if is_classic_type:
                                     # For classic types, ensure they are NOT centered (left-aligned)
-                                    if paragraph.alignment == WD_ALIGN_PARAGRAPH.CENTER:
-                                        paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                                        self.logger.debug(f"Fixed classic type alignment: set to LEFT for '{paragraph_text[:30]}...'")
+                                    paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                                    self.logger.debug(f"Fixed classic type alignment: set to LEFT for '{paragraph_text[:30]}...'")
                                 else:
                                     # For non-classic types, center the brand content
                                     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                                     self.logger.debug(f"Applied brand centering for non-classic type: '{paragraph_text[:30]}...'")
+                            elif is_brand_content and paragraph.alignment == WD_ALIGN_PARAGRAPH.CENTER:
+                                # Paragraph is already centered, preserve it
+                                self.logger.debug(f"Preserved existing centering for brand: '{paragraph_text[:30]}...'")
             
         except Exception as e:
             self.logger.error(f"Error applying brand centering for double template: {e}")
+
+    def _ensure_lineage_centering_for_nonclassic_types(self, doc):
+        """
+        Ensure brand field is centered for nonclassic types (where brand like "CERES" should be centered).
+        This method runs after all other processing to ensure the centering is not overridden.
+        """
+        try:
+            self.logger.info("DEBUG: Starting _ensure_lineage_centering_for_nonclassic_types")
+            
+            # Process all tables and look for actual brand content that should be centered
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for paragraph in cell.paragraphs:
+                            paragraph_text = paragraph.text.strip()
+                            
+                            # Skip empty paragraphs
+                            if not paragraph_text:
+                                continue
+                            
+                            # Look for actual brand content that should be centered
+                            # This includes all brand names regardless of case or length
+                            is_brand_name = (
+                                paragraph_text and
+                                not paragraph_text.startswith('$') and
+                                not paragraph_text.endswith('g') and
+                                not paragraph_text.endswith('mg') and
+                                not paragraph_text.isdigit() and
+                                # Not classic lineage values
+                                paragraph_text.upper() not in ["SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", "CBD", "MIXED"] and
+                                # Not THC/CBD content
+                                not ('THC:' in paragraph_text and 'CBD:' in paragraph_text) and
+                                # Not long product descriptions (those should be left-aligned)
+                                len(paragraph_text) <= 50 and
+                                # Not product names with weights or measurements
+                                not ('oz' in paragraph_text.lower() or 'ml' in paragraph_text.lower() or 'mg' in paragraph_text.lower()) and
+                                # Contains letters (brand names)
+                                any(c.isalpha() for c in paragraph_text) and
+                                # Not purely numeric content
+                                not paragraph_text.replace('.', '').replace(',', '').isdigit()
+                            )
+                            
+                            if is_brand_name:
+                                # Force center alignment for brand names
+                                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                self.logger.info(f"DEBUG: Centered brand name content: '{paragraph_text}'")
+                                
+        except Exception as e:
+            self.logger.error(f"Error ensuring brand centering for nonclassic types: {e}")
+
+    def _clean_up_lineage_brand_concatenation(self, doc):
+        """
+        Clean up any remaining concatenated lineage+brand content for classic types.
+        This runs at the very end to catch any concatenation that wasn't caught earlier.
+        """
+        try:
+            self.logger.info("DEBUG: Starting _clean_up_lineage_brand_concatenation")
+
+            # Define classic lineage values
+            classic_lineages = ["SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", "CBD", "MIXED"]
+
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for paragraph in cell.paragraphs:
+                            paragraph_text = paragraph.text.strip()
+
+                            # Skip empty paragraphs
+                            if not paragraph_text:
+                                continue
+
+                            # Check if this paragraph contains concatenated lineage+brand content
+                            cleaned_text = paragraph_text
+                            for classic_lineage in classic_lineages:
+                                # Look for patterns like "HYBRIDHUSTLER", "INDICAHUSTLER", etc.
+                                if paragraph_text.upper().startswith(classic_lineage.upper()) and len(paragraph_text) > len(classic_lineage):
+                                    # Extract only the lineage part
+                                    cleaned_text = paragraph_text[:len(classic_lineage)]
+                                    self.logger.info(f"DEBUG: Cleaned concatenated lineage: '{paragraph_text}' -> '{cleaned_text}'")
+                                    break
+
+                            # If we found concatenated content, update the paragraph
+                            if cleaned_text != paragraph_text:
+                                # Clear and recreate the paragraph with clean content
+                                paragraph.clear()
+                                run = paragraph.add_run()
+                                run.font.name = "Arial"
+                                run.font.bold = True
+                                
+                                # Use unified font sizing for lineage instead of hardcoded 12pt
+                                from src.core.generation.unified_font_sizing import get_font_size_by_marker
+                                lineage_font_size = get_font_size_by_marker(cleaned_text, 'LINEAGE', self.template_type, self.scale_factor)
+                                run.font.size = lineage_font_size
+                                
+                                run.font.color.rgb = RGBColor(255, 255, 255)  # Set text to white
+                                run.add_text(cleaned_text)
+                                paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT  # Left-align classic lineage
+                                
+        except Exception as e:
+            self.logger.error(f"Error cleaning up lineage brand concatenation: {e}")
+
+    def _ensure_standalone_cannabinoid_font_sizing(self, doc):
+        """
+        Ensure any standalone cannabinoid text (CBD, THC, CBC, CBG, CBN) uses 1pt font size.
+        This runs at the very end to catch any standalone cannabinoid text that wasn't caught earlier.
+        """
+        try:
+            self.logger.info("DEBUG: Starting _ensure_standalone_cannabinoid_font_sizing")
+
+            # Define standalone cannabinoid values that should be nearly invisible
+            standalone_cannabinoids = ["CBD", "THC", "CBC", "CBG", "CBN"]
+
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for paragraph in cell.paragraphs:
+                            for run in paragraph.runs:
+                                run_text = run.text.strip()
+
+                                # Skip empty runs
+                                if not run_text:
+                                    continue
+
+                                # Check if this run contains standalone cannabinoid text
+                                if (run_text in standalone_cannabinoids and 
+                                    len(run_text) <= 3 and
+                                    not any(marker in run.text for marker in ['CBD_START', 'THC_START', 'CBC_START', 'CBG_START', 'CBN_START', 'CBD_END', 'THC_END', 'CBC_END', 'CBG_END', 'CBN_END'])):
+                                    
+                                    # This is standalone cannabinoid text - force 1pt font size
+                                    from src.core.generation.unified_font_sizing import get_font_size_by_marker
+                                    strain_font_size = get_font_size_by_marker(run_text, 'PRODUCTSTRAIN', self.template_type, self.scale_factor)
+                                    run.font.size = strain_font_size
+                                    self.logger.info(f"DEBUG: Set standalone cannabinoid '{run_text}' to 1pt font size")
+                                
+        except Exception as e:
+            self.logger.error(f"Error ensuring standalone cannabinoid font sizing: {e}")
 
     def _get_template_specific_font_size(self, content, marker_name):
         """
@@ -3791,26 +4292,73 @@ class TemplateProcessor:
         
         # Handle the default "THC:|BR|CBD:" format from excel processor
         if text == "THC:|BR|CBD:" or text == "THC: | BR | CBD:":
-            self.logger.debug(f"Processing THC:|BR|CBD: placeholder for record: {record.get('Product Name*', 'Unknown')}")
-            # If we have record data, prioritize Excel THC/CBD values over database values
+            product_name = record.get('Product Name*', 'Unknown') if record else 'Unknown'
+            self.logger.debug(f"Processing THC:|BR|CBD: placeholder for record: {product_name}")
             if record:
-                # PRIORITY 1: Use Excel THC/CBD values directly (these come from the Excel sheet)
-                thc_value = str(record.get('THC', '')).strip()
-                cbd_value = str(record.get('CBD', '')).strip()
-                
-                self.logger.debug(f"Excel THC/CBD values - THC: '{thc_value}', CBD: '{cbd_value}'")
-                
-                # If Excel values are empty or 0, fall back to database values
-                if not thc_value or thc_value == '0' or thc_value == '0.0':
-                    total_thc_value = str(record.get('Total THC', '')).strip()
-                    thc_test_result = str(record.get('THC test result', '')).strip()
-                    
-                    if total_thc_value and total_thc_value != '0' and total_thc_value != '0.0':
-                        thc_value = total_thc_value
-                        self.logger.debug(f"Using database Total THC: '{thc_value}'")
-                    elif thc_test_result and thc_test_result != '0' and thc_test_result != '0.0':
-                        thc_value = thc_test_result
-                        self.logger.debug(f"Using database THC test result: '{thc_value}'")
+                # Show all relevant THC fields for debugging
+                self.logger.debug(f"RECORD THC FIELDS: THC: '{record.get('THC', '')}', THC test result: '{record.get('THC test result', '')}', Total THC: '{record.get('Total THC', '')}', THCA: '{record.get('THCA', '')}'")
+                # Always use Excel 'THC test result' if present and valid
+                excel_thc = str(record.get('THC test result', '')).strip()
+                try:
+                    excel_thc_float = float(excel_thc)
+                    if excel_thc not in ['0', '0.0', '', 'nan', 'NaN']:
+                        thc_value = excel_thc
+                        self.logger.debug(f"USING EXCEL THC test result: '{thc_value}'")
+                    else:
+                        raise ValueError
+                except Exception:
+                    # Fallback to highest of all other fields if Excel value is not valid
+                    thc_candidates = []
+                    thc_debug_vals = {}
+                    for key in ['Total THC', 'THCA', 'THC']:
+                        val = str(record.get(key, '')).strip()
+                        thc_debug_vals[key] = val
+                        try:
+                            val_float = float(val)
+                            if val not in ['0', '0.0', '', 'nan', 'NaN']:
+                                thc_candidates.append(val_float)
+                        except Exception:
+                            continue
+                    self.logger.debug(f"THC candidate values (fallback): {thc_debug_vals}, numeric candidates: {thc_candidates}")
+                    if thc_candidates:
+                        max_thc = max(thc_candidates)
+                        thc_value = str(max_thc)
+                        self.logger.debug(f"USING HIGHEST THC VALUE (fallback): '{thc_value}' from candidates: {thc_candidates}")
+                    else:
+                        thc_value = '0'
+                        self.logger.debug("No valid THC value found, defaulting to 0")
+
+                # Always use the highest value for both THC and CBD from all relevant fields
+                # Always use Excel 'CBD test result' if present and valid
+                excel_cbd = str(record.get('CBD test result', '')).strip()
+                try:
+                    excel_cbd_float = float(excel_cbd)
+                    if excel_cbd not in ['0', '0.0', '', 'nan', 'NaN']:
+                        cbd_value = excel_cbd
+                        self.logger.debug(f"USING EXCEL CBD test result: '{cbd_value}'")
+                    else:
+                        raise ValueError
+                except Exception:
+                    # Fallback to highest of all other fields if Excel value is not valid
+                    cbd_candidates = []
+                    cbd_debug_vals = {}
+                    for key in ['Total CBD', 'CBDA', 'CBD']:
+                        val = str(record.get(key, '')).strip()
+                        cbd_debug_vals[key] = val
+                        try:
+                            val_float = float(val)
+                            if val not in ['0', '0.0', '', 'nan', 'NaN']:
+                                cbd_candidates.append(val_float)
+                        except Exception:
+                            continue
+                    self.logger.debug(f"CBD candidate values (fallback): {cbd_debug_vals}, numeric candidates: {cbd_candidates}")
+                    if cbd_candidates:
+                        max_cbd = max(cbd_candidates)
+                        cbd_value = str(max_cbd)
+                        self.logger.debug(f"USING HIGHEST CBD VALUE (fallback): '{cbd_value}' from candidates: {cbd_candidates}")
+                    else:
+                        cbd_value = '0'
+                        self.logger.debug("No valid CBD value found, defaulting to 0")
                 
                 if not cbd_value or cbd_value == '0' or cbd_value == '0.0':
                     total_cbd_value = str(record.get('Total CBD', '')).strip()
@@ -3829,29 +4377,21 @@ class TemplateProcessor:
                 if cbd_value in ['nan', 'NaN', '']:
                     cbd_value = '0'
                 
-                self.logger.debug(f"THC/CBD values found - THC: '{thc_value}', CBD: '{cbd_value}'")
+                self.logger.debug("THC/CBD percentage display removed - QR codes now provide this information")
                 
-                # Format with actual values - always show both THC and CBD
-                if thc_value and cbd_value:
-                    result = f"THC: {thc_value}% CBD: {cbd_value}%"
-                elif thc_value:
-                    result = f"THC: {thc_value}% CBD: 0%"
-                elif cbd_value:
-                    result = f"THC: 0% CBD: {cbd_value}%"
-                else:
-                    result = f"THC: 0% CBD: 0%"
-                
-                self.logger.debug(f"Formatted THC/CBD result: '{result}'")
-                return result
+                # Return empty string - THC/CBD percentages are now shown via QR codes
+                return ""
             
-            # Fallback to default format if no record data or no values
-            return "THC: 0% CBD: 0%"
+            # Fallback - return empty string for THC/CBD requests
+            return ""
         
-        # If the text already contains THC/CBD format, return as-is
-        if 'THC:' in text and 'CBD:' in text:
-            return text
+        # Check for any THC/CBD content first, before other processing
+        # THC/CBD percentages are now provided via QR codes
+        if 'THC' in text.upper() or 'CBD' in text.upper():
+            self.logger.debug(f"Removing THC/CBD content: '{text}' - QR codes now provide this information")
+            return ""
         
-        # If the text contains mg values, return as-is (let text_processing handle it)
+        # If the text contains mg values (non-THC/CBD), return as-is (let text_processing handle it)
         if 'mg' in text.lower():
             return text
         
@@ -3864,54 +4404,8 @@ class TemplateProcessor:
             text = re.sub(r'(\d+):(\d+)', r'\1: \2', text)
             return text
         
-        # Common patterns for THC/CBD ratios
-        thc_patterns = [
-            r'THC[:\s]*([0-9.]+)%?',
-            r'([0-9.]+)%?\s*THC',
-            r'([0-9.]+)\s*THC'
-        ]
-        
-        cbd_patterns = [
-            r'CBD[:\s]*([0-9.]+)%?',
-            r'([0-9.]+)%?\s*CBD',
-            r'([0-9.]+)\s*CBD'
-        ]
-        
-        thc_value = None
-        cbd_value = None
-        
-        # Extract THC value
-        for pattern in thc_patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                thc_value = match.group(1)
-                break
-        
-        # Extract CBD value
-        for pattern in cbd_patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                cbd_value = match.group(1)
-                break
-        
-        # If we found both values, format them
-        if thc_value and cbd_value:
-            # Keep on same line without line breaks
-            formatted_text = f"THC: {thc_value}% CBD: {cbd_value}%"
-            # Apply the new THC/CBD percentage formatting rules
-            from src.core.generation.text_processing import format_thc_cbd_percentages
-            return format_thc_cbd_percentages(formatted_text)
-        elif thc_value:
-            formatted_text = f"THC: {thc_value}%"
-            from src.core.generation.text_processing import format_thc_cbd_percentages
-            return format_thc_cbd_percentages(formatted_text)
-        elif cbd_value:
-            formatted_text = f"CBD: {cbd_value}%"
-            from src.core.generation.text_processing import format_thc_cbd_percentages
-            return format_thc_cbd_percentages(formatted_text)
-        else:
-            # If no clear THC/CBD pattern found, return the original text
-            return text
+        # Return original text for non-THC/CBD content
+        return text
 
     def format_joint_ratio_pack(self, text):
         """
@@ -3969,115 +4463,17 @@ class TemplateProcessor:
 
     def format_thc_cbd_vertical_alignment(self, text):
         """
-        Format THC_CBD content for vertical templates with right-aligned percentages.
-        Splits THC and CBD into separate lines and right-aligns the percentage values.
-        Adds extra line spacing between THC percentage and CBD line.
+        THC/CBD percentage display removed - QR codes now provide this information.
         """
-        if not text:
-            return text
-        
-        # Split into lines
-        lines = text.split('\n')
-        formatted_lines = []
-        
-        # Check if this contains THC/CBD content with percentages
-        if not any('%' in line for line in lines):
-            return text
-        
-        # First pass: collect all percentage values to determine maximum width
-        all_percentages = []
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            
-            # Extract percentage values using regex
-            import re
-            percentages = re.findall(r'([0-9.]+)%', line)
-            all_percentages.extend(percentages)
-        
-        # Calculate maximum percentage width for right-alignment
-        max_percentage_width = 0
-        if all_percentages:
-            max_percentage_width = max(len(percentage) for percentage in all_percentages)
-        
-        # Second pass: format each line with proper right-alignment
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            
-            # Check if this line contains both THC and CBD (same line)
-            if 'THC:' in line and 'CBD:' in line and '%' in line:
-                # Split the line into THC and CBD parts
-                cbd_start = line.find('CBD:')
-                thc_part = line[:cbd_start].strip()
-                cbd_part = line[cbd_start:].strip()
-                
-                # Check if there are other cannabinoids after CBD
-                remaining_content = ''
-                if 'CBC:' in cbd_part:
-                    cbc_start = cbd_part.find('CBC:')
-                    cbd_part_only = cbd_part[:cbc_start].strip()
-                    remaining_content = cbd_part[cbc_start:].strip()
-                    cbd_part = cbd_part_only
-                elif 'CBG:' in cbd_part:
-                    cbg_start = cbd_part.find('CBG:')
-                    cbd_part_only = cbd_part[:cbg_start].strip()
-                    remaining_content = cbd_part[cbg_start:].strip()
-                    cbd_part = cbd_part_only
-                
-                # Format THC part with simple formatting
-                formatted_thc = self._format_thc_cbd_simple(thc_part, max_percentage_width)
-                
-                # Format CBD part with simple formatting
-                formatted_cbd = self._format_thc_cbd_simple(cbd_part, max_percentage_width)
-                
-                # Combine with line break between THC and CBD
-                if remaining_content:
-                    # Format remaining content (like CBC) with right-alignment
-                    formatted_remaining = self._format_percentage_right_alignment(remaining_content, max_percentage_width)
-                    # Add line break between THC and CBD
-                    formatted_line = f"{formatted_thc}\n{formatted_cbd}\n{formatted_remaining}"
-                else:
-                    # Add line break between THC and CBD
-                    formatted_line = f"{formatted_thc}\n{formatted_cbd}"
-                formatted_lines.append(formatted_line)
-            else:
-                # For single cannabinoid lines, apply right-alignment
-                formatted_line = self._format_percentage_right_alignment(line, max_percentage_width)
-                formatted_lines.append(formatted_line)
-        
-        return '\n'.join(formatted_lines)
+        self.logger.debug("THC/CBD vertical alignment formatting removed - QR codes now provide this information")
+        return ""
     
     def _format_thc_cbd_simple(self, text, max_percentage_width):
         """
-        Helper function to format THC/CBD with simple line break between values.
-        Returns format: "THC: x%\nCBD: x%"
+        THC/CBD percentage display removed - QR codes now provide this information.
         """
-        if not text or '%' not in text:
-            return text
-        
-        import re
-        
-        # Split the text into parts: label, percentage, and any remaining text
-        # Pattern to match: "THC: " + percentage + "%" + remaining
-        match = re.match(r'^([^0-9]*?)([0-9.]+)%(.*)$', text)
-        if not match:
-            return text
-        
-        label = match.group(1).strip()  # e.g., "THC:"
-        percentage = match.group(2)  # e.g., "21.0"
-        remaining = match.group(3)  # e.g., " CBD: 0.25%"
-        
-        # Simple format: label and percentage on same line
-        formatted_group = f"{label} {percentage}%"
-        
-        # Add remaining content if any
-        if remaining.strip():
-            formatted_group += f"\n{remaining.strip()}"
-        
-        return formatted_group
+        self.logger.debug("THC/CBD simple formatting removed - QR codes now provide this information")
+        return ""
 
     def _identify_marker_type(self, text):
         """Identify the marker type from text content for proper font sizing."""
@@ -4153,29 +4549,10 @@ class TemplateProcessor:
 
     def _format_percentage_right_alignment(self, text, max_percentage_width):
         """
-        Helper function to right-align percentage values in a single line.
+        THC/CBD percentage display removed - QR codes now provide this information.
         """
-        if not text or '%' not in text:
-            return text
-        
-        import re
-        
-        # Split the text into parts: label, percentage, and any remaining text
-        # Pattern to match: "THC: " + percentage + "%" + remaining
-        match = re.match(r'^([^0-9]*?)([0-9.]+)%(.*)$', text)
-        if not match:
-            return text
-        
-        label = match.group(1)  # e.g., "THC: "
-        percentage = match.group(2)  # e.g., "21.0"
-        remaining = match.group(3)  # e.g., " CBD: 0.25%"
-        
-        # Calculate spacing needed for right-alignment
-        spacing_needed = max_percentage_width - len(percentage)
-        spaces = ' ' * max(0, spacing_needed)
-        
-        # Return the formatted string with proper spacing
-        return f"{label}{spaces}{percentage}%{remaining}"
+        self.logger.debug("Percentage right alignment formatting removed - QR codes now provide this information")
+        return ""
 
     def _process_combined_lineage_vendor(self, paragraph, lineage_content, vendor_content):
         """
@@ -4221,8 +4598,8 @@ class TemplateProcessor:
                 return
             
             # Original single-line processing
-            # Set paragraph to justified alignment to allow for right-aligned vendor
-            paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            # Set paragraph to right alignment for proper vendor right-alignment
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
             
             # Add lineage with larger font size (left-aligned)
             if lineage_content and lineage_content.strip():
@@ -4237,14 +4614,8 @@ class TemplateProcessor:
                 lineage_run.font.name = "Arial"
                 lineage_run.font.bold = True
                 
-                # Get lineage font size
-                product_type = None
-                if hasattr(self, 'current_product_type'):
-                    product_type = self.current_product_type
-                elif hasattr(self, 'label_context') and 'ProductType' in self.label_context:
-                    product_type = self.label_context['ProductType']
-                
-                lineage_font_size = get_font_size_by_marker(lineage_content, 'LINEAGE', self.template_type, self.scale_factor, product_type)
+                # Use proper lineage font sizing
+                lineage_font_size = get_font_size_by_marker(lineage_content, 'LINEAGE', self.template_type, self.scale_factor)
                 set_run_font_size(lineage_run, lineage_font_size)
             
             # Add tab character to push vendor to the right (only if vendor content exists)
@@ -4281,11 +4652,11 @@ class TemplateProcessor:
                 paragraph.paragraph_format.tab_stops.clear_all()
                 # Add right-aligned tab stop at the right margin - positioned further right for full justification
                 if self.template_type == 'mini':
-                    tab_position = Inches(1.2)  # Adjusted for 1.5x1.5 mini template
+                    tab_position = Inches(1.4)  # Increased for more aggressive right alignment
                 elif self.template_type == 'vertical':
-                    tab_position = Inches(2.3)  # Increased for vertical template
+                    tab_position = Inches(2.5)  # Increased for more aggressive right alignment
                 else:  # horizontal, double
-                    tab_position = Inches(3.2)  # Further increased for horizontal/double templates
+                    tab_position = Inches(3.4)  # Increased for more aggressive right alignment
                 
                 paragraph.paragraph_format.tab_stops.add_tab_stop(tab_position, WD_TAB_ALIGNMENT.RIGHT)
                 
@@ -4293,7 +4664,15 @@ class TemplateProcessor:
                 # This creates additional tab stops to ensure the vendor text reaches the right edge
                 if self.template_type in ['horizontal', 'double']:
                     # Add an additional tab stop even further right as backup
-                    backup_tab_position = Inches(3.5)
+                    backup_tab_position = Inches(3.7)
+                    paragraph.paragraph_format.tab_stops.add_tab_stop(backup_tab_position, WD_TAB_ALIGNMENT.RIGHT)
+                elif self.template_type == 'vertical':
+                    # Add backup tab stop for vertical template too
+                    backup_tab_position = Inches(2.7)
+                    paragraph.paragraph_format.tab_stops.add_tab_stop(backup_tab_position, WD_TAB_ALIGNMENT.RIGHT)
+                elif self.template_type == 'mini':
+                    # Add backup tab stop for mini template too
+                    backup_tab_position = Inches(1.6)
                     paragraph.paragraph_format.tab_stops.add_tab_stop(backup_tab_position, WD_TAB_ALIGNMENT.RIGHT)
             else:
                 # For non-classic products without vendor, use left alignment
@@ -4333,8 +4712,8 @@ class TemplateProcessor:
             paragraph.paragraph_format.space_before = Pt(2)
             paragraph.paragraph_format.space_after = Pt(1)
             
-            # Set paragraph to left alignment for two-line layout
-            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            # Set paragraph to right alignment for proper vendor right-alignment
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
             
             # Add lineage on first line with larger font size
             if lineage_content and lineage_content.strip():
@@ -4344,22 +4723,22 @@ class TemplateProcessor:
                 lineage_run.font.name = "Arial"
                 lineage_run.font.bold = True
                 
-                # Get lineage font size
-                product_type = None
-                if hasattr(self, 'current_product_type'):
-                    product_type = self.current_product_type
-                elif hasattr(self, 'label_context') and 'ProductType' in self.label_context:
-                    product_type = self.label_context['ProductType']
-                
-                lineage_font_size = get_font_size_by_marker(lineage_content, 'LINEAGE', self.template_type, self.scale_factor, product_type)
+                # Use proper lineage font sizing
+                lineage_font_size = get_font_size_by_marker(lineage_content, 'LINEAGE', self.template_type, self.scale_factor)
                 set_run_font_size(lineage_run, lineage_font_size)
             
             # Add line break
             if lineage_content and vendor_content:
                 paragraph.add_run("\n")
             
-            # Add vendor on second line with smaller font size
+            # Add vendor on second line with smaller font size and right alignment
             if vendor_content and vendor_content.strip():
+                # Add tab character to push vendor to the right
+                tab_run = paragraph.add_run("\t")
+                tab_run.font.name = "Arial"
+                tab_run.font.bold = True
+                tab_run.font.size = Pt(12)  # Default size for tab
+                
                 vendor_run = paragraph.add_run(vendor_content.strip())
                 vendor_run.font.name = "Arial"
                 vendor_run.font.bold = False
@@ -4377,6 +4756,28 @@ class TemplateProcessor:
                 from src.core.generation.unified_font_sizing import get_font_size
                 vendor_font_size = get_font_size(vendor_content, 'vendor', self.template_type, self.scale_factor)
                 set_run_font_size(vendor_run, vendor_font_size)
+                
+                # Set tab stops to position vendor on the right
+                paragraph.paragraph_format.tab_stops.clear_all()
+                if self.template_type == 'mini':
+                    tab_position = Inches(1.4)  # Increased for more aggressive right alignment
+                elif self.template_type == 'vertical':
+                    tab_position = Inches(2.5)  # Increased for more aggressive right alignment
+                else:  # horizontal, double
+                    tab_position = Inches(3.4)  # Increased for more aggressive right alignment
+                
+                paragraph.paragraph_format.tab_stops.add_tab_stop(tab_position, WD_TAB_ALIGNMENT.RIGHT)
+                
+                # Add backup tab stop for more aggressive right positioning
+                if self.template_type in ['horizontal', 'double']:
+                    backup_tab_position = Inches(3.7)
+                    paragraph.paragraph_format.tab_stops.add_tab_stop(backup_tab_position, WD_TAB_ALIGNMENT.RIGHT)
+                elif self.template_type == 'vertical':
+                    backup_tab_position = Inches(2.7)
+                    paragraph.paragraph_format.tab_stops.add_tab_stop(backup_tab_position, WD_TAB_ALIGNMENT.RIGHT)
+                elif self.template_type == 'mini':
+                    backup_tab_position = Inches(1.6)
+                    paragraph.paragraph_format.tab_stops.add_tab_stop(backup_tab_position, WD_TAB_ALIGNMENT.RIGHT)
             
             # Handle left indentation based on lineage content type
             if lineage_content:
@@ -4426,6 +4827,55 @@ class TemplateProcessor:
                 vendor_end_idx = full_text.find(vendor_end)
                 vendor_content = full_text[vendor_start_idx:vendor_end_idx]
                 
+                # CRITICAL FIX: For classic types, don't combine lineage and vendor
+                # The lineage should only contain actual lineage content (SATIVA, INDICA, HYBRID)
+                # Check if this is a classic type by looking at the lineage content
+                classic_lineages = ["SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", "CBD", "MIXED"]
+                
+                # Check if lineage content starts with a classic lineage value
+                is_classic_lineage = False
+                for classic_lineage in classic_lineages:
+                    if lineage_content.upper().startswith(classic_lineage.upper()):
+                        is_classic_lineage = True
+                        break
+                
+                if is_classic_lineage:
+                    # This is a classic type with lineage content - don't combine with vendor
+                    # Extract just the lineage part if it contains additional brand info
+                    lineage_only = lineage_content
+                    for classic_lineage in classic_lineages:
+                        if lineage_content.upper().startswith(classic_lineage.upper()):
+                            # Extract just the lineage part
+                            lineage_only = lineage_content[:len(classic_lineage)]
+                            break
+                    
+                    # Update the lineage content to only show the lineage part
+                    lineage_content = lineage_only
+                    self.logger.debug(f"Extracted classic lineage only: '{lineage_content}' from '{full_text[lineage_start_idx:lineage_end_idx]}'")
+                    
+                    # Process only the lineage part, not combined with vendor
+                    paragraph.clear()
+                    run = paragraph.add_run()
+                    run.font.name = "Arial"
+                    run.font.bold = True
+                    
+                    # Get proper lineage font size using unified font sizing system
+                    product_type = None
+                    if hasattr(self, 'current_product_type'):
+                        product_type = self.current_product_type
+                    elif hasattr(self, 'label_context') and 'ProductType' in self.label_context:
+                        product_type = self.label_context['ProductType']
+                    
+                    lineage_font_size = get_font_size_by_marker(lineage_content, 'LINEAGE', self.template_type, self.scale_factor, product_type)
+                    set_run_font_size(run, lineage_font_size)
+                    
+                    run.add_text(lineage_content)
+                    paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT  # Left-align classic lineage
+                    
+                    # Mark as processed to prevent re-processing
+                    paragraph._combined_lineage_vendor_processed = True
+                    return True
+                
                 # Note: Product type filtering is now handled in _build_label_context
                 # This method only processes the content that's already been filtered
                 
@@ -4446,6 +4896,12 @@ class TemplateProcessor:
     def _fix_productstrain_in_brand_cells(self, doc):
         """Fix ProductStrain appearing in ProductBrand cells for non-classic types."""
         try:
+            # CRITICAL FIX: Skip ProductStrain removal for vertical templates
+            # In vertical templates, ProductStrain legitimately appears in the main cell alongside Lineage and ProductVendor
+            if self.template_type == 'vertical':
+                self.logger.debug("Skipping ProductStrain removal for vertical template - ProductStrain belongs in main cell")
+                return
+                
             for table in doc.tables:
                 for row in table.rows:
                     for cell in row.cells:
@@ -4464,6 +4920,12 @@ class TemplateProcessor:
                             elif self._detect_productstrain_in_brand_content(full_text):
                                 self.logger.debug(f"Found ProductStrain content in ProductBrand cell, fixing...")
                                 self._fix_productstrain_content_in_brand_cells(paragraph, full_text)
+                                
+                            # VERTICAL TEMPLATE FIX: Prevent arbitrary Product Strain concatenation to Lineage/Brand
+                            elif (self.template_type == 'vertical' and 
+                                  self._detect_arbitrary_strain_concatenation(full_text)):
+                                self.logger.debug(f"Found arbitrary Product Strain concatenation in vertical template, fixing...")
+                                self._fix_arbitrary_strain_concatenation(paragraph, full_text)
                                     
         except Exception as e:
             self.logger.warning(f"Error fixing ProductStrain in Brand cells: {e}")
@@ -4587,6 +5049,117 @@ class TemplateProcessor:
         except Exception as e:
             self.logger.warning(f"Error fixing ProductStrain markers in brand cells: {e}")
 
+    def _detect_arbitrary_strain_concatenation(self, text):
+        """Detect arbitrary Product Strain concatenation to Lineage/Brand in vertical template for non-classic types."""
+        # Only check for non-classic type strain patterns in vertical templates
+        if not text.strip():
+            return False
+            
+        # Common non-classic strain patterns that shouldn't be concatenated to brand names
+        non_classic_strains = [
+            'CBD BLEND', 'MIXED', 'CBD', 'PARAPHERNALIA', 'PARA', 'N/A'
+        ]
+        
+        # Look for patterns where a strain is concatenated directly to brand content
+        # Example: "HUSTLERCBD BLEND" should be "HUSTLER" + separate "CBD BLEND"
+        text_upper = text.upper()
+        
+        for strain in non_classic_strains:
+            strain_upper = strain.upper()
+            if strain_upper in text_upper:
+                # Check if strain appears to be concatenated (no space before strain)
+                strain_index = text_upper.find(strain_upper)
+                if strain_index > 0:
+                    # Check if there's text immediately before the strain (no space)
+                    char_before = text_upper[strain_index - 1]
+                    if char_before.isalnum():  # Letter or number directly before strain
+                        # This looks like concatenation - brand name + strain without space
+                        self.logger.debug(f"Detected arbitrary strain concatenation: '{text}' contains '{strain}' concatenated to brand")
+                        return True
+        
+        return False
+
+    def _fix_arbitrary_strain_concatenation(self, paragraph, full_text):
+        """Fix arbitrary Product Strain concatenation to Lineage/Brand for vertical template non-classic types."""
+        try:
+            # Common non-classic strain patterns to separate
+            non_classic_strains = [
+                'CBD BLEND', 'MIXED', 'CBD', 'PARAPHERNALIA', 'PARA', 'N/A'
+            ]
+            
+            new_text = full_text
+            text_upper = full_text.upper()
+            
+            for strain in non_classic_strains:
+                strain_upper = strain.upper()
+                if strain_upper in text_upper:
+                    strain_index = text_upper.find(strain_upper)
+                    if strain_index > 0:
+                        # Check if strain is concatenated (no space before)
+                        char_before = text_upper[strain_index - 1]
+                        if char_before.isalnum():
+                            # Extract the brand part (before strain)
+                            brand_part = full_text[:strain_index].strip()
+                            strain_part = full_text[strain_index:strain_index + len(strain)].strip()
+                            remainder = full_text[strain_index + len(strain):].strip()
+                            
+                            # For vertical template non-classic types, keep only the brand part in Lineage
+                            # The strain should be handled separately by ProductStrain field
+                            new_text = brand_part
+                            if remainder:
+                                new_text += " " + remainder
+                            
+                            self.logger.debug(f"Fixed arbitrary concatenation in vertical template:")
+                            self.logger.debug(f"  Original: '{full_text}'")
+                            self.logger.debug(f"  Brand part: '{brand_part}'")
+                            self.logger.debug(f"  Strain part: '{strain_part}' (removed from Lineage)")
+                            self.logger.debug(f"  Result: '{new_text}'")
+                            break
+            
+            # Update the paragraph if we made changes
+            if new_text != full_text:
+                paragraph.clear()
+                run = paragraph.add_run()
+                run.text = new_text.strip()
+                run.font.name = "Arial"
+                run.font.bold = True
+                
+                # Apply appropriate font sizing for brand content
+                from src.core.generation.unified_font_sizing import get_font_size
+                font_size = get_font_size(new_text, 'brand', self.template_type, self.scale_factor)
+                run.font.size = font_size
+                
+                return True
+            
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"Error fixing arbitrary strain concatenation: {e}")
+            return False
+
+    def _is_non_classic_type(self, product_type):
+        """Check if a product type is non-classic (not Flower, Pre-Roll, or Live)."""
+        if not product_type:
+            return False
+        
+        classic_types = ['flower', 'pre-roll', 'live']
+        return product_type.lower() not in classic_types
+
+    def _cell_contains_doh_image(self, cell):
+        """
+        Check if a cell contains a DOH image.
+        This is used to preserve center alignment for DOH images when setting other content to TOP alignment.
+        
+        Args:
+            cell: The table cell to check
+            
+        Returns:
+            bool: True if the cell contains a DOH image, False otherwise
+        """
+        # Use the common utility function
+        from src.core.utils.common import cell_contains_doh_image
+        return cell_contains_doh_image(cell)
+
     def _clean_doh_cells_before_processing(self, doc):
         """
         Clean up DOH cells before processing to ensure no content interferes with image positioning.
@@ -4631,28 +5204,20 @@ class TemplateProcessor:
             for table in doc.tables:
                 for row in table.rows:
                     for cell in row.cells:
-                        for para in cell.paragraphs:
-                            if 'QR_PLACEHOLDER' in para.text:
-                                self.logger.debug(f"Found QR placeholder in paragraph for {label_key}")
-                                
-                                # Clear the paragraph and add the QR code
-                                para.clear()
-                                para.alignment = 1  # Center alignment
-                                
-                                # Add the QR code image using raw image data
-                                run = para.add_run()
-                                from io import BytesIO
-                                img_buffer = BytesIO(qr_inline_image._raw_image_data)
-                                run.add_picture(img_buffer, width=qr_inline_image._raw_image_width)
-                                
-                                self.logger.debug(f"✓ QR code replaced successfully for {label_key}")
-                                return True
+                        for paragraph in cell.paragraphs:
+                            for run in paragraph.runs:
+                                if 'QR_PLACEHOLDER' in run.text:
+                                    # Clear the run text and add the QR image
+                                    run.clear()
+                                    run._element.append(qr_inline_image._inline)
+                                    self.logger.debug(f"Replaced QR placeholder with QR code image for {label_key}")
+                                    return True
             
-            self.logger.warning(f"QR placeholder not found in document for {label_key}")
+            self.logger.warning(f"QR_PLACEHOLDER not found for {label_key}")
             return False
             
         except Exception as e:
-            self.logger.error(f"Error replacing QR placeholder: {e}")
+            self.logger.error(f"Error replacing QR placeholder for {label_key}: {e}")
             return False
 
     def _manual_replace_placeholders(self, doc, context):
@@ -4667,40 +5232,83 @@ class TemplateProcessor:
                     self.logger.info(f"{label_key} fields: {list(label_context.keys())}")
                     # Log a few sample values
                     for field_key, field_value in list(label_context.items())[:5]:
-                        self.logger.info(f"  {field_key}: {repr(str(field_value)[:100])}")
+                        # Avoid calling str() on InlineImage objects which causes rendering issues
+                        if hasattr(field_value, '_raw_image_data'):
+                            self.logger.info(f"  {field_key}: <QR Code InlineImage>")
+                        else:
+                            self.logger.info(f"  {field_key}: {repr(str(field_value)[:100])}")
             
-            # Process each table in the document
+            # Debug: Check what placeholders exist in the template
+            placeholder_count = 0
+            found_placeholders = set()
             for table in doc.tables:
                 for row in table.rows:
                     for cell in row.cells:
                         for paragraph in cell.paragraphs:
-                            # Process runs for placeholder replacement
+                            full_text = ''.join(run.text for run in paragraph.runs)
+                            if '{{' in full_text and '}}' in full_text:
+                                # Extract all placeholders from this paragraph
+                                import re
+                                placeholders = re.findall(r'{{[^}]+}}', full_text)
+                                for p in placeholders:
+                                    found_placeholders.add(p)
+                                    placeholder_count += 1
+                                    self.logger.debug(f"Found placeholder in template: {p}")
+                            elif full_text.strip():  # Log non-empty text that doesn't contain placeholders
+                                self.logger.debug(f"Found non-placeholder text: '{full_text.strip()}'")
+            
+            self.logger.info(f"Found {placeholder_count} placeholders in template: {sorted(found_placeholders)}")
+            
+            # Process each table in the document
+            replacements_made = 0
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for paragraph in cell.paragraphs:
+                            # First, try to handle split placeholders by reconstructing the full paragraph text
+                            full_paragraph_text = ''.join(run.text for run in paragraph.runs)
+                            
+                            # Process each run for placeholder replacement
                             for run in paragraph.runs:
                                 text = run.text
                                 for label_key, label_context in context.items():
                                     for field_key, field_value in label_context.items():
                                         placeholder = f"{{{{{label_key}.{field_key}}}}}"
-                                        if placeholder in text:
-                                            # Special handling for QR codes (InlineImage objects)
-                                            if field_key == 'QR' and hasattr(field_value, 'image'):
-                                                # Clear the run and add the QR code image
-                                                run.clear()
-                                                run.add_picture(field_value.image, width=field_value.width)
-                                                self.logger.debug(f"Replaced {placeholder} with QR code image")
-                                                continue
+                                        
+                                        # Check if placeholder is in this run or split across runs
+                                        if placeholder in text or placeholder in full_paragraph_text:
+                                            if placeholder in text:
+                                                self.logger.debug(f"Found placeholder to replace: {placeholder}")
+                                            else:
+                                                self.logger.debug(f"Found split placeholder to replace: {placeholder}")
+                                            replacements_made += 1
                                             
-                                            # Handle simple QR placeholder {{QR}}
-                                            if placeholder == '{{QR}}' and field_key == 'QR' and hasattr(field_value, 'image'):
-                                                # Clear the run and add the QR code image
-                                                run.clear()
-                                                run.add_picture(field_value.image, width=field_value.width)
-                                                self.logger.debug(f"Replaced simple {{QR}} placeholder with QR code image")
+                                            # Special handling for QR codes (InlineImage objects)
+                                            if field_key == 'QR' and hasattr(field_value, '_raw_image_data'):
+                                                # This is a QR code - replace with actual image
+                                                try:
+                                                    from PIL import Image
+                                                    # Get the image data
+                                                    img_buffer = BytesIO(field_value._raw_image_data)
+                                                    img_buffer.seek(0)
+                                                    
+                                                    # Clear the run and add the image directly
+                                                    run.clear()
+                                                    # Add the QR code image to the run
+                                                    run.add_picture(img_buffer, width=field_value._raw_image_width)
+                                                    self.logger.debug(f"Replaced {placeholder} with QR code image")
+                                                    continue
+                                                except Exception as qr_error:
+                                                    self.logger.error(f"Failed to insert QR code image: {qr_error}")
+                                                    # Fall back to replacing with product name
+                                                    text = text.replace(placeholder, getattr(field_value, '_product_name', 'QR Code'))
                                                 continue
                                             
                                             # For all templates, unwrap markers to get clean content
                                             if True:  # Apply to all templates
                                                 # Unwrap common markers to get clean content
                                                 clean_value = str(field_value)
+                                                self.logger.debug(f"Processing field {field_key} with value: {clean_value}")
                                                 if 'DESC_START' in clean_value and 'DESC_END' in clean_value:
                                                     clean_value = unwrap_marker(clean_value, 'DESC')
                                                 elif 'PRICE_START' in clean_value and 'PRICE_END' in clean_value:
@@ -4711,6 +5319,8 @@ class TemplateProcessor:
                                                     clean_value = unwrap_marker(clean_value, 'RATIO')
                                                 elif 'PRODUCTNAME_START' in clean_value and 'PRODUCTNAME_END' in clean_value:
                                                     clean_value = unwrap_marker(clean_value, 'PRODUCTNAME')
+                                                elif 'PRODUCTBRAND_CENTER_START' in clean_value and 'PRODUCTBRAND_CENTER_END' in clean_value:
+                                                    clean_value = unwrap_marker(clean_value, 'PRODUCTBRAND_CENTER')
                                                 elif 'PRODUCTBRAND_START' in clean_value and 'PRODUCTBRAND_END' in clean_value:
                                                     clean_value = unwrap_marker(clean_value, 'PRODUCTBRAND')
                                                 elif 'WEIGHTUNITS_START' in clean_value and 'WEIGHTUNITS_END' in clean_value:
@@ -4723,6 +5333,58 @@ class TemplateProcessor:
                                                 # Replace placeholder with clean value
                                                 text = text.replace(placeholder, clean_value)
                                                 self.logger.debug(f"Replaced {placeholder} with unwrapped value: {clean_value}")
+                                                
+                                                # CRITICAL FIX: Apply centering for Lineage field with PRODUCTBRAND_CENTER markers
+                                                if field_key == 'Lineage' and 'PRODUCTBRAND_CENTER_START' in str(field_value) and 'PRODUCTBRAND_CENTER_END' in str(field_value):
+                                                    # This is a non-classic type with Product Brand in Lineage field
+                                                    # For double template, we need to create a separate paragraph for the brand
+                                                    # to center it properly within the yellow banner area
+                                                    from docx.oxml.ns import qn
+                                                    from docx.oxml import OxmlElement
+                                                    from docx.enum.text import WD_ALIGN_PARAGRAPH
+                                                    
+                                                    self.logger.debug(f"Applying centering to Lineage field with value: {field_value}")
+                                                    
+                                                    # Find the paragraph and cell
+                                                    paragraph = run._element.getparent()
+                                                    if paragraph is not None:
+                                                        cell = paragraph.getparent()
+                                                        if cell is not None:
+                                                            # Create a new paragraph specifically for the centered brand
+                                                            new_para = OxmlElement('w:p')
+                                                            
+                                                            # Add paragraph properties with center alignment
+                                                            pPr = OxmlElement('w:pPr')
+                                                            jc = OxmlElement('w:jc')
+                                                            jc.set(qn('w:val'), 'center')
+                                                            pPr.append(jc)
+                                                            new_para.append(pPr)
+                                                            
+                                                            # Create run with the brand text
+                                                            new_run = OxmlElement('w:r')
+                                                            run_props = OxmlElement('w:rPr')
+                                                            new_run.append(run_props)
+                                                            
+                                                            # Add text
+                                                            text_elem = OxmlElement('w:t')
+                                                            text_elem.text = clean_value
+                                                            new_run.append(text_elem)
+                                                            new_para.append(new_run)
+                                                            
+                                                            # Insert the new centered paragraph before the current paragraph
+                                                            cell.insert(cell.index(paragraph), new_para)
+                                                            
+                                                            # Remove the brand text from the original run
+                                                            text = text.replace(clean_value, '')
+                                                            
+                                                            self.logger.debug(f"Created separate centered paragraph for brand: {clean_value}")
+                                                        else:
+                                                            self.logger.debug(f"Could not find cell for centering")
+                                                    else:
+                                                        self.logger.debug(f"Could not find paragraph for centering")
+                                                
+                                                # Update the run text
+                                                run.text = text
                                                 
                                                 # Apply unified font sizing for double templates
                                                 field_type_mapping = {
@@ -4756,22 +5418,40 @@ class TemplateProcessor:
                                     placeholder = f"{{{{{label_key}.{field_key}}}}}"
                                     if placeholder in paragraph_text:
                                         # Special handling for QR codes (InlineImage objects)
-                                        if field_key == 'QR' and hasattr(field_value, 'image'):
+                                        if field_key == 'QR' and hasattr(field_value, '_raw_image_data'):
                                             # Clear the paragraph and add the QR code image
-                                            paragraph.clear()
-                                            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                                            paragraph.add_run().add_picture(field_value.image, width=field_value.width)
-                                            self.logger.debug(f"Replaced {placeholder} with QR code image in paragraph")
-                                            continue
+                                            try:
+                                                img_buffer = BytesIO(field_value._raw_image_data)
+                                                img_buffer.seek(0)
+                                                paragraph.clear()
+                                                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                                new_run = paragraph.add_run()
+                                                new_run.add_picture(img_buffer, width=field_value._raw_image_width)
+                                                self.logger.debug(f"Replaced {placeholder} with QR code image in paragraph")
+                                                continue
+                                            except Exception as qr_error:
+                                                self.logger.error(f"Failed to insert QR code in paragraph: {qr_error}")
+                                                # Fall back to product name
+                                                paragraph_text = paragraph_text.replace(placeholder, getattr(field_value, '_product_name', 'QR Code'))
+                                                continue
                                         
                                         # Handle simple QR placeholder {{QR}}
-                                        if placeholder == '{{QR}}' and field_key == 'QR' and hasattr(field_value, 'image'):
+                                        if placeholder == '{{QR}}' and field_key == 'QR' and hasattr(field_value, '_raw_image_data'):
                                             # Clear the paragraph and add the QR code image
-                                            paragraph.clear()
-                                            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                                            paragraph.add_run().add_picture(field_value.image, width=field_value.width)
-                                            self.logger.debug(f"Replaced simple {{QR}} placeholder with QR code image in paragraph")
-                                            continue
+                                            try:
+                                                img_buffer = BytesIO(field_value._raw_image_data)
+                                                img_buffer.seek(0)
+                                                paragraph.clear()
+                                                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER  
+                                                new_run = paragraph.add_run()
+                                                new_run.add_picture(img_buffer, width=field_value._raw_image_width)
+                                                self.logger.debug(f"Replaced simple {{QR}} placeholder with QR code image in paragraph")
+                                                continue
+                                            except Exception as qr_error:
+                                                self.logger.error(f"Failed to insert simple QR code: {qr_error}")
+                                                # Fall back to product name
+                                                paragraph_text = paragraph_text.replace(placeholder, getattr(field_value, '_product_name', 'QR Code'))
+                                                continue
                                         
                                         # For all templates, unwrap markers to get clean content
                                         if True:  # Apply to all templates
@@ -4826,9 +5506,10 @@ class TemplateProcessor:
                                             paragraph_text = paragraph_text.replace(placeholder, str(field_value))
                                             self.logger.debug(f"Replaced {placeholder} with {field_value} in paragraph")
                             
-                            paragraph.text = paragraph_text
+                            # CRITICAL FIX: Don't set paragraph.text as it overrides formatting including centering
+                            # The run.text updates above preserve paragraph formatting
             
-            self.logger.info("Manual placeholder replacement completed")
+            self.logger.info(f"Manual placeholder replacement completed - made {replacements_made} replacements")
             
         except Exception as e:
             self.logger.error(f"Error during manual placeholder replacement: {e}")

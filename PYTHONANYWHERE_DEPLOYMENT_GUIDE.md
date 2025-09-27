@@ -1,270 +1,273 @@
-# PythonAnywhere Deployment Guide for Label Maker
+# PythonAnywhere Deployment Guide - Python 3.11
 
-## 🚀 Quick Deployment (5 minutes)
+## Overview
+This guide will help you deploy your Label Maker application to PythonAnywhere using Python 3.11 (same version as your local environment).
 
-### Step 1: Access PythonAnywhere
-1. Go to [www.pythonanywhere.com](https://www.pythonanywhere.com)
-2. Log into your account
-3. Click on **Consoles** tab
-4. Start a new **Bash console**
+## Prerequisites
+- PythonAnywhere account (Free or Paid)
+- Git repository access (GitHub recommended)
+- Your local project working correctly
 
-### Step 2: Run the Deployment Script
+## Step 1: Push to GitHub (if not already done)
+
+First, let's initialize and push your project to GitHub:
+
 ```bash
-# Download and run the deployment script
-curl -sSL https://raw.githubusercontent.com/leruseadam/AGTDesigner/main/deploy_pythonanywhere_complete.sh | bash
+# Initialize git repository (if not already done)
+git init
+git add .
+git commit -m "Initial commit - Label Maker with JSON match improvements"
+
+# Add your GitHub remote (replace with your actual repository)
+git remote add origin https://github.com/leruseadam/AGTDesigner.git
+git branch -M main
+git push -u origin main
 ```
 
-### Step 3: Configure Web App
-1. Go to **Web** tab in PythonAnywhere
-2. Click **Add a new web app**
-3. Choose **Manual configuration**
-4. Python version: **3.11**
+## Step 2: Clone on PythonAnywhere
 
-### Step 4: Set Configuration
-- **Source code**: `/home/yourusername/AGTDesigner`
-- **Working directory**: `/home/yourusername/AGTDesigner`
-- **WSGI configuration file**: `/var/www/yourusername_pythonanywhere_com_wsgi.py`
-- **Virtual environment**: `/home/yourusername/AGTDesigner/venv_pythonanywhere`
+1. **Log into PythonAnywhere** and open a Bash console
 
-### Step 5: Update WSGI File
-Replace the content of the WSGI file with:
-```python
-import sys
-import os
-
-# Add the project directory to Python path
-project_dir = '/home/yourusername/AGTDesigner'
-sys.path.insert(0, project_dir)
-
-# Activate virtual environment
-activate_this = '/home/yourusername/AGTDesigner/venv_pythonanywhere/bin/activate_this.py'
-with open(activate_this) as file_:
-    exec(file_.read(), dict(__file__=activate_this))
-
-# Set environment variables
-os.environ['FLASK_ENV'] = 'production'
-os.environ['FLASK_DEBUG'] = 'False'
-
-# Import the Flask app
-from app import create_app
-
-# Create the application instance
-application = create_app()
-
-if __name__ == "__main__":
-    application.run()
-```
-
-### Step 6: Reload Application
-Click the **Reload** button in the Web tab.
-
-## 📋 Detailed Step-by-Step Guide
-
-### Prerequisites
-- PythonAnywhere account (free or paid)
-- Git access to the repository
-
-### Manual Setup (if automated script fails)
-
-#### Step 1: Clone Repository
+2. **Clone your repository:**
 ```bash
 cd ~
 git clone https://github.com/leruseadam/AGTDesigner.git
 cd AGTDesigner
 ```
 
-#### Step 2: Create Virtual Environment
+## Step 3: Create Virtual Environment with Python 3.11
+
+PythonAnywhere supports Python 3.11, so we can use the same version:
+
 ```bash
-python3.11 -m venv venv_pythonanywhere
-source venv_pythonanywhere/bin/activate
+# Create virtual environment with Python 3.11
+mkvirtualenv --python=/usr/bin/python3.11 labelmaker-env
+
+# Activate the environment (should happen automatically)
+workon labelmaker-env
+
+# Verify Python version
+python --version
+# Should show: Python 3.11.x
 ```
 
-#### Step 3: Install Dependencies
+## Step 4: Install Dependencies
+
+Install packages in the correct order to avoid dependency conflicts:
+
 ```bash
-pip install --upgrade pip
-pip install -r requirements_pythonanywhere.txt
-pip install flask-caching python-dotenv gunicorn
+# Upgrade pip first
+pip install --upgrade pip setuptools wheel
+
+# Install core Flask dependencies
+pip install Flask==2.3.3
+pip install Werkzeug==2.3.7
+pip install Flask-CORS==4.0.0
+pip install Flask-Caching==2.1.0
+
+# Install data processing libraries
+pip install pandas==2.1.4
+pip install python-dateutil==2.8.2
+pip install pytz==2023.3
+
+# Install Excel processing
+pip install openpyxl==3.1.2
+pip install xlrd==2.0.1
+
+# Install document processing
+pip install python-docx==0.8.11
+pip install docxtpl==0.16.7
+pip install docxcompose==1.4.0
+pip install lxml==4.9.3
+
+# Install image processing
+pip install Pillow==10.1.0
+
+# Install utility libraries
+pip install jellyfish==1.2.0
+pip install fuzzywuzzy>=0.18.0
+pip install python-Levenshtein>=0.27.0
+pip install requests>=2.32.0
 ```
 
-#### Step 4: Test Application
-```bash
-python -c "from app import create_app; print('✅ Application ready!')"
-```
+## Step 5: Configure Web App
 
-#### Step 5: Create WSGI File
-```bash
-cat > wsgi.py << 'EOF'
-import sys
+1. **Go to Web tab** in PythonAnywhere dashboard
+2. **Create a new web app:**
+   - Choose "Manual configuration"
+   - Select **Python 3.11**
+   - Don't use a framework template
+
+3. **Configure WSGI file:**
+   - Click on the WSGI configuration file link
+   - Replace the contents with the prepared WSGI configuration (see `wsgi_pythonanywhere_fixed.py`)
+
+4. **Set up static files:**
+   - URL: `/static/`
+   - Directory: `/home/yourusername/AGTDesigner/static/`
+
+## Step 6: Update WSGI Configuration
+
+Edit your WSGI file (`/var/www/yourusername_pythonanywhere_com_wsgi.py`):
+
+```python
+#!/usr/bin/env python3
+
 import os
+import sys
+import logging
 
-# Add the project directory to Python path
-project_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, project_dir)
+# Set the project directory
+project_dir = '/home/yourusername/AGTDesigner'
 
-# Activate virtual environment
-activate_this = os.path.join(project_dir, 'venv_pythonanywhere', 'bin', 'activate_this.py')
-with open(activate_this) as file_:
-    exec(file_.read(), dict(__file__=activate_this))
+# Add project to Python path
+if project_dir not in sys.path:
+    sys.path.insert(0, project_dir)
+
+# Set environment variables
+os.environ['PYTHONANYWHERE_SITE'] = 'True'
+os.environ['FLASK_ENV'] = 'production'
+os.environ['FLASK_DEBUG'] = 'False'
+
+# Configure minimal logging
+logging.basicConfig(level=logging.ERROR)
 
 # Import the Flask app
-from app import create_app
+from app import app as application
 
-# Create the application instance
-application = create_app()
+# Configure for production
+application.config['DEBUG'] = False
+application.config['TESTING'] = False
 
 if __name__ == "__main__":
     application.run()
-EOF
 ```
 
-## 🔧 Troubleshooting
+## Step 7: Create Required Directories
 
-### Common Issues and Solutions
-
-#### 1. Import Errors
-**Problem**: `ModuleNotFoundError` or import failures
-**Solution**:
 ```bash
-# Check if virtual environment is activated
-which python
-# Should show: /home/yourusername/AGTDesigner/venv_pythonanywhere/bin/python
+# Create necessary directories
+mkdir -p ~/AGTDesigner/uploads
+mkdir -p ~/AGTDesigner/output
+mkdir -p ~/AGTDesigner/cache
+mkdir -p ~/AGTDesigner/sessions
+mkdir -p ~/AGTDesigner/logs
+mkdir -p ~/AGTDesigner/temp
 
-# Reinstall dependencies
-source venv_pythonanywhere/bin/activate
-pip install -r requirements_pythonanywhere.txt
+# Set permissions
+chmod 755 ~/AGTDesigner/uploads
+chmod 755 ~/AGTDesigner/output
+chmod 755 ~/AGTDesigner/cache
+chmod 755 ~/AGTDesigner/sessions
 ```
 
-#### 2. Database Issues
-**Problem**: Database not found or corrupted
-**Solution**:
-```bash
-# Check if database exists
-ls -la product_database.db
+## Step 8: Environment Configuration
 
-# If missing, the app will create a default one
-python -c "from app import create_app; app = create_app()"
+Create a production config file:
+
+```bash
+# Copy the PythonAnywhere config
+cp pythonanywhere_config.py config_production.py
 ```
 
-#### 3. WSGI Configuration Errors
-**Problem**: WSGI file syntax errors
-**Solution**:
-```bash
-# Test WSGI file syntax
-python -m py_compile wsgi.py
+## Step 9: Database Setup
 
-# Check WSGI file content
-cat wsgi.py
+If you have a database file, upload it:
+
+```bash
+# If you have a local database, you can upload it via Files tab
+# Or recreate it:
+python init_database.py
 ```
 
-#### 4. Permission Issues
-**Problem**: Permission denied errors
-**Solution**:
+## Step 10: Test and Deploy
+
+1. **Reload web app** in the Web tab
+2. **Check error logs** if there are issues
+3. **Visit your site** at `yourusername.pythonanywhere.com`
+
+## Troubleshooting
+
+### Common Issues:
+
+1. **Module not found errors:**
+   ```bash
+   # Verify virtual environment is active
+   workon labelmaker-env
+   # Reinstall missing packages
+   pip install [missing-package]
+   ```
+
+2. **Path issues:**
+   - Ensure WSGI file has correct project path
+   - Check static files configuration
+
+3. **Database issues:**
+   - Ensure database file exists and has correct permissions
+   - Check database initialization
+
+4. **Memory issues (free accounts):**
+   - Optimize imports in pythonanywhere_config.py
+   - Use fallback functions for missing dependencies
+
+### Checking Logs:
+
 ```bash
-# Set proper permissions
-chmod 755 /home/yourusername/AGTDesigner
-chmod 644 /home/yourusername/AGTDesigner/*.py
+# View error logs
+tail -f /var/log/yourusername.pythonanywhere.com.error.log
+
+# View server logs
+tail -f /var/log/yourusername.pythonanywhere.com.server.log
 ```
 
-#### 5. Virtual Environment Issues
-**Problem**: Virtual environment not found or corrupted
-**Solution**:
+## Step 11: Enable HTTPS (Recommended)
+
+1. Go to **Web tab**
+2. Enable **Force HTTPS**
+3. Update any hardcoded HTTP URLs to HTTPS
+
+## Step 12: Set up Scheduled Tasks (if needed)
+
+If your app needs scheduled maintenance:
+
+1. Go to **Tasks tab**
+2. Create scheduled tasks for database cleanup, etc.
+
+## Maintenance Commands
+
 ```bash
-# Recreate virtual environment
-rm -rf venv_pythonanywhere
-python3.11 -m venv venv_pythonanywhere
-source venv_pythonanywhere/bin/activate
-pip install -r requirements_pythonanywhere.txt
-```
-
-### Error Logs
-Check error logs in PythonAnywhere:
-1. Go to **Web** tab
-2. Click on your web app
-3. Check **Error log** section
-4. Look for specific error messages
-
-### Debugging Commands
-```bash
-# Test application import
-python -c "from app import create_app; print('Import successful')"
-
-# Test database loading
-python -c "from app import create_app; app = create_app(); print('Database loaded')"
-
-# Test WSGI configuration
-python -c "import wsgi; print('WSGI OK')"
-
-# Check Python path
-python -c "import sys; print('\n'.join(sys.path))"
-
-# Check installed packages
-pip list
-```
-
-## 📊 Verification Commands
-
-### Pre-Deployment Checks
-```bash
-# Verify virtual environment
-which python
-python --version
-
-# Verify dependencies
-pip list | grep -E "(flask|pandas|openpyxl)"
-
-# Verify application
-python -c "from app import create_app; print('✅ Ready for deployment')"
-```
-
-### Post-Deployment Verification
-```bash
-# Test the deployed application
-curl -s https://yourusername.pythonanywhere.com/api/health
-
-# Check application status
-python verify_deployment.py
-```
-
-## 🔄 Maintenance
-
-### Updating the Application
-```bash
+# Update code from GitHub
 cd ~/AGTDesigner
 git pull origin main
-source venv_pythonanywhere/bin/activate
-pip install -r requirements_pythonanywhere.txt
-# Go to Web tab and click Reload
+
+# Restart web app (in Web tab or via API)
+# Update dependencies if needed
+pip install -r requirements.txt
+
+# Reload web app after changes
 ```
 
-### Restarting the Application
-```bash
-cd ~/AGTDesigner
-./restart_app.sh
-# Or manually go to Web tab and click Reload
-```
+## Production Optimizations
 
-### Monitoring
-- Check error logs regularly
-- Monitor application performance
-- Verify database integrity
+1. **Disable debug mode** (already done in WSGI)
+2. **Enable compression** (configured in pythonanywhere_config.py)
+3. **Set up caching** (Flask-Caching already configured)
+4. **Optimize database queries**
+5. **Use CDN for static files** (optional)
 
-## 📞 Support
+## Security Considerations
 
-If you encounter issues:
-1. Check the error logs in PythonAnywhere Web tab
-2. Run the verification script: `python verify_deployment.py`
-3. Check this troubleshooting guide
-4. Verify all dependencies are installed correctly
+1. **Never commit sensitive data** (already in .gitignore)
+2. **Use environment variables** for secrets
+3. **Keep dependencies updated**
+4. **Monitor error logs regularly**
 
-## 🎉 Success Indicators
+## Support
 
-Your deployment is successful when:
-- ✅ Application loads without errors
-- ✅ Database loads successfully (2,433+ records)
-- ✅ Health endpoint responds: `{"status": "healthy", "records": 2433}`
-- ✅ Main page loads correctly
-- ✅ All features work as expected
+- PythonAnywhere Help: https://help.pythonanywhere.com/
+- Flask Documentation: https://flask.palletsprojects.com/
+- Your application-specific issues: Check error logs and GitHub issues
 
 ---
 
-**🎉 Congratulations! Your Label Maker is now deployed on PythonAnywhere!** 
+**Note**: Replace `yourusername` with your actual PythonAnywhere username throughout this guide.

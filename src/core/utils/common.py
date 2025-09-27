@@ -160,3 +160,30 @@ def safe_get(obj, key, default=None):
         return obj.get(key, default)
     except (AttributeError, TypeError):
         return default 
+
+def cell_contains_doh_image(cell):
+    """
+    Check if a cell contains a DOH image.
+    This utility function can be imported by multiple modules.
+    
+    Args:
+        cell: The table cell to check
+        
+    Returns:
+        bool: True if the cell contains a DOH image, False otherwise
+    """
+    try:
+        from docx.oxml.ns import qn
+        
+        # Check all paragraphs in the cell for drawing elements (InlineImage)
+        for paragraph in cell.paragraphs:
+            for run in paragraph.runs:
+                if hasattr(run, '_element'):
+                    # Check for drawing elements (InlineImage) or picture elements
+                    if (run._element.find(qn('w:drawing')) is not None or 
+                        run._element.find(qn('w:pict')) is not None):
+                        return True
+        return False
+    except Exception as e:
+        logger.warning(f"Error checking for DOH image in cell: {e}")
+        return False 

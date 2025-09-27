@@ -24,6 +24,7 @@ const getUniqueLineages = () => {
 
 function createTagRow(tag) {
     const lineage = tag.Lineage || tag.lineage || 'MIXED';
+    const dohStatus = tag.DOH || tag['DOH Compliant (Yes/No)'] || 'No';
     
     // For JSON matched tags and educated guess tags, prioritize the original display information over derived product names
     let tagName;
@@ -37,7 +38,7 @@ function createTagRow(tag) {
     const type = tag['Product Type*'] || tag.Type || '';
 
     return `
-        <tr class="tag-row" data-tag-name="${tagName}" data-lineage="${lineage}">
+        <tr class="tag-row" data-tag-name="${tagName}" data-lineage="${lineage}" data-doh="${dohStatus}">
             <td class="align-middle">${tagName}</td>
             <td class="align-middle">
                 <div class="d-flex align-items-center">
@@ -51,6 +52,15 @@ function createTagRow(tag) {
                         <option value="CBD" ${(lineage === 'CBD' || lineage === 'CBD_BLEND') ? 'selected' : ''}>CBD</option>
                         <option value="MIXED" ${lineage === 'MIXED' ? 'selected' : ''}>THC</option>
                         <option value="PARA" ${lineage === 'PARA' ? 'selected' : ''}>P</option>
+                    </select>
+                </div>
+            </td>
+            <td class="align-middle">
+                <div class="d-flex align-items-center">
+                    <select class="form-select form-select-sm doh-dropdown doh-dropdown-mini" 
+                            onchange="TagsTable.handleDohChange(this, '${tagName}')">
+                        <option value="Yes" ${dohStatus === 'Yes' ? 'selected' : ''}>Yes</option>
+                        <option value="No" ${dohStatus === 'No' ? 'selected' : ''}>No</option>
                     </select>
                 </div>
             </td>
@@ -92,9 +102,11 @@ class TagsTable {
     }
   }
 
-  // Render a tag row as a div with an inline dropdown for lineage
+  // Render a tag row as a div with an inline dropdown for lineage and DOH
   static createTagRow(tag, isSelected = false) {
     const lineage = tag.Lineage || tag.lineage || 'MIXED';
+    const dohStatus = tag.DOH || tag['DOH Compliant (Yes/No)'] || 'No';
+    console.log('DOH Status for tag:', tag['Product Name*'] || tag.ProductName, '=', dohStatus); // Debug log
     
     // For JSON matched tags and educated guess tags, prioritize the original display information over derived product names
     let tagName;
@@ -120,6 +132,15 @@ class TagsTable {
       return `<option value="${lin}" ${selected}>${displayName}</option>`;
     }).join('');
 
+    // DOH dropdown options
+    const dohDropdownOptions = [
+      `<option value="Yes" ${dohStatus === 'Yes' ? 'selected' : ''}>Yes</option>`,
+      `<option value="No" ${dohStatus === 'No' ? 'selected' : ''}>No</option>`
+    ].join('');
+    
+    // Debug: Log DOH dropdown creation
+    console.log('Creating DOH dropdown for tag:', tagName, 'DOH Status:', dohStatus);
+
     // Add DOH and High CBD images if applicable
     const dohValue = (tag.DOH || '').toString().toUpperCase();
     const productType = (tag['Product Type*'] || '').toString().toLowerCase();
@@ -139,6 +160,7 @@ class TagsTable {
       <div class="tag-item d-flex align-items-center p-2 mb-2" 
            data-tag-name="${safeTagName}" 
            data-lineage="${lineage}"
+           data-doh="${dohStatus}"
            style="background: ${color}; cursor: pointer;">
         <div class="checkbox-container me-2">
           <input type="checkbox" 
@@ -155,8 +177,13 @@ class TagsTable {
                     onchange="TagsTable.handleLineageChange(this, '${safeTagName}')">
               ${dropdownOptions}
             </select>
+            <select class="form-select form-select-sm doh-dropdown doh-dropdown-mini ms-2" 
+                    onchange="TagsTable.handleDohChange(this, '${safeTagName}')"
+                    title="DOH Status">
+              ${dohDropdownOptions}
+            </select>
           </div>
-          <small class="text-muted d-block mt-1">${brand}${vendor ? ` (${vendor})` : ''} | ${type}</small>
+          <small class="text-muted d-block mt-1">${brand}${vendor ? ` (${vendor})` : ''} | ${type} | DOH: ${dohStatus}</small>
         </div>
       </div>
     `;
@@ -177,10 +204,80 @@ class TagsTable {
     `;
   }
 
+  static async handleDohChange(selectElement, tagName) {
+    const newDohStatus = selectElement.value;
+    const tagRow = selectElement.closest(".tag-row");
+    const oldDohStatus = tagRow.dataset.doh;
+
+    console.log(`🔄 Updating DOH for ${tagName}: ${oldDohStatus} → ${newDohStatus}`);
+
+    try {
+      const response = await fetch("/api/update-doh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tag_name: tagName, doh: newDohStatus })
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(`❌ API Error: ${error.error || "Failed to update DOH"}`);
+        throw new Error(error.error || "Failed to update DOH");
+      }
+
+      // Update the local UI
+      tagRow.dataset.doh = newDohStatus;
+      
+      // Show success message
+      console.log(`✅ Successfully updated DOH for ${tagName} (${oldDohStatus} → ${newDohStatus})`);
+      
+      // Update the tag in TagManager state if it exists
+      if (typeof TagManager !== 'undefined' && TagManager.state) {
+        const tag = TagManager.state.tags?.find(t => t['Product Name*'] === tagName);
+        if (tag) {
+          tag.DOH = newDohStatus;
+          tag['DOH Compliant (Yes/No)'] = newDohStatus;
+          console.log(`📝 Updated tag DOH in TagManager.state.tags`);
+        }
+        
+        const originalTag = TagManager.state.originalTags?.find(t => t['Product Name*'] === tagName);
+        if (originalTag) {
+          originalTag.DOH = newDohStatus;
+          originalTag['DOH Compliant (Yes/No)'] = newDohStatus;
+          console.log(`📝 Updated tag DOH in TagManager.state.originalTags`);
+        }
+      }
+
+      // Show brief visual feedback
+      selectElement.style.backgroundColor = '#d4edda';
+      setTimeout(() => {
+        selectElement.style.backgroundColor = '';
+      }, 500);
+
+    } catch (error) {
+      console.error(`❌ Error updating DOH for ${tagName}:`, error);
+      
+      // Revert the dropdown to the old value
+      selectElement.value = oldDohStatus;
+      
+      // Show error feedback
+      selectElement.style.backgroundColor = '#f8d7da';
+      setTimeout(() => {
+        selectElement.style.backgroundColor = '';
+      }, 1000);
+      
+      // Show user-friendly error message
+      if (typeof showToast === 'function') {
+        showToast(`Failed to update DOH for ${tagName}: ${error.message}`, 'error');
+      } else {
+        alert(`Failed to update DOH for ${tagName}: ${error.message}`);
+      }
+    }
+  }
+
   static async handleLineageChange(selectElement, tagName) {
     const newLineage = selectElement.value;
-    const tagItem = selectElement.closest(".tag-item");
-    const oldLineage = tagItem.dataset.lineage;
+    const tagRow = selectElement.closest(".tag-row");
+    const oldLineage = tagRow?.dataset.lineage || selectElement.closest(".tag-item")?.dataset.lineage;
 
     console.log(`🔄 Updating lineage for ${tagName}: ${oldLineage} → ${newLineage}`);
 
@@ -198,7 +295,12 @@ class TagsTable {
       }
 
       // Update the local UI
-      tagItem.dataset.lineage = newLineage;
+      if (tagRow) {
+        tagRow.dataset.lineage = newLineage;
+      } else {
+        const tagItem = selectElement.closest(".tag-item");
+        if (tagItem) tagItem.dataset.lineage = newLineage;
+      }
       
       // Show success message
       console.log(`✅ Successfully updated lineage for ${tagName} (${oldLineage} → ${newLineage})`);
@@ -347,6 +449,7 @@ class TagsTable {
                   <tr>
                       <th>Name</th>
                       <th>Lineage</th>
+                      <th>DOH</th>
                       <th>${brandHeaderText}</th>
                       <th>Type</th>
                       <th></th>
