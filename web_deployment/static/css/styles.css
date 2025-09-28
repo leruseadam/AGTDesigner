@@ -4084,7 +4084,7 @@ img, video, canvas, svg {
     top: 15%;
     left: 12%;
     animation-delay: 0s;
-    animation-duration: 18s;
+    animation-duration: 45s;
   }
   
   .orb:nth-child(2) {
@@ -4094,7 +4094,7 @@ img, video, canvas, svg {
     top: 65%;
     right: 18%;
     animation-delay: -4s;
-    animation-duration: 22s;
+    animation-duration: 55s;
   }
   
   .orb:nth-child(3) {
@@ -4104,7 +4104,7 @@ img, video, canvas, svg {
     top: 35%;
     right: 35%;
     animation-delay: -8s;
-    animation-duration: 16s;
+    animation-duration: 40s;
   }
   
   .orb:nth-child(4) {
@@ -4114,7 +4114,7 @@ img, video, canvas, svg {
     bottom: 25%;
     left: 25%;
     animation-delay: -12s;
-    animation-duration: 20s;
+    animation-duration: 50s;
   }
   
   .orb:nth-child(5) {
@@ -4124,7 +4124,7 @@ img, video, canvas, svg {
     top: 75%;
     left: 65%;
     animation-delay: -6s;
-    animation-duration: 14s;
+    animation-duration: 35s;
   }
   
   @keyframes float {
@@ -4162,7 +4162,7 @@ img, video, canvas, svg {
     width: 4px;
     height: 4px;
     border-radius: 50%;
-    animation: particleFloat 8s linear infinite;
+    animation: particleFloat 20s linear infinite;
     pointer-events: none;
   }
   
