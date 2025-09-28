@@ -27,11 +27,11 @@ class PostgreSQLProductDatabase:
         
         # PostgreSQL connection config
         self.config = {
-            'host': os.getenv('DB_HOST', 'adamcordova-4822.postgres.pythonanywhere-services.com'),
-            'database': os.getenv('DB_NAME', 'postgres'),
-            'user': os.getenv('DB_USER', 'super'),
-            'password': os.getenv('DB_PASSWORD', '193154life'),
-            'port': os.getenv('DB_PORT', '14822')
+            'host': os.getenv('DB_HOST', 'localhost'),
+            'database': os.getenv('DB_NAME', 'agt_designer'),
+            'user': os.getenv('DB_USER', os.getenv('USER', 'adamcordova')),
+            'password': os.getenv('DB_PASSWORD', ''),
+            'port': os.getenv('DB_PORT', '5432')
         }
         
         # Performance timing
