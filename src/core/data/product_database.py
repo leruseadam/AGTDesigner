@@ -571,12 +571,15 @@ class ProductDatabase:
                 description = product_data.get('Description', '') or product_data.get('description', '')
                 ratio = product_data.get('Ratio', '') or product_data.get('ratio', '')
             else:
-                # If not a dict, assume it's already the strain value
-                return str(product_data) if product_data else 'Mixed'
+                # Handle individual parameters (backward compatibility)
+                product_type = product_data
+                product_name = kwargs.get('product_name', '')
+                description = kwargs.get('description', '')
+                ratio = kwargs.get('ratio', '')
             
             return self._calculate_product_strain_original(product_type, product_name, description, ratio)
         except Exception as e:
-            logger.error(f"Error calculating product strain: {e}")
+            logging.error(f"Error calculating product strain: {e}")
             return 'Mixed'
     
     def _calculate_product_strain_original(self, product_type: str, product_name: str, description: str, ratio: str) -> str:
