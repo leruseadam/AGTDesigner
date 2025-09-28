@@ -603,11 +603,12 @@ class ProductDatabase:
         if product_type == "paraphernalia":
             return "Paraphernalia"
         
+        # Create combined text for all processing
+        combined_text = f"{product_name} {description}".strip()
+        
         # For classic types, try to extract strain from product name or description
         from src.core.constants import CLASSIC_TYPES
         if product_type in CLASSIC_TYPES:
-            # Try to extract strain name from product name
-            combined_text = f"{product_name} {description}".strip()
             
             # Common strain extraction patterns
             strain_patterns = [
@@ -643,7 +644,6 @@ class ProductDatabase:
         # For vape cartridges and concentrates
         if product_type in ['vape cartridge', 'concentrate']:
             # Try to extract strain from name/description
-            combined_text = f"{product_name} {description}".strip()
             
             # Look for strain patterns in vape/concentrate names
             vape_patterns = [
