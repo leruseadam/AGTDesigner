@@ -55,6 +55,92 @@ class PostgreSQLProductDatabase:
                 return None
         return self._connection_pool[thread_id]
     
+    def _normalize_product_name(self, name: str) -> str:
+        """Normalize product name for consistent storage."""
+        if not name:
+            return ""
+        return name.strip().title()
+    
+    def _normalize_strain_name(self, name: str) -> str:
+        """Normalize strain name for consistent storage."""
+        if not name:
+            return ""
+        return name.strip().title()
+    
+    def _normalize_lineage(self, lineage: str) -> str:
+        """Normalize lineage for consistent storage."""
+        if not lineage:
+            return ""
+        return lineage.strip()
+    
+    def _calculate_product_strain(self, product_data):
+        """Calculate Product Strain from product_data dictionary."""
+        try:
+            # Handle both dict and individual parameter formats
+            if isinstance(product_data, dict):
+                product_type = product_data.get('Product Type*', '') or product_data.get('product_type', '')
+                product_name = product_data.get('Product Name*', '') or product_data.get('product_name', '')
+                description = product_data.get('Description', '') or product_data.get('description', '')
+                ratio = product_data.get('Ratio', '') or product_data.get('ratio', '')
+                
+                # Call the original method with extracted parameters
+                return self._calculate_product_strain_original(product_type, product_name, description, ratio)
+            else:
+                # If it's not a dict, assume it's the product_type parameter
+                return self._calculate_product_strain_original(product_data, '', '', '')
+                
+        except Exception as e:
+            logging.error(f"Error in overloaded _calculate_product_strain: {e}")
+            return 'Mixed'
+    
+    def _calculate_product_strain_original(self, product_type: str, product_name: str, description: str, ratio: str) -> str:
+        """Calculate Product Strain using exact Excel processor logic."""
+        import re
+        
+        product_type = str(product_type).strip().lower()
+        product_name = str(product_name).strip() if product_name else ""
+        description = str(description).strip() if description else ""
+        ratio = str(ratio).strip() if ratio else ""
+        
+        # Handle 'nan' values
+        if product_name.lower() == 'nan':
+            product_name = ""
+        if description.lower() == 'nan':
+            description = ""
+        if ratio.lower() == 'nan':
+            ratio = ""
+        
+        # Special case: paraphernalia gets Product Strain set to "Paraphernalia"
+        if product_type == "paraphernalia":
+            return "Paraphernalia"
+        
+        # Define classic types (these don't get Product Strain logic applied)
+        classic_types = [
+            'flower', 'pre-roll', 'infused pre-roll', 'concentrate', 'solventless concentrate', 
+            'vape cartridge', 'alcohol/ethanol extract', 'co2 concentrate'
+        ]
+        
+        # If it's a classic type, return blank (classic types don't get Product Strain logic)
+        if product_type in classic_types:
+            return ""
+        
+        # For non-classic types, determine if it's CBD or Mixed
+        # Check if product name contains CBD, CBG, CBC, or CBN
+        name_contains_cbd = bool(re.search(r'\b(?:CBD|CBG|CBC|CBN)\b', product_name, re.IGNORECASE))
+        
+        # Check if description contains CBD, CBG, CBC, or CBN, or ":"
+        desc_contains_cbd = bool(re.search(r'\b(?:CBD|CBG|CBC|CBN)\b', description, re.IGNORECASE)) or ':' in description
+        
+        # Check if ratio contains CBD, CBG, CBC, or CBN
+        ratio_contains_cbd = bool(re.search(r'\b(?:CBD|CBG|CBC|CBN)\b', ratio, re.IGNORECASE))
+        
+        # If any field contains CBD-related terms, return "CBD Blend"
+        if name_contains_cbd or desc_contains_cbd or ratio_contains_cbd:
+            return "CBD Blend"
+        
+        # Otherwise, return "Mixed"
+        return "Mixed"
+    
     def init_database(self):
         """Initialize the database (PostgreSQL schema already exists from migration)."""
         if self._initialized:
@@ -98,6 +184,154 @@ class PostgreSQLProductDatabase:
                     conn.close()
         
         return True
+    
+    def add_or_update_strain(self, strain_name: str, lineage: str = None, sovereign: bool = False) -> int:
+        """Add a new strain or update existing strain information."""
+        try:
+            self.init_database()
+            normalized_name = self._normalize_strain_name(strain_name)
+            current_date = datetime.now().isoformat()
+            
+            with self._write_lock:
+                conn = self._get_connection()
+                if not conn:
+                    return None
+                    
+                cursor = conn.cursor()
+                
+                # Check if strain exists
+                cursor.execute("""
+                    SELECT id FROM strains 
+                    WHERE strain_name = %s
+                """, (normalized_name,))
+                
+                existing_strain = cursor.fetchone()
+                
+                if existing_strain:
+                    strain_id = existing_strain[0]
+                    # Update existing strain
+                    cursor.execute("""
+                        UPDATE strains 
+                        SET lineage = %s, 
+                            sovereign_lineage = %s,
+                            updated_at = %s
+                        WHERE id = %s
+                    """, (lineage or '', lineage if sovereign else '', current_date, strain_id))
+                else:
+                    # Insert new strain
+                    cursor.execute("""
+                        INSERT INTO strains (strain_name, lineage, sovereign_lineage, created_at, updated_at)
+                        VALUES (%s, %s, %s, %s, %s)
+                        RETURNING id
+                    """, (normalized_name, lineage or '', lineage if sovereign else '', current_date, current_date))
+                    
+                    strain_id = cursor.fetchone()[0]
+                
+                conn.commit()
+                return strain_id
+                
+        except Exception as e:
+            logging.error(f"Failed to add/update strain '{strain_name}': {e}")
+            if 'conn' in locals():
+                conn.rollback()
+            return None
+        finally:
+            if 'cursor' in locals():
+                cursor.close()
+    
+    def add_or_update_product(self, product_data: Dict[str, Any]) -> int:
+        """Add a new product or update existing product information."""
+        try:
+            self.init_database()
+            
+            # Handle both 'ProductName' and 'Product Name*' column names
+            product_name = product_data.get('Product Name*', product_data.get('ProductName', ''))
+            normalized_name = self._normalize_product_name(product_name)
+            current_date = datetime.now().isoformat()
+            
+            # Get or create strain
+            strain_name = product_data.get('Product Strain', '')
+            strain_id = None
+            if strain_name:
+                normalized_lineage = self._normalize_lineage(product_data.get('Lineage'))
+                strain_id = self.add_or_update_strain(strain_name, normalized_lineage)
+            
+            with self._write_lock:
+                conn = self._get_connection()
+                if not conn:
+                    return None
+                    
+                cursor = conn.cursor()
+                
+                # Check if product exists
+                cursor.execute("""
+                    SELECT id FROM products 
+                    WHERE product_name = %s
+                """, (normalized_name,))
+                
+                existing_product = cursor.fetchone()
+                
+                if existing_product:
+                    product_id = existing_product[0]
+                    # Update existing product
+                    cursor.execute("""
+                        UPDATE products 
+                        SET product_strain = %s,
+                            strain_id = %s,
+                            product_type = %s,
+                            vendor_supplier = %s,
+                            thc_content = %s,
+                            cbd_content = %s,
+                            price = %s,
+                            updated_at = %s
+                        WHERE id = %s
+                    """, (
+                        strain_name or '',
+                        strain_id,
+                        product_data.get('Product Type', ''),
+                        product_data.get('Vendor/Supplier', ''),
+                        product_data.get('THC Content', ''),
+                        product_data.get('CBD Content', ''),
+                        product_data.get('Price', ''),
+                        current_date,
+                        product_id
+                    ))
+                else:
+                    # Insert new product
+                    cursor.execute("""
+                        INSERT INTO products (
+                            product_name, product_strain, strain_id, product_type,
+                            vendor_supplier, thc_content, cbd_content, price,
+                            created_at, updated_at
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        RETURNING id
+                    """, (
+                        normalized_name,
+                        strain_name or '',
+                        strain_id,
+                        product_data.get('Product Type', ''),
+                        product_data.get('Vendor/Supplier', ''),
+                        product_data.get('THC Content', ''),
+                        product_data.get('CBD Content', ''),
+                        product_data.get('Price', ''),
+                        current_date,
+                        current_date
+                    ))
+                    
+                    product_id = cursor.fetchone()[0]
+                
+                conn.commit()
+                return product_id
+                
+        except Exception as e:
+            logging.error(f"Failed to add/update product '{product_name}': {e}")
+            if 'conn' in locals():
+                conn.rollback()
+            return None
+        finally:
+            if 'cursor' in locals():
+                cursor.close()
     
     def search_products(self, query: str, limit: int = 50) -> List[Dict[str, Any]]:
         """Search products using PostgreSQL full-text search."""
@@ -289,6 +523,9 @@ def get_postgresql_database(store_name: str = None) -> PostgreSQLProductDatabase
 def get_product_database(store_name: str = None) -> PostgreSQLProductDatabase:
     """Compatibility function - returns PostgreSQL database instead of SQLite."""
     return get_postgresql_database(store_name)
+
+# Create ProductDatabase alias for compatibility
+ProductDatabase = PostgreSQLProductDatabase
 
 if __name__ == "__main__":
     # Test the PostgreSQL database
