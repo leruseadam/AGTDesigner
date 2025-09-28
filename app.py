@@ -1780,6 +1780,29 @@ def upload_file_simple_pythonanywhere():
         logging.error(f"Upload error: {e}")
         return jsonify({'error': f'Upload failed: {str(e)}'}), 500
 
+@app.route('/upload-status', methods=['GET'])
+def upload_status():
+    """Check upload processing status"""
+    try:
+        # Check if there's a global processor with data
+        global excel_processor
+        if excel_processor and hasattr(excel_processor, 'df') and excel_processor.df is not None:
+            return jsonify({
+                'status': 'ready',
+                'rows': len(excel_processor.df),
+                'message': 'File processed successfully'
+            })
+        else:
+            return jsonify({
+                'status': 'processing',
+                'message': 'File is being processed'
+            })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        })
+
 @app.route('/upload-fast', methods=['POST'])
 def upload_file_ultra_fast():
     """Ultra-fast file upload optimized for PythonAnywhere"""
@@ -1811,7 +1834,7 @@ def upload_file_ultra_fast():
             df = pd.read_excel(
                 temp_path,
                 engine='openpyxl',
-                nrows=5000,  # Limit to 5000 rows for speed
+                nrows=1000,  # Limit to 1000 rows for speed (reduced from 5000)
                 dtype=str,   # Read everything as strings for speed
                 na_filter=False,  # Don't filter NA values
                 keep_default_na=False  # Don't use default NA values

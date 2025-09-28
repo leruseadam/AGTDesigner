@@ -26,9 +26,9 @@ if (typeof TagManager !== 'undefined') {
                 
                 console.log('Sending FAST upload request...');
                 
-                // Create AbortController for timeout (reduced timeout for fast mode)
+                // Create AbortController for timeout (increased timeout for large files)
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout for fast mode
+                const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout for large files
                 
                 const response = await fetch('/upload-fast', {
                     method: 'POST',

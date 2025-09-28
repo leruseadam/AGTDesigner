@@ -5503,7 +5503,7 @@ const TagManager = {
                 
                 // Create AbortController for timeout
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+                const timeoutId = setTimeout(() => controller.abort(), 120000); // 120 second timeout for large files
                 
                 const response = await fetch('/upload', {
                     method: 'POST',
