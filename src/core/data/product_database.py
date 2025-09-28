@@ -219,8 +219,14 @@ class ProductDatabase:
             normalized_name = product_data.get('normalized_name', '')
             product_type = product_data.get('Product Type*', '')
             
-            if not product_name or not normalized_name or not product_type:
-                raise ValueError("Missing required fields: Product Name*, normalized_name, or Product Type*")
+            # More robust validation
+            if (not product_name or 
+                str(product_name).strip() == '' or 
+                str(product_name).strip().lower() == 'nan' or
+                str(product_name).strip().lower() == 'none' or
+                not normalized_name or 
+                not product_type):
+                raise ValueError(f"Missing required fields: Product Name*='{product_name}', normalized_name='{normalized_name}', or Product Type*='{product_type}'")
             
             current_time = datetime.now().isoformat()
             

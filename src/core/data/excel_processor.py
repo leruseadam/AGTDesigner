@@ -728,9 +728,11 @@ class ExcelProcessor:
                                 str(product_name).strip().lower() == 'nan' or
                                 str(product_name).strip().lower() == 'none'):
                                 # Skip empty products
+                                logger.debug(f"Skipping empty product: '{product_name}'")
                                 continue
                             
                             row_dict['normalized_name'] = normalize_name(product_name)
+                            logger.debug(f"Processing product: '{product_name}' -> '{row_dict['normalized_name']}'")
                             
                             # Only process classic types through the strain database
                             product_type = row_dict.get('Product Type*', '').strip().lower()
