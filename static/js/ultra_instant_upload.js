@@ -1,9 +1,9 @@
 
-// Turbo upload frontend - matches local server speed
+// Ultra-instant upload frontend - absolute minimum processing
 (function() {
     'use strict';
     
-    // Override the upload function for turbo speed
+    // Override the upload function for ultra-instant speed
     if (typeof TagManager !== 'undefined' && TagManager.prototype.uploadFile) {
         const originalUploadFile = TagManager.prototype.uploadFile;
         
@@ -44,7 +44,7 @@
             })
             .catch(error => {
                 console.error('⚡ Ultra-instant upload failed:', error);
-                // Try zero mode as fallback
+                // Try zero mode as final fallback
                 console.log('⚡ Trying zero mode...');
                 return this.tryZeroUpload(file);
             });
