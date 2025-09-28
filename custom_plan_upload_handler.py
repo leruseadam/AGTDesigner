@@ -23,7 +23,7 @@ def custom_plan_performance_monitor(func):
         
         # Log performance metrics
         if execution_time > 0.5:  # Log operations > 0.5 seconds
-            print(f"📊 {func.__name__}: {execution_time:.2f}s")
+            logging.info(f"{func.__name__}: {execution_time:.2f}s")
         
         return result
     return wrapper

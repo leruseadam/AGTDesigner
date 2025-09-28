@@ -55,7 +55,7 @@ def apply_custom_plan_optimizations():
     try:
         import pandas as pd
         pd.read_excel = performance_monitor(pd.read_excel)
-        print("✅ Performance monitoring applied to pandas")
+        logging.info("Performance monitoring applied to pandas")
     except ImportError:
         pass
     
@@ -63,7 +63,7 @@ def apply_custom_plan_optimizations():
     try:
         import sqlalchemy
         sqlalchemy.pool.QueuePool = performance_monitor(sqlalchemy.pool.QueuePool)
-        print("✅ Database connection optimization applied")
+        logging.info("Database connection optimization applied")
     except ImportError:
         pass
     
@@ -71,11 +71,11 @@ def apply_custom_plan_optimizations():
     try:
         import openpyxl
         openpyxl.load_workbook = performance_monitor(openpyxl.load_workbook)
-        print("✅ File I/O optimization applied")
+        logging.info("File I/O optimization applied")
     except ImportError:
         pass
     
-    print("✅ Custom plan optimizations complete")
+    logging.info("Custom plan optimizations complete")
 
 def optimize_for_web_workers():
     """Optimize for multiple web workers"""
@@ -94,7 +94,7 @@ def optimize_for_web_workers():
         'TEMP_DIR': f'/tmp/worker_{worker_id}'
     })
     
-    print(f"✅ Worker {worker_id} optimizations applied")
+    logging.info(f"Worker {worker_id} optimizations applied")
 
 def optimize_for_large_files():
     """Optimize for handling large files with 20GB disk space"""
@@ -111,7 +111,7 @@ def optimize_for_large_files():
     for directory in ['/home/adamcordova/AGTDesigner/temp', '/home/adamcordova/AGTDesigner/uploads']:
         os.makedirs(directory, exist_ok=True)
     
-    print("✅ Large file handling optimization applied")
+    logging.info("Large file handling optimization applied")
 
 def optimize_for_postgres():
     """Optimize for Postgres database"""
@@ -125,7 +125,7 @@ def optimize_for_postgres():
         'DB_MAX_OVERFLOW': '20'
     })
     
-    print("✅ Postgres optimization applied")
+    logging.info("Postgres optimization applied")
 
 def optimize_for_cpu_seconds():
     """Optimize for 7000 CPU seconds per day"""
@@ -137,7 +137,7 @@ def optimize_for_cpu_seconds():
         'CPU_THROTTLE_THRESHOLD': '25'  # Throttle at 25 seconds
     })
     
-    print("✅ CPU seconds optimization applied")
+    logging.info("CPU seconds optimization applied")
 
 # Apply all optimizations
 if __name__ == "__main__":
@@ -147,10 +147,5 @@ if __name__ == "__main__":
     optimize_for_postgres()
     optimize_for_cpu_seconds()
     
-    print("🚀 All custom plan optimizations complete!")
-    print("📊 Plan specs:")
-    print("   - 6 Web Workers: ✅")
-    print("   - 20GB Disk Space: ✅")
-    print("   - 7000 CPU Seconds/Day: ✅")
-    print("   - Postgres Database: ✅")
-    print("   - 4 Always-On Tasks: ✅")
+    logging.info("All custom plan optimizations complete!")
+    logging.info("Plan specs: 6 Web Workers, 20GB Disk Space, 7000 CPU Seconds/Day, Postgres Database, 4 Always-On Tasks")

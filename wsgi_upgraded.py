@@ -52,9 +52,9 @@ try:
     try:
         from pythonanywhere_custom_plan_optimizations import apply_custom_plan_optimizations
         apply_custom_plan_optimizations()
-        print("✅ Custom plan optimizations applied")
+        logging.info("Custom plan optimizations applied")
     except ImportError:
-        print("⚠️ Custom plan optimizations not available")
+        logging.warning("Custom plan optimizations not available")
     
     # Import the Flask application
     from app import app as application
@@ -67,9 +67,9 @@ try:
         application = create_custom_plan_upload_handler(application)
         create_fast_generator_routes(application)
         
-        print("✅ Custom plan handlers applied")
+        logging.info("Custom plan handlers applied")
     except ImportError:
-        print("⚠️ Custom plan handlers not available")
+        logging.warning("Custom plan handlers not available")
     
     # Custom plan configuration - optimized for 6 web workers
     application.config.update(
@@ -116,15 +116,9 @@ try:
     # Force garbage collection and memory optimization
     gc.collect()
     
-    # Custom plan startup message
-    print("✅ Custom Plan WSGI Configuration Complete")
-    print("🚀 Optimized for:")
-    print("   - 6 Web Workers")
-    print("   - 20GB Disk Space")
-    print("   - 7000 CPU Seconds/Day")
-    print("   - 4 Always-On Tasks")
-    print("   - Postgres Enabled")
-    print("   - Enhanced Performance Mode")
+    # Custom plan startup logging
+    logging.info("Custom Plan WSGI Configuration Complete")
+    logging.info("Optimized for: 6 Web Workers, 20GB Disk Space, 7000 CPU Seconds/Day, 4 Always-On Tasks, Postgres Enabled, Enhanced Performance Mode")
     
 except ImportError as e:
     logging.critical(f"Failed to import Flask app: {e}")
