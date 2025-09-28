@@ -5848,130 +5848,86 @@ def database_stats():
         if not product_db._initialized:
             product_db.init_database()
         
-        # Test database connection
+        # Test database connection using PostgreSQL
         try:
-            import sqlite3
-            test_conn = sqlite3.connect(product_db.db_path)
-            test_cursor = test_conn.cursor()
-            test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
-            if not test_cursor.fetchone():
-                logging.error(f"Products table not found in database at {product_db.db_path}")
-                # If store-specific database doesn't have products table, fall back to main database
-                if current_store:
-                    logging.info(f"Falling back to main database for store {current_store}")
-                    # Force creation of main database instance by clearing the global variable
-                    global _product_database
-                    _product_database = None
-                    # Create main database instance directly
-                    from src.core.data.product_database import ProductDatabase
-                    main_db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
-                    product_db = ProductDatabase(main_db_path)
-                    if not product_db._initialized:
-                        product_db.init_database()
-                    # Test main database
-                    test_conn = sqlite3.connect(product_db.db_path)
-                    test_cursor = test_conn.cursor()
-                    test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
-                    if not test_cursor.fetchone():
-                        logging.error("Products table not found in main database either")
-                        return jsonify({'error': 'Products table not found in any database'}), 500
-                    test_conn.close()
-                    logging.info(f"Successfully fell back to main database: {product_db.db_path}")
-                else:
-                    return jsonify({'error': 'Products table not found in database'}), 500
-            test_conn.close()
+            with product_db.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'products')")
+                    if not cursor.fetchone()[0]:
+                        logging.error("Products table not found in PostgreSQL database")
+                        return jsonify({'error': 'Products table not found in database'}), 500
         except Exception as test_error:
             logging.error(f"Database connection test failed: {test_error}")
             return jsonify({'error': f'Database connection failed: {test_error}'}), 500
         
-        # Get vendor stats for the frontend
+        # Get vendor stats for the frontend using PostgreSQL
         vendor_stats = {}
         try:
-            import sqlite3
-            with sqlite3.connect(product_db.db_path) as conn:
-                # Get basic counts
-                cursor = conn.cursor()
+            with product_db.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    # Total products
+                    cursor.execute("SELECT COUNT(*) FROM products")
+                    total_products = cursor.fetchone()[0]
+                    
+                    # Unique vendors
+                    cursor.execute("SELECT COUNT(DISTINCT \"Vendor/Supplier*\") FROM products WHERE \"Vendor/Supplier*\" IS NOT NULL AND \"Vendor/Supplier*\" != '' AND \"Vendor/Supplier*\" != 'Vendor/Supplier*'")
+                    unique_vendors = cursor.fetchone()[0]
+                    
+                    # Unique brands
+                    cursor.execute("SELECT COUNT(DISTINCT \"Product Brand\") FROM products WHERE \"Product Brand\" IS NOT NULL AND \"Product Brand\" != '' AND \"Product Brand\" != 'Product Brand'")
+                    unique_brands = cursor.fetchone()[0]
+                    
+                    # Unique product types
+                    cursor.execute("SELECT COUNT(DISTINCT \"Product Type*\") FROM products WHERE \"Product Type*\" IS NOT NULL AND \"Product Type*\" != '' AND \"Product Type*\" != 'Product Type*'")
+                    unique_product_types = cursor.fetchone()[0]
+                    
+                    # Product type distribution
+                    cursor.execute("SELECT \"Product Type*\", COUNT(*) FROM products WHERE \"Product Type*\" IS NOT NULL AND \"Product Type*\" != '' AND \"Product Type*\" != 'Product Type*' GROUP BY \"Product Type*\" ORDER BY COUNT(*) DESC LIMIT 10")
+                    product_types = cursor.fetchall()
+                    product_type_distribution = {pt[0]: pt[1] for pt in product_types}
+                    
+                    stats = {
+                        'total_products': total_products,
+                        'unique_vendors': unique_vendors,
+                        'unique_brands': unique_brands,
+                        'unique_product_types': unique_product_types,
+                        'product_type_distribution': product_type_distribution
+                    }
                 
-                # Check if products table exists
-                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
-                if not cursor.fetchone():
-                    logging.error("Products table does not exist in database")
-                    return jsonify({
-                        'stats': {
-                            'total_products': 0,
-                            'unique_vendors': 0,
-                            'unique_brands': 0,
-                            'unique_product_types': 0,
-                            'product_type_distribution': {}
-                        },
-                        'vendor_stats': {'vendors': [], 'brands': []},
-                        'error': 'Products table not found in database'
-                    })
-                
-                # Total products
-                cursor.execute("SELECT COUNT(*) FROM products")
-                total_products = cursor.fetchone()[0]
-                
-                # Unique vendors
-                cursor.execute("SELECT COUNT(DISTINCT \"Vendor/Supplier*\") FROM products WHERE \"Vendor/Supplier*\" IS NOT NULL AND \"Vendor/Supplier*\" != '' AND \"Vendor/Supplier*\" != 'Vendor/Supplier*'")
-                unique_vendors = cursor.fetchone()[0]
-                
-                # Unique brands
-                cursor.execute("SELECT COUNT(DISTINCT \"Product Brand\") FROM products WHERE \"Product Brand\" IS NOT NULL AND \"Product Brand\" != '' AND \"Product Brand\" != 'Product Brand'")
-                unique_brands = cursor.fetchone()[0]
-                
-                # Unique product types
-                cursor.execute("SELECT COUNT(DISTINCT \"Product Type*\") FROM products WHERE \"Product Type*\" IS NOT NULL AND \"Product Type*\" != '' AND \"Product Type*\" != 'Product Type*'")
-                unique_product_types = cursor.fetchone()[0]
-                
-                # Product type distribution
-                cursor.execute("SELECT \"Product Type*\", COUNT(*) FROM products WHERE \"Product Type*\" IS NOT NULL AND \"Product Type*\" != '' AND \"Product Type*\" != 'Product Type*' GROUP BY \"Product Type*\" ORDER BY COUNT(*) DESC LIMIT 10")
-                product_types = cursor.fetchall()
-                product_type_distribution = {pt[0]: pt[1] for pt in product_types}
-                
-                stats = {
-                    'total_products': total_products,
-                    'unique_vendors': unique_vendors,
-                    'unique_brands': unique_brands,
-                    'unique_product_types': unique_product_types,
-                    'product_type_distribution': product_type_distribution
-                }
-                
-                vendor_stats = {
-                    'vendors': [],
-                    'brands': []
-                }
-                
-                # Get top vendors
-                cursor.execute("SELECT \"Vendor/Supplier*\", COUNT(*) as count FROM products WHERE \"Vendor/Supplier*\" IS NOT NULL AND \"Vendor/Supplier*\" != '' AND \"Vendor/Supplier*\" != 'Vendor/Supplier*' GROUP BY \"Vendor/Supplier*\" ORDER BY count DESC LIMIT 15")
-                vendors = cursor.fetchall()
-                vendor_stats['vendors'] = [{'vendor': v[0], 'product_count': v[1]} for v in vendors]
-                
-                # Get top brands
-                cursor.execute("SELECT \"Product Brand\", COUNT(*) as count FROM products WHERE \"Product Brand\" IS NOT NULL AND \"Product Brand\" != '' AND \"Product Brand\" != 'Product Brand' GROUP BY \"Product Brand\" ORDER BY count DESC LIMIT 15")
-                brands = cursor.fetchall()
-                vendor_stats['brands'] = [{'brand': b[0], 'product_count': b[1]} for b in brands]
-                
-                logging.info(f"Database stats retrieved successfully: {total_products} products, {unique_vendors} vendors, {unique_brands} brands")
-                
-                # Auto-cleanup blank entries
-                try:
-                    blank_check = product_db.cleanup_blank_entries()
-                    if blank_check.get('cleaned', 0) > 0:
-                        logging.info(f"Auto-cleanup removed {blank_check['cleaned']} blank entries from database")
-                        # Re-run stats after cleanup
-                        cursor.execute("SELECT COUNT(*) FROM products")
-                        total_products_after_cleanup = cursor.fetchone()[0]
-                        if total_products_after_cleanup != total_products:
-                            logging.info(f"Product count after cleanup: {total_products_after_cleanup} (was {total_products})")
-                            stats['total_products'] = total_products_after_cleanup
-                except Exception as cleanup_error:
-                    logging.warning(f"Auto-cleanup failed: {cleanup_error}")
+                    vendor_stats = {
+                        'vendors': [],
+                        'brands': []
+                    }
+                    
+                    # Get top vendors
+                    cursor.execute("SELECT \"Vendor/Supplier*\", COUNT(*) as count FROM products WHERE \"Vendor/Supplier*\" IS NOT NULL AND \"Vendor/Supplier*\" != '' AND \"Vendor/Supplier*\" != 'Vendor/Supplier*' GROUP BY \"Vendor/Supplier*\" ORDER BY count DESC LIMIT 15")
+                    vendors = cursor.fetchall()
+                    vendor_stats['vendors'] = [{'vendor': v[0], 'product_count': v[1]} for v in vendors]
+                    
+                    # Get top brands
+                    cursor.execute("SELECT \"Product Brand\", COUNT(*) as count FROM products WHERE \"Product Brand\" IS NOT NULL AND \"Product Brand\" != '' AND \"Product Brand\" != 'Product Brand' GROUP BY \"Product Brand\" ORDER BY count DESC LIMIT 15")
+                    brands = cursor.fetchall()
+                    vendor_stats['brands'] = [{'brand': b[0], 'product_count': b[1]} for b in brands]
+                    
+                    logging.info(f"Database stats retrieved successfully: {total_products} products, {unique_vendors} vendors, {unique_brands} brands")
+                    
+                    # Auto-cleanup blank entries
+                    try:
+                        blank_check = product_db.cleanup_blank_entries()
+                        if blank_check.get('cleaned', 0) > 0:
+                            logging.info(f"Auto-cleanup removed {blank_check['cleaned']} blank entries from database")
+                            # Re-run stats after cleanup
+                            cursor.execute("SELECT COUNT(*) FROM products")
+                            total_products_after_cleanup = cursor.fetchone()[0]
+                            if total_products_after_cleanup != total_products:
+                                logging.info(f"Product count after cleanup: {total_products_after_cleanup} (was {total_products})")
+                                stats['total_products'] = total_products_after_cleanup
+                    except Exception as cleanup_error:
+                        logging.warning(f"Auto-cleanup failed: {cleanup_error}")
                 
         except Exception as db_error:
             logging.error(f"Error querying database: {db_error}")
-            logging.error(f"Database path: {product_db.db_path}")
-            logging.error(f"Database exists: {os.path.exists(product_db.db_path)}")
+            logging.error(f"Database connection: {product_db.db_path}")
             stats = {
                 'total_products': 0,
                 'unique_vendors': 0,
