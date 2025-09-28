@@ -67,10 +67,7 @@ class PostgreSQLProductDatabase:
             'application_name': 'AGTDesigner',
             'keepalives_idle': 300,
             'keepalives_interval': 10,
-            'keepalives_count': 5,
-            'tcp_keepalives_idle': 300,
-            'tcp_keepalives_interval': 10,
-            'tcp_keepalives_count': 5
+            'keepalives_count': 5
         }
         
         # Performance timing
