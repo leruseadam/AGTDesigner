@@ -582,9 +582,9 @@ def get_product_database(store_name=None):
     """Lazy load SQLite ProductDatabase to avoid startup delay."""
     global _product_database
     if _product_database is None or (store_name and getattr(_product_database, 'store_name', None) != store_name):
-        # Use SQLite instead of PostgreSQL for local development
+        # Use SQLite for local development (PostgreSQL connection hanging)
         try:
-            from src.core.data.product_database import ProductDatabase
+            from src.core.data.product_database_sqlite_backup import ProductDatabase
             _product_database = ProductDatabase(store_name=store_name)
             logging.info(f"SQLite ProductDatabase created for store '{store_name or 'AGT_Bothell'}'")
         except ImportError:
