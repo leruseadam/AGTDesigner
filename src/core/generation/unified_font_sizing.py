@@ -166,6 +166,16 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
         else:
             logger.debug(f"Special double template brand rule: text='{text}' has {len(long_words)} words with 8+ chars each: {long_words}, NOT triggering 8pt font")
     
+    # Special vertical rule: Any brand with multiple words and one word >9 letters gets 11pt font
+    if field_type.lower() == 'brand' and orientation.lower() == 'vertical':
+        words = text.split()
+        if len(words) > 1:  # Multiple words
+            long_words = [word for word in words if len(word) > 9]
+            if long_words:  # At least one word longer than 9 letters
+                final_size = 11 * scale_factor
+                logger.info(f"Vertical brand rule: '{text}' has multiple words with word >9 letters ({long_words}), using 11pt font")
+                return Pt(final_size)
+    
     # DEBUG: Check if CONSTELLATION is being processed by special rule
     if field_type.lower() == 'brand' and 'CONSTELLATION' in text.upper():
         logger.debug(f"DEBUG: CONSTELLATION brand - orientation='{orientation}', should NOT trigger special rule")
