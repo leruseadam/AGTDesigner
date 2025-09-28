@@ -560,6 +560,104 @@ class ProductDatabase:
             except:
                 pass
         self._connection_pool.clear()
+    
+    def _calculate_product_strain(self, product_data):
+        """Calculate Product Strain from product_data dictionary (overloaded version)."""
+        try:
+            # Handle both dict and individual parameter formats
+            if isinstance(product_data, dict):
+                product_type = product_data.get('Product Type*', '') or product_data.get('product_type', '')
+                product_name = product_data.get('Product Name*', '') or product_data.get('product_name', '')
+                description = product_data.get('Description', '') or product_data.get('description', '')
+                ratio = product_data.get('Ratio', '') or product_data.get('ratio', '')
+            else:
+                # If not a dict, assume it's already the strain value
+                return str(product_data) if product_data else 'Mixed'
+            
+            return self._calculate_product_strain_original(product_type, product_name, description, ratio)
+        except Exception as e:
+            logger.error(f"Error calculating product strain: {e}")
+            return 'Mixed'
+    
+    def _calculate_product_strain_original(self, product_type: str, product_name: str, description: str, ratio: str) -> str:
+        """Calculate Product Strain using exact Excel processor logic."""
+        import re
+        
+        product_type = str(product_type).strip().lower()
+        product_name = str(product_name).strip() if product_name else ""
+        description = str(description).strip() if description else ""
+        ratio = str(ratio).strip() if ratio else ""
+        
+        # Handle 'nan' values
+        if product_name.lower() == 'nan':
+            product_name = ""
+        if description.lower() == 'nan':
+            description = ""
+        if ratio.lower() == 'nan':
+            ratio = ""
+        
+        # Special case: paraphernalia gets Product Strain set to "Paraphernalia"
+        if product_type == "paraphernalia":
+            return "Paraphernalia"
+        
+        # For classic types, try to extract strain from product name or description
+        from src.core.constants import CLASSIC_TYPES
+        if product_type in CLASSIC_TYPES:
+            # Try to extract strain name from product name
+            combined_text = f"{product_name} {description}".strip()
+            
+            # Common strain extraction patterns
+            strain_patterns = [
+                r'(\w+(?:\s+\w+)*)\s+by\s+',  # "Strain Name by Brand"
+                r'^([^-]+)\s*-',  # "Strain Name - other info"
+                r'(\w+(?:\s+\w+)*)\s+(?:flower|bud|strain)',  # "Strain Name flower/bud/strain"
+            ]
+            
+            for pattern in strain_patterns:
+                match = re.search(pattern, combined_text, re.IGNORECASE)
+                if match:
+                    strain = match.group(1).strip()
+                    if len(strain) > 2 and strain.lower() not in ['the', 'and', 'for', 'with']:
+                        return strain
+            
+            # If no pattern matches, try to get the first meaningful words
+            words = combined_text.split()
+            if words:
+                # Skip common prefixes
+                skip_words = {'medically', 'compliant', 'high', 'thc', 'cbd', 'premium', 'quality'}
+                filtered_words = [w for w in words[:3] if w.lower() not in skip_words]
+                if filtered_words:
+                    return ' '.join(filtered_words[:2])  # Take first 2 meaningful words
+        
+        # For non-classic types, use different logic
+        if product_type in ['edible (solid)', 'edible (liquid)', 'capsule', 'tincture', 'topical']:
+            # Check for CBD content
+            if any(term in combined_text.lower() for term in ['cbd', 'cannabidiol']):
+                return 'CBD Blend'
+            else:
+                return 'Mixed'
+        
+        # For vape cartridges and concentrates
+        if product_type in ['vape cartridge', 'concentrate']:
+            # Try to extract strain from name/description
+            combined_text = f"{product_name} {description}".strip()
+            
+            # Look for strain patterns in vape/concentrate names
+            vape_patterns = [
+                r'([A-Za-z\s]+?)\s+(?:cartridge|cart|vape|concentrate|wax|shatter|rosin)',
+                r'([A-Za-z\s]+?)\s+(?:live|cured|hash)',
+                r'^([^-]+)\s*-',
+            ]
+            
+            for pattern in vape_patterns:
+                match = re.search(pattern, combined_text, re.IGNORECASE)
+                if match:
+                    strain = match.group(1).strip()
+                    if len(strain) > 2:
+                        return strain
+        
+        # Default fallback
+        return 'Mixed'
 
 # Global instance for lazy loading
 _product_database_instance = None
