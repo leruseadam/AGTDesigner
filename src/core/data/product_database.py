@@ -62,6 +62,7 @@ class ProductDatabase:
     def __init__(self, store_name: str = None):
         self.store_name = store_name or 'AGT_Bothell'
         self.config = get_database_config(store_name)
+        self.db_path = f"postgresql://{self.config['user']}@{self.config['host']}:{self.config['port']}/{self.config['database']}"  # For compatibility
         self._connection_pool = {}
         self._cache = {}
         self._cache_lock = threading.Lock()
