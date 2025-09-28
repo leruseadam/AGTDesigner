@@ -13,7 +13,19 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any
 import time
 
-class PostgreSQLProductDatabase:
+# Global instance for lazy loading
+_product_database_instance = None
+_product_database_lock = threading.Lock()
+
+def get_product_database(store_name=None):
+    """Get or create a ProductDatabase instance."""
+    global _product_database_instance
+    with _product_database_lock:
+        if _product_database_instance is None:
+            _product_database_instance = ProductDatabase(store_name)
+        return _product_database_instance
+
+class ProductDatabase:
     """PostgreSQL database for storing and managing product and strain information."""
     
     def __init__(self, store_name: str = None):
