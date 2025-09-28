@@ -193,10 +193,10 @@ class ProductDatabase:
                 """)
                 
                 conn.commit()
-                self._initialized = True
+                    self._initialized = True
                 logger.info(f"PostgreSQL database initialized for store '{self.store_name}'")
-                return True
-                
+                    return True
+                    
             except Exception as e:
                 logger.error(f"Failed to initialize PostgreSQL database: {e}")
                 return False
@@ -212,8 +212,10 @@ class ProductDatabase:
         cursor = conn.cursor()
         
         try:
-            # Extract required fields
-            product_name = product_data.get('Product Name*', '')
+            # Extract required fields - check multiple possible column names
+            product_name = (product_data.get('Product Name*', '') or 
+                          product_data.get('ProductName', '') or 
+                          product_data.get('Product Name', ''))
             normalized_name = product_data.get('normalized_name', '')
             product_type = product_data.get('Product Type*', '')
             
@@ -505,7 +507,7 @@ class ProductDatabase:
         """Get products by their normalized names."""
         if not product_names:
             return []
-            
+    
         conn = self._get_connection()
         if not conn:
             return []
@@ -567,7 +569,10 @@ class ProductDatabase:
             # Handle both dict and individual parameter formats
             if isinstance(product_data, dict):
                 product_type = product_data.get('Product Type*', '') or product_data.get('product_type', '')
-                product_name = product_data.get('Product Name*', '') or product_data.get('product_name', '')
+                product_name = (product_data.get('Product Name*', '') or 
+                              product_data.get('ProductName', '') or 
+                              product_data.get('Product Name', '') or 
+                              product_data.get('product_name', ''))
                 description = product_data.get('Description', '') or product_data.get('description', '')
                 ratio = product_data.get('Ratio', '') or product_data.get('ratio', '')
             else:

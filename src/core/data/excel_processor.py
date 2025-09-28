@@ -717,8 +717,12 @@ class ExcelProcessor:
                             row_dict = row.to_dict()
                             
                             # Add normalized_name field for database compatibility
-                            product_name = row_dict.get('Product Name*', '')
-                            if product_name and str(product_name).strip():
+                            # Check multiple possible column names for product name
+                            product_name = (row_dict.get('Product Name*', '') or 
+                                          row_dict.get('ProductName', '') or 
+                                          row_dict.get('Product Name', ''))
+                            
+                            if product_name and str(product_name).strip() and str(product_name).strip() != 'nan':
                                 row_dict['normalized_name'] = normalize_name(product_name)
                             else:
                                 # Skip empty products
