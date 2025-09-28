@@ -5445,14 +5445,14 @@ class ExcelProcessor:
                 product_db = get_product_database()
                 logger.info("Using global product database instance")
             except ImportError:
-                # Fallback to creating a new instance if app module not available
+                # Fallback to creating a new instance if app module not available - USE BOTHELL DATABASE
                 from src.core.data.product_database import ProductDatabase
                 import os
                 current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-                db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
+                db_path = os.path.join(current_dir, 'uploads', 'product_database_AGT_Bothell.db')
                 product_db = ProductDatabase(db_path)
                 product_db.init_database()
-                logger.info(f"Created new product database instance at: {db_path}")
+                logger.info(f"Created new Bothell product database instance at: {db_path}")
             
             logger.info(f"Starting database storage for Excel upload: {len(df)} rows from {source_file}")
             
