@@ -694,6 +694,17 @@ class ExcelProcessor:
                     from .product_database import ProductDatabase
                     product_db = ProductDatabase(store_name=self._store_name)
                     
+                    # Test database connection before proceeding
+                    try:
+                        conn = product_db._get_connection()
+                        if not conn:
+                            self.logger.warning("[ProductDB] Database connection failed, skipping background integration")
+                            return
+                    except Exception as conn_error:
+                        self.logger.warning(f"[ProductDB] Database connection test failed: {conn_error}")
+                        self.logger.info("[ProductDB] Skipping background integration due to database connection issues")
+                        return
+                    
                     # Add retry logic for database locking issues
                     max_retries = 3
                     
@@ -753,6 +764,9 @@ class ExcelProcessor:
                                                 self.logger.warning(f"[ProductDB] Database locked for strain '{strain_name}', retrying in {strain_retry_delay}s (attempt {attempt + 1}/{max_retries})")
                                                 time.sleep(strain_retry_delay)
                                                 strain_retry_delay *= 2  # Exponential backoff
+                                            elif "connection" in str(e).lower() or "postgresql" in str(e).lower():
+                                                self.logger.warning(f"[ProductDB] Database connection issue for strain '{strain_name}': {e}")
+                                                break  # Don't retry connection issues
                                             else:
                                                 self.logger.error(f"[ProductDB] Failed to add/update strain '{strain_name}' after {max_retries} attempts: {e}")
                                                 break
@@ -770,6 +784,9 @@ class ExcelProcessor:
                                             self.logger.warning(f"[ProductDB] Database locked for product, retrying in {product_retry_delay}s (attempt {attempt + 1}/{max_retries})")
                                             time.sleep(product_retry_delay)
                                             product_retry_delay *= 2  # Exponential backoff
+                                        elif "connection" in str(e).lower() or "postgresql" in str(e).lower():
+                                            self.logger.warning(f"[ProductDB] Database connection issue for product: {e}")
+                                            break  # Don't retry connection issues
                                         else:
                                             self.logger.error(f"[ProductDB] Failed to add/update product after {max_retries} attempts: {e}")
                                             break
@@ -787,6 +804,9 @@ class ExcelProcessor:
                                             self.logger.warning(f"[ProductDB] Database locked for non-classic product, retrying in {non_classic_retry_delay}s (attempt {attempt + 1}/{max_retries})")
                                             time.sleep(non_classic_retry_delay)
                                             non_classic_retry_delay *= 2  # Exponential backoff
+                                        elif "connection" in str(e).lower() or "postgresql" in str(e).lower():
+                                            self.logger.warning(f"[ProductDB] Database connection issue for non-classic product: {e}")
+                                            break  # Don't retry connection issues
                                         else:
                                             self.logger.error(f"[ProductDB] Failed to add/update non-classic product after {max_retries} attempts: {e}")
                                             break
