@@ -289,22 +289,22 @@ class ProductDatabase:
 # Global PostgreSQL database instance
 _postgresql_db = None
 
-def get_postgresql_database(store_name: str = None) -> PostgreSQLProductDatabase:
+def get_postgresql_database(store_name: str = None) -> ProductDatabase:
     """Get PostgreSQL database instance."""
     global _postgresql_db
     if _postgresql_db is None or (store_name and _postgresql_db.store_name != store_name):
-        _postgresql_db = PostgreSQLProductDatabase(store_name)
+        _postgresql_db = ProductDatabase(store_name)
         _postgresql_db.init_database()
     return _postgresql_db
 
 # Compatibility function for existing code
-def get_product_database(store_name: str = None) -> PostgreSQLProductDatabase:
+def get_product_database(store_name: str = None) -> ProductDatabase:
     """Compatibility function - returns PostgreSQL database instead of SQLite."""
     return get_postgresql_database(store_name)
 
 if __name__ == "__main__":
     # Test the PostgreSQL database
-    db = PostgreSQLProductDatabase('AGT_Bothell')
+    db = ProductDatabase('AGT_Bothell')
     
     if db.test_connection():
         print("✅ PostgreSQL connection successful")
