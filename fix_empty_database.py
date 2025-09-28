@@ -8,8 +8,15 @@ import os
 import sys
 import logging
 
-# Add project directory to path
-project_dir = '/Users/adamcordova/Desktop/labelMaker_ QR copy SAFEST copy 5'
+# Add project directory to path - detect environment
+import os
+if os.path.exists('/home/adamcordova'):
+    # PythonAnywhere environment
+    project_dir = '/home/adamcordova/AGTDesigner'
+else:
+    # Local environment
+    project_dir = '/Users/adamcordova/Desktop/labelMaker_ QR copy SAFEST copy 5'
+
 if project_dir not in sys.path:
     sys.path.insert(0, project_dir)
 
@@ -71,10 +78,10 @@ def find_excel_files():
     """Find Excel files that can be used to populate the database"""
     print("\n🔍 Looking for Excel files...")
     
-    # Check uploads directory
-    uploads_dir = os.path.join(project_dir, 'uploads')
     excel_files = []
     
+    # Check uploads directory
+    uploads_dir = os.path.join(project_dir, 'uploads')
     if os.path.exists(uploads_dir):
         for file in os.listdir(uploads_dir):
             if file.endswith(('.xlsx', '.xls')):
@@ -83,8 +90,8 @@ def find_excel_files():
                 excel_files.append((file, file_path, file_size))
                 print(f"📄 Found Excel file: {file} ({file_size} bytes)")
     
-    # Check Downloads directory
-    downloads_dir = os.path.expanduser('~/Downloads')
+    # Check Downloads directory (PythonAnywhere specific)
+    downloads_dir = '/home/adamcordova/Downloads'
     if os.path.exists(downloads_dir):
         for file in os.listdir(downloads_dir):
             if 'greener today' in file.lower() and file.endswith(('.xlsx', '.xls')):
@@ -93,8 +100,21 @@ def find_excel_files():
                 excel_files.append((file, file_path, file_size))
                 print(f"📄 Found Excel file in Downloads: {file} ({file_size} bytes)")
     
+    # Check current directory for any Excel files
+    current_dir_files = os.listdir(project_dir)
+    for file in current_dir_files:
+        if file.endswith(('.xlsx', '.xls')):
+            file_path = os.path.join(project_dir, file)
+            file_size = os.path.getsize(file_path)
+            excel_files.append((file, file_path, file_size))
+            print(f"📄 Found Excel file in project directory: {file} ({file_size} bytes)")
+    
     if not excel_files:
         print("❌ No Excel files found")
+        print(f"💡 Searched in:")
+        print(f"   - {uploads_dir}")
+        print(f"   - {downloads_dir}")
+        print(f"   - {project_dir}")
         return None
     
     # Return the largest file (most likely to be the inventory)
@@ -155,6 +175,12 @@ def main():
     """Main function to fix empty database"""
     print("🚀 FIXING EMPTY DATABASE ON PYTHONANYWHERE")
     print("=" * 50)
+    
+    # Show environment info
+    print(f"📍 Project directory: {project_dir}")
+    print(f"🐍 Python version: {sys.version}")
+    print(f"📁 Current working directory: {os.getcwd()}")
+    print(f"🏠 Home directory: {os.path.expanduser('~')}")
     
     # Check current database status
     db_ok = check_database_status()
