@@ -170,6 +170,10 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
     if field_type.lower() == 'brand' and 'CONSTELLATION' in text.upper():
         logger.debug(f"DEBUG: CONSTELLATION brand - orientation='{orientation}', should NOT trigger special rule")
         logger.info(f"CONSTELLATION DEBUG: text='{text}', field_type='{field_type}', orientation='{orientation}'")
+        # TEMPORARY FIX: Force CONSTELLATION to use larger font
+        final_size = 16 * scale_factor
+        logger.info(f"CONSTELLATION TEMP FIX: Forcing 16pt font for '{text}'")
+        return Pt(final_size)
     
     # Special rule: If double template description has multiple words with 9+ characters each, automatically reduce to 18pt
     if orientation.lower() == 'double' and field_type.lower() == 'description':
