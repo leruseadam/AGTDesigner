@@ -31,7 +31,12 @@ class PostgreSQLProductDatabase:
             'database': os.getenv('DB_NAME', 'postgres'),
             'user': os.getenv('DB_USER', 'super'),
             'password': os.getenv('DB_PASSWORD', '193154life'),
-            'port': os.getenv('DB_PORT', '14822')
+            'port': os.getenv('DB_PORT', '14822'),
+            'connect_timeout': 30,
+            'application_name': 'AGTDesigner',
+            'keepalives_idle': 600,
+            'keepalives_interval': 30,
+            'keepalives_count': 3
         }
         
         # Performance timing
@@ -45,15 +50,34 @@ class PostgreSQLProductDatabase:
     def _get_connection(self):
         """Get a PostgreSQL connection, reusing if possible."""
         thread_id = threading.get_ident()
-        if thread_id not in self._connection_pool:
+        
+        # Check if we have a connection and if it's still alive
+        if thread_id in self._connection_pool:
+            conn = self._connection_pool[thread_id]
             try:
-                conn = psycopg2.connect(**self.config)
-                conn.autocommit = False
-                self._connection_pool[thread_id] = conn
-            except psycopg2.OperationalError as e:
-                logging.error(f"PostgreSQL connection failed: {e}")
-                return None
-        return self._connection_pool[thread_id]
+                # Test if connection is still alive
+                cursor = conn.cursor()
+                cursor.execute("SELECT 1")
+                cursor.fetchone()
+                cursor.close()
+                return conn
+            except (psycopg2.OperationalError, psycopg2.InterfaceError):
+                # Connection is dead, remove it and create a new one
+                try:
+                    conn.close()
+                except:
+                    pass
+                del self._connection_pool[thread_id]
+        
+        # Create new connection
+        try:
+            conn = psycopg2.connect(**self.config)
+            conn.autocommit = False
+            self._connection_pool[thread_id] = conn
+            return conn
+        except psycopg2.OperationalError as e:
+            logging.error(f"PostgreSQL connection failed: {e}")
+            return None
     
     def _normalize_product_name(self, name: str) -> str:
         """Normalize product name for consistent storage."""
@@ -187,6 +211,8 @@ class PostgreSQLProductDatabase:
     
     def add_or_update_strain(self, strain_name: str, lineage: str = None, sovereign: bool = False) -> int:
         """Add a new strain or update existing strain information."""
+        conn = None
+        cursor = None
         try:
             self.init_database()
             normalized_name = self._normalize_strain_name(strain_name)
@@ -195,6 +221,7 @@ class PostgreSQLProductDatabase:
             with self._write_lock:
                 conn = self._get_connection()
                 if not conn:
+                    logging.error(f"No connection available for strain '{strain_name}'")
                     return None
                     
                 cursor = conn.cursor()
@@ -230,17 +257,36 @@ class PostgreSQLProductDatabase:
                 conn.commit()
                 return strain_id
                 
+        except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+            logging.error(f"Connection error for strain '{strain_name}': {e}")
+            # Remove the dead connection from pool
+            thread_id = threading.get_ident()
+            if thread_id in self._connection_pool:
+                try:
+                    self._connection_pool[thread_id].close()
+                except:
+                    pass
+                del self._connection_pool[thread_id]
+            return None
         except Exception as e:
             logging.error(f"Failed to add/update strain '{strain_name}': {e}")
-            if 'conn' in locals():
-                conn.rollback()
+            if conn:
+                try:
+                    conn.rollback()
+                except:
+                    pass
             return None
         finally:
-            if 'cursor' in locals():
-                cursor.close()
+            if cursor:
+                try:
+                    cursor.close()
+                except:
+                    pass
     
     def add_or_update_product(self, product_data: Dict[str, Any]) -> int:
         """Add a new product or update existing product information."""
+        conn = None
+        cursor = None
         try:
             self.init_database()
             
@@ -259,6 +305,7 @@ class PostgreSQLProductDatabase:
             with self._write_lock:
                 conn = self._get_connection()
                 if not conn:
+                    logging.error(f"No connection available for product '{product_name}'")
                     return None
                     
                 cursor = conn.cursor()
@@ -324,14 +371,31 @@ class PostgreSQLProductDatabase:
                 conn.commit()
                 return product_id
                 
+        except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+            logging.error(f"Connection error for product '{product_name}': {e}")
+            # Remove the dead connection from pool
+            thread_id = threading.get_ident()
+            if thread_id in self._connection_pool:
+                try:
+                    self._connection_pool[thread_id].close()
+                except:
+                    pass
+                del self._connection_pool[thread_id]
+            return None
         except Exception as e:
             logging.error(f"Failed to add/update product '{product_name}': {e}")
-            if 'conn' in locals():
-                conn.rollback()
+            if conn:
+                try:
+                    conn.rollback()
+                except:
+                    pass
             return None
         finally:
-            if 'cursor' in locals():
-                cursor.close()
+            if cursor:
+                try:
+                    cursor.close()
+                except:
+                    pass
     
     def search_products(self, query: str, limit: int = 50) -> List[Dict[str, Any]]:
         """Search products using PostgreSQL full-text search."""
