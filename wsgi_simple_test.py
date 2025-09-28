@@ -1,6 +1,7 @@
 #!/usr/bin/env python3.11
 """
-Simple WSGI test file for debugging
+Simple WSGI test for PythonAnywhere debugging
+This is a minimal WSGI application to test if the basic setup works
 """
 
 import os
@@ -8,62 +9,66 @@ import sys
 
 # Add project directory to Python path
 project_dir = '/home/adamcordova/AGTDesigner'
-if project_dir not in sys.path:
-    sys.path.insert(0, project_dir)
+if os.path.exists(project_dir):
+    if project_dir not in sys.path:
+        sys.path.insert(0, project_dir)
 
-def application(environ, start_response):
+# Add user site-packages
+import site
+user_site = site.getusersitepackages()
+if user_site and user_site not in sys.path:
+    sys.path.insert(0, user_site)
+
+# Set environment variables
+os.environ['PYTHONANYWHERE_SITE'] = 'True'
+os.environ['FLASK_ENV'] = 'production'
+os.environ['FLASK_DEBUG'] = 'False'
+
+def simple_app(environ, start_response):
     """Simple WSGI application for testing"""
+    status = '200 OK'
+    headers = [('Content-Type', 'text/html; charset=utf-8')]
     
-    # Get the request path
-    path = environ.get('PATH_INFO', '/')
-    
-    # Simple HTML response
-    html = f"""
+    html = """
     <!DOCTYPE html>
     <html>
     <head>
-        <title>WSGI Test</title>
+        <title>WSGI Test - Working!</title>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 40px; }
+            .success { color: green; font-size: 24px; }
+            .info { color: blue; margin: 20px 0; }
+        </style>
     </head>
     <body>
-        <h1>WSGI Test Successful!</h1>
-        <p>Path: {path}</p>
-        <p>Python version: {sys.version}</p>
-        <p>Current directory: {os.getcwd()}</p>
-        <p>Project directory exists: {os.path.exists(project_dir)}</p>
-        <p>Files in current directory: {', '.join(os.listdir('.'))}</p>
-        
-        <h2>Testing Flask App Import:</h2>
-    """
-    
-    try:
-        from app import app
-        html += f"<p style='color: green;'>✅ Flask app imported successfully!</p>"
-        html += f"<p>App name: {app.name}</p>"
-        
-        # Test a simple route
-        with app.test_client() as client:
-            response = client.get('/')
-            html += f"<p>Home route status: {response.status_code}</p>"
-            
-    except Exception as e:
-        html += f"<p style='color: red;'>❌ Flask app import failed: {e}</p>"
-        import traceback
-        html += f"<pre>{traceback.format_exc()}</pre>"
-    
-    html += """
+        <h1 class="success">✅ WSGI Test Successful!</h1>
+        <div class="info">
+            <p><strong>Python Version:</strong> {python_version}</p>
+            <p><strong>Project Directory:</strong> {project_dir}</p>
+            <p><strong>Python Path:</strong> {python_path}</p>
+            <p><strong>Environment:</strong> {environment}</p>
+        </div>
+        <p>If you can see this page, your WSGI configuration is working correctly!</p>
+        <p>Now you can switch back to your main application.</p>
     </body>
     </html>
-    """
+    """.format(
+        python_version=sys.version,
+        project_dir=project_dir,
+        python_path='<br>'.join(sys.path[:5]),
+        environment=dict(os.environ)
+    )
     
-    # Return response
-    status = '200 OK'
-    headers = [('Content-Type', 'text/html')]
     start_response(status, headers)
     return [html.encode('utf-8')]
 
+# This is what PythonAnywhere will use
+application = simple_app
+
+# For testing
 if __name__ == "__main__":
-    # For testing locally
     from wsgiref.simple_server import make_server
+    print("Starting simple WSGI test server...")
     httpd = make_server('', 8000, application)
-    print("Serving on port 8000...")
+    print("Serving on http://localhost:8000")
     httpd.serve_forever()
