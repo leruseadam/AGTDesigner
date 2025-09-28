@@ -44,23 +44,23 @@
             })
             .catch(error => {
                 console.error('🧠 Smart-fast upload failed:', error);
-                // Try batch smart as fallback
-                console.log('🧠 Trying batch smart mode...');
-                return this.tryBatchSmartUpload(file);
+                // Try ultra-instant as fallback
+                console.log('🧠 Trying ultra-instant mode...');
+                return this.tryUltraInstantUpload(file);
             });
         };
         
-        // Add batch smart upload fallback
-        TagManager.prototype.tryBatchSmartUpload = function(file) {
+        // Add ultra-instant upload fallback
+        TagManager.prototype.tryUltraInstantUpload = function(file) {
             const formData = new FormData();
             formData.append('file', file);
             
-            this.showUploadProgress('Batch smart mode: Processing in chunks...');
+            this.showUploadProgress('Ultra-instant mode: Just saving file...');
             
-            return fetch('/upload-batch-smart', {
+            return fetch('/upload-ultra-instant', {
                 method: 'POST',
                 body: formData,
-                timeout: 45000  // 45 second timeout
+                timeout: 5000  // 5 second timeout
             })
             .then(response => {
                 if (!response.ok) {
@@ -69,20 +69,20 @@
                 return response.json();
             })
             .then(data => {
-                console.log('📦 Batch smart upload result:', data);
+                console.log('⚡ Ultra-instant upload result:', data);
                 
                 if (data.error) {
                     throw new Error(data.error);
                 }
                 
-                this.showUploadSuccess(`📦 Batch smart upload complete in ${data.processing_time}s! Processed ${data.total_products} products in ${data.batches_processed} batches.`);
+                this.showUploadSuccess(`⚡ Ultra-instant upload complete in ${data.processing_time}s!`);
                 this.loadTags();
                 
                 return data;
             })
             .catch(error => {
-                console.error('📦 Batch smart upload failed:', error);
-                this.showUploadError(`Both smart upload modes failed: ${error.message}`);
+                console.error('⚡ Ultra-instant upload failed:', error);
+                this.showUploadError(`Both smart-fast and ultra-instant upload failed: ${error.message}`);
                 throw error;
             });
         };
