@@ -1845,6 +1845,27 @@ def upload_file_ultra_fast():
             global excel_processor
             excel_processor = processor
             
+            # Store Excel data in database (CRITICAL FOR DATABASE DISPLAY)
+            try:
+                if hasattr(processor, '_store_upload_in_database'):
+                    logging.info("[UPLOAD-FAST] Storing Excel data in database...")
+                    storage_result = processor._store_upload_in_database(processor.df, temp_path)
+                    logging.info(f"[UPLOAD-FAST] ✅ Database storage completed: {storage_result}")
+                else:
+                    logging.warning("[UPLOAD-FAST] ExcelProcessor does not have _store_upload_in_database method")
+                    # Try alternative database storage method
+                    try:
+                        current_store = session.get('selected_store', 'AGT_Bothell')
+                        product_db = get_product_database(current_store)
+                        if hasattr(product_db, 'store_excel_data'):
+                            logging.info("[UPLOAD-FAST] Using ProductDatabase.store_excel_data method...")
+                            storage_result = product_db.store_excel_data(processor.df, temp_path)
+                            logging.info(f"[UPLOAD-FAST] ✅ Alternative database storage completed: {storage_result}")
+                    except Exception as db_error:
+                        logging.error(f"[UPLOAD-FAST] Database storage failed: {db_error}")
+            except Exception as storage_error:
+                logging.error(f"[UPLOAD-FAST] Error storing data in database: {storage_error}")
+            
             # Update session
             session['file_path'] = temp_path
             session['selected_tags'] = []
@@ -1860,7 +1881,8 @@ def upload_file_ultra_fast():
                 'filename': file.filename,
                 'rows': len(df),
                 'status': 'ready',
-                'processing_time': 'ultra-fast'
+                'processing_time': 'ultra-fast',
+                'database_stored': True
             })
             
         except Exception as process_error:
