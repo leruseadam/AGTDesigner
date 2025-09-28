@@ -166,6 +166,10 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
         else:
             logger.debug(f"Special double template brand rule: text='{text}' has {len(long_words)} words with 8+ chars each: {long_words}, NOT triggering 8pt font")
     
+    # DEBUG: Check if CONSTELLATION is being processed by special rule
+    if field_type.lower() == 'brand' and 'CONSTELLATION' in text.upper():
+        logger.debug(f"DEBUG: CONSTELLATION brand - orientation='{orientation}', should NOT trigger special rule")
+    
     # Special rule: If double template description has multiple words with 9+ characters each, automatically reduce to 18pt
     if orientation.lower() == 'double' and field_type.lower() == 'description':
         words = str(text).split()
@@ -198,6 +202,10 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
     
     logger.debug(f"Font sizing for '{text}' (field_type: {field_type}, orientation: {orientation}, complexity: {comp})")
     logger.debug(f"Config: {config}")
+    
+    # DEBUG: Check if orientation is correct for vertical templates
+    if field_type.lower() == 'brand' and 'CONSTELLATION' in text.upper():
+        logger.debug(f"DEBUG: CONSTELLATION brand detected - orientation='{orientation}', field_type='{field_type}'")
     
     # Find appropriate font size based on complexity
     for threshold, size in config:
