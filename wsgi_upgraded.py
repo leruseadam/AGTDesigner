@@ -62,9 +62,11 @@ try:
     # Apply enhanced handlers for custom plan
     try:
         from custom_plan_upload_handler import create_custom_plan_upload_handler
+        from fast_tag_generator import create_fast_tag_generator
         from fast_docx_generator import create_fast_generator_routes
         
         application = create_custom_plan_upload_handler(application)
+        application = create_fast_tag_generator(application)
         create_fast_generator_routes(application)
         
         logging.info("Custom plan handlers applied")
