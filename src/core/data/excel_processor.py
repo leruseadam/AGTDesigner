@@ -2404,14 +2404,15 @@ class ExcelProcessor:
             self.logger.debug(f"Final columns after all processing: {self.df.columns.tolist()}")
             self.logger.debug(f"Sample data after all processing:\n{self.df[['ProductName', 'Description', 'Ratio', 'Product Strain']].head()}")
             
-            # Log memory usage for PythonAnywhere monitoring
+            # Log memory usage for PythonAnywhere monitoring (with error handling)
             try:
                 import psutil
                 process = psutil.Process()
                 memory_info = process.memory_info()
                 self.logger.info(f"Memory usage after file load: {memory_info.rss / (1024*1024):.2f} MB")
-            except ImportError:
-                self.logger.debug("psutil not available for memory monitoring")
+            except (ImportError, Exception) as e:
+                # psutil doesn't work properly on PythonAnywhere shared hosting
+                self.logger.debug(f"Memory monitoring not available: {e}")
             
             # --- Product/Strain Database Integration (Background Processing) ---
             # Re-enabled to ensure lineage changes persist after reload
