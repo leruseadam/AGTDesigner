@@ -150,7 +150,7 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
     # Special rule: Handle specific large brand names that are too big
     if field_type.lower() == 'brand' and orientation.lower() == 'double':
         # Force specific large brand names to use much smaller fonts
-        large_brands = ['CONSTELLATION', 'MARY JONES', 'MARY JONES CANNABIS']
+        large_brands = ['MARY JONES', 'MARY JONES CANNABIS']  # Temporarily removed CONSTELLATION to test
         if any(brand in text.upper() for brand in large_brands):
             final_size = 5.5 * scale_factor
             logger.debug(f"Special double template brand rule: text='{text}' matches large brand list, forcing 5.5pt font")
