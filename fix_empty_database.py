@@ -21,11 +21,19 @@ def check_database_status():
         # Import the database
         from src.core.data.product_database import ProductDatabase
         
-        # Check if database file exists
-        db_path = os.path.join(project_dir, 'product_database.db')
+        # Check if Bothell database file exists
+        db_path = os.path.join(project_dir, 'uploads', 'product_database_AGT_Bothell.db')
         if not os.path.exists(db_path):
-            print(f"❌ Database file not found: {db_path}")
-            return False
+            print(f"❌ Bothell database file not found: {db_path}")
+            # Try default database as fallback
+            db_path = os.path.join(project_dir, 'product_database.db')
+            if not os.path.exists(db_path):
+                print(f"❌ Default database file also not found: {db_path}")
+                return False
+            else:
+                print(f"⚠️  Using default database: {db_path}")
+        else:
+            print(f"✅ Using Bothell database: {db_path}")
         
         # Get database size
         db_size = os.path.getsize(db_path)
@@ -117,9 +125,13 @@ def populate_database_from_excel(excel_file_path):
         
         print(f"✅ Loaded {len(processor.df)} rows from Excel file")
         
-        # Store in database
-        print("💾 Storing data in database...")
-        db_path = os.path.join(project_dir, 'product_database.db')
+        # Store in Bothell database
+        print("💾 Storing data in Bothell database...")
+        db_path = os.path.join(project_dir, 'uploads', 'product_database_AGT_Bothell.db')
+        
+        # Ensure uploads directory exists
+        os.makedirs(os.path.join(project_dir, 'uploads'), exist_ok=True)
+        
         product_db = ProductDatabase(db_path)
         product_db.init_database()
         

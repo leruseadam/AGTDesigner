@@ -590,10 +590,13 @@ def get_product_database(store_name=None):
             _product_database._store_name = store_name
             logging.info(f"ProductDatabase created for store '{store_name}' at: {db_path}")
         else:
-            # Default database for backward compatibility
-            db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
+            # Default to Bothell database for AGT
+            store_name = 'AGT_Bothell'
+            db_filename = f'product_database_{store_name}.db'
+            db_path = os.path.join(current_dir, 'uploads', db_filename)
             _product_database = ProductDatabase(db_path)
-            logging.info(f"ProductDatabase created (default) at: {db_path}")
+            _product_database._store_name = store_name
+            logging.info(f"ProductDatabase created (default Bothell) at: {db_path}")
     return _product_database
 
 def get_json_matcher():
@@ -1853,12 +1856,12 @@ def upload_file_ultra_fast():
                     logging.info(f"[UPLOAD-FAST] ✅ Database storage completed: {storage_result}")
                 else:
                     logging.warning("[UPLOAD-FAST] ExcelProcessor does not have _store_upload_in_database method")
-                    # Try alternative database storage method
+                    # Try alternative database storage method - USE BOTHELL DATABASE
                     try:
-                        current_store = session.get('selected_store', 'AGT_Bothell')
+                        current_store = 'AGT_Bothell'  # Force Bothell database
                         product_db = get_product_database(current_store)
                         if hasattr(product_db, 'store_excel_data'):
-                            logging.info("[UPLOAD-FAST] Using ProductDatabase.store_excel_data method...")
+                            logging.info(f"[UPLOAD-FAST] Using ProductDatabase.store_excel_data method for {current_store}...")
                             storage_result = product_db.store_excel_data(processor.df, temp_path)
                             logging.info(f"[UPLOAD-FAST] ✅ Alternative database storage completed: {storage_result}")
                     except Exception as db_error:
