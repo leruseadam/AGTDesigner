@@ -716,6 +716,14 @@ class ExcelProcessor:
                         for _, row in batch_df.iterrows():
                             row_dict = row.to_dict()
                             
+                            # Add normalized_name field for database compatibility
+                            product_name = row_dict.get('Product Name*', '')
+                            if product_name and str(product_name).strip():
+                                row_dict['normalized_name'] = normalize_name(product_name)
+                            else:
+                                # Skip empty products
+                                continue
+                            
                             # Only process classic types through the strain database
                             product_type = row_dict.get('Product Type*', '').strip().lower()
                             if product_type in [c.lower() for c in CLASSIC_TYPES]:
