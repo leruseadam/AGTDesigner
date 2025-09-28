@@ -273,6 +273,36 @@ class PostgreSQLProductDatabase:
                 """)
                 logging.info("✓ Added strain_id column to products table")
             
+            # Check if thc_content column exists in products table
+            cursor.execute("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'products' AND column_name = 'thc_content'
+            """)
+            
+            if not cursor.fetchone():
+                logging.info("Adding thc_content column to products table...")
+                cursor.execute("""
+                    ALTER TABLE products 
+                    ADD COLUMN thc_content VARCHAR(255)
+                """)
+                logging.info("✓ Added thc_content column to products table")
+            
+            # Check if cbd_content column exists in products table
+            cursor.execute("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'products' AND column_name = 'cbd_content'
+            """)
+            
+            if not cursor.fetchone():
+                logging.info("Adding cbd_content column to products table...")
+                cursor.execute("""
+                    ALTER TABLE products 
+                    ADD COLUMN cbd_content VARCHAR(255)
+                """)
+                logging.info("✓ Added cbd_content column to products table")
+            
             # Check if lineage column exists in strains table
             cursor.execute("""
                 SELECT column_name 
@@ -302,6 +332,21 @@ class PostgreSQLProductDatabase:
                     ADD COLUMN sovereign_lineage TEXT
                 """)
                 logging.info("✓ Added sovereign_lineage column to strains table")
+            
+            # Check if normalized_name column exists in strains table
+            cursor.execute("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'strains' AND column_name = 'normalized_name'
+            """)
+            
+            if not cursor.fetchone():
+                logging.info("Adding normalized_name column to strains table...")
+                cursor.execute("""
+                    ALTER TABLE strains 
+                    ADD COLUMN normalized_name VARCHAR(255)
+                """)
+                logging.info("✓ Added normalized_name column to strains table")
                 
         except Exception as e:
             logging.error(f"Error ensuring columns exist: {e}")
@@ -340,16 +385,17 @@ class PostgreSQLProductDatabase:
                         UPDATE strains 
                         SET lineage = %s, 
                             sovereign_lineage = %s,
+                            normalized_name = %s,
                             updated_at = %s
                         WHERE id = %s
-                    """, (lineage or '', lineage if sovereign else '', current_date, strain_id))
+                    """, (lineage or '', lineage if sovereign else '', normalized_name, current_date, strain_id))
                 else:
                     # Insert new strain
                     cursor.execute("""
-                        INSERT INTO strains (strain_name, lineage, sovereign_lineage, created_at, updated_at)
-                        VALUES (%s, %s, %s, %s, %s)
+                        INSERT INTO strains (strain_name, lineage, sovereign_lineage, normalized_name, created_at, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, %s)
                         RETURNING id
-                    """, (normalized_name, lineage or '', lineage if sovereign else '', current_date, current_date))
+                    """, (normalized_name, lineage or '', lineage if sovereign else '', normalized_name, current_date, current_date))
                     
                     strain_id = cursor.fetchone()[0]
                 
