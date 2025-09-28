@@ -207,6 +207,10 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
         logger.warning(f"No font configuration found for {field_type} in {orientation} template, using {fallback_size}pt")
         return Pt(fallback_size)
     
+    # DEBUG: Log configuration for brand fields
+    if field_type.lower() == 'brand':
+        logger.info(f"BRAND DEBUG: Found config for '{text}' - orientation: {orientation}, config: {config}")
+    
     # Calculate text complexity
     comp = calculate_text_complexity(text)
     
@@ -234,6 +238,8 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
                 logger.info(f"PRICE DEBUG: SELECTED {size}pt for '{text}'")
             if field_type.lower() == 'brand' and 'CONSTELLATION' in text.upper():
                 logger.info(f"CONSTELLATION DEBUG: Selected {size}pt font for '{text}' (complexity: {comp}, threshold: {threshold})")
+            if field_type.lower() == 'brand':
+                logger.info(f"BRAND DEBUG: Selected {size}pt font for '{text}' (complexity: {comp}, threshold: {threshold})")
             return Pt(final_size)
     
     # Fallback to smallest size - ensure price gets proper fallback
