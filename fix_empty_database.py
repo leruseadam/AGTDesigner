@@ -56,7 +56,8 @@ def check_database_status():
         
         # Count products
         try:
-            count = product_db.get_product_count()
+            products = product_db.get_all_products()
+            count = len(products)
             print(f"📈 Total products in database: {count}")
             
             if count == 0:
