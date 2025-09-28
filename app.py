@@ -6454,63 +6454,56 @@ def clear_rate_limit():
 def database_analytics():
     """Get advanced analytics data for the database."""
     try:
-        import sqlite3
+        import psycopg2
         from datetime import datetime, timedelta
         
-        product_db = get_product_database('AGT_Bothell')
+        # Use PostgreSQL connection
+        config = {
+            'host': os.getenv('DB_HOST', 'localhost'),
+            'database': os.getenv('DB_NAME', 'agt_designer'),
+            'user': os.getenv('DB_USER', os.getenv('USER', 'adamcordova')),
+            'password': os.getenv('DB_PASSWORD', ''),
+            'port': os.getenv('DB_PORT', '5432')
+        }
         
-        # Test database connection and fallback if needed
         try:
-            test_conn = sqlite3.connect(product_db.db_path)
-            test_cursor = test_conn.cursor()
-            test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
-            if not test_cursor.fetchone():
-                logging.error(f"Products table not found in database at {product_db.db_path}")
-                # Fall back to main database
-                logging.info("Falling back to main database for analytics")
-                global _product_database
-                _product_database = None
-                # Create main database instance directly
-                from src.core.data.product_database import ProductDatabase
-                main_db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
-                product_db = ProductDatabase(main_db_path)
-                if not product_db._initialized:
-                    product_db.init_database()
-                # Test main database
-                test_conn = sqlite3.connect(product_db.db_path)
-                test_cursor = test_conn.cursor()
-                test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
-                if not test_cursor.fetchone():
-                    logging.error("Products table not found in main database either")
-                    return jsonify({'error': 'Products table not found in any database'}), 500
-                test_conn.close()
-                logging.info(f"Successfully fell back to main database: {product_db.db_path}")
-            test_conn.close()
-        except Exception as test_error:
-            logging.error(f"Database connection test failed: {test_error}")
-            return jsonify({'error': f'Database connection failed: {test_error}'}), 500
+            conn = psycopg2.connect(**config)
+            cursor = conn.cursor()
+            
+            # Test connection
+            cursor.execute("SELECT COUNT(*) FROM products")
+            product_count = cursor.fetchone()[0]
+            logging.info(f"Connected to PostgreSQL with {product_count} products")
+            
+        except Exception as conn_error:
+            logging.error(f"PostgreSQL connection failed: {conn_error}")
+            return jsonify({'error': f'Database connection failed: {conn_error}'}), 500
         
-        with sqlite3.connect(product_db.db_path) as conn:
+        with conn:
             # Get product type distribution
-            product_types_df = pd.read_sql_query('''
+            cursor.execute('''
                 SELECT "Product Type*" as product_type, COUNT(*) as count
                 FROM products
                 WHERE "Product Type*" IS NOT NULL AND "Product Type*" != ''
                 GROUP BY "Product Type*"
                 ORDER BY count DESC
-            ''', conn)
+            ''')
+            product_types_data = cursor.fetchall()
+            product_types_dict = {row[0]: row[1] for row in product_types_data}
             
             # Get lineage distribution
-            lineage_df = pd.read_sql_query('''
+            cursor.execute('''
                 SELECT canonical_lineage, COUNT(*) as count
                 FROM strains
                 WHERE canonical_lineage IS NOT NULL AND canonical_lineage != ''
                 GROUP BY canonical_lineage
                 ORDER BY count DESC
-            ''', conn)
+            ''')
+            lineage_data = cursor.fetchall()
+            lineage_dict = {row[0]: row[1] for row in lineage_data}
             
             # Get vendor performance
-            vendor_performance_df = pd.read_sql_query('''
+            cursor.execute('''
                 SELECT "Vendor/Supplier*" as vendor, COUNT(*) as product_count,
                        COUNT(DISTINCT "Product Brand") as unique_brands,
                        COUNT(DISTINCT "Product Type*") as unique_types
@@ -6519,22 +6512,34 @@ def database_analytics():
                 GROUP BY "Vendor/Supplier*"
                 ORDER BY product_count DESC
                 LIMIT 10
-            ''', conn)
+            ''')
+            vendor_data = cursor.fetchall()
+            vendor_performance = [
+                {
+                    'vendor': row[0],
+                    'product_count': row[1],
+                    'unique_brands': row[2],
+                    'unique_types': row[3]
+                }
+                for row in vendor_data
+            ]
             
-            # Get recent activity (last 30 days) - using id as proxy for recent activity
-            # Since last_seen_date column doesn't exist in this schema, use id ordering
-            recent_activity_df = pd.read_sql_query('''
+            # Get recent activity (last 100 products)
+            cursor.execute('''
                 SELECT 'Recent' as date, COUNT(*) as new_products
                 FROM products
                 WHERE id > (SELECT MAX(id) - 100 FROM products)
-            ''', conn)
+            ''')
+            recent_data = cursor.fetchone()
+            recent_activity = [{'date': recent_data[0], 'new_products': recent_data[1]}] if recent_data else []
             
             return jsonify({
-                'product_type_distribution': dict(zip(product_types_df['product_type'], product_types_df['count'])),
-                'lineage_distribution': dict(zip(lineage_df['canonical_lineage'], lineage_df['count'])),
-                'vendor_performance': vendor_performance_df.to_dict('records'),
-                'recent_activity': recent_activity_df.to_dict('records'),
-                'analytics_generated': datetime.now().isoformat()
+                'product_type_distribution': product_types_dict,
+                'lineage_distribution': lineage_dict,
+                'vendor_performance': vendor_performance,
+                'recent_activity': recent_activity,
+                'analytics_generated': datetime.now().isoformat(),
+                'total_products': product_count
             })
     except Exception as e:
         logging.error(f"Error getting database analytics: {str(e)}")
