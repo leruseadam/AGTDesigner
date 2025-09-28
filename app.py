@@ -1,4 +1,5 @@
 from src.core.data.field_mapping import get_canonical_field
+from product_database_postgresql import get_postgresql_database
 import os
 import sys  # Add this import
 import logging
@@ -578,25 +579,12 @@ def get_excel_processor():
             return None
 
 def get_product_database(store_name=None):
-    """Lazy load ProductDatabase to avoid startup delay."""
+    """Lazy load PostgreSQL ProductDatabase to avoid startup delay."""
     global _product_database
-    if _product_database is None or (store_name and getattr(_product_database, '_store_name', None) != store_name):
-        from src.core.data.product_database import ProductDatabase
-        # Use store-specific database path
-        if store_name:
-            db_filename = f'product_database_{store_name}.db'
-            db_path = os.path.join(current_dir, 'uploads', db_filename)
-            _product_database = ProductDatabase(db_path)
-            _product_database._store_name = store_name
-            logging.info(f"ProductDatabase created for store '{store_name}' at: {db_path}")
-        else:
-            # Default to Bothell database for AGT
-            store_name = 'AGT_Bothell'
-            db_filename = f'product_database_{store_name}.db'
-            db_path = os.path.join(current_dir, 'uploads', db_filename)
-            _product_database = ProductDatabase(db_path)
-            _product_database._store_name = store_name
-            logging.info(f"ProductDatabase created (default Bothell) at: {db_path}")
+    if _product_database is None or (store_name and getattr(_product_database, 'store_name', None) != store_name):
+        # Use PostgreSQL instead of SQLite
+        _product_database = get_postgresql_database(store_name)
+        logging.info(f"PostgreSQL ProductDatabase created for store '{store_name or 'AGT_Bothell'}'")
     return _product_database
 
 def get_json_matcher():
@@ -1305,19 +1293,12 @@ def get_session_json_matcher():
             return None
 
 def get_session_product_database():
-    """Get ProductDatabase instance for the current session."""
+    """Get PostgreSQL ProductDatabase instance for the current session."""
     try:
         if not hasattr(app, '_product_database'):
-            from src.core.data.product_database import ProductDatabase
-            # CRITICAL FIX: Use the correct database path - prioritize AGT_Bothell
-            db_path = os.path.join(current_dir, 'uploads', 'product_database_AGT_Bothell.db')
-            
-            # Fallback to main database if AGT_Bothell doesn't exist
-            if not os.path.exists(db_path):
-                db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
-            
-            app._product_database = ProductDatabase(db_path)
-            logging.info(f"Created new ProductDatabase instance for session at {db_path}")
+            # Use PostgreSQL instead of SQLite
+            app._product_database = get_postgresql_database('AGT_Bothell')
+            logging.info(f"Created new PostgreSQL ProductDatabase instance for session")
         return app._product_database
     except Exception as e:
         logging.error(f"Error getting session product database: {e}")
