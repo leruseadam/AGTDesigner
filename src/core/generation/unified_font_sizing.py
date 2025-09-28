@@ -58,7 +58,7 @@ def _load_font_sizing_config():
                 },
                 'vertical': {
                     'description': [(5, 34), (30, 32), (40, 28), (60, 26), (70, 24), (80, 22), (100, 20), (float('inf'), 18)],
-                    'brand': [(10, 16), (15, 14), (20, 12), (float('inf'), 10)],
+                    'brand': [(10, 20), (15, 18), (20, 16), (float('inf'), 14)],
                     'price': [(4, 34), (5, 30), (10, 28), (float('inf'), 26)],  # Updated: complexity-based thresholds for better vertical price sizing
                     'lineage': [(20, 20), (40, 18), (60, 16), (float('inf'), 12)],
                     'ratio': [(10, 14), (20, 12), (30, 9), (float('inf'), 9)],
