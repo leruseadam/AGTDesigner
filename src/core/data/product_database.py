@@ -303,6 +303,30 @@ class PostgreSQLProductDatabase:
                 """)
                 logging.info("✓ Added cbd_content column to products table")
             
+            # Check if price column exists and is the correct type
+            cursor.execute("""
+                SELECT column_name, data_type 
+                FROM information_schema.columns 
+                WHERE table_name = 'products' AND column_name = 'price'
+            """)
+            
+            price_column = cursor.fetchone()
+            if price_column:
+                if price_column[1] in ['numeric', 'decimal', 'integer', 'bigint']:
+                    logging.info("Converting price column from numeric to VARCHAR...")
+                    cursor.execute("""
+                        ALTER TABLE products 
+                        ALTER COLUMN price TYPE VARCHAR(255)
+                    """)
+                    logging.info("✓ Converted price column to VARCHAR")
+            else:
+                logging.info("Adding price column to products table...")
+                cursor.execute("""
+                    ALTER TABLE products 
+                    ADD COLUMN price VARCHAR(255)
+                """)
+                logging.info("✓ Added price column to products table")
+            
             # Check if lineage column exists in strains table
             cursor.execute("""
                 SELECT column_name 
