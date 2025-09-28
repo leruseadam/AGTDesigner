@@ -2637,7 +2637,7 @@ def process_excel_background(filename, temp_path):
         update_processing_status(filename, f'error: {str(e)}')
 
 @app.route('/api/upload-status', methods=['GET'])
-def upload_status():
+def api_upload_status():
     try:
         filename = request.args.get('filename')
         if not filename:
