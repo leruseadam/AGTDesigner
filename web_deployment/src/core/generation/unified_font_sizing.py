@@ -176,6 +176,12 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
             logger.debug(f"Special brand rule: text='{text}' ({len(text)} chars) is all caps >= 9 chars, forcing 14pt font")
             return Pt(final_size)
     
+    # CONSTELLATION brand fix: Use 10pt font for vertical templates
+    if field_type.lower() == 'brand' and 'CONSTELLATION' in text.upper():
+        final_size = 10 * scale_factor
+        logger.info(f"CONSTELLATION FIX: Using 10pt font for '{text}' in vertical template")
+        return Pt(final_size)
+    
     # Special rule: Handle specific large brand names that are too big
     if field_type.lower() == 'brand' and orientation.lower() == 'double':
         # Force specific large brand names to use much smaller fonts
