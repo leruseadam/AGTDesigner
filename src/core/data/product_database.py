@@ -12,6 +12,37 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 import time
+import random
+
+def retry_on_connection_error(max_retries=3, base_delay=1.0):
+    """Decorator to retry database operations on connection errors."""
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+                    if attempt == max_retries - 1:
+                        logging.error(f"Failed after {max_retries} attempts: {e}")
+                        raise
+                    
+                    # Exponential backoff with jitter
+                    delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
+                    logging.warning(f"Connection error on attempt {attempt + 1}, retrying in {delay:.2f}s: {e}")
+                    time.sleep(delay)
+                    
+                    # Clear connection pool for this thread
+                    if hasattr(args[0], '_connection_pool'):
+                        thread_id = threading.get_ident()
+                        if thread_id in args[0]._connection_pool:
+                            try:
+                                args[0]._connection_pool[thread_id].close()
+                            except:
+                                pass
+                            del args[0]._connection_pool[thread_id]
+            return None
+        return wrapper
+    return decorator
 
 class PostgreSQLProductDatabase:
     """PostgreSQL database for storing and managing product and strain information."""
@@ -32,11 +63,14 @@ class PostgreSQLProductDatabase:
             'user': os.getenv('DB_USER', 'super'),
             'password': os.getenv('DB_PASSWORD', '193154life'),
             'port': os.getenv('DB_PORT', '14822'),
-            'connect_timeout': 30,
+            'connect_timeout': 60,
             'application_name': 'AGTDesigner',
-            'keepalives_idle': 600,
-            'keepalives_interval': 30,
-            'keepalives_count': 3
+            'keepalives_idle': 300,
+            'keepalives_interval': 10,
+            'keepalives_count': 5,
+            'tcp_keepalives_idle': 300,
+            'tcp_keepalives_interval': 10,
+            'tcp_keepalives_count': 5
         }
         
         # Performance timing
@@ -46,6 +80,16 @@ class PostgreSQLProductDatabase:
             'cache_hits': 0,
             'cache_misses': 0
         }
+    
+    def _clear_connection_pool(self):
+        """Clear all connections in the pool."""
+        with self._write_lock:
+            for thread_id, conn in list(self._connection_pool.items()):
+                try:
+                    conn.close()
+                except:
+                    pass
+            self._connection_pool.clear()
     
     def _get_connection(self):
         """Get a PostgreSQL connection, reusing if possible."""
@@ -166,7 +210,7 @@ class PostgreSQLProductDatabase:
         return "Mixed"
     
     def init_database(self):
-        """Initialize the database (PostgreSQL schema already exists from migration)."""
+        """Initialize the database and ensure all required columns exist."""
         if self._initialized:
             return True
             
@@ -191,6 +235,9 @@ class PostgreSQLProductDatabase:
                 """)
                 
                 if cursor.fetchone()[0]:
+                    # Tables exist, ensure all required columns exist
+                    self._ensure_columns_exist(cursor)
+                    conn.commit()
                     self._initialized = True
                     logging.info(f"PostgreSQL database initialized for store '{self.store_name}'")
                     return True
@@ -200,6 +247,8 @@ class PostgreSQLProductDatabase:
                     
             except Exception as e:
                 logging.error(f"Error initializing PostgreSQL database: {e}")
+                if 'conn' in locals():
+                    conn.rollback()
                 return False
             finally:
                 if 'cursor' in locals():
@@ -209,6 +258,59 @@ class PostgreSQLProductDatabase:
         
         return True
     
+    def _ensure_columns_exist(self, cursor):
+        """Ensure required columns exist in the database tables."""
+        try:
+            # Check if strain_id column exists in products table
+            cursor.execute("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'products' AND column_name = 'strain_id'
+            """)
+            
+            if not cursor.fetchone():
+                logging.info("Adding strain_id column to products table...")
+                cursor.execute("""
+                    ALTER TABLE products 
+                    ADD COLUMN strain_id INTEGER REFERENCES strains(id)
+                """)
+                logging.info("✓ Added strain_id column to products table")
+            
+            # Check if lineage column exists in strains table
+            cursor.execute("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'strains' AND column_name = 'lineage'
+            """)
+            
+            if not cursor.fetchone():
+                logging.info("Adding lineage column to strains table...")
+                cursor.execute("""
+                    ALTER TABLE strains 
+                    ADD COLUMN lineage TEXT
+                """)
+                logging.info("✓ Added lineage column to strains table")
+            
+            # Check if sovereign_lineage column exists in strains table
+            cursor.execute("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'strains' AND column_name = 'sovereign_lineage'
+            """)
+            
+            if not cursor.fetchone():
+                logging.info("Adding sovereign_lineage column to strains table...")
+                cursor.execute("""
+                    ALTER TABLE strains 
+                    ADD COLUMN sovereign_lineage TEXT
+                """)
+                logging.info("✓ Added sovereign_lineage column to strains table")
+                
+        except Exception as e:
+            logging.error(f"Error ensuring columns exist: {e}")
+            raise
+    
+    @retry_on_connection_error(max_retries=3, base_delay=0.5)
     def add_or_update_strain(self, strain_name: str, lineage: str = None, sovereign: bool = False) -> int:
         """Add a new strain or update existing strain information."""
         conn = None
@@ -283,6 +385,7 @@ class PostgreSQLProductDatabase:
                 except:
                     pass
     
+    @retry_on_connection_error(max_retries=3, base_delay=0.5)
     def add_or_update_product(self, product_data: Dict[str, Any]) -> int:
         """Add a new product or update existing product information."""
         conn = None
