@@ -1,5 +1,5 @@
 from src.core.data.field_mapping import get_canonical_field
-from product_database_postgresql import get_postgresql_database
+# from product_database_postgresql import get_postgresql_database  # Using complete implementation in src/core/data/product_database.py
 import os
 import sys  # Add this import
 import logging
