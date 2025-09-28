@@ -722,11 +722,15 @@ class ExcelProcessor:
                                           row_dict.get('ProductName', '') or 
                                           row_dict.get('Product Name', ''))
                             
-                            if product_name and str(product_name).strip() and str(product_name).strip() != 'nan':
-                                row_dict['normalized_name'] = normalize_name(product_name)
-                            else:
+                            # More robust validation for empty products
+                            if (not product_name or 
+                                str(product_name).strip() == '' or 
+                                str(product_name).strip().lower() == 'nan' or
+                                str(product_name).strip().lower() == 'none'):
                                 # Skip empty products
                                 continue
+                            
+                            row_dict['normalized_name'] = normalize_name(product_name)
                             
                             # Only process classic types through the strain database
                             product_type = row_dict.get('Product Type*', '').strip().lower()

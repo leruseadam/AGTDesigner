@@ -193,9 +193,9 @@ class ProductDatabase:
                 """)
                 
                 conn.commit()
-                    self._initialized = True
+                self._initialized = True
                 logger.info(f"PostgreSQL database initialized for store '{self.store_name}'")
-                    return True
+                return True
                     
             except Exception as e:
                 logger.error(f"Failed to initialize PostgreSQL database: {e}")
@@ -438,7 +438,11 @@ class ProductDatabase:
                     product_data.get('CBNV'),
                     product_data.get('CBGVA')
                 ))
-                product_id = cursor.fetchone()[0]
+                result = cursor.fetchone()
+                if result:
+                    product_id = result[0]
+                else:
+                    raise Exception("Failed to get product ID after insert")
             
             conn.commit()
             return product_id
@@ -493,7 +497,11 @@ class ProductDatabase:
                     strain_name, normalized_name, lineage, current_date, current_date, 1,
                     current_date, current_date, lineage if sovereign else None
                 ))
-                strain_id = cursor.fetchone()[0]
+                result = cursor.fetchone()
+                if result:
+                    strain_id = result[0]
+                else:
+                    raise Exception("Failed to get strain ID after insert")
             
             conn.commit()
             return strain_id
@@ -563,7 +571,7 @@ class ProductDatabase:
                 pass
         self._connection_pool.clear()
     
-    def _calculate_product_strain(self, product_data):
+    def _calculate_product_strain(self, product_data, **kwargs):
         """Calculate Product Strain from product_data dictionary (overloaded version)."""
         try:
             # Handle both dict and individual parameter formats
