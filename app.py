@@ -579,18 +579,12 @@ def get_excel_processor():
             return None
 
 def get_product_database(store_name=None):
-    """Lazy load SQLite ProductDatabase to avoid startup delay."""
+    """Lazy load PostgreSQL ProductDatabase to avoid startup delay."""
     global _product_database
     if _product_database is None or (store_name and getattr(_product_database, 'store_name', None) != store_name):
-        # Use SQLite for local development (PostgreSQL connection hanging)
-        try:
-            from src.core.data.product_database_sqlite_backup import ProductDatabase
-            _product_database = ProductDatabase(store_name=store_name)
-            logging.info(f"SQLite ProductDatabase created for store '{store_name or 'AGT_Bothell'}'")
-        except ImportError:
-            # Fallback to PostgreSQL if SQLite not available
-            _product_database = get_postgresql_database(store_name)
-            logging.info(f"PostgreSQL ProductDatabase created for store '{store_name or 'AGT_Bothell'}'")
+        # Use PostgreSQL for production
+        _product_database = get_postgresql_database(store_name)
+        logging.info(f"PostgreSQL ProductDatabase created for store '{store_name or 'AGT_Bothell'}'")
     return _product_database
 
 def get_json_matcher():
