@@ -583,6 +583,7 @@ def get_product_database(store_name=None):
     global _product_database
     if _product_database is None or (store_name and getattr(_product_database, 'store_name', None) != store_name):
         # Use PostgreSQL for production
+        from src.core.data.product_database import get_postgresql_database
         _product_database = get_postgresql_database(store_name)
         logging.info(f"PostgreSQL ProductDatabase created for store '{store_name or 'AGT_Bothell'}'")
     return _product_database
@@ -1297,6 +1298,7 @@ def get_session_product_database():
     try:
         if not hasattr(app, '_product_database'):
             # Use PostgreSQL for production
+            from src.core.data.product_database import get_postgresql_database
             app._product_database = get_postgresql_database('AGT_Bothell')
             logging.info(f"Created new PostgreSQL ProductDatabase instance for session")
         return app._product_database
