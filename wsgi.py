@@ -23,15 +23,27 @@ os.environ['PYTHONANYWHERE_SITE'] = 'True'
 os.environ['FLASK_ENV'] = 'production'
 os.environ['FLASK_DEBUG'] = 'False'
 
-# Import and configure Flask app
-from app import app as application
+# Ensure we're in the right directory
+os.chdir(project_dir)
 
-# Production settings
-application.config.update(
-    DEBUG=False,
-    TESTING=False,
-    TEMPLATES_AUTO_RELOAD=False
-)
+# Import and configure Flask app
+try:
+    from app import app as application
+    
+    # Production settings
+    application.config.update(
+        DEBUG=False,
+        TESTING=False,
+        TEMPLATES_AUTO_RELOAD=False
+    )
+    
+    print("✅ WSGI application loaded successfully")
+    
+except Exception as e:
+    print(f"❌ Error loading WSGI application: {e}")
+    import traceback
+    traceback.print_exc()
+    raise
 
 # For direct execution
 if __name__ == "__main__":
