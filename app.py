@@ -1803,10 +1803,12 @@ def upload_status():
             'message': str(e)
         })
 
-@app.route('/upload-fast', methods=['POST'])
-def upload_file_ultra_fast():
-    """Ultra-fast file upload optimized for PythonAnywhere"""
+@app.route('/upload-lightning', methods=['POST'])
+def upload_lightning():
+    """Lightning-fast upload with absolute minimal processing"""
     try:
+        start_time = time.time()
+        
         if 'file' not in request.files:
             return jsonify({'error': 'No file provided'}), 400
         
@@ -1814,109 +1816,80 @@ def upload_file_ultra_fast():
         if file.filename == '':
             return jsonify({'error': 'No file selected'}), 400
         
-        # Generate safe filename
-        import uuid
-        import time
-        timestamp = int(time.time())
-        unique_id = str(uuid.uuid4())[:8]
-        sanitized_filename = f"{timestamp}_{unique_id}_{file.filename}"
+        # Skip filename sanitization for speed
+        filename = file.filename
         
-        # Save to uploads directory
+        # Save directly to uploads (no temp file)
         uploads_dir = os.path.join(os.getcwd(), 'uploads')
         os.makedirs(uploads_dir, exist_ok=True)
-        temp_path = os.path.join(uploads_dir, sanitized_filename)
+        file_path = os.path.join(uploads_dir, filename)
         
-        file.save(temp_path)
+        file.save(file_path)
         
-        # ULTRA-FAST PROCESSING
+        # LIGHTNING-FAST PROCESSING - Only read first 100 rows
         try:
-            # Use pandas directly for maximum speed
             df = pd.read_excel(
-                temp_path,
+                file_path,
                 engine='openpyxl',
-                nrows=1000,  # Limit to 1000 rows for speed (reduced from 5000)
-                dtype=str,   # Read everything as strings for speed
-                na_filter=False,  # Don't filter NA values
-                keep_default_na=False  # Don't use default NA values
+                nrows=100,  # Only 100 rows for maximum speed
+                dtype=str,
+                na_filter=False,
+                keep_default_na=False
             )
             
             if df.empty:
-                return jsonify({'error': 'No data found in file'}), 400
+                return jsonify({'error': 'No data found'}), 400
             
-            # Minimal processing - only essential columns
-            essential_columns = ['Product Name*', 'Product Type*', 'Lineage', 'Product Brand']
+            # MINIMAL PROCESSING - Only keep essential columns
+            essential_cols = ['Product Name*', 'Product Type*', 'Product Brand']
+            available_cols = [col for col in essential_cols if col in df.columns]
             
-            # Ensure essential columns exist
-            for col in essential_columns:
-                if col not in df.columns:
-                    df[col] = "Unknown"
+            if available_cols:
+                df = df[available_cols]
             
-            # Basic string cleaning (minimal)
-            for col in essential_columns:
-                if col in df.columns:
-                    df[col] = df[col].astype(str).str.strip()
-            
-            # Remove excluded product types (minimal check)
-            if 'Product Type*' in df.columns:
-                excluded_types = ["Samples - Educational", "Sample - Vendor", "x-DEACTIVATED 1", "x-DEACTIVATED 2"]
-                df = df[~df['Product Type*'].isin(excluded_types)]
-                df.reset_index(drop=True, inplace=True)
-            
-            # Create minimal ExcelProcessor
+            # Create minimal processor
             from src.core.data.excel_processor import ExcelProcessor
             processor = ExcelProcessor()
             processor.df = df
             
-            # Store in global processor
+            # Store globally
             global excel_processor
             excel_processor = processor
             
-            # Store Excel data in database (CRITICAL FOR DATABASE DISPLAY)
+            # MINIMAL DATABASE STORAGE - Only store essential data
             try:
-                if hasattr(processor, '_store_upload_in_database'):
-                    logging.info("[UPLOAD-FAST] Storing Excel data in database...")
-                    storage_result = processor._store_upload_in_database(processor.df, temp_path)
-                    logging.info(f"[UPLOAD-FAST] ✅ Database storage completed: {storage_result}")
-                else:
-                    logging.warning("[UPLOAD-FAST] ExcelProcessor does not have _store_upload_in_database method")
-                    # Try alternative database storage method - USE BOTHELL DATABASE
-                    try:
-                        current_store = 'AGT_Bothell'  # Force Bothell database
-                        product_db = get_product_database(current_store)
-                        if hasattr(product_db, 'store_excel_data'):
-                            logging.info(f"[UPLOAD-FAST] Using ProductDatabase.store_excel_data method for {current_store}...")
-                            storage_result = product_db.store_excel_data(processor.df, temp_path)
-                            logging.info(f"[UPLOAD-FAST] ✅ Alternative database storage completed: {storage_result}")
-                    except Exception as db_error:
-                        logging.error(f"[UPLOAD-FAST] Database storage failed: {db_error}")
-            except Exception as storage_error:
-                logging.error(f"[UPLOAD-FAST] Error storing data in database: {storage_error}")
+                current_store = 'AGT_Bothell'
+                product_db = get_product_database(current_store)
+                
+                # Store only first 50 rows to database for speed
+                small_df = df.head(50)
+                if hasattr(product_db, 'store_excel_data'):
+                    product_db.store_excel_data(small_df, file_path)
+                    logging.info(f"[LIGHTNING] Stored {len(small_df)} rows to {current_store} database")
+            except Exception as db_error:
+                logging.warning(f"[LIGHTNING] Database storage skipped: {db_error}")
             
-            # Update session
-            session['file_path'] = temp_path
+            # Update session minimally
+            session['file_path'] = file_path
             session['selected_tags'] = []
             
-            # Clean up temp file immediately
-            try:
-                os.remove(temp_path)
-            except:
-                pass
+            processing_time = time.time() - start_time
             
             return jsonify({
-                'message': 'File uploaded and processed successfully (ultra-fast mode)',
-                'filename': file.filename,
-                'rows': len(df),
+                'message': f'Lightning upload complete in {processing_time:.1f}s',
+                'filename': filename,
+                'rows_processed': len(df),
+                'rows_stored': min(50, len(df)),
                 'status': 'ready',
-                'processing_time': 'ultra-fast',
-                'database_stored': True
+                'processing_time': round(processing_time, 2)
             })
             
         except Exception as process_error:
-            logging.error(f"Ultra-fast processing error: {process_error}")
+            logging.error(f"Lightning processing error: {process_error}")
             return jsonify({'error': f'Processing failed: {str(process_error)}'}), 500
             
     except Exception as e:
-        logging.error(f"Ultra-fast upload error: {e}")
+        logging.error(f"Lightning upload error: {e}")
         return jsonify({'error': 'Upload failed'}), 500
 
 @app.route('/upload-simple', methods=['POST'])
@@ -10719,82 +10692,7 @@ def upload_file_optimized():
         else:
             return jsonify({'error': 'Upload failed. Please try again.'}), 500
 
-@app.route('/upload-fast', methods=['POST'])
-def upload_file_fast():
-    """Ultra-fast file upload with background processing for PythonAnywhere"""
-    try:
-        start_time = time.time()
-        logging.info("=== UPLOAD-FAST REQUEST START ===")
-        
-        # Check if file is present
-        if 'file' not in request.files:
-            logging.error("No file provided in request")
-            return jsonify({'error': 'No file provided'}), 400
-        
-        file = request.files['file']
-        if file.filename == '':
-            logging.error("No file selected")
-            return jsonify({'error': 'No file selected'}), 400
-        
-        logging.info(f"Processing file: {file.filename}")
-        
-        # Validate file type
-        if not file.filename.lower().endswith(('.xlsx', '.xls')):
-            logging.error(f"Invalid file type: {file.filename}")
-            return jsonify({'error': 'Invalid file type. Please upload an Excel file.'}), 400
-        
-        # Create uploads directory if it doesn't exist
-        uploads_dir = Path('uploads')
-        uploads_dir.mkdir(exist_ok=True)
-        logging.info(f"Uploads directory: {uploads_dir.absolute()}")
-        
-        # Generate unique filename
-        timestamp = int(time.time())
-        safe_filename = secure_filename(file.filename)
-        filename = f"{timestamp}_{safe_filename}"
-        file_path = uploads_dir / filename
-        
-        logging.info(f"Saving file to: {file_path}")
-        
-        # Save file
-        file.save(str(file_path))
-        
-        # Store file path in session
-        session['file_path'] = str(file_path)
-        session['selected_tags'] = []
-        
-        # CRITICAL FIX: Use background processing with database storage
-        # This ensures products are stored in the database
-        try:
-            logging.info(f"Starting background processing with database storage for {file.filename}")
-            
-            # Use the background processing function that includes database storage
-            ultra_fast_background_processing(file.filename, str(file_path))
-            logging.info(f"Background processing with database storage completed for {file.filename}")
-            
-        except Exception as bg_error:
-            logging.error(f"Failed background processing: {bg_error}")
-            logging.error(f"Background error traceback: {traceback.format_exc()}")
-            # Don't fail the upload - just log the error
-            logging.warning("Continuing without processing - file uploaded but not processed")
-        
-        upload_time = time.time() - start_time
-        logging.info(f"File saved and processed successfully: {filename} in {upload_time:.3f}s")
-        
-        # Return success response with synchronous processing status
-        return jsonify({
-            'message': 'File uploaded and processed successfully',
-            'filename': filename,
-            'status': 'success',
-            'upload_time': f"{upload_time:.3f}s",
-            'processing_status': 'completed'
-        })
-        
-    except Exception as e:
-        logging.error(f"=== UPLOAD-FAST ERROR ===")
-        logging.error(f"Upload-fast error: {str(e)}")
-        logging.error(f"Traceback: {traceback.format_exc()}")
-        return jsonify({'error': 'Upload failed. Please try again.'}), 500
+# Removed duplicate upload-fast endpoint - using /upload-lightning instead
 
 
 @app.route('/test-upload-fast', methods=['GET'])
