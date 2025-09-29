@@ -1617,7 +1617,7 @@ class ProductDatabase:
             self.init_database()  # Ensure DB is initialized
             
             conn = self._get_connection()
-        cursor = conn.cursor()
+            cursor = conn.cursor()
         
             # Database should already be initialized with all required columns
             # No need to add missing columns during export
@@ -4504,7 +4504,7 @@ class ProductDatabase:
             word_similarity = word_overlap / total_words
             # Combine overall similarity with word overlap
             final_score = (similarity + word_similarity) / 2
-            else:
+        else:
             final_score = similarity
         
         return final_score
@@ -4767,7 +4767,7 @@ class ProductDatabase:
         
         for pattern in weight_patterns:
             match = re.search(pattern, product_name, re.IGNORECASE)
-                if match:
+            if match:
                 weight = match.group(1)
                 units = match.group(2).lower()
                 if units in ['gram', 'grams', 'gm']:
