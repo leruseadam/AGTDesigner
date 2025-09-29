@@ -41,12 +41,19 @@ os.environ['DB_USER'] = 'super'
 os.environ['DB_PASSWORD'] = '193154life'
 os.environ['DB_PORT'] = '14822'
 
-# Configure logging to prevent verbose output
-logging.basicConfig(
-    level=logging.ERROR,
-    format='%(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler()]
-)
+# Configure production logging to prevent BlockingIOError
+try:
+    from pythonanywhere_logging_config import configure_production_logging
+    configure_production_logging()
+except ImportError:
+    # Fallback logging configuration
+    import logging
+    logging.basicConfig(
+        level=logging.WARNING,
+        format='%(levelname)s - %(message)s',
+        handlers=[logging.StreamHandler(sys.stdout)]
+    )
+    logging.getLogger('werkzeug').setLevel(logging.WARNING)
 
 # Suppress verbose logging from libraries
 for logger_name in ['werkzeug', 'urllib3', 'requests', 'pandas', 'openpyxl']:
