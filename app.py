@@ -5848,21 +5848,100 @@ def database_stats():
         current_store = session.get('selected_store', '')
         product_db = get_product_database(current_store)
         
-        # Ensure database is initialized
+        # Ensure database is initialized (do not hard-fail if PostgreSQL is unreachable)
         if not product_db._initialized:
-            product_db.init_database()
+            try:
+                product_db.init_database()
+            except Exception as init_error:
+                logging.warning(f"Product DB init failed, will attempt SQLite fallback later: {init_error}")
         
-        # Test database connection using PostgreSQL
+        # Helper: compute stats using SQLite fallback (local DB)
+        def _compute_sqlite_stats():
+            try:
+                import sqlite3
+                # Determine a valid SQLite file path
+                try:
+                    sqlite_path = product_db.db_path
+                except Exception:
+                    sqlite_path = None
+                if not sqlite_path or not os.path.exists(sqlite_path) or not os.path.isfile(sqlite_path):
+                    sqlite_path = os.path.join(current_dir, 'uploads', 'product_database.db')
+                with sqlite3.connect(sqlite_path) as sconn:
+                    cursor = sconn.cursor()
+                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+                    if not cursor.fetchone():
+                        logging.error("Products table does not exist in SQLite database")
+                        return {
+                            'stats': {
+                                'total_products': 0,
+                                'unique_vendors': 0,
+                                'unique_brands': 0,
+                                'unique_product_types': 0,
+                                'product_type_distribution': {}
+                            },
+                            'vendor_stats': {'vendors': [], 'brands': []}
+                        }
+                    # Total products
+                    cursor.execute("SELECT COUNT(*) FROM products")
+                    total_products = cursor.fetchone()[0]
+                    # Unique vendors
+                    cursor.execute("SELECT COUNT(DISTINCT \"Vendor/Supplier*\") FROM products WHERE \"Vendor/Supplier*\" IS NOT NULL AND \"Vendor/Supplier*\" != '' AND \"Vendor/Supplier*\" != 'Vendor/Supplier*'")
+                    unique_vendors = cursor.fetchone()[0]
+                    # Unique brands
+                    cursor.execute("SELECT COUNT(DISTINCT \"Product Brand\") FROM products WHERE \"Product Brand\" IS NOT NULL AND \"Product Brand\" != '' AND \"Product Brand\" != 'Product Brand'")
+                    unique_brands = cursor.fetchone()[0]
+                    # Unique product types
+                    cursor.execute("SELECT COUNT(DISTINCT \"Product Type*\") FROM products WHERE \"Product Type*\" IS NOT NULL AND \"Product Type*\" != '' AND \"Product Type*\" != 'Product Type*'")
+                    unique_product_types = cursor.fetchone()[0]
+                    # Product type distribution
+                    cursor.execute("SELECT \"Product Type*\", COUNT(*) FROM products WHERE \"Product Type*\" IS NOT NULL AND \"Product Type*\" != '' AND \"Product Type*\" != 'Product Type*' GROUP BY \"Product Type*\" ORDER BY COUNT(*) DESC LIMIT 10")
+                    product_types = cursor.fetchall()
+                    product_type_distribution = {pt[0]: pt[1] for pt in product_types}
+                    stats_local = {
+                        'total_products': total_products,
+                        'unique_vendors': unique_vendors,
+                        'unique_brands': unique_brands,
+                        'unique_product_types': unique_product_types,
+                        'product_type_distribution': product_type_distribution
+                    }
+                    # Top vendors/brands
+                    cursor.execute("SELECT \"Vendor/Supplier*\", COUNT(*) as count FROM products WHERE \"Vendor/Supplier*\" IS NOT NULL AND \"Vendor/Supplier*\" != '' AND \"Vendor/Supplier*\" != 'Vendor/Supplier*' GROUP BY \"Vendor/Supplier*\" ORDER BY count DESC LIMIT 15")
+                    vendors = cursor.fetchall()
+                    cursor.execute("SELECT \"Product Brand\", COUNT(*) as count FROM products WHERE \"Product Brand\" IS NOT NULL AND \"Product Brand\" != '' AND \"Product Brand\" != 'Product Brand' GROUP BY \"Product Brand\" ORDER BY count DESC LIMIT 15")
+                    brands = cursor.fetchall()
+                    vendor_stats_local = {
+                        'vendors': [{'vendor': v[0], 'product_count': v[1]} for v in vendors],
+                        'brands': [{'brand': b[0], 'product_count': b[1]} for b in brands]
+                    }
+                    logging.info(f"SQLite fallback stats ({sqlite_path}): {total_products} products, {unique_vendors} vendors, {unique_brands} brands")
+                    return {'stats': stats_local, 'vendor_stats': vendor_stats_local}
+            except Exception as sqlite_error:
+                logging.error(f"SQLite fallback failed: {sqlite_error}")
+                return {
+                    'stats': {
+                        'total_products': 0,
+                        'unique_vendors': 0,
+                        'unique_brands': 0,
+                        'unique_product_types': 0,
+                        'product_type_distribution': {}
+                    },
+                    'vendor_stats': {'vendors': [], 'brands': []}
+                }
+
+        # Test PostgreSQL; if it fails, gracefully fall back to SQLite
         try:
             with product_db.get_connection() as conn:
                 with conn.cursor() as cursor:
                     cursor.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'products')")
                     if not cursor.fetchone()[0]:
-                        logging.error("Products table not found in PostgreSQL database")
-                        return jsonify({'error': 'Products table not found in database'}), 500
+                        logging.error("Products table not found in PostgreSQL database; using SQLite fallback")
+                        fallback = _compute_sqlite_stats()
+                        return jsonify(fallback)
         except Exception as test_error:
-            logging.error(f"Database connection test failed: {test_error}")
-            return jsonify({'error': f'Database connection failed: {test_error}'}), 500
+            logging.warning(f"PostgreSQL connection test failed: {test_error}")
+            logging.info("Falling back to SQLite for database-stats")
+            fallback = _compute_sqlite_stats()
+            return jsonify(fallback)
         
         # Get vendor stats for the frontend using PostgreSQL
         vendor_stats = {}
@@ -5930,16 +6009,11 @@ def database_stats():
                         logging.warning(f"Auto-cleanup failed: {cleanup_error}")
                 
         except Exception as db_error:
-            logging.error(f"Error querying database: {db_error}")
-            logging.error(f"Database connection: {product_db.db_path}")
-            stats = {
-                'total_products': 0,
-                'unique_vendors': 0,
-                'unique_brands': 0,
-                'unique_product_types': 0,
-                'product_type_distribution': {}
-            }
-            vendor_stats = {'vendors': [], 'brands': []}
+            logging.warning(f"Error querying PostgreSQL: {db_error}")
+            # Try SQLite fallback instead of returning zeros
+            fallback = _compute_sqlite_stats()
+            stats = fallback['stats']
+            vendor_stats = fallback['vendor_stats']
         
         return jsonify({
             'stats': stats,
