@@ -6194,103 +6194,62 @@ def database_schema():
 def database_vendor_stats():
     """Get detailed vendor and brand statistics from the product database."""
     try:
-        import sqlite3
-        
         product_db = get_product_database('AGT_Bothell')
-        
-        # Ensure database is initialized
-        if not product_db._initialized:
+        # Ensure DB ready
+        if not getattr(product_db, '_initialized', False):
             product_db.init_database()
-        
-        # Test database connection and fallback if needed
-        try:
-            test_conn = sqlite3.connect(product_db.db_path)
-            test_cursor = test_conn.cursor()
-            test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
-            if not test_cursor.fetchone():
-                logging.error(f"Products table not found in database at {product_db.db_path}")
-                # If store-specific database doesn't have products table, fall back to main database
-                logging.info("Falling back to main database for vendor stats")
-                # Force creation of main database instance
-                global _product_database
-                _product_database = None
-                # Create main database instance directly
-                from src.core.data.product_database import ProductDatabase
-                main_db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
-                product_db = ProductDatabase(main_db_path)
-                if not product_db._initialized:
-                    product_db.init_database()
-                # Test main database
-                test_conn = sqlite3.connect(product_db.db_path)
-                test_cursor = test_conn.cursor()
-                test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
-                if not test_cursor.fetchone():
-                    logging.error("Products table not found in main database either")
-                    return jsonify({'error': 'Products table not found in any database'}), 500
-                test_conn.close()
-                logging.info(f"Successfully fell back to main database: {product_db.db_path}")
-            test_conn.close()
-        except Exception as test_error:
-            logging.error(f"Database connection test failed: {test_error}")
-            return jsonify({'error': f'Database connection failed: {test_error}'}), 500
-        
-        with sqlite3.connect(product_db.db_path) as conn:
-            # Get all vendors with their product counts
-            vendors_df = pd.read_sql_query('''
-                SELECT "Vendor/Supplier*" as vendor, COUNT(*) as product_count, 
-                       COUNT(DISTINCT "Product Brand") as unique_brands,
-                       COUNT(DISTINCT "Product Type*") as unique_product_types
-                FROM products 
-                WHERE "Vendor/Supplier*" IS NOT NULL AND "Vendor/Supplier*" != ''
-                GROUP BY "Vendor/Supplier*"
-                ORDER BY product_count DESC
-            ''', conn)
-            
-            # Get all brands with their product counts
-            brands_df = pd.read_sql_query('''
-                SELECT "Product Brand" as brand, COUNT(*) as product_count,
-                       COUNT(DISTINCT "Vendor/Supplier*") as unique_vendors,
-                       COUNT(DISTINCT "Product Type*") as unique_product_types
-                FROM products 
-                WHERE "Product Brand" IS NOT NULL AND "Product Brand" != ''
-                GROUP BY "Product Brand"
-                ORDER BY product_count DESC
-            ''', conn)
-            
-            # Get all product types with their counts
-            product_types_df = pd.read_sql_query('''
-                SELECT "Product Type*" as product_type, COUNT(*) as product_count,
-                       COUNT(DISTINCT "Vendor/Supplier*") as unique_vendors,
-                       COUNT(DISTINCT "Product Brand") as unique_brands
-                FROM products 
-                WHERE "Product Type*" IS NOT NULL AND "Product Type*" != ''
-                GROUP BY "Product Type*"
-                ORDER BY product_count DESC
-            ''', conn)
-            
-            # Get vendor-brand combinations
-            vendor_brands_df = pd.read_sql_query('''
-                SELECT "Vendor/Supplier*" as vendor, "Product Brand" as brand, COUNT(*) as product_count,
-                       COUNT(DISTINCT "Product Type*") as unique_product_types
-                FROM products 
-                WHERE "Vendor/Supplier*" IS NOT NULL AND "Vendor/Supplier*" != '' 
-                  AND "Product Brand" IS NOT NULL AND "Product Brand" != ''
-                GROUP BY "Vendor/Supplier*", "Product Brand"
-                ORDER BY product_count DESC
-            ''', conn)
-            
-            return jsonify({
-                'vendors': vendors_df.to_dict('records'),
-                'brands': brands_df.to_dict('records'),
-                'product_types': product_types_df.to_dict('records'),
-                'vendor_brands': vendor_brands_df.to_dict('records'),
-                'summary': {
-                    'total_vendors': len(vendors_df),
-                    'total_brands': len(brands_df),
-                    'total_product_types': len(product_types_df),
-                    'total_vendor_brand_combinations': len(vendor_brands_df)
-                }
+
+        stats = {}
+        if hasattr(product_db, 'get_strain_statistics'):
+            stats = product_db.get_strain_statistics() or {}
+
+        # Adapt to legacy response shape used by modal
+        vendors = []
+        brands = []
+        product_types = []
+        vendor_brands = []
+
+        # Vendor counts
+        for item in stats.get('vendor_statistics', []):
+            vendors.append({
+                'vendor': item.get('vendor', ''),
+                'product_count': item.get('count', 0)
             })
+
+        # Brand counts
+        for item in stats.get('brand_statistics', []):
+            brands.append({
+                'brand': item.get('brand', ''),
+                'product_count': item.get('count', 0)
+            })
+
+        # Product type counts
+        for item in stats.get('product_type_statistics', []):
+            product_types.append({
+                'product_type': item.get('product_type', ''),
+                'product_count': item.get('count', 0)
+            })
+
+        # Vendor-brand combinations
+        for item in stats.get('vendor_brand_combinations', []):
+            vendor_brands.append({
+                'vendor': item.get('vendor', ''),
+                'brand': item.get('brand', ''),
+                'product_count': item.get('count', 0)
+            })
+
+        return jsonify({
+            'vendors': vendors,
+            'brands': brands,
+            'product_types': product_types,
+            'vendor_brands': vendor_brands,
+            'summary': {
+                'total_vendors': len(vendors),
+                'total_brands': len(brands),
+                'total_product_types': len(product_types),
+                'total_vendor_brand_combinations': len(vendor_brands)
+            }
+        })
     except Exception as e:
         logging.error(f"Error getting vendor stats: {str(e)}")
         return jsonify({'error': str(e)}), 500
@@ -6485,8 +6444,11 @@ def database_export():
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
         temp_file.close()
         
-        # Export database
-        product_db.export_database(temp_file.name)
+        # Export database using abstraction (works with PostgreSQL)
+        if hasattr(product_db, 'export_database'):
+            product_db.export_database(temp_file.name)
+        else:
+            raise RuntimeError('Database export not available')
         
         # Send file with proper cleanup
         # Generate descriptive filename with timestamp
