@@ -1640,105 +1640,51 @@ class ProductDatabase:
                 ORDER BY total_occurrences DESC
             ''', conn)
             
-            # Get available columns dynamically to avoid SQL errors
-            cursor.execute("PRAGMA table_info(products)")
-            product_columns = {row[1] for row in cursor.fetchall()}
-            
-            # Define column groups in order of preference (using actual column names without quotes)
-            column_groups = [
-                # Core columns that should always exist
-                ['Product Name*', 'Product Type*', 'Vendor/Supplier*', 'Product Brand', 'Lineage'],
-                # Basic product info
-                ['Description', 'Weight*', 'Weight Unit* (grams/gm or ounces/oz)', 'Price* (Tier Name for Bulk)', 'Product Strain', 'Quantity*'],
-                # Test results
-                ['Test result unit (% or mg)'],
-                # Additional product details
-                ['DOH', 'Concentrate Type', 'Ratio', 'JointRatio', 'State'],
-                # Product flags
-                ['Is Sample? (yes/no)', 'Is MJ product?(yes/no)', 'Discountable? (yes/no)', 'Room*'],
-                # Batch and inventory info
-                ['Batch Number', 'Lot Number', 'Barcode*'],
-                # Medical and pricing
-                ['Medical Only (Yes/No)', 'Med Price', 'Expiration Date(YYYY-MM-DD)'],
-                # Additional fields
-                ['Is Archived? (yes/no)', 'THC Per Serving', 'Allergens', 'Solvent'],
-                # Metadata
-                ['Accepted Date', 'Internal Product Identifier', 'Product Tags (comma separated)', 'Image URL', 'Ingredients'],
-                # THC/CBD data
-                ['Total THC', 'THCA', 'CBDA', 'CBN'],
-                # Excel compatibility columns
-                ['ProductName', 'Units', 'Price', 'Joint Ratio', 'Quantity Received*', 'qty']
+            # Discover available columns (SQLite first, then PostgreSQL)
+            try:
+                cursor.execute("PRAGMA table_info(products)")
+                product_columns = {row[1] for row in cursor.fetchall()}
+            except Exception:
+                cursor.execute(
+                    """
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_name = 'products'
+                    """
+                )
+                product_columns = {row[0] for row in cursor.fetchall()}
+
+            desired_columns_in_order = [
+                'Product Name*', 'Product Type*', 'Vendor/Supplier*', 'Product Brand', 'Lineage',
+                'Description', 'Weight*', 'Units', 'Price', 'Product Strain', 'Quantity*',
+                'Test result unit (% or mg)',
+                'DOH', 'Concentrate Type', 'Ratio', 'JointRatio', 'State',
+                'Is Sample? (yes/no)', 'Is MJ product?(yes/no)', 'Discountable? (yes/no)', 'Room*',
+                'Batch Number', 'Lot Number', 'Barcode*',
+                'Medical Only (Yes/No)', 'Med Price', 'Expiration Date(YYYY-MM-DD)',
+                'Is Archived? (yes/no)', 'THC Per Serving', 'Allergens', 'Solvent',
+                'Accepted Date', 'Internal Product Identifier', 'Product Tags (comma separated)', 'Image URL', 'Ingredients',
+                'Total THC', 'THCA', 'CBDA', 'CBN', 'CombinedWeight', 'DOH Compliant (Yes/No)',
+                'ProductName', 'Joint Ratio', 'Quantity Received*', 'qty'
             ]
-            
-            # Use the same approach as get_all_products for consistency
-            cursor.execute('''
-                SELECT p.id, p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
-                       p."Description", p."Weight*", p."Weight Unit* (grams/gm or ounces/oz)", p."Price* (Tier Name for Bulk)", 
-                       p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio", p."State", p."Is Sample? (yes/no)",
-                       p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*",
-                       p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens",
-                       p."Solvent", p."Accepted Date", p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients",
-                       p."CombinedWeight", p."Total THC", p."THCA", p."CBDA", p."CBN",
-                       p."DOH Compliant (Yes/No)"
-                FROM products p
-                ORDER BY p.id
-            ''')
-            
+
+            selected_product_cols = [col for col in desired_columns_in_order if col in product_columns]
+            if selected_product_cols:
+                quoted_cols = ", ".join([f'p."{c}"' for c in selected_product_cols])
+                query = f'SELECT p.id, {quoted_cols} FROM products p ORDER BY p.id'
+            else:
+                query = 'SELECT p.id FROM products p ORDER BY p.id'
+
+            cursor.execute(query)
             results = cursor.fetchall()
+
             products_data = []
-            
-            # Debug logging
-            logger.info(f"Number of results: {len(results)}")
-            if results:
-                logger.info(f"Number of columns in first result: {len(results[0])}")
-            
-            for result in results:
-                product = {
-                    'id': result[0],
-                    'Product Name*': result[1],
-                    'Product Type*': result[2],
-                    'Vendor/Supplier*': result[3],
-                    'Product Brand': result[4],
-                    'Lineage': result[5],
-                    'Description': result[6],
-                    'Weight*': result[7],
-                    'Weight Unit* (grams/gm or ounces/oz)': result[8],
-                    'Price* (Tier Name for Bulk)': result[9],
-                    'Quantity*': result[10],
-                    'DOH': result[11],
-                    'Concentrate Type': result[12],
-                    'Ratio': result[13],
-                    'JointRatio': result[14],
-                    'State': result[15],
-                    'Is Sample? (yes/no)': result[16],
-                    'Is MJ product?(yes/no)': result[17],
-                    'Discountable? (yes/no)': result[18],
-                    'Room*': result[19],
-                    'Batch Number': result[20],
-                    'Lot Number': result[21],
-                    'Barcode*': result[22],
-                    'Medical Only (Yes/No)': result[23],
-                    'Med Price': result[24],
-                    'Expiration Date(YYYY-MM-DD)': result[25],
-                    'Is Archived? (yes/no)': result[26],
-                    'THC Per Serving': result[27],
-                    'Allergens': result[28],
-                    'Solvent': result[29],
-                    'Accepted Date': result[30],
-                    'Internal Product Identifier': result[31],
-                    'Product Tags (comma separated)': result[32],
-                    'Image URL': result[33],
-                    'Ingredients': result[34],
-                    'CombinedWeight': result[35],
-                    'Total THC': result[36],
-                    'THCA': result[37],
-                    'CBDA': result[38],
-                    'CBN': result[39],
-                    'DOH Compliant (Yes/No)': result[41]
-                }
+            for row in results:
+                product = {'id': row[0]}
+                for idx, col in enumerate(selected_product_cols, start=1):
+                    product[col] = row[idx]
                 products_data.append(product)
-            
-            # Convert to DataFrame
+
             products_df = pd.DataFrame(products_data)
             
             # Export to Excel
