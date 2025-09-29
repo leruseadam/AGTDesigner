@@ -6293,8 +6293,20 @@ def database_vendor_stats():
         logging.info(f"[CACHE SET] /api/database-vendor-stats store='{current_store}' computed in {total_ms}ms")
         return jsonify(payload)
     except Exception as e:
-        logging.error(f"Error getting vendor stats: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        logging.error(f"Error getting vendor stats: {str(e)}", exc_info=True)
+        # Never 500 - return empty but valid shape
+        return jsonify({
+            'vendors': [],
+            'brands': [],
+            'product_types': [],
+            'vendor_brands': [],
+            'summary': {
+                'total_vendors': 0,
+                'total_brands': 0,
+                'total_product_types': 0,
+                'total_vendor_brand_combinations': 0
+            }
+        })
 @app.route('/api/products/search', methods=['GET'])
 def search_products():
     """Search for unique strains by brand within a vendor using Excel data."""
