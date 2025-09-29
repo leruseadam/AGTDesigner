@@ -2361,6 +2361,28 @@ def ultra_fast_background_processing(filename, temp_path):
         
         # No processing - just use the raw data as-is for maximum speed
         logging.info("[ULTRA-FAST-BG] Ultra-minimal processing completed - raw data ready")
+
+        # Step 4.5: Persist to database (fast path) so new uploads are stored
+        try:
+            # Exclude JSON/AI matched rows automatically inside the storage call
+            if hasattr(processor, '_store_upload_in_database'):
+                logging.info("[ULTRA-FAST-BG] Persisting uploaded data to database (fast path)")
+                storage_result = processor._store_upload_in_database(processor.df, temp_path)
+                logging.info(f"[ULTRA-FAST-BG] ✅ Database storage completed (fast path): {storage_result}")
+            else:
+                # Fallback to direct ProductDatabase storage
+                logging.info("[ULTRA-FAST-BG] ExcelProcessor missing _store_upload_in_database; using ProductDatabase fallback")
+                current_store = 'AGT_Bothell'
+                product_db = get_product_database(current_store)
+                if hasattr(product_db, 'store_excel_data'):
+                    storage_result = product_db.store_excel_data(processor.df, temp_path)
+                    logging.info(f"[ULTRA-FAST-BG] ✅ Fallback database storage completed: {storage_result}")
+                else:
+                    logging.warning("[ULTRA-FAST-BG] ProductDatabase has no store_excel_data method; skipping DB persist")
+        except Exception as fast_storage_error:
+            logging.error(f"[ULTRA-FAST-BG] ❌ Fast-path database storage failed: {fast_storage_error}")
+            import traceback
+            logging.error(f"[ULTRA-FAST-BG] Fast-path storage traceback: {traceback.format_exc()}")
         
         # Step 5: Store in global processor (skip database storage for speed)
         global excel_processor
