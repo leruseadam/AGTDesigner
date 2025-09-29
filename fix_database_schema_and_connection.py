@@ -57,27 +57,69 @@ def fix_database_schema():
         existing_columns = [row[0] for row in cur.fetchall()]
         print(f"📋 Current products table has {len(existing_columns)} columns")
         
-        # Required columns that might be missing
+        # Required columns that might be missing (from actual database schema)
         required_columns = [
             'Product Name*',
-            'Product Brand',
-            'Vendor/Supplier*',
+            'normalized_name',
+            'strain_id',
             'Product Type*',
+            'Vendor/Supplier*',
+            'Product Brand',
             'Description',
             'Weight*',
             'Units',
             'Price',
-            'Quantity*',
-            'Product Strain',
             'Lineage',
-            'THC test result',
-            'CBD test result',
-            'Room*',
-            'State',
-            'DOH',
             'first_seen_date',
             'last_seen_date',
-            'normalized_name'
+            'total_occurrences',
+            'created_at',
+            'updated_at',
+            'Product Strain',
+            'Quantity*',
+            'DOH',
+            'Concentrate Type',
+            'Ratio',
+            'JointRatio',
+            'THC test result',
+            'CBD test result',
+            'Test result unit (% or mg)',
+            'State',
+            'Is Sample? (yes/no)',
+            'Is MJ product?(yes/no)',
+            'Discountable? (yes/no)',
+            'Room*',
+            'Batch Number',
+            'Lot Number',
+            'Barcode*',
+            'Medical Only (Yes/No)',
+            'Med Price',
+            'Expiration Date(YYYY-MM-DD)',
+            'Is Archived? (yes/no)',
+            'THC Per Serving',
+            'Allergens',
+            'Solvent',
+            'Accepted Date',
+            'Internal Product Identifier',
+            'Product Tags (comma separated)',
+            'Image URL',
+            'Ingredients',
+            'Total THC',
+            'THCA',
+            'CBDA',
+            'CBN',
+            'THC',
+            'CBD',
+            'Total CBD',
+            'CBGA',
+            'CBG',
+            'Total CBG',
+            'CBC',
+            'CBDV',
+            'THCV',
+            'CBGV',
+            'CBNV',
+            'CBGVA'
         ]
         
         missing_columns = []
@@ -91,16 +133,13 @@ def fix_database_schema():
             
             for column in missing_columns:
                 try:
-                    # Add column with appropriate data type
-                    if column in ['Product Name*', 'Product Brand', 'Vendor/Supplier*', 'Product Type*', 'Description', 'Product Strain', 'Lineage', 'Room*', 'State', 'normalized_name']:
-                        cur.execute(f'ALTER TABLE products ADD COLUMN "{column}" TEXT')
-                    elif column in ['Weight*', 'Price', 'Quantity*', 'THC test result', 'CBD test result']:
-                        cur.execute(f'ALTER TABLE products ADD COLUMN "{column}" NUMERIC')
-                    elif column in ['Units', 'DOH']:
-                        cur.execute(f'ALTER TABLE products ADD COLUMN "{column}" TEXT')
-                    elif column in ['first_seen_date', 'last_seen_date']:
-                        cur.execute(f'ALTER TABLE products ADD COLUMN "{column}" TIMESTAMP')
+                    # Add column with appropriate data type (matching actual schema)
+                    if column in ['strain_id']:
+                        cur.execute(f'ALTER TABLE products ADD COLUMN "{column}" INTEGER')
+                    elif column in ['total_occurrences']:
+                        cur.execute(f'ALTER TABLE products ADD COLUMN "{column}" INTEGER DEFAULT 1')
                     else:
+                        # All other columns are TEXT (matching the actual schema)
                         cur.execute(f'ALTER TABLE products ADD COLUMN "{column}" TEXT')
                     
                     print(f"✅ Added column: {column}")
