@@ -42,52 +42,47 @@ os.environ['DB_PASSWORD'] = '193154life'
 os.environ['DB_PORT'] = '14822'
 
 # Configure production logging to prevent BlockingIOError
+import logging
+import logging.handlers
+
+# CRITICAL: Disable all console logging to prevent BlockingIOError
+logging.getLogger().handlers.clear()
+
+# Create a null handler to prevent any logging to stdout/stderr
+null_handler = logging.NullHandler()
+logging.getLogger().addHandler(null_handler)
+
+# Set all loggers to CRITICAL level to minimize output
+logging.getLogger().setLevel(logging.CRITICAL)
+
+# Suppress all library logging
+for logger_name in ['werkzeug', 'urllib3', 'requests', 'pandas', 'openpyxl', 'psycopg2', 'flask', 'sqlalchemy']:
+    logging.getLogger(logger_name).setLevel(logging.CRITICAL)
+    logging.getLogger(logger_name).handlers.clear()
+    logging.getLogger(logger_name).addHandler(null_handler)
+
+# Optional: Create file logging (only if needed)
 try:
-    from pythonanywhere_logging_config import configure_production_logging
-    configure_production_logging()
-    print("✅ Production logging configured successfully")
-except ImportError as e:
-    print(f"⚠️ Could not import pythonanywhere_logging_config: {e}")
-    # Fallback logging configuration
-    import logging
-    from logging.handlers import RotatingFileHandler
-    
-    # Create logs directory
     log_dir = os.path.join(project_dir, 'logs')
     os.makedirs(log_dir, exist_ok=True)
     
-    # Configure root logger
-    root_logger = logging.getLogger()
-    root_logger.setLevel(logging.WARNING)  # Only warnings and errors
-    
-    # Clear existing handlers
-    root_logger.handlers.clear()
-    
-    # Create file handler
-    log_file = os.path.join(log_dir, 'app.log')
-    file_handler = RotatingFileHandler(
+    # Create a file handler for critical errors only
+    log_file = os.path.join(log_dir, 'critical_errors.log')
+    file_handler = logging.handlers.RotatingFileHandler(
         log_file, 
-        maxBytes=5*1024*1024,  # 5MB max file size
-        backupCount=3,         # Keep 3 backup files
+        maxBytes=1024*1024,  # 1MB max file size
+        backupCount=2,       # Keep 2 backup files
         encoding='utf-8'
     )
-    file_handler.setLevel(logging.WARNING)
+    file_handler.setLevel(logging.CRITICAL)
     
-    # Create formatter
-    formatter = logging.Formatter(
-        '%(asctime)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-    file_handler.setFormatter(formatter)
+    # Add file handler to root logger
+    logging.getLogger().addHandler(file_handler)
     
-    # Add handler to root logger
-    root_logger.addHandler(file_handler)
-    
-    print(f"✅ Fallback logging configured - log file: {log_file}")
-
-# Suppress verbose logging from libraries
-for logger_name in ['werkzeug', 'urllib3', 'requests', 'pandas', 'openpyxl', 'psycopg2']:
-    logging.getLogger(logger_name).setLevel(logging.ERROR)
+    print("✅ Production logging configured - critical errors only")
+except Exception as e:
+    print(f"⚠️ Could not configure file logging: {e}")
+    print("✅ Console logging disabled - no BlockingIOError")
 
 try:
     # Import the Flask application
