@@ -582,7 +582,7 @@ def get_product_database(store_name=None):
     global _product_database
     if _product_database is None or (store_name and getattr(_product_database, '_store_name', None) != store_name):
         from src.core.data.product_database import ProductDatabase
-        # Use store-specific database path
+        # Use main product_database.db by default, store-specific only if requested
         if store_name:
             db_filename = f'product_database_{store_name}.db'
             db_path = os.path.join(current_dir, 'uploads', db_filename)
@@ -590,10 +590,10 @@ def get_product_database(store_name=None):
             _product_database._store_name = store_name
             logging.info(f"ProductDatabase created for store '{store_name}' at: {db_path}")
         else:
-            # Default database for backward compatibility
+            # Use main product_database.db (524MB database)
             db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
             _product_database = ProductDatabase(db_path)
-            logging.info(f"ProductDatabase created (default) at: {db_path}")
+            logging.info(f"ProductDatabase created (main database) at: {db_path}")
     return _product_database
 
 def get_json_matcher():
@@ -1110,59 +1110,80 @@ def get_session_excel_processor():
                                     logging.warning("No strain filter found in dropdown cache")
                             except Exception as e:
                                 logging.error(f"Failed to populate dropdown cache from session uploaded file: {e}")
-                        else:
-                            logging.warning("ExcelProcessor does not have _cache_dropdown_values method")
+            
+            # CRITICAL FIX: Ensure ExcelProcessor has data for JSON matching
+            if not hasattr(g.excel_processor, 'df') or g.excel_processor.df is None or g.excel_processor.df.empty:
+                logging.info("CRITICAL FIX: ExcelProcessor DataFrame is empty, loading default file for JSON matching")
+                default_file = get_default_upload_file()
+                if default_file and os.path.exists(default_file):
+                    logging.info(f"CRITICAL FIX: Loading default file for JSON matching: {default_file}")
+                    success = g.excel_processor.load_file(default_file)
+                    if success:
+                        logging.info(f"CRITICAL FIX: Successfully loaded default file for JSON matching")
+                        # Populate dropdown cache
+                        if hasattr(g.excel_processor, '_cache_dropdown_values'):
+                            try:
+                                g.excel_processor._cache_dropdown_values()
+                                logging.info(f"Successfully populated dropdown cache from default file")
+                            except Exception as e:
+                                logging.error(f"Failed to populate dropdown cache from default file: {e}")
                     else:
-                        logging.error("Failed to load uploaded file from session")
-                        # Create a minimal DataFrame to prevent errors
-                        import pandas as pd
-                        g.excel_processor.df = pd.DataFrame()
-                
-                # CRITICAL FIX: For new uploaded files, update the last processed file but DON'T clear tags
-                if session_file_path != getattr(g.excel_processor, '_last_processed_file', None):
-                    logging.info(f"CRITICAL FIX: New uploaded file detected, updating last processed file")
-                    logging.info(f"CRITICAL FIX: Previous file: {getattr(g.excel_processor, '_last_processed_file', 'None')}")
-                    logging.info(f"CRITICAL FIX: New file: {session_file_path}")
-                    logging.info(f"CRITICAL FIX: Selected tags before update: {len(g.excel_processor.selected_tags)}")
-                    
-                    # Update the last processed file but preserve selected tags
-                    g.excel_processor._last_processed_file = session_file_path
-                    
-                    # CRITICAL FIX: Clear caches for new file but preserve selected tags
-                    logging.info(f"CRITICAL FIX: Clearing caches for new file (preserving selected tags)")
-                    if hasattr(g.excel_processor, '_file_cache'):
-                        g.excel_processor._file_cache.clear()
-                        logging.info(f"CRITICAL FIX: Cleared file cache")
-                    if hasattr(g.excel_processor, '_dropdown_cache'):
-                        g.excel_processor._dropdown_cache.clear()
-                        logging.info(f"CRITICAL FIX: Cleared dropdown cache")
-                    if hasattr(g.excel_processor, '_available_tags_cache'):
-                        g.excel_processor._available_tags_cache.clear()
-                        logging.info(f"CRITICAL FIX: Cleared available tags cache")
-                    
-                    logging.info(f"CRITICAL FIX: Selected tags after update: {len(g.excel_processor.selected_tags)}")
-                    logging.info(f"CRITICAL FIX: Session selected tags after update: {len(session.get('selected_tags', []))}")
+                        logging.error(f"CRITICAL FIX: Failed to load default file for JSON matching: {default_file}")
+                else:
+                    logging.warning("CRITICAL FIX: No default file available for JSON matching")
             else:
-                # Only load default file if no uploaded file exists
-                if not hasattr(g.excel_processor, 'df') or g.excel_processor.df is None or g.excel_processor.df.empty:
-                    from src.core.data.excel_processor import get_default_upload_file
-                    default_file = get_default_upload_file()
-                    if default_file and os.path.exists(default_file):
-                        logging.info(f"Loading default file for session: {default_file}")
-                        success = g.excel_processor.load_file(default_file)
-                        if success:
-                            # CRITICAL FIX: Ensure dropdown cache is populated after successful file load
-                            if hasattr(g.excel_processor, '_cache_dropdown_values'):
-                                try:
-                                    g.excel_processor._cache_dropdown_values()
-                                    logging.info(f"Successfully populated dropdown cache from session default file")
-                                    # Log the strain count specifically
-                                    if 'strain' in g.excel_processor.dropdown_cache:
-                                        strain_count = len(g.excel_processor.dropdown_cache['strain'])
-                                        logging.info(f"Dropdown cache contains {strain_count} strains")
-                                    else:
-                                        logging.warning("No strain filter found in dropdown cache")
-                                except Exception as e:
+                logging.warning("ExcelProcessor does not have _cache_dropdown_values method")
+        else:
+            logging.error("Failed to load uploaded file from session")
+            # Create a minimal DataFrame to prevent errors
+            import pandas as pd
+            g.excel_processor.df = pd.DataFrame()
+        
+        # CRITICAL FIX: For new uploaded files, update the last processed file but DON'T clear tags
+        if session_file_path and session_file_path != getattr(g.excel_processor, '_last_processed_file', None):
+            logging.info(f"CRITICAL FIX: New uploaded file detected, updating last processed file")
+            logging.info(f"CRITICAL FIX: Previous file: {getattr(g.excel_processor, '_last_processed_file', 'None')}")
+            logging.info(f"CRITICAL FIX: New file: {session_file_path}")
+            logging.info(f"CRITICAL FIX: Selected tags before update: {len(g.excel_processor.selected_tags)}")
+            
+            # Update the last processed file but preserve selected tags
+            g.excel_processor._last_processed_file = session_file_path
+            
+            # CRITICAL FIX: Clear caches for new file but preserve selected tags
+            logging.info(f"CRITICAL FIX: Clearing caches for new file (preserving selected tags)")
+            if hasattr(g.excel_processor, '_file_cache'):
+                g.excel_processor._file_cache.clear()
+                logging.info(f"CRITICAL FIX: Cleared file cache")
+            if hasattr(g.excel_processor, '_dropdown_cache'):
+                g.excel_processor._dropdown_cache.clear()
+                logging.info(f"CRITICAL FIX: Cleared dropdown cache")
+            if hasattr(g.excel_processor, '_available_tags_cache'):
+                g.excel_processor._available_tags_cache.clear()
+                logging.info(f"CRITICAL FIX: Cleared available tags cache")
+            
+            logging.info(f"CRITICAL FIX: Selected tags after update: {len(g.excel_processor.selected_tags)}")
+            logging.info(f"CRITICAL FIX: Session selected tags after update: {len(session.get('selected_tags', []))}")
+        else:
+            # Only load default file if no uploaded file exists
+            if not hasattr(g.excel_processor, 'df') or g.excel_processor.df is None or g.excel_processor.df.empty:
+                from src.core.data.excel_processor import get_default_upload_file
+                default_file = get_default_upload_file()
+                if default_file and os.path.exists(default_file):
+                    logging.info(f"Loading default file for session: {default_file}")
+                    success = g.excel_processor.load_file(default_file)
+                    if success:
+                        # CRITICAL FIX: Ensure dropdown cache is populated after successful file load
+                        if hasattr(g.excel_processor, '_cache_dropdown_values'):
+                            try:
+                                g.excel_processor._cache_dropdown_values()
+                                logging.info(f"Successfully populated dropdown cache from session default file")
+                                # Log the strain count specifically
+                                if 'strain' in g.excel_processor.dropdown_cache:
+                                    strain_count = len(g.excel_processor.dropdown_cache['strain'])
+                                    logging.info(f"Dropdown cache contains {strain_count} strains")
+                                else:
+                                    logging.warning("No strain filter found in dropdown cache")
+                            except Exception as e:
                                     logging.error(f"Failed to populate dropdown cache from session default file: {e}")
                             else:
                                 logging.warning("ExcelProcessor does not have _cache_dropdown_values method")
@@ -1307,12 +1328,12 @@ def get_session_product_database():
     try:
         if not hasattr(app, '_product_database'):
             from src.core.data.product_database import ProductDatabase
-            # CRITICAL FIX: Use the correct database path - prioritize AGT_Bothell
-            db_path = os.path.join(current_dir, 'uploads', 'product_database_AGT_Bothell.db')
+            # CRITICAL FIX: Use the main product_database.db file
+            db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
             
-            # Fallback to main database if AGT_Bothell doesn't exist
+            # Fallback to AGT_Bothell database if main doesn't exist
             if not os.path.exists(db_path):
-                db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
+                db_path = os.path.join(current_dir, 'uploads', 'product_database_AGT_Bothell.db')
             
             app._product_database = ProductDatabase(db_path)
             logging.info(f"Created new ProductDatabase instance for session at {db_path}")
@@ -6451,7 +6472,7 @@ def database_test():
 def database_status():
     """Get basic database status and information."""
     try:
-        product_db = get_product_database('AGT_Bothell')
+        product_db = get_product_database()  # Use main product_database.db
         
         # Check if database file exists
         db_exists = os.path.exists(product_db.db_path)
