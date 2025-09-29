@@ -825,61 +825,20 @@ class ProductDatabase:
         try:
             self.init_database()  # Ensure DB is initialized
             
-            # Handle both 'ProductName' and 'Product Name*' column names
             product_name = product_data.get('Product Name*', product_data.get('ProductName', ''))
-            normalized_name = self._normalize_product_name(product_name)
-            current_date = datetime.now().isoformat()
+            if not product_name:
+                raise ValueError("Product name is required")
             
-            # Get or create strain
-            strain_name = product_data.get('Product Strain', '')
-            strain_id = None
-            if strain_name:
-                # Normalize lineage before storing
-                normalized_lineage = self._normalize_lineage(product_data.get('Lineage'))
-                strain_id = self.add_or_update_strain(strain_name, normalized_lineage)
+            normalized_name = self._normalize_product_name(product_name)
+            product_type = product_data.get('Product Type*', 'Unknown')
+            current_date = datetime.now().isoformat()
             
             # Serialize write operations
             with self._write_lock:
                 conn = self._get_connection()
                 cursor = conn.cursor()
-                # PostgreSQL doesn't need explicit BEGIN for autocommit=False
                 
-                # Enhanced duplicate detection: Check multiple combinations
-                # First check exact match (name + vendor + brand)
-                cursor.execute('''
-                    SELECT id, total_occurrences, "Product Name*"
-                    FROM products 
-                    WHERE normalized_name = %s AND "Vendor/Supplier*" = %s AND "Product Brand" = %s
-                ''', (normalized_name, product_data.get('Vendor/Supplier*'), product_data.get('Product Brand')))
-            
-            existing = cursor.fetchone()
-            
-            if existing:
-                product_id, occurrences, existing_name = existing
-                
-                # Log duplicate detection and update
-                logger.info(f"Found existing product: '{existing_name}' (ID: {product_id}, occurrences: {occurrences}) - REPLACING WITH NEW EXCEL DATA")
-                
-                # Update existing product with new data (new data always replaces old values)
-                self._update_existing_product(cursor, product_id, product_data)
-                conn.commit()
-                logger.info(f"Successfully replaced existing product '{existing_name}' with new Excel data")
-                return product_id
-            
-            # Check for similar products (same name + vendor, different brand)
-            cursor.execute('''
-                SELECT id, total_occurrences, "Product Name*", "Product Brand"
-                FROM products 
-                WHERE normalized_name = %s AND "Vendor/Supplier*" = %s AND "Product Brand" != %s
-            ''', (normalized_name, product_data.get('Vendor/Supplier*'), product_data.get('Product Brand')))
-            
-            similar_products = cursor.fetchall()
-            if similar_products:
-                logger.info(f"Found {len(similar_products)} similar products with same name '{product_name}' and vendor '{product_data.get('Vendor')}' but different brands")
-                for similar_id, similar_occurrences, similar_name, similar_brand in similar_products:
-                    logger.debug(f"Similar product: '{similar_name}' (Brand: {similar_brand}, ID: {similar_id})")
-            else:
-                # Add new product - Simple working INSERT statement
+                # Simple INSERT - just add the product with basic info
                 cursor.execute('''
                     INSERT INTO products (
                         "Product Name*", normalized_name, "Product Type*", first_seen_date, last_seen_date, 
@@ -890,7 +849,7 @@ class ProductDatabase:
                 ''', (
                     product_name,
                     normalized_name,
-                    product_data.get('Product Type*'),
+                    product_type,
                     current_date,
                     current_date,
                     1,
@@ -904,8 +863,8 @@ class ProductDatabase:
                 else:
                     raise Exception("Failed to get product ID after insert")
                 conn.commit()
-                if DEBUG_ENABLED:
-                    logger.debug(f"Added new product '{product_name}'")
+                
+                logger.info(f"Added new product '{product_name}' with ID {product_id}")
                 return product_id
             
         except Exception as e:
@@ -1388,14 +1347,14 @@ class ProductDatabase:
                 return cached_result
             conn = self._get_connection()
             cursor = conn.cursor()
-                cursor.execute('''
+            cursor.execute('''
                 SELECT id, strain_name, canonical_lineage, total_occurrences, lineage_confidence, first_seen_date, last_seen_date, sovereign_lineage
                 FROM strains 
-                WHERE normalized_name = ?
+                WHERE normalized_name = %s
             ''', (normalized_name,))
-                result = cursor.fetchone()
-                if result:
-                    strain_id = result[0]
+            result = cursor.fetchone()
+            if result:
+                strain_id = result[0]
                 sovereign_lineage = result[7]
                 canonical_lineage = result[2]
                 # Use sovereign_lineage if set, else mode, else canonical
@@ -1439,8 +1398,8 @@ class ProductDatabase:
             cached_result = self._get_from_cache(cache_key)
             if cached_result is not None:
                 return cached_result
-    
-        conn = self._get_connection()
+            
+            conn = self._get_connection()
             cursor = conn.cursor()
             
             if vendor and brand:
@@ -1556,7 +1515,7 @@ class ProductDatabase:
         try:
             self.init_database()  # Ensure DB is initialized
             
-        conn = self._get_connection()
+            conn = self._get_connection()
             cursor = conn.cursor()
             
             # Total strains
