@@ -43,19 +43,19 @@ def main():
 
     # Verify counts
     print("🔎 Verifying PostgreSQL counts...")
-    verify_code = r'''
+    verify_code = r"""
 import os, psycopg2
 cfg = dict(host=os.environ['DB_HOST'], database=os.environ['DB_NAME'], user=os.environ['DB_USER'], password=os.environ['DB_PASSWORD'], port=os.environ['DB_PORT'])
 conn = psycopg2.connect(**cfg)
 cur = conn.cursor()
-cur.execute('SELECT COUNT(*) FROM products')
-print('products:', cur.fetchone()[0])
-cur.execute('SELECT COUNT(DISTINCT "Vendor/Supplier*") FROM products WHERE "Vendor/Supplier*" IS NOT NULL AND "Vendor/Supplier*" != ''')
-print('vendors:', cur.fetchone()[0])
-cur.execute('SELECT COUNT(DISTINCT "Product Brand") FROM products WHERE "Product Brand" IS NOT NULL AND "Product Brand" != ''')
-print('brands:', cur.fetchone()[0])
+cur.execute("SELECT COUNT(*) FROM products")
+print("products:", cur.fetchone()[0])
+cur.execute("SELECT COUNT(DISTINCT \"Vendor/Supplier*\") FROM products WHERE \"Vendor/Supplier*\" IS NOT NULL AND \"Vendor/Supplier*\" != ''")
+print("vendors:", cur.fetchone()[0])
+cur.execute("SELECT COUNT(DISTINCT \"Product Brand\") FROM products WHERE \"Product Brand\" IS NOT NULL AND \"Product Brand\" != ''")
+print("brands:", cur.fetchone()[0])
 cur.close(); conn.close()
-'''
+"""
     run([sys.executable, '-c', verify_code])
     print("✅ Done. Reload your web app to reflect new counts.")
 
