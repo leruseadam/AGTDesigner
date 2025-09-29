@@ -364,7 +364,7 @@ class ProductDatabase:
                     product_id
                 ))
             else:
-                # Insert new product
+                # Insert new product - Hardcoded INSERT statement that works
                 cursor.execute('''
                     INSERT INTO products (
                         "Product Name*", "ProductName", normalized_name, strain_id, "Product Type*",
@@ -387,7 +387,7 @@ class ProductDatabase:
                     product_name,
                     product_data.get('ProductName', product_name),
                     normalized_name,
-                    product_data.get('strain_id'),  # Add strain_id
+                    product_data.get('strain_id'),
                     product_type,
                     product_data.get('Vendor/Supplier*'),
                     product_data.get('Product Brand'),
