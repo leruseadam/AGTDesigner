@@ -5896,12 +5896,43 @@ def debug_columns():
         logging.error(f"Error in debug_columns: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+# Lightweight in-memory cache for analytics endpoints
+_endpoint_cache = {}
+
+def _cache_get(key, ttl_seconds=20):
+    try:
+        import time as _t
+        entry = _endpoint_cache.get(key)
+        if not entry:
+            return None
+        value, ts = entry
+        if (_t.time() - ts) > ttl_seconds:
+            return None
+        return value
+    except Exception:
+        return None
+
+def _cache_set(key, value):
+    try:
+        import time as _t
+        _endpoint_cache[key] = (value, _t.time())
+    except Exception:
+        pass
+
 @app.route('/api/database-stats', methods=['GET'])
 def database_stats():
     """Get statistics about the product database."""
     try:
         # Get current store from session
         current_store = session.get('selected_store', '')
+        # Cache fast path
+        import time
+        t0 = time.perf_counter()
+        cache_key = f"db-stats:{current_store}"
+        cached = _cache_get(cache_key, ttl_seconds=20)
+        if cached is not None:
+            logging.info(f"[CACHE HIT] /api/database-stats store='{current_store}' served in {int((time.perf_counter()-t0)*1000)}ms")
+            return jsonify(cached)
         product_db = get_product_database(current_store)
         
         # Ensure database is initialized (do not hard-fail if PostgreSQL is unreachable)
@@ -6098,10 +6129,14 @@ def database_stats():
             stats = fallback['stats']
             vendor_stats = fallback['vendor_stats']
         
-        return jsonify({
+        payload = {
             'stats': stats,
             'vendor_stats': vendor_stats
-        })
+        }
+        _cache_set(cache_key, payload)
+        total_ms = int((time.perf_counter() - t0) * 1000)
+        logging.info(f"[CACHE SET] /api/database-stats store='{current_store}' computed in {total_ms}ms")
+        return jsonify(payload)
         
     except Exception as e:
         logging.error(f"Error getting database stats: {str(e)}")
@@ -6615,6 +6650,13 @@ def clear_rate_limit():
 def database_analytics():
     """Get advanced analytics data for the database."""
     try:
+        import time
+        t0 = time.perf_counter()
+        cache_key = 'db-analytics:global'
+        cached = _cache_get(cache_key, ttl_seconds=45)
+        if cached is not None:
+            logging.info(f"[CACHE HIT] /api/database-analytics served in {int((time.perf_counter()-t0)*1000)}ms")
+            return jsonify(cached)
         import psycopg2
         from datetime import datetime, timedelta
         
@@ -6694,14 +6736,18 @@ def database_analytics():
             recent_data = cursor.fetchone()
             recent_activity = [{'date': recent_data[0], 'new_products': recent_data[1]}] if recent_data else []
             
-            return jsonify({
+            payload = {
                 'product_type_distribution': product_types_dict,
                 'lineage_distribution': lineage_dict,
                 'vendor_performance': vendor_performance,
                 'recent_activity': recent_activity,
                 'analytics_generated': datetime.now().isoformat(),
                 'total_products': product_count
-            })
+            }
+            _cache_set(cache_key, payload)
+            total_ms = int((time.perf_counter() - t0) * 1000)
+            logging.info(f"[CACHE SET] /api/database-analytics computed in {total_ms}ms")
+            return jsonify(payload)
     except Exception as e:
         logging.error(f"Error getting database analytics: {str(e)}")
         return jsonify({'error': str(e)}), 500
