@@ -8044,7 +8044,6 @@ def upload_product_database():
         try:
             product_db = get_product_database('AGT_Bothell')
             
-            # CRITICAL FIX: Implement proper database import from Excel
             logging.info(f"Starting database import from {db_file_path}")
             
             # Read the Excel file
@@ -8052,65 +8051,50 @@ def upload_product_database():
             df = pd.read_excel(db_file_path)
             logging.info(f"Excel file loaded: {len(df)} rows, {len(df.columns)} columns")
             
-            # Clear existing data
+            # Clear existing data then import using canonical API
             logging.info("Clearing existing database data...")
             product_db.clear_all_data()
             
-            # Import the data
-            logging.info("Importing Excel data to database...")
-            stored_count = 0
-            strains_count = 0
+            logging.info("Importing Excel data to database via store_excel_data()...")
+            storage_result = product_db.store_excel_data(df, db_file_path)
+            logging.info(f"Database import completed: {storage_result}")
             
-            # Column mapping from Excel column names to database column names
-            column_mapping = {
-                'Product Name*': 'ProductName',
-                'ProductType': 'ProductType',
-                'ProductBrand': 'ProductBrand',
-                'Description': 'Description',
-                'Lineage': 'Lineage',
-                'Vendor/Supplier*': 'Vendor',
-                'Weight*': 'Weight',
-                'Weight Unit*': 'Units',
-                'Quantity*': 'Quantity',
-                'Quantity Received*': 'QuantityReceived',
-                'Price*': 'Price',
-                'Price Tier': 'PriceTier',
-                'Bulk Price': 'BulkPrice',
-                'DOH Compliant*': 'DOHCompliant',
-                'DOH Status': 'DOHStatus',
-                'Product Strain': 'ProductStrain',
-                'Concentrate Type': 'ConcentrateType',
-                'Ratio': 'Ratio',
-                'Joint Ratio': 'JointRatio',
-                'THC Content': 'THCContent',
-                'CBD Content': 'CBDContent',
-                'THC_CBD': 'THCCBD',
-                'Total THC': 'TotalTHC',
-                'Total CBD': 'TotalCBD',
-                'Lab Test Date': 'LabTestDate',
-                'Lab Name': 'LabName',
-                'COA': 'COA',
-                'Batch Number': 'BatchNumber',
-                'Production Date': 'ProductionDate',
-                'Expiration Date': 'ExpirationDate',
-                'Terpenes': 'Terpenes',
-                'Flavor Profile': 'FlavorProfile',
-                'Effects': 'Effects',
-                'Medical Benefits': 'MedicalBenefits',
-                'SKU': 'SKU',
-                'Product Code': 'ProductCode',
-                'Category': 'Category',
-                'Subcategory': 'Subcategory',
-                'Supplier Contact': 'SupplierContact',
-                'Supplier Email': 'SupplierEmail',
-                'Country of Origin': 'CountryOfOrigin',
-                'Growing Method': 'GrowingMethod',
-                'Organic Status': 'OrganicStatus'
-            }
+            # Clear DB-level caches and app caches so new items are visible immediately
+            try:
+                if hasattr(product_db, 'clear_cache'):
+                    product_db.clear_cache()
+            except Exception as cache_err:
+                logging.warning(f"Error clearing product DB cache: {cache_err}")
             
+            try:
+                # Clear Flask cache buckets related to tags
+                if cache is not None:
+                    # Remove per-session keys if available
+                    try:
+                        available_cache_key = get_session_cache_key('available_tags')
+                        cache.delete(available_cache_key)
+                    except Exception:
+                        pass
+                    try:
+                        json_matched_cache_key = get_session_cache_key('json_matched_tags')
+                        cache.delete(json_matched_cache_key)
+                    except Exception:
+                        pass
+                    # As a fallback, clear all cache
+                    cache.clear()
+            except Exception as app_cache_err:
+                logging.warning(f"Error clearing app cache: {app_cache_err}")
+            
+            return jsonify({
+                'success': True,
+                'message': 'Product database Excel uploaded and imported successfully',
+                'rows_processed': int(len(df)),
+                'storage_result': storage_result
+            })
+            
+            # Old per-row import logic removed in favor of canonical storage API
             for index, row in df.iterrows():
                 try:
-                    # Convert row to dictionary and clean NaN values
                     product_data = {}
                     for col, value in row.items():
                         if pd.isna(value):
