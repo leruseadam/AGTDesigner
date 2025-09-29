@@ -629,8 +629,8 @@ class ProductDatabase:
                     cz_column TEXT,
                     -- Excel processor compatibility columns
                     "ProductName" TEXT,  -- Alternative to "Product Name*"
-                    "Units" TEXT,  -- Alternative to "Weight Unit* (grams/gm or ounces/oz)"
-                    "Price" TEXT,  -- Alternative to "Price* (Tier Name for Bulk)"
+                    "Units_Alt" TEXT,  -- Alternative to "Weight Unit* (grams/gm or ounces/oz)"
+                    "Price_Alt" TEXT,  -- Alternative to "Price* (Tier Name for Bulk)"
                     "DOH Compliant (Yes/No)" TEXT,  -- Alternative to "DOH"
                     "Joint Ratio" TEXT,  -- Alternative to "JointRatio"
                     "Quantity Received*" TEXT,  -- Alternative to "Quantity*"
