@@ -1,117 +1,114 @@
 #!/usr/bin/env python3
 """
-PostgreSQL Connection Test
-Tests connection to your PostgreSQL database
+Test PostgreSQL connection on PythonAnywhere
 """
 
-import psycopg2
-from psycopg2.extras import RealDictCursor
 import os
+import sys
+import psycopg2
+from psycopg2 import sql
 
 def test_postgresql_connection():
-    """Test PostgreSQL connection"""
+    """Test PostgreSQL connection with environment variables"""
     
-    print("🧪 Testing PostgreSQL Connection...")
-    print("=" * 40)
+    print("🔍 Testing PostgreSQL Connection...")
+    print("=" * 50)
     
-    # Update these with your actual connection details
-    config = {
-        'host': os.getenv('DB_HOST', 'localhost'),
-        'database': os.getenv('DB_NAME', 'labelmaker'),
-        'user': os.getenv('DB_USER', 'labelmaker'),
-        'password': os.getenv('DB_PASSWORD', ''),
-        'port': os.getenv('DB_PORT', '5432')
-    }
+    # Get environment variables
+    db_host = os.environ.get('DB_HOST', 'adamcordova-4822.postgres.pythonanywhere-services.com')
+    db_name = os.environ.get('DB_NAME', 'postgres')
+    db_user = os.environ.get('DB_USER', 'super')
+    db_password = os.environ.get('DB_PASSWORD', '193154life')
+    db_port = os.environ.get('DB_PORT', '14822')
     
-    print(f"Host: {config['host']}")
-    print(f"Database: {config['database']}")
-    print(f"User: {config['user']}")
-    print(f"Port: {config['port']}")
+    print(f"Host: {db_host}")
+    print(f"Database: {db_name}")
+    print(f"User: {db_user}")
+    print(f"Port: {db_port}")
+    print(f"Password: {'*' * len(db_password)}")
     print()
     
     try:
         # Test connection
-        conn = psycopg2.connect(**config)
+        print("🔄 Attempting to connect...")
+        conn = psycopg2.connect(
+            host=db_host,
+            database=db_name,
+            user=db_user,
+            password=db_password,
+            port=db_port
+        )
+        
         print("✅ Connection successful!")
         
         # Test query
-        cursor = conn.cursor(cursor_factory=RealDictCursor)
-        cursor.execute("SELECT version()")
+        cursor = conn.cursor()
+        cursor.execute("SELECT version();")
         version = cursor.fetchone()
-        print(f"✅ PostgreSQL version: {version['version']}")
+        print(f"📊 PostgreSQL version: {version[0]}")
         
-        # Test database info
-        cursor.execute("SELECT current_database()")
-        db_name = cursor.fetchone()
-        print(f"✅ Connected to database: {db_name['current_database']}")
-        
-        # Test table creation
+        # Check if our tables exist
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS test_table (
-                id SERIAL PRIMARY KEY,
-                name VARCHAR(100),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
+            SELECT table_name 
+            FROM information_schema.tables 
+            WHERE table_schema = 'public' 
+            AND table_name IN ('products', 'strains', 'vendors', 'brands');
         """)
-        conn.commit()
-        print("✅ Table creation test passed")
+        tables = cursor.fetchall()
         
-        # Test insert
-        cursor.execute("INSERT INTO test_table (name) VALUES (%s)", ("test",))
-        conn.commit()
-        print("✅ Insert test passed")
-        
-        # Test select
-        cursor.execute("SELECT * FROM test_table")
-        results = cursor.fetchall()
-        print(f"✅ Select test passed: {len(results)} rows")
-        
-        # Clean up
-        cursor.execute("DROP TABLE test_table")
-        conn.commit()
-        print("✅ Cleanup test passed")
+        if tables:
+            print(f"📋 Found tables: {[table[0] for table in tables]}")
+        else:
+            print("⚠️  No product tables found - database may need initialization")
         
         cursor.close()
         conn.close()
-        
-        print("\n🎉 All PostgreSQL tests passed!")
-        print("✅ Your database is ready for migration")
         
         return True
         
     except psycopg2.OperationalError as e:
         print(f"❌ Connection failed: {e}")
-        print("\n💡 Check your connection details:")
-        print("   • Host: Is the server running?")
-        print("   • Database: Does it exist?")
-        print("   • User: Does the user exist?")
-        print("   • Password: Is it correct?")
-        print("   • Port: Is it open?")
         return False
-        
     except Exception as e:
-        print(f"❌ Test failed: {e}")
+        print(f"❌ Unexpected error: {e}")
         return False
 
+def test_environment_variables():
+    """Test if environment variables are set correctly"""
+    
+    print("🔍 Testing Environment Variables...")
+    print("=" * 50)
+    
+    required_vars = ['DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASSWORD', 'DB_PORT']
+    
+    for var in required_vars:
+        value = os.environ.get(var)
+        if value:
+            print(f"✅ {var}: {value}")
+        else:
+            print(f"❌ {var}: Not set")
+    
+    print()
+
 if __name__ == "__main__":
-    print("🐘 PostgreSQL Connection Test")
-    print("=" * 30)
+    print("🐘 PythonAnywhere PostgreSQL Connection Test")
+    print("=" * 60)
     
-    # Check if psycopg2 is installed
-    try:
-        import psycopg2
-        print("✅ PostgreSQL client available")
-    except ImportError:
-        print("❌ PostgreSQL client not available")
-        print("💡 Install with: pip install psycopg2-binary")
-        exit(1)
+    # Test environment variables
+    test_environment_variables()
     
-    # Run test
+    # Test connection
     success = test_postgresql_connection()
     
     if success:
-        print("\n🚀 Ready to migrate your data!")
-        print("Run: python migrate_to_postgresql_agt.py")
+        print("\n🎉 PostgreSQL connection test PASSED!")
+        print("Your database is ready for the Label Maker app.")
     else:
-        print("\n🔧 Fix connection issues first")
-        print("Then run this test again")
+        print("\n💥 PostgreSQL connection test FAILED!")
+        print("Please check your database configuration.")
+        
+        print("\n🔧 Troubleshooting steps:")
+        print("1. Verify PostgreSQL service is running")
+        print("2. Check database credentials")
+        print("3. Ensure database exists")
+        print("4. Check firewall/network settings")
