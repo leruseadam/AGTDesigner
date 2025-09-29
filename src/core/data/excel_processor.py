@@ -758,6 +758,9 @@ class ExcelProcessor:
                                             strain_id = product_db.add_or_update_strain(strain_name, row_dict.get('Lineage', ''))
                                             if strain_id:
                                                 strain_count += 1
+                                                self.logger.debug(f"[ProductDB] ✅ Successfully added/updated strain '{strain_name}' with ID {strain_id}")
+                                            else:
+                                                self.logger.warning(f"[ProductDB] ⚠️ Strain '{strain_name}' operation returned None (likely duplicate)")
                                             break
                                         except Exception as e:
                                             if "database is locked" in str(e).lower() and attempt < max_retries - 1:

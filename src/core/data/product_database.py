@@ -792,17 +792,26 @@ class ProductDatabase:
                             del self._cache[cache_key]
                     return strain_id
                 else:
+                    # Use PostgreSQL ON CONFLICT to handle duplicate strains gracefully
                     cursor.execute('''
                         INSERT INTO strains (strain_name, normalized_name, canonical_lineage, first_seen_date, last_seen_date, created_at, updated_at, sovereign_lineage)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (strain_name) 
+                        DO UPDATE SET 
+                            total_occurrences = strains.total_occurrences + 1,
+                            last_seen_date = %s,
+                            updated_at = %s
                         RETURNING id
-                    ''', (strain_name, normalized_name, lineage, current_date, current_date, current_date, current_date, lineage if sovereign else None))
+                    ''', (strain_name, normalized_name, lineage, current_date, current_date, current_date, current_date, lineage if sovereign else None, current_date, current_date))
                     result = cursor.fetchone()
                     if result:
                         strain_id = result[0]
+                        conn.commit()
+                        logger.debug(f"✅ Strain '{strain_name}' handled (insert or update) with ID {strain_id}")
                     else:
+                        conn.rollback()
+                        logger.error(f"❌ Failed to get strain ID after insert/update for '{strain_name}'")
                         raise Exception("Failed to get strain ID after insert")
-                    conn.commit()
                     
                     # Notify all sessions of the new strain (non-blocking)
                     try:
@@ -821,7 +830,9 @@ class ProductDatabase:
                     
         except Exception as e:
             logger.error(f"Error adding/updating strain '{strain_name}': {e}")
-            raise
+            # Don't re-raise the exception to prevent transaction rollbacks
+            # Return None to indicate failure, but don't abort the transaction
+            return None
     
     @timed_operation("add_or_update_product")
     @retry_on_lock(max_retries=3, delay=0.5)
