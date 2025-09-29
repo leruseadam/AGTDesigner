@@ -6518,14 +6518,17 @@ def database_export():
         current_store = session.get('selected_store', 'AGT_Bothell')
         product_db = get_product_database(current_store)
         
-        # Create temporary file
+        # Create temporary Excel file by default
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
         temp_file.close()
+        export_path = temp_file.name
+        export_mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        export_ext = 'xlsx'
         
         # Export database using abstraction; on failure, fall back to SQLite direct export
         try:
             if hasattr(product_db, 'export_database'):
-                product_db.export_database(temp_file.name)
+                product_db.export_database(export_path)
             else:
                 raise RuntimeError('Database export not available')
         except Exception as primary_error:
@@ -6533,6 +6536,8 @@ def database_export():
             try:
                 import sqlite3
                 import pandas as pd
+                import tempfile as _tmp
+                import zipfile
                 # Determine SQLite path if available
                 sqlite_path = None
                 try:
@@ -6570,13 +6575,29 @@ def database_export():
                         products_df = pd.read_sql_query(f'SELECT {select_list} FROM products ORDER BY id', sconn)
                     else:
                         products_df = pd.read_sql_query('SELECT id FROM products ORDER BY id', sconn)
-                # Write Excel
-                with pd.ExcelWriter(temp_file.name, engine='openpyxl') as writer:
-                    if not strains_df.empty:
-                        strains_df.to_excel(writer, sheet_name='Strains', index=False)
-                    if 'products_df' in locals() and not products_df.empty:
-                        products_df.to_excel(writer, sheet_name='Products', index=False)
-                logging.info("SQLite fallback export completed")
+                # Try writing Excel; if engine missing, fall back to CSV ZIP
+                try:
+                    with pd.ExcelWriter(export_path, engine='openpyxl') as writer:
+                        if not strains_df.empty:
+                            strains_df.to_excel(writer, sheet_name='Strains', index=False)
+                        if 'products_df' in locals() and not products_df.empty:
+                            products_df.to_excel(writer, sheet_name='Products', index=False)
+                    logging.info("SQLite fallback export completed (Excel)")
+                except Exception as excel_engine_error:
+                    logging.warning(f"Excel engine unavailable, exporting CSV ZIP instead: {excel_engine_error}")
+                    zip_temp = _tmp.NamedTemporaryFile(delete=False, suffix='.zip')
+                    zip_temp.close()
+                    with zipfile.ZipFile(zip_temp.name, 'w', zipfile.ZIP_DEFLATED) as zf:
+                        if not strains_df.empty:
+                            strains_csv = strains_df.to_csv(index=False).encode('utf-8')
+                            zf.writestr('Strains.csv', strains_csv)
+                        if 'products_df' in locals() and not products_df.empty:
+                            products_csv = products_df.to_csv(index=False).encode('utf-8')
+                            zf.writestr('Products.csv', products_csv)
+                    export_path = zip_temp.name
+                    export_mime = 'application/zip'
+                    export_ext = 'zip'
+                    logging.info("SQLite fallback export completed (ZIP)")
             except Exception as fallback_error:
                 import traceback
                 logging.error(f"SQLite fallback export failed: {fallback_error}\n" + traceback.format_exc())
@@ -6586,24 +6607,29 @@ def database_export():
         # Generate descriptive filename with timestamp
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         
-        filename = f"AGT_Product_Database_{timestamp}.xlsx"
+        filename = f"AGT_Product_Database_{timestamp}.{export_ext}"
         response = send_file(
-            temp_file.name,
-            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            export_path,
+            mimetype=export_mime,
             as_attachment=True,
             download_name=filename
         )
         
         # Set proper download filename with headers
         response = set_download_filename(response, filename)
-        response.headers['Content-Type'] = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        response.headers['Content-Type'] = export_mime
         
         # Clean up the temporary file after sending
         @response.call_on_close
         def cleanup():
             try:
-                if os.path.exists(temp_file.name):
-                    os.unlink(temp_file.name)
+                # Clean up both possible temp files
+                for fp in {temp_file.name, export_path}:
+                    try:
+                        if os.path.exists(fp):
+                            os.unlink(fp)
+                    except Exception:
+                        pass
             except Exception as cleanup_error:
                 logging.warning(f"Failed to cleanup temp file {temp_file.name}: {cleanup_error}")
         
