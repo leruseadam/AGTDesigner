@@ -482,8 +482,8 @@
         `;
         showDatabaseModal('Database Analytics Dashboard', loadingHtml);
 
-        // Fetch all data with individual timeout and error handling
-        const fetchWithTimeout = (url, timeout = 10000) => {
+        // Fetch with tighter timeout to avoid long waits
+        const fetchWithTimeout = (url, timeout = 6000) => {
           console.log(`Fetching: ${url}`);
           return Promise.race([
             fetch(url).then(r => {
@@ -496,45 +496,15 @@
             )
           ]);
         };
-
-        Promise.allSettled([
-          fetchWithTimeout('/api/database-stats').catch(e => ({ error: `Stats: ${e.message}`, total_strains: 0 })),
-          fetchWithTimeout('/api/database-vendor-stats').catch(e => ({ 
-            error: `Vendor Stats: ${e.message}`, 
-            summary: { total_vendors: 0, total_brands: 0 }, 
-            vendors: [], 
-            product_types: [], 
-            vendor_brands: [] 
-          })),
-          fetchWithTimeout('/api/database-analytics').catch(e => ({ error: `Analytics: ${e.message}` })),
-          fetchWithTimeout('/api/available-tags').catch(e => { console.error('Available tags failed:', e); return []; })
-        ])
-        .then((results) => {
-          console.log('All promises settled:', results);
-          const [statsResult, vendorStatsResult, analyticsResult, availableTagsResult] = results;
-          const stats = statsResult.value || statsResult.reason || { stats: { total_products: 0, unique_vendors: 0, unique_brands: 0 } };
-          const vendorStats = vendorStatsResult.value || vendorStatsResult.reason || { 
-            summary: { total_vendors: 0, total_brands: 0 }, 
-            vendors: [], 
-            product_types: [], 
-            vendor_brands: [] 
-          };
-          const analytics = analyticsResult.value || analyticsResult.reason || {};
-          const availableTags = availableTagsResult.value || [];
-          
+        // Step 1: Fetch base stats first for fast initial render
+        fetchWithTimeout('/api/database-stats')
+        .then(stats => {
           const totalProducts = stats.stats?.total_products || 0;
           const totalVendors = stats.stats?.unique_vendors || 0;
           const totalBrands = stats.stats?.unique_brands || 0;
           const totalStrains = stats.stats?.unique_strains || 0;
-          
-          console.log('Analytics data loaded:', { 
-            products: totalProducts, 
-            vendors: totalVendors,
-            brands: totalBrands,
-            strains: totalStrains
-          });
-        
-          const analyticsHtml = `
+
+          const baseHtml = `
             <div class="database-analytics">
               <div class="row mb-4">
                 <div class="col-md-3">
@@ -577,19 +547,10 @@
                     <div class="card-header">
                       <h6 class="mb-0">Top Vendors</h6>
                     </div>
-                    <div class="card-body" style="max-height: 300px; overflow-y: auto;">
-                      ${vendorStats.vendors && vendorStats.vendors.length > 0 ? 
-                        vendorStats.vendors.slice(0, 10).map((vendor, index) => 
-                          `<div class="d-flex justify-content-between align-items-center py-2 ${index < vendorStats.vendors.length - 1 ? 'border-bottom' : ''}">
-                            <div>
-                              <strong>${vendor.vendor || 'Unknown'}</strong>
-                              <small class="text-muted d-block">${vendor.unique_brands || 0} brands, ${vendor.unique_product_types || 0} types</small>
-                            </div>
-                            <span class="badge bg-primary">${vendor.product_count || 0}</span>
-                          </div>`
-                        ).join('') : 
-                        '<p class="text-muted">No vendor data available. Upload Excel files to see vendor statistics.</p>'
-                      }
+                    <div id="vendorList" class="card-body" style="max-height: 300px; overflow-y: auto;">
+                      <div class="text-center text-muted">
+                        <span class="spinner-border spinner-border-sm me-2"></span> Loading vendor stats...
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -598,19 +559,10 @@
                     <div class="card-header">
                       <h6 class="mb-0">Top Product Types</h6>
                     </div>
-                    <div class="card-body" style="max-height: 300px; overflow-y: auto;">
-                      ${vendorStats.product_types && vendorStats.product_types.length > 0 ? 
-                        vendorStats.product_types.slice(0, 10).map((type, index) => 
-                          `<div class="d-flex justify-content-between align-items-center py-2 ${index < vendorStats.product_types.length - 1 ? 'border-bottom' : ''}">
-                            <div>
-                              <strong>${type.product_type || 'Unknown'}</strong>
-                              <small class="text-muted d-block">${type.unique_vendors || 0} vendors, ${type.unique_brands || 0} brands</small>
-                            </div>
-                            <span class="badge bg-success">${type.product_count || 0}</span>
-                          </div>`
-                        ).join('') : 
-                        '<p class="text-muted">No product type data available. Upload Excel files to see product analytics.</p>'
-                      }
+                    <div id="productTypeList" class="card-body" style="max-height: 300px; overflow-y: auto;">
+                      <div class="text-center text-muted">
+                        <span class="spinner-border spinner-border-sm me-2"></span> Loading product types...
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -623,30 +575,10 @@
                       <h6 class="mb-0">Top Vendor-Brand Combinations</h6>
                     </div>
                     <div class="card-body">
-                      <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
-                        <table class="table table-sm">
-                          <thead class="sticky-top bg-dark">
-                            <tr>
-                              <th>Vendor</th>
-                              <th>Brand</th>
-                              <th>Product Types</th>
-                              <th>Products</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            ${vendorStats.vendor_brands && vendorStats.vendor_brands.length > 0 ? 
-                              vendorStats.vendor_brands.slice(0, 20).map(combo => 
-                                `<tr>
-                                  <td><strong>${combo.vendor || 'Unknown'}</strong></td>
-                                  <td>${combo.brand || 'Unknown'}</td>
-                                  <td><span class="badge bg-info">${combo.unique_product_types || 0} types</span></td>
-                                  <td><span class="badge bg-primary">${combo.product_count || 0}</span></td>
-                                </tr>`
-                              ).join('') : 
-                              '<tr><td colspan="4" class="text-muted text-center">No vendor-brand data available. Upload Excel files to see detailed analytics.</td></tr>'
-                            }
-                          </tbody>
-                        </table>
+                      <div id="vendorBrandTable" class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                        <div class="text-center text-muted py-3">
+                          <span class="spinner-border spinner-border-sm me-2"></span> Loading detailed combinations...
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -663,20 +595,81 @@
                         'Upload Excel files to populate the database and unlock detailed vendor analytics, strain statistics, and performance metrics.'
                       }
                     </p>
-                    ${stats.error || vendorStats.error || analytics.error ? 
-                      `<small class="text-warning d-block mt-2">Some data may be limited due to: ${[stats.error, vendorStats.error, analytics.error].filter(e => e).join(', ')}</small>` : 
-                      ''
-                    }
                   </div>
                 </div>
               </div>
             </div>
           `;
-          
-          showDatabaseModal('Database Analytics Dashboard', analyticsHtml);
-          
-          // Reset loading flag
-          window._analyticsLoading = false;
+
+          showDatabaseModal('Database Analytics Dashboard', baseHtml);
+
+          // Step 2: Load vendor stats progressively
+          fetchWithTimeout('/api/database-vendor-stats').then(vendorStats => {
+            const vendorList = document.getElementById('vendorList');
+            const productTypeList = document.getElementById('productTypeList');
+            const vendorBrandTable = document.getElementById('vendorBrandTable');
+
+            if (vendorList) {
+              vendorList.innerHTML = (vendorStats.vendors && vendorStats.vendors.length > 0)
+                ? vendorStats.vendors.slice(0, 10).map((vendor, index) => 
+                    `<div class="d-flex justify-content-between align-items-center py-2 ${index < vendorStats.vendors.length - 1 ? 'border-bottom' : ''}">
+                      <div>
+                        <strong>${vendor.vendor || 'Unknown'}</strong>
+                        <small class="text-muted d-block">${vendor.unique_brands || 0} brands, ${vendor.unique_product_types || 0} types</small>
+                      </div>
+                      <span class="badge bg-primary">${vendor.product_count || 0}</span>
+                    </div>`
+                  ).join('')
+                : '<p class="text-muted">No vendor data available. Upload Excel files to see vendor statistics.</p>';
+            }
+
+            if (productTypeList) {
+              productTypeList.innerHTML = (vendorStats.product_types && vendorStats.product_types.length > 0)
+                ? vendorStats.product_types.slice(0, 10).map((type, index) => 
+                    `<div class="d-flex justify-content-between align-items-center py-2 ${index < vendorStats.product_types.length - 1 ? 'border-bottom' : ''}">
+                      <div>
+                        <strong>${type.product_type || 'Unknown'}</strong>
+                        <small class="text-muted d-block">${type.unique_vendors || 0} vendors, ${type.unique_brands || 0} brands</small>
+                      </div>
+                      <span class="badge bg-success">${type.product_count || 0}</span>
+                    </div>`
+                  ).join('')
+                : '<p class="text-muted">No product type data available. Upload Excel files to see product analytics.</p>';
+            }
+
+            if (vendorBrandTable) {
+              vendorBrandTable.innerHTML = `<table class="table table-sm">
+                <thead class="sticky-top bg-dark">
+                  <tr>
+                    <th>Vendor</th>
+                    <th>Brand</th>
+                    <th>Product Types</th>
+                    <th>Products</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${vendorStats.vendor_brands && vendorStats.vendor_brands.length > 0 ? 
+                    vendorStats.vendor_brands.slice(0, 20).map(combo => 
+                      `<tr>
+                        <td><strong>${combo.vendor || 'Unknown'}</strong></td>
+                        <td>${combo.brand || 'Unknown'}</td>
+                        <td><span class="badge bg-info">${combo.unique_product_types || 0} types</span></td>
+                        <td><span class="badge bg-primary">${combo.product_count || 0}</span></td>
+                      </tr>`
+                    ).join('') : 
+                    '<tr><td colspan="4" class="text-muted text-center">No vendor-brand data available. Upload Excel files to see detailed analytics.</td></tr>'
+                  }
+                </tbody>
+              </table>`;
+            }
+          }).catch(e => {
+            console.warn('Vendor stats load failed:', e);
+          }).finally(() => {
+            window._analyticsLoading = false;
+          });
+
+          // Step 3: Optionally load deeper analytics without blocking UI
+          fetchWithTimeout('/api/database-analytics').catch(e => console.warn('Analytics load failed:', e));
         })
         .catch(error => {
           console.error('Error loading database analytics:', error);
