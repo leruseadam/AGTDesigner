@@ -850,58 +850,58 @@ class ProductDatabase:
             existing = cursor.fetchone()
             
             if existing:
-                    product_id, occurrences, existing_name = existing
-                    
-                    # Log duplicate detection and update
-                    logger.info(f"Found existing product: '{existing_name}' (ID: {product_id}, occurrences: {occurrences}) - REPLACING WITH NEW EXCEL DATA")
-                    
-                    # Update existing product with new data (new data always replaces old values)
-                    self._update_existing_product(cursor, product_id, product_data)
-                    conn.commit()
-                    logger.info(f"Successfully replaced existing product '{existing_name}' with new Excel data")
-                    return product_id
+                product_id, occurrences, existing_name = existing
                 
-                # Check for similar products (same name + vendor, different brand)
-                cursor.execute('''
-                    SELECT id, total_occurrences, "Product Name*", "Product Brand"
-                    FROM products 
-                    WHERE normalized_name = %s AND "Vendor/Supplier*" = %s AND "Product Brand" != %s
-                ''', (normalized_name, product_data.get('Vendor/Supplier*'), product_data.get('Product Brand')))
+                # Log duplicate detection and update
+                logger.info(f"Found existing product: '{existing_name}' (ID: {product_id}, occurrences: {occurrences}) - REPLACING WITH NEW EXCEL DATA")
                 
-                similar_products = cursor.fetchall()
-                if similar_products:
-                    logger.info(f"Found {len(similar_products)} similar products with same name '{product_name}' and vendor '{product_data.get('Vendor')}' but different brands")
-                    for similar_id, similar_occurrences, similar_name, similar_brand in similar_products:
-                        logger.debug(f"Similar product: '{similar_name}' (Brand: {similar_brand}, ID: {similar_id})")
+                # Update existing product with new data (new data always replaces old values)
+                self._update_existing_product(cursor, product_id, product_data)
+                conn.commit()
+                logger.info(f"Successfully replaced existing product '{existing_name}' with new Excel data")
+                return product_id
+            
+            # Check for similar products (same name + vendor, different brand)
+            cursor.execute('''
+                SELECT id, total_occurrences, "Product Name*", "Product Brand"
+                FROM products 
+                WHERE normalized_name = %s AND "Vendor/Supplier*" = %s AND "Product Brand" != %s
+            ''', (normalized_name, product_data.get('Vendor/Supplier*'), product_data.get('Product Brand')))
+            
+            similar_products = cursor.fetchall()
+            if similar_products:
+                logger.info(f"Found {len(similar_products)} similar products with same name '{product_name}' and vendor '{product_data.get('Vendor')}' but different brands")
+                for similar_id, similar_occurrences, similar_name, similar_brand in similar_products:
+                    logger.debug(f"Similar product: '{similar_name}' (Brand: {similar_brand}, ID: {similar_id})")
             else:
-                    # Add new product with comprehensive column population
+                # Add new product - Simple working INSERT statement
                 cursor.execute('''
                     INSERT INTO products (
-                            "Product Name*", normalized_name, "Product Type*", first_seen_date, last_seen_date, 
-                            total_occurrences, created_at, updated_at
+                        "Product Name*", normalized_name, "Product Type*", first_seen_date, last_seen_date, 
+                        total_occurrences, created_at, updated_at
                     ) VALUES (
-                            %s, %s, %s, %s, %s, %s, %s, %s
+                        %s, %s, %s, %s, %s, %s, %s, %s
                     ) RETURNING id
                 ''', (
                     product_name,
                     normalized_name,
-                        product_data.get('Product Type*'),
-                        current_date,
-                        current_date,
-                        1,
-                        current_date,
-                        current_date
-                    ))
-                    
+                    product_data.get('Product Type*'),
+                    current_date,
+                    current_date,
+                    1,
+                    current_date,
+                    current_date
+                ))
+                
                 result = cursor.fetchone()
                 if result:
                     product_id = result[0]
                 else:
                     raise Exception("Failed to get product ID after insert")
-            conn.commit()
-                    if DEBUG_ENABLED:
-                        logger.debug(f"Added new product '{product_name}'")
-            return product_id
+                conn.commit()
+                if DEBUG_ENABLED:
+                    logger.debug(f"Added new product '{product_name}'")
+                return product_id
             
         except Exception as e:
             product_name = product_data.get('Product Name*', product_data.get('ProductName', ''))
