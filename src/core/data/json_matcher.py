@@ -2094,7 +2094,7 @@ class JSONMatcher:
                     except Exception as db_entry_error:
                         logging.warning(f"Failed to create database entry for '{product_name}': {db_entry_error}")
             
-            # CRITICAL FIX: Deduplicate by product name - keep only the best match for each unique product
+            # IMPROVED: Less aggressive deduplication - only remove exact duplicates
             def _score_of(p: dict) -> float:
                 for k in ['overall_score', 'fuzzy_score', 'comprehensive_score', 'partial_score', 'score']:
                     v = p.get(k)
@@ -2102,20 +2102,26 @@ class JSONMatcher:
                         return float(v)
                 return 0.0
 
-            # Group products by their final product name and keep only the best match
+            # Only deduplicate if products have EXACT same name AND same vendor AND same brand
             product_groups = {}
             for p in matched_products:
                 product_name = str(p.get('Product Name*', '') or '').strip()
-                if product_name:
-                    if product_name not in product_groups or _score_of(p) > _score_of(product_groups[product_name]):
-                        product_groups[product_name] = p
-                        logging.info(f"✅ Kept best match for '{product_name}' (score: {_score_of(p):.1f})")
+                vendor = str(p.get('Vendor/Supplier*', '') or '').strip()
+                brand = str(p.get('Product Brand', '') or '').strip()
+                
+                # Create a unique key combining name, vendor, and brand
+                unique_key = f"{product_name}|{vendor}|{brand}"
+                
+                if unique_key:
+                    if unique_key not in product_groups or _score_of(p) > _score_of(product_groups[unique_key]):
+                        product_groups[unique_key] = p
+                        logging.info(f"✅ Kept best match for '{product_name}' by {vendor} ({brand}) (score: {_score_of(p):.1f})")
                     else:
-                        existing_score = _score_of(product_groups[product_name])
-                        logging.info(f"⚠️  Skipped duplicate '{product_name}' (score: {_score_of(p):.1f} <= {existing_score:.1f})")
+                        existing_score = _score_of(product_groups[unique_key])
+                        logging.info(f"⚠️  Skipped exact duplicate '{product_name}' by {vendor} ({brand}) (score: {_score_of(p):.1f} <= {existing_score:.1f})")
             
             matched_products = list(product_groups.values())
-            logging.info(f"CRITICAL FIX: Deduplicated to {len(matched_products)} unique products from {len(matched_products) + sum(1 for _ in product_groups if len(product_groups) > 1)} total matches")
+            logging.info(f"IMPROVED DEDUPLICATION: Kept {len(matched_products)} unique products (only removed exact duplicates)")
                 
             logging.info(f"CRITICAL FIX: After deduplication: {len(matched_products)} unique products")
             logging.info(f"CRITICAL FIX: Input items: {len(items)}, Processed items: {len(unique_items)}, Final products: {len(matched_products)}")
