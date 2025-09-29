@@ -679,7 +679,8 @@ def resource_path(relative_path):
     return os.path.join(base_path, relative_path)
 
 def create_app():
-    app = Flask(__name__, static_url_path='/static', static_folder='static')
+    import flask
+    app = flask.Flask(__name__, static_url_path='/static', static_folder='static')
     app.config.from_object('config.Config')
     
     # Enable development mode for auto-reload and debug features
