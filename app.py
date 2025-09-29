@@ -579,13 +579,14 @@ def get_excel_processor():
             return None
 
 def get_product_database(store_name=None):
-    """Lazy load PostgreSQL ProductDatabase to avoid startup delay."""
+    """Lazy load SQLite ProductDatabase to avoid startup delay."""
     global _product_database
     if _product_database is None or (store_name and getattr(_product_database, 'store_name', None) != store_name):
-        # Use PostgreSQL for production
-        from src.core.data.product_database import get_postgresql_database
-        _product_database = get_postgresql_database(store_name)
-        logging.info(f"PostgreSQL ProductDatabase created for store '{store_name or 'AGT_Bothell'}'")
+        # Use SQLite for local development
+        from src.core.data.product_database import ProductDatabase
+        _product_database = ProductDatabase('product_database.db', store_name)
+        _product_database.init_database()
+        logging.info(f"SQLite ProductDatabase created for store '{store_name or 'AGT_Bothell'}'")
     return _product_database
 
 def get_json_matcher():
@@ -1294,13 +1295,14 @@ def get_session_json_matcher():
             return None
 
 def get_session_product_database():
-    """Get PostgreSQL ProductDatabase instance for the current session."""
+    """Get SQLite ProductDatabase instance for the current session."""
     try:
         if not hasattr(app, '_product_database'):
-            # Use PostgreSQL for production
-            from src.core.data.product_database import get_postgresql_database
-            app._product_database = get_postgresql_database('AGT_Bothell')
-            logging.info(f"Created new PostgreSQL ProductDatabase instance for session")
+            # Use SQLite for local development
+            from src.core.data.product_database import ProductDatabase
+            app._product_database = ProductDatabase('product_database.db', 'AGT_Bothell')
+            app._product_database.init_database()
+            logging.info(f"Created new SQLite ProductDatabase instance for session")
         return app._product_database
     except Exception as e:
         logging.error(f"Error getting session product database: {e}")
