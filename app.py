@@ -177,6 +177,8 @@ from src.core.data.excel_processor import ExcelProcessor, get_default_upload_fil
 from src.core.data.json_matcher import map_inventory_type_to_product_type
 import random
 # Optional import for flask_caching
+# Import optimized upload handler
+from optimized_excel_upload import create_optimized_upload_routes
 try:
     from flask_caching import Cache
     CACHE_AVAILABLE = True
@@ -1698,9 +1700,9 @@ def upload_file():
 
 @app.route('/upload-pythonanywhere', methods=['POST'])
 def upload_file_simple_pythonanywhere():
-    """Ultra-simple upload endpoint specifically for PythonAnywhere - no background processing"""
+    """OPTIMIZED upload endpoint with increased row limits and better performance"""
     try:
-        logging.info("=== PYTHONANYWHERE UPLOAD START ===")
+        logging.info("=== OPTIMIZED PYTHONANYWHERE UPLOAD START ===")
         
         if 'file' not in request.files:
             return jsonify({'error': 'No file uploaded'}), 400
@@ -1720,7 +1722,7 @@ def upload_file_simple_pythonanywhere():
         temp_path = os.path.join(tempfile.gettempdir(), f"upload_{sanitized_filename}")
         file.save(temp_path)
         
-        # Process immediately (no background processing)
+        # Process with optimizations
         try:
             from src.core.data.excel_processor import ExcelProcessor
             processor = ExcelProcessor()
@@ -1730,21 +1732,47 @@ def upload_file_simple_pythonanywhere():
                 processor.enable_product_db_integration(True)
                 logging.info("[UPLOAD] Product database integration enabled for new product storage")
             
-            # Load file with full method (not fast_load_file)
-            # Limit rows to prevent timeout on large files
+            # OPTIMIZATION: Try multiple loading methods with increased row limits
             import pandas as pd
-            try:
-                # Load with minimal rows and processing
-                df = pd.read_excel(temp_path, nrows=1000, engine='openpyxl')  # Reduced to 1000 rows
-                if not df.empty:
-                    processor.df = df
-                    success = True
-                    logging.info(f"[UPLOAD] Loaded {len(df)} rows (fast mode)")
-                else:
-                    success = False
-            except Exception as e:
-                logging.warning(f"Fast load failed, trying basic load: {e}")
-                success = processor.load_file(temp_path)
+            success = False
+            
+            # Method 1: Try ultra-fast load if available
+            if hasattr(processor, 'ultra_fast_load'):
+                try:
+                    success = processor.ultra_fast_load(temp_path)
+                    logging.info("[UPLOAD] Used ultra_fast_load method")
+                except Exception as e:
+                    logging.warning(f"Ultra-fast load failed: {e}")
+            
+            # Method 2: Try PythonAnywhere fast load
+            if not success and hasattr(processor, 'pythonanywhere_fast_load'):
+                try:
+                    success = processor.pythonanywhere_fast_load(temp_path)
+                    logging.info("[UPLOAD] Used pythonanywhere_fast_load method")
+                except Exception as e:
+                    logging.warning(f"PythonAnywhere fast load failed: {e}")
+            
+            # Method 3: Try optimized pandas read with much higher row limit
+            if not success:
+                try:
+                    # OPTIMIZATION: Increased from 1000 to 50000 rows
+                    df = pd.read_excel(temp_path, nrows=50000, engine='openpyxl', dtype=str, na_filter=False)
+                    if not df.empty:
+                        processor.df = df
+                        success = True
+                        logging.info(f"[UPLOAD] Loaded {len(df)} rows (optimized pandas)")
+                    else:
+                        success = False
+                except Exception as e:
+                    logging.warning(f"Optimized pandas load failed: {e}")
+            
+            # Method 4: Fallback to standard load
+            if not success:
+                try:
+                    success = processor.load_file(temp_path)
+                    logging.info("[UPLOAD] Used standard load_file method")
+                except Exception as e:
+                    logging.warning(f"Standard load failed: {e}")
             
             if not success or processor.df is None or processor.df.empty:
                 return jsonify({'error': 'Failed to process file'}), 400
@@ -1753,7 +1781,7 @@ def upload_file_simple_pythonanywhere():
             global excel_processor
             excel_processor = processor
             
-            # Store Excel data in database
+            # Store Excel data in database (non-blocking)
             try:
                 if hasattr(processor, '_store_upload_in_database'):
                     logging.info("[UPLOAD] Storing Excel data in database...")
@@ -1788,7 +1816,8 @@ def upload_file_simple_pythonanywhere():
                 'message': 'File uploaded and processed successfully',
                 'filename': sanitized_filename,
                 'rows': len(processor.df),
-                'status': 'ready'
+                'status': 'ready',
+                'optimization': 'enhanced'
             })
             
         except Exception as process_error:
@@ -2688,10 +2717,10 @@ def process_lightning():
         # Quick row-limited load for speed
         import pandas as pd
         try:
-            # Load only first 1000 rows for lightning speed
-            df = pd.read_excel(file_path, nrows=1000, engine='openpyxl')
+            # OPTIMIZATION: Load more rows for better data coverage
+            df = pd.read_excel(file_path, nrows=50000, engine='openpyxl', dtype=str, na_filter=False)
             processor.df = df
-            logging.info(f"[LIGHTNING] Loaded {len(df)} rows (limited for speed)")
+            logging.info(f"[LIGHTNING] Loaded {len(df)} rows (optimized for speed)")
         except Exception as e:
             logging.warning(f"[LIGHTNING] Quick load failed, trying full load: {e}")
             success = processor.load_file(file_path)
@@ -12862,6 +12891,9 @@ def fix_description_format():
     except Exception as e:
         logging.error(f"Error fixing description format: {str(e)}")
         return jsonify({'error': f'Failed to fix description format: {str(e)}'}), 500
+
+# Register optimized upload routes
+create_optimized_upload_routes(app)
 
 if __name__ == '__main__':
     # Use the global app instance that has all routes registered
