@@ -838,34 +838,39 @@ class ProductDatabase:
                 conn = self._get_connection()
                 cursor = conn.cursor()
                 
-                # Simple INSERT - just add the product with basic info
-                cursor.execute('''
-                    INSERT INTO products (
-                        "Product Name*", normalized_name, "Product Type*", first_seen_date, last_seen_date, 
-                        total_occurrences, created_at, updated_at
-                    ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s
-                    ) RETURNING id
-                ''', (
-                    product_name,
-                    normalized_name,
-                    product_type,
-                    current_date,
-                    current_date,
-                    1,
-                    current_date,
-                    current_date
-                ))
-                
-                result = cursor.fetchone()
-                if result:
-                    product_id = result[0]
-                else:
-                    raise Exception("Failed to get product ID after insert")
-                conn.commit()
-                
-                logger.info(f"Added new product '{product_name}' with ID {product_id}")
-                return product_id
+                try:
+                    # Simple INSERT - just add the product with basic info
+                    cursor.execute('''
+                        INSERT INTO products (
+                            "Product Name*", normalized_name, "Product Type*", first_seen_date, last_seen_date, 
+                            total_occurrences, created_at, updated_at
+                        ) VALUES (
+                            %s, %s, %s, %s, %s, %s, %s, %s
+                        ) RETURNING id
+                    ''', (
+                        product_name,
+                        normalized_name,
+                        product_type,
+                        current_date,
+                        current_date,
+                        1,
+                        current_date,
+                        current_date
+                    ))
+                    
+                    result = cursor.fetchone()
+                    if result:
+                        product_id = result[0]
+                    else:
+                        raise Exception("Failed to get product ID after insert")
+                    conn.commit()
+                    
+                    logger.info(f"Added new product '{product_name}' with ID {product_id}")
+                    return product_id
+                    
+                except Exception as e:
+                    conn.rollback()
+                    raise e
             
         except Exception as e:
             product_name = product_data.get('Product Name*', product_data.get('ProductName', ''))
