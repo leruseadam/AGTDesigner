@@ -6194,62 +6194,104 @@ def database_schema():
 def database_vendor_stats():
     """Get detailed vendor and brand statistics from the product database."""
     try:
-        product_db = get_product_database('AGT_Bothell')
+        import time
+        t0 = time.perf_counter()
+        current_store = session.get('selected_store', 'AGT_Bothell')
+        cache_key = f'db-vendor-stats:{current_store}'
+        cached = _cache_get(cache_key, ttl_seconds=30)
+        if cached is not None:
+            logging.info(f"[CACHE HIT] /api/database-vendor-stats store='{current_store}' served in {int((time.perf_counter()-t0)*1000)}ms")
+            return jsonify(cached)
+
+        product_db = get_product_database(current_store)
         # Ensure DB ready
         if not getattr(product_db, '_initialized', False):
             product_db.init_database()
 
-        stats = {}
-        if hasattr(product_db, 'get_strain_statistics'):
-            stats = product_db.get_strain_statistics() or {}
-
-        # Adapt to legacy response shape used by modal
         vendors = []
         brands = []
         product_types = []
         vendor_brands = []
 
-        # Vendor counts
-        for item in stats.get('vendor_statistics', []):
-            vendors.append({
-                'vendor': item.get('vendor', ''),
-                'product_count': item.get('count', 0)
-            })
+        # Primary: use high-level stats provider
+        try:
+            if hasattr(product_db, 'get_strain_statistics'):
+                stats = product_db.get_strain_statistics() or {}
+                for item in (stats.get('vendor_statistics') or []):
+                    vendors.append({'vendor': item.get('vendor', ''), 'product_count': item.get('count', 0)})
+                for item in (stats.get('brand_statistics') or []):
+                    brands.append({'brand': item.get('brand', ''), 'product_count': item.get('count', 0)})
+                for item in (stats.get('product_type_statistics') or []):
+                    product_types.append({'product_type': item.get('product_type', ''), 'product_count': item.get('count', 0)})
+                for item in (stats.get('vendor_brand_combinations') or []):
+                    vendor_brands.append({'vendor': item.get('vendor', ''), 'brand': item.get('brand', ''), 'product_count': item.get('count', 0)})
+        except Exception as e_stats:
+            logging.warning(f"Primary stats provider failed: {e_stats}")
 
-        # Brand counts
-        for item in stats.get('brand_statistics', []):
-            brands.append({
-                'brand': item.get('brand', ''),
-                'product_count': item.get('count', 0)
-            })
+        # Fallback: direct SQL if primary empty
+        if not vendors and hasattr(product_db, '_get_connection'):
+            try:
+                conn = product_db._get_connection()
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT "Vendor/Supplier*", COUNT(*) as count
+                    FROM products 
+                    WHERE "Vendor/Supplier*" IS NOT NULL AND "Vendor/Supplier*" != ''
+                    GROUP BY "Vendor/Supplier*"
+                    ORDER BY count DESC
+                    LIMIT 20
+                ''')
+                vendors = [{'vendor': v, 'product_count': c} for v, c in cursor.fetchall()]
 
-        # Product type counts
-        for item in stats.get('product_type_statistics', []):
-            product_types.append({
-                'product_type': item.get('product_type', ''),
-                'product_count': item.get('count', 0)
-            })
+                cursor.execute('''
+                    SELECT "Product Brand", COUNT(*) as count
+                    FROM products 
+                    WHERE "Product Brand" IS NOT NULL AND "Product Brand" != ''
+                    GROUP BY "Product Brand"
+                    ORDER BY count DESC
+                    LIMIT 20
+                ''')
+                brands = [{'brand': b, 'product_count': c} for b, c in cursor.fetchall()]
 
-        # Vendor-brand combinations
-        for item in stats.get('vendor_brand_combinations', []):
-            vendor_brands.append({
-                'vendor': item.get('vendor', ''),
-                'brand': item.get('brand', ''),
-                'product_count': item.get('count', 0)
-            })
+                cursor.execute('''
+                    SELECT "Product Type*", COUNT(*) as count
+                    FROM products 
+                    WHERE "Product Type*" IS NOT NULL AND "Product Type*" != ''
+                    GROUP BY "Product Type*"
+                    ORDER BY count DESC
+                    LIMIT 20
+                ''')
+                product_types = [{'product_type': t, 'product_count': c} for t, c in cursor.fetchall()]
 
-        return jsonify({
-            'vendors': vendors,
-            'brands': brands,
-            'product_types': product_types,
-            'vendor_brands': vendor_brands,
+                cursor.execute('''
+                    SELECT "Vendor/Supplier*", "Product Brand", COUNT(*) as count
+                    FROM products 
+                    WHERE "Vendor/Supplier*" IS NOT NULL AND "Vendor/Supplier*" != ''
+                      AND "Product Brand" IS NOT NULL AND "Product Brand" != ''
+                    GROUP BY "Vendor/Supplier*", "Product Brand"
+                    ORDER BY count DESC
+                    LIMIT 20
+                ''')
+                vendor_brands = [{'vendor': v, 'brand': b, 'product_count': c} for v, b, c in cursor.fetchall()]
+            except Exception as e_fb:
+                logging.error(f"Fallback SQL for vendor stats failed: {e_fb}")
+
+        payload = {
+            'vendors': vendors or [],
+            'brands': brands or [],
+            'product_types': product_types or [],
+            'vendor_brands': vendor_brands or [],
             'summary': {
-                'total_vendors': len(vendors),
-                'total_brands': len(brands),
-                'total_product_types': len(product_types),
-                'total_vendor_brand_combinations': len(vendor_brands)
+                'total_vendors': len(vendors or []),
+                'total_brands': len(brands or []),
+                'total_product_types': len(product_types or []),
+                'total_vendor_brand_combinations': len(vendor_brands or [])
             }
-        })
+        }
+        _cache_set(cache_key, payload)
+        total_ms = int((time.perf_counter() - t0) * 1000)
+        logging.info(f"[CACHE SET] /api/database-vendor-stats store='{current_store}' computed in {total_ms}ms")
+        return jsonify(payload)
     except Exception as e:
         logging.error(f"Error getting vendor stats: {str(e)}")
         return jsonify({'error': str(e)}), 500
