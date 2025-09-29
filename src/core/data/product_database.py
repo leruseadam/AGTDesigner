@@ -859,6 +859,7 @@ class ProductDatabase:
                     if existing_product:
                         # Update existing product
                         product_id = existing_product[0]
+                        logger.debug(f"Found existing product '{product_name}' with ID {product_id}, updating...")
                         cursor.execute('''
                             UPDATE products SET 
                                 last_seen_date = %s,
@@ -867,7 +868,7 @@ class ProductDatabase:
                             WHERE id = %s
                         ''', (current_date, current_date, product_id))
                         conn.commit()
-                        logger.info(f"Updated existing product '{product_name}' with ID {product_id}")
+                        logger.info(f"✅ Updated existing product '{product_name}' with ID {product_id}")
                         return product_id
                     else:
                         # Insert new product
@@ -894,12 +895,13 @@ class ProductDatabase:
                         result = cursor.fetchone()
                         if result:
                             product_id = result[0]
+                            conn.commit()
+                            logger.info(f"✅ Added new product '{product_name}' with ID {product_id}")
+                            return product_id
                         else:
+                            conn.rollback()
+                            logger.error(f"❌ Failed to get product ID after insert for '{product_name}'")
                             raise Exception("Failed to get product ID after insert")
-                        conn.commit()
-                        
-                        logger.info(f"Added new product '{product_name}' with ID {product_id}")
-                        return product_id
                     
                 except Exception as e:
                     conn.rollback()
@@ -1206,9 +1208,11 @@ class ProductDatabase:
                     # Track this product to prevent duplicates within the same upload
                     self._current_upload_products.add(duplicate_key)
                     # Store the product in database
+                    logger.debug(f"Row {index + 1}: Attempting to store product '{product_name}' (vendor: {vendor}, type: {product_type})")
                     product_id = self.add_or_update_product(product_data)
                     if product_id:
                         stored_count += 1
+                        logger.info(f"Row {index + 1}: ✅ Successfully stored product '{product_name}' with ID {product_id}")
                     elif product_id is None:
                         # Product was skipped as duplicate
                         skipped_duplicates += 1
@@ -1216,7 +1220,8 @@ class ProductDatabase:
                         continue
                     else:
                         error_count += 1
-                        errors.append(f"Row {index + 1}: Failed to store product")
+                        errors.append(f"Row {index + 1}: Failed to store product '{product_name}'")
+                        logger.error(f"Row {index + 1}: ❌ Failed to store product '{product_name}' - add_or_update_product returned {product_id}")
                         
                 except Exception as row_error:
                     error_count += 1

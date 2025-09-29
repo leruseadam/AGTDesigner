@@ -1729,24 +1729,48 @@ def upload_file_simple_pythonanywhere():
             
             # Store Excel data in database
             try:
+                logging.info(f"[UPLOAD] DataFrame shape: {processor.df.shape}, columns: {list(processor.df.columns)[:5]}...")
+                logging.info(f"[UPLOAD] First few product names: {processor.df['Product Name*'].head(3).tolist()}")
+                
                 if hasattr(processor, '_store_upload_in_database'):
-                    logging.info("[UPLOAD] Storing Excel data in database...")
+                    logging.info("[UPLOAD] Using ExcelProcessor._store_upload_in_database method...")
                     storage_result = processor._store_upload_in_database(processor.df, temp_path)
                     logging.info(f"[UPLOAD] ✅ Database storage completed: {storage_result}")
+                    
+                    # Log detailed results
+                    stored = storage_result.get('stored', 0)
+                    updated = storage_result.get('updated', 0)
+                    errors = storage_result.get('errors', 0)
+                    excluded = storage_result.get('excluded_json_matches', 0)
+                    logging.info(f"[UPLOAD] DETAILED RESULTS: stored={stored}, updated={updated}, errors={errors}, excluded={excluded}")
                 else:
                     logging.warning("[UPLOAD] ExcelProcessor does not have _store_upload_in_database method")
                     # Try alternative database storage method
                     try:
                         current_store = session.get('selected_store', 'AGT_Bothell')
+                        logging.info(f"[UPLOAD] Using ProductDatabase.store_excel_data for store: {current_store}")
                         product_db = get_product_database(current_store)
                         if hasattr(product_db, 'store_excel_data'):
                             logging.info("[UPLOAD] Using ProductDatabase.store_excel_data method...")
                             storage_result = product_db.store_excel_data(processor.df, temp_path)
                             logging.info(f"[UPLOAD] ✅ Alternative database storage completed: {storage_result}")
+                            
+                            # Log detailed results
+                            stored = storage_result.get('stored', 0)
+                            updated = storage_result.get('updated', 0)
+                            errors = storage_result.get('errors', 0)
+                            excluded = storage_result.get('excluded_json_matches', 0)
+                            logging.info(f"[UPLOAD] DETAILED RESULTS: stored={stored}, updated={updated}, errors={errors}, excluded={excluded}")
+                        else:
+                            logging.error("[UPLOAD] ProductDatabase does not have store_excel_data method")
                     except Exception as db_error:
                         logging.error(f"[UPLOAD] Database storage failed: {db_error}")
+                        import traceback
+                        logging.error(f"[UPLOAD] Database error traceback: {traceback.format_exc()}")
             except Exception as storage_error:
                 logging.error(f"[UPLOAD] Error storing data in database: {storage_error}")
+                import traceback
+                logging.error(f"[UPLOAD] Storage error traceback: {traceback.format_exc()}")
             
             # Update session
             session['file_path'] = temp_path
