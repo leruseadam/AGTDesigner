@@ -45,20 +45,54 @@ def get_conn():
     )
 
 
+def table_has_column(cur, table: str, column: str) -> bool:
+    cur.execute(
+        """
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = %s AND column_name = %s
+        """,
+        (table, column.strip('"')),
+    )
+    return cur.fetchone() is not None
+
+
+def pick_column(cur, candidates):
+    for col in candidates:
+        # Check both quoted and unquoted by stripping quotes for information_schema
+        if table_has_column(cur, 'products', col):
+            return col
+    return None
+
+
 def main():
     conn = get_conn()
     conn.autocommit = False
     try:
         cur = conn.cursor()
 
+        # Detect correct column names in products
+        strain_col = pick_column(cur, ['Product Strain', 'ProductStrain', 'product_strain', 'strain'])
+        if not strain_col:
+            raise RuntimeError('Could not find strain column in products table')
+        lineage_col = pick_column(cur, ['Lineage', 'lineage'])
+        # Build SQL-safe identifier (quoted if contains uppercase/space)
+        def col_id(name: str) -> str:
+            # If original contains any non-lowercase or spaces, quote it
+            if not name.islower() or ' ' in name:
+                return f'"{name}"'
+            return name
+        strain_id = col_id(strain_col)
+        lineage_id = col_id(lineage_col) if lineage_col else None
+
         # 1) Gather distinct strain names from products
         cur.execute(
-            '''
-            SELECT DISTINCT TRIM("Product Strain")
+            f'''
+            SELECT DISTINCT TRIM({strain_id})
             FROM products
-            WHERE "Product Strain" IS NOT NULL
-              AND TRIM("Product Strain") <> ''
-              AND TRIM("Product Strain") <> ' '
+            WHERE {strain_id} IS NOT NULL
+              AND TRIM({strain_id}) <> ''
+              AND TRIM({strain_id}) <> ' '
             '''
         )
         raw = [r[0] for r in cur.fetchall()]
@@ -111,13 +145,15 @@ def main():
             ''')
 
         # 3) Link products to strains by normalized name
-        cur.execute('''
+        cur.execute(
+            f'''
             UPDATE products p
             SET strain_id = s.id
             FROM strains s
-            WHERE s.normalized_name = LOWER(TRIM(p."Product Strain"))
+            WHERE s.normalized_name = LOWER(TRIM(p.{strain_id}))
               AND (p.strain_id IS NULL OR p.strain_id <> s.id)
-        ''')
+            '''
+        )
         print(f"Linked products to strains: {cur.rowcount} rows updated")
 
         # 4) Recompute total_occurrences for strains
@@ -136,31 +172,36 @@ def main():
         ''', (now,))
         print(f"Updated total_occurrences for strains: {cur.rowcount} rows")
 
-        # 5) Set canonical_lineage as mode of non-empty product Lineage per strain
-        cur.execute('''
-            WITH ranked AS (
-                SELECT s.id AS strain_id, p."Lineage" AS lineage, COUNT(*) AS cnt,
-                       ROW_NUMBER() OVER (PARTITION BY s.id ORDER BY COUNT(*) DESC) AS rn
-                FROM strains s
-                JOIN products p ON p.strain_id = s.id
-                WHERE p."Lineage" IS NOT NULL AND TRIM(p."Lineage") <> ''
-                GROUP BY s.id, p."Lineage"
-            )
-            UPDATE strains s
-            SET canonical_lineage = r.lineage,
-                updated_at = %s
-            FROM ranked r
-            WHERE r.rn = 1 AND s.id = r.strain_id
-        ''', (now,))
-        print(f"Updated canonical_lineage for strains: {cur.rowcount} rows")
+        # 5) Set canonical_lineage as mode of non-empty product Lineage per strain (if lineage column exists)
+        if lineage_id:
+            cur.execute(
+                f'''
+                WITH ranked AS (
+                    SELECT s.id AS strain_id, p.{lineage_id} AS lineage, COUNT(*) AS cnt,
+                           ROW_NUMBER() OVER (PARTITION BY s.id ORDER BY COUNT(*) DESC) AS rn
+                    FROM strains s
+                    JOIN products p ON p.strain_id = s.id
+                    WHERE p.{lineage_id} IS NOT NULL AND TRIM(p.{lineage_id}) <> ''
+                    GROUP BY s.id, p.{lineage_id}
+                )
+                UPDATE strains s
+                SET canonical_lineage = r.lineage,
+                    updated_at = %s
+                FROM ranked r
+                WHERE r.rn = 1 AND s.id = r.strain_id
+                '''
+            , (now,))
+            print(f"Updated canonical_lineage for strains: {cur.rowcount} rows")
 
         # 6) Some products may have only generic/empty strain; optionally clear their strain_id
         if SKIP_GENERIC_BUCKETS:
-            cur.execute('''
+            cur.execute(
+                f'''
                 UPDATE products
                 SET strain_id = NULL
-                WHERE LOWER(TRIM("Product Strain")) IN (%s, %s)
-            ''', ("mixed", "cbd blend"))
+                WHERE LOWER(TRIM({strain_id})) IN (%s, %s)
+                '''
+            , ("mixed", "cbd blend"))
 
         # Report
         cur.execute('SELECT COUNT(*) FROM strains')
