@@ -6517,6 +6517,18 @@ def database_export():
         # Use selected store if available
         current_store = session.get('selected_store', 'AGT_Bothell')
         product_db = get_product_database(current_store)
+
+        # Optional debug mode: return diagnostics instead of a file
+        try_debug = request.args.get('debug', '0') == '1'
+        debug_info = {
+            'store': current_store,
+            'mode': 'xlsx',
+            'sqlite_path_checked': None,
+            'products_table_exists': None,
+            'selected_columns': [],
+            'strains_rows': None,
+            'products_rows': None
+        }
         
         # Create temporary Excel file by default
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
@@ -6546,12 +6558,17 @@ def database_export():
                     sqlite_path = None
                 if not sqlite_path or not os.path.exists(sqlite_path):
                     sqlite_path = os.path.join(current_dir, 'uploads', 'product_database.db')
+                debug_info['sqlite_path_checked'] = sqlite_path
                 with sqlite3.connect(sqlite_path) as sconn:
                     # Export strains table if present
                     try:
                         strains_df = pd.read_sql_query('SELECT strain_name, canonical_lineage, total_occurrences, first_seen_date, last_seen_date FROM strains ORDER BY total_occurrences DESC', sconn)
                     except Exception:
                         strains_df = pd.DataFrame()
+                    try:
+                        debug_info['strains_rows'] = int(strains_df.shape[0])
+                    except Exception:
+                        pass
                     # Discover available product columns
                     try:
                         cur = sconn.cursor()
@@ -6563,6 +6580,7 @@ def database_export():
                     except Exception:
                         products_table_exists = False
                         product_columns = []
+                    debug_info['products_table_exists'] = bool(products_table_exists)
                     desired_columns = [
                         'Product Name*', 'Product Type*', 'Vendor/Supplier*', 'Product Brand', 'Lineage',
                         'Description', 'Weight*', 'Units', 'Price', 'Product Strain', 'Quantity*',
@@ -6575,6 +6593,7 @@ def database_export():
                     ]
                     if products_table_exists:
                         selected = [c for c in desired_columns if c in product_columns]
+                        debug_info['selected_columns'] = selected
                         if selected:
                             select_list = ', '.join([f'"{c}"' for c in selected])
                             products_df = pd.read_sql_query(f'SELECT {select_list} FROM products ORDER BY id', sconn)
@@ -6583,6 +6602,10 @@ def database_export():
                     else:
                         # No products table found; return empty sheet with sane headers
                         products_df = pd.DataFrame(columns=['id'] + desired_columns)
+                    try:
+                        debug_info['products_rows'] = int(products_df.shape[0])
+                    except Exception:
+                        pass
                 # Try writing Excel; if engine missing, fall back to CSV ZIP
                 try:
                     with pd.ExcelWriter(export_path, engine='openpyxl') as writer:
@@ -6605,11 +6628,17 @@ def database_export():
                     export_path = zip_temp.name
                     export_mime = 'application/zip'
                     export_ext = 'zip'
+                    debug_info['mode'] = 'zip'
                     logging.info("SQLite fallback export completed (ZIP)")
             except Exception as fallback_error:
                 import traceback
                 logging.error(f"SQLite fallback export failed: {fallback_error}\n" + traceback.format_exc())
+                if try_debug:
+                    return jsonify({'error': str(fallback_error), 'debug': debug_info}), 500
                 raise
+
+        if try_debug:
+            return jsonify({'success': True, 'debug': debug_info})
         
         # Send file with proper cleanup
         # Generate descriptive filename with timestamp
