@@ -81,7 +81,7 @@ PYTHONANYWHERE_CONFIG = {
     'enable_caching': True,
     'cache_ttl': 300,  # 5 minutes
     'missing_dependencies': MISSING_DEPENDENCIES,
-    'disable_product_db_integration': True,  # Disable for performance
+    'disable_product_db_integration': False,  # Enable database integration
     'enable_fast_mode': True  # Enable all performance optimizations
 }
 
