@@ -2,7 +2,7 @@ import os
 import sys
 import psycopg2
 from psycopg2.extras import execute_values
-from datetime import datetime
+from datetime import datetime, timezone, date
 
 """
 Backfill/repair strains on PostgreSQL.
@@ -112,24 +112,24 @@ def main():
 
         print(f"Found {len(unique_candidates)} distinct strain candidates from products")
 
-        # 2) Upsert strains by normalized_name
-        # Create temp table for bulk upsert input
-        now = datetime.utcnow().isoformat()
+        # 2) Upsert strains by normalized_name using proper DATE/TIMESTAMPTZ types
+        today = date.today()
+        now_ts = datetime.now(timezone.utc)
         values = []
         for orig, norm in unique_candidates:
-            values.append((orig, norm, None, now, now, 0.0, None, now, now))
+            values.append((orig, norm, None, today, today, 0.0, None, now_ts, now_ts))
         if values:
             cur.execute('''
                 CREATE TEMP TABLE tmp_strains (
                     strain_name TEXT,
                     normalized_name TEXT,
                     canonical_lineage TEXT,
-                    first_seen_date TEXT,
-                    last_seen_date TEXT,
+                    first_seen_date DATE,
+                    last_seen_date DATE,
                     lineage_confidence REAL,
                     sovereign_lineage TEXT,
-                    created_at TEXT,
-                    updated_at TEXT
+                    created_at TIMESTAMPTZ,
+                    updated_at TIMESTAMPTZ
                 ) ON COMMIT DROP
             ''')
             execute_values(cur, 'INSERT INTO tmp_strains VALUES %s', values)
@@ -169,7 +169,7 @@ def main():
                 updated_at = %s
             FROM counts c
             WHERE s.id = c.strain_id
-        ''', (now,))
+        ''', (now_ts,))
         print(f"Updated total_occurrences for strains: {cur.rowcount} rows")
 
         # 5) Set canonical_lineage as mode of non-empty product Lineage per strain (if lineage column exists)
@@ -190,7 +190,7 @@ def main():
                 FROM ranked r
                 WHERE r.rn = 1 AND s.id = r.strain_id
                 '''
-            , (now,))
+            , (now_ts,))
             print(f"Updated canonical_lineage for strains: {cur.rowcount} rows")
 
         # 6) Some products may have only generic/empty strain; optionally clear their strain_id
