@@ -6522,17 +6522,73 @@ def database_export():
         import tempfile
         import os
         
-        product_db = get_product_database('AGT_Bothell')
+        # Use selected store if available
+        current_store = session.get('selected_store', 'AGT_Bothell')
+        product_db = get_product_database(current_store)
         
         # Create temporary file
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
         temp_file.close()
         
-        # Export database using abstraction (works with PostgreSQL)
-        if hasattr(product_db, 'export_database'):
-            product_db.export_database(temp_file.name)
-        else:
-            raise RuntimeError('Database export not available')
+        # Export database using abstraction; on failure, fall back to SQLite direct export
+        try:
+            if hasattr(product_db, 'export_database'):
+                product_db.export_database(temp_file.name)
+            else:
+                raise RuntimeError('Database export not available')
+        except Exception as primary_error:
+            logging.error(f"Primary export failed, attempting SQLite fallback: {primary_error}")
+            try:
+                import sqlite3
+                import pandas as pd
+                # Determine SQLite path if available
+                sqlite_path = None
+                try:
+                    sqlite_path = getattr(product_db, 'db_path', None)
+                except Exception:
+                    sqlite_path = None
+                if not sqlite_path or not os.path.exists(sqlite_path):
+                    sqlite_path = os.path.join(current_dir, 'uploads', 'product_database.db')
+                with sqlite3.connect(sqlite_path) as sconn:
+                    # Export strains table if present
+                    try:
+                        strains_df = pd.read_sql_query('SELECT strain_name, canonical_lineage, total_occurrences, first_seen_date, last_seen_date FROM strains ORDER BY total_occurrences DESC', sconn)
+                    except Exception:
+                        strains_df = pd.DataFrame()
+                    # Discover available product columns
+                    try:
+                        cur = sconn.cursor()
+                        cur.execute("PRAGMA table_info(products)")
+                        product_columns = [row[1] for row in cur.fetchall()]
+                    except Exception:
+                        product_columns = []
+                    desired_columns = [
+                        'Product Name*', 'Product Type*', 'Vendor/Supplier*', 'Product Brand', 'Lineage',
+                        'Description', 'Weight*', 'Units', 'Price', 'Product Strain', 'Quantity*',
+                        'Test result unit (% or mg)', 'DOH', 'Concentrate Type', 'Ratio', 'JointRatio', 'State',
+                        'Is Sample? (yes/no)', 'Is MJ product?(yes/no)', 'Discountable? (yes/no)', 'Room*',
+                        'Batch Number', 'Lot Number', 'Barcode*', 'Medical Only (Yes/No)', 'Med Price',
+                        'Expiration Date(YYYY-MM-DD)', 'Is Archived? (yes/no)', 'THC Per Serving', 'Allergens', 'Solvent',
+                        'Accepted Date', 'Internal Product Identifier', 'Product Tags (comma separated)', 'Image URL', 'Ingredients',
+                        'Total THC', 'THCA', 'CBDA', 'CBN'
+                    ]
+                    selected = [c for c in desired_columns if c in product_columns]
+                    if selected:
+                        select_list = ', '.join([f'"{c}"' for c in selected])
+                        products_df = pd.read_sql_query(f'SELECT {select_list} FROM products ORDER BY id', sconn)
+                    else:
+                        products_df = pd.read_sql_query('SELECT id FROM products ORDER BY id', sconn)
+                # Write Excel
+                with pd.ExcelWriter(temp_file.name, engine='openpyxl') as writer:
+                    if not strains_df.empty:
+                        strains_df.to_excel(writer, sheet_name='Strains', index=False)
+                    if 'products_df' in locals() and not products_df.empty:
+                        products_df.to_excel(writer, sheet_name='Products', index=False)
+                logging.info("SQLite fallback export completed")
+            except Exception as fallback_error:
+                import traceback
+                logging.error(f"SQLite fallback export failed: {fallback_error}\n" + traceback.format_exc())
+                raise
         
         # Send file with proper cleanup
         # Generate descriptive filename with timestamp
