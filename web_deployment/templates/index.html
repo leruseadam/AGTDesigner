@@ -1813,12 +1813,20 @@
               
               showDatabaseModal('Data & Analytics', loadingHtml, 'database-modal');
               
-              // Fetch database statistics and display enhanced interface
-              fetch('/api/database-stats')
-                .then(response => response.json())
-                .then(data => {
-                  const stats = data.stats || {};
-                  const vendorStats = data.vendor_stats || {};
+              // Fetch database statistics with robust fallbacks
+              Promise.allSettled([
+                fetch('/api/database-stats').then(r => r.json()).catch(() => ({})),
+                fetch('/api/database-vendor-stats').then(r => r.json()).catch(() => ({})),
+                fetch('/api/available-tags').then(r => r.json()).catch(() => [])
+              ]).then(([statsRes, vendorRes, tagsRes]) => {
+                  const statsPayload = statsRes.value || {};
+                  const stats = statsPayload.stats || statsPayload || {};
+                  const vendorStats = (vendorRes.value || {});
+                  const availableTags = Array.isArray(tagsRes.value) ? tagsRes.value : [];
+                  
+                  const derivedTotalProducts = (stats.total_products) || availableTags.length || 0;
+                  const derivedUniqueVendors = (stats.unique_vendors) || (vendorStats.summary && vendorStats.summary.total_vendors) || 0;
+                  const derivedUniqueBrands = (stats.unique_brands) || (vendorStats.summary && vendorStats.summary.total_brands) || 0;
                   
                   const modalBody = document.querySelector('#databaseModal .modal-body');
                   if (modalBody) {
@@ -1835,7 +1843,7 @@
                           <div class="col-md-3 col-sm-6 mb-3">
                             <div class="stats-card text-center h-100">
                               <div class="stats-content">
-                                <h3 class="stats-number mb-2">${stats.total_products || 0}</h3>
+                                <h3 class="stats-number mb-2">${derivedTotalProducts}</h3>
                                 <p class="stats-label mb-0">Total Products</p>
                               </div>
                             </div>
@@ -1843,7 +1851,7 @@
                           <div class="col-md-3 col-sm-6 mb-3">
                             <div class="stats-card text-center h-100">
                               <div class="stats-content">
-                                <h3 class="stats-number mb-2">${stats.unique_vendors || 0}</h3>
+                                <h3 class="stats-number mb-2">${derivedUniqueVendors}</h3>
                                 <p class="stats-label mb-0">Unique Vendors</p>
                               </div>
                             </div>
