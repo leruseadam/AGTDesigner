@@ -34,6 +34,13 @@ os.environ['PYTHONANYWHERE_SITE'] = 'True'
 os.environ['FLASK_ENV'] = 'production'
 os.environ['FLASK_DEBUG'] = 'False'
 
+# PostgreSQL Database Configuration
+os.environ['DB_HOST'] = 'adamcordova-4822.postgres.pythonanywhere-services.com'
+os.environ['DB_NAME'] = 'postgres'
+os.environ['DB_USER'] = 'super'
+os.environ['DB_PASSWORD'] = '193154life'
+os.environ['DB_PORT'] = '14822'
+
 # Configure logging to prevent verbose output
 logging.basicConfig(
     level=logging.ERROR,
