@@ -91,7 +91,8 @@ for logger_name in ['werkzeug', 'urllib3', 'requests', 'pandas', 'openpyxl', 'ps
 
 try:
     # Import the Flask application
-    from app import app as application
+    from app import app
+    application = app
     
     # Production configuration
     application.config.update(
