@@ -1372,31 +1372,20 @@ class EnhancedJSONMatcher:
         if cached_products:
             return cached_products
             
-        # Try to get from ProductDatabase first (more reliable)
+        # Prefer the new PostgreSQL database layer
         try:
-            from .product_database import get_database_path
-            from .product_database import ProductDatabase
-            import os
-            
-            # Use the correct database path - prioritize AGT_Bothell database
-            current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-            db_path = os.path.join(current_dir, 'uploads', 'product_database_AGT_Bothell.db')
-            
-            # Fallback to main database if AGT_Bothell doesn't exist
-            if not os.path.exists(db_path):
-                db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
-            
-            if os.path.exists(db_path):
-                product_db = ProductDatabase(db_path)
-                products = product_db.get_all_products()
-                logging.info(f"EnhancedJSONMatcher: Loaded {len(products)} products from ProductDatabase at {db_path}")
-                
-                # Cache for 1 hour
-                self.cache.set(cache_key, products, ttl=3600)
-                return products
-                
+            from .product_database import get_postgresql_database
+            # Default store aligns with app-level default
+            product_db = get_postgresql_database('AGT_Bothell')
+            products = product_db.get_all_products()
+            logging.info(f"EnhancedJSONMatcher: Loaded {len(products)} products from PostgreSQL database")
+            # Cache for 1 hour
+            self.cache.set(cache_key, products, ttl=3600)
+            return products
         except Exception as e:
-            logging.warning(f"EnhancedJSONMatcher: Could not load from ProductDatabase: {e}")
+            logging.warning(f"EnhancedJSONMatcher: Could not load from PostgreSQL ProductDatabase: {e}")
+            
+        # Legacy fallback to Excel processor
             
         # Fallback to excel processor
         if not self.excel_processor or self.excel_processor.df.empty:
