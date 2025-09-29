@@ -43,13 +43,14 @@ def test_database_stats_endpoint():
             
             if response.status_code == 200:
                 data = response.get_json()
+                stats = data.get('stats', {})
                 print(f"📊 Database Stats Response:")
-                print(f"   Total Products: {data.get('total_products', 'N/A')}")
-                print(f"   Unique Vendors: {data.get('unique_vendors', 'N/A')}")
-                print(f"   Unique Brands: {data.get('unique_brands', 'N/A')}")
-                print(f"   Unique Product Types: {data.get('unique_product_types', 'N/A')}")
+                print(f"   Total Products: {stats.get('total_products', 'N/A')}")
+                print(f"   Unique Vendors: {stats.get('unique_vendors', 'N/A')}")
+                print(f"   Unique Brands: {stats.get('unique_brands', 'N/A')}")
+                print(f"   Unique Product Types: {stats.get('unique_product_types', 'N/A')}")
                 
-                if data.get('total_products', 0) > 0:
+                if stats.get('total_products', 0) > 0:
                     print("✅ Database stats show real data!")
                     return True
                 else:
@@ -121,12 +122,13 @@ def test_web_app_url():
         
         if response.status_code == 200:
             data = response.json()
+            stats = data.get('stats', {})
             print(f"📊 Web App Database Stats:")
-            print(f"   Total Products: {data.get('total_products', 'N/A')}")
-            print(f"   Unique Vendors: {data.get('unique_vendors', 'N/A')}")
-            print(f"   Unique Brands: {data.get('unique_brands', 'N/A')}")
+            print(f"   Total Products: {stats.get('total_products', 'N/A')}")
+            print(f"   Unique Vendors: {stats.get('unique_vendors', 'N/A')}")
+            print(f"   Unique Brands: {stats.get('unique_brands', 'N/A')}")
             
-            if data.get('total_products', 0) > 0:
+            if stats.get('total_products', 0) > 0:
                 print("✅ Web app shows real data!")
                 return True
             else:
