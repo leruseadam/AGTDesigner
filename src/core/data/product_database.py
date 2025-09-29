@@ -104,7 +104,7 @@ class ProductDatabase:
                 
             start_time = time.time()
             logger.info(f"Initializing product database for store '{self.store_name}'...")
-            
+                
             try:
                 conn = self._get_connection()
                 cursor = conn.cursor()
@@ -334,16 +334,16 @@ class ProductDatabase:
                 CREATE TABLE strains (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     strain_name TEXT UNIQUE NOT NULL,
-                    normalized_name TEXT NOT NULL,
-                    canonical_lineage TEXT,
+                        normalized_name TEXT NOT NULL,
+                        canonical_lineage TEXT,
                     first_seen_date TEXT NOT NULL,
                     last_seen_date TEXT NOT NULL,
-                    total_occurrences INTEGER DEFAULT 1,
+                        total_occurrences INTEGER DEFAULT 1,
                     lineage_confidence REAL DEFAULT 0.0,
-                    sovereign_lineage TEXT,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                )
+                        sovereign_lineage TEXT,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    )
             ''')
             
             cursor.execute('''
@@ -619,7 +619,7 @@ class ProductDatabase:
             
             conn.commit()
             logger.info("Database recreated with correct schema")
-            
+                    
         except Exception as e:
             logger.error(f"Error recreating database: {e}")
             raise
@@ -669,7 +669,7 @@ class ProductDatabase:
             cursor = conn.cursor()
             
             # First get the strain name from the strains table
-            cursor.execute('SELECT strain_name FROM strains WHERE id = ?', (strain_id,))
+            cursor.execute('SELECT strain_name FROM strains WHERE id = %s', (strain_id,))
             strain_result = cursor.fetchone()
             if not strain_result:
                 return None
@@ -706,7 +706,7 @@ class ProductDatabase:
             mode_lineage = self.get_mode_lineage(strain_id)
             if mode_lineage and mode_lineage != canonical_lineage:
                 cursor.execute('''
-                    UPDATE strains SET canonical_lineage = ?, updated_at = ? WHERE id = ?
+                    UPDATE strains SET canonical_lineage = %s, updated_at = %s WHERE id = %s
                 ''', (mode_lineage, datetime.now().isoformat(), strain_id))
                 logger.info(f"Updated canonical_lineage for '{strain_name}' to '{mode_lineage}' (was '{canonical_lineage}')")
                 updated += 1
@@ -731,7 +731,7 @@ class ProductDatabase:
                 cursor.execute('''
                     SELECT id, canonical_lineage, total_occurrences, lineage_confidence, sovereign_lineage
                     FROM strains 
-                    WHERE normalized_name = ?
+                    WHERE normalized_name = %s
                 ''', (normalized_name,))
                 existing = cursor.fetchone()
                 
@@ -742,12 +742,12 @@ class ProductDatabase:
                     if lineage and lineage != existing_lineage:
                         cursor.execute('''
                             INSERT INTO lineage_history (strain_id, old_lineage, new_lineage, change_date, change_reason)
-                            VALUES (?, ?, ?, ?, ?)
+                            VALUES (%s, %s, %s, %s, %s)
                         ''', (strain_id, existing_lineage, lineage, current_date, 'New data upload'))
                         cursor.execute('''
                             UPDATE strains 
-                            SET canonical_lineage = ?, total_occurrences = ?, last_seen_date = ?, updated_at = ?
-                            WHERE id = ?
+                            SET canonical_lineage = %s, total_occurrences = %s, last_seen_date = %s, updated_at = %s
+                            WHERE id = %s
                         ''', (lineage, new_occurrences, current_date, current_date, strain_id))
                         
                         # Notify all sessions of the lineage update (non-blocking)
@@ -759,13 +759,13 @@ class ProductDatabase:
                     else:
                         cursor.execute('''
                             UPDATE strains 
-                            SET total_occurrences = ?, last_seen_date = ?, updated_at = ?
-                            WHERE id = ?
+                            SET total_occurrences = %s, last_seen_date = %s, updated_at = %s
+                            WHERE id = %s
                         ''', (new_occurrences, current_date, current_date, strain_id))
                     # Sovereign lineage update
                     if sovereign and lineage:
                         cursor.execute('''
-                            UPDATE strains SET sovereign_lineage = ? WHERE id = ?
+                            UPDATE strains SET sovereign_lineage = %s WHERE id = %s
                         ''', (lineage, strain_id))
                         
                         # Notify all sessions of the sovereign lineage update (non-blocking)
@@ -784,9 +784,14 @@ class ProductDatabase:
                 else:
                     cursor.execute('''
                         INSERT INTO strains (strain_name, normalized_name, canonical_lineage, first_seen_date, last_seen_date, created_at, updated_at, sovereign_lineage)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        RETURNING id
                     ''', (strain_name, normalized_name, lineage, current_date, current_date, current_date, current_date, lineage if sovereign else None))
-                    strain_id = cursor.lastrowid
+                    result = cursor.fetchone()
+                    if result:
+                        strain_id = result[0]
+                    else:
+                        raise Exception("Failed to get strain ID after insert")
                     conn.commit()
                     
                     # Notify all sessions of the new strain (non-blocking)
@@ -841,10 +846,10 @@ class ProductDatabase:
                     FROM products 
                     WHERE normalized_name = %s AND "Vendor/Supplier*" = %s AND "Product Brand" = %s
                 ''', (normalized_name, product_data.get('Vendor/Supplier*'), product_data.get('Product Brand')))
-                
-                existing = cursor.fetchone()
-                
-                if existing:
+            
+            existing = cursor.fetchone()
+            
+            if existing:
                     product_id, occurrences, existing_name = existing
                     
                     # Log duplicate detection and update
@@ -860,7 +865,7 @@ class ProductDatabase:
                 cursor.execute('''
                     SELECT id, total_occurrences, "Product Name*", "Product Brand"
                     FROM products 
-                    WHERE normalized_name = ? AND "Vendor/Supplier*" = ? AND "Product Brand" != ?
+                    WHERE normalized_name = %s AND "Vendor/Supplier*" = %s AND "Product Brand" != %s
                 ''', (normalized_name, product_data.get('Vendor/Supplier*'), product_data.get('Product Brand')))
                 
                 similar_products = cursor.fetchall()
@@ -868,18 +873,18 @@ class ProductDatabase:
                     logger.info(f"Found {len(similar_products)} similar products with same name '{product_name}' and vendor '{product_data.get('Vendor')}' but different brands")
                     for similar_id, similar_occurrences, similar_name, similar_brand in similar_products:
                         logger.debug(f"Similar product: '{similar_name}' (Brand: {similar_brand}, ID: {similar_id})")
-                else:
+            else:
                     # Add new product with comprehensive column population
-                    cursor.execute('''
-                        INSERT INTO products (
+                cursor.execute('''
+                    INSERT INTO products (
                             "Product Name*", normalized_name, "Product Type*", first_seen_date, last_seen_date, 
                             total_occurrences, created_at, updated_at
-                        ) VALUES (
+                    ) VALUES (
                             %s, %s, %s, %s, %s, %s, %s, %s
-                        ) RETURNING id
-                    ''', (
-                        product_name,
-                        normalized_name,
+                    ) RETURNING id
+                ''', (
+                    product_name,
+                    normalized_name,
                         product_data.get('Product Type*'),
                         current_date,
                         current_date,
@@ -888,16 +893,16 @@ class ProductDatabase:
                         current_date
                     ))
                     
-                    result = cursor.fetchone()
-                    if result:
-                        product_id = result[0]
-                    else:
-                        raise Exception("Failed to get product ID after insert")
-                    conn.commit()
+                result = cursor.fetchone()
+                if result:
+                    product_id = result[0]
+                else:
+                    raise Exception("Failed to get product ID after insert")
+            conn.commit()
                     if DEBUG_ENABLED:
                         logger.debug(f"Added new product '{product_name}'")
-                    return product_id
-                    
+            return product_id
+            
         except Exception as e:
             product_name = product_data.get('Product Name*', product_data.get('ProductName', ''))
             logger.error(f"Error adding/updating product '{product_name}': {e}")
@@ -1276,7 +1281,7 @@ class ProductDatabase:
                 }
             
             # Delete blank entries
-            cursor.execute('''
+                cursor.execute('''
                 DELETE FROM products 
                 WHERE "Product Name*" IS NULL 
                    OR "Product Name*" = '' 
@@ -1340,7 +1345,7 @@ class ProductDatabase:
                             case=False, 
                             na=False
                         )
-                    else:
+            else:
                         # Look for non-null values in other JSON match columns
                         json_match_mask |= filtered_df[col].notna()
             
@@ -1378,14 +1383,14 @@ class ProductDatabase:
                 return cached_result
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute('''
+                cursor.execute('''
                 SELECT id, strain_name, canonical_lineage, total_occurrences, lineage_confidence, first_seen_date, last_seen_date, sovereign_lineage
                 FROM strains 
                 WHERE normalized_name = ?
             ''', (normalized_name,))
-            result = cursor.fetchone()
-            if result:
-                strain_id = result[0]
+                result = cursor.fetchone()
+                if result:
+                    strain_id = result[0]
                 sovereign_lineage = result[7]
                 canonical_lineage = result[2]
                 # Use sovereign_lineage if set, else mode, else canonical
@@ -1429,8 +1434,8 @@ class ProductDatabase:
             cached_result = self._get_from_cache(cache_key)
             if cached_result is not None:
                 return cached_result
-            
-            conn = self._get_connection()
+    
+        conn = self._get_connection()
             cursor = conn.cursor()
             
             if vendor and brand:
@@ -1530,7 +1535,7 @@ class ProductDatabase:
                     'confidence': confidence,
                     'reason': f'Database suggests {canonical_lineage} (seen {occurrences} times)'
                 }
-                
+            
         except Exception as e:
             logger.error(f"Error validating lineage for '{strain_name}': {e}")
             return {
@@ -1546,7 +1551,7 @@ class ProductDatabase:
         try:
             self.init_database()  # Ensure DB is initialized
             
-            conn = self._get_connection()
+        conn = self._get_connection()
             cursor = conn.cursor()
             
             # Total strains
@@ -1648,8 +1653,8 @@ class ProductDatabase:
             self.init_database()  # Ensure DB is initialized
             
             conn = self._get_connection()
-            cursor = conn.cursor()
-            
+        cursor = conn.cursor()
+        
             # Database should already be initialized with all required columns
             # No need to add missing columns during export
             
@@ -2240,7 +2245,7 @@ class ProductDatabase:
     def close_connections(self):
         """Close all database connections."""
         for conn in self._connection_pool.values():
-            conn.close()
+                conn.close()
         self._connection_pool.clear()
     
     def _normalize_strain_name(self, strain_name: str) -> str:
@@ -2463,7 +2468,7 @@ class ProductDatabase:
                 
                 if changes:
                     logger.info(f"Product ID {product_id} data changes: {'; '.join(changes)}")
-                else:
+            else:
                     logger.info(f"Product ID {product_id} updated with same values (no changes detected)")
             
             # Calculate AI and AK values
@@ -4530,7 +4535,7 @@ class ProductDatabase:
             word_similarity = word_overlap / total_words
             # Combine overall similarity with word overlap
             final_score = (similarity + word_similarity) / 2
-        else:
+            else:
             final_score = similarity
         
         return final_score
@@ -4793,7 +4798,7 @@ class ProductDatabase:
         
         for pattern in weight_patterns:
             match = re.search(pattern, product_name, re.IGNORECASE)
-            if match:
+                if match:
                 weight = match.group(1)
                 units = match.group(2).lower()
                 if units in ['gram', 'grams', 'gm']:
