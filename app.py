@@ -5071,6 +5071,13 @@ def get_session_cache_key(base_key):
 @app.route('/api/available-tags', methods=['GET'])
 def get_available_tags():
     try:
+        # Short TTL cache to stabilize UI and avoid heavy reloads
+        current_store = session.get('selected_store', '')
+        cache_key_local = f"available-tags:{current_store}"
+        cached = _cache_get(cache_key_local, ttl_seconds=15)
+        if cached is not None:
+            logging.info(f"[CACHE HIT] /api/available-tags store='{current_store}' -> {len(cached)} tags")
+            return jsonify(cached)
         logging.info("=== AVAILABLE TAGS DEBUG START ===")
         logging.info(f"Available tags request at {datetime.now().strftime('%H:%M:%S')}")
         
@@ -5136,6 +5143,7 @@ def get_available_tags():
                         
                         # Return the data immediately
                         logging.info(f"ALWAYS DIRECT: Returning {len(cleaned_tags)} tags directly")
+                        _cache_set(cache_key_local, cleaned_tags)
                         return jsonify(cleaned_tags)
                     else:
                         logging.warning(f"ALWAYS DIRECT: File is empty: {latest_file}")
@@ -5177,6 +5185,7 @@ def get_available_tags():
                 logging.info(f"CRITICAL FIX: Sample tag: {sample.get('Product Name*', 'N/A')} - {sample.get('Lineage', 'N/A')}")
             
             logging.info(f"CRITICAL FIX: Returning {len(cleaned_tags)} fresh tags from Excel processor")
+            _cache_set(cache_key_local, cleaned_tags)
             logging.info("=== AVAILABLE TAGS DEBUG END ===")
             return jsonify(cleaned_tags)
             
@@ -5185,8 +5194,13 @@ def get_available_tags():
             return jsonify([])
     except Exception as e:
         logging.error(f"Error getting available tags: {str(e)}")
-        logging.error(traceback.format_exc())
-        return jsonify({'error': f'Server error: {str(e)}'}), 500
+        try:
+            import traceback as _tb
+            logging.error(_tb.format_exc())
+        except Exception:
+            pass
+        # Never 500 for this endpoint – return empty set to keep UI responsive
+        return jsonify([])
 
 @app.route('/api/selected-tags', methods=['GET'])
 def get_selected_tags():
@@ -5733,6 +5747,12 @@ def update_doh():
 @app.route('/api/filter-options', methods=['GET', 'POST'])
 def get_filter_options():
     try:
+        # Brief cache for stability
+        store = session.get('selected_store', '')
+        cache_key_local = f"filter-options:{store}"
+        cached = _cache_get(cache_key_local, ttl_seconds=20)
+        if cached is not None:
+            return jsonify(cached)
         cache_key = get_session_cache_key('filter_options')
         
         # Always clear cache for weight filter to ensure updated formatting
@@ -5791,11 +5811,21 @@ def get_filter_options():
         if 'weight' in options:
             logging.info(f"Weight filter options: {options['weight'][:10]}...")  # Log first 10 options
         
-        # Don't cache filter options to ensure fresh data
+        _cache_set(cache_key_local, options)
         return jsonify(options)
     except Exception as e:
         logging.error(f"Error in filter_options: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        # Never 500 - return empty options to keep UI functional
+        return jsonify({
+            'vendor': [],
+            'brand': [],
+            'productType': [],
+            'lineage': [],
+            'weight': [],
+            'strain': [],
+            'doh': [],
+            'highCbd': []
+        })
 
 @app.route('/api/debug-weight-formatting', methods=['GET'])
 def debug_weight_formatting():
