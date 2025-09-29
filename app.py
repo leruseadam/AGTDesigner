@@ -3,6 +3,7 @@ from src.core.data.field_mapping import get_canonical_field
 import os
 import sys  # Add this import
 import logging
+from logging.handlers import RotatingFileHandler
 import threading
 import pandas as pd  # Add this import
 import time
@@ -1001,23 +1002,31 @@ class LabelMakerApp:
             log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
             formatter = logging.Formatter(log_format)
             
-            # Configure console handler - show info and above for debugging
-            console_handler = logging.StreamHandler()
-            console_handler.setLevel(logging.INFO)  # Show info, warnings, and errors
-            console_handler.setFormatter(formatter)
+            # Detect PythonAnywhere to avoid console logging which can cause BlockingIOError
+            is_pythonanywhere = bool(os.environ.get('PYTHONANYWHERE_DOMAIN') or os.environ.get('PYTHONANYWHERE_SITE'))
             
             # Configure file handler
             log_file = log_dir / 'label_maker.log'
-            file_handler = logging.FileHandler(log_file)
+            file_handler = RotatingFileHandler(log_file, maxBytes=10*1024*1024, backupCount=5, encoding='utf-8')
             file_handler.setLevel(logging.INFO)
             file_handler.setFormatter(formatter)
             
             # Configure root logger
-            logging.basicConfig(
-                level=logging.INFO,
-                format=log_format,
-                handlers=[console_handler, file_handler]
-            )
+            if is_pythonanywhere:
+                logging.basicConfig(
+                    level=logging.INFO,
+                    format=log_format,
+                    handlers=[file_handler]
+                )
+            else:
+                console_handler = logging.StreamHandler()
+                console_handler.setLevel(logging.INFO)
+                console_handler.setFormatter(formatter)
+                logging.basicConfig(
+                    level=logging.INFO,
+                    format=log_format,
+                    handlers=[console_handler, file_handler]
+                )
             
             # Suppress verbose logging from third-party libraries
             logging.getLogger('watchdog').setLevel(logging.WARNING)
@@ -1026,7 +1035,8 @@ class LabelMakerApp:
             logging.getLogger('requests').setLevel(logging.WARNING)
             
             # Add handlers to application logger
-            self.logger.addHandler(console_handler)
+            if not is_pythonanywhere:
+                self.logger.addHandler(console_handler)
             self.logger.addHandler(file_handler)
             self.logger.setLevel(logging.INFO)
             
