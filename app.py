@@ -6555,9 +6555,13 @@ def database_export():
                     # Discover available product columns
                     try:
                         cur = sconn.cursor()
+                        # Check if products table exists early
+                        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+                        products_table_exists = cur.fetchone() is not None
                         cur.execute("PRAGMA table_info(products)")
                         product_columns = [row[1] for row in cur.fetchall()]
                     except Exception:
+                        products_table_exists = False
                         product_columns = []
                     desired_columns = [
                         'Product Name*', 'Product Type*', 'Vendor/Supplier*', 'Product Brand', 'Lineage',
@@ -6569,12 +6573,16 @@ def database_export():
                         'Accepted Date', 'Internal Product Identifier', 'Product Tags (comma separated)', 'Image URL', 'Ingredients',
                         'Total THC', 'THCA', 'CBDA', 'CBN'
                     ]
-                    selected = [c for c in desired_columns if c in product_columns]
-                    if selected:
-                        select_list = ', '.join([f'"{c}"' for c in selected])
-                        products_df = pd.read_sql_query(f'SELECT {select_list} FROM products ORDER BY id', sconn)
+                    if products_table_exists:
+                        selected = [c for c in desired_columns if c in product_columns]
+                        if selected:
+                            select_list = ', '.join([f'"{c}"' for c in selected])
+                            products_df = pd.read_sql_query(f'SELECT {select_list} FROM products ORDER BY id', sconn)
+                        else:
+                            products_df = pd.read_sql_query('SELECT id FROM products ORDER BY id', sconn)
                     else:
-                        products_df = pd.read_sql_query('SELECT id FROM products ORDER BY id', sconn)
+                        # No products table found; return empty sheet with sane headers
+                        products_df = pd.DataFrame(columns=['id'] + desired_columns)
                 # Try writing Excel; if engine missing, fall back to CSV ZIP
                 try:
                     with pd.ExcelWriter(export_path, engine='openpyxl') as writer:
