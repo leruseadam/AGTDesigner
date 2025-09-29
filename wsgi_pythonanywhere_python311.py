@@ -45,18 +45,48 @@ os.environ['DB_PORT'] = '14822'
 try:
     from pythonanywhere_logging_config import configure_production_logging
     configure_production_logging()
-except ImportError:
+    print("✅ Production logging configured successfully")
+except ImportError as e:
+    print(f"⚠️ Could not import pythonanywhere_logging_config: {e}")
     # Fallback logging configuration
     import logging
-    logging.basicConfig(
-        level=logging.WARNING,
-        format='%(levelname)s - %(message)s',
-        handlers=[logging.StreamHandler(sys.stdout)]
+    from logging.handlers import RotatingFileHandler
+    
+    # Create logs directory
+    log_dir = os.path.join(project_dir, 'logs')
+    os.makedirs(log_dir, exist_ok=True)
+    
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.WARNING)  # Only warnings and errors
+    
+    # Clear existing handlers
+    root_logger.handlers.clear()
+    
+    # Create file handler
+    log_file = os.path.join(log_dir, 'app.log')
+    file_handler = RotatingFileHandler(
+        log_file, 
+        maxBytes=5*1024*1024,  # 5MB max file size
+        backupCount=3,         # Keep 3 backup files
+        encoding='utf-8'
     )
-    logging.getLogger('werkzeug').setLevel(logging.WARNING)
+    file_handler.setLevel(logging.WARNING)
+    
+    # Create formatter
+    formatter = logging.Formatter(
+        '%(asctime)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    file_handler.setFormatter(formatter)
+    
+    # Add handler to root logger
+    root_logger.addHandler(file_handler)
+    
+    print(f"✅ Fallback logging configured - log file: {log_file}")
 
 # Suppress verbose logging from libraries
-for logger_name in ['werkzeug', 'urllib3', 'requests', 'pandas', 'openpyxl']:
+for logger_name in ['werkzeug', 'urllib3', 'requests', 'pandas', 'openpyxl', 'psycopg2']:
     logging.getLogger(logger_name).setLevel(logging.ERROR)
 
 try:
