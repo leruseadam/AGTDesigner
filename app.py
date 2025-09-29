@@ -5958,26 +5958,49 @@ def database_stats():
         try:
             with product_db.get_connection() as conn:
                 with conn.cursor() as cursor:
+                    # Discover column names dynamically to tolerate schema variations
+                    cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'products'")
+                    colnames = {row[0] for row in cursor.fetchall()}
+                    def pick(*cands):
+                        for c in cands:
+                            if c in colnames:
+                                return c
+                        return None
+                    vendor_col = pick('Vendor/Supplier*', 'Vendor', 'Vendor_Supplier', 'vendor', 'vendor_supplier')
+                    brand_col = pick('Product Brand', 'ProductBrand', 'brand', 'product_brand')
+                    ptype_col = pick('Product Type*', 'Product Type', 'ProductType', 'type', 'product_type')
+
                     # Total products
                     cursor.execute("SELECT COUNT(*) FROM products")
                     total_products = cursor.fetchone()[0]
                     
                     # Unique vendors
-                    cursor.execute("SELECT COUNT(DISTINCT \"Vendor/Supplier*\") FROM products WHERE \"Vendor/Supplier*\" IS NOT NULL AND \"Vendor/Supplier*\" != '' AND \"Vendor/Supplier*\" != 'Vendor/Supplier*'")
-                    unique_vendors = cursor.fetchone()[0]
+                    if vendor_col:
+                        cursor.execute(f"SELECT COUNT(DISTINCT \"{vendor_col}\") FROM products WHERE \"{vendor_col}\" IS NOT NULL AND \"{vendor_col}\" != ''")
+                        unique_vendors = cursor.fetchone()[0]
+                    else:
+                        unique_vendors = 0
                     
                     # Unique brands
-                    cursor.execute("SELECT COUNT(DISTINCT \"Product Brand\") FROM products WHERE \"Product Brand\" IS NOT NULL AND \"Product Brand\" != '' AND \"Product Brand\" != 'Product Brand'")
-                    unique_brands = cursor.fetchone()[0]
+                    if brand_col:
+                        cursor.execute(f"SELECT COUNT(DISTINCT \"{brand_col}\") FROM products WHERE \"{brand_col}\" IS NOT NULL AND \"{brand_col}\" != ''")
+                        unique_brands = cursor.fetchone()[0]
+                    else:
+                        unique_brands = 0
                     
                     # Unique product types
-                    cursor.execute("SELECT COUNT(DISTINCT \"Product Type*\") FROM products WHERE \"Product Type*\" IS NOT NULL AND \"Product Type*\" != '' AND \"Product Type*\" != 'Product Type*'")
-                    unique_product_types = cursor.fetchone()[0]
+                    if ptype_col:
+                        cursor.execute(f"SELECT COUNT(DISTINCT \"{ptype_col}\") FROM products WHERE \"{ptype_col}\" IS NOT NULL AND \"{ptype_col}\" != ''")
+                        unique_product_types = cursor.fetchone()[0]
+                    else:
+                        unique_product_types = 0
                     
                     # Product type distribution
-                    cursor.execute("SELECT \"Product Type*\", COUNT(*) FROM products WHERE \"Product Type*\" IS NOT NULL AND \"Product Type*\" != '' AND \"Product Type*\" != 'Product Type*' GROUP BY \"Product Type*\" ORDER BY COUNT(*) DESC LIMIT 10")
-                    product_types = cursor.fetchall()
-                    product_type_distribution = {pt[0]: pt[1] for pt in product_types}
+                    product_type_distribution = {}
+                    if ptype_col:
+                        cursor.execute(f"SELECT \"{ptype_col}\", COUNT(*) FROM products WHERE \"{ptype_col}\" IS NOT NULL AND \"{ptype_col}\" != '' GROUP BY \"{ptype_col}\" ORDER BY COUNT(*) DESC LIMIT 10")
+                        product_types = cursor.fetchall()
+                        product_type_distribution = {pt[0]: pt[1] for pt in product_types}
                     
                     stats = {
                         'total_products': total_products,
@@ -5993,14 +6016,18 @@ def database_stats():
                     }
                     
                     # Get top vendors
-                    cursor.execute("SELECT \"Vendor/Supplier*\", COUNT(*) as count FROM products WHERE \"Vendor/Supplier*\" IS NOT NULL AND \"Vendor/Supplier*\" != '' AND \"Vendor/Supplier*\" != 'Vendor/Supplier*' GROUP BY \"Vendor/Supplier*\" ORDER BY count DESC LIMIT 15")
-                    vendors = cursor.fetchall()
-                    vendor_stats['vendors'] = [{'vendor': v[0], 'product_count': v[1]} for v in vendors]
+                    vendor_stats['vendors'] = []
+                    if vendor_col:
+                        cursor.execute(f"SELECT \"{vendor_col}\", COUNT(*) as count FROM products WHERE \"{vendor_col}\" IS NOT NULL AND \"{vendor_col}\" != '' GROUP BY \"{vendor_col}\" ORDER BY count DESC LIMIT 15")
+                        vendors = cursor.fetchall()
+                        vendor_stats['vendors'] = [{'vendor': v[0], 'product_count': v[1]} for v in vendors]
                     
                     # Get top brands
-                    cursor.execute("SELECT \"Product Brand\", COUNT(*) as count FROM products WHERE \"Product Brand\" IS NOT NULL AND \"Product Brand\" != '' AND \"Product Brand\" != 'Product Brand' GROUP BY \"Product Brand\" ORDER BY count DESC LIMIT 15")
-                    brands = cursor.fetchall()
-                    vendor_stats['brands'] = [{'brand': b[0], 'product_count': b[1]} for b in brands]
+                    vendor_stats['brands'] = []
+                    if brand_col:
+                        cursor.execute(f"SELECT \"{brand_col}\", COUNT(*) as count FROM products WHERE \"{brand_col}\" IS NOT NULL AND \"{brand_col}\" != '' GROUP BY \"{brand_col}\" ORDER BY count DESC LIMIT 15")
+                        brands = cursor.fetchall()
+                        vendor_stats['brands'] = [{'brand': b[0], 'product_count': b[1]} for b in brands]
                     
                     logging.info(f"Database stats retrieved successfully: {total_products} products, {unique_vendors} vendors, {unique_brands} brands")
                     
