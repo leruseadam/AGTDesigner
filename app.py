@@ -5538,7 +5538,7 @@ def update_strain_lineage():
                 SELECT COUNT(*) as product_count
                 FROM products p
                 JOIN strains s ON p.strain_id = s.id
-                WHERE s.strain_name = ?
+                WHERE s.strain_name = %s
             ''', (strain_name,))
             
             result = cursor.fetchone()
@@ -10291,7 +10291,7 @@ def set_strain_lineage():
             cursor = conn.cursor()
             
             # First check if the strain exists
-            cursor.execute('SELECT id FROM strains WHERE strain_name = ?', (strain_name,))
+            cursor.execute('SELECT id FROM strains WHERE strain_name = %s', (strain_name,))
             strain_result = cursor.fetchone()
             
             if not strain_result:
@@ -10302,23 +10302,23 @@ def set_strain_lineage():
             # Update the sovereign lineage (preferred over canonical)
             cursor.execute('''
                 UPDATE strains 
-                SET sovereign_lineage = ?, 
+                SET sovereign_lineage = %s, 
                     updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
+                WHERE id = %s
             ''', (lineage, strain_id))
             
             # Also update all products that use this strain
             cursor.execute('''
                 UPDATE products 
-                SET lineage = ?,
+                SET lineage = %s,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE strain_id = ?
+                WHERE strain_id = %s
             ''', (lineage, strain_id))
             
             conn.commit()
             
             # Get the count of updated products
-            cursor.execute('SELECT COUNT(*) FROM products WHERE strain_id = ?', (strain_id,))
+            cursor.execute('SELECT COUNT(*) FROM products WHERE strain_id = %s', (strain_id,))
             product_count = cursor.fetchone()[0]
             
             logging.info(f"Updated lineage for strain '{strain_name}' to '{lineage}'. Affected {product_count} products.")

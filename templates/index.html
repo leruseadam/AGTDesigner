@@ -7232,22 +7232,89 @@
       displayProducts();
     }
 
-    function addNewProduct() {
-      // Open edit modal with empty product
-      editProduct(null);
+    async function addNewProduct() {
+      try {
+        const name = prompt('Enter Product Name');
+        if (!name || !name.trim()) return;
+        const type = prompt('Enter Product Type (e.g., Flower)') || 'Flower';
+        const brand = prompt('Enter Product Brand') || '';
+        const vendor = prompt('Enter Vendor/Supplier') || '';
+        const price = prompt('Enter Price') || '';
+        const weight = prompt('Enter Weight (e.g., 3.5g)') || '';
+
+        const payload = {
+          'Product Name*': name.trim(),
+          'Product Type*': type.trim(),
+          'Product Brand': brand,
+          'Vendor/Supplier*': vendor,
+          'Price': price,
+          'Weight*': weight
+        };
+
+        const res = await fetch('/api/database/products', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || 'Create failed');
+        await loadDatabaseProducts();
+      } catch (err) {
+        alert('Failed to add product: ' + err.message);
+      }
     }
 
-    function editProduct(productId) {
-      // This would open an edit modal/form
-      console.log('Edit product:', productId);
-      alert('Edit functionality coming soon!');
+    async function editProduct(productId) {
+      try {
+        const product = allProducts.find(p => p.id === productId);
+        if (!product) return;
+        const name = prompt('Edit Product Name', product['Product Name*'] || '');
+        if (name === null) return;
+        const price = prompt('Edit Price', product['Price'] || '');
+        if (price === null) return;
+        const brand = prompt('Edit Brand', product['Product Brand'] || '');
+        if (brand === null) return;
+        const vendor = prompt('Edit Vendor', product['Vendor/Supplier*'] || '');
+        if (vendor === null) return;
+        const type = prompt('Edit Product Type', product['Product Type*'] || '');
+        if (type === null) return;
+        const weight = prompt('Edit Weight', product['Weight*'] || '');
+        if (weight === null) return;
+        const lineage = prompt('Edit Lineage', product['Lineage'] || '');
+        if (lineage === null) return;
+
+        const payload = {
+          'Product Name*': name,
+          'Price': price,
+          'Product Brand': brand,
+          'Vendor/Supplier*': vendor,
+          'Product Type*': type,
+          'Weight*': weight,
+          'Lineage': lineage
+        };
+
+        const res = await fetch(`/api/database/products/${productId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || 'Update failed');
+        await loadDatabaseProducts();
+      } catch (err) {
+        alert('Failed to update product: ' + err.message);
+      }
     }
 
-    function deleteProduct(productId) {
-      if (confirm('Are you sure you want to delete this product?')) {
-        // This would call delete API
-        console.log('Delete product:', productId);
-        alert('Delete functionality coming soon!');
+    async function deleteProduct(productId) {
+      try {
+        if (!confirm('Delete this product?')) return;
+        const res = await fetch(`/api/database/products/${productId}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || 'Delete failed');
+        await loadDatabaseProducts();
+      } catch (err) {
+        alert('Failed to delete product: ' + err.message);
       }
     }
 
@@ -7257,9 +7324,10 @@
     }
 
     function exportDatabase() {
-      // This would export the current filtered products
-      console.log('Export database');
-      alert('Export functionality coming soon!');
+      // Defer to consolidated export handler in static/js/database-sync.js
+      if (window.exportDatabase) {
+        window.exportDatabase();
+      }
     }
 
     // Use the consolidated function from window scope
