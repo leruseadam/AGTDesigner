@@ -112,39 +112,55 @@ def main():
 
         print(f"Found {len(unique_candidates)} distinct strain candidates from products")
 
-        # 2) Upsert strains by normalized_name using proper DATE/TIMESTAMPTZ types
+        # Early exit if nothing to do
+        if not unique_candidates:
+            print('Nothing to insert/update. Exiting.')
+            conn.commit()
+            return
+
+        # 2) Ensure unique index on strains.normalized_name for upsert
+        cur.execute('''
+            DO $$ BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_indexes WHERE tablename = 'strains' AND indexname = 'idx_strains_normalized_name_unique'
+                ) THEN
+                    CREATE UNIQUE INDEX idx_strains_normalized_name_unique ON strains (normalized_name);
+                END IF;
+            END $$;
+        ''')
+
+        # 3) Upsert strains by normalized_name using proper DATE/TIMESTAMPTZ types
         today = date.today()
         now_ts = datetime.now(timezone.utc)
         values = []
         for orig, norm in unique_candidates:
             values.append((orig, norm, None, today, today, 0.0, None, now_ts, now_ts))
-        if values:
-            cur.execute('''
-                CREATE TEMP TABLE tmp_strains (
-                    strain_name TEXT,
-                    normalized_name TEXT,
-                    canonical_lineage TEXT,
-                    first_seen_date DATE,
-                    last_seen_date DATE,
-                    lineage_confidence REAL,
-                    sovereign_lineage TEXT,
-                    created_at TIMESTAMPTZ,
-                    updated_at TIMESTAMPTZ
-                ) ON COMMIT DROP
-            ''')
-            execute_values(cur, 'INSERT INTO tmp_strains VALUES %s', values)
-            # Upsert into strains
-            cur.execute('''
-                INSERT INTO strains (strain_name, normalized_name, canonical_lineage, first_seen_date, last_seen_date, lineage_confidence, sovereign_lineage, created_at, updated_at)
-                SELECT t.strain_name, t.normalized_name, t.canonical_lineage, t.first_seen_date, t.last_seen_date, t.lineage_confidence, t.sovereign_lineage, t.created_at, t.updated_at
-                FROM tmp_strains t
-                ON CONFLICT (normalized_name) DO UPDATE SET
-                    strain_name = EXCLUDED.strain_name,
-                    last_seen_date = EXCLUDED.last_seen_date,
-                    updated_at = EXCLUDED.updated_at
-            ''')
+        cur.execute('''
+            CREATE TEMP TABLE tmp_strains (
+                strain_name TEXT,
+                normalized_name TEXT,
+                canonical_lineage TEXT,
+                first_seen_date DATE,
+                last_seen_date DATE,
+                lineage_confidence REAL,
+                sovereign_lineage TEXT,
+                created_at TIMESTAMPTZ,
+                updated_at TIMESTAMPTZ
+            ) ON COMMIT DROP
+        ''')
+        execute_values(cur, 'INSERT INTO tmp_strains VALUES %s', values)
+        # Upsert into strains
+        cur.execute('''
+            INSERT INTO strains (strain_name, normalized_name, canonical_lineage, first_seen_date, last_seen_date, lineage_confidence, sovereign_lineage, created_at, updated_at)
+            SELECT t.strain_name, t.normalized_name, t.canonical_lineage, t.first_seen_date, t.last_seen_date, t.lineage_confidence, t.sovereign_lineage, t.created_at, t.updated_at
+            FROM tmp_strains t
+            ON CONFLICT (normalized_name) DO UPDATE SET
+                strain_name = EXCLUDED.strain_name,
+                last_seen_date = EXCLUDED.last_seen_date,
+                updated_at = EXCLUDED.updated_at
+        ''')
 
-        # 3) Link products to strains by normalized name
+        # 4) Link products to strains by normalized name
         cur.execute(
             f'''
             UPDATE products p
@@ -156,7 +172,7 @@ def main():
         )
         print(f"Linked products to strains: {cur.rowcount} rows updated")
 
-        # 4) Recompute total_occurrences for strains
+        # 5) Recompute total_occurrences for strains
         cur.execute('''
             WITH counts AS (
                 SELECT p.strain_id, COUNT(*) AS c
@@ -172,7 +188,7 @@ def main():
         ''', (now_ts,))
         print(f"Updated total_occurrences for strains: {cur.rowcount} rows")
 
-        # 5) Set canonical_lineage as mode of non-empty product Lineage per strain (if lineage column exists)
+        # 6) Set canonical_lineage as mode of non-empty product Lineage per strain (if lineage column exists)
         if lineage_id:
             cur.execute(
                 f'''
@@ -193,7 +209,7 @@ def main():
             , (now_ts,))
             print(f"Updated canonical_lineage for strains: {cur.rowcount} rows")
 
-        # 6) Some products may have only generic/empty strain; optionally clear their strain_id
+        # 7) Some products may have only generic/empty strain; optionally clear their strain_id
         if SKIP_GENERIC_BUCKETS:
             cur.execute(
                 f'''
