@@ -93,6 +93,10 @@ class ProductDatabase:
                 raise
         return self._connection_pool[thread_id]
     
+    def get_connection(self):
+        """Public method to get a database connection."""
+        return self._get_connection()
+    
     def init_database(self):
         """Initialize the database with required tables (lazy initialization)."""
         if self._initialized:
@@ -5202,6 +5206,17 @@ class ProductDatabase:
 def get_product_database(store_name=None):
     """Get a ProductDatabase instance for the specified store."""
     return ProductDatabase(store_name=store_name) 
+
+# Global PostgreSQL database instance
+_postgresql_db = None
+
+def get_postgresql_database(store_name: str = None) -> ProductDatabase:
+    """Get PostgreSQL database instance."""
+    global _postgresql_db
+    if _postgresql_db is None or (store_name and _postgresql_db.store_name != store_name):
+        _postgresql_db = ProductDatabase(store_name)
+        _postgresql_db.init_database()
+    return _postgresql_db
 
 if __name__ == "__main__":
     import argparse
