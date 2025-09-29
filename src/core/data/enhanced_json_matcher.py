@@ -1153,26 +1153,38 @@ class EnhancedJSONMatcher:
         # Get database products (with caching)
         database_products = self._get_database_products()
         
-        # VENDOR RESTRICTION: Filter database products to match the JSON product's vendor
+        # VENDOR RESTRICTION (lenient): Prefer vendor-filtered set, but fall back to all products
         json_vendor = self._normalize_vendor(json_product.get('vendor', ''))
         if json_vendor and json_vendor != 'no_vendor':
-            # Filter database products to only include those from the same vendor
             vendor_filtered_products = []
             for db_product in database_products:
-                raw_db_vendor = str(db_product.get('Vendor/Supplier*', '') or db_product.get('Vendor', '') or db_product.get('Product Brand', ''))
+                raw_db_vendor = str(
+                    db_product.get('Vendor/Supplier*', '')
+                    or db_product.get('Vendor', '')
+                    or db_product.get('Product Brand', '')
+                )
                 db_vendor = self._normalize_vendor(raw_db_vendor)
-                
-                # Check for exact vendor match or partial match
-                if (json_vendor == db_vendor or 
-                    (json_vendor and db_vendor and (json_vendor in db_vendor or db_vendor in json_vendor)) or
-                    self._vendors_match(json_vendor, db_vendor)):
+
+                # Consider exact, partial, or fuzzy vendor matches
+                if (
+                    json_vendor == db_vendor
+                    or (json_vendor and db_vendor and (json_vendor in db_vendor or db_vendor in json_vendor))
+                    or self._vendors_match(json_vendor, db_vendor)
+                ):
                     vendor_filtered_products.append(db_product)
-            
-            if vendor_filtered_products:
+
+            # If the vendor-filtered set looks suspiciously small, broaden the search
+            if vendor_filtered_products and len(vendor_filtered_products) >= 10:
                 database_products = vendor_filtered_products
-                logging.debug(f"🏢 VENDOR FILTER: Restricted to {len(database_products)} products from vendor '{json_vendor}'")
+                logging.debug(
+                    f"🏢 VENDOR FILTER: Using {len(database_products)} products for vendor '{json_vendor}'"
+                )
             else:
-                logging.warning(f"⚠️ VENDOR FILTER: No products found for vendor '{json_vendor}', using all products")
+                # Keep full database for matching but boost vendor similarity downstream
+                logging.warning(
+                    f"⚠️ VENDOR FILTER: Found {len(vendor_filtered_products)} products for vendor '{json_vendor}'. "
+                    f"Proceeding with full database to avoid under-matching."
+                )
         
         database_products = database_products
         
