@@ -1384,20 +1384,58 @@ class EnhancedJSONMatcher:
         if cached_products:
             return cached_products
             
-        # Prefer the new PostgreSQL database layer
+        # Prefer the database layer (SQLite first for reliability, then PostgreSQL)
+        # 1) SQLite (uploads/product_database.db or store-specific file)
+        try:
+            import os, sqlite3
+            import pandas as _pd
+            # Resolve SQLite DB path similar to server usage
+            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            uploads_dir = os.path.join(base_dir, 'uploads')
+            sqlite_path = os.path.join(uploads_dir, 'product_database.db')
+            if not os.path.exists(sqlite_path):
+                # Check for store-specific file
+                sqlite_store = os.path.join(uploads_dir, 'product_database_AGT_Bothell.db')
+                if os.path.exists(sqlite_store):
+                    sqlite_path = sqlite_store
+            if os.path.exists(sqlite_path):
+                with sqlite3.connect(sqlite_path) as conn:
+                    cur = conn.cursor()
+                    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+                    if cur.fetchone():
+                        # Select core columns, tolerate missing ones
+                        try:
+                            cols_df = _pd.read_sql_query("PRAGMA table_info(products)", conn)
+                            available = set(cols_df['name'].tolist()) if 'name' in cols_df.columns else set()
+                        except Exception:
+                            available = set()
+                        desired = [
+                            'Product Name*', 'Product Type*', 'Vendor/Supplier*', 'Product Brand', 'Lineage',
+                            'Description', 'Weight*', 'Units', 'Price', 'Product Strain', 'Quantity*',
+                            'Accepted Date', 'Updated At', 'created_at', 'updated_at'
+                        ]
+                        select_cols = [c for c in desired if c in available]
+                        select_list = ', '.join([f'"{c}"' for c in select_cols]) if select_cols else 'id'
+                        df = _pd.read_sql_query(f'SELECT {select_list} FROM products', conn)
+                        products = df.to_dict('records')
+                        logging.info(f"EnhancedJSONMatcher: Loaded {len(products)} products from SQLite database at {sqlite_path}")
+                        self.cache.set(cache_key, products, ttl=3600)
+                        return products
+        except Exception as e:
+            logging.warning(f"EnhancedJSONMatcher: SQLite load failed: {e}")
+
+        # 2) PostgreSQL (if configured)
         try:
             from .product_database import get_postgresql_database
-            # Default store aligns with app-level default
             product_db = get_postgresql_database('AGT_Bothell')
             products = product_db.get_all_products()
             logging.info(f"EnhancedJSONMatcher: Loaded {len(products)} products from PostgreSQL database")
-            # Cache for 1 hour
             self.cache.set(cache_key, products, ttl=3600)
             return products
         except Exception as e:
-            logging.warning(f"EnhancedJSONMatcher: Could not load from PostgreSQL ProductDatabase: {e}")
+            logging.warning(f"EnhancedJSONMatcher: PostgreSQL load failed: {e}")
             
-        # Legacy fallback to Excel processor
+        # Final fallback to Excel processor
             
         # Fallback to excel processor
         if not self.excel_processor or self.excel_processor.df.empty:
