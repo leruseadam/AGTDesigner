@@ -74,7 +74,10 @@ def fix_database_schema():
             'CBD test result',
             'Room*',
             'State',
-            'DOH'
+            'DOH',
+            'first_seen_date',
+            'last_seen_date',
+            'normalized_name'
         ]
         
         missing_columns = []
@@ -89,12 +92,14 @@ def fix_database_schema():
             for column in missing_columns:
                 try:
                     # Add column with appropriate data type
-                    if column in ['Product Name*', 'Product Brand', 'Vendor/Supplier*', 'Product Type*', 'Description', 'Product Strain', 'Lineage', 'Room*', 'State']:
+                    if column in ['Product Name*', 'Product Brand', 'Vendor/Supplier*', 'Product Type*', 'Description', 'Product Strain', 'Lineage', 'Room*', 'State', 'normalized_name']:
                         cur.execute(f'ALTER TABLE products ADD COLUMN "{column}" TEXT')
                     elif column in ['Weight*', 'Price', 'Quantity*', 'THC test result', 'CBD test result']:
                         cur.execute(f'ALTER TABLE products ADD COLUMN "{column}" NUMERIC')
                     elif column in ['Units', 'DOH']:
                         cur.execute(f'ALTER TABLE products ADD COLUMN "{column}" TEXT')
+                    elif column in ['first_seen_date', 'last_seen_date']:
+                        cur.execute(f'ALTER TABLE products ADD COLUMN "{column}" TIMESTAMP')
                     else:
                         cur.execute(f'ALTER TABLE products ADD COLUMN "{column}" TEXT')
                     
