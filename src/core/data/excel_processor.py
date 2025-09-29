@@ -925,12 +925,12 @@ class ExcelProcessor:
             product_db = ProductDatabase(store_name=self._store_name)
             
             # Use the database's calculation method to get the Product Strain
-            product_strain = product_db._calculate_product_strain({
-                'Product Type*': product_type or '',
-                'Product Name*': product_name or '',
-                'Description': description or '',
-                'Ratio': ratio or ''
-            })
+            product_strain = product_db._calculate_product_strain(
+                product_type or '',
+                product_name or '',
+                description or '',
+                ratio or ''
+            )
             
             return product_strain
             
@@ -962,12 +962,12 @@ class ExcelProcessor:
                     ratio = row.get('Ratio', '')
                     
                     # Get Product Strain from database
-                    db_product_strain = product_db._calculate_product_strain({
-                        'Product Type*': product_type or '',
-                        'Product Name*': product_name or '',
-                        'Description': description or '',
-                        'Ratio': ratio or ''
-                    })
+                    db_product_strain = product_db._calculate_product_strain(
+                        product_type or '',
+                        product_name or '',
+                        description or '',
+                        ratio or ''
+                    )
                     
                     # Update the DataFrame with database value
                     self.df.loc[idx, 'Product Strain'] = db_product_strain
