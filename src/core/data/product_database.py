@@ -244,19 +244,24 @@ class ProductDatabase:
                 ''')
                 
                 # Create indexes for better performance
-                cursor.execute('CREATE INDEX IF NOT EXISTS idx_strains_normalized ON strains(normalized_name)')
+                cursor.execute('CREATE INDEX idx_strains_normalized ON strains(normalized_name)')
                 
                 # Only create normalized_name index if the column exists
-                cursor.execute("PRAGMA table_info(products)")
+                cursor.execute("""
+                    SELECT column_name, data_type, is_nullable 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'products' 
+                    ORDER BY ordinal_position
+                """)
                 product_columns = [col[1] for col in cursor.fetchall()]
                 if 'normalized_name' in product_columns:
-                    cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_normalized ON products(normalized_name)')
+                    cursor.execute('CREATE INDEX idx_products_normalized ON products(normalized_name)')
                 
                 # Only create strain_id index if the column exists
                 if 'strain_id' in product_columns:
-                    cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_strain ON products(strain_id)')
+                    cursor.execute('CREATE INDEX idx_products_strain ON products(strain_id)')
                     
-                cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_vendor_brand ON products("Vendor/Supplier*", "Product Brand")')
+                cursor.execute('CREATE INDEX idx_products_vendor_brand ON products("Vendor/Supplier*", "Product Brand")')
                 
                 conn.commit()
                 
@@ -680,7 +685,7 @@ class ProductDatabase:
             cursor.execute('''
                 SELECT "Lineage", COUNT(*) as count
                 FROM products
-                WHERE "Product Strain" = ? AND "Lineage" IS NOT NULL AND "Lineage" != ''
+                WHERE "Product Strain" = %s AND "Lineage" IS NOT NULL AND "Lineage" != ''
                 GROUP BY "Lineage"
                 ORDER BY count DESC
                 LIMIT 1
@@ -1877,7 +1882,12 @@ class ProductDatabase:
                 
                 # Set other missing columns with defaults (only for columns that exist)
                 # Check which columns exist in the database
-                cursor.execute("PRAGMA table_info(products)")
+                cursor.execute("""
+                    SELECT column_name, data_type, is_nullable 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'products' 
+                    ORDER BY ordinal_position
+                """)
                 existing_columns = {row[1] for row in cursor.fetchall()}
                 
                 # Define column mappings with existence checks
@@ -2442,7 +2452,7 @@ class ProductDatabase:
             current_date = datetime.now().isoformat()
             
             # Get current product data for comparison
-            cursor.execute('SELECT "Price", "THC test result", "CBD test result", "Weight*", "Units" FROM products WHERE id = ?', (product_id,))
+            cursor.execute('SELECT "Price", "THC test result", "CBD test result", "Weight*", "Units" FROM products WHERE id = %s', (product_id,))
             current_data = cursor.fetchone()
             
             # Log changes for important fields
@@ -2478,33 +2488,33 @@ class ProductDatabase:
             # Update the product with new data - NEW DATA ALWAYS REPLACES OLD VALUES
             cursor.execute('''
                 UPDATE products SET
-                    "Product Type*" = ?,
-                    "Lineage" = ?,
-                    "Vendor/Supplier*" = ?,
-                    "Product Brand" = ?,
-                    "Description" = ?,
-                    "Weight*" = ?,
-                    "Units" = ?,
-                    "Price" = ?,
-                    "Product Strain" = ?,
-                    "Quantity*" = ?,
-                    "DOH" = ?,
-                    "Concentrate Type" = ?,
-                    "Ratio" = ?,
-                    "JointRatio" = ?,
-                    "THC test result" = ?,
-                    "CBD test result" = ?,
-                    "Total THC" = ?,
-                    "THCA" = ?,
-                    "CBDA" = ?,
-                    "THC" = ?,
-                    "CBD" = ?,
-                    "AI" = ?,
-                    "AJ" = ?,
-                    "AK" = ?,
-                    "last_seen_date" = ?,
-                    "updated_at" = ?
-                WHERE id = ?
+                    "Product Type*" = %s,
+                    "Lineage" = %s,
+                    "Vendor/Supplier*" = %s,
+                    "Product Brand" = %s,
+                    "Description" = %s,
+                    "Weight*" = %s,
+                    "Units" = %s,
+                    "Price" = %s,
+                    "Product Strain" = %s,
+                    "Quantity*" = %s,
+                    "DOH" = %s,
+                    "Concentrate Type" = %s,
+                    "Ratio" = %s,
+                    "JointRatio" = %s,
+                    "THC test result" = %s,
+                    "CBD test result" = %s,
+                    "Total THC" = %s,
+                    "THCA" = %s,
+                    "CBDA" = %s,
+                    "THC" = %s,
+                    "CBD" = %s,
+                    "AI" = %s,
+                    "AJ" = %s,
+                    "AK" = %s,
+                    "last_seen_date" = %s,
+                    "updated_at" = %s
+                WHERE id = %s
             ''', (
                 product_data.get('Product Type*'),
                 self._normalize_lineage(product_data.get('Lineage')),
