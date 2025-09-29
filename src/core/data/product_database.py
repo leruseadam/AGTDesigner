@@ -216,7 +216,7 @@ class ProductDatabase:
             product_name = (product_data.get('Product Name*', '') or 
                           product_data.get('ProductName', '') or 
                           product_data.get('Product Name', ''))
-            normalized_name = product_data.get('normalized_name', '')
+            normalized_name = product_data.get('normalized_name', '') or product_name.lower().strip()
             product_type = product_data.get('Product Type*', '')
             
             # More robust validation
@@ -244,6 +244,7 @@ class ProductDatabase:
                     UPDATE products SET
                         "Product Name*" = %s,
                         "ProductName" = %s,
+                        strain_id = %s,
                         "Product Type*" = %s,
                         "Vendor/Supplier*" = %s,
                         "Product Brand" = %s,
@@ -304,6 +305,7 @@ class ProductDatabase:
                 ''', (
                     product_name,
                     product_data.get('ProductName', product_name),
+                    product_data.get('strain_id'),  # Add strain_id
                     product_type,
                     product_data.get('Vendor/Supplier*'),
                     product_data.get('Product Brand'),
@@ -379,7 +381,7 @@ class ProductDatabase:
                     ) VALUES (
                         %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                         %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                     ) RETURNING id
                 ''', (
                     product_name,
