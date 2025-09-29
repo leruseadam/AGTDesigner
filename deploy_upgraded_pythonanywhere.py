@@ -1,5 +1,69 @@
 #!/usr/bin/env python3
 """
+One-click PythonAnywhere migration runner:
+ - Verifies env vars for PostgreSQL
+ - Ensures SQLite snapshot exists in uploads/
+ - Runs migrate_sqlite_to_postgresql_final.py
+ - Verifies counts in PostgreSQL
+
+Usage on PythonAnywhere Bash (in /home/adamcordova/AGTDesigner):
+  python3 deploy_upgraded_pythonanywhere.py --sqlite uploads/product_database_AGT_Bothell.db
+"""
+import os
+import sys
+import subprocess
+
+def run(cmd: list[str]):
+    print("$", " ".join(cmd))
+    subprocess.check_call(cmd)
+
+def main():
+    sqlite_path = None
+    for i, a in enumerate(sys.argv):
+        if a == '--sqlite' and i + 1 < len(sys.argv):
+            sqlite_path = sys.argv[i + 1]
+            break
+    if not sqlite_path:
+        sqlite_path = 'uploads/product_database_AGT_Bothell.db'
+    if not os.path.exists(sqlite_path):
+        print(f"❌ SQLite file not found: {sqlite_path}")
+        sys.exit(1)
+
+    required = ['DB_HOST','DB_NAME','DB_USER','DB_PASSWORD','DB_PORT']
+    missing = [k for k in required if not os.environ.get(k)]
+    if missing:
+        print("❌ Missing env vars:", ", ".join(missing))
+        sys.exit(1)
+
+    # Run migration
+    env = os.environ.copy()
+    env['PYTHONUNBUFFERED'] = '1'
+    print("🚀 Running migration...")
+    run([sys.executable, 'migrate_sqlite_to_postgresql_final.py'])
+
+    # Verify counts
+    print("🔎 Verifying PostgreSQL counts...")
+    verify_code = r'''
+import os, psycopg2
+cfg = dict(host=os.environ['DB_HOST'], database=os.environ['DB_NAME'], user=os.environ['DB_USER'], password=os.environ['DB_PASSWORD'], port=os.environ['DB_PORT'])
+conn = psycopg2.connect(**cfg)
+cur = conn.cursor()
+cur.execute('SELECT COUNT(*) FROM products')
+print('products:', cur.fetchone()[0])
+cur.execute('SELECT COUNT(DISTINCT "Vendor/Supplier*") FROM products WHERE "Vendor/Supplier*" IS NOT NULL AND "Vendor/Supplier*" != ''')
+print('vendors:', cur.fetchone()[0])
+cur.execute('SELECT COUNT(DISTINCT "Product Brand") FROM products WHERE "Product Brand" IS NOT NULL AND "Product Brand" != ''')
+print('brands:', cur.fetchone()[0])
+cur.close(); conn.close()
+'''
+    run([sys.executable, '-c', verify_code])
+    print("✅ Done. Reload your web app to reflect new counts.")
+
+if __name__ == '__main__':
+    main()
+
+#!/usr/bin/env python3
+"""
 Deploy Upgraded PythonAnywhere Configuration
 Automates the deployment of optimized settings for upgraded plan
 """
