@@ -5483,102 +5483,70 @@ const TagManager = {
     },
 
     async uploadFile(file) {
-        const maxRetries = 2;
-        let retryCount = 0;
-        
-        while (retryCount <= maxRetries) {
-            try {
-                console.log(`Starting file upload (attempt ${retryCount + 1}):`, file.name, 'Size:', file.size, 'bytes');
-                
-                // Show Excel loading splash screen
-                this.showExcelLoadingSplash(file.name);
-                
-                // Show loading state
-                this.updateUploadUI(`Uploading ${file.name}...`);
-                
-                const formData = new FormData();
-                formData.append('file', file);
-                
-                console.log('Sending upload request...');
-                
-                // Create AbortController for timeout
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
-                
-                const response = await fetch('/upload', {
-                    method: 'POST',
-                    body: formData,
-                    signal: controller.signal
-                });
-                
-                clearTimeout(timeoutId);
-                console.log('Upload response status:', response.status);
-                
-                let data;
-                try {
-                    data = await response.json();
-                    console.log('Upload response data:', data);
-                } catch (jsonError) {
-                    console.error('Error parsing JSON response:', jsonError);
-                    throw new Error('Invalid server response');
-                }
-                
-                if (response.ok && data.filename) {
-                    // Poll for processing status
-                    this.updateUploadUI(`Processing ${file.name}...`);
-                    await this.pollUploadStatusAndUpdateUI(data.filename, file.name);
-                    return; // Success, exit retry loop
-                } else if (response.ok) {
-                    // Fallback for legacy response
-                    this.updateUploadUI(file.name, 'File uploaded successfully', 'success');
-                    // File uploaded successfully
-                    return; // Success, exit retry loop
-                } else {
-                    console.error('Upload failed:', data.error);
-                    this.hideExcelLoadingSplash();
-                    
-                    // Check if store selection is required
-                    if (data.requires_store) {
-                        this.updateUploadUI('Store selection required', 'error');
-                        // Show store selection modal
-                        if (window.showStoreSelectionModal) {
-                            window.showStoreSelectionModal();
-                        }
-                        return; // Don't retry on store selection requirement
-                    }
-                    
-                    this.updateUploadUI('No file selected');
-                    console.error('Upload failed:', data.error);
-                    return; // Don't retry on server errors
-                }
-            } catch (error) {
-                console.error(`Upload error (attempt ${retryCount + 1}):`, error);
-                
-                if (retryCount === maxRetries) {
-                    // Final attempt failed
-                    this.hideExcelLoadingSplash();
-                    this.updateUploadUI('No file selected');
-                    let errorMessage = 'Upload failed';
-                    if (error.name === 'AbortError') {
-                        errorMessage = 'Upload timed out - please try again';
-                    } else if (error.message.includes('Failed to fetch')) {
-                        errorMessage = 'Network error - please check your connection';
-                    } else if (error.message.includes('Invalid server response')) {
-                        errorMessage = 'Server error - please try again';
-                    } else if (error.message) {
-                        errorMessage = error.message;
-                    }
-                    console.error('Upload error:', errorMessage);
-                    return;
-                } else {
-                    // Retry after a short delay
-                    console.log(`Retrying upload in 2 seconds... (${retryCount + 1}/${maxRetries})`);
-                    this.updateUploadUI(`Retrying upload... (${retryCount + 1}/${maxRetries})`);
-                    await new Promise(resolve => setTimeout(resolve, 2000));
-                }
+        try {
+            console.log(`🚀 Starting LIGHTNING upload:`, file.name, 'Size:', file.size, 'bytes');
+            
+            // Show Excel loading splash screen
+            this.showExcelLoadingSplash(file.name);
+            
+            // Phase 1: Lightning-fast upload (save file only)
+            this.updateUploadUI(`⚡ Lightning upload: ${file.name}...`);
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            console.log('🚀 Sending lightning upload request...');
+            
+            const uploadResponse = await fetch('/upload-lightning', {
+                method: 'POST',
+                body: formData
+            });
+            
+            const uploadData = await uploadResponse.json();
+            console.log('⚡ Lightning upload response:', uploadData);
+            
+            if (!uploadResponse.ok) {
+                throw new Error(uploadData.error || 'Lightning upload failed');
             }
             
-            retryCount++;
+            // Phase 2: Background processing
+            this.updateUploadUI(`🔄 Processing ${file.name}...`);
+            console.log('🔄 Starting background processing...');
+            
+            const processResponse = await fetch('/process-lightning', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    file_path: uploadData.file_path,
+                    filename: uploadData.filename
+                })
+            });
+            
+            const processData = await processResponse.json();
+            console.log('✅ Processing response:', processData);
+            
+            if (!processResponse.ok) {
+                throw new Error(processData.error || 'Processing failed');
+            }
+            
+            // Success!
+            this.updateUploadUI(`✅ ${file.name} ready!`, 'File processed successfully', 'success');
+            console.log(`✅ Lightning upload completed! Upload: ${uploadData.upload_time?.toFixed(3)}s, Process: ${processData.process_time?.toFixed(3)}s`);
+            
+            // Refresh the page to show new data
+            setTimeout(() => {
+                console.log('🔄 Refreshing page to show new data...');
+                window.location.reload();
+            }, 1000);
+            
+            return; // Success!
+        } catch (error) {
+            console.error('⚡ Lightning upload error:', error);
+            this.hideExcelLoadingSplash();
+            this.updateUploadUI('Upload failed: ' + error.message, 'error');
+            return;
         }
     },
     // Fallback upload method for PythonAnywhere

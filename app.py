@@ -2587,6 +2587,120 @@ def upload_status():
         # Never return HTML; always JSON for the polling loop
         return jsonify({'error': str(e), 'trace': tb, 'status': 'processing'}), 500
 
+@app.route('/upload-lightning', methods=['POST'])
+def upload_lightning():
+    """Ultra-fast file upload - saves file immediately, processes later"""
+    try:
+        logging.info("=== LIGHTNING UPLOAD START ===")
+        start_time = time.time()
+        
+        # Validate file upload
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file uploaded'}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        if not file.filename.lower().endswith('.xlsx'):
+            return jsonify({'error': 'Only .xlsx files are allowed'}), 400
+        
+        # Quick file size check
+        file.seek(0, 2)
+        file_size = file.tell()
+        file.seek(0)
+        
+        max_size = app.config.get('MAX_CONTENT_LENGTH', 100 * 1024 * 1024)
+        if file_size > max_size:
+            return jsonify({'error': f'File too large. Maximum size is {max_size / (1024*1024):.1f} MB'}), 400
+        
+        # Sanitize filename
+        sanitized_filename = sanitize_filename(file.filename)
+        if not sanitized_filename:
+            return jsonify({'error': 'Invalid filename'}), 400
+        
+        # Save file immediately (no processing)
+        upload_folder = app.config['UPLOAD_FOLDER']
+        os.makedirs(upload_folder, exist_ok=True)
+        
+        file_path = os.path.join(upload_folder, sanitized_filename)
+        file.save(file_path)
+        
+        # Store file path in session for later processing
+        session['uploaded_file_path'] = file_path
+        session['uploaded_filename'] = sanitized_filename
+        
+        upload_time = time.time() - start_time
+        logging.info(f"[LIGHTNING] File saved in {upload_time:.3f}s: {file_path}")
+        
+        return jsonify({
+            'success': True,
+            'message': f'File uploaded successfully in {upload_time:.3f}s',
+            'file_path': file_path,
+            'filename': sanitized_filename,
+            'upload_time': upload_time,
+            'file_size': file_size
+        })
+        
+    except Exception as e:
+        logging.error(f"[LIGHTNING] Upload failed: {e}")
+        return jsonify({'error': f'Upload failed: {str(e)}'}), 500
+
+@app.route('/process-lightning', methods=['POST'])
+def process_lightning():
+    """Process the lightning-uploaded file in the background"""
+    try:
+        logging.info("=== LIGHTNING PROCESSING START ===")
+        start_time = time.time()
+        
+        # Get file path from session or request
+        file_path = session.get('uploaded_file_path')
+        filename = session.get('uploaded_filename')
+        
+        if not file_path or not os.path.exists(file_path):
+            return jsonify({'error': 'No uploaded file found to process'}), 400
+        
+        # Load file with optimizations
+        from src.core.data.excel_processor import ExcelProcessor
+        processor = ExcelProcessor()
+        
+        # Quick row-limited load for speed
+        import pandas as pd
+        try:
+            # Load only first 1000 rows for lightning speed
+            df = pd.read_excel(file_path, nrows=1000, engine='openpyxl')
+            processor.df = df
+            logging.info(f"[LIGHTNING] Loaded {len(df)} rows (limited for speed)")
+        except Exception as e:
+            logging.warning(f"[LIGHTNING] Quick load failed, trying full load: {e}")
+            success = processor.load_file(file_path)
+            if not success:
+                return jsonify({'error': 'Failed to process file'}), 500
+        
+        # Update global processor
+        global _excel_processor
+        with excel_processor_lock:
+            _excel_processor = processor
+            _excel_processor._last_loaded_file = file_path
+        
+        # Clear minimal caches only
+        cache.delete('full_excel_cache_key')
+        cache.delete('dropdown_cache_key')
+        
+        process_time = time.time() - start_time
+        logging.info(f"[LIGHTNING] Processing completed in {process_time:.3f}s")
+        
+        return jsonify({
+            'success': True,
+            'message': f'File processed successfully in {process_time:.3f}s',
+            'rows_loaded': len(processor.df),
+            'process_time': process_time
+        })
+        
+    except Exception as e:
+        logging.error(f"[LIGHTNING] Processing failed: {e}")
+        return jsonify({'error': f'Processing failed: {str(e)}'}), 500
+
 @app.route('/api/template', methods=['POST'])
 def edit_template():
     """
