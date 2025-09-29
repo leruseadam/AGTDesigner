@@ -528,8 +528,8 @@
           console.log('Analytics data loaded:', { 
             products: totalProducts, 
             strains: totalStrains, 
-            vendors: stats.stats?.unique_vendors || 0,
-            brands: stats.stats?.unique_brands || 0
+            vendors: vendorStats.summary?.total_vendors || 0,
+            brands: vendorStats.summary?.total_brands || 0
           });
         
           const analyticsHtml = `
@@ -554,16 +554,16 @@
                 <div class="col-md-3">
                   <div class="card glass-card text-center">
                     <div class="card-body">
-                      <h3 class="text-warning">${stats.stats?.unique_vendors || 0}</h3>
-                      <p class="mb-0">Unique Vendors</p>
+                      <h3 class="text-warning">${vendorStats.summary?.total_vendors || 0}</h3>
+                      <p class="mb-0">Active Vendors</p>
                     </div>
                   </div>
                 </div>
                 <div class="col-md-3">
                   <div class="card glass-card text-center">
                     <div class="card-body">
-                      <h3 class="text-info">${stats.stats?.unique_brands || 0}</h3>
-                      <p class="mb-0">Unique Brands</p>
+                      <h3 class="text-info">${vendorStats.summary?.total_brands || 0}</h3>
+                      <p class="mb-0">Product Brands</p>
                     </div>
                   </div>
                 </div>
