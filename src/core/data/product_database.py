@@ -1676,7 +1676,7 @@ class ProductDatabase:
                 # Core columns that should always exist
                 ['Product Name*', 'Product Type*', 'Vendor/Supplier*', 'Product Brand', 'Lineage'],
                 # Basic product info
-                ['Description', 'Weight*', 'Weight Unit* (grams/gm or ounces/oz)', 'Price* (Tier Name for Bulk)', 'Product Strain', 'Quantity*'],
+                ['Description', 'Weight*', 'Units', 'Price', 'Product Strain', 'Quantity*'],
                 # Test results
                 ['Test result unit (% or mg)'],
                 # Additional product details
@@ -1700,13 +1700,12 @@ class ProductDatabase:
             # Use the same approach as get_all_products for consistency
             cursor.execute('''
                 SELECT p.id, p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
-                       p."Description", p."Weight*", p."Weight Unit* (grams/gm or ounces/oz)", p."Price* (Tier Name for Bulk)", 
+                       p."Description", p."Weight*", p."Units", p."Price", 
                        p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio", p."State", p."Is Sample? (yes/no)",
                        p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*",
                        p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens",
                        p."Solvent", p."Accepted Date", p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients",
-                       p."CombinedWeight", p."Total THC", p."THCA", p."CBDA", p."CBN",
-                       p."DOH Compliant (Yes/No)"
+                       p."Total THC", p."THCA", p."CBDA", p."CBN"
                 FROM products p
                 ORDER BY p.id
             ''')
@@ -1729,8 +1728,8 @@ class ProductDatabase:
                     'Lineage': result[5],
                     'Description': result[6],
                     'Weight*': result[7],
-                    'Weight Unit* (grams/gm or ounces/oz)': result[8],
-                    'Price* (Tier Name for Bulk)': result[9],
+                    'Units': result[8],
+                    'Price': result[9],
                     'Quantity*': result[10],
                     'DOH': result[11],
                     'Concentrate Type': result[12],
@@ -1756,12 +1755,10 @@ class ProductDatabase:
                     'Product Tags (comma separated)': result[32],
                     'Image URL': result[33],
                     'Ingredients': result[34],
-                    'CombinedWeight': result[35],
-                    'Total THC': result[36],
-                    'THCA': result[37],
-                    'CBDA': result[38],
-                    'CBN': result[39],
-                    'DOH Compliant (Yes/No)': result[41]
+                    'Total THC': result[35],
+                    'THCA': result[36],
+                    'CBDA': result[37],
+                    'CBN': result[38]
                 }
                 products_data.append(product)
             
@@ -4011,8 +4008,8 @@ class ProductDatabase:
                        p."Description", p."Weight*", p."Units", p."Price", p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio",
                        p."State", p."Is Sample? (yes/no)", p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*",
                        p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens", p."Solvent", p."Accepted Date",
-                       p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."CombinedWeight", p."Ratio_or_THC_CBD", 
-                       p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN", 0 as total_occurrences, '' as first_seen_date, '' as last_seen_date
+                       p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."Total THC", p."Ratio", 
+                       p."Description", p."Total THC", p."THCA", p."CBDA", p."CBN", 0 as total_occurrences, '' as first_seen_date, '' as last_seen_date
                 FROM products p
                 WHERE 1=1
             '''
@@ -4306,7 +4303,7 @@ class ProductDatabase:
             for term in key_terms:
                 if len(term) > 3:  # Only use meaningful terms
                     cursor.execute('''
-                        SELECT p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Weight*", p."Weight Unit* (grams/gm or ounces/oz)", p."Price* (Tier Name for Bulk)",
+                        SELECT p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Weight*", p."Units", p."Price",
                                p."Lineage", s.strain_name, p."Description"
                         FROM products p
                         LEFT JOIN strains s ON p."Product Strain" = s.strain_name
@@ -4335,7 +4332,7 @@ class ProductDatabase:
             product_type = self._infer_product_type_from_name(product_name)
             if product_type:
                 cursor.execute('''
-                    SELECT p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Weight*", p."Weight Unit* (grams/gm or ounces/oz)", p."Price* (Tier Name for Bulk)",
+                    SELECT p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Weight*", p."Units", p."Price",
                            p."Lineage", s.strain_name, p."Description"
                     FROM products p
                     LEFT JOIN strains s ON p."Product Strain" = s.strain_name
@@ -4364,7 +4361,7 @@ class ProductDatabase:
             strain_name = self._extract_strain_from_name(product_name)
             if strain_name:
                 cursor.execute('''
-                    SELECT p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Weight*", p."Weight Unit* (grams/gm or ounces/oz)", p."Price* (Tier Name for Bulk)",
+                    SELECT p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Weight*", p."Units", p."Price",
                            p."Lineage", s.strain_name, p."Description"
                     FROM products p
                     LEFT JOIN strains s ON p."Product Strain" = s.strain_name
@@ -4809,8 +4806,8 @@ class ProductDatabase:
                        p."Description", p."Weight*", p."Units", p."Price", p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio",
                        p."State", p."Is Sample? (yes/no)", p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*",
                        p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens", p."Solvent", p."Accepted Date",
-                       p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."CombinedWeight", p."Ratio_or_THC_CBD", 
-                       p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN", p.total_occurrences, p.first_seen_date, p.last_seen_date,
+                       p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."Total THC", p."Ratio", 
+                       p."Description", p."Total THC", p."THCA", p."CBDA", p."CBN", p.total_occurrences, p.first_seen_date, p.last_seen_date,
                        s.canonical_lineage, s.sovereign_lineage
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
@@ -4841,8 +4838,8 @@ class ProductDatabase:
                        p."Description", p."Weight*", p."Units", p."Price", p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio",
                        p."State", p."Is Sample? (yes/no)", p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*",
                        p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens", p."Solvent", p."Accepted Date",
-                       p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."CombinedWeight", p."Ratio_or_THC_CBD", 
-                       p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN", p.total_occurrences, p.first_seen_date, p.last_seen_date,
+                       p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."Total THC", p."Ratio", 
+                       p."Description", p."Total THC", p."THCA", p."CBDA", p."CBN", p.total_occurrences, p.first_seen_date, p.last_seen_date,
                        s.canonical_lineage, s.sovereign_lineage
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
@@ -4873,8 +4870,8 @@ class ProductDatabase:
                        p."Description", p."Weight*", p."Units", p."Price", p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio",
                        p."State", p."Is Sample? (yes/no)", p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*",
                        p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens", p."Solvent", p."Accepted Date",
-                       p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."CombinedWeight", p."Ratio_or_THC_CBD", 
-                       p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN", p.total_occurrences, p.first_seen_date, p.last_seen_date,
+                       p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."Total THC", p."Ratio", 
+                       p."Description", p."Total THC", p."THCA", p."CBDA", p."CBN", p.total_occurrences, p.first_seen_date, p.last_seen_date,
                        s.canonical_lineage, s.sovereign_lineage
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
@@ -4924,14 +4921,12 @@ class ProductDatabase:
             
             cursor.execute('''
                 SELECT p.id, p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
-                       p."Description", p."Weight*", p."Weight Unit* (grams/gm or ounces/oz)", p."Price* (Tier Name for Bulk)", 
+                       p."Description", p."Weight*", p."Units", p."Price", 
                        p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio", p."State", p."Is Sample? (yes/no)",
                        p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*",
                        p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens",
                        p."Solvent", p."Accepted Date", p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients",
-                       p."CombinedWeight", p."Ratio_or_THC_CBD", p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN",
-                       p."ProductName", p."Units", p."Price", p."DOH Compliant (Yes/No)", p."Joint Ratio", p."Quantity Received*", p."qty",
-                       p."AI", p."AJ", p."AK"
+                       p."Total THC", p."THCA", p."CBDA", p."CBN"
                 FROM products p
                 ORDER BY p.id
             ''')
@@ -4949,8 +4944,8 @@ class ProductDatabase:
                     'Lineage': result[5],
                     'Description': result[6],
                     'Weight*': result[7],
-                    'Weight Unit* (grams/gm or ounces/oz)': result[8],
-                    'Price* (Tier Name for Bulk)': result[9],
+                    'Units': result[8],
+                    'Price': result[9],
                     'Quantity*': result[10],
                     'DOH': result[11],
                     'Concentrate Type': result[12],

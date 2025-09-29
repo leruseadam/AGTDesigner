@@ -1,105 +1,66 @@
 #!/usr/bin/env python3
 """
-Copy Fixed WSGI File to PythonAnywhere Location
-Copies the corrected WSGI file to the PythonAnywhere web app location
+Script to copy the local wsgi_pythonanywhere_python311.py to the PythonAnywhere
+web app's WSGI file location (/var/www/www_agtpricetags_com_wsgi.py).
+Includes backup and verification.
 """
 
 import os
 import shutil
+import sys
+import time
 
 def copy_wsgi_file():
-    """Copy the fixed WSGI file to PythonAnywhere location"""
-    
-    print("🔧 Copying Fixed WSGI File to PythonAnywhere...")
+    """Copies the local WSGI file to the PythonAnywhere web app location."""
+    print("🚀 Copying WSGI File to PythonAnywhere Location...")
     print("=" * 50)
-    
-    # Source WSGI file (our corrected one)
-    source_wsgi = "/home/adamcordova/AGTDesigner/wsgi_pythonanywhere_python311.py"
-    
-    # Target WSGI file (the one PythonAnywhere uses)
-    target_wsgi = "/var/www/www_agtpricetags_com_wsgi.py"
-    
-    print(f"📁 Source WSGI: {source_wsgi}")
-    print(f"📁 Target WSGI: {target_wsgi}")
-    
-    # Check if source file exists
-    if not os.path.exists(source_wsgi):
-        print(f"❌ Source WSGI file not found: {source_wsgi}")
-        return False
-    
-    # Check if target file exists
-    if not os.path.exists(target_wsgi):
-        print(f"❌ Target WSGI file not found: {target_wsgi}")
-        return False
-    
-    try:
-        # Create backup of target file
-        backup_file = target_wsgi + '.backup'
-        shutil.copy2(target_wsgi, backup_file)
-        print(f"✅ Created backup: {backup_file}")
-        
-        # Copy our corrected WSGI file to the target location
-        shutil.copy2(source_wsgi, target_wsgi)
-        print("✅ WSGI file copied successfully!")
-        
-        # Verify the copy
-        with open(target_wsgi, 'r') as f:
-            content = f.read()
-        
-        # Check for key elements
-        checks = [
-            ('from app import app', 'App import'),
-            ('application = app', 'Application assignment'),
-            ('adamcordova-4822.postgres.pythonanywhere-services.com', 'PostgreSQL host'),
-            ('os.environ[\'DB_HOST\']', 'Database host env var'),
-            ('configure_production_logging', 'Production logging')
-        ]
-        
-        print("\n🔍 Verifying copied WSGI file:")
-        all_good = True
-        for check, description in checks:
-            if check in content:
-                print(f"✅ {description}")
-            else:
-                print(f"❌ Missing: {description}")
-                all_good = False
-        
-        if all_good:
-            print("\n🎉 WSGI file copied and verified successfully!")
-            return True
-        else:
-            print("\n⚠️ Some elements are missing from copied WSGI file")
-            return False
-        
-    except PermissionError:
-        print(f"❌ Permission denied: Cannot write to {target_wsgi}")
-        print("💡 You may need to run this with sudo")
-        return False
-    except Exception as e:
-        print(f"❌ Error copying WSGI file: {e}")
-        return False
 
-def main():
-    """Main function"""
-    print("🚀 Copy Fixed WSGI File to PythonAnywhere")
-    print("=" * 45)
-    
-    # Copy the WSGI file
-    success = copy_wsgi_file()
-    
-    print("\n💡 Next Steps:")
-    if success:
-        print("🎉 WSGI file copied successfully!")
-        print("1. Go to PythonAnywhere Web tab")
-        print("2. Click Reload button")
-        print("3. Wait 60 seconds")
-        print("4. Refresh your web app")
-        print("5. Database should now show 15,939 products!")
-    else:
-        print("⚠️ WSGI file copy failed")
-        print("1. Check the error messages above")
-        print("2. Try running with sudo if permission denied")
-        print("3. Manually copy the file if needed")
+    local_wsgi_path = os.path.join(os.getcwd(), 'wsgi_pythonanywhere_python311.py')
+    pythonanywhere_wsgi_path = '/var/www/www_agtpricetags_com_wsgi.py'
+    backup_path = f"{pythonanywhere_wsgi_path}.backup_{time.strftime('%Y%m%d%H%M%S')}"
+
+    if not os.path.exists(local_wsgi_path):
+        print(f"❌ Error: Local WSGI file not found at {local_wsgi_path}")
+        sys.exit(1)
+
+    print(f"Source WSGI file: {local_wsgi_path}")
+    print(f"Destination WSGI file: {pythonanywhere_wsgi_path}")
+
+    try:
+        # Create a backup of the existing WSGI file
+        if os.path.exists(pythonanywhere_wsgi_path):
+            print(f"Creating backup of existing WSGI file to: {backup_path}")
+            shutil.copy2(pythonanywhere_wsgi_path, backup_path)
+            print("✅ Backup created successfully.")
+        else:
+            print("⚠️ No existing WSGI file found at destination, skipping backup.")
+
+        # Copy the new WSGI file
+        shutil.copy2(local_wsgi_path, pythonanywhere_wsgi_path)
+        print(f"✅ Successfully copied {local_wsgi_path} to {pythonanywhere_wsgi_path}")
+
+        # Verify content
+        with open(pythonanywhere_wsgi_path, 'r') as f:
+            content = f.read()
+            
+        if "application = app" in content and "DB_HOST" in content:
+            print("✅ Verified WSGI file contains 'application = app' and 'DB_HOST' environment variable.")
+        else:
+            print("❌ Verification failed: WSGI file content does not look correct.")
+            print("   Please check the content of the copied file manually.")
+            sys.exit(1)
+
+        print("\n🎉 WSGI file copied and verified successfully!")
+        print("💡 Remember to reload your web app on PythonAnywhere's Web tab to apply changes.")
+
+    except PermissionError:
+        print(f"❌ Permission denied: Cannot write to {pythonanywhere_wsgi_path}.")
+        print("   💡 You might need to run this script with `sudo` if you have the necessary permissions,")
+        print("      or manually copy the file using the PythonAnywhere 'Files' interface.")
+        sys.exit(1)
+    except Exception as e:
+        print(f"❌ An unexpected error occurred: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
-    main()
+    copy_wsgi_file()

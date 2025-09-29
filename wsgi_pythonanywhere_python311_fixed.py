@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 PythonAnywhere WSGI configuration for Label Maker application
-Updated for Python 3.11 deployment
+Updated for Python 3.11 deployment with robust database connection handling
 """
 
 import os
@@ -109,7 +109,8 @@ try:
     conn.close()
 except Exception as e:
     print(f"❌ Database connection failed: {e}")
-    raise
+    # Don't raise here - let the app handle it gracefully
+    print("⚠️ Continuing without database connection test...")
 
 try:
     # Import the Flask application
