@@ -82,3 +82,6 @@ backup/
 pythonanywhere.log product_database_fixed.db.gz
 *.xlsx
 *.tar.gz
+
+# Ignore large database files
+uploads/*.db
