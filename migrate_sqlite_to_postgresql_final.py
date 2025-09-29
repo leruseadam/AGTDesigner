@@ -6,6 +6,7 @@ Handles exact column differences between SQLite and PostgreSQL schemas
 import sqlite3
 import psycopg2
 import os
+import sys
 from datetime import datetime
 import logging
 
@@ -23,14 +24,37 @@ def get_postgresql_config():
         'port': os.getenv('DB_PORT', '5432')
     }
 
+def resolve_sqlite_path() -> str:
+    """Resolve the SQLite path from CLI arg, env, or sensible defaults on PythonAnywhere."""
+    # CLI argument: --sqlite PATH
+    sqlite_path = None
+    argv = sys.argv
+    for i, a in enumerate(argv):
+        if a == '--sqlite' and i + 1 < len(argv):
+            sqlite_path = argv[i + 1]
+            break
+    # Environment override
+    if not sqlite_path:
+        sqlite_path = os.environ.get('SQLITE_PATH')
+    # Defaults: look in uploads/ within current project
+    if not sqlite_path:
+        candidate1 = os.path.join(os.getcwd(), 'uploads', 'product_database_AGT_Bothell.db')
+        candidate2 = os.path.join(os.getcwd(), 'uploads', 'product_database.db')
+        if os.path.exists(candidate1):
+            sqlite_path = candidate1
+        elif os.path.exists(candidate2):
+            sqlite_path = candidate2
+    return sqlite_path or ''
+
+
 def migrate_products():
     """Migrate all products from SQLite to PostgreSQL"""
     
     # SQLite database path
-    sqlite_path = '/Users/adamcordova/Desktop/labelMaker_ QR copy/uploads/product_database_AGT_Bothell.db'
+    sqlite_path = resolve_sqlite_path()
     
-    if not os.path.exists(sqlite_path):
-        logger.error(f"SQLite database not found: {sqlite_path}")
+    if not sqlite_path or not os.path.exists(sqlite_path):
+        logger.error(f"SQLite database not found: {sqlite_path or '(empty)'}")
         return False
     
     # Connect to SQLite
