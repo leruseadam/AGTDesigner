@@ -63,6 +63,7 @@ class ProductDatabase:
     
     def __init__(self, db_path: str = None, store_name: str = None):
         self.store_name = store_name
+        self.db_path = db_path or "postgresql://localhost/agt_designer"  # Default PostgreSQL path
         self.config = get_database_config()
         self._connection_pool = {}
         self._cache = {}

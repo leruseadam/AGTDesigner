@@ -2949,12 +2949,16 @@ def api_upload_status():
         # If status is 'not_found' but file exists, it might have been processed successfully
         if status == 'not_found' and file_exists:
             # Check if we have a global processor with data
-            global excel_processor
-            if excel_processor and hasattr(excel_processor, 'df') and excel_processor.df is not None and not excel_processor.df.empty:
-                status = 'ready'
-                logging.info(f"File {filename} appears to be processed (global processor has data)")
-            else:
-                status = 'processing'  # Still processing
+            try:
+                excel_processor = get_excel_processor()
+                if excel_processor and hasattr(excel_processor, 'df') and excel_processor.df is not None and not excel_processor.df.empty:
+                    status = 'ready'
+                    logging.info(f"File {filename} appears to be processed (global processor has data)")
+                else:
+                    status = 'processing'  # Still processing
+            except Exception as e:
+                logging.error(f"Error checking processor status: {e}")
+                status = 'processing'
         elif status == 'processing' and file_exists:
             # Check if processing is actually complete
             local_processor = get_excel_processor()
