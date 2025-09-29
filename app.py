@@ -1455,10 +1455,11 @@ def index():
         # --- LIGHTWEIGHT PAGE LOAD (minimal work) ---
         cache_bust = str(int(time.time()))
         
-        # Only clear session data, don't reset global state
-        uploaded_file = session.pop('file_path', None)
+        # CRITICAL FIX: Don't clear uploaded file from session on page refresh
+        # This was causing uploads to disappear when users refreshed the page
+        uploaded_file = session.get('file_path', None)  # Keep the file path instead of removing it
         if uploaded_file:
-            logging.info(f"Cleared uploaded file from session: {uploaded_file}")
+            logging.info(f"Preserving uploaded file in session: {uploaded_file}")
         # Don't clear selected_tags - they should persist across page loads
         
         # Store selection will be handled by frontend JavaScript using localStorage
@@ -2089,41 +2090,66 @@ def update_global_processor_fast(processor, temp_path):
     except Exception as e:
         logging.error(f"Error updating global processor: {str(e)}")
 def process_excel_background(filename, temp_path):
-    """Ultra-optimized background processing with minimal processing for instant response"""
+    """ULTRA-FAST background processing - minimal operations for instant response"""
     global os  # Ensure os is available in this scope
     
     try:
-        logging.info(f"[BG] ===== BACKGROUND PROCESSING START =====")
-        logging.info(f"[BG] Starting ultra-optimized file processing: {temp_path}")
-        logging.info(f"[BG] Filename: {filename}")
-        logging.info(f"[BG] Temp path: {temp_path}")
+        logging.info(f"[BG] ===== ULTRA-FAST BACKGROUND PROCESSING START =====")
+        logging.info(f"[BG] Processing: {filename}")
         
-        # CRITICAL FIX: Add comprehensive error handling
-        try:
-            import traceback
-            logging.info(f"[BG] Python version: {sys.version}")
-            logging.info(f"[BG] Current working directory: {os.getcwd()}")
-            logging.info(f"[BG] File exists check: {os.path.exists(temp_path) if temp_path else 'temp_path is None'}")
-            if temp_path and os.path.exists(temp_path):
-                file_size = os.path.getsize(temp_path)
-                logging.info(f"[BG] File size: {file_size} bytes")
-            else:
-                logging.error(f"[BG] CRITICAL ERROR: File does not exist at {temp_path}")
-                update_processing_status(filename, f'error: File not found at {temp_path}')
-                return
-        except Exception as debug_error:
-            logging.error(f"[BG] Debug error: {debug_error}")
-            logging.error(f"[BG] Debug traceback: {traceback.format_exc()}")
-        
-        # Set a timeout for the entire processing operation
-        start_time = time.time()
-        max_processing_time = 300  # 5 minutes max
-        
-        # Verify the file still exists before processing
+        # Quick file existence check
         if not os.path.exists(temp_path):
-            update_processing_status(filename, f'error: File not found at {temp_path}')
+            update_processing_status(filename, f'error: File not found')
             logging.error(f"[BG] File not found: {temp_path}")
             return
+        
+        start_time = time.time()
+        
+        # ULTRA-FAST LOADING: Load file with minimal processing
+        from src.core.data.excel_processor import ExcelProcessor
+        new_processor = ExcelProcessor()
+        
+        try:
+            # Use fast load for immediate response
+            success = new_processor.load_file(temp_path)
+            if not success or new_processor.df is None or new_processor.df.empty:
+                update_processing_status(filename, f'error: Failed to load file')
+                return
+            
+            logging.info(f"[BG] File loaded successfully: {len(new_processor.df)} rows")
+            
+            # Mark as ready immediately
+            update_processing_status(filename, 'ready')
+            logging.info(f"[BG] Marked {filename} as ready")
+            
+        except Exception as load_error:
+            logging.error(f"[BG] Load error: {load_error}")
+            update_processing_status(filename, f'error: Load failed')
+            return
+        
+        # ULTRA-FAST PROCESSING: Update global processor immediately
+        global _excel_processor
+        with excel_processor_lock:
+            _excel_processor = new_processor
+            logging.info(f"[BG] ✅ Global processor updated with {len(new_processor.df)} rows")
+        
+        # Store in database (non-blocking)
+        try:
+            if hasattr(new_processor, '_store_upload_in_database'):
+                storage_result = new_processor._store_upload_in_database(new_processor.df, temp_path)
+                logging.info(f"[BG] ✅ Database storage completed: {storage_result}")
+        except Exception as storage_error:
+            logging.warning(f"[BG] Database storage failed: {storage_error}")
+        
+        processing_time = time.time() - start_time
+        logging.info(f"[BG] ===== ULTRA-FAST PROCESSING COMPLETE =====")
+        logging.info(f"[BG] Processing time: {processing_time:.3f}s")
+        logging.info(f"[BG] Rows processed: {len(new_processor.df)}")
+        
+    except Exception as e:
+        logging.error(f"[BG] ===== ULTRA-FAST PROCESSING FAILED =====")
+        logging.error(f"[BG] Error: {str(e)}")
+        update_processing_status(filename, f'error: {str(e)}')
         
         # Step 1: Use fast loading for immediate response
         load_start = time.time()
@@ -2378,7 +2404,6 @@ def process_excel_background(filename, temp_path):
             logging.warning(f"[BG] Failed to mark ready: {mark_ready_error}")
 
         # Step 2: Update the global processor safely with minimal clearing
-        global _excel_processor
         with excel_processor_lock:
             # Clear the old processor completely
             if _excel_processor is not None:
