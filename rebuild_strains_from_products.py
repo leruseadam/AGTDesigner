@@ -85,6 +85,16 @@ def main():
         strain_id = col_id(strain_col)
         lineage_id = col_id(lineage_col) if lineage_col else None
 
+        # Ensure products.strain_id column exists
+        if not table_has_column(cur, 'products', 'strain_id'):
+            cur.execute('ALTER TABLE products ADD COLUMN strain_id INTEGER')
+            # Optional FK (skip if table might not allow due to legacy)
+            try:
+                cur.execute('ALTER TABLE products ADD CONSTRAINT fk_products_strain FOREIGN KEY (strain_id) REFERENCES strains(id)')
+            except Exception:
+                pass
+            cur.execute('CREATE INDEX IF NOT EXISTS idx_products_strain_id ON products(strain_id)')
+
         # 1) Gather distinct strain names from products
         cur.execute(
             f'''
