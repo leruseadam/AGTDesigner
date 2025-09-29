@@ -2546,11 +2546,11 @@ def upload_status():
         
         # If status is 'not_found' but file exists, it might have been processed successfully
         if status == 'not_found' and file_exists:
-            # Check if we have a global processor with data
-            global excel_processor
-            if excel_processor and hasattr(excel_processor, 'df') and excel_processor.df is not None and not excel_processor.df.empty:
+            # Check if we have a processor with data
+            local_processor = get_excel_processor()
+            if local_processor and hasattr(local_processor, 'df') and local_processor.df is not None and not local_processor.df.empty:
                 status = 'ready'
-                logging.info(f"File {filename} appears to be processed (global processor has data)")
+                logging.info(f"File {filename} appears to be processed (processor has data)")
             else:
                 status = 'processing'  # Still processing
         elif status == 'processing' and file_exists:
