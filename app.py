@@ -9811,6 +9811,83 @@ def get_library_products():
         return jsonify({'success': True, 'products': products})
     except Exception as e:
         logging.error(f"Error getting library products: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/database/products', methods=['POST'])
+def create_database_product():
+    try:
+        data = request.get_json() or {}
+        required = ['Product Name*']
+        for key in required:
+            if not data.get(key):
+                return jsonify({'success': False, 'error': f"Missing required field: {key}"}), 400
+
+        product_db = get_product_database()
+        product_id = None
+        if hasattr(product_db, 'add_or_update_product'):
+            product_id = product_db.add_or_update_product(data)
+        if not product_id:
+            return jsonify({'success': False, 'error': 'Failed to create product'}), 500
+        return jsonify({'success': True, 'id': product_id})
+    except Exception as e:
+        logging.error(f"[API] Create product failed: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/database/products/<int:product_id>', methods=['PUT'])
+def update_database_product(product_id: int):
+    try:
+        data = request.get_json() or {}
+        product_db = get_product_database()
+        conn = product_db._get_connection()
+        cursor = conn.cursor()
+
+        # Map of allowed editable fields
+        editable_fields = {
+            'Product Name*': '"Product Name*"',
+            'Product Type*': '"Product Type*"',
+            'Product Brand': '"Product Brand"',
+            'Vendor/Supplier*': '"Vendor/Supplier*"',
+            'Lineage': '"Lineage"',
+            'Price': '"Price"',
+            'Weight*': '"Weight*"',
+            'Description': '"Description"'
+        }
+
+        set_clauses = []
+        values = []
+        for key, column in editable_fields.items():
+            if key in data:
+                set_clauses.append(f"{column} = %s")
+                values.append(data.get(key))
+
+        if not set_clauses:
+            return jsonify({'success': False, 'error': 'No editable fields provided'}), 400
+
+        values.append(product_id)
+        sql = f"UPDATE products SET {', '.join(set_clauses)}, updated_at = %s WHERE id = %s"
+        from datetime import datetime
+        values.insert(-1, datetime.now().isoformat())
+        cursor.execute(sql, tuple(values))
+        conn.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        logging.error(f"[API] Update product {product_id} failed: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/database/products/<int:product_id>', methods=['DELETE'])
+def delete_database_product(product_id: int):
+    try:
+        product_db = get_product_database()
+        conn = product_db._get_connection()
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM products WHERE id = %s', (product_id,))
+        conn.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        logging.error(f"[API] Delete product {product_id} failed: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+    except Exception as e:
+        logging.error(f"Error getting library products: {e}")
         return jsonify({'success': False, 'message': str(e)})
 
 @app.route('/api/library/products/<int:product_id>', methods=['GET'])
