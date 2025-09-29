@@ -365,7 +365,7 @@ class ProductDatabase:
                 # Insert new product
                 cursor.execute('''
                     INSERT INTO products (
-                        "Product Name*", "ProductName", normalized_name, "Product Type*",
+                        "Product Name*", "ProductName", normalized_name, strain_id, "Product Type*",
                         "Vendor/Supplier*", "Product Brand", "Description", "Weight*", "Units", "Price", "Lineage",
                         first_seen_date, last_seen_date, total_occurrences, created_at, updated_at,
                         "Product Strain", "Quantity*", "DOH", "Concentrate Type", "Ratio", "JointRatio",
@@ -377,14 +377,15 @@ class ProductDatabase:
                         "Total THC", "THCA", "CBDA", "CBN", "THC", "CBD", "Total CBD", "CBGA", "CBG", "Total CBG",
                         "CBC", "CBDV", "THCV", "CBGV", "CBNV", "CBGVA"
                     ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                     ) RETURNING id
                 ''', (
                     product_name,
                     product_data.get('ProductName', product_name),
                     normalized_name,
+                    product_data.get('strain_id'),  # Add strain_id
                     product_type,
                     product_data.get('Vendor/Supplier*'),
                     product_data.get('Product Brand'),
