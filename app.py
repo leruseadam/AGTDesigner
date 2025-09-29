@@ -1708,12 +1708,12 @@ def upload_file_simple_pythonanywhere():
             # Limit rows to prevent timeout on large files
             import pandas as pd
             try:
-                # Load with minimal rows and processing
-                df = pd.read_excel(temp_path, nrows=1000, engine='openpyxl')  # Reduced to 1000 rows
+                # Load full file for accurate database population (no row cap)
+                df = pd.read_excel(temp_path, engine='openpyxl')
                 if not df.empty:
                     processor.df = df
                     success = True
-                    logging.info(f"[UPLOAD] Loaded {len(df)} rows (fast mode)")
+                    logging.info(f"[UPLOAD] Loaded full file: {len(df)} rows")
                 else:
                     success = False
             except Exception as e:
