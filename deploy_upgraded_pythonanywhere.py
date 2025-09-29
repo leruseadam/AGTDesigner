@@ -50,10 +50,32 @@ conn = psycopg2.connect(**cfg)
 cur = conn.cursor()
 cur.execute("SELECT COUNT(*) FROM products")
 print("products:", cur.fetchone()[0])
-cur.execute("SELECT COUNT(DISTINCT \"Vendor/Supplier*\") FROM products WHERE \"Vendor/Supplier*\" IS NOT NULL AND \"Vendor/Supplier*\" != ''")
-print("vendors:", cur.fetchone()[0])
-cur.execute("SELECT COUNT(DISTINCT \"Product Brand\") FROM products WHERE \"Product Brand\" IS NOT NULL AND \"Product Brand\" != ''")
-print("brands:", cur.fetchone()[0])
+
+# Discover column names dynamically
+cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'products'")
+cols = {r[0] for r in cur.fetchall()}
+
+def pick(*cands):
+    for c in cands:
+        if c in cols:
+            return c
+    return None
+
+vendor_col = pick('Vendor/Supplier*', 'Vendor', 'Vendor_Supplier', 'vendor', 'vendor_supplier')
+brand_col = pick('Product Brand', 'ProductBrand', 'brand', 'product_brand')
+
+if vendor_col:
+    cur.execute(f"SELECT COUNT(DISTINCT \"{vendor_col}\") FROM products WHERE \"{vendor_col}\" IS NOT NULL AND \"{vendor_col}\" != ''")
+    print("vendors:", cur.fetchone()[0])
+else:
+    print("vendors: 0 (vendor column not found)")
+
+if brand_col:
+    cur.execute(f"SELECT COUNT(DISTINCT \"{brand_col}\") FROM products WHERE \"{brand_col}\" IS NOT NULL AND \"{brand_col}\" != ''")
+    print("brands:", cur.fetchone()[0])
+else:
+    print("brands: 0 (brand column not found)")
+
 cur.close(); conn.close()
 """
     run([sys.executable, '-c', verify_code])
