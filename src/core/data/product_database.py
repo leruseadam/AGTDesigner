@@ -844,34 +844,62 @@ class ProductDatabase:
                 cursor = conn.cursor()
                 
                 try:
-                    # Simple INSERT - just add the product with basic info
+                    # Check if product already exists
                     cursor.execute('''
-                        INSERT INTO products (
-                            "Product Name*", normalized_name, "Product Type*", first_seen_date, last_seen_date, 
-                            total_occurrences, created_at, updated_at
-                        ) VALUES (
-                            %s, %s, %s, %s, %s, %s, %s, %s
-                        ) RETURNING id
+                        SELECT id FROM products 
+                        WHERE "Product Name*" = %s AND "Vendor/Supplier*" = %s AND "Product Brand" = %s
                     ''', (
                         product_name,
-                        normalized_name,
-                        product_type,
-                        current_date,
-                        current_date,
-                        1,
-                        current_date,
-                        current_date
+                        product_data.get('Vendor/Supplier*', ''),
+                        product_data.get('Product Brand', '')
                     ))
                     
-                    result = cursor.fetchone()
-                    if result:
-                        product_id = result[0]
-                    else:
-                        raise Exception("Failed to get product ID after insert")
-                    conn.commit()
+                    existing_product = cursor.fetchone()
                     
-                    logger.info(f"Added new product '{product_name}' with ID {product_id}")
-                    return product_id
+                    if existing_product:
+                        # Update existing product
+                        product_id = existing_product[0]
+                        cursor.execute('''
+                            UPDATE products SET 
+                                last_seen_date = %s,
+                                total_occurrences = total_occurrences + 1,
+                                updated_at = %s
+                            WHERE id = %s
+                        ''', (current_date, current_date, product_id))
+                        conn.commit()
+                        logger.info(f"Updated existing product '{product_name}' with ID {product_id}")
+                        return product_id
+                    else:
+                        # Insert new product
+                        cursor.execute('''
+                            INSERT INTO products (
+                                "Product Name*", normalized_name, "Product Type*", "Vendor/Supplier*", "Product Brand",
+                                first_seen_date, last_seen_date, total_occurrences, created_at, updated_at
+                            ) VALUES (
+                                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                            ) RETURNING id
+                        ''', (
+                            product_name,
+                            normalized_name,
+                            product_type,
+                            product_data.get('Vendor/Supplier*', ''),
+                            product_data.get('Product Brand', ''),
+                            current_date,
+                            current_date,
+                            1,
+                            current_date,
+                            current_date
+                        ))
+                        
+                        result = cursor.fetchone()
+                        if result:
+                            product_id = result[0]
+                        else:
+                            raise Exception("Failed to get product ID after insert")
+                        conn.commit()
+                        
+                        logger.info(f"Added new product '{product_name}' with ID {product_id}")
+                        return product_id
                     
                 except Exception as e:
                     conn.rollback()
