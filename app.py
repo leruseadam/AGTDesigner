@@ -6044,22 +6044,14 @@ def database_stats():
                     },
                     'vendor_stats': {'vendors': [], 'brands': []}
                 }
-
-        # Test PostgreSQL; if it fails, gracefully fall back to SQLite
-        try:
-            with product_db.get_connection() as conn:
-                with conn.cursor() as cursor:
-                    cursor.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'products')")
-                    if not cursor.fetchone()[0]:
-                        logging.error("Products table not found in PostgreSQL database; using SQLite fallback")
-                        fallback = _compute_sqlite_stats()
-                        return jsonify(fallback)
-        except Exception as test_error:
-            logging.warning(f"PostgreSQL connection test failed: {test_error}")
-            logging.info("Falling back to SQLite for database-stats")
-            fallback = _compute_sqlite_stats()
-            return jsonify(fallback)
         
+        # TEMP: Always use SQLite stats to avoid inconsistent results while Postgres is being stabilized
+        fallback = _compute_sqlite_stats()
+        _cache_set(cache_key, fallback)
+        logging.info(f"[CACHE SET] /api/database-stats (sqlite) store='{current_store}' in {int((time.perf_counter()-t0)*1000)}ms")
+        return jsonify(fallback)
+
+        # The PostgreSQL path is retained below for future re-enable once schema is stable
         # Get vendor stats for the frontend using PostgreSQL
         vendor_stats = {}
         try:
