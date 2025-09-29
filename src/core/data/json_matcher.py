@@ -512,10 +512,29 @@ class JSONMatcher:
             
         df = self.excel_processor.df
         if df is None:
-            logging.warning("Cannot build sheet cache: DataFrame is None")
-            self._sheet_cache = []
-            self._indexed_cache = {}
-            return
+            logging.warning("Cannot build sheet cache: DataFrame is None, attempting to load default file")
+            # Try to load a default file
+            try:
+                from .excel_processor import get_default_upload_file
+                default_file = get_default_upload_file()
+                if default_file:
+                    logging.info(f"Loading default file for JSON matcher: {default_file}")
+                    success = self.excel_processor.load_file(default_file)
+                    if success:
+                        df = self.excel_processor.df
+                        logging.info(f"Successfully loaded default file, DataFrame now has {len(df) if df is not None else 0} rows")
+                    else:
+                        logging.error(f"Failed to load default file: {default_file}")
+                else:
+                    logging.warning("No default file available for JSON matcher")
+            except Exception as e:
+                logging.error(f"Error loading default file for JSON matcher: {e}")
+            
+            if df is None:
+                logging.warning("Cannot build sheet cache: DataFrame is still None after attempting to load default file")
+                self._sheet_cache = []
+                self._indexed_cache = {}
+                return
             
         if df.empty:
             logging.warning("Cannot build sheet cache: DataFrame is empty")

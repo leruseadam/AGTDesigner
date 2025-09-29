@@ -55,8 +55,8 @@ def _load_font_sizing_config():
                     'default': [(20, 16), (40, 14), (60, 12), (float('inf'), 10)]
                 },
                 'vertical': {
-                    'description': [(5, 34), (30, 32), (40, 28), (60, 26), (70, 24), (80, 22), (90, 20), (float('inf'), 18)],
-                    'brand': [(10, 20), (15, 18), (20, 16), (30, 16), (49, 11), (59, 10), (float('inf'), 10)],
+                    'description': [(5, 34), (30, 32), (40, 28), (60, 26), (70, 24), (80, 22), (100, 20), (float('inf'), 14)],
+                    'brand': [(10, 16), (20, 14), (30, 12), (float('inf'), 10)],
                     'price': [(2, 30), (5, 26), (float('inf'), 14)],
                     'lineage': [(20, 18), (40, 16), (60, 12), (float('inf'), 8)],
                     'ratio': [(10, 14), (20, 12), (30, 9), (float('inf'), 9)],
@@ -176,26 +176,10 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
             logger.debug(f"Special brand rule: text='{text}' ({len(text)} chars) is all caps >= 9 chars, forcing 14pt font")
             return Pt(final_size)
     
-    # CONSTELLATION brand fix: Use 10pt font for vertical templates (MUST come before other brand rules)
-    if field_type.lower() == 'brand' and 'CONSTELLATION' in text.upper():
-        final_size = 10 * scale_factor
-        logger.info(f"CONSTELLATION FIX: Using 10pt font for '{text}' in vertical template")
-        return Pt(final_size)
-    
-    # Special vertical rule: Any brand with multiple words and one word >9 letters gets 11pt font
-    if field_type.lower() == 'brand' and orientation.lower() == 'vertical':
-        words = text.split()
-        if len(words) > 1:  # Multiple words
-            long_words = [word for word in words if len(word) > 9]
-            if long_words:  # At least one word longer than 9 letters
-                final_size = 11 * scale_factor
-                logger.info(f"Vertical brand rule: '{text}' has multiple words with word >9 letters ({long_words}), using 11pt font")
-                return Pt(final_size)
-    
     # Special rule: Handle specific large brand names that are too big
     if field_type.lower() == 'brand' and orientation.lower() == 'double':
         # Force specific large brand names to use much smaller fonts
-        large_brands = ['MARY JONES', 'MARY JONES CANNABIS']  # Temporarily removed CONSTELLATION to test
+        large_brands = ['CONSTELLATION', 'MARY JONES', 'MARY JONES CANNABIS', 'CONSTELLATION CANNABIS']
         if any(brand in text.upper() for brand in large_brands):
             final_size = 5.5 * scale_factor
             logger.debug(f"Special double template brand rule: text='{text}' matches large brand list, forcing 5.5pt font")

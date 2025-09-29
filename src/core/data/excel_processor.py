@@ -694,17 +694,6 @@ class ExcelProcessor:
                     from .product_database import ProductDatabase
                     product_db = ProductDatabase(store_name=self._store_name)
                     
-                    # Test database connection before proceeding
-                    try:
-                        conn = product_db._get_connection()
-                        if not conn:
-                            self.logger.warning("[ProductDB] Database connection failed, skipping background integration")
-                            return
-                    except Exception as conn_error:
-                        self.logger.warning(f"[ProductDB] Database connection test failed: {conn_error}")
-                        self.logger.info("[ProductDB] Skipping background integration due to database connection issues")
-                        return
-                    
                     # Add retry logic for database locking issues
                     max_retries = 3
                     
@@ -727,24 +716,6 @@ class ExcelProcessor:
                         for _, row in batch_df.iterrows():
                             row_dict = row.to_dict()
                             
-                            # Add normalized_name field for database compatibility
-                            # Check multiple possible column names for product name
-                            product_name = (row_dict.get('Product Name*', '') or 
-                                          row_dict.get('ProductName', '') or 
-                                          row_dict.get('Product Name', ''))
-                            
-                            # More robust validation for empty products
-                            if (not product_name or 
-                                str(product_name).strip() == '' or 
-                                str(product_name).strip().lower() == 'nan' or
-                                str(product_name).strip().lower() == 'none'):
-                                # Skip empty products
-                                logger.debug(f"Skipping empty product: '{product_name}'")
-                                continue
-                            
-                            row_dict['normalized_name'] = normalize_name(product_name)
-                            logger.debug(f"Processing product: '{product_name}' -> '{row_dict['normalized_name']}'")
-                            
                             # Only process classic types through the strain database
                             product_type = row_dict.get('Product Type*', '').strip().lower()
                             if product_type in [c.lower() for c in CLASSIC_TYPES]:
@@ -764,9 +735,6 @@ class ExcelProcessor:
                                                 self.logger.warning(f"[ProductDB] Database locked for strain '{strain_name}', retrying in {strain_retry_delay}s (attempt {attempt + 1}/{max_retries})")
                                                 time.sleep(strain_retry_delay)
                                                 strain_retry_delay *= 2  # Exponential backoff
-                                            elif "connection" in str(e).lower() or "postgresql" in str(e).lower():
-                                                self.logger.warning(f"[ProductDB] Database connection issue for strain '{strain_name}': {e}")
-                                                break  # Don't retry connection issues
                                             else:
                                                 self.logger.error(f"[ProductDB] Failed to add/update strain '{strain_name}' after {max_retries} attempts: {e}")
                                                 break
@@ -784,9 +752,6 @@ class ExcelProcessor:
                                             self.logger.warning(f"[ProductDB] Database locked for product, retrying in {product_retry_delay}s (attempt {attempt + 1}/{max_retries})")
                                             time.sleep(product_retry_delay)
                                             product_retry_delay *= 2  # Exponential backoff
-                                        elif "connection" in str(e).lower() or "postgresql" in str(e).lower():
-                                            self.logger.warning(f"[ProductDB] Database connection issue for product: {e}")
-                                            break  # Don't retry connection issues
                                         else:
                                             self.logger.error(f"[ProductDB] Failed to add/update product after {max_retries} attempts: {e}")
                                             break
@@ -804,9 +769,6 @@ class ExcelProcessor:
                                             self.logger.warning(f"[ProductDB] Database locked for non-classic product, retrying in {non_classic_retry_delay}s (attempt {attempt + 1}/{max_retries})")
                                             time.sleep(non_classic_retry_delay)
                                             non_classic_retry_delay *= 2  # Exponential backoff
-                                        elif "connection" in str(e).lower() or "postgresql" in str(e).lower():
-                                            self.logger.warning(f"[ProductDB] Database connection issue for non-classic product: {e}")
-                                            break  # Don't retry connection issues
                                         else:
                                             self.logger.error(f"[ProductDB] Failed to add/update non-classic product after {max_retries} attempts: {e}")
                                             break
@@ -925,12 +887,12 @@ class ExcelProcessor:
             product_db = ProductDatabase(store_name=self._store_name)
             
             # Use the database's calculation method to get the Product Strain
-            product_strain = product_db._calculate_product_strain({
-                'Product Type*': product_type or '',
-                'Product Name*': product_name or '',
-                'Description': description or '',
-                'Ratio': ratio or ''
-            })
+            product_strain = product_db._calculate_product_strain(
+                product_type or '',
+                product_name or '',
+                description or '',
+                ratio or ''
+            )
             
             return product_strain
             
@@ -962,12 +924,12 @@ class ExcelProcessor:
                     ratio = row.get('Ratio', '')
                     
                     # Get Product Strain from database
-                    db_product_strain = product_db._calculate_product_strain({
-                        'Product Type*': product_type or '',
-                        'Product Name*': product_name or '',
-                        'Description': description or '',
-                        'Ratio': ratio or ''
-                    })
+                    db_product_strain = product_db._calculate_product_strain(
+                        product_type or '',
+                        product_name or '',
+                        description or '',
+                        ratio or ''
+                    )
                     
                     # Update the DataFrame with database value
                     self.df.loc[idx, 'Product Strain'] = db_product_strain
@@ -2442,15 +2404,14 @@ class ExcelProcessor:
             self.logger.debug(f"Final columns after all processing: {self.df.columns.tolist()}")
             self.logger.debug(f"Sample data after all processing:\n{self.df[['ProductName', 'Description', 'Ratio', 'Product Strain']].head()}")
             
-            # Log memory usage for PythonAnywhere monitoring (with error handling)
+            # Log memory usage for PythonAnywhere monitoring
             try:
                 import psutil
                 process = psutil.Process()
                 memory_info = process.memory_info()
                 self.logger.info(f"Memory usage after file load: {memory_info.rss / (1024*1024):.2f} MB")
-            except (ImportError, Exception) as e:
-                # psutil doesn't work properly on PythonAnywhere shared hosting
-                self.logger.debug(f"Memory monitoring not available: {e}")
+            except ImportError:
+                self.logger.debug("psutil not available for memory monitoring")
             
             # --- Product/Strain Database Integration (Background Processing) ---
             # Re-enabled to ensure lineage changes persist after reload
@@ -5484,14 +5445,14 @@ class ExcelProcessor:
                 product_db = get_product_database()
                 logger.info("Using global product database instance")
             except ImportError:
-                # Fallback to creating a new instance if app module not available - USE BOTHELL DATABASE
+                # Fallback to creating a new instance if app module not available
                 from src.core.data.product_database import ProductDatabase
                 import os
                 current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-                db_path = os.path.join(current_dir, 'uploads', 'product_database_AGT_Bothell.db')
+                db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
                 product_db = ProductDatabase(db_path)
                 product_db.init_database()
-                logger.info(f"Created new Bothell product database instance at: {db_path}")
+                logger.info(f"Created new product database instance at: {db_path}")
             
             logger.info(f"Starting database storage for Excel upload: {len(df)} rows from {source_file}")
             
@@ -6152,6 +6113,151 @@ class ExcelProcessor:
         return sorted_tags
 
 
+
+    def ultra_fast_load(self, file_path: str) -> bool:
+        """Ultra-fast loading with minimal processing for maximum speed"""
+        try:
+            self.logger.info(f"[ULTRA-FAST] Loading file: {file_path}")
+            
+            # Clear previous data efficiently
+            if hasattr(self, 'df') and self.df is not None:
+                del self.df
+                import gc
+                gc.collect()
+            
+            # Read with minimal settings for maximum speed
+            df = pd.read_excel(
+                file_path,
+                engine='openpyxl',
+                nrows=50000,  # High row limit
+                dtype=str,   # Read as strings for speed
+                na_filter=False,  # Don't filter NA values
+                keep_default_na=False  # Don't use default NA values
+            )
+            
+            if df is None or df.empty:
+                self.logger.error("No data found in Excel file")
+                return False
+            
+            self.logger.info(f"[ULTRA-FAST] Successfully read {len(df)} rows, {len(df.columns)} columns")
+            
+            # Handle duplicate columns efficiently
+            df = self._handle_duplicate_columns_fast(df)
+            
+            # Remove duplicates efficiently
+            initial_count = len(df)
+            df.drop_duplicates(inplace=True)
+            df.reset_index(drop=True, inplace=True)
+            final_count = len(df)
+            
+            if initial_count != final_count:
+                self.logger.info(f"[ULTRA-FAST] Removed {initial_count - final_count} duplicate rows")
+            
+            # Apply ultra-minimal processing
+            df = self._ultra_minimal_processing(df)
+            
+            self.df = df
+            self.logger.info(f"[ULTRA-FAST] Processing complete: {len(df)} rows")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"[ULTRA-FAST] Error loading file: {e}")
+            return False
+
+    def _handle_duplicate_columns_fast(self, df):
+        """Handle duplicate columns efficiently"""
+        if df.columns.duplicated().any():
+            # Rename duplicate columns
+            cols = pd.Series(df.columns)
+            for dup in cols[cols.duplicated()].unique():
+                cols[cols[cols == dup].index.values.tolist()] = [dup if i == 0 else f"{dup}_{i}" for i in range(sum(cols == dup))]
+            df.columns = cols
+        return df
+
+    def _ultra_minimal_processing(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Ultra-minimal processing for maximum speed"""
+        try:
+            if len(df) == 0:
+                return df
+            
+            # Only essential processing
+            essential_columns = ['Product Name*', 'Product Type*', 'Lineage', 'Product Brand']
+            
+            # Ensure required columns exist
+            for col in essential_columns:
+                if col not in df.columns:
+                    df[col] = "Unknown"
+            
+            # Basic string cleaning for key columns only
+            for col in essential_columns:
+                if col in df.columns:
+                    df[col] = df[col].astype(str).str.strip()
+            
+            # Remove excluded product types (minimal check)
+            if 'Product Type*' in df.columns:
+                excluded_types = ["Samples - Educational", "Sample - Vendor", "x-DEACTIVATED 1", "x-DEACTIVATED 2"]
+                df = df[~df['Product Type*'].isin(excluded_types)]
+                df.reset_index(drop=True, inplace=True)
+            
+            self.logger.info(f"[ULTRA-FAST] Ultra-minimal processing completed: {len(df)} rows remaining")
+            return df
+            
+        except Exception as e:
+            self.logger.error(f"[ULTRA-FAST] Error in ultra-minimal processing: {e}")
+            return df
+
+    def streaming_load(self, file_path: str, chunk_size: int = 10000) -> bool:
+        """Load large files in streaming chunks for better memory usage"""
+        try:
+            self.logger.info(f"[STREAMING] Loading file in chunks: {file_path}")
+            
+            # Clear previous data
+            if hasattr(self, 'df') and self.df is not None:
+                del self.df
+                import gc
+                gc.collect()
+            
+            # Read file in chunks
+            chunks = []
+            total_rows = 0
+            
+            # First, try to read the full file with high row limit
+            df = pd.read_excel(
+                file_path,
+                engine='openpyxl',
+                nrows=50000,  # High limit
+                dtype=str,  # Read as strings for speed
+                na_filter=False,
+                keep_default_na=False
+            )
+            
+            if df is None or df.empty:
+                self.logger.error("No data found in Excel file")
+                return False
+            
+            # Handle duplicate columns efficiently
+            df = self._handle_duplicate_columns_fast(df)
+            
+            # Remove duplicates efficiently
+            initial_count = len(df)
+            df.drop_duplicates(inplace=True)
+            df.reset_index(drop=True, inplace=True)
+            final_count = len(df)
+            
+            if initial_count != final_count:
+                self.logger.info(f"[STREAMING] Removed {initial_count - final_count} duplicate rows")
+            
+            # Apply minimal processing
+            df = self._ultra_minimal_processing(df)
+            
+            self.df = df
+            self.logger.info(f"[STREAMING] Streaming load completed: {len(df)} rows")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"[STREAMING] Error in streaming load: {e}")
+            return False
+    
     def _process_descriptions_from_product_names(self):
         """Process Description values using our established formula from Product Name."""
         try:

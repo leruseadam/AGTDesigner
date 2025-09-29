@@ -58,7 +58,7 @@ def _load_font_sizing_config():
                 },
                 'vertical': {
                     'description': [(5, 34), (30, 32), (40, 28), (60, 26), (70, 24), (80, 22), (100, 20), (float('inf'), 18)],
-                    'brand': [(10, 20), (15, 18), (20, 16), (float('inf'), 14)],
+                    'brand': [(10, 16), (15, 14), (20, 12), (float('inf'), 10)],
                     'price': [(4, 34), (5, 30), (10, 28), (float('inf'), 26)],  # Updated: complexity-based thresholds for better vertical price sizing
                     'lineage': [(20, 20), (40, 18), (60, 16), (float('inf'), 12)],
                     'ratio': [(10, 14), (20, 12), (30, 9), (float('inf'), 9)],
@@ -150,7 +150,7 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
     # Special rule: Handle specific large brand names that are too big
     if field_type.lower() == 'brand' and orientation.lower() == 'double':
         # Force specific large brand names to use much smaller fonts
-        large_brands = ['MARY JONES', 'MARY JONES CANNABIS']  # Temporarily removed CONSTELLATION to test
+        large_brands = ['CONSTELLATION', 'MARY JONES', 'MARY JONES CANNABIS']
         if any(brand in text.upper() for brand in large_brands):
             final_size = 5.5 * scale_factor
             logger.debug(f"Special double template brand rule: text='{text}' matches large brand list, forcing 5.5pt font")
@@ -165,31 +165,6 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
             return Pt(final_size)
         else:
             logger.debug(f"Special double template brand rule: text='{text}' has {len(long_words)} words with 8+ chars each: {long_words}, NOT triggering 8pt font")
-    
-    # CONSTELLATION brand fix: Use 10pt font for vertical templates (MUST come before other brand rules)
-    if field_type.lower() == 'brand' and 'CONSTELLATION' in text.upper():
-        final_size = 10 * scale_factor
-        logger.info(f"CONSTELLATION FIX: Using 10pt font for '{text}' in vertical template")
-        return Pt(final_size)
-    
-    # Special vertical rule: Any brand with multiple words and one word >9 letters gets 11pt font
-    if field_type.lower() == 'brand' and orientation.lower() == 'vertical':
-        words = text.split()
-        if len(words) > 1:  # Multiple words
-            long_words = [word for word in words if len(word) > 9]
-            if long_words:  # At least one word longer than 9 letters
-                final_size = 11 * scale_factor
-                logger.info(f"Vertical brand rule: '{text}' has multiple words with word >9 letters ({long_words}), using 11pt font")
-                return Pt(final_size)
-    
-    # DEBUG: Check if CONSTELLATION is being processed by special rule
-    if field_type.lower() == 'brand' and 'CONSTELLATION' in text.upper():
-        logger.debug(f"DEBUG: CONSTELLATION brand - orientation='{orientation}', should NOT trigger special rule")
-        logger.info(f"CONSTELLATION DEBUG: text='{text}', field_type='{field_type}', orientation='{orientation}'")
-        # CONSTELLATION brand fix: Use 10pt font for vertical templates
-        final_size = 10 * scale_factor
-        logger.info(f"CONSTELLATION FIX: Using 10pt font for '{text}' in vertical template")
-        return Pt(final_size)
     
     # Special rule: If double template description has multiple words with 9+ characters each, automatically reduce to 18pt
     if orientation.lower() == 'double' and field_type.lower() == 'description':
@@ -213,10 +188,6 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
         logger.warning(f"No font configuration found for {field_type} in {orientation} template, using {fallback_size}pt")
         return Pt(fallback_size)
     
-    # DEBUG: Log configuration for brand fields
-    if field_type.lower() == 'brand':
-        logger.info(f"BRAND DEBUG: Found config for '{text}' - orientation: {orientation}, config: {config}")
-    
     # Calculate text complexity
     comp = calculate_text_complexity(text)
     
@@ -228,10 +199,6 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
     logger.debug(f"Font sizing for '{text}' (field_type: {field_type}, orientation: {orientation}, complexity: {comp})")
     logger.debug(f"Config: {config}")
     
-    # DEBUG: Check if orientation is correct for vertical templates
-    if field_type.lower() == 'brand' and 'CONSTELLATION' in text.upper():
-        logger.debug(f"DEBUG: CONSTELLATION brand detected - orientation='{orientation}', field_type='{field_type}'")
-    
     # Find appropriate font size based on complexity
     for threshold, size in config:
         logger.debug(f"Checking threshold {threshold} -> size {size}")
@@ -242,10 +209,6 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
             logger.debug(f"Selected size {size}pt (final: {final_size}pt)")
             if field_type.lower() == 'price':
                 logger.info(f"PRICE DEBUG: SELECTED {size}pt for '{text}'")
-            if field_type.lower() == 'brand' and 'CONSTELLATION' in text.upper():
-                logger.info(f"CONSTELLATION DEBUG: Selected {size}pt font for '{text}' (complexity: {comp}, threshold: {threshold})")
-            if field_type.lower() == 'brand':
-                logger.info(f"BRAND DEBUG: Selected {size}pt font for '{text}' (complexity: {comp}, threshold: {threshold})")
             return Pt(final_size)
     
     # Fallback to smallest size - ensure price gets proper fallback
