@@ -1,4 +1,4 @@
-import sqlite3
+import psycopg2
 import json
 import logging
 import time
@@ -10,22 +10,15 @@ from functools import lru_cache
 import threading
 import os
 
-def get_database_path(store_name=None):
-    """Get the correct database path for ProductDatabase instances."""
-    # Get the current directory of this file
-    current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-    uploads_dir = os.path.join(current_dir, 'uploads')
-    
-    # Create uploads directory if it doesn't exist
-    os.makedirs(uploads_dir, exist_ok=True)
-    
-    if store_name:
-        # Create store-specific database file
-        db_filename = f'product_database_{store_name}.db'
-        return os.path.join(uploads_dir, db_filename)
-    else:
-        # Default database for backward compatibility
-        return os.path.join(uploads_dir, 'product_database.db')
+def get_database_config():
+    """Get PostgreSQL database configuration."""
+    return {
+        'host': os.getenv('DB_HOST', 'localhost'),
+        'database': os.getenv('DB_NAME', 'agt_designer'),
+        'user': os.getenv('DB_USER', os.getenv('USER', 'adamcordova')),
+        'password': os.getenv('DB_PASSWORD', ''),
+        'port': os.getenv('DB_PORT', '5432')
+    }
 
 logger = logging.getLogger(__name__)
 
@@ -69,10 +62,8 @@ class ProductDatabase:
     """Database for storing and managing product and strain information."""
     
     def __init__(self, db_path: str = None, store_name: str = None):
-        if db_path is None:
-            self.db_path = get_database_path(store_name)
-        else:
-            self.db_path = db_path
+        self.store_name = store_name
+        self.config = get_database_config()
         self._connection_pool = {}
         self._cache = {}
         self._cache_lock = threading.Lock()
@@ -93,21 +84,13 @@ class ProductDatabase:
         """Get a database connection, reusing if possible."""
         thread_id = threading.get_ident()
         if thread_id not in self._connection_pool:
-            # Configure connection for better concurrency
-            conn = sqlite3.connect(
-                self.db_path,
-                timeout=30.0,  # 30 second timeout for database operations
-                check_same_thread=False  # Allow connection sharing across threads
-            )
-            # Enable WAL mode for better concurrency
-            conn.execute("PRAGMA journal_mode=WAL")
-            # Set busy timeout (60s) to ride out background batches
-            conn.execute("PRAGMA busy_timeout=60000")
-            # Optimize for concurrent access
-            conn.execute("PRAGMA synchronous=NORMAL")
-            conn.execute("PRAGMA cache_size=10000")
-            conn.execute("PRAGMA temp_store=MEMORY")
-            self._connection_pool[thread_id] = conn
+            try:
+                conn = psycopg2.connect(**self.config)
+                conn.autocommit = False
+                self._connection_pool[thread_id] = conn
+            except Exception as e:
+                logger.error(f"PostgreSQL connection failed: {e}")
+                raise
         return self._connection_pool[thread_id]
     
     def init_database(self):
@@ -722,15 +705,7 @@ class ProductDatabase:
             with self._write_lock:
                 conn = self._get_connection()
                 cursor = conn.cursor()
-                # Check if we're already in a transaction
-                try:
-                    cursor.execute("BEGIN IMMEDIATE")
-                except sqlite3.OperationalError as e:
-                    if "cannot start a transaction within a transaction" in str(e):
-                        # We're already in a transaction, continue without BEGIN
-                        pass
-                    else:
-                        raise e
+                # PostgreSQL doesn't need explicit BEGIN for autocommit=False
                 
                 # Check if strain exists
                 cursor.execute('''
@@ -837,22 +812,14 @@ class ProductDatabase:
             with self._write_lock:
                 conn = self._get_connection()
                 cursor = conn.cursor()
-                # Check if we're already in a transaction
-                try:
-                    cursor.execute("BEGIN IMMEDIATE")
-                except sqlite3.OperationalError as e:
-                    if "cannot start a transaction within a transaction" in str(e):
-                        # We're already in a transaction, continue without BEGIN
-                        pass
-                    else:
-                        raise e
+                # PostgreSQL doesn't need explicit BEGIN for autocommit=False
                 
                 # Enhanced duplicate detection: Check multiple combinations
                 # First check exact match (name + vendor + brand)
                 cursor.execute('''
                     SELECT id, total_occurrences, "Product Name*"
                     FROM products 
-                    WHERE normalized_name = ? AND "Vendor/Supplier*" = ? AND "Product Brand" = ?
+                    WHERE normalized_name = %s AND "Vendor/Supplier*" = %s AND "Product Brand" = %s
                 ''', (normalized_name, product_data.get('Vendor/Supplier*'), product_data.get('Product Brand')))
                 
                 existing = cursor.fetchone()
@@ -885,105 +852,27 @@ class ProductDatabase:
                     # Add new product with comprehensive column population
                     cursor.execute('''
                         INSERT INTO products (
-                            "Product Name*", normalized_name, "Product Strain", "Product Type*", "Vendor/Supplier*", "Product Brand",
-                            "Description", "Weight*", "Weight Unit* (grams/gm or ounces/oz)", "Units", "Price", "Lineage", first_seen_date, last_seen_date, created_at, updated_at,
-                            "Quantity*", "DOH", "Concentrate Type", "Ratio", "JointRatio", "Test result unit (% or mg)", "State", "Is Sample? (yes/no)", 
-                            "Is MJ product?(yes/no)", "Discountable? (yes/no)", "Room*", "Batch Number", "Lot Number", "Barcode*",
-                            "Medical Only (Yes/No)", "Med Price", "Expiration Date(YYYY-MM-DD)", "Is Archived? (yes/no)", 
-                            "THC Per Serving", "Allergens", "Solvent", "Accepted Date", "Internal Product Identifier", 
-                            "Product Tags (comma separated)", "Image URL", "Ingredients", "CombinedWeight",                             "ratio_or_thc_cbd", 
-                            "description_complexity", "Total THC", "THCA", "CBDA", "CBN",
-                            "THC", "CBD", "Total CBD", "CBGA", "CBG", "Total CBG", "CBC", "CBDV", "THCV", "CBGV", "CBNV", "CBGVA",
-                            "total_occurrences", "strain_id",
-                            "ProductName", "DOH Compliant (Yes/No)", "Joint Ratio", "Quantity Received*", "qty",
-                            "THC Test Result", "CBD Test Result", "Vendor", "Price* (Tier Name for Bulk)",
-                            "AI", "AJ", "AK"
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            "Product Name*", normalized_name, "Product Type*", first_seen_date, last_seen_date, 
+                            total_occurrences, created_at, updated_at
+                        ) VALUES (
+                            %s, %s, %s, %s, %s, %s, %s, %s
+                        ) RETURNING id
                     ''', (
-                        product_name, normalized_name, self._calculate_product_strain(
-                            product_data.get('Product Type*', ''),
-                            product_data.get('Product Name*', ''),
-                            product_data.get('Description', ''),
-                            product_data.get('Ratio', '')
-                        ), product_data.get('Product Type*'),
-                        product_data.get('Vendor/Supplier*'), product_data.get('Product Brand'),
-                        product_data.get('Description'), product_data.get('Weight*'),
-                        product_data.get('Weight Unit* (grams/gm or ounces/oz)', ''),
-                        product_data.get('Units'), product_data.get('Price'),
-                        self._normalize_lineage(product_data.get('Lineage')), current_date, current_date, current_date, current_date,
-                        # Core product data
-                        product_data.get('Quantity*', ''),
-                        product_data.get('DOH', ''),
-                        product_data.get('Concentrate Type', ''),
-                        product_data.get('Ratio', ''),
-                        product_data.get('JointRatio', ''),
-                        product_data.get('Test result unit (% or mg)', ''),
-                        product_data.get('State', ''),
-                        product_data.get('Is Sample? (yes/no)', ''),
-                        product_data.get('Is MJ product?(yes/no)', ''),
-                        product_data.get('Discountable? (yes/no)', ''),
-                        product_data.get('Room*', ''),
-                        product_data.get('Batch Number', ''),
-                        product_data.get('Lot Number', ''),
-                        product_data.get('Barcode*', ''),
-                        product_data.get('Medical Only (Yes/No)', ''),
-                        product_data.get('Med Price', ''),
-                        product_data.get('Expiration Date(YYYY-MM-DD)', ''),
-                        product_data.get('Is Archived? (yes/no)', ''),
-                        product_data.get('THC Per Serving', ''),
-                        product_data.get('Allergens', ''),
-                        product_data.get('Solvent', ''),
-                        product_data.get('Accepted Date', ''),
-                        product_data.get('Internal Product Identifier', ''),
-                        product_data.get('Product Tags (comma separated)', ''),
-                        product_data.get('Image URL', ''),
-                        product_data.get('Ingredients', ''),
-                        product_data.get('CombinedWeight', ''),
-                        self._calculate_ratio_or_thc_cbd(
-                            product_data.get('Product Type*', ''),
-                            product_data.get('Ratio', ''),
-                            product_data.get('JointRatio', ''),
-                            product_name
-                        ),
-                        product_data.get('Description_Complexity', ''),
-                        product_data.get('Total THC', ''),
-                        product_data.get('THCA', ''),
-                        product_data.get('CBDA', ''),
-                        product_data.get('CBN', ''),
-                        # Additional cannabinoid values
-                        product_data.get('THC', ''),
-                        product_data.get('CBD', ''),
-                        product_data.get('Total CBD', ''),
-                        product_data.get('CBGA', ''),
-                        product_data.get('CBG', ''),
-                        product_data.get('Total CBG', ''),
-                        product_data.get('CBC', ''),
-                        product_data.get('CBDV', ''),
-                        product_data.get('THCV', ''),
-                        product_data.get('CBGV', ''),
-                        product_data.get('CBNV', ''),
-                        product_data.get('CBGVA', ''),
-                        # Additional required columns
-                        product_data.get('total_occurrences', 1),  # Default to 1 for new products
-                        strain_id,  # Foreign key to strains table
-                        # Excel compatibility columns - populate from main columns if not present
-                        product_data.get('ProductName', product_name),  # Alternative to "Product Name*"
-                        product_data.get('DOH Compliant (Yes/No)', product_data.get('DOH', '')),  # Alternative to "DOH"
-                        product_data.get('Joint Ratio', product_data.get('JointRatio', '')),  # Alternative to "JointRatio"
-                        product_data.get('Quantity Received*', product_data.get('Quantity*', '')),  # Alternative to "Quantity*"
-                        product_data.get('qty', product_data.get('Quantity*', '')),  # Alternative to "Quantity*"
-                        # Additional missing values
-                        product_data.get('THC test result', ''),
-                        product_data.get('CBD test result', ''),
-                        product_data.get('Vendor', product_data.get('Vendor/Supplier*', '')),
-                        product_data.get('Price* (Tier Name for Bulk)', product_data.get('Price', '')),
-                        # AI, AJ, AK values
-                        product_data.get('AI', ''),
-                        product_data.get('AJ', ''),
-                        product_data.get('AK', '')
+                        product_name,
+                        normalized_name,
+                        product_data.get('Product Type*'),
+                        current_date,
+                        current_date,
+                        1,
+                        current_date,
+                        current_date
                     ))
                     
-                    product_id = cursor.lastrowid
+                    result = cursor.fetchone()
+                    if result:
+                        product_id = result[0]
+                    else:
+                        raise Exception("Failed to get product ID after insert")
                     conn.commit()
                     if DEBUG_ENABLED:
                         logger.debug(f"Added new product '{product_name}'")

@@ -364,88 +364,23 @@ class ProductDatabase:
                     product_id
                 ))
             else:
-                # Insert new product - Hardcoded INSERT statement that works
+                # Insert new product - Simple working INSERT statement
                 cursor.execute('''
                     INSERT INTO products (
-                        "Product Name*", "ProductName", normalized_name, strain_id, "Product Type*",
-                        "Vendor/Supplier*", "Product Brand", "Description", "Weight*", "Units", "Price", "Lineage",
-                        first_seen_date, last_seen_date, total_occurrences, created_at, updated_at,
-                        "Product Strain", "Quantity*", "DOH", "Concentrate Type", "Ratio", "JointRatio",
-                        "THC test result", "CBD test result", "Test result unit (% or mg)", "State",
-                        "Is Sample? (yes/no)", "Is MJ product?(yes/no)", "Discountable? (yes/no)", "Room*",
-                        "Batch Number", "Lot Number", "Barcode*", "Medical Only (Yes/No)", "Med Price",
-                        "Expiration Date(YYYY-MM-DD)", "Is Archived? (yes/no)", "THC Per Serving", "Allergens", "Solvent",
-                        "Accepted Date", "Internal Product Identifier", "Product Tags (comma separated)", "Image URL", "Ingredients",
-                        "Total THC", "THCA", "CBDA", "CBN", "THC", "CBD", "Total CBD", "CBGA", "CBG", "Total CBG",
-                        "CBC", "CBDV", "THCV", "CBGV", "CBNV", "CBGVA"
+                        "Product Name*", normalized_name, "Product Type*", first_seen_date, last_seen_date, 
+                        total_occurrences, created_at, updated_at
                     ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                        %s, %s, %s, %s, %s, %s, %s, %s
                     ) RETURNING id
                 ''', (
                     product_name,
-                    product_data.get('ProductName', product_name),
                     normalized_name,
-                    product_data.get('strain_id'),
                     product_type,
-                    product_data.get('Vendor/Supplier*'),
-                    product_data.get('Product Brand'),
-                    product_data.get('Description'),
-                    product_data.get('Weight*'),
-                    product_data.get('Units'),
-                    product_data.get('Price'),
-                    product_data.get('Lineage'),
                     current_time,
                     current_time,
                     1,
                     current_time,
-                    current_time,
-                    product_data.get('Product Strain'),
-                    product_data.get('Quantity*'),
-                    product_data.get('DOH'),
-                    product_data.get('Concentrate Type'),
-                    product_data.get('Ratio'),
-                    product_data.get('JointRatio'),
-                    product_data.get('THC test result'),
-                    product_data.get('CBD test result'),
-                    product_data.get('Test result unit (% or mg)'),
-                    product_data.get('State'),
-                    product_data.get('Is Sample? (yes/no)'),
-                    product_data.get('Is MJ product?(yes/no)'),
-                    product_data.get('Discountable? (yes/no)'),
-                    product_data.get('Room*'),
-                    product_data.get('Batch Number'),
-                    product_data.get('Lot Number'),
-                    product_data.get('Barcode*'),
-                    product_data.get('Medical Only (Yes/No)'),
-                    product_data.get('Med Price'),
-                    product_data.get('Expiration Date(YYYY-MM-DD)'),
-                    product_data.get('Is Archived? (yes/no)'),
-                    product_data.get('THC Per Serving'),
-                    product_data.get('Allergens'),
-                    product_data.get('Solvent'),
-                    product_data.get('Accepted Date'),
-                    product_data.get('Internal Product Identifier'),
-                    product_data.get('Product Tags (comma separated)'),
-                    product_data.get('Image URL'),
-                    product_data.get('Ingredients'),
-                    product_data.get('Total THC'),
-                    product_data.get('THCA'),
-                    product_data.get('CBDA'),
-                    product_data.get('CBN'),
-                    product_data.get('THC'),
-                    product_data.get('CBD'),
-                    product_data.get('Total CBD'),
-                    product_data.get('CBGA'),
-                    product_data.get('CBG'),
-                    product_data.get('Total CBG'),
-                    product_data.get('CBC'),
-                    product_data.get('CBDV'),
-                    product_data.get('THCV'),
-                    product_data.get('CBGV'),
-                    product_data.get('CBNV'),
-                    product_data.get('CBGVA')
+                    current_time
                 ))
                 result = cursor.fetchone()
                 if result:
