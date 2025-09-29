@@ -512,7 +512,7 @@
         .then((results) => {
           console.log('All promises settled:', results);
           const [statsResult, vendorStatsResult, analyticsResult, availableTagsResult] = results;
-          const stats = statsResult.value || statsResult.reason || { total_strains: 0 };
+          const stats = statsResult.value || statsResult.reason || { stats: { total_products: 0, unique_vendors: 0, unique_brands: 0 } };
           const vendorStats = vendorStatsResult.value || vendorStatsResult.reason || { 
             summary: { total_vendors: 0, total_brands: 0 }, 
             vendors: [], 
@@ -522,14 +522,16 @@
           const analytics = analyticsResult.value || analyticsResult.reason || {};
           const availableTags = availableTagsResult.value || [];
           
-          const totalProducts = Array.isArray(availableTags) ? availableTags.length : 0;
-          const totalStrains = stats.total_strains || 0;
+          const totalProducts = stats.stats?.total_products || 0;
+          const totalVendors = stats.stats?.unique_vendors || 0;
+          const totalBrands = stats.stats?.unique_brands || 0;
+          const totalStrains = stats.stats?.unique_strains || 0;
           
           console.log('Analytics data loaded:', { 
             products: totalProducts, 
-            strains: totalStrains, 
-            vendors: vendorStats.summary?.total_vendors || 0,
-            brands: vendorStats.summary?.total_brands || 0
+            vendors: totalVendors,
+            brands: totalBrands,
+            strains: totalStrains
           });
         
           const analyticsHtml = `
@@ -554,16 +556,16 @@
                 <div class="col-md-3">
                   <div class="card glass-card text-center">
                     <div class="card-body">
-                      <h3 class="text-warning">${vendorStats.summary?.total_vendors || 0}</h3>
-                      <p class="mb-0">Active Vendors</p>
+                      <h3 class="text-warning">${totalVendors}</h3>
+                      <p class="mb-0">Unique Vendors</p>
                     </div>
                   </div>
                 </div>
                 <div class="col-md-3">
                   <div class="card glass-card text-center">
                     <div class="card-body">
-                      <h3 class="text-info">${vendorStats.summary?.total_brands || 0}</h3>
-                      <p class="mb-0">Product Brands</p>
+                      <h3 class="text-info">${totalBrands}</h3>
+                      <p class="mb-0">Unique Brands</p>
                     </div>
                   </div>
                 </div>
