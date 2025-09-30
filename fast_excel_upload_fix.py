@@ -274,7 +274,7 @@ class FastExcelUploader:
             'status': 'completed'
         }
     
-    def get_upload_status(self, upload_id):
+    def get_fast_upload_status(self, upload_id):
         """Get upload status"""
         if upload_id not in self.active_uploads:
             return jsonify({'error': 'Upload not found'}), 404
@@ -318,7 +318,7 @@ def create_fast_upload_routes(app):
     @app.route('/api/upload-status-fast/<upload_id>', methods=['GET'])
     def get_upload_status_fast(upload_id):
         """Get upload status"""
-        return uploader.get_upload_status(upload_id)
+        return uploader.get_fast_upload_status(upload_id)
     
     return app
 
