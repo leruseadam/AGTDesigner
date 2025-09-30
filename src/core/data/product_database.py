@@ -344,7 +344,8 @@ class ProductDatabase:
                 '"Joint Ratio"',
                 'qty',
                 '"Weight Unit* (grams/gm or ounces/oz)"',
-                'Vendor'
+                'Vendor',
+                'Source'  # Add Source column for compatibility
             ]
             
             added_columns = []
@@ -633,6 +634,7 @@ class ProductDatabase:
                     "Joint Ratio" TEXT,  -- Alternative to "JointRatio"
                     "Quantity Received*" TEXT,  -- Alternative to "Quantity*"
                     "qty" TEXT,  -- Alternative to "Quantity*"
+                    "Source" TEXT,  -- Source of product data (Excel Import, JSON Match, etc.)
                     FOREIGN KEY (strain_id) REFERENCES strains (id),
                     UNIQUE("Product Name*", "Vendor/Supplier*", "Product Brand")
                 )
@@ -3225,81 +3227,6 @@ class ProductDatabase:
         # For any other product type, return the ratio as-is
         return ratio
     
-    def _calculate_product_strain_original(self, product_type: str, product_name: str, description: str, ratio: str) -> str:
-        """Calculate Product Strain using exact Excel processor logic."""
-        import re
-        
-        product_type = str(product_type).strip().lower()
-        product_name = str(product_name).strip() if product_name else ""
-        description = str(description).strip() if description else ""
-        ratio = str(ratio).strip() if ratio else ""
-        
-        # Handle 'nan' values
-        if product_name.lower() == 'nan':
-            product_name = ""
-        if description.lower() == 'nan':
-            description = ""
-        if ratio.lower() == 'nan':
-            ratio = ""
-        
-        # Special case: paraphernalia gets Product Strain set to "Paraphernalia"
-        if product_type == "paraphernalia":
-            return "Paraphernalia"
-        
-        # Define classic types (these don't get Product Strain logic applied)
-        classic_types = [
-            'flower', 'pre-roll', 'infused pre-roll', 'concentrate', 'solventless concentrate', 
-            'vape cartridge', 'alcohol/ethanol extract', 'co2 concentrate'
-        ]
-        
-        # If it's a classic type, return blank (classic types don't get Product Strain logic)
-        if product_type in classic_types:
-            return ""
-        
-        # Define edible types for special handling
-        edible_types = {"edible (solid)", "edible (liquid)", "high cbd edible liquid", "tincture", "topical", "capsule"}
-        
-        # For edibles: if ProductName, Description, or Ratio contains CBD, CBG, CBN, CBC, or ":", then Product Strain is "CBD Blend", otherwise "Mixed"
-        if product_type in edible_types:
-            # Check product name for cannabinoids or ratio patterns
-            name_has_cbd = bool(re.search(r'\b(?:CBD|CBG|CBC|CBN)\b', product_name, re.IGNORECASE)) or ':' in product_name
-            # Check description for cannabinoids or ratio patterns  
-            desc_has_cbd = bool(re.search(r'\b(?:CBD|CBG|CBC|CBN)\b', description, re.IGNORECASE)) or ':' in description
-            # Check ratio for cannabinoids
-            ratio_has_cbd = bool(re.search(r'\b(?:CBD|CBG|CBC|CBN)\b', ratio, re.IGNORECASE))
-            
-            if name_has_cbd or desc_has_cbd or ratio_has_cbd:
-                return "CBD Blend"
-            else:
-                return "Mixed"
-        
-        # For RSO/CO2 Tankers: if ProductName, Description, or Ratio contains CBD, CBG, CBC, CBN, or ":", then Product Strain is "CBD Blend", otherwise "Mixed"
-        if product_type == "rso/co2 tankers":
-            # Check product name for cannabinoids or ratio patterns
-            name_has_cbd = bool(re.search(r'\b(?:CBD|CBG|CBC|CBN)\b', product_name, re.IGNORECASE)) or ':' in product_name
-            # Check description for cannabinoids or ratio patterns
-            desc_has_cbd = bool(re.search(r'\b(?:CBD|CBG|CBC|CBN)\b', description, re.IGNORECASE)) or ':' in description
-            # Check ratio for cannabinoids
-            ratio_has_cbd = bool(re.search(r'\b(?:CBD|CBG|CBC|CBN)\b', ratio, re.IGNORECASE))
-            
-            if name_has_cbd or desc_has_cbd or ratio_has_cbd:
-                return "CBD Blend"
-            else:
-                return "Mixed"
-        
-        # For all other nonclassic types: check for CBD content in Product Name, Description, or Ratio
-        # Check product name for cannabinoids or ratio patterns
-        name_has_cbd = bool(re.search(r'\b(?:CBD|CBG|CBC|CBN)\b', product_name, re.IGNORECASE)) or ':' in product_name
-        # Check description for cannabinoids or ratio patterns
-        desc_has_cbd = bool(re.search(r'\b(?:CBD|CBG|CBC|CBN)\b', description, re.IGNORECASE)) or ':' in description
-        # Check ratio for cannabinoids
-        ratio_has_cbd = bool(re.search(r'\b(?:CBD|CBG|CBC|CBN)\b', ratio, re.IGNORECASE))
-        
-        if name_has_cbd or desc_has_cbd or ratio_has_cbd:
-            return "CBD Blend"
-        
-        # For all other nonclassic types without CBD content, return "Mixed"
-        return "Mixed"
     
     def update_all_product_strains(self) -> Dict[str, Any]:
         """Update all products with correct Product Strain values based on Excel logic."""
@@ -5682,24 +5609,14 @@ class ProductDatabase:
                 'message': f'Failed to update joint ratios: {e}'
             }
 
-    def _calculate_product_strain(self, product_data):
-        """Calculate Product Strain from product_data dictionary (overloaded version)."""
+    def _calculate_product_strain(self, product_type='', product_name='', description='', ratio=''):
+        """Calculate Product Strain from individual parameters (overloaded version)."""
         try:
-            # Handle both dict and individual parameter formats
-            if isinstance(product_data, dict):
-                product_type = product_data.get('Product Type*', '') or product_data.get('product_type', '')
-                product_name = product_data.get('Product Name*', '') or product_data.get('product_name', '')
-                description = product_data.get('Description', '') or product_data.get('description', '')
-                ratio = product_data.get('Ratio', '') or product_data.get('ratio', '')
-                
-                # Call the original method with extracted parameters
-                return self._calculate_product_strain_original(product_type, product_name, description, ratio)
-            else:
-                # If it's not a dict, assume it's the product_type parameter
-                return self._calculate_product_strain_original(product_data, '', '', '')
+            # Call the original method with the provided parameters
+            return self._calculate_product_strain_original(product_type, product_name, description, ratio)
                 
         except Exception as e:
-            print(f"Error in overloaded _calculate_product_strain: {e}")
+            print(f"Error in _calculate_product_strain: {e}")
             return 'Mixed'
 
 def get_product_database(store_name=None):

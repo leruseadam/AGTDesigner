@@ -1,131 +1,301 @@
 #!/usr/bin/env python3
 """
-Ultra-fast document generation for PythonAnywhere
+Fast DOCX Generator
+Optimized for web performance with minimal processing overhead
 """
 
-from docx import Document
-from docx.shared import Inches, Pt
 import os
 import time
+import logging
+from io import BytesIO
+from docx import Document
+from docx.shared import Inches, Pt
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_TABLE_ALIGNMENT
+import pandas as pd
+from typing import List, Dict, Any
+
+# Performance constants
+MAX_RECORDS_PER_DOCX = 100  # Limit records for web performance
+CHUNK_SIZE = 20  # Process in small chunks
+MAX_PROCESSING_TIME = 30  # 30 second timeout
+
+logger = logging.getLogger(__name__)
 
 class FastDocxGenerator:
-    """Optimized DOCX generation with minimal overhead"""
+    """Ultra-fast DOCX generation with minimal overhead"""
     
     def __init__(self):
-        self.template_cache = {}
-    
-    def generate_simple_labels(self, data, output_path):
-        """Generate labels with minimal formatting for speed"""
-        start_time = time.time()
+        self.start_time = time.time()
+        self.processed_count = 0
         
+    def generate_labels_fast(self, records: List[Dict], template_type: str = 'vertical', 
+                           scale_factor: float = 1.0) -> BytesIO:
+        """Generate labels with optimized processing"""
         try:
-            # Create simple document
+            logger.info(f"[FAST-DOCX] Starting generation for {len(records)} records")
+            
+            # Limit records for web performance
+            if len(records) > MAX_RECORDS_PER_DOCX:
+                logger.warning(f"[FAST-DOCX] Limiting records from {len(records)} to {MAX_RECORDS_PER_DOCX}")
+                records = records[:MAX_RECORDS_PER_DOCX]
+            
+            # Create document
             doc = Document()
             
-            # Add title
-            title = doc.add_heading('Product Labels', 0)
+            # Set up page margins for labels
+            section = doc.sections[0]
+            section.top_margin = Inches(0.5)
+            section.bottom_margin = Inches(0.5)
+            section.left_margin = Inches(0.5)
+            section.right_margin = Inches(0.5)
             
-            # Process data in chunks
-            chunk_size = 10  # Small chunks for PythonAnywhere
-            processed = 0
-            
-            for i in range(0, min(len(data), 50), chunk_size):  # Limit to 50 items
-                chunk = data[i:i+chunk_size]
-                
-                for item in chunk:
-                    # Add simple paragraph for each product
-                    p = doc.add_paragraph()
-                    p.add_run(f"Product: {item.get('Product Name*', 'N/A')}").bold = True
-                    
-                    # Add basic info only
-                    doc.add_paragraph(f"Type: {item.get('Product Type*', 'N/A')}")
-                    doc.add_paragraph(f"Brand: {item.get('Product Brand', 'N/A')}")
-                    doc.add_paragraph(f"Weight: {item.get('Weight*', 'N/A')}")
-                    
-                    # Add separator
-                    doc.add_paragraph("─" * 40)
-                    
-                    processed += 1
-                
-                # Quick break to prevent timeout
-                if time.time() - start_time > 15:  # 15 second limit
+            # Process records in chunks
+            for i in range(0, len(records), CHUNK_SIZE):
+                # Check timeout
+                if time.time() - self.start_time > MAX_PROCESSING_TIME:
+                    logger.warning(f"[FAST-DOCX] Timeout reached, stopping at {self.processed_count} records")
                     break
+                
+                chunk = records[i:i + CHUNK_SIZE]
+                self._process_chunk(doc, chunk, template_type, scale_factor)
+                self.processed_count += len(chunk)
             
-            # Save document
-            doc.save(output_path)
+            # Save to buffer
+            output_buffer = BytesIO()
+            doc.save(output_buffer)
+            output_buffer.seek(0)
+            
+            generation_time = time.time() - self.start_time
+            logger.info(f"[FAST-DOCX] Generated {self.processed_count} labels in {generation_time:.2f}s")
+            
+            return output_buffer
+            
+        except Exception as e:
+            logger.error(f"[FAST-DOCX] Error generating labels: {e}")
+            raise
+    
+    def _process_chunk(self, doc: Document, chunk: List[Dict], template_type: str, scale_factor: float):
+        """Process a chunk of records with minimal formatting"""
+        try:
+            for record in chunk:
+                # Check timeout
+                if time.time() - self.start_time > MAX_PROCESSING_TIME:
+                    break
+                
+                # Create label table
+                table = doc.add_table(rows=1, cols=1)
+                table.alignment = WD_TABLE_ALIGNMENT.CENTER
+                
+                # Set table properties for label size
+                table.autofit = False
+                table.allow_autofit = False
+                
+                # Get cell
+                cell = table.cell(0, 0)
+                cell.width = Inches(2.0 * scale_factor)
+                
+                # Add content with minimal formatting
+                self._add_label_content(cell, record, template_type)
+                
+                # Add spacing between labels
+                doc.add_paragraph()
+                
+        except Exception as e:
+            logger.error(f"[FAST-DOCX] Error processing chunk: {e}")
+            raise
+    
+    def _add_label_content(self, cell, record: Dict, template_type: str):
+        """Add content to label cell with minimal processing"""
+        try:
+            # Clear cell content
+            cell.text = ''
+            
+            # Get basic fields
+            product_name = record.get('ProductName', record.get('Product Name*', 'N/A'))
+            product_type = record.get('ProductType', record.get('Product Type*', 'N/A'))
+            brand = record.get('ProductBrand', record.get('Product Brand', 'N/A'))
+            weight = record.get('Weight', record.get('Weight*', 'N/A'))
+            price = record.get('Price', 'N/A')
+            lineage = record.get('Lineage', 'N/A')
+            
+            # Clean lineage
+            if 'LINEAGE_START' in lineage and 'LINEAGE_END' in lineage:
+                start_idx = lineage.find('LINEAGE_START') + len('LINEAGE_START')
+                end_idx = lineage.find('LINEAGE_END')
+                if start_idx != -1 and end_idx != -1:
+                    lineage = lineage[start_idx:end_idx].strip()
+            
+            # Add content based on template type
+            if template_type == 'vertical':
+                self._add_vertical_content(cell, product_name, product_type, brand, weight, price, lineage)
+            elif template_type == 'horizontal':
+                self._add_horizontal_content(cell, product_name, product_type, brand, weight, price, lineage)
+            elif template_type == 'mini':
+                self._add_mini_content(cell, product_name, product_type, brand, weight, price, lineage)
+            else:
+                self._add_vertical_content(cell, product_name, product_type, brand, weight, price, lineage)
+                
+        except Exception as e:
+            logger.error(f"[FAST-DOCX] Error adding label content: {e}")
+            # Add fallback content
+            cell.text = f"Product: {product_name}\nType: {product_type}\nBrand: {brand}"
+    
+    def _add_vertical_content(self, cell, product_name, product_type, brand, weight, price, lineage):
+        """Add vertical label content"""
+        # Product Name (bold)
+        p1 = cell.paragraphs[0]
+        p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run1 = p1.add_run(product_name)
+        run1.bold = True
+        run1.font.size = Pt(10)
+        
+        # Product Type
+        p2 = cell.add_paragraph()
+        p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run2 = p2.add_run(product_type)
+        run2.font.size = Pt(8)
+        
+        # Brand
+        p3 = cell.add_paragraph()
+        p3.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run3 = p3.add_run(brand)
+        run3.font.size = Pt(8)
+        
+        # Weight and Price
+        p4 = cell.add_paragraph()
+        p4.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run4 = p4.add_run(f"{weight} - ${price}")
+        run4.font.size = Pt(8)
+        
+        # Lineage
+        p5 = cell.add_paragraph()
+        p5.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run5 = p5.add_run(lineage)
+        run5.font.size = Pt(8)
+    
+    def _add_horizontal_content(self, cell, product_name, product_type, brand, weight, price, lineage):
+        """Add horizontal label content"""
+        # Single line format
+        p1 = cell.paragraphs[0]
+        p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run1 = p1.add_run(f"{product_name} | {product_type} | {brand} | {weight} | ${price} | {lineage}")
+        run1.font.size = Pt(8)
+    
+    def _add_mini_content(self, cell, product_name, product_type, brand, weight, price, lineage):
+        """Add mini label content"""
+        # Compact format
+        p1 = cell.paragraphs[0]
+        p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run1 = p1.add_run(f"{product_name}\n{product_type} | {weight}")
+        run1.font.size = Pt(7)
+
+def generate_fast_docx(records: List[Dict], template_type: str = 'vertical', 
+                      scale_factor: float = 1.0) -> BytesIO:
+    """Generate DOCX with fast processing"""
+    generator = FastDocxGenerator()
+    return generator.generate_labels_fast(records, template_type, scale_factor)
+
+def create_fast_docx_routes(app):
+    """Create fast DOCX generation routes"""
+    
+    @app.route('/api/generate-fast', methods=['POST'])
+    def generate_labels_fast():
+        """Fast label generation endpoint"""
+        try:
+            start_time = time.time()
+            logger.info("[FAST-DOCX] Fast generation request received")
+            
+            # Get request data
+            data = request.get_json()
+            template_type = data.get('template_type', 'vertical')
+            scale_factor = float(data.get('scale_factor', 1.0))
+            selected_tags = data.get('selected_tags', [])
+            
+            logger.info(f"[FAST-DOCX] Template: {template_type}, Scale: {scale_factor}, Tags: {len(selected_tags)}")
+            
+            # Get records from Excel processor
+            from src.core.data.excel_processor import get_excel_processor
+            excel_processor = get_excel_processor()
+            
+            if not excel_processor.df or excel_processor.df.empty:
+                return jsonify({'error': 'No data available'}), 400
+            
+            # Filter records by selected tags
+            if selected_tags:
+                # Simple filtering by product name
+                filtered_df = excel_processor.df[
+                    excel_processor.df['ProductName'].isin(selected_tags) |
+                    excel_processor.df['Product Name*'].isin(selected_tags)
+                ]
+            else:
+                # Use first 50 records for fast generation
+                filtered_df = excel_processor.df.head(50)
+            
+            if filtered_df.empty:
+                return jsonify({'error': 'No matching records found'}), 400
+            
+            # Convert to records format
+            records = []
+            for _, row in filtered_df.iterrows():
+                record = {
+                    'ProductName': row.get('ProductName', row.get('Product Name*', '')),
+                    'ProductType': row.get('ProductType', row.get('Product Type*', '')),
+                    'ProductBrand': row.get('ProductBrand', row.get('Product Brand', '')),
+                    'Weight': row.get('Weight', row.get('Weight*', '')),
+                    'Price': row.get('Price', '0.00'),
+                    'Lineage': row.get('Lineage', 'HYBRID')
+                }
+                records.append(record)
+            
+            # Generate DOCX
+            output_buffer = generate_fast_docx(records, template_type, scale_factor)
+            
+            # Create filename
+            from datetime import datetime
+            today_str = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"AGT_Fast_Labels_{template_type}_{len(records)}tags_{today_str}.docx"
+            
+            # Return file
+            from flask import send_file
+            response = send_file(
+                output_buffer,
+                as_attachment=True,
+                download_name=filename,
+                mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            )
             
             generation_time = time.time() - start_time
+            logger.info(f"[FAST-DOCX] Fast generation completed in {generation_time:.2f}s")
             
-            return {
-                'success': True,
-                'output_path': output_path,
-                'processed_items': processed,
-                'generation_time': generation_time,
-                'file_size': os.path.getsize(output_path) if os.path.exists(output_path) else 0
-            }
+            return response
             
         except Exception as e:
-            return {
-                'success': False,
-                'error': str(e),
-                'generation_time': time.time() - start_time
-            }
-
-def create_fast_generator_routes(app):
-    """Add fast generation routes to Flask app"""
+            logger.error(f"[FAST-DOCX] Error in fast generation: {e}")
+            return jsonify({'error': str(e)}), 500
     
-    from flask import request, jsonify, send_file, session
-    
-    @app.route('/generate-ultra-fast', methods=['POST'])
-    def generate_ultra_fast():
-        """Ultra-fast document generation"""
-        start_time = time.time()
-        
-        try:
-            # Get data from request
-            data = request.get_json()
-            if not data or 'items' not in data:
-                return jsonify({'error': 'No data provided'}), 400
-            
-            items = data['items']
-            if len(items) > 25:  # Limit for speed
-                items = items[:25]
-                
-            # Generate output filename
-            timestamp = int(time.time())
-            output_filename = f"fast_labels_{timestamp}.docx"
-            output_path = os.path.join('output', output_filename)
-            
-            # Ensure output directory exists
-            os.makedirs('output', exist_ok=True)
-            
-            # Generate document
-            generator = FastDocxGenerator()
-            result = generator.generate_simple_labels(items, output_path)
-            
-            total_time = time.time() - start_time
-            
-            if result['success']:
-                return jsonify({
-                    'success': True,
-                    'filename': output_filename,
-                    'download_url': f'/download/{output_filename}',
-                    'processed_items': result['processed_items'],
-                    'total_time': round(total_time, 2),
-                    'file_size': result['file_size']
-                })
-            else:
-                return jsonify({
-                    'error': result['error'],
-                    'total_time': round(total_time, 2)
-                }), 500
-                
-        except Exception as e:
-            total_time = time.time() - start_time
-            return jsonify({
-                'error': f'Generation failed: {str(e)}',
-                'total_time': round(total_time, 2)
-            }), 500
+    return app
 
-# Export the function
-__all__ = ['create_fast_generator_routes', 'FastDocxGenerator']
+if __name__ == "__main__":
+    # Test the generator
+    test_records = [
+        {
+            'ProductName': 'Test Product 1',
+            'ProductType': 'Flower',
+            'ProductBrand': 'Test Brand',
+            'Weight': '3.5g',
+            'Price': '25.00',
+            'Lineage': 'HYBRID'
+        },
+        {
+            'ProductName': 'Test Product 2',
+            'ProductType': 'Concentrate',
+            'ProductBrand': 'Test Brand',
+            'Weight': '1g',
+            'Price': '40.00',
+            'Lineage': 'INDICA'
+        }
+    ]
+    
+    output = generate_fast_docx(test_records, 'vertical', 1.0)
+    print(f"Generated DOCX with {len(test_records)} records")

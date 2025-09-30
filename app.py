@@ -179,6 +179,8 @@ import random
 # Optional import for flask_caching
 # Import optimized upload handler
 from optimized_excel_upload import create_optimized_upload_routes
+from fast_excel_upload_fix import create_fast_upload_routes
+from fast_docx_generator import create_fast_docx_routes
 try:
     from flask_caching import Cache
     CACHE_AVAILABLE = True
@@ -12959,6 +12961,10 @@ def fix_description_format():
 
 # Register optimized upload routes
 create_optimized_upload_routes(app)
+# Register fast upload routes
+create_fast_upload_routes(app)
+# Register fast DOCX generation routes
+create_fast_docx_routes(app)
 
 if __name__ == '__main__':
     # Use the global app instance that has all routes registered
