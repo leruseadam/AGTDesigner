@@ -80,7 +80,9 @@ PYTHONANYWHERE_CONFIG = {
     'enable_compression': True,
     'enable_caching': True,
     'cache_ttl': 300,  # 5 minutes
-    'missing_dependencies': MISSING_DEPENDENCIES
+    'missing_dependencies': MISSING_DEPENDENCIES,
+    'disable_product_db_integration': True,  # Disable for performance
+    'enable_fast_mode': True  # Enable all performance optimizations
 }
 
 def get_pythonanywhere_config():

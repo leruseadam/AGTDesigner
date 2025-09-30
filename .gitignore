@@ -82,10 +82,3 @@ backup/
 pythonanywhere.log product_database_fixed.db.gz
 *.xlsx
 *.tar.gz
-# Large generated/backup files
-product_database*.db*
-*.sql
-*.sql.gz
-*.db.gz
-*.zip
-comprehensive_product_database_with_pricing.xlsx
