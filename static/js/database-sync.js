@@ -81,11 +81,11 @@ async function openDatabaseAnalytics() {
         <div class="col-md-6">
           <div class="card glass-card">
             <div class="card-header">
-              <h6 class="mb-0">Top Vendors</h6>
+              <h6 class="mb-0">All Vendors (${vendorStats.vendors ? vendorStats.vendors.length : 0})</h6>
             </div>
             <div class="card-body" style="max-height: 300px; overflow-y: auto;">
               ${vendorStats.vendors && vendorStats.vendors.length > 0 ? 
-                vendorStats.vendors.slice(0, 10).map((vendor, index) => 
+                vendorStats.vendors.map((vendor, index) => 
                   `<div class="d-flex justify-content-between align-items-center py-2 ${index < vendorStats.vendors.length - 1 ? 'border-bottom' : ''}">
                     <div>
                       <strong>${vendor.vendor || 'Unknown'}</strong>
@@ -102,11 +102,11 @@ async function openDatabaseAnalytics() {
         <div class="col-md-6">
           <div class="card glass-card">
             <div class="card-header">
-              <h6 class="mb-0">Top Product Types</h6>
+              <h6 class="mb-0">All Product Types (${vendorStats.product_types ? vendorStats.product_types.length : 0})</h6>
             </div>
             <div class="card-body" style="max-height: 300px; overflow-y: auto;">
               ${vendorStats.product_types && vendorStats.product_types.length > 0 ? 
-                vendorStats.product_types.slice(0, 10).map((type, index) => 
+                vendorStats.product_types.map((type, index) => 
                   `<div class="d-flex justify-content-between align-items-center py-2 ${index < vendorStats.product_types.length - 1 ? 'border-bottom' : ''}">
                     <div>
                       <strong>${type.product_type || 'Unknown'}</strong>

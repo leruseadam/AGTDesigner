@@ -1107,7 +1107,7 @@ class TemplateProcessor:
             # All content now uses standard spacing - no special THC_CBD handling
             
             chunk_time = time.time() - chunk_start_time
-            self.logger.debug(f"Chunk processed in {chunk_time:.2f}s")
+            # Chunk processed
             
             # FINAL MARKER CLEANUP: Remove any lingering *_START and *_END markers AFTER font sizing has been applied
             # This cleanup should only remove markers that weren't processed by the font sizing system
@@ -1271,24 +1271,8 @@ class TemplateProcessor:
             if weight.startswith('- '):
                 weight = weight[2:]
             
-            # Template-specific handling
-            if self.template_type == 'mini':
-                # For mini templates, include both description and weight in DescAndWeight
-                # Use regular space instead of non-breaking space to allow proper line breaking
-                if desc and weight:
-                    # Format for mini template with proper text wrapping
-                    combined_text = f"{desc} - {weight}"
-                    # Apply mini template text wrapping to prevent line breaks in the middle of words
-                    wrapped_text = self._format_mini_template_text(combined_text)
-                    label_context['DescAndWeight'] = wrap_with_marker(wrapped_text, 'DESC')
-                else:
-                    label_context['DescAndWeight'] = wrap_with_marker(desc or weight, 'DESC')
-            else:
-                if desc and weight:
-                    combined_text = f"{desc} -\u00A0{weight}"
-                    label_context['DescAndWeight'] = wrap_with_marker(combined_text, 'DESC')
-                else:
-                    label_context['DescAndWeight'] = wrap_with_marker(desc or weight, 'DESC')
+            # DescAndWeight should just be the description (no weight added since Description is already clean)
+            label_context['DescAndWeight'] = wrap_with_marker(desc, 'DESC')
 
         # Fast DOH image processing - only if needed
         if label_context.get('DOH'):
@@ -2207,8 +2191,7 @@ class TemplateProcessor:
             
             if doh_images_found > 0:
                 self.logger.info(f"Final DOH centering pass completed - processed {doh_images_found} DOH images")
-            else:
-                self.logger.debug("Final DOH centering pass - no DOH images found")
+            # Final DOH centering pass completed
                 
         except Exception as e:
             self.logger.warning(f"Error in final DOH centering pass: {e}")
@@ -2396,7 +2379,6 @@ class TemplateProcessor:
                                 cleaned_text = clean_text(original_text)
                                 if cleaned_text != original_text:
                                     run.text = cleaned_text
-                                    self.logger.debug(f"Cleaned markers from run: '{original_text}' -> '{cleaned_text}'")
             
             # Clean markers in paragraphs outside tables
             for paragraph in doc.paragraphs:
@@ -2405,12 +2387,11 @@ class TemplateProcessor:
                     cleaned_text = clean_text(original_text)
                     if cleaned_text != original_text:
                         run.text = cleaned_text
-                        self.logger.debug(f"Cleaned markers from paragraph run: '{original_text}' -> '{cleaned_text}'")
             
             # FINAL LINEAGE CLEANUP: Remove any leading spaces from lineage content
             self._final_lineage_cleanup(doc)
             
-            self.logger.debug("Enhanced final marker cleanup completed - all markers should be stripped")
+            # Enhanced final marker cleanup completed
             
         except Exception as e:
             self.logger.warning(f"Error in enhanced final marker cleanup: {e}")
@@ -2443,7 +2424,6 @@ class TemplateProcessor:
                                         
                                         if cleaned_text != original_text:
                                             run.text = cleaned_text
-                                            self.logger.debug(f"Final lineage cleanup: '{original_text}' -> '{cleaned_text}'")
                                         break
             
             # Clean lineage content in paragraphs outside tables
@@ -2459,10 +2439,9 @@ class TemplateProcessor:
                             
                             if cleaned_text != original_text:
                                 run.text = cleaned_text
-                                self.logger.debug(f"Final lineage cleanup: '{original_text}' -> '{cleaned_text}'")
                             break
             
-            self.logger.debug("Final lineage cleanup completed - all leading spaces should be removed")
+            # Final lineage cleanup completed
             
         except Exception as e:
             self.logger.warning(f"Error in final lineage cleanup: {e}")
@@ -2618,26 +2597,17 @@ class TemplateProcessor:
         
         full_text = "".join(run.text for run in paragraph.runs)
         
-        # DEBUG: Log the input parameters
-        self.logger.debug(f"Processing paragraph for markers: {markers}")
-        self.logger.debug(f"Full text: '{full_text}'")
-        
         # First, check if this is a combined lineage/vendor paragraph
         if self._detect_and_process_combined_lineage_vendor(paragraph):
             return
         
-        # Check if any markers are present
+        # Check if any markers are present (optimized - no debug logging)
         found_markers = []
         for marker_name in markers:
             start_marker = f'{marker_name}_START'
             end_marker = f'{marker_name}_END'
             if start_marker in full_text and end_marker in full_text:
                 found_markers.append(marker_name)
-                self.logger.debug(f"Found marker: {marker_name} (start: '{start_marker}', end: '{end_marker}')")
-            else:
-                self.logger.debug(f"Marker not found: {marker_name} (start: '{start_marker}' in text: {start_marker in full_text}, end: '{end_marker}' in text: {end_marker in full_text})")
-        
-        self.logger.debug(f"Total markers found: {found_markers}")
         
         if found_markers:
             # Process all markers and build the final content
@@ -2659,7 +2629,6 @@ class TemplateProcessor:
                     
                     # Get font size for this marker
                     font_size = self._get_template_specific_font_size(content, marker_name)
-                    self.logger.debug(f"Processing marker '{marker_name}': content='{content}', font_size={font_size.pt}pt")
                     
                     processed_content[marker_name] = {
                         'content': content,
@@ -3275,7 +3244,7 @@ class TemplateProcessor:
             for paragraph in doc.paragraphs:
                 process_paragraph(paragraph)
             
-            self.logger.debug("Ensured consistent spacing above lineage/brand sections")
+            # Ensured consistent spacing above lineage/brand sections
             
         except Exception as e:
             self.logger.error(f"Error ensuring consistent lineage spacing: {e}")
@@ -3326,7 +3295,7 @@ class TemplateProcessor:
             for paragraph in doc.paragraphs:
                 process_paragraph(paragraph)
             
-            self.logger.debug("Added consistent spacing above main content sections")
+            # Added consistent spacing above main content sections
             
         except Exception as e:
             self.logger.error(f"Error adding consistent content spacing: {e}")
@@ -3378,7 +3347,7 @@ class TemplateProcessor:
             for paragraph in doc.paragraphs:
                 process_paragraph(paragraph)
             
-            self.logger.debug("Fixed paragraph spacing for ratio content")
+            # Fixed paragraph spacing for ratio content
             
         except Exception as e:
             self.logger.error(f"Error fixing ratio paragraph spacing: {e}")
@@ -3829,7 +3798,7 @@ class TemplateProcessor:
                                     tcW.set(qn('w:w'), str(int(col_width * 1440)))
                                     tcW.set(qn('w:type'), 'dxa')
             
-            self.logger.debug("Ensured proper table centering and document setup")
+            # Ensured proper table centering and document setup
             
         except Exception as e:
             self.logger.error(f"Error ensuring proper centering: {e}")
@@ -4024,7 +3993,7 @@ class TemplateProcessor:
         while classic types maintain their default alignment (left-aligned).
         """
         try:
-            self.logger.info("DEBUG: Starting _apply_brand_centering_for_double_template")
+            # Starting _apply_brand_centering_for_double_template
             
             # Import CLASSIC_TYPES to check if current product type is classic
             from src.core.constants import CLASSIC_TYPES
@@ -4105,7 +4074,7 @@ class TemplateProcessor:
         This method runs after all other processing to ensure the centering is not overridden.
         """
         try:
-            self.logger.info("DEBUG: Starting _ensure_lineage_centering_for_nonclassic_types")
+            # Starting _ensure_lineage_centering_for_nonclassic_types
             
             # Process all tables and look for actual brand content that should be centered
             for table in doc.tables:
@@ -4143,7 +4112,7 @@ class TemplateProcessor:
                             if is_brand_name:
                                 # Force center alignment for brand names
                                 paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                                self.logger.info(f"DEBUG: Centered brand name content: '{paragraph_text}'")
+                                # Centered brand name content
                                 
         except Exception as e:
             self.logger.error(f"Error ensuring brand centering for nonclassic types: {e}")
@@ -4154,7 +4123,7 @@ class TemplateProcessor:
         This runs at the very end to catch any concatenation that wasn't caught earlier.
         """
         try:
-            self.logger.info("DEBUG: Starting _clean_up_lineage_brand_concatenation")
+            # Starting _clean_up_lineage_brand_concatenation
 
             # Define classic lineage values
             classic_lineages = ["SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", "CBD", "MIXED"]
@@ -4205,7 +4174,7 @@ class TemplateProcessor:
         This runs at the very end to catch any standalone cannabinoid text that wasn't caught earlier.
         """
         try:
-            self.logger.info("DEBUG: Starting _ensure_standalone_cannabinoid_font_sizing")
+            # Starting _ensure_standalone_cannabinoid_font_sizing
 
             # Define standalone cannabinoid values that should be nearly invisible
             standalone_cannabinoids = ["CBD", "THC", "CBC", "CBG", "CBN"]
@@ -4409,9 +4378,9 @@ class TemplateProcessor:
 
     def format_joint_ratio_pack(self, text):
         """
-        Format JointRatio as: [amount]g x [count] Pack
-        Handles various input formats and normalizes them to standard format.
-        For single units, shows just the weight (e.g., "1g" instead of "1g x 1 Pack").
+        Format JointRatio as: - [amount]g x [count] Pack
+        Handles various input formats and normalizes them to standard format with hyphen prefix.
+        For single units, shows just the weight with hyphen (e.g., "- 1g" instead of "- 1g x 1 Pack").
         """
         if not text:
             return text
@@ -4445,17 +4414,17 @@ class TemplateProcessor:
                     if count and count.isdigit():
                         count_int = int(count)
                         if count_int == 1:
-                            # For single units, just show the weight
-                            formatted = f"{amount}g"
+                            # For single units, just show the weight with hyphen
+                            formatted = f"- {amount}g"
                         else:
-                            # For multiple units, show the full pack format
-                            formatted = f"{amount}g x {count} Pack"
+                            # For multiple units, show the full pack format with hyphen
+                            formatted = f"- {amount}g x {count} Pack"
                     else:
-                        # Only amount found (like "1g") - show just the weight
-                        formatted = f"{amount}g"
+                        # Only amount found (like "1g") - show just the weight with hyphen
+                        formatted = f"- {amount}g"
                 except IndexError:
-                    # Only amount found (like "1g") - show just the weight
-                    formatted = f"{amount}g"
+                    # Only amount found (like "1g") - show just the weight with hyphen
+                    formatted = f"- {amount}g"
                 return formatted
         
         # If no pattern matches, return the original text

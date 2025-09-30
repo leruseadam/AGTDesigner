@@ -2982,7 +2982,7 @@ class ExcelProcessor:
                                         'ProductName': product.get('Product Name*', product.get('ProductName', '')),
                                         'Product Name*': product.get('Product Name*', product.get('ProductName', '')),
                                         'Description': product.get('Description', product.get('Product Name*', product.get('ProductName', ''))),
-                                        'DescAndWeight': product.get('Description', product.get('Product Name*', product.get('ProductName', ''))),  # Use Description for DescAndWeight field
+                                        'DescAndWeight': self._process_description_from_product_name(product.get('Product Name*', product.get('ProductName', ''))),  # Use Excel processor formula
                                         'Product Type*': product.get('Product Type*', 'Unknown'),
                                         'Product Brand': product.get('Product Brand', 'Unknown'),
                                         'Product Strain': product.get('Product Strain', 'Unknown'),
@@ -4250,7 +4250,7 @@ class ExcelProcessor:
                     logger.debug(f"Repairing Lineage for {product_name}")
                     inferred_lineage = self._infer_lineage_from_existing_data(product_name)
                     if not inferred_lineage:
-                        inferred_lineage = self._infer_lineage_from_name(product_name)  # Fallback to pattern matching
+                        inferred_lineage = self._infer_lineage_from_name(product_name, repaired_product.get('Product Type*'))  # Fallback to pattern matching
                     logger.debug(f"Inferred lineage: {inferred_lineage}")
                     repaired_product['Lineage'] = inferred_lineage
                 else:
@@ -4441,8 +4441,18 @@ class ExcelProcessor:
         # Default strain
         return 'Premium Blend'
     
-    def _infer_lineage_from_name(self, product_name):
+    def _infer_lineage_from_name(self, product_name, product_type=None):
         """Infer lineage from product name and strain information."""
+        # Import constants to check product type classification
+        from src.core.constants import CLASSIC_TYPES
+        
+        # If product type is provided, check if it's a classic type
+        if product_type:
+            product_type_lower = product_type.strip().lower()
+            if product_type_lower not in CLASSIC_TYPES:
+                # Nonclassic types (edibles, tinctures, topicals, etc.) should ALWAYS be MIXED for blue color
+                return 'MIXED'
+        
         name_lower = product_name.lower()
         
         # Check for specific lineage indicators
@@ -5152,7 +5162,7 @@ class ExcelProcessor:
                     'Quantity Received*': '1',
                     'Weight Unit* (grams/gm or ounces/oz)': educated_guess.get("units", "g"),
                     'CombinedWeight': educated_guess.get("weight", "1"),
-                    'DescAndWeight': educated_guess.get('description', educated_guess.get('product_name', product_name)),
+                    'DescAndWeight': self._process_description_from_product_name(educated_guess.get('product_name', product_name)),  # Use Excel processor formula
                     'Description_Complexity': '1',
                     'Ratio_or_THC_CBD': '',
                     'THC test result': '',
@@ -5199,7 +5209,7 @@ class ExcelProcessor:
                     'ProductBrand': brand or "Unknown",
                     'Product Strain': self._infer_strain_from_name(product_name) or "Unknown",
                     'Strain Name': self._infer_strain_from_name(product_name) or "Unknown",
-                    'Lineage': self._infer_lineage_from_name(product_name) or "HYBRID",
+                    'Lineage': self._infer_lineage_from_name(product_name, product_type) or "HYBRID",
                     'Weight*': self._infer_weight_from_name(product_name)['weight'],
                     'Weight': self._infer_weight_from_name(product_name)['weight'],
                     'Quantity*': '1',
@@ -5217,7 +5227,7 @@ class ExcelProcessor:
                     'Quantity Received*': '1',
                     'Weight Unit* (grams/gm or ounces/oz)': self._infer_weight_from_name(product_name)['units'],
                     'CombinedWeight': self._infer_weight_from_name(product_name)['weight'],
-                    'DescAndWeight': product_name,
+                    'DescAndWeight': self._process_description_from_product_name(product_name),  # Use Excel processor formula
                     'Description_Complexity': '1',
                     'Ratio_or_THC_CBD': '',
                     'THC test result': '',
@@ -5836,15 +5846,15 @@ class ExcelProcessor:
         return name.strip()
 
     def _create_desc_and_weight(self, full_name, weight_units):
-        """Create DescAndWeight field with 'Product Name - Weight' format."""
+        """Create DescAndWeight field with 'Product Name - Weight' format using soft hyphen."""
         # Extract just the product name from the full name
         product_name = self._extract_product_name_from_full_name(full_name)
         
         # Get weight units, clean them up
         weight = str(weight_units).strip() if weight_units else ''
         if weight and weight.lower() not in ['nan', 'none', 'null', '']:
-            # Combine product name and weight
-            return f"{product_name} - {weight}"
+            # Combine product name and weight with hyphen staying with weight (space after hyphen)
+            return f"{product_name} -\u00A0{weight}"
         else:
             # Just return the product name if no weight
             return product_name
@@ -6258,6 +6268,24 @@ class ExcelProcessor:
             self.logger.error(f"[STREAMING] Error in streaming load: {e}")
             return False
     
+    def _process_description_from_product_name(self, product_name: str) -> str:
+        """Process description using the Excel processor formula."""
+        if not product_name:
+            return ''
+        
+        # Clean up the product name first
+        description = str(product_name).strip()
+        
+        # Apply Excel processor formula: Remove " by " patterns
+        if " by " in description:
+            description = description.split(" by ")[0].strip()
+        
+        # Apply Excel processor formula: Remove weight information (patterns like " - 1g", " - .5g")
+        import re
+        description = re.sub(r' - [\d.].*$', '', description)
+        
+        return description
+
     def _process_descriptions_from_product_names(self):
         """Process Description values using our established formula from Product Name."""
         try:

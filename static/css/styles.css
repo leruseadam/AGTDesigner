@@ -2551,6 +2551,75 @@ img, video, canvas, svg {
     background: rgba(255, 192, 203, 0.6) !important;
     border-color: rgba(255, 192, 203, 0.3);
   }
+
+  /* Lineage-specific checkbox colors */
+  .tag-item[data-lineage="SATIVA"] .custom-checkbox:checked,
+  .tag-item[data-lineage="SATIVA"] .tag-checkbox:checked,
+  .tag-item[data-lineage="HYBRID/SATIVA"] .custom-checkbox:checked,
+  .tag-item[data-lineage="HYBRID/SATIVA"] .tag-checkbox:checked {
+    background: linear-gradient(135deg, #ed4123 0%, #c7351a 100%) !important;
+    border-color: rgba(237, 65, 35, 0.9) !important;
+    box-shadow: 
+      inset 0 2px 4px rgba(0, 0, 0, 0.2),
+      0 4px 15px rgba(237, 65, 35, 0.6),
+      0 2px 4px rgba(237, 65, 35, 0.4) !important;
+  }
+  
+  .tag-item[data-lineage="INDICA"] .custom-checkbox:checked,
+  .tag-item[data-lineage="INDICA"] .tag-checkbox:checked,
+  .tag-item[data-lineage="HYBRID/INDICA"] .custom-checkbox:checked,
+  .tag-item[data-lineage="HYBRID/INDICA"] .tag-checkbox:checked {
+    background: linear-gradient(135deg, #9900ff 0%, #7a00cc 100%) !important;
+    border-color: rgba(153, 0, 255, 0.9) !important;
+    box-shadow: 
+      inset 0 2px 4px rgba(0, 0, 0, 0.2),
+      0 4px 15px rgba(153, 0, 255, 0.6),
+      0 2px 4px rgba(153, 0, 255, 0.4) !important;
+  }
+  
+  .tag-item[data-lineage="HYBRID"] .custom-checkbox:checked,
+  .tag-item[data-lineage="HYBRID"] .tag-checkbox:checked {
+    background: linear-gradient(135deg, #009900 0%, #007700 100%) !important;
+    border-color: rgba(0, 153, 0, 0.9) !important;
+    box-shadow: 
+      inset 0 2px 4px rgba(0, 0, 0, 0.2),
+      0 4px 15px rgba(0, 153, 0, 0.6),
+      0 2px 4px rgba(0, 153, 0, 0.4) !important;
+  }
+  
+  .tag-item[data-lineage="CBD"] .custom-checkbox:checked,
+  .tag-item[data-lineage="CBD"] .tag-checkbox:checked,
+  .tag-item[data-lineage="CBD_BLEND"] .custom-checkbox:checked,
+  .tag-item[data-lineage="CBD_BLEND"] .tag-checkbox:checked {
+    background: linear-gradient(135deg, #f1c232 0%, #e6b800 100%) !important;
+    border-color: rgba(241, 194, 50, 0.9) !important;
+    box-shadow: 
+      inset 0 2px 4px rgba(0, 0, 0, 0.2),
+      0 4px 15px rgba(241, 194, 50, 0.6),
+      0 2px 4px rgba(241, 194, 50, 0.4) !important;
+  }
+  
+  .tag-item[data-lineage="MIXED"] .custom-checkbox:checked,
+  .tag-item[data-lineage="MIXED"] .tag-checkbox:checked {
+    background: linear-gradient(135deg, #0021f5 0%, #0019cc 100%) !important;
+    border-color: rgba(0, 33, 245, 0.9) !important;
+    box-shadow: 
+      inset 0 2px 4px rgba(0, 0, 0, 0.2),
+      0 4px 15px rgba(0, 33, 245, 0.6),
+      0 2px 4px rgba(0, 33, 245, 0.4) !important;
+  }
+  
+  .tag-item[data-lineage="PARA"] .custom-checkbox:checked,
+  .tag-item[data-lineage="PARA"] .tag-checkbox:checked,
+  .tag-item[data-lineage="PARAPHERNALIA"] .custom-checkbox:checked,
+  .tag-item[data-lineage="PARAPHERNALIA"] .tag-checkbox:checked {
+    background: linear-gradient(135deg, #ffc0cb 0%, #ffb3ba 100%) !important;
+    border-color: rgba(255, 192, 203, 0.9) !important;
+    box-shadow: 
+      inset 0 2px 4px rgba(0, 0, 0, 0.2),
+      0 4px 15px rgba(255, 192, 203, 0.6),
+      0 2px 4px rgba(255, 192, 203, 0.4) !important;
+  }
   
   /* Brand headers */
   .brand-category {
@@ -5132,7 +5201,7 @@ img, video, canvas, svg {
   .excel-loading-title {
     font-size: 24px;
     font-weight: 700;
-    margin-bottom: 10px;
+    margin-bottom: 20px;
     background: linear-gradient(135deg, #00d4aa, #ffffff);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -5142,47 +5211,10 @@ img, video, canvas, svg {
   .excel-loading-subtitle {
     font-size: 16px;
     color: rgba(255, 255, 255, 0.8);
-    margin-bottom: 30px;
+    margin-bottom: 20px;
     font-weight: 500;
   }
 
-  .excel-loading-progress {
-    margin-bottom: 20px;
-  }
-
-  .excel-loading-bar {
-    width: 100%;
-    height: 8px;
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 4px;
-    overflow: hidden;
-    position: relative;
-  }
-
-  .excel-loading-fill {
-    height: 100%;
-    background: linear-gradient(90deg, #00d4aa, #0099cc, #00d4aa);
-    border-radius: 4px;
-    width: 0%;
-    transition: width 0.3s ease;
-    position: relative;
-  }
-
-  .excel-loading-fill::after {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
-    animation: excelShimmer 2s ease-in-out infinite;
-  }
-
-  @keyframes excelShimmer {
-    0% { transform: translateX(-100%); }
-    100% { transform: translateX(100%); }
-  }
 
   .excel-loading-status {
     font-size: 14px;

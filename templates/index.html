@@ -4211,14 +4211,9 @@
               <polyline points="9 9 15 9 15 15 9 15 9 9"></polyline>
             </svg>
           </div>
-          <h3 class="excel-loading-title">Loading Excel File</h3>
+          <h3 class="excel-loading-title">Processing Excel File</h3>
           <p class="excel-loading-subtitle" id="excelLoadingFilename">Processing...</p>
-          <div class="excel-loading-progress">
-            <div class="excel-loading-bar">
-              <div class="excel-loading-fill" id="excelLoadingFill"></div>
-            </div>
-          </div>
-          <div class="excel-loading-status" id="excelLoadingStatus">Initializing...</div>
+          <div class="excel-loading-status" id="excelLoadingStatus">Processing...</div>
           <div class="excel-loading-dots">
             <span></span>
             <span></span>
@@ -4335,7 +4330,7 @@
         <div class="row mb-1 mt-0 fade-in" style="animation-delay: 0.2s;">
           <div class="col-lg-2 mb-1">
             <div class="modern-upload-bar" style="display: inline-flex; align-items: center; min-height: 28px; padding: 0.25rem 0.5rem; border-radius: 10px; background: rgba(45,34,58,0.85);">
-              <button type="button" class="upload-btn-modern d-flex align-items-center justify-content-center" onclick="document.getElementById('fileInput').click()" aria-label="Upload Excel file" style="padding:0.15rem 0.6rem; font-size:0.82rem;">
+              <button type="button" class="upload-btn-modern d-flex align-items-center justify-content-center" onclick="console.log('Upload button clicked'); document.getElementById('fileInput').click();" aria-label="Upload Excel file" style="padding:0.15rem 0.6rem; font-size:0.82rem;">
                 <svg class="me-2" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                   <polyline points="7 10 12 15 17 10"></polyline>
@@ -4343,7 +4338,7 @@
                 </svg>
                 <span class="fw-bold">Upload</span>
               </button>
-              <input type="file" id="fileInput" accept=".xlsx" style="display:none;">
+              <input type="file" id="fileInput" accept=".xlsx" style="display:none;" onchange="console.log('File input changed:', this.files[0]);">
               <span class="file-info-modern d-flex align-items-center gap-1 ms-2" id="currentFileInfo" style="min-width:200px; max-width:none; font-size:0.82rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;">
                   <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>

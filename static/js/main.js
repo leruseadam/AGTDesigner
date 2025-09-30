@@ -5026,45 +5026,20 @@ const TagManager = {
         const splash = document.getElementById('excelLoadingSplash');
         const filenameElement = document.getElementById('excelLoadingFilename');
         const statusElement = document.getElementById('excelLoadingStatus');
-        const progressFill = document.getElementById('excelLoadingFill');
         
-        if (splash && filenameElement && statusElement && progressFill) {
+        if (splash && filenameElement && statusElement) {
             filenameElement.textContent = filename;
-            statusElement.textContent = 'Initializing...';
-            progressFill.style.width = '0%';
+            statusElement.textContent = 'Processing...';
             splash.style.display = 'flex';
-            
-            // Start progress animation
-            this.excelLoadingProgress = 0;
-            this.excelLoadingInterval = setInterval(() => {
-                this.excelLoadingProgress += Math.random() * 15;
-                if (this.excelLoadingProgress > 90) {
-                    this.excelLoadingProgress = 90; // Don't go to 100% until actually done
-                }
-                progressFill.style.width = this.excelLoadingProgress + '%';
-            }, 500);
         }
     },
 
     hideExcelLoadingSplash() {
         const splash = document.getElementById('excelLoadingSplash');
-        const progressFill = document.getElementById('excelLoadingFill');
         
-        if (splash && progressFill) {
-            // Complete the progress bar
-            progressFill.style.width = '100%';
-            
-            // Clear the progress interval
-            if (this.excelLoadingInterval) {
-                clearInterval(this.excelLoadingInterval);
-                this.excelLoadingInterval = null;
-            }
-            
-            // Hide splash after a short delay
-            setTimeout(() => {
-                splash.style.display = 'none';
-                progressFill.style.width = '0%';
-            }, 500);
+        if (splash) {
+            // Hide splash immediately
+            splash.style.display = 'none';
         }
     },
 

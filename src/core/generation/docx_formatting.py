@@ -294,7 +294,6 @@ def clear_table_cell_padding(cell):
         for old_mar in tcPr.findall(qn('w:tcMar')):
             tcPr.remove(old_mar)
         tcPr.append(tcMar)
-        logger.debug(f"Cleared padding for cell")
     except Exception as e:
         logger.error(f"Error in clear_table_cell_padding: {str(e)}")
         raise
@@ -821,6 +820,8 @@ def create_3x3_grid(doc, template_type='vertical'):
 def disable_autofit(table):
     """Disable autofit for a table."""
     try:
+        from docx.oxml.ns import qn
+        from docx.oxml import OxmlElement
         tblPr = table._element.find(qn('w:tblPr'))
         if tblPr is None:
             tblPr = OxmlElement('w:tblPr')
@@ -848,6 +849,8 @@ def enforce_fixed_cell_dimensions(table, template_type=None):
         from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
         from docx.shared import Inches
         from docx.enum.table import WD_ROW_HEIGHT_RULE
+        from docx.oxml.ns import qn
+        from docx.oxml import OxmlElement
         
         # Safety check: ensure table has valid structure
         if not table or not table.rows or len(table.rows) == 0:
@@ -1363,31 +1366,39 @@ def remove_all_headers_and_footers(doc):
     try:
         # Process all sections in the document
         for section in doc.sections:
-            # Remove header content
+            # Remove header content safely
             if hasattr(section, 'header') and section.header:
-                # Clear header content by removing all child elements
-                for child in list(section.header._element):
-                    section.header._element.remove(child)
-                # Also try to remove the header element itself
                 try:
-                    section.header._element.getparent().remove(section.header._element)
-                except:
-                    pass
+                    # Clear header content by removing all paragraphs
+                    for paragraph in section.header.paragraphs:
+                        paragraph.clear()
+                    # Clear any tables in header
+                    for table in section.header.tables:
+                        table._element.getparent().remove(table._element)
+                except Exception as e:
+                    logger.warning(f"Could not clear header content: {e}")
             
-            # Remove footer content
+            # Remove footer content safely
             if hasattr(section, 'footer') and section.footer:
-                # Clear footer content by removing all child elements
-                for child in list(section.footer._element):
-                    section.footer._element.remove(child)
-                # Also try to remove the footer element itself
                 try:
-                    section.footer._element.getparent().remove(section.footer._element)
-                except:
-                    pass
+                    # Clear footer content by removing all paragraphs
+                    for paragraph in section.footer.paragraphs:
+                        paragraph.clear()
+                    # Clear any tables in footer
+                    for table in section.footer.tables:
+                        table._element.getparent().remove(table._element)
+                except Exception as e:
+                    logger.warning(f"Could not clear footer content: {e}")
             
             # Ensure no header/footer spacing
-            section.header_distance = 0
-            section.footer_distance = 0
+            try:
+                section.header_distance = 0
+                section.footer_distance = 0
+            except Exception as e:
+                logger.warning(f"Could not set header/footer distances: {e}")
+        
+        logger.info("Successfully removed headers and footers from document")
+        return doc
         
         # Also check for any header/footer references in the document XML
         try:
@@ -1789,13 +1800,13 @@ def prevent_table_expansion_enhanced(doc, template_type=None):
                 tblLook.set(qn('w:noHBand'), '0')
                 tblLook.set(qn('w:noVBand'), '0')
                 
-                logger.debug(f"Applied enhanced table expansion prevention to table with {len(table.rows)} rows")
+                # Applied enhanced table expansion prevention
                 
             except Exception as table_error:
                 logger.warning(f"Error applying enhanced expansion prevention to table: {table_error}")
                 continue
         
-        logger.info("Enhanced table expansion prevention completed")
+        # Enhanced table expansion prevention completed
         return doc
         
     except Exception as e:

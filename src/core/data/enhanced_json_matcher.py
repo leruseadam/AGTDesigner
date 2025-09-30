@@ -850,6 +850,85 @@ class EnhancedJSONMatcher:
         except Exception:
             return 0
 
+    def _extract_json_price(self, json_data: list, product_dict: dict) -> str:
+        """Extract price from JSON data for the matched product."""
+        try:
+            # Find the matching JSON item for this product
+            product_name = product_dict.get('Product Name*') or product_dict.get('ProductName') or ''
+            
+            for json_item in json_data:
+                json_name = json_item.get('product_name') or json_item.get('inventory_name') or ''
+                
+                # Enhanced name matching to find the corresponding JSON item
+                # Try exact match first, then partial match
+                if (product_name.lower().strip() == json_name.lower().strip() or
+                    json_name.lower().strip() in product_name.lower().strip() or
+                    product_name.lower().strip() in json_name.lower().strip()):
+                    # Extract price from JSON item
+                    price_candidates = [
+                        json_item.get('price'),
+                        json_item.get('Price'),
+                        json_item.get('line_price'),
+                        json_item.get('retail_price'),
+                        json_item.get('unit_price'),
+                        json_item.get('sale_price'),
+                        json_item.get('unit_cost'),
+                        json_item.get('cost'),
+                        json_item.get('Cost')
+                    ]
+                    
+                    for price in price_candidates:
+                        if price is not None:
+                            price_str = str(price).strip()
+                            if price_str and price_str.lower() != 'none' and price_str not in ('0', '0.0', '0.00'):
+                                logging.info(f"💰 Using JSON price '{price_str}' for '{product_name}'")
+                                return price_str
+                    break
+            
+            return None
+        except Exception as e:
+            logging.warning(f"Error extracting JSON price: {e}")
+            return None
+
+    def _extract_json_weight(self, json_data: list, product_dict: dict) -> str:
+        """Extract weight from JSON data for the matched product."""
+        try:
+            # Find the matching JSON item for this product
+            product_name = product_dict.get('Product Name*') or product_dict.get('ProductName') or ''
+            
+            for json_item in json_data:
+                json_name = json_item.get('product_name') or json_item.get('inventory_name') or ''
+                
+                # Enhanced name matching to find the corresponding JSON item
+                # Try exact match first, then partial match
+                if (product_name.lower().strip() == json_name.lower().strip() or
+                    json_name.lower().strip() in product_name.lower().strip() or
+                    product_name.lower().strip() in json_name.lower().strip()):
+                    # Extract weight from JSON item
+                    weight_candidates = [
+                        json_item.get('weight'),
+                        json_item.get('Weight'),
+                        json_item.get('weight_with_units'),
+                        json_item.get('weight_units'),
+                        json_item.get('size'),
+                        json_item.get('Size'),
+                        json_item.get('quantity'),
+                        json_item.get('Quantity')
+                    ]
+                    
+                    for weight in weight_candidates:
+                        if weight is not None:
+                            weight_str = str(weight).strip()
+                            if weight_str and weight_str.lower() != 'none' and weight_str not in ('0', '0.0', '0.00'):
+                                logging.info(f"⚖️ Using JSON weight '{weight_str}' for '{product_name}'")
+                                return weight_str
+                    break
+            
+            return None
+        except Exception as e:
+            logging.warning(f"Error extracting JSON weight: {e}")
+            return None
+
     def _select_db_price(self, product: dict) -> str:
         """Pick the best available price field from a DB product record."""
         try:
@@ -1635,6 +1714,8 @@ class EnhancedJSONMatcher:
                 json_items = payload.get("inventory_transfer_items", [])
                 if not json_items:
                     json_items = payload.get("items", [])
+                if not json_items:
+                    json_items = payload.get("products", [])
             else:
                 json_items = []
                 
@@ -1723,9 +1804,20 @@ class EnhancedJSONMatcher:
                                          product_dict.get('Product Name*') or 
                                          product_dict.get('ProductName') or '')
                     product_dict['Description'] = description_value
-                    # Ensure Price comes from the DB record's price fields
-                    db_price_raw = self._select_db_price(product_dict)
-                    product_dict['Price'] = self._format_price(db_price_raw)
+                    # Ensure Price comes from JSON data first, then DB record's price fields
+                    json_price = self._extract_json_price(json_data, product_dict)
+                    if json_price:
+                        product_dict['Price'] = self._format_price(json_price)
+                    else:
+                        db_price_raw = self._select_db_price(product_dict)
+                        product_dict['Price'] = self._format_price(db_price_raw)
+                    # Ensure Weight comes from JSON data first, then DB record's weight fields
+                    json_weight = self._extract_json_weight(json_data, product_dict)
+                    if json_weight:
+                        product_dict['Weight*'] = json_weight
+                        product_dict['WeightUnits'] = json_weight
+                        product_dict['WeightWithUnits'] = json_weight
+                    
                     # Ensure Units prefer weight units over 'each'
                     product_dict['Units'] = self._select_units(product_dict)
                     product_dict = self._to_json_safe(product_dict)

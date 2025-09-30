@@ -4373,14 +4373,13 @@ class JSONMatcher:
                         'Quantity Received*': quantity,
                         'Weight Unit* (grams/gm or ounces/oz)': units,
                         'CombinedWeight': weight,
-                        'DescAndWeight': f"{description} - {weight} {units}".strip() if description and weight and units else description or f"{weight} {units}".strip(),
+                        'DescAndWeight': self._process_description_from_product_name(primary_product_name, weight, units),  # Use Excel processor formula with weight
                         'Description_Complexity': '1',
                         'Ratio_or_THC_CBD': '',
                         'displayName': clean_product_name(product_name),  # Use cleaned product name for consistency
-                        'weightWithUnits': f"{str(round(float(weight or '1')))} {units or 'g'}",
-                        'WeightWithUnits': f"{str(round(float(weight or '1')))} {units or 'g'}",
-                        'WeightUnits': f"{str(round(float(weight or '1')))} {units or 'g'}",
-                        'DescAndWeight': f"{description} - {weight} {units}".strip() if description and weight and units else description or f"{weight} {units}".strip(),
+                        'weightWithUnits': f"{str(round(float(weight or '1')))}{units or 'g'}",
+                        'WeightWithUnits': f"{str(round(float(weight or '1')))}{units or 'g'}",
+                        'WeightUnits': f"{str(round(float(weight or '1')))}{units or 'g'}",
                         'vendor': vendor,
                         'productBrand': brand,
                         'lineage': lineage,
@@ -6216,6 +6215,53 @@ class JSONMatcher:
                 'message': f'Product Database not available: {e}'
             }
     
+    def _process_description_from_product_name(self, product_name: str, weight: str = None, units: str = None) -> str:
+        """Process description using the Excel processor formula with weight formatting."""
+        if not product_name:
+            return ''
+        
+        # Clean up the product name first
+        description = str(product_name).strip()
+        
+        # Apply Excel processor formula: Remove " by " patterns
+        if " by " in description:
+            description = description.split(" by ")[0].strip()
+        
+        # Apply Excel processor formula: Remove weight information (patterns like " - 1g", " - .5g")
+        import re
+        description = re.sub(r' - [\d.].*$', '', description)
+        
+        # Add weight with hyphen staying with weight (space after hyphen) if provided
+        if weight and units:
+            weight_units = f"{str(round(float(weight or '1')))}{units or 'g'}"
+            if weight_units and weight_units.lower() not in ['nan', 'none', 'null', '']:
+                return f"{description} -\u00A0{weight_units}"
+        
+        return description
+
+    def _determine_lineage_for_product(self, product_type: str, existing_lineage: str) -> str:
+        """
+        Determine the appropriate lineage for a product based on its type.
+        
+        Args:
+            product_type: The product type (e.g., "edible (solid)", "flower", etc.)
+            existing_lineage: Any existing lineage from the database
+            
+        Returns:
+            The appropriate lineage string
+        """
+        # Import constants to check product type classification
+        from src.core.constants import CLASSIC_TYPES
+        
+        # Check if this is a classic product type
+        if product_type and product_type.strip().lower() in CLASSIC_TYPES:
+            # Classic types (flower, pre-roll, concentrate, etc.) can use existing lineage or default to HYBRID
+            return existing_lineage or "HYBRID"
+        else:
+            # Nonclassic types (edibles, tinctures, topicals, etc.) should ALWAYS be MIXED for blue color
+            # This overrides any incorrect lineage values in the database
+            return "MIXED"
+
     def _create_tag_from_database_info(self, db_info: Dict, vendor: str) -> Dict:
         """
         Create a product tag from Product Database information.
@@ -6240,49 +6286,52 @@ class JSONMatcher:
                 cleaned = re.sub(r'\s+', ' ', cleaned)
                 return cleaned.strip()
             
-            # Extract all available information from database
-            brand = db_info.get("brand", "")
-            product_type = db_info.get("product_type", "")
-            strain = db_info.get("product_strain", "")
-            lineage = db_info.get("lineage", "")
-            price = str(db_info.get("price", ""))
-            weight = str(db_info.get("weight", ""))
-            units = str(db_info.get("units", ""))
-            description = db_info.get("description", "")
-            thc_result = str(db_info.get("thc_test_result", ""))
-            cbd_result = str(db_info.get("cbd_test_result", ""))
-            test_unit = str(db_info.get("test_result_unit", "%"))
-            batch_num = str(db_info.get("batch_number", ""))
-            lot_num = str(db_info.get("lot_number", ""))
-            barcode = str(db_info.get("barcode", ""))
+            # Extract all available information from database using correct field names
+            brand = db_info.get("Product Brand", "") or db_info.get("brand", "")
+            product_type = db_info.get("Product Type*", "") or db_info.get("product_type", "")
+            strain = db_info.get("Product Strain", "") or db_info.get("product_strain", "")
+            lineage = db_info.get("Lineage", "") or db_info.get("lineage", "")
+            price = str(db_info.get("Price", "") or db_info.get("price", ""))
+            weight = str(db_info.get("Weight*", "") or db_info.get("weight", ""))
+            units = str(db_info.get("Units", "") or db_info.get("units", ""))
+            description = db_info.get("Description", "") or db_info.get("description", "")
+            thc_result = str(db_info.get("THC test result", "") or db_info.get("thc_test_result", ""))
+            cbd_result = str(db_info.get("CBD test result", "") or db_info.get("cbd_test_result", ""))
+            test_unit = str(db_info.get("Test result unit (% or mg)", "%") or db_info.get("test_result_unit", "%"))
+            batch_num = str(db_info.get("Batch Number", "") or db_info.get("batch_number", ""))
+            lot_num = str(db_info.get("Lot Number", "") or db_info.get("lot_number", ""))
+            barcode = str(db_info.get("Barcode*", "") or db_info.get("barcode", ""))
             cost = str(db_info.get("cost", ""))
-            medical_only = str(db_info.get("medical_only", "No"))
-            med_price = str(db_info.get("med_price", ""))
-            expiration = str(db_info.get("expiration_date", ""))
-            is_archived = str(db_info.get("is_archived", "no"))
-            thc_per_serving = str(db_info.get("thc_per_serving", ""))
-            allergens = str(db_info.get("allergens", ""))
-            solvent = str(db_info.get("solvent", ""))
-            accepted_date = str(db_info.get("accepted_date", ""))
-            internal_id = str(db_info.get("internal_product_identifier", ""))
-            product_tags = str(db_info.get("product_tags", ""))
-            image_url = str(db_info.get("image_url", ""))
-            ingredients = str(db_info.get("ingredients", ""))
+            medical_only = str(db_info.get("Medical Only (Yes/No)", "No") or db_info.get("medical_only", "No"))
+            med_price = str(db_info.get("Med Price", "") or db_info.get("med_price", ""))
+            expiration = str(db_info.get("Expiration Date(YYYY-MM-DD)", "") or db_info.get("expiration_date", ""))
+            is_archived = str(db_info.get("Is Archived? (yes/no)", "no") or db_info.get("is_archived", "no"))
+            thc_per_serving = str(db_info.get("THC Per Serving", "") or db_info.get("thc_per_serving", ""))
+            allergens = str(db_info.get("Allergens", "") or db_info.get("allergens", ""))
+            solvent = str(db_info.get("Solvent", "") or db_info.get("solvent", ""))
+            accepted_date = str(db_info.get("Accepted Date", "") or db_info.get("accepted_date", ""))
+            internal_id = str(db_info.get("Internal Product Identifier", "") or db_info.get("internal_product_identifier", ""))
+            product_tags = str(db_info.get("Product Tags (comma separated)", "") or db_info.get("product_tags", ""))
+            image_url = str(db_info.get("Image URL", "") or db_info.get("image_url", ""))
+            ingredients = str(db_info.get("Ingredients", "") or db_info.get("ingredients", ""))
             
-            # Create tag using database information - prioritize Description from database
-            # Always use Description from database if available, otherwise create formatted description
-            if description and description.strip():
+            # Create tag using database information - prioritize Product Name* from database
+            # Always use Product Name* from database if available, otherwise use Description
+            primary_product_name = db_info.get("Product Name*", "") or db_info.get("ProductName", "")
+            if not primary_product_name and description and description.strip():
                 # Use Description from database as primary product name
                 primary_product_name = description.strip()
                 logging.info(f"📝 Using database Description as primary name: '{primary_product_name}'")
-            elif strain and lineage and weight and units:
+            elif not primary_product_name and strain and lineage and weight and units:
                 # Strain-based lookup: create formatted description
                 primary_product_name = f"{strain} - {lineage} - {weight}{units}"
                 logging.info(f"📝 Created formatted description: '{primary_product_name}'")
-            else:
-                # Direct product lookup: use product name
+            elif not primary_product_name:
+                # Fallback to product_name field
                 primary_product_name = db_info.get("product_name", "Unknown Product")
-                logging.info(f"📝 Using product name: '{primary_product_name}'")
+                logging.info(f"📝 Using fallback product name: '{primary_product_name}'")
+            else:
+                logging.info(f"📝 Using database Product Name*: '{primary_product_name}'")
             
             # CRITICAL FIX: Log the AI match information and ensure database values are used
             ai_match_score = db_info.get("ai_match_score", 0)
@@ -6312,7 +6361,7 @@ class JSONMatcher:
                 'ProductBrand': brand,
                 'Product Strain': strain,
                 'Strain Name': strain,
-                'Lineage': lineage or "HYBRID",
+                'Lineage': self._determine_lineage_for_product(product_type, lineage),
                 'Weight*': f"{weight or '1'} {units or 'g'}",
                 'Weight': f"{weight or '1'} {units or 'g'}",
                 'Quantity*': "1",
@@ -6369,7 +6418,7 @@ class JSONMatcher:
                 # Additional fields for consistency
                 'vendor': vendor,
                 'productBrand': brand,
-                'lineage': lineage or "HYBRID",
+                'lineage': self._determine_lineage_for_product(product_type, lineage),
                 'productType': product_type or "Unknown",
                 'weight': weight or "1",
                 'units': units or "g",
@@ -7029,7 +7078,7 @@ class JSONMatcher:
                 'Quantity Received*': '1',
                 'Weight Unit* (grams/gm or ounces/oz)': units,
                 'CombinedWeight': weight,
-                'DescAndWeight': f"{description} - {weight} {units}".strip() if description and weight and units else description or f"{weight} {units}".strip(),
+                'DescAndWeight': self._process_description_from_product_name(product_name, weight, units),  # Use Excel processor formula with weight
                 'Description_Complexity': '1',
                 'Ratio_or_THC_CBD': '',
                 'THC test result': '',
@@ -7821,27 +7870,27 @@ class JSONMatcher:
             'disposable vape': 'HYBRID',
             'vape cartridge': 'HYBRID',
             
-            # Edibles - typically HYBRID (often use hybrid extracts)
-            'edible': 'HYBRID',
-            'gummy': 'HYBRID',
-            'chocolate': 'HYBRID',
-            'cookie': 'HYBRID',
-            'brownie': 'HYBRID',
-            'candy': 'HYBRID',
-            'beverage': 'HYBRID',
+            # Edibles - typically MIXED (nonclassic types get blue color)
+            'edible': 'MIXED',
+            'gummy': 'MIXED',
+            'chocolate': 'MIXED',
+            'cookie': 'MIXED',
+            'brownie': 'MIXED',
+            'candy': 'MIXED',
+            'beverage': 'MIXED',
             
-            # Tinctures and oils - typically HYBRID
-            'tincture': 'HYBRID',
-            'drops': 'HYBRID',
-            'liquid': 'HYBRID',
-            'sublingual': 'HYBRID',
+            # Tinctures and oils - typically MIXED (nonclassic types get blue color)
+            'tincture': 'MIXED',
+            'drops': 'MIXED',
+            'liquid': 'MIXED',
+            'sublingual': 'MIXED',
             
-            # Topicals - typically HYBRID
-            'topical': 'HYBRID',
-            'cream': 'HYBRID',
-            'lotion': 'HYBRID',
-            'salve': 'HYBRID',
-            'balm': 'HYBRID',
+            # Topicals - typically MIXED (nonclassic types get blue color)
+            'topical': 'MIXED',
+            'cream': 'MIXED',
+            'lotion': 'MIXED',
+            'salve': 'MIXED',
+            'balm': 'MIXED',
             
             # RSO and full extract - typically HYBRID
             'rso': 'HYBRID',

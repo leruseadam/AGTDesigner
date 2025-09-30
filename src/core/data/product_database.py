@@ -953,8 +953,8 @@ class ProductDatabase:
                             "total_occurrences", "strain_id",
                             "ProductName", "DOH Compliant (Yes/No)", "Joint Ratio", "Quantity Received*", "qty",
                             "THC test result", "CBD test result", "Vendor/Supplier*", "Price",
-                            "AI", "AJ", "AK"
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            "AI", "AJ", "AK", "Source", "Date Added"
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         product_name, normalized_name, self._calculate_product_strain(
                             product_data.get('Product Type*', ''),
@@ -1035,7 +1035,10 @@ class ProductDatabase:
                         # AI, AJ, AK values
                         product_data.get('AI', ''),
                         product_data.get('AJ', ''),
-                        product_data.get('AK', '')
+                        product_data.get('AK', ''),
+                        # Source and Date Added fields
+                        product_data.get('Source', ''),
+                        product_data.get('Date Added', current_date)
                     ))
                     
                     product_id = cursor.lastrowid
@@ -2684,6 +2687,8 @@ class ProductDatabase:
                     "AI" = ?,
                     "AJ" = ?,
                     "AK" = ?,
+                    "Source" = ?,
+                    "Date Added" = ?,
                     "last_seen_date" = ?,
                     "updated_at" = ?
                 WHERE id = ?
@@ -2717,6 +2722,8 @@ class ProductDatabase:
                 self._calculate_ai_value(product_data),
                 product_data.get('THC Content', ''),
                 self._calculate_ak_value(product_data),
+                product_data.get('Source', ''),
+                product_data.get('Date Added', current_date),
                 current_date,
                 current_date,
                 product_id
@@ -4000,12 +4007,12 @@ class ProductDatabase:
             # Use placeholders for the IN clause
             placeholders = ','.join(['?' for _ in normalized_names])
             
-            # Fixed query - use products table directly without alias to avoid column issues
+            # Fixed query - use products table directly with correct column names
             cursor.execute(f'''
                 SELECT id, "Product Name*", normalized_name, "Product Type*", "Vendor/Supplier*", "Product Brand", "Lineage",
-                       '' as strain_name, '' as canonical_lineage, 0 as total_occurrences, '' as first_seen_date, '' as last_seen_date,
-                       "Description", "Weight*", "Weight Unit* (grams/gm or ounces/oz)", "Price* (Tier Name for Bulk)", 
-                       '' as thc_test_result, '' as cbd_test_result, "Test result unit (% or mg)",
+                       "Product Strain" as strain_name, "Lineage" as canonical_lineage, total_occurrences, first_seen_date, last_seen_date,
+                       "Description", "Weight*", "Units", "Price", 
+                       "THC test result", "CBD test result", "Test result unit (% or mg)",
                        "Quantity*", "DOH", "Concentrate Type", "Ratio", "JointRatio", "State", "Is Sample? (yes/no)",
                        "Is MJ product?(yes/no)", "Discountable? (yes/no)", "Room*", "Batch Number", "Lot Number", "Barcode*",
                        "Medical Only (Yes/No)", "Med Price", "Expiration Date(YYYY-MM-DD)", "Is Archived? (yes/no)", "THC Per Serving", "Allergens",
@@ -4043,52 +4050,52 @@ class ProductDatabase:
                         'Vendor/Supplier*': result[4],  # Excel column name compatibility
                         'Product Brand': result[5],  # brand
                         'Lineage': result[6] or 'MIXED',  # lineage
-                        'strain_name': result[7],  # strain_name (empty string)
-                        'canonical_lineage': result[8],  # canonical_lineage (empty string)
+                        'Product Strain': result[7],  # strain_name from Product Strain column
+                        'strain_name': result[7],  # strain_name from Product Strain column
+                        'canonical_lineage': result[8],  # canonical_lineage from Lineage column
                         'total_occurrences': result[9],
                         'first_seen_date': result[10],
                         'last_seen_date': result[11],
                         'Description': result[12] or result[1],  # description or product_name
                         'Weight*': result[13],  # weight
                         'Units': result[14],  # units
-                        'Price': result[15],  # price (Price* (Tier Name for Bulk))
+                        'Price': result[15],  # price
                         'THC test result': result[16],  # thc_test_result
                         'CBD test result': result[17],  # cbd_test_result
-                        'Test result unit': result[18],  # test_result_unit
+                        'Test result unit (% or mg)': result[18],  # test_result_unit with correct field name
                         'Quantity*': result[19],  # quantity
                         'DOH': result[20],  # doh_compliant
-                        'concentrate_type': result[21],  # concentrate_type
+                        'Concentrate Type': result[21],  # concentrate_type with correct field name
                         'Ratio': result[22],  # ratio
                         'JointRatio': result[23],  # joint_ratio
                         'State': result[24],  # state
-                        'Is Sample?': result[25],  # is_sample
-                        'Is MJ product?': result[26],  # is_mj_product
-                        'Discountable?': result[27],  # discountable
+                        'Is Sample? (yes/no)': result[25],  # is_sample with correct field name
+                        'Is MJ product?(yes/no)': result[26],  # is_mj_product with correct field name
+                        'Discountable? (yes/no)': result[27],  # discountable with correct field name
                         'Room*': result[28],  # room
-                        'batch_number': result[29],  # batch_number
-                        'lot_number': result[30],  # lot_number
-                        'barcode': result[31],  # barcode
-                        'Medical Only': result[32],  # medical_only
-                        'med_price': result[33],  # med_price
-                        'expiration_date': result[34],  # expiration_date
-                        'is_archived': result[35],  # is_archived
-                        'thc_per_serving': result[36],  # thc_per_serving
-                        'allergens': result[37],  # allergens
-                        'solvent': result[38],  # solvent
-                        'accepted_date': result[39],  # accepted_date
-                        'internal_product_identifier': result[40],  # internal_product_identifier
-                        'product_tags': result[41],  # product_tags
-                        'image_url': result[42],  # image_url
-                        'ingredients': result[43],  # ingredients
-                        'combined_weight': result[44],  # combined_weight
-                        'ratio_or_thc_cbd': result[45],  # ratio_or_thc_cbd
-                        'description_complexity': result[46],  # description_complexity
+                        'Batch Number': result[29],  # batch_number with correct field name
+                        'Lot Number': result[30],  # lot_number with correct field name
+                        'Barcode*': result[31],  # barcode with correct field name
+                        'Medical Only (Yes/No)': result[32],  # medical_only with correct field name
+                        'Med Price': result[33],  # med_price with correct field name
+                        'Expiration Date(YYYY-MM-DD)': result[34],  # expiration_date with correct field name
+                        'Is Archived? (yes/no)': result[35],  # is_archived with correct field name
+                        'THC Per Serving': result[36],  # thc_per_serving with correct field name
+                        'Allergens': result[37],  # allergens with correct field name
+                        'Solvent': result[38],  # solvent with correct field name
+                        'Accepted Date': result[39],  # accepted_date with correct field name
+                        'Internal Product Identifier': result[40],  # internal_product_identifier with correct field name
+                        'Product Tags (comma separated)': result[41],  # product_tags with correct field name
+                        'Image URL': result[42],  # image_url with correct field name
+                        'Ingredients': result[43],  # ingredients with correct field name
+                        'CombinedWeight': result[44],  # combined_weight with correct field name
+                        'Ratio_or_THC_CBD': result[45],  # ratio_or_thc_cbd with correct field name
+                        'Description_Complexity': result[46],  # description_complexity with correct field name
                         'Total THC': result[47],  # total_thc
                         'THCA': result[48],  # thca
                         'CBDA': result[49],  # cbda
                         'CBN': result[50],  # cbn
                         # Add Excel column name compatibility fields
-                        'ProductName': result[1],
                         'ProductBrand': result[5],
                         'ProductStrain': result[7],
                         'WeightWithUnits': f"{result[13]}{result[14]}" if result[13] and result[14] else result[13] or result[14] or '',

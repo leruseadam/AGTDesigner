@@ -728,7 +728,9 @@ def create_app():
     allowed_origins = [
         'https://www.agtpricetags.com',  # Your actual domain
         'https://agtpricetags.com',
+        'http://localhost:5000',  # For local development
         'http://localhost:5001',  # For local development
+        'http://127.0.0.1:5000',
         'http://127.0.0.1:5001',
         'https://adamcordova.pythonanywhere.com'  # PythonAnywhere domain
     ]
@@ -1535,19 +1537,11 @@ def upload_file():
         logging.info(f"File upload request at {datetime.now().strftime('%H:%M:%S')}")
         start_time = time.time()
         
-        # Log request details (dev only)
-        if app.config.get('DEVELOPMENT_MODE', False):
-            logging.debug(f"Request method: {request.method}")
-            logging.debug(f"Request headers: {dict(request.headers)}")
-            logging.debug(f"Request files: {list(request.files.keys()) if request.files else 'None'}")
-        
         if 'file' not in request.files:
             logging.error("No file uploaded - 'file' not in request.files")
             return jsonify({'error': 'No file uploaded'}), 400
         
         file = request.files['file']
-        if app.config.get('DEVELOPMENT_MODE', False):
-            logging.debug(f"File received: {file.filename}, Content-Type: {file.content_type}")
         
         if file.filename == '':
             logging.error("No file selected - filename is empty")
@@ -1567,8 +1561,6 @@ def upload_file():
         file.seek(0, 2)  # Seek to end
         file_size = file.tell()
         file.seek(0)  # Reset to beginning
-        if app.config.get('DEVELOPMENT_MODE', False):
-            logging.debug(f"File size: {file_size} bytes ({file_size / (1024*1024):.2f} MB)")
         
         if file_size > app.config['MAX_CONTENT_LENGTH']:
             logging.error(f"File too large: {file_size} bytes (max: {app.config['MAX_CONTENT_LENGTH']})")
@@ -1577,49 +1569,29 @@ def upload_file():
         # Ensure upload folder exists
         upload_folder = app.config['UPLOAD_FOLDER']
         os.makedirs(upload_folder, exist_ok=True)
-        if app.config.get('DEVELOPMENT_MODE', False):
-            logging.debug(f"Upload folder: {upload_folder}")
         
         # Use sanitized filename (security fix)
         temp_path = os.path.join(upload_folder, sanitized_filename)
-        if app.config.get('DEVELOPMENT_MODE', False):
-            logging.debug(f"Saving file to: {temp_path}")
         
-        save_start = time.time()
         try:
             file.save(temp_path)
-            save_time = time.time() - save_start
-            if app.config.get('DEVELOPMENT_MODE', False):
-                logging.debug(f"File saved successfully to {temp_path} in {save_time:.2f}s")
         except Exception as save_error:
             logging.error(f"Error saving file: {save_error}")
             return jsonify({'error': f'Failed to save file: {str(save_error)}'}), 500
         
         # Clear any existing status for this filename and mark as processing
-        if app.config.get('DEVELOPMENT_MODE', False):
-            logging.debug(f"[UPLOAD] Setting processing status for: {file.filename}")
         update_processing_status(file.filename, 'processing')
-        if app.config.get('DEVELOPMENT_MODE', False):
-            logging.debug(f"[UPLOAD] Processing status set. Current statuses: {dict(processing_status)}")
         
         # ULTRA-FAST UPLOAD OPTIMIZATION - Minimal cache clearing
-        if app.config.get('DEVELOPMENT_MODE', False):
-            logging.debug(f"[UPLOAD] Performing ultra-fast upload optimization for: {sanitized_filename}")
-        
-        # Only clear the most critical caches (preserve everything else)
         try:
             # CRITICAL FIX: Preserve JSON matched tags during file upload
             # Only clear file-related caches, not JSON matched data
             critical_cache_keys = [
                 'full_excel_cache_key', 'file_path'
             ]
-            cleared_count = 0
             for key in critical_cache_keys:
                 if cache.has(key):
                     cache.delete(key)
-                    cleared_count += 1
-            if app.config.get('DEVELOPMENT_MODE', False):
-                logging.debug(f"[UPLOAD] Cleared {cleared_count} critical cache entries")
         except Exception as cache_error:
             logging.warning(f"[UPLOAD] Error clearing critical caches: {cache_error}")
         
@@ -1627,37 +1599,23 @@ def upload_file():
         # Only clear the absolute minimum required for new file
         if 'file_path' in session:
             del session['file_path']
-            if app.config.get('DEVELOPMENT_MODE', False):
-                logging.debug(f"[UPLOAD] Cleared session key: file_path")
         
         # Clear global Excel processor to force complete replacement
-        if app.config.get('DEVELOPMENT_MODE', False):
-            logging.debug(f"[UPLOAD] Resetting Excel processor before loading new file: {sanitized_filename}")
         reset_excel_processor()
         
         # Clear any existing g context for this request
         if hasattr(g, 'excel_processor'):
             delattr(g, 'excel_processor')
-            if app.config.get('DEVELOPMENT_MODE', False):
-                logging.debug("[UPLOAD] Cleared g.excel_processor context")
         
         # Start ultra-optimized background processing (includes database storage)
         try:
-            if app.config.get('DEVELOPMENT_MODE', False):
-                logging.debug(f"[UPLOAD] Starting ultra-optimized background processing for {file.filename}")
             thread = threading.Thread(target=process_excel_background, args=(file.filename, temp_path))
             thread.daemon = True  # Make thread daemon so it doesn't block app shutdown
             thread.start()
-            if app.config.get('DEVELOPMENT_MODE', False):
-                logging.debug(f"[UPLOAD] Ultra-optimized background processing started successfully for {file.filename}")
         except Exception as thread_error:
             logging.error(f"[UPLOAD] Failed to start ultra-optimized background processing: {thread_error}")
             update_processing_status(file.filename, f'error: Failed to start processing')
             return jsonify({'error': 'Failed to start file processing'}), 500
-        
-        upload_time = time.time() - start_time
-        if app.config.get('DEVELOPMENT_MODE', False):
-            logging.debug(f"=== UPLOAD REQUEST COMPLETE === Time: {upload_time:.2f}s")
         
         # Store uploaded file path in session
         session['file_path'] = temp_path
@@ -1666,19 +1624,13 @@ def upload_file():
         current_store = session.get('selected_store', '')
         if current_store:
             session['file_store'] = current_store
-            logging.info(f"[UPLOAD] File associated with store: {current_store}")
-        else:
-            logging.warning("[UPLOAD] No store selected - file will be processed without store context")
         
         # Clear selected tags in session to ensure fresh start
-        logging.info(f"[UPLOAD] Clearing selected tags from session. Previous count: {len(session.get('selected_tags', []))}")
         session['selected_tags'] = []
-        logging.info(f"[UPLOAD] Selected tags cleared from session")
         
         # ULTRA-FAST RESPONSE - Return immediately for instant user feedback
         upload_response_time = time.time() - start_time
-        if app.config.get('DEVELOPMENT_MODE', False):
-            logging.debug(f"[UPLOAD] Ultra-fast upload completed in {upload_response_time:.3f}s")
+        logging.info(f"[UPLOAD] Ultra-fast upload completed in {upload_response_time:.3f}s")
         
         return jsonify({
             'message': 'File uploaded, processing in background', 
@@ -2110,6 +2062,11 @@ def process_excel_background(filename, temp_path):
         new_processor = ExcelProcessor()
         
         try:
+            # Disable product database integration for faster loading
+            if hasattr(new_processor, 'enable_product_db_integration'):
+                new_processor.enable_product_db_integration(False)
+                logging.info("[BG] Product database integration disabled for faster loading")
+            
             # Use fast load for immediate response
             success = new_processor.load_file(temp_path)
             if not success or new_processor.df is None or new_processor.df.empty:
@@ -2133,9 +2090,11 @@ def process_excel_background(filename, temp_path):
             _excel_processor = new_processor
             logging.info(f"[BG] ✅ Global processor updated with {len(new_processor.df)} rows")
         
-        # Store in database (non-blocking)
+        # Store in database (non-blocking) - only if enabled
         try:
-            if hasattr(new_processor, '_store_upload_in_database'):
+            if hasattr(new_processor, 'enable_product_db_integration') and hasattr(new_processor, '_store_upload_in_database'):
+                # Re-enable database integration for storage
+                new_processor.enable_product_db_integration(True)
                 storage_result = new_processor._store_upload_in_database(new_processor.df, temp_path)
                 logging.info(f"[BG] ✅ Database storage completed: {storage_result}")
         except Exception as storage_error:
@@ -3910,6 +3869,87 @@ def _validate_tags_against_excel(excel_processor, selected_tags):
     
     return valid_selected_tags, invalid_selected_tags
 
+def _create_desc_and_weight(product_name, weight_units):
+    """Create DescAndWeight field with 'Product Name - Weight' format (matching Excel processor)."""
+    if not product_name:
+        return ''
+
+    # Clean up the product name first (remove weight info that might already be there)
+    description = str(product_name).strip()
+    
+    # Apply Excel processor formula: Remove " by " patterns
+    if " by " in description:
+        description = description.split(" by ")[0].strip()
+    
+    # Apply Excel processor formula: Remove weight information (patterns like " - 1g", " - .5g")
+    import re
+    description = re.sub(r' - [\d.].*$', '', description)
+    
+    # Get weight units, clean them up
+    weight = str(weight_units).strip() if weight_units else ''
+    if weight and weight.lower() not in ['nan', 'none', 'null', '']:
+        # Combine product name and weight with hyphen staying with weight (space after hyphen)
+        return f"{description} -\u00A0{weight}"
+    else:
+        # Just return the product name if no weight
+        return description
+
+def _calculate_joint_ratio_for_record(db_record):
+    """Calculate joint ratio for pre-roll products from database record."""
+    product_name = db_record.get('Product Name*', '')
+    product_type = db_record.get('Product Type*', '')
+    weight = db_record.get('Weight*', '')
+    
+    # Only calculate for pre-roll products
+    if not product_type or 'pre-roll' not in str(product_type).lower():
+        return db_record.get('JointRatio', '')
+    
+    if not product_name:
+        return db_record.get('JointRatio', '')
+    
+    import re
+    product_name_str = str(product_name)
+    
+    # Look for patterns like "0.5g x 2 Pack", "1g x 28 Pack", etc.
+    patterns = [
+        r'(\d+(?:\.\d+)?)g\s*x\s*(\d+)\s*pack',  # "0.5g x 2 Pack"
+        r'(\d+(?:\.\d+)?)g\s*x\s*(\d+)',         # "0.5g x 2"
+        r'(\d+(?:\.\d+)?)g\s*×\s*(\d+)',         # "0.5g × 2" (different x character)
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, product_name_str, re.IGNORECASE)
+        if match:
+            amount = match.group(1)
+            count = match.group(2)
+            try:
+                count_int = int(count)
+                if count_int == 1:
+                    return f"{amount}g"
+                else:
+                    return f"{amount}g x {count} Pack"
+            except ValueError:
+                continue
+    
+    # If no pattern found, try to generate from weight
+    if weight and str(weight).strip() != '' and str(weight).lower() != 'nan':
+        try:
+            weight_float = float(weight)
+            if weight_float == 1.0:
+                return "1g"
+            else:
+                # Format weight similar to price formatting - no decimals unless original has decimals
+                if weight_float.is_integer():
+                    formatted_weight = f"{int(weight_float)}g"
+                else:
+                    # Round to 2 decimal places and remove trailing zeros
+                    formatted_weight = f"{weight_float:.2f}".rstrip("0").rstrip(".") + "g"
+                return formatted_weight
+        except (ValueError, TypeError):
+            pass
+    
+    return db_record.get('JointRatio', '')
+
 def _replace_json_tags_with_database_data(selected_tags, product_db):
     """
     Replace JSON matched tags with their corresponding database data.
@@ -4354,48 +4394,48 @@ def generate_labels():
                         # Convert database records to the format expected by TemplateProcessor
                         records = []
                         for db_record in valid_db_records:
-                            print(f"DEBUG: Database record Description: '{db_record.get('Description', '')}'")
+                            logging.info(f"Processing database record: {db_record.get('Product Name*', '')}")
                             # Map database fields to template fields (using correct field names from database)
                             record = {
                                 'Product Name*': db_record.get('Product Name*', ''),
                                 'ProductName': db_record.get('Product Name*', ''),  # Add ProductName for Excel processor compatibility
                                 'ProductType': db_record.get('Product Type*', ''),
-                                'Lineage': db_record.get('Lineage', ''),
+                                'Lineage': db_record.get('Lineage', 'MIXED'),
                                 'ProductBrand': db_record.get('Product Brand', ''),
                                 'Product Brand': db_record.get('Product Brand', ''),  # Add Product Brand for template processor compatibility
                                 'Vendor': db_record.get('Vendor/Supplier*', ''),
                                 'Product Strain': db_record.get('Product Strain', ''),  # Correct field name
                                 'ProductStrain': db_record.get('Product Strain', ''),  # Add ProductStrain for template processor compatibility
-                                'Price': db_record.get('Price', ''),
+                                'Price': db_record.get('Price', '25'),  # Default price if missing
                                 'DOH': db_record.get('DOH', ''),
                                 'Ratio': db_record.get('Ratio', ''),
-                                'Weight*': db_record.get('Weight*', ''),
-                                'Units': db_record.get('Units', ''),  # Correct field name
-                                'WeightUnits': db_record.get('Units', ''),  # Add WeightUnits for template processor compatibility
+                                'Weight*': db_record.get('Weight*', '1'),  # Default weight if missing
+                                'Units': db_record.get('Units', 'g'),  # Default units if missing
+                                'WeightUnits': f"{db_record.get('Weight*', '1')}{db_record.get('Units', 'g')}",  # Construct WeightUnits from Weight* and Units
                                 # Add database weight and units as fallback data for Excel processor
-                                'db_weight': db_record.get('Weight*', ''),
-                                'db_units': db_record.get('Units', ''),
-                                'Description': db_record.get('Description', ''),
-                                'DescAndWeight': _create_desc_and_weight(db_record.get('Product Name*', ''), db_record.get('Units', '')),  # Create "Product Name - Weight" format
+                                'db_weight': db_record.get('Weight*', '1'),
+                                'db_units': db_record.get('Units', 'g'),
+                                'Description': _create_desc_and_weight(db_record.get('Product Name*', ''), f"{db_record.get('Weight*', '1')}{db_record.get('Units', 'g')}"),
+                                'DescAndWeight': _create_desc_and_weight(db_record.get('Product Name*', ''), f"{db_record.get('Weight*', '1')}{db_record.get('Units', 'g')}"),  # Use Excel processor formula with weight
                                 'THC test result': db_record.get('THC test result', ''),
                                 'CBD test result': db_record.get('CBD test result', ''),
-                                'Test result unit (% or mg)': db_record.get('Test result unit (% or mg)', ''),  # Correct field name
-                                'Quantity*': db_record.get('Quantity*', ''),
+                                'Test result unit (% or mg)': db_record.get('Test result unit (% or mg)', '%'),  # Default to % if missing
+                                'Quantity*': db_record.get('Quantity*', '1'),  # Default quantity if missing
                                 'Concentrate Type': db_record.get('Concentrate Type', ''),  # Correct field name
-                                'JointRatio': db_record.get('JointRatio', ''),
+                                'JointRatio': _calculate_joint_ratio_for_record(db_record),
                                 'Ratio_or_THC_CBD': db_record.get('Ratio_or_THC_CBD', ''),
-                                'State': db_record.get('State', ''),
-                                'Is Sample? (yes/no)': db_record.get('Is Sample? (yes/no)', ''),  # Correct field name
-                                'Is MJ product?(yes/no)': db_record.get('Is MJ product?(yes/no)', ''),  # Correct field name
-                                'Discountable? (yes/no)': db_record.get('Discountable? (yes/no)', ''),  # Correct field name
-                                'Room*': db_record.get('Room*', ''),
+                                'State': db_record.get('State', 'active'),  # Default state if missing
+                                'Is Sample? (yes/no)': db_record.get('Is Sample? (yes/no)', 'no'),  # Default sample status
+                                'Is MJ product?(yes/no)': db_record.get('Is MJ product?(yes/no)', 'yes'),  # Default MJ product status
+                                'Discountable? (yes/no)': db_record.get('Discountable? (yes/no)', 'yes'),  # Default discountable status
+                                'Room*': db_record.get('Room*', 'Default'),  # Default room if missing
                                 'Batch Number': db_record.get('Batch Number', ''),  # Correct field name
                                 'Lot Number': db_record.get('Lot Number', ''),  # Correct field name
                                 'Barcode*': db_record.get('Barcode*', ''),  # Correct field name
                                 'Medical Only (Yes/No)': db_record.get('Medical Only (Yes/No)', ''),  # Correct field name
                                 'Med Price': db_record.get('Med Price', ''),  # Correct field name
                                 'Expiration Date(YYYY-MM-DD)': db_record.get('Expiration Date(YYYY-MM-DD)', ''),  # Correct field name
-                                'Is Archived? (yes/no)': db_record.get('Is Archived? (yes/no)', ''),  # Correct field name
+                                'Is Archived? (yes/no)': db_record.get('Is Archived? (yes/no)', 'no'),  # Default archived status
                                 'THC Per Serving': db_record.get('THC Per Serving', ''),  # Correct field name
                                 'Allergens': db_record.get('Allergens', ''),  # Correct field name
                                 'Solvent': db_record.get('Solvent', ''),  # Correct field name
@@ -4405,7 +4445,6 @@ def generate_labels():
                                 'Image URL': db_record.get('Image URL', ''),  # Correct field name
                                 'Ingredients': db_record.get('Ingredients', ''),  # Correct field name
                                 'CombinedWeight': db_record.get('CombinedWeight', ''),  # Correct field name
-                                'Ratio_or_THC_CBD': db_record.get('Ratio_or_THC_CBD', ''),  # Correct field name
                                 'Description_Complexity': db_record.get('Description_Complexity', ''),  # Correct field name
                                 'Total THC': db_record.get('Total THC', ''),
                                 'THCA': db_record.get('THCA', ''),
@@ -4420,7 +4459,7 @@ def generate_labels():
                                 'ProductVendor': db_record.get('Vendor/Supplier*', ''),
                                 'Quantity Received*': db_record.get('Quantity Received*', ''),
                                 'Barcode': db_record.get('Barcode*', ''),
-                                'Quantity': db_record.get('Quantity*', '')
+                                'Quantity': db_record.get('Quantity*', '1')
                             }
                             print(f"DEBUG: Final record DescAndWeight: '{record.get('DescAndWeight', '')}' (from: '{db_record.get('Product Name*', '')}' + '{db_record.get('Units', '')}')")
                             print(f"DEBUG: THC/CBD values - THC: '{db_record.get('THC test result', '')}', CBD: '{db_record.get('CBD test result', '')}', Unit: '{db_record.get('Test result unit (% or mg)', '')}'")
@@ -4801,16 +4840,6 @@ def get_available_tags():
         logging.info("=== AVAILABLE TAGS DEBUG START ===")
         logging.info(f"Available tags request at {datetime.now().strftime('%H:%M:%S')}")
         
-        # Get Excel processor using the proper function
-        excel_processor = get_excel_processor()
-        if excel_processor is None:
-            logging.warning("No Excel processor available, returning empty tags")
-            return jsonify([])
-        
-        if excel_processor.df is None:
-            logging.warning("Excel processor has no data, returning empty tags")
-            return jsonify([])
-        
         # Store validation to prevent cross-store data access
         current_store = session.get('selected_store', '')
         file_store = session.get('file_store', '')
@@ -4820,96 +4849,107 @@ def get_available_tags():
             logging.warning("Returning empty tags to prevent cross-store data access")
             return jsonify([])
         
-        # Use the Excel processor we already obtained
-        logging.info(f"Using Excel processor: {excel_processor is not None}")
-        if excel_processor is not None:
-            logging.info(f"Processor df is None: {excel_processor.df is None}")
-            if excel_processor.df is not None:
-                logging.info(f"Processor df shape: {excel_processor.df.shape}")
-                logging.info(f"Processor df empty: {excel_processor.df.empty}")
-            else:
-                logging.warning("Processor has no DataFrame!")
+        # Get products from both Excel processor and database
+        all_tags = []
         
-        # ALWAYS try direct file loading like debug columns (since debug columns works)
-        logging.info("ALWAYS DIRECT: Using direct file loading like debug columns")
+        # 1. Get products from Excel processor (current uploaded file)
+        excel_processor = get_excel_processor()
+        excel_tags = []
+        if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
+            try:
+                excel_tags = excel_processor.get_available_tags()
+                logging.info(f"Excel processor returned {len(excel_tags)} tags")
+            except Exception as e:
+                logging.warning(f"Error getting Excel processor tags: {e}")
+                excel_tags = []
+        
+        # 2. Get products from database
+        database_tags = []
         try:
-            import glob
-            import os
-            import pandas as pd
-            
-            uploads_dir = os.path.join(os.getcwd(), 'uploads')
-            if os.path.exists(uploads_dir):
-                xlsx_files = glob.glob(os.path.join(uploads_dir, '*.xlsx'))
-                if xlsx_files:
-                    xlsx_files.sort(key=os.path.getmtime, reverse=True)
-                    latest_file = xlsx_files[0]
-                    logging.info(f"ALWAYS DIRECT: Loading {latest_file} directly")
-                    
-                    # Load the file directly
-                    df = pd.read_excel(latest_file)
-                    if not df.empty:
-                        # Convert to the format expected by the frontend
-                        tags = df.to_dict('records')
+            product_db = get_product_database(current_store)
+            logging.info(f"Got product database: {product_db}")
+            if product_db:
+                logging.info(f"Database path: {product_db.db_path}")
+                # Get all products from database
+                import sqlite3
+                import os
+                if os.path.exists(product_db.db_path):
+                    logging.info(f"Database file exists, size: {os.path.getsize(product_db.db_path)} bytes")
+                    with sqlite3.connect(product_db.db_path) as conn:
+                        cursor = conn.cursor()
                         
-                        # Clean the data
-                        import math
-                        def clean_dict(d):
-                            if not isinstance(d, dict):
-                                return {}
-                            return {k: ('' if (v is None or (isinstance(v, float) and math.isnan(v))) else v) for k, v in d.items()}
+                        # First check how many products are in the database
+                        cursor.execute('SELECT COUNT(*) FROM products')
+                        total_count = cursor.fetchone()[0]
+                        logging.info(f"Total products in database: {total_count}")
                         
-                        cleaned_tags = [clean_dict(tag) for tag in tags if isinstance(tag, dict)]
-                        logging.info(f"ALWAYS DIRECT: Successfully loaded {len(cleaned_tags)} tags directly")
+                        cursor.execute('''
+                            SELECT "Product Name*", "Product Type*", "Product Brand", "Vendor/Supplier*", 
+                                   "Lineage", "Price* (Tier Name for Bulk)", "Weight*", "Description", 
+                                   "Quantity*", "DOH", "Concentrate Type", "Ratio", "JointRatio", "State",
+                                   "Is Sample? (yes/no)", "Is MJ product?(yes/no)", "Discountable? (yes/no)",
+                                   "Room*", "Batch Number", "Lot Number", "Barcode*", "Medical Only (Yes/No)",
+                                   "Med Price", "Expiration Date(YYYY-MM-DD)", "Is Archived? (yes/no)",
+                                   "THC Per Serving", "Allergens", "Solvent", "Accepted Date",
+                                   "Internal Product Identifier", "Product Tags (comma separated)", "Image URL",
+                                   "Ingredients", "CombinedWeight", "Ratio_or_THC_CBD", "Total THC", "THCA", "CBDA", "CBN",
+                                   "DOH Compliant (Yes/No)"
+                            FROM products 
+                            ORDER BY id DESC
+                            LIMIT 20000
+                        ''')
                         
-                        # Return the data immediately
-                        logging.info(f"ALWAYS DIRECT: Returning {len(cleaned_tags)} tags directly")
-                        return jsonify(cleaned_tags)
-                    else:
-                        logging.warning(f"ALWAYS DIRECT: File is empty: {latest_file}")
+                        rows = cursor.fetchall()
+                        columns = [description[0] for description in cursor.description]
+                        logging.info(f"Database query returned {len(rows)} rows")
+                        
+                        for row in rows:
+                            product_dict = dict(zip(columns, row))
+                            # Convert to the format expected by the frontend
+                            database_tags.append(product_dict)
+                        
+                        logging.info(f"Database returned {len(database_tags)} products")
+                        
+                        # Debug: Check if we have products with specific indicators
+                        ray_count = sum(1 for tag in database_tags if 'Ray' in tag.get('Product Name*', ''))
+                        hustler_count = sum(1 for tag in database_tags if 'Hustler' in tag.get('Product Name*', ''))
+                        logging.info(f"Database products - Ray: {ray_count}, Hustler: {hustler_count}")
                 else:
-                    logging.warning(f"ALWAYS DIRECT: No Excel files found in {uploads_dir}")
+                    logging.error(f"Database file does not exist: {product_db.db_path}")
+        except Exception as e:
+            logging.error(f"Error getting database products: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
+            database_tags = []
+        
+        # 3. Combine and deduplicate products
+        # Use Excel processor products as primary (they have processed fields)
+        # Add database products that aren't already in Excel processor
+        excel_product_names = {tag.get('Product Name*', '') for tag in excel_tags}
+        logging.info(f"Excel product names set has {len(excel_product_names)} unique names")
+        
+        # Add Excel processor products first
+        all_tags.extend(excel_tags)
+        logging.info(f"Added {len(excel_tags)} Excel products to all_tags")
+        
+        # Add database products that aren't duplicates
+        added_db_count = 0
+        skipped_db_count = 0
+        for db_tag in database_tags:
+            product_name = db_tag.get('Product Name*', '')
+            if product_name and product_name not in excel_product_names:
+                all_tags.append(db_tag)
+                added_db_count += 1
             else:
-                logging.warning(f"ALWAYS DIRECT: Uploads directory not found: {uploads_dir}")
-        except Exception as e:
-            logging.error(f"ALWAYS DIRECT: Direct loading failed: {e}")
+                skipped_db_count += 1
         
-        # Check if we have data in the Excel processor
-        if excel_processor.df is None or excel_processor.df.empty:
-            logging.warning(f"Excel processor has no data - df is None: {excel_processor.df is None}, empty: {excel_processor.df.empty if excel_processor.df is not None else 'N/A'}")
-            logging.warning(f"Last loaded file: {getattr(excel_processor, '_last_loaded_file', 'None')}")
-            return jsonify([])
+        logging.info(f"Database products: {added_db_count} added, {skipped_db_count} skipped as duplicates")
+        logging.info(f"Combined total: {len(all_tags)} products ({len(excel_tags)} from Excel, {len(database_tags)} from database)")
         
-        # Convert DataFrame to list of dictionaries for frontend
-        try:
-            logging.info(f"CRITICAL FIX: Excel processor has {len(excel_processor.df)} rows, {len(excel_processor.df.columns)} columns")
-            logging.info(f"CRITICAL FIX: Last loaded file: {getattr(excel_processor, '_last_loaded_file', 'None')}")
-            
-            # Get all rows as dictionaries
-            tags = excel_processor.df.to_dict('records')
-            logging.info(f"CRITICAL FIX: Converted to {len(tags)} records")
-            
-            # Clean the data (remove NaN values, etc.)
-            import math
-            def clean_dict(d):
-                if not isinstance(d, dict):
-                    return {}
-                return {k: ('' if (v is None or (isinstance(v, float) and math.isnan(v))) else v) for k, v in d.items()}
-            
-            cleaned_tags = [clean_dict(tag) for tag in tags if isinstance(tag, dict)]
-            logging.info(f"CRITICAL FIX: Cleaned to {len(cleaned_tags)} tags")
-            
-            # Log sample data for debugging
-            if len(cleaned_tags) > 0:
-                sample = cleaned_tags[0]
-                logging.info(f"CRITICAL FIX: Sample tag: {sample.get('Product Name*', 'N/A')} - {sample.get('Lineage', 'N/A')}")
-            
-            logging.info(f"CRITICAL FIX: Returning {len(cleaned_tags)} fresh tags from Excel processor")
-            logging.info("=== AVAILABLE TAGS DEBUG END ===")
-            return jsonify(cleaned_tags)
-            
-        except Exception as e:
-            logging.error(f"Error converting Excel data to tags: {e}")
-            return jsonify([])
+        # Return the combined tags
+        logging.info("=== AVAILABLE TAGS DEBUG END ===")
+        return jsonify(all_tags)
+        
     except Exception as e:
         logging.error(f"Error getting available tags: {str(e)}")
         logging.error(traceback.format_exc())
