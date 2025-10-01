@@ -5639,8 +5639,7 @@ def database_stats():
                     return jsonify({'error': 'Products table not found in any database'}), 500
                 test_conn.close()
                 logging.info(f"Successfully fell back to main database: {product_db.db_path}")
-            else:
-                return jsonify({'error': 'Products table not found in database'}), 500
+            # Products table exists, proceed
             test_conn.close()
         except Exception as test_error:
             logging.error(f"Database connection test failed: {test_error}")
