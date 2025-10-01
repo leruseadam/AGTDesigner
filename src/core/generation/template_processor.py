@@ -1429,10 +1429,25 @@ class TemplateProcessor:
             label_context['ProductVendor'] = ""
             self.logger.debug(f"ProductVendor set to empty for non-classic type '{product_type}' (not used for non-classic types)")
         
-        # THC/CBD percentage display removed - QR codes now provide this information
-        # Empty ratio fields to prevent any THC/CBD content from appearing
-        label_context['Ratio_or_THC_CBD'] = ''
-        label_context['THC_CBD'] = ''
+        # THC/CBD percentage display - use JointRatio for prerolls and infused prerolls
+        product_type = (label_context.get('Product Type*', '').lower() or 
+                       label_context.get('ProductType', '').lower())
+        
+        if product_type in ['pre-roll', 'infused pre-roll']:
+            # Use JointRatio for prerolls and infused prerolls
+            joint_ratio = (record.get('JointRatio') or 
+                          record.get('Joint Ratio') or 
+                          record.get('Ratio') or 
+                          '')
+            label_context['Ratio_or_THC_CBD'] = joint_ratio
+            label_context['THC_CBD'] = joint_ratio
+        else:
+            # Use regular ratio for other product types
+            ratio = (record.get('Ratio') or 
+                    record.get('Ratio_or_THC_CBD') or 
+                    '')
+            label_context['Ratio_or_THC_CBD'] = ratio
+            label_context['THC_CBD'] = ratio
 
         # DEBUG: Log ProductStrain value before template replacement
         if self.template_type == 'vertical':
