@@ -1431,22 +1431,9 @@ class TemplateProcessor:
             label_context['ProductVendor'] = ""
             self.logger.debug(f"ProductVendor set to empty for non-classic type '{product_type}' (not used for non-classic types)")
         
-        # THC/CBD percentage display - use JointRatio for prerolls and infused prerolls only
-        product_type = (label_context.get('Product Type*', '').lower() or 
-                       label_context.get('ProductType', '').lower())
-        
-        if product_type in ['pre-roll', 'infused pre-roll']:
-            # Use JointRatio for prerolls and infused prerolls
-            joint_ratio = (record.get('JointRatio') or 
-                          record.get('Joint Ratio') or 
-                          record.get('Ratio') or 
-                          '')
-            label_context['Ratio_or_THC_CBD'] = joint_ratio
-            label_context['THC_CBD'] = joint_ratio
-        else:
-            # Empty ratio fields for other product types to prevent THC/CBD content
-            label_context['Ratio_or_THC_CBD'] = ''
-            label_context['THC_CBD'] = ''
+        # Initial THC/CBD processing - will be overridden for prerolls below
+        label_context['Ratio_or_THC_CBD'] = ''
+        label_context['THC_CBD'] = ''
 
         # DEBUG: Log ProductStrain value before template replacement
         if self.template_type == 'vertical':
@@ -1654,6 +1641,24 @@ class TemplateProcessor:
         else:
             label_context['QR'] = ''
             self.logger.debug("No product name available for QR code generation")
+
+        # CRITICAL: Final JointRatio processing for prerolls - must be last to override any other THC/CBD processing
+        product_type = (label_context.get('Product Type*', '').lower() or 
+                       label_context.get('ProductType', '').lower())
+        
+        if product_type in ['pre-roll', 'infused pre-roll']:
+            # Use JointRatio for prerolls and infused prerolls
+            joint_ratio = (record.get('JointRatio') or 
+                          record.get('Joint Ratio') or 
+                          record.get('Ratio') or 
+                          '')
+            if joint_ratio:
+                # Wrap JointRatio with markers for proper template processing
+                label_context['Ratio_or_THC_CBD'] = wrap_with_marker(joint_ratio, 'THC_CBD')
+                label_context['THC_CBD'] = wrap_with_marker(joint_ratio, 'THC_CBD')
+                self.logger.debug(f"FINAL: Set JointRatio for {product_type}: '{joint_ratio}'")
+            else:
+                self.logger.debug(f"FINAL: No JointRatio found for {product_type}")
 
         return label_context
 
