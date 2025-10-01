@@ -1582,16 +1582,36 @@ def upload_file():
         session['uploaded_filename'] = file.filename
         session.modified = True
         
-        # Mark ready
-        update_processing_status(file.filename, 'ready')
+        # Load file into ExcelProcessor immediately (simple sync load)
+        try:
+            logging.info(f"Loading file into ExcelProcessor: {file_path}")
+            processor = get_excel_processor()
+            
+            # Load the file
+            success = processor.load_file(file_path)
+            if success:
+                row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
+                logging.info(f"File loaded successfully: {row_count} rows")
+                update_processing_status(file.filename, 'ready')
+            else:
+                logging.error("File load returned False")
+                update_processing_status(file.filename, 'error: File load failed')
+                return jsonify({'error': 'Failed to process file'}), 500
+                
+        except Exception as load_error:
+            logging.error(f"Error loading file: {load_error}")
+            logging.error(traceback.format_exc())
+            update_processing_status(file.filename, f'error: {str(load_error)}')
+            return jsonify({'error': f'Failed to process file: {str(load_error)}'}), 500
         
         upload_time = time.time() - start_time
         logging.info(f"=== UPLOAD COMPLETE: {upload_time:.3f}s ===")
         
         return jsonify({
             'success': True,
-            'message': 'File uploaded',
-            'filename': file.filename
+            'message': 'File uploaded and processed',
+            'filename': file.filename,
+            'rows': row_count
         })
         
     except Exception as e:
