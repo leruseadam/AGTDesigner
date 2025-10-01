@@ -4351,7 +4351,7 @@ def generate_labels():
                         # Convert database records to the format expected by TemplateProcessor
                         records = []
                         for db_record in valid_db_records:
-                            logging.info(f"Processing database record: {db_record.get('Product Name*', '')}")
+                            logging.info(f"Processing database record: {db_record.get('Product Name*', '')} - Units: {db_record.get('Units', 'MISSING')}, Weight: {db_record.get('Weight*', 'MISSING')}")
                             # Map database fields to template fields (using correct field names from database)
                             record = {
                                 'Product Name*': db_record.get('Product Name*', ''),
@@ -4369,6 +4369,7 @@ def generate_labels():
                                 'Weight*': db_record.get('Weight*', '1'),  # Default weight if missing
                                 'Units': db_record.get('Units', 'g'),  # Default units if missing
                                 'WeightUnits': f"{db_record.get('Weight*', '1')}{db_record.get('Units', 'g')}",  # Construct WeightUnits from Weight* and Units
+                                'CombinedWeight': f"{db_record.get('Weight*', '1')}{db_record.get('Units', 'g')}",  # Add CombinedWeight for template compatibility
                                 # Add database weight and units as fallback data for Excel processor
                                 'db_weight': db_record.get('Weight*', '1'),
                                 'db_units': db_record.get('Units', 'g'),
