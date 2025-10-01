@@ -1585,28 +1585,25 @@ class TemplateProcessor:
         # CRITICAL FIX: Provide raw values for template fields (after all processing)
         # The template needs raw values, not wrapped values
         if label_context.get('Price'):
-            raw_price = unwrap_marker(label_context['Price'], 'PRICE')
-            label_context['Price'] = raw_price  # Template gets raw value
-        
-        if label_context.get('WeightUnits'):
-            raw_weight = unwrap_marker(label_context['WeightUnits'], 'WEIGHTUNITS')
-            label_context['WeightUnits'] = raw_weight  # Template gets raw value
-        
-        if label_context.get('DescAndWeight'):
-            raw_desc = unwrap_marker(label_context['DescAndWeight'], 'DESC')
-            label_context['DescAndWeight'] = raw_desc  # Template gets raw value
-        
-        if label_context.get('Lineage'):
-            raw_lineage = unwrap_marker(label_context['Lineage'], 'LINEAGE')
-            label_context['Lineage'] = raw_lineage  # Template gets raw value
-        
-        if label_context.get('ProductStrain'):
-            raw_strain = unwrap_marker(label_context['ProductStrain'], 'PRODUCTSTRAIN')
-            label_context['ProductStrain'] = raw_strain  # Template gets raw value
-        
-        if label_context.get('ProductVendor'):
-            raw_vendor = unwrap_marker(label_context['ProductVendor'], 'PRODUCTVENDOR')
-            label_context['ProductVendor'] = raw_vendor  # Template gets raw value
+        # Preserve template-side formatting: keep wrapped markers during render.
+        # We still compute raw values and expose them under *_RAW keys for any logic that needs plain text.
+        # This avoids stripping run-level styling defined in the .docx placeholders.
+        try:
+            if label_context.get('Price'):
+                label_context['Price_RAW'] = unwrap_marker(label_context['Price'], 'PRICE')
+            if label_context.get('WeightUnits'):
+                label_context['WeightUnits_RAW'] = unwrap_marker(label_context['WeightUnits'], 'WEIGHTUNITS')
+            if label_context.get('DescAndWeight'):
+                label_context['DescAndWeight_RAW'] = unwrap_marker(label_context['DescAndWeight'], 'DESC')
+            if label_context.get('Lineage'):
+                label_context['Lineage_RAW'] = unwrap_marker(label_context['Lineage'], 'LINEAGE')
+            if label_context.get('ProductStrain'):
+                label_context['ProductStrain_RAW'] = unwrap_marker(label_context['ProductStrain'], 'PRODUCTSTRAIN')
+            if label_context.get('ProductVendor'):
+                label_context['ProductVendor_RAW'] = unwrap_marker(label_context['ProductVendor'], 'PRODUCTVENDOR')
+        except Exception:
+            # Fail-safe: if unwrapping fails, continue with wrapped values so template render still works
+            pass
         
         # Ensure JointRatio stays on the same line - no line break processing
         if label_context.get('JointRatio'):
