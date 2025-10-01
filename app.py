@@ -4939,24 +4939,20 @@ def get_available_tags():
                         total_count = cursor.fetchone()[0]
                         logging.info(f"Total products in database: {total_count}")
                         
-                        cursor.execute('''
-                            SELECT "Product Name*", "Product Type*", "Product Brand", "Vendor/Supplier*", 
-                                   "Lineage", "Price* (Tier Name for Bulk)", "Weight*", "Description", 
-                                   "Quantity*", "DOH", "Concentrate Type", "Ratio", "JointRatio", "State",
-                                   "Is Sample? (yes/no)", "Is MJ product?(yes/no)", "Discountable? (yes/no)",
-                                   "Room*", "Batch Number", "Lot Number", "Barcode*", "Medical Only (Yes/No)",
-                                   "Med Price", "Expiration Date(YYYY-MM-DD)", "Is Archived? (yes/no)",
-                                   "THC Per Serving", "Allergens", "Solvent", "Accepted Date",
-                                   "Internal Product Identifier", "Product Tags (comma separated)", "Image URL",
-                                   "Ingredients", "CombinedWeight", "Ratio_or_THC_CBD", "Total THC", "THCA", "CBDA", "CBN",
-                                   "DOH Compliant (Yes/No)"
-                            FROM products 
-                            ORDER BY id DESC
-                            LIMIT 20000
-                        ''')
+                        # Get available columns dynamically to avoid SQL errors
+                        cursor.execute("PRAGMA table_info(products)")
+                        available_columns = [row[1] for row in cursor.fetchall()]
                         
+                        # Filter to only columns we want, excluding internal ones
+                        columns_to_query = [col for col in available_columns if col not in ['id', 'normalized_name', 'strain_id']]
+                        
+                        # Build dynamic query
+                        quoted_columns = ', '.join([f'"{col}"' for col in columns_to_query])
+                        query = f'SELECT {quoted_columns} FROM products ORDER BY id DESC LIMIT 20000'
+                        
+                        cursor.execute(query)
                         rows = cursor.fetchall()
-                        columns = [description[0] for description in cursor.description]
+                        columns = columns_to_query
                         logging.info(f"Database query returned {len(rows)} rows")
                         
                         for row in rows:
@@ -6723,51 +6719,65 @@ def get_database_products():
             excel_style = 'Product Name*' in cols or 'Product Brand' in cols
 
             if excel_style:
-                # Build SELECT with aliases from Excel-style columns
-                select_clause = (
-                    'SELECT p.rowid as id, '
-                    'p."Product Name*" AS "Product Name*", '
-                    'p."Product Type*" AS "Product Type*", '
-                    'p."Product Brand" AS "Product Brand", '
-                    'p."Vendor/Supplier*" AS "Vendor/Supplier*", '
-                    'p."Lineage" AS "Lineage", '
-                    'p."Price* (Tier Name for Bulk)" AS "Price", '
-                    'p."Weight*" AS "Weight*", '
-                    'p."Description" AS "Description", '
-                    'p."Quantity*" AS "Quantity*", '
-                    'p."DOH" AS "DOH", '
-                    'p."Concentrate Type" AS "Concentrate Type", '
-                    'p."Ratio" AS "Ratio", '
-                    'p."JointRatio" AS "JointRatio", '
-                    'p."State" AS "State", '
-                    'p."Is Sample? (yes/no)" AS "Is Sample? (yes/no)", '
-                    'p."Is MJ product?(yes/no)" AS "Is MJ product?(yes/no)", '
-                    'p."Discountable? (yes/no)" AS "Discountable? (yes/no)", '
-                    'p."Room*" AS "Room*", '
-                    'p."Batch Number" AS "Batch Number", '
-                    'p."Lot Number" AS "Lot Number", '
-                    'p."Barcode*" AS "Barcode*", '
-                    'p."Medical Only (Yes/No)" AS "Medical Only (Yes/No)", '
-                    'p."Med Price" AS "Med Price", '
-                    'p."Expiration Date(YYYY-MM-DD)" AS "Expiration Date(YYYY-MM-DD)", '
-                    'p."Is Archived? (yes/no)" AS "Is Archived? (yes/no)", '
-                    'p."THC Per Serving" AS "THC Per Serving", '
-                    'p."Allergens" AS "Allergens", '
-                    'p."Solvent" AS "Solvent", '
-                    'p."Accepted Date" AS "Accepted Date", '
-                    'p."Internal Product Identifier" AS "Internal Product Identifier", '
-                    'p."Product Tags (comma separated)" AS "Product Tags (comma separated)", '
-                    'p."Image URL" AS "Image URL", '
-                    'p."Ingredients" AS "Ingredients", '
-                    'p."CombinedWeight" AS "CombinedWeight", '
-                    'p."Ratio_or_THC_CBD" AS "Ratio_or_THC_CBD", '
-                    'p."Total THC" AS "Total THC", '
-                    'p."THCA" AS "THCA", '
-                    'p."CBDA" AS "CBDA", '
-                    'p."CBN" AS "CBN", '
-                    'p."DOH Compliant (Yes/No)" AS "DOH Compliant (Yes/No)" '
-                    'FROM products p'
-                )
+                # Build SELECT dynamically based on available columns
+                # Map common column names that might vary
+                column_mappings = {
+                    'Price': ['Price', 'Price* (Tier Name for Bulk)'],
+                    'Weight Unit': ['Weight Unit* (grams/gm or ounces/oz)', 'Units'],
+                    'DOH Compliant': ['DOH Compliant (Yes/No)', 'DOH Compliant'],
+                }
+                
+                def get_column_name(options):
+                    """Return the first column name that exists in the table."""
+                    if isinstance(options, str):
+                        options = [options]
+                    for opt in options:
+                        if opt in cols:
+                            return opt
+                    return None
+                
+                # Build SELECT clause dynamically
+                select_fields = ['p.rowid as id']
+                
+                # Add each column if it exists
+                core_columns = [
+                    ('Product Name*', 'Product Name*'),
+                    ('Product Type*', 'Product Type*'),
+                    ('Product Brand', 'Product Brand'),
+                    ('Vendor/Supplier*', 'Vendor/Supplier*'),
+                    ('Lineage', 'Lineage'),
+                    ('Weight*', 'Weight*'),
+                    ('Description', 'Description'),
+                    ('Quantity*', 'Quantity*'),
+                ]
+                
+                # Add core columns
+                for col, alias in core_columns:
+                    if col in cols:
+                        select_fields.append(f'p."{col}" AS "{alias}"')
+                
+                # Add Price column (check multiple possible names)
+                price_col = get_column_name(column_mappings['Price'])
+                if price_col:
+                    select_fields.append(f'p."{price_col}" AS "Price"')
+                
+                # Add other optional columns
+                optional_columns = [
+                    'DOH', 'Concentrate Type', 'Ratio', 'JointRatio', 'State',
+                    'Is Sample? (yes/no)', 'Is MJ product?(yes/no)', 'Discountable? (yes/no)',
+                    'Room*', 'Batch Number', 'Lot Number', 'Barcode*',
+                    'Medical Only (Yes/No)', 'Med Price', 'Expiration Date(YYYY-MM-DD)',
+                    'Is Archived? (yes/no)', 'THC Per Serving', 'Allergens', 'Solvent',
+                    'Accepted Date', 'Internal Product Identifier', 'Product Tags (comma separated)',
+                    'Image URL', 'Ingredients', 'CombinedWeight', 'Ratio_or_THC_CBD',
+                    'Total THC', 'THCA', 'CBDA', 'CBN', 'Product Strain', 'Units'
+                ]
+                
+                for col in optional_columns:
+                    if col in cols:
+                        select_fields.append(f'p."{col}" AS "{col}"')
+                
+                select_clause = 'SELECT ' + ', '.join(select_fields) + ' FROM products p'
                 where_parts = []
                 params = []
                 if search:
