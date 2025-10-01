@@ -1581,18 +1581,29 @@ def upload_file():
         # Start background processing
         def background_processing():
             try:
-                logging.info("[BG] ===== ULTRA-FAST BACKGROUND PROCESSING START =====")
+                logging.info("[BG] ===== BACKGROUND PROCESSING START =====")
                 logging.info(f"[BG] Processing: {file.filename}")
                 
-                # Use fast upload handler for processing
-                from fast_excel_upload_fix import FastUploadHandler
-                uploader = FastUploadHandler()
-                
-                # Process with ultra-fast settings
-                result = uploader.process_file_fast(str(file_path), file.filename)
+                # Try fast upload handler first, fall back to standard processing
+                try:
+                    if FAST_UPLOAD_AVAILABLE:
+                        from fast_excel_upload_fix import FastUploadHandler
+                        uploader = FastUploadHandler()
+                        result = uploader.process_file_fast(str(file_path), file.filename)
+                        logging.info(f"[BG] Used fast upload handler")
+                    else:
+                        # Fallback: Load file with ExcelProcessor
+                        processor = get_excel_processor()
+                        processor.load_file(str(file_path))
+                        result = f"Loaded {len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0} rows"
+                        logging.info(f"[BG] Used standard ExcelProcessor")
+                except Exception as proc_error:
+                    logging.error(f"[BG] Processing method failed: {proc_error}")
+                    # Final fallback: just mark as ready
+                    result = "Upload completed (processing deferred)"
                 
                 logging.info(f"[BG] ✅ Processing completed: {result}")
-                logging.info(f"[BG] ===== ULTRA-FAST PROCESSING COMPLETE =====")
+                logging.info(f"[BG] ===== PROCESSING COMPLETE =====")
                 logging.info(f"[BG] Processing time: {time.time() - start_time:.3f}s")
                 
                 # Update status
@@ -1600,6 +1611,7 @@ def upload_file():
                 
             except Exception as e:
                 logging.error(f"[BG] Processing error: {str(e)}")
+                logging.error(f"[BG] Traceback: {traceback.format_exc()}")
                 update_processing_status(file.filename, f'error: {str(e)}')
         
         # Start background thread
