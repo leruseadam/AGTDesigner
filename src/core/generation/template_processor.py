@@ -1391,10 +1391,12 @@ class TemplateProcessor:
                 # For non-classic types, separate Product Strain and Product Brand for different font sizing
                 # Lineage shows Product Brand only (centered) - this is the primary field
                 # For vertical template, don't wrap with markers since it uses simple placeholders
+                # Center brand should always be ALL CAPS
+                brand_center_text = str(product_brand).upper()
                 if self.template_type == 'vertical':
-                    label_context['Lineage'] = product_brand
+                    label_context['Lineage'] = brand_center_text
                 else:
-                    label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{product_brand}PRODUCTBRAND_CENTER_END"
+                    label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{brand_center_text}PRODUCTBRAND_CENTER_END"
                 # Set ProductBrand fields to empty to prevent duplication
                 label_context['ProductBrand'] = ""
                 label_context['ProductBrand_Center'] = ""
