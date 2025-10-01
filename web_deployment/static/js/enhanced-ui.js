@@ -361,7 +361,8 @@ function pollUploadStatus(filename) {
         // Update splash screen status with progress
         if (typeof TagManager !== 'undefined' && TagManager.updateExcelLoadingStatus) {
           const progressPercent = Math.min((pollCount / maxPolls) * 100, 95);
-          TagManager.updateExcelLoadingStatus(`Processing file... ${Math.round(progressPercent)}%`);
+          // Remove numeric percent from splash per request; keep animated dots
+          TagManager.updateExcelLoadingStatus('Processing file...');
         }
         
         if (pollCount >= maxPolls) {
