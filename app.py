@@ -5938,15 +5938,15 @@ def database_vendor_stats():
                 logging.error(f"Products table not found in database at {product_db.db_path}")
                 # If store-specific database doesn't have products table, fall back to main database
                 logging.info("Falling back to main database for vendor stats")
-                # Force creation of main database instance
-                global _product_database
-                _product_database = None
-                # Create main database instance directly
+                # Create main database instance directly (don't clear the global variable!)
                 from src.core.data.product_database import ProductDatabase
                 main_db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
                 product_db = ProductDatabase(main_db_path)
                 if not product_db._initialized:
                     product_db.init_database()
+                # Update the global reference to use the main database
+                global _product_database
+                _product_database = product_db
                 # Test main database
                 test_conn = sqlite3.connect(product_db.db_path)
                 test_cursor = test_conn.cursor()
@@ -6391,14 +6391,15 @@ def database_analytics():
                 logging.error(f"Products table not found in database at {product_db.db_path}")
                 # Fall back to main database
                 logging.info("Falling back to main database for analytics")
-                global _product_database
-                _product_database = None
-                # Create main database instance directly
+                # Create main database instance directly (don't clear the global variable!)
                 from src.core.data.product_database import ProductDatabase
                 main_db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
                 product_db = ProductDatabase(main_db_path)
                 if not product_db._initialized:
                     product_db.init_database()
+                # Update the global reference to use the main database
+                global _product_database
+                _product_database = product_db
                 # Test main database
                 test_conn = sqlite3.connect(product_db.db_path)
                 test_cursor = test_conn.cursor()
