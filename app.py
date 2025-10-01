@@ -179,8 +179,21 @@ import random
 # Optional import for flask_caching
 # Import optimized upload handler
 from optimized_excel_upload import create_optimized_upload_routes
-from fast_excel_upload_fix import create_fast_upload_routes
-from fast_docx_generator import create_fast_docx_routes
+try:
+    from fast_excel_upload_fix import create_fast_upload_routes
+    FAST_UPLOAD_AVAILABLE = True
+except Exception as e:
+    logging.warning(f"Fast upload routes not available: {e}")
+    create_fast_upload_routes = None
+    FAST_UPLOAD_AVAILABLE = False
+
+try:
+    from fast_docx_generator import create_fast_docx_routes
+    FAST_DOCX_AVAILABLE = True
+except Exception as e:
+    logging.warning(f"Fast DOCX routes not available: {e}")
+    create_fast_docx_routes = None
+    FAST_DOCX_AVAILABLE = False
 try:
     from flask_caching import Cache
     CACHE_AVAILABLE = True
@@ -12917,10 +12930,22 @@ def fix_description_format():
 
 # Register optimized upload routes
 create_optimized_upload_routes(app)
-# Register fast upload routes
-create_fast_upload_routes(app)
-# Register fast DOCX generation routes
-create_fast_docx_routes(app)
+
+# Register fast upload routes (optional)
+if FAST_UPLOAD_AVAILABLE and create_fast_upload_routes:
+    try:
+        create_fast_upload_routes(app)
+        logging.info("Fast upload routes registered successfully")
+    except Exception as e:
+        logging.warning(f"Failed to register fast upload routes: {e}")
+
+# Register fast DOCX generation routes (optional)
+if FAST_DOCX_AVAILABLE and create_fast_docx_routes:
+    try:
+        create_fast_docx_routes(app)
+        logging.info("Fast DOCX routes registered successfully")
+    except Exception as e:
+        logging.warning(f"Failed to register fast DOCX routes: {e}")
 
 if __name__ == '__main__':
     # Use the global app instance that has all routes registered
