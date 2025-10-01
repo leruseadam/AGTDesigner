@@ -2485,6 +2485,8 @@ def upload_status():
         if not filename:
             return jsonify({'error': 'No filename provided'}), 400
         
+        logging.info(f"Status check for: {filename}")
+        
         # Ensure filename is properly sanitized
         filename = sanitize_filename(filename)
         
@@ -2522,10 +2524,20 @@ def upload_status():
         logging.info(f"Upload status request for {filename}: {status} (age: {age:.1f}s)")
         logging.debug(f"All processing statuses: {all_statuses}")
         
-        # Check if file exists in uploads directory
+        # Check if file exists in uploads directory (check both with and without timestamp)
         upload_folder = app.config['UPLOAD_FOLDER']
         file_path = os.path.join(upload_folder, filename)
         file_exists = os.path.exists(file_path)
+        
+        # Also check for timestamp-prefixed version
+        if not file_exists:
+            import glob
+            pattern = os.path.join(upload_folder, f"*_{filename}")
+            matching_files = glob.glob(pattern)
+            if matching_files:
+                file_exists = True
+                file_path = matching_files[0]  # Use most recent match
+                logging.info(f"Found timestamp-prefixed file: {file_path}")
         
         # If status is 'not_found' but file exists, it might have been processed successfully
         if status == 'not_found' and file_exists:
