@@ -1592,6 +1592,10 @@ def upload_file():
             # On PythonAnywhere: Start background thread to avoid timeout
             logging.info("[PYTHONANYWHERE] Starting background processing thread")
             
+            # Capture variables from request context for background thread
+            original_filename = file.filename
+            current_store = session.get('selected_store', 'AGT_Bothell')
+            
             def process_in_background():
                 try:
                     logging.info(f"[BACKGROUND] Processing file: {file_path}")
@@ -1605,7 +1609,6 @@ def upload_file():
                         # Store in database
                         try:
                             from src.core.data.product_database import get_product_database
-                            current_store = session.get('selected_store', 'AGT_Bothell')
                             product_db = get_product_database(current_store)
                             
                             if product_db and hasattr(product_db, 'store_excel_data'):
@@ -1615,16 +1618,16 @@ def upload_file():
                         except Exception as db_error:
                             logging.warning(f"[BACKGROUND] Database storage failed: {db_error}")
                         
-                        update_processing_status(file.filename, 'ready')
-                        logging.info(f"[BACKGROUND] Processing complete for {file.filename}")
+                        update_processing_status(original_filename, 'ready')
+                        logging.info(f"[BACKGROUND] Processing complete for {original_filename}")
                     else:
                         logging.error("[BACKGROUND] File load returned False")
-                        update_processing_status(file.filename, 'error: File load failed')
+                        update_processing_status(original_filename, 'error: File load failed')
                         
                 except Exception as e:
                     logging.error(f"[BACKGROUND] Processing error: {e}")
                     logging.error(traceback.format_exc())
-                    update_processing_status(file.filename, f'error: {str(e)}')
+                    update_processing_status(original_filename, f'error: {str(e)}')
             
             # Start background thread
             import threading
