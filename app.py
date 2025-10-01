@@ -1538,102 +1538,54 @@ def generation_splash():
     return render_template('generation-splash.html')
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    """Fast file upload with background processing (integrated fast upload)"""
+    """Simple file upload with deferred processing"""
     try:
         start_time = time.time()
         logging.info("=== UPLOAD REQUEST START ===")
-        logging.info(f"File upload request at {datetime.now().strftime('%H:%M:%S')}")
         
         # Check if file is present
         if 'file' not in request.files:
-            logging.error("No file provided in request")
             return jsonify({'error': 'No file provided'}), 400
         
         file = request.files['file']
         if file.filename == '':
-            logging.error("No file selected")
             return jsonify({'error': 'No file selected'}), 400
-        
-        logging.info(f"Processing file: {file.filename}")
         
         # Validate file type
         if not file.filename.lower().endswith(('.xlsx', '.xls')):
-            logging.error(f"Invalid file type: {file.filename}")
             return jsonify({'error': 'Invalid file type. Please upload an Excel file.'}), 400
         
-        # Create uploads directory if it doesn't exist
+        # Save file
         uploads_dir = Path('uploads')
         uploads_dir.mkdir(exist_ok=True)
-        logging.info(f"Uploads directory: {uploads_dir.absolute()}")
-        
-        # Generate unique filename
         timestamp = int(time.time())
         filename = f"{timestamp}_{file.filename}"
         file_path = uploads_dir / filename
-        
-        # Save file
         file.save(str(file_path))
-        logging.info(f"File saved to: {file_path}")
+        logging.info(f"File saved: {file_path}")
         
-        # Update processing status
-        update_processing_status(file.filename, 'processing')
+        # Store in session
+        session['file_path'] = str(file_path)
+        session['uploaded_filename'] = file.filename
+        session.modified = True
         
-        # Start background processing
-        def background_processing():
-            try:
-                logging.info("[BG] ===== BACKGROUND PROCESSING START =====")
-                logging.info(f"[BG] Processing: {file.filename}")
-                
-                # Try fast upload handler first, fall back to standard processing
-                try:
-                    if FAST_UPLOAD_AVAILABLE:
-                        from fast_excel_upload_fix import FastUploadHandler
-                        uploader = FastUploadHandler()
-                        result = uploader.process_file_fast(str(file_path), file.filename)
-                        logging.info(f"[BG] Used fast upload handler")
-                    else:
-                        # Fallback: Load file with ExcelProcessor
-                        processor = get_excel_processor()
-                        processor.load_file(str(file_path))
-                        result = f"Loaded {len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0} rows"
-                        logging.info(f"[BG] Used standard ExcelProcessor")
-                except Exception as proc_error:
-                    logging.error(f"[BG] Processing method failed: {proc_error}")
-                    # Final fallback: just mark as ready
-                    result = "Upload completed (processing deferred)"
-                
-                logging.info(f"[BG] ✅ Processing completed: {result}")
-                logging.info(f"[BG] ===== PROCESSING COMPLETE =====")
-                logging.info(f"[BG] Processing time: {time.time() - start_time:.3f}s")
-                
-                # Update status
-                update_processing_status(file.filename, 'ready')
-                
-            except Exception as e:
-                logging.error(f"[BG] Processing error: {str(e)}")
-                logging.error(f"[BG] Traceback: {traceback.format_exc()}")
-                update_processing_status(file.filename, f'error: {str(e)}')
+        # Mark as ready immediately - processing will happen on demand
+        update_processing_status(file.filename, 'ready')
         
-        # Start background thread
-        import threading
-        thread = threading.Thread(target=background_processing)
-        thread.daemon = True
-        thread.start()
-        
-        # Return immediate response
         upload_time = time.time() - start_time
-        logging.info(f"[UPLOAD] Ultra-fast upload completed in {upload_time:.3f}s")
+        logging.info(f"Upload completed in {upload_time:.3f}s")
         
         return jsonify({
             'success': True,
-            'message': f'File uploaded successfully in {upload_time:.3f}s',
+            'message': 'File uploaded successfully',
             'filename': file.filename,
             'upload_time': upload_time
         })
         
     except Exception as e:
         logging.error(f"Upload error: {str(e)}")
-        return jsonify({'error': f'Upload failed: {str(e)}'}), 500
+        logging.error(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/upload-pythonanywhere', methods=['POST'])
