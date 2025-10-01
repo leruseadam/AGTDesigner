@@ -13025,7 +13025,7 @@ def fix_description_format():
         return jsonify({'error': f'Failed to fix description format: {str(e)}'}), 500
 
 # Register optimized upload routes
-create_optimized_upload_routes(app)
+# create_optimized_upload_routes(app)  # Disabled - module not found
 
 # Register fast upload routes (optional)
 if FAST_UPLOAD_AVAILABLE and create_fast_upload_routes:
