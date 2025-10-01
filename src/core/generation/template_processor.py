@@ -1480,6 +1480,7 @@ class TemplateProcessor:
         if 'ProductType' not in label_context:
             label_context['ProductType'] = record.get('ProductType', '')
         
+        
         # Fast strain handling - always show the actual strain value from Excel
         # But don't override if ProductStrain was already set for nonclassic types
         # CRITICAL FIX: Don't override ProductStrain if we already processed non-classic types
@@ -1580,6 +1581,32 @@ class TemplateProcessor:
                 val = label_context[key]
                 formatted_val = self.format_with_soft_hyphen(val)
                 label_context[key] = wrap_with_marker(unwrap_marker(formatted_val, marker), marker)
+        
+        # CRITICAL FIX: Provide raw values for template fields (after all processing)
+        # The template needs raw values, not wrapped values
+        if label_context.get('Price'):
+            raw_price = unwrap_marker(label_context['Price'], 'PRICE')
+            label_context['Price'] = raw_price  # Template gets raw value
+        
+        if label_context.get('WeightUnits'):
+            raw_weight = unwrap_marker(label_context['WeightUnits'], 'WEIGHTUNITS')
+            label_context['WeightUnits'] = raw_weight  # Template gets raw value
+        
+        if label_context.get('DescAndWeight'):
+            raw_desc = unwrap_marker(label_context['DescAndWeight'], 'DESC')
+            label_context['DescAndWeight'] = raw_desc  # Template gets raw value
+        
+        if label_context.get('Lineage'):
+            raw_lineage = unwrap_marker(label_context['Lineage'], 'LINEAGE')
+            label_context['Lineage'] = raw_lineage  # Template gets raw value
+        
+        if label_context.get('ProductStrain'):
+            raw_strain = unwrap_marker(label_context['ProductStrain'], 'PRODUCTSTRAIN')
+            label_context['ProductStrain'] = raw_strain  # Template gets raw value
+        
+        if label_context.get('ProductVendor'):
+            raw_vendor = unwrap_marker(label_context['ProductVendor'], 'PRODUCTVENDOR')
+            label_context['ProductVendor'] = raw_vendor  # Template gets raw value
         
         # Ensure JointRatio stays on the same line - no line break processing
         if label_context.get('JointRatio'):
