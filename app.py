@@ -1538,7 +1538,7 @@ def generation_splash():
     return render_template('generation-splash.html')
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    """Simple file upload - just save and return success"""
+    """Optimized file upload - saves file quickly then processes in background"""
     start_time = time.time()
     
     try:
@@ -1582,18 +1582,77 @@ def upload_file():
         session['uploaded_filename'] = file.filename
         session.modified = True
         
-        # Load file into ExcelProcessor and store in database
-        try:
-            logging.info(f"Loading file into ExcelProcessor: {file_path}")
+        # Mark as processing
+        update_processing_status(file.filename, 'processing')
+        
+        # Check if we're on PythonAnywhere - if so, use background processing
+        is_pythonanywhere = os.environ.get('PYTHONANYWHERE_DOMAIN') or os.environ.get('PYTHONANYWHERE_SITE')
+        
+        if is_pythonanywhere:
+            # On PythonAnywhere: Start background thread to avoid timeout
+            logging.info("[PYTHONANYWHERE] Starting background processing thread")
+            
+            def process_in_background():
+                try:
+                    logging.info(f"[BACKGROUND] Processing file: {file_path}")
+                    processor = get_excel_processor()
+                    success = processor.load_file(file_path)
+                    
+                    if success:
+                        row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
+                        logging.info(f"[BACKGROUND] File loaded: {row_count} rows")
+                        
+                        # Store in database
+                        try:
+                            from src.core.data.product_database import get_product_database
+                            current_store = session.get('selected_store', 'AGT_Bothell')
+                            product_db = get_product_database(current_store)
+                            
+                            if product_db and hasattr(product_db, 'store_excel_data'):
+                                logging.info(f"[BACKGROUND] Storing {row_count} products in database...")
+                                result = product_db.store_excel_data(processor.df, file_path)
+                                logging.info(f"[BACKGROUND] Database storage result: {result}")
+                        except Exception as db_error:
+                            logging.warning(f"[BACKGROUND] Database storage failed: {db_error}")
+                        
+                        update_processing_status(file.filename, 'ready')
+                        logging.info(f"[BACKGROUND] Processing complete for {file.filename}")
+                    else:
+                        logging.error("[BACKGROUND] File load returned False")
+                        update_processing_status(file.filename, 'error: File load failed')
+                        
+                except Exception as e:
+                    logging.error(f"[BACKGROUND] Processing error: {e}")
+                    logging.error(traceback.format_exc())
+                    update_processing_status(file.filename, f'error: {str(e)}')
+            
+            # Start background thread
+            import threading
+            thread = threading.Thread(target=process_in_background)
+            thread.daemon = True
+            thread.start()
+            
+            upload_time = time.time() - start_time
+            logging.info(f"=== UPLOAD COMPLETE (background processing started): {upload_time:.3f}s ===")
+            
+            return jsonify({
+                'success': True,
+                'message': 'File uploaded, processing in background',
+                'filename': file.filename,
+                'processing': True
+            })
+            
+        else:
+            # Local development: Process synchronously for immediate feedback
+            logging.info("[LOCAL] Processing file synchronously")
             processor = get_excel_processor()
             
-            # Load the file
             success = processor.load_file(file_path)
             if success:
                 row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
                 logging.info(f"File loaded successfully: {row_count} rows")
                 
-                # Store in database for persistence across workers
+                # Store in database for persistence
                 try:
                     from src.core.data.product_database import get_product_database
                     current_store = session.get('selected_store', 'AGT_Bothell')
@@ -1615,22 +1674,16 @@ def upload_file():
                 logging.error("File load returned False")
                 update_processing_status(file.filename, 'error: File load failed')
                 return jsonify({'error': 'Failed to process file'}), 500
-                
-        except Exception as load_error:
-            logging.error(f"Error loading file: {load_error}")
-            logging.error(traceback.format_exc())
-            update_processing_status(file.filename, f'error: {str(load_error)}')
-            return jsonify({'error': f'Failed to process file: {str(load_error)}'}), 500
-        
-        upload_time = time.time() - start_time
-        logging.info(f"=== UPLOAD COMPLETE: {upload_time:.3f}s ===")
-        
-        return jsonify({
-            'success': True,
-            'message': 'File uploaded and processed',
-            'filename': file.filename,
-            'rows': row_count
-        })
+            
+            upload_time = time.time() - start_time
+            logging.info(f"=== UPLOAD COMPLETE: {upload_time:.3f}s ===")
+            
+            return jsonify({
+                'success': True,
+                'message': 'File uploaded and processed',
+                'filename': file.filename,
+                'rows': row_count
+            })
         
     except Exception as e:
         logging.error(f"Upload failed: {e}")
