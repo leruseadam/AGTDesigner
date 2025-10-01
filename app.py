@@ -178,7 +178,7 @@ from src.core.data.json_matcher import map_inventory_type_to_product_type
 import random
 # Optional import for flask_caching
 # Import optimized upload handler
-from optimized_excel_upload import create_optimized_upload_routes
+# from optimized_excel_upload import create_optimized_upload_routes  # Disabled - module not found
 try:
     from fast_excel_upload_fix import create_fast_upload_routes
     FAST_UPLOAD_AVAILABLE = True
@@ -5738,15 +5738,15 @@ def database_stats():
                 # If store-specific database doesn't have products table, fall back to main database
                 if current_store:
                     logging.info(f"Falling back to main database for store {current_store}")
-                    # Force creation of main database instance by clearing the global variable
-                    global _product_database
-                    _product_database = None
-                    # Create main database instance directly
+                    # Create main database instance directly (don't clear the global variable!)
                     from src.core.data.product_database import ProductDatabase
                     main_db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
                     product_db = ProductDatabase(main_db_path)
                     if not product_db._initialized:
                         product_db.init_database()
+                    # Update the global reference to use the main database
+                    global _product_database
+                    _product_database = product_db
                     # Test main database
                     test_conn = sqlite3.connect(product_db.db_path)
                     test_cursor = test_conn.cursor()
