@@ -1429,7 +1429,7 @@ class TemplateProcessor:
             label_context['ProductVendor'] = ""
             self.logger.debug(f"ProductVendor set to empty for non-classic type '{product_type}' (not used for non-classic types)")
         
-        # THC/CBD percentage display - use JointRatio for prerolls and infused prerolls
+        # THC/CBD percentage display - use JointRatio for prerolls and infused prerolls only
         product_type = (label_context.get('Product Type*', '').lower() or 
                        label_context.get('ProductType', '').lower())
         
@@ -1442,12 +1442,9 @@ class TemplateProcessor:
             label_context['Ratio_or_THC_CBD'] = joint_ratio
             label_context['THC_CBD'] = joint_ratio
         else:
-            # Use regular ratio for other product types
-            ratio = (record.get('Ratio') or 
-                    record.get('Ratio_or_THC_CBD') or 
-                    '')
-            label_context['Ratio_or_THC_CBD'] = ratio
-            label_context['THC_CBD'] = ratio
+            # Empty ratio fields for other product types to prevent THC/CBD content
+            label_context['Ratio_or_THC_CBD'] = ''
+            label_context['THC_CBD'] = ''
 
         # DEBUG: Log ProductStrain value before template replacement
         if self.template_type == 'vertical':
