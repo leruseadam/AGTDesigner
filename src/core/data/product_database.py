@@ -938,115 +938,111 @@ class ProductDatabase:
                     for similar_id, similar_occurrences, similar_name, similar_brand in similar_products:
                         logger.debug(f"Similar product: '{similar_name}' (Brand: {similar_brand}, ID: {similar_id})")
                 else:
-                    # Add new product with comprehensive column population
-                    cursor.execute('''
-                        INSERT INTO products (
-                            "Product Name*", normalized_name, "Product Strain", "Product Type*", "Vendor/Supplier*", "Product Brand",
-                            "Description", "Weight*", "Units", "Price", "Lineage", first_seen_date, last_seen_date, created_at, updated_at,
-                            "Quantity*", "DOH", "Concentrate Type", "Ratio", "JointRatio", "Test result unit (% or mg)", "State", "Is Sample? (yes/no)", 
-                            "Is MJ product?(yes/no)", "Discountable? (yes/no)", "Room*", "Batch Number", "Lot Number", "Barcode*",
-                            "Medical Only (Yes/No)", "Med Price", "Expiration Date(YYYY-MM-DD)", "Is Archived? (yes/no)", 
-                            "THC Per Serving", "Allergens", "Solvent", "Accepted Date", "Internal Product Identifier", 
-                            "Product Tags (comma separated)", "Image URL", "Ingredients", "CombinedWeight", "Ratio_or_THC_CBD", 
-                            "Description_Complexity", "Total THC", "THCA", "CBDA", "CBN",
-                            "THC", "CBD", "Total CBD", "CBGA", "CBG", "Total CBG", "CBC", "CBDV", "THCV", "CBGV", "CBNV", "CBGVA",
-                            "total_occurrences", "strain_id",
-                            "ProductName", "DOH Compliant (Yes/No)", "Joint Ratio", "Quantity Received*", "qty",
-                            "THC test result", "CBD test result", "Vendor/Supplier*", "Price",
-                            "AI", "AJ", "AK", "Source", "Date Added"
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (
-                        product_name, normalized_name, self._calculate_product_strain_original(
+                    # Get available columns dynamically to avoid SQL errors
+                    cursor.execute("PRAGMA table_info(products)")
+                    available_columns = {row[1] for row in cursor.fetchall()}
+                    
+                    # Build column list and values list based on what exists
+                    columns_to_insert = []
+                    values_to_insert = []
+                    
+                    # Map of data to potential column names
+                    column_data_map = {
+                        'Product Name*': product_name,
+                        'normalized_name': normalized_name,
+                        'Product Strain': self._calculate_product_strain_original(
                             product_data.get('Product Type*', ''),
                             product_data.get('Product Name*', ''),
                             product_data.get('Description', ''),
                             product_data.get('Ratio', '')
-                        ), product_data.get('Product Type*'),
-                        product_data.get('Vendor/Supplier*'), product_data.get('Product Brand'),
-                        self._process_description(product_data.get('Product Name*', ''), product_data.get('Description', '')), product_data.get('Weight*'),
-                        product_data.get('Units'), product_data.get('Price'),
-                        self._normalize_lineage(product_data.get('Lineage')), current_date, current_date, current_date, current_date,
-                        # Core product data
-                        product_data.get('Quantity*', ''),
-                        product_data.get('DOH', ''),
-                        product_data.get('Concentrate Type', ''),
-                        product_data.get('Ratio', ''),
-                        product_data.get('JointRatio', ''),
-                        product_data.get('Test result unit (% or mg)', ''),
-                        product_data.get('State', ''),
-                        product_data.get('Is Sample? (yes/no)', ''),
-                        product_data.get('Is MJ product?(yes/no)', ''),
-                        product_data.get('Discountable? (yes/no)', ''),
-                        product_data.get('Room*', ''),
-                        product_data.get('Batch Number', ''),
-                        product_data.get('Lot Number', ''),
-                        product_data.get('Barcode*', ''),
-                        product_data.get('Medical Only (Yes/No)', ''),
-                        product_data.get('Med Price', ''),
-                        product_data.get('Expiration Date(YYYY-MM-DD)', ''),
-                        product_data.get('Is Archived? (yes/no)', ''),
-                        product_data.get('THC Per Serving', ''),
-                        product_data.get('Allergens', ''),
-                        product_data.get('Solvent', ''),
-                        product_data.get('Accepted Date', ''),
-                        product_data.get('Internal Product Identifier', ''),
-                        product_data.get('Product Tags (comma separated)', ''),
-                        product_data.get('Image URL', ''),
-                        product_data.get('Ingredients', ''),
-                        product_data.get('CombinedWeight', ''),
-                        self._calculate_ratio_or_thc_cbd(
+                        ),
+                        'Product Type*': product_data.get('Product Type*'),
+                        'Vendor/Supplier*': product_data.get('Vendor/Supplier*'),
+                        'Product Brand': product_data.get('Product Brand'),
+                        'Description': self._process_description(product_data.get('Product Name*', ''), product_data.get('Description', '')),
+                        'Weight*': product_data.get('Weight*'),
+                        'Units': product_data.get('Units'),
+                        'Price': product_data.get('Price'),
+                        'Lineage': self._normalize_lineage(product_data.get('Lineage')),
+                        'first_seen_date': current_date,
+                        'last_seen_date': current_date,
+                        'created_at': current_date,
+                        'updated_at': current_date,
+                        'Quantity*': product_data.get('Quantity*', ''),
+                        'DOH': product_data.get('DOH', ''),
+                        'Concentrate Type': product_data.get('Concentrate Type', ''),
+                        'Ratio': product_data.get('Ratio', ''),
+                        'JointRatio': product_data.get('JointRatio', ''),
+                        'Test result unit (% or mg)': product_data.get('Test result unit (% or mg)', ''),
+                        'State': product_data.get('State', ''),
+                        'Is Sample? (yes/no)': product_data.get('Is Sample? (yes/no)', ''),
+                        'Is MJ product?(yes/no)': product_data.get('Is MJ product?(yes/no)', ''),
+                        'Discountable? (yes/no)': product_data.get('Discountable? (yes/no)', ''),
+                        'Room*': product_data.get('Room*', ''),
+                        'Batch Number': product_data.get('Batch Number', ''),
+                        'Lot Number': product_data.get('Lot Number', ''),
+                        'Barcode*': product_data.get('Barcode*', ''),
+                        'Medical Only (Yes/No)': product_data.get('Medical Only (Yes/No)', ''),
+                        'Med Price': product_data.get('Med Price', ''),
+                        'Expiration Date(YYYY-MM-DD)': product_data.get('Expiration Date(YYYY-MM-DD)', ''),
+                        'Is Archived? (yes/no)': product_data.get('Is Archived? (yes/no)', ''),
+                        'THC Per Serving': product_data.get('THC Per Serving', ''),
+                        'Allergens': product_data.get('Allergens', ''),
+                        'Solvent': product_data.get('Solvent', ''),
+                        'Accepted Date': product_data.get('Accepted Date', ''),
+                        'Internal Product Identifier': product_data.get('Internal Product Identifier', ''),
+                        'Product Tags (comma separated)': product_data.get('Product Tags (comma separated)', ''),
+                        'Image URL': product_data.get('Image URL', ''),
+                        'Ingredients': product_data.get('Ingredients', ''),
+                        'CombinedWeight': product_data.get('CombinedWeight', ''),
+                        'Ratio_or_THC_CBD': self._calculate_ratio_or_thc_cbd(
                             product_data.get('Product Type*', ''),
                             product_data.get('Ratio', ''),
                             product_data.get('JointRatio', ''),
                             product_name
                         ),
-                        product_data.get('Description_Complexity', ''),
-                        product_data.get('Total THC', ''),
-                        product_data.get('THCA', ''),
-                        product_data.get('CBDA', ''),
-                        product_data.get('CBN', ''),
-                        # Additional cannabinoid values
-                        product_data.get('THC', ''),
-                        product_data.get('CBD', ''),
-                        product_data.get('Total CBD', ''),
-                        product_data.get('CBGA', ''),
-                        product_data.get('CBG', ''),
-                        product_data.get('Total CBG', ''),
-                        product_data.get('CBC', ''),
-                        product_data.get('CBDV', ''),
-                        product_data.get('THCV', ''),
-                        product_data.get('CBGV', ''),
-                        product_data.get('CBNV', ''),
-                        product_data.get('CBGVA', ''),
-                        # Additional required columns
-                        product_data.get('total_occurrences', 1),  # Default to 1 for new products
-                        strain_id,  # Foreign key to strains table
-                        # Excel compatibility columns - populate from main columns if not present
-                        product_data.get('ProductName', product_name),  # Alternative to "Product Name*"
-                        product_data.get('DOH Compliant (Yes/No)', product_data.get('DOH', '')),  # Alternative to "DOH"
-                        product_data.get('Joint Ratio', product_data.get('JointRatio', '')),  # Alternative to "JointRatio"
-                        product_data.get('Quantity Received*', product_data.get('Quantity*', '')),  # Alternative to "Quantity*"
-                        product_data.get('qty', product_data.get('Quantity*', '')),  # Alternative to "Quantity*"
-                        # Additional missing values
-                        product_data.get('THC test result', ''),
-                        product_data.get('CBD test result', ''),
-                        product_data.get('Vendor/Supplier*', ''),  # Map to Vendor/Supplier* column
-                        product_data.get('Price', ''),  # Map to Price column,
-                        # AI, AJ, AK values
-                        product_data.get('AI', ''),
-                        product_data.get('AJ', ''),
-                        product_data.get('AK', ''),
-                        # Source and Date Added fields
-                        product_data.get('Source', ''),
-                        product_data.get('Date Added', current_date)
-                    ))
+                        'Total THC': product_data.get('Total THC', ''),
+                        'THCA': product_data.get('THCA', ''),
+                        'CBDA': product_data.get('CBDA', ''),
+                        'CBN': product_data.get('CBN', ''),
+                        'THC': product_data.get('THC', ''),
+                        'CBD': product_data.get('CBD', ''),
+                        'Total CBD': product_data.get('Total CBD', ''),
+                        'CBGA': product_data.get('CBGA', ''),
+                        'CBG': product_data.get('CBG', ''),
+                        'Total CBG': product_data.get('Total CBG', ''),
+                        'CBC': product_data.get('CBC', ''),
+                        'CBDV': product_data.get('CBDV', ''),
+                        'THCV': product_data.get('THCV', ''),
+                        'CBGV': product_data.get('CBGV', ''),
+                        'CBNV': product_data.get('CBNV', ''),
+                        'CBGVA': product_data.get('CBGVA', ''),
+                        'total_occurrences': 1,
+                        'strain_id': strain_id,
+                        'Weight Unit* (grams/gm or ounces/oz)': product_data.get('Weight Unit* (grams/gm or ounces/oz)', product_data.get('Units', '')),
+                        'THC test result': product_data.get('THC test result', ''),
+                        'CBD test result': product_data.get('CBD test result', ''),
+                    }
+                    
+                    # Only include columns that exist in the database
+                    for col_name, col_value in column_data_map.items():
+                        if col_name in available_columns:
+                            columns_to_insert.append(f'"{col_name}"')
+                            values_to_insert.append(col_value)
+                    
+                    # Build the INSERT statement dynamically
+                    columns_str = ', '.join(columns_to_insert)
+                    placeholders = ', '.join(['?' for _ in values_to_insert])
+                    
+                    insert_query = f'INSERT INTO products ({columns_str}) VALUES ({placeholders})'
+                    cursor.execute(insert_query, values_to_insert)
                     
                     product_id = cursor.lastrowid
                     conn.commit()
                     if DEBUG_ENABLED:
                         logger.debug(f"Added new product '{product_name}'")
                     return product_id
-                    
+                
         except Exception as e:
             product_name = product_data.get('Product Name*', product_data.get('ProductName', ''))
             logger.error(f"Error adding/updating product '{product_name}': {e}")
