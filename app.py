@@ -1542,50 +1542,89 @@ def upload_file():
     try:
         start_time = time.time()
         logging.info("=== UPLOAD REQUEST START ===")
+        logging.info(f"Request method: {request.method}")
+        logging.info(f"Content-Type: {request.content_type}")
+        logging.info(f"Files in request: {list(request.files.keys())}")
         
         # Check if file is present
         if 'file' not in request.files:
+            logging.error("No 'file' field in request.files")
             return jsonify({'error': 'No file provided'}), 400
         
         file = request.files['file']
+        logging.info(f"File object: {file}")
+        logging.info(f"Filename: {file.filename}")
+        
         if file.filename == '':
+            logging.error("Empty filename")
             return jsonify({'error': 'No file selected'}), 400
         
         # Validate file type
         if not file.filename.lower().endswith(('.xlsx', '.xls')):
+            logging.error(f"Invalid file type: {file.filename}")
             return jsonify({'error': 'Invalid file type. Please upload an Excel file.'}), 400
         
         # Save file
-        uploads_dir = Path('uploads')
-        uploads_dir.mkdir(exist_ok=True)
-        timestamp = int(time.time())
-        filename = f"{timestamp}_{file.filename}"
-        file_path = uploads_dir / filename
-        file.save(str(file_path))
-        logging.info(f"File saved: {file_path}")
+        try:
+            uploads_dir = Path('uploads')
+            uploads_dir.mkdir(exist_ok=True)
+            logging.info(f"Uploads directory: {uploads_dir.absolute()}")
+            
+            timestamp = int(time.time())
+            filename = f"{timestamp}_{file.filename}"
+            file_path = uploads_dir / filename
+            
+            logging.info(f"Attempting to save to: {file_path}")
+            file.save(str(file_path))
+            logging.info(f"File saved successfully: {file_path}")
+            
+            # Verify file exists
+            if not file_path.exists():
+                raise Exception(f"File was not saved: {file_path}")
+            
+            file_size = file_path.stat().st_size
+            logging.info(f"File size: {file_size} bytes")
+            
+        except Exception as save_error:
+            logging.error(f"Error saving file: {save_error}")
+            logging.error(traceback.format_exc())
+            return jsonify({'error': f'Failed to save file: {str(save_error)}'}), 500
         
         # Store in session
-        session['file_path'] = str(file_path)
-        session['uploaded_filename'] = file.filename
-        session.modified = True
+        try:
+            session['file_path'] = str(file_path)
+            session['uploaded_filename'] = file.filename
+            session.modified = True
+            logging.info(f"Session updated with file path: {file_path}")
+        except Exception as session_error:
+            logging.error(f"Error updating session: {session_error}")
+            # Continue anyway - this is not critical
         
-        # Mark as ready immediately - processing will happen on demand
-        update_processing_status(file.filename, 'ready')
+        # Mark as ready
+        try:
+            update_processing_status(file.filename, 'ready')
+            logging.info(f"Processing status updated to 'ready'")
+        except Exception as status_error:
+            logging.error(f"Error updating processing status: {status_error}")
+            # Continue anyway
         
         upload_time = time.time() - start_time
-        logging.info(f"Upload completed in {upload_time:.3f}s")
+        logging.info(f"=== UPLOAD COMPLETE === Time: {upload_time:.3f}s")
         
         return jsonify({
             'success': True,
             'message': 'File uploaded successfully',
             'filename': file.filename,
-            'upload_time': upload_time
-        })
+            'upload_time': upload_time,
+            'file_size': file_size
+        }), 200
         
     except Exception as e:
-        logging.error(f"Upload error: {str(e)}")
-        logging.error(traceback.format_exc())
-        return jsonify({'error': str(e)}), 500
+        logging.error(f"=== UPLOAD FAILED ===")
+        logging.error(f"Error: {str(e)}")
+        logging.error(f"Type: {type(e)}")
+        logging.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({'error': str(e), 'type': str(type(e).__name__)}), 500
 
 
 @app.route('/upload-pythonanywhere', methods=['POST'])
