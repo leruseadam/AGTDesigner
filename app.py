@@ -453,11 +453,12 @@ def get_excel_processor():
                 # Get the current store name from session, with fallback for startup
                 from flask import session
                 try:
-                    current_store = session.get('selected_store', 'AGT_Bothell')
+                    # Store context removed - using single database
+                    pass
                 except RuntimeError:
                     # No active request context during startup, use default
-                    current_store = 'AGT_Bothell'
-                _excel_processor = ExcelProcessor(store_name=current_store)
+                    pass
+                _excel_processor = ExcelProcessor()
                 
                 # Enable product database integration by default
                 if hasattr(_excel_processor, 'enable_product_db_integration'):
@@ -1097,23 +1098,13 @@ def get_session_excel_processor():
             # CRITICAL FIX: Check if we have an uploaded file in session
             session_file_path = session.get('file_path')
             session_store = session.get('file_store', '')
-            current_store = session.get('selected_store', '')
+            # Store context removed - using single database
             
             if session_file_path and os.path.exists(session_file_path):
                 logging.info(f"CRITICAL FIX: Session has uploaded file: {session_file_path}")
-                logging.info(f"CRITICAL FIX: File store context: {session_store}, Current store: {current_store}")
+                logging.info(f"CRITICAL FIX: File store context: {session_store}")
                 
-                # Check if store context matches current store selection
-                if session_store and current_store and session_store != current_store:
-                    logging.warning(f"CRITICAL FIX: Store mismatch! File was uploaded for {session_store}, but current store is {current_store}")
-                    logging.warning(f"CRITICAL FIX: Clearing file data to prevent cross-store data leakage")
-                    session.pop('file_path', None)
-                    session.pop('file_store', None)
-                    # Don't clear selected_tags on store mismatch - preserve user selections
-                    # session.pop('selected_tags', None)
-                    g.excel_processor.df = pd.DataFrame()
-                    g.excel_processor.selected_tags = []
-                    return g.excel_processor
+                # Store mismatch logic removed - using single database for all stores
                 
                 # Don't load default file if we have an uploaded file
                 if not hasattr(g.excel_processor, 'df') or g.excel_processor.df is None or g.excel_processor.df.empty:
@@ -1276,16 +1267,8 @@ def get_session_excel_processor():
             g.excel_processor.df = pd.DataFrame()
         
         # Validate store context to prevent cross-store data access
-        current_store = session.get('selected_store', '')
-        if hasattr(g.excel_processor, '_store_context') and g.excel_processor._store_context:
-            if current_store and g.excel_processor._store_context != current_store:
-                logging.warning(f"Store context mismatch! Processor has {g.excel_processor._store_context}, but session has {current_store}")
-                logging.warning("Updating store context but preserving selected tags")
-                g.excel_processor._store_context = current_store
-                # Don't clear data or tags for store context changes
-            elif not current_store:
-                logging.warning("No store selected in session - preserving processor data and tags")
-                # Don't clear data or tags when no store is selected
+        # Store context removed - using single database
+        # Store context removed - using single database
         
         return g.excel_processor
         
@@ -1446,7 +1429,7 @@ def api_status():
             'selected_tags_count': len(excel_processor.selected_tags) if hasattr(excel_processor, 'selected_tags') else 0,
             'session_stats': session_stats,
             'has_pending_changes': has_pending_changes,
-            'current_store': session.get('selected_store', ''),
+            # Store context removed - using single database
             'file_store': session.get('file_store', '')
         }
         return jsonify(status)
@@ -1595,7 +1578,7 @@ def upload_file():
             
             # Capture variables from request context for background thread
             original_filename = file.filename
-            current_store = session.get('selected_store', 'AGT_Bothell')
+            # Store context removed - using single database
             
             def process_in_background():
                 try:
@@ -1610,7 +1593,7 @@ def upload_file():
                         # Store in database
                         try:
                             from src.core.data.product_database import get_product_database
-                            product_db = get_product_database(current_store)
+                            product_db = get_product_database()
                             
                             if product_db and hasattr(product_db, 'store_excel_data'):
                                 logging.info(f"[BACKGROUND] Storing {row_count} products in database...")
@@ -1659,8 +1642,8 @@ def upload_file():
                 # Store in database for persistence
                 try:
                     from src.core.data.product_database import get_product_database
-                    current_store = session.get('selected_store', 'AGT_Bothell')
-                    product_db = get_product_database(current_store)
+                    # Store context removed - using single database
+                    product_db = get_product_database()
                     
                     if product_db and hasattr(product_db, 'store_excel_data'):
                         logging.info(f"Storing {row_count} products in database...")
@@ -1788,8 +1771,8 @@ def upload_file_simple_pythonanywhere():
                     logging.warning("[UPLOAD] ExcelProcessor does not have _store_upload_in_database method")
                     # Try alternative database storage method
                     try:
-                        current_store = session.get('selected_store', 'AGT_Bothell')
-                        product_db = get_product_database(current_store)
+                        # Store context removed - using single database
+                        product_db = get_product_database()
                         if hasattr(product_db, 'store_excel_data'):
                             logging.info("[UPLOAD] Using ProductDatabase.store_excel_data method...")
                             storage_result = product_db.store_excel_data(processor.df, temp_path)
@@ -2369,8 +2352,8 @@ def process_excel_background(filename, temp_path):
                 # Try alternative database storage method
                 try:
                     logging.info("[BG] Attempting alternative database storage with ProductDatabase")
-                    current_store = session.get('selected_store', 'AGT_Bothell')
-                    product_db = get_product_database(current_store)
+                    # Store context removed - using single database
+                    product_db = get_product_database()
                     logging.info(f"[BG] ProductDatabase obtained: {product_db}")
                     
                     if hasattr(product_db, 'store_excel_data'):
@@ -2945,13 +2928,10 @@ def move_tags():
         check_session_size()
         
         # Store validation to prevent cross-store data access
-        current_store = session.get('selected_store', '')
+        # Store context removed - using single database
         file_store = session.get('file_store', '')
         
-        if file_store and current_store and file_store != current_store:
-            logging.warning(f"Store mismatch! File was uploaded for {file_store}, but current store is {current_store}")
-            logging.warning("Returning error to prevent cross-store data access")
-            return jsonify({'error': 'Store mismatch detected. Please select the correct store for this file.'}), 400
+        # Store validation removed - using single database
         
         data = request.get_json()
         action = data.get('action', 'move')
@@ -3293,13 +3273,10 @@ def clear_filters():
         optimize_session_data()
         
         # Store validation to prevent cross-store data access
-        current_store = session.get('selected_store', '')
+        # Store context removed - using single database
         file_store = session.get('file_store', '')
         
-        if file_store and current_store and file_store != current_store:
-            logging.warning(f"Store mismatch! File was uploaded for {file_store}, but current store is {current_store}")
-            logging.warning("Returning error to prevent cross-store data access")
-            return jsonify({'error': 'Store mismatch detected. Please select the correct store for this file.'}), 400
+        # Store validation removed - using single database
         
         excel_processor = get_session_excel_processor()
         # CRITICAL FIX: Don't clear selected tags if they were set by JSON matching
@@ -3382,120 +3359,11 @@ def get_session_stats():
         logging.error(f"Error getting session stats: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/set-store', methods=['POST'])
-def set_store():
-    """Set the store for the current session."""
-    try:
-        data = request.get_json()
-        if not data or 'store' not in data:
-            return jsonify({'error': 'Store selection is required'}), 400
-        
-        store_value = data['store']
-        
-        # Validate store selection
-        valid_stores = [
-            'AGT_Bothell', 'AGT_Burien', 'AGT_Goldbar', 'AGT_Lynnwood',
-            'AGT_Shoreline', 'AGT_Seattle', 'AGT_Walla_Walla'
-        ]
-        
-        if store_value not in valid_stores:
-            return jsonify({'error': 'Invalid store selection'}), 400
-        
-        # Store the selected store in session
-        session['selected_store'] = store_value
-        
-        # Clear any existing data to ensure fresh start with new store
-        # (but keep the selected_store we just set)
-        session.pop('file_path', None)
-        session.pop('file_store', None)
-        # Don't clear selected_tags when switching stores - preserve user selections
-        # session.pop('selected_tags', None)
-        
-        # Clear global Excel processor to force reload with new store context
-        reset_excel_processor()
-        
-        # Clear global database cache to force reload with new store context
-        global _product_database
-        _product_database = None
-        
-        # Clear any cached data that might contain old store information
-        try:
-            cache_keys_to_clear = [
-                'available_tags', 'selected_tags', 'filter_options', 'dropdowns',
-                'json_matched_tags', 'full_excel_tags', 'initial_data'
-            ]
-            
-            for cache_key_name in cache_keys_to_clear:
-                try:
-                    cache_keys_to_try = [
-                        get_session_cache_key(cache_key_name),
-                        f"{cache_key_name}_default",
-                        cache_key_name
-                    ]
-                    
-                    for key in cache_keys_to_try:
-                        if cache.has(key):
-                            cache.delete(key)
-                            logging.info(f"Cleared cache key: {key}")
-                except Exception as key_error:
-                    logging.warning(f"Error clearing cache key {cache_key_name}: {key_error}")
-        except Exception as cache_error:
-            logging.warning(f"Error clearing caches: {cache_error}")
-        
-        logging.info(f"Store set to: {store_value} for session")
-        
-        return jsonify({
-            'success': True,
-            'message': f'Store set to {store_value}',
-            'store': store_value
-        })
-        
-    except Exception as e:
-        logging.error(f"Error setting store: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+# Store change logic removed - using single database for all stores
 
-@app.route('/api/get-store', methods=['GET'])
-def get_store():
-    """Get the current store for the session."""
-    try:
-        current_store = session.get('selected_store', '')
-        
-        # If no store is set, default to Bothell
-        if not current_store:
-            current_store = 'AGT_Bothell'
-            session['selected_store'] = current_store
-            logging.info(f"No store set, defaulting to {current_store}")
-        
-        return jsonify({
-            'success': True,
-            'store': current_store
-        })
-    except Exception as e:
-        logging.error(f"Error getting store: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+# Store get logic removed - using single database for all stores
 
-@app.route('/api/check-store-required', methods=['GET'])
-def check_store_required():
-    """Check if store selection is required for the current session."""
-    try:
-        current_store = session.get('selected_store', '')
-        
-        # If no store is set, default to Bothell
-        if not current_store:
-            current_store = 'AGT_Bothell'
-            session['selected_store'] = current_store
-            logging.info(f"No store set in check-store-required, defaulting to {current_store}")
-        
-        requires_store = not bool(current_store)
-        
-        return jsonify({
-            'success': True,
-            'requires_store': requires_store,
-            'store': current_store
-        })
-    except Exception as e:
-        logging.error(f"Error checking store requirement: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+# Store check logic removed - using single database for all stores
 
 @app.route('/api/clear-session', methods=['POST'])
 def clear_session():
@@ -3523,7 +3391,7 @@ def clear_session():
 def debug_database():
     """Debug endpoint to check database state and session info."""
     try:
-        current_store = session.get('selected_store', '')
+        # Store context removed - using single database
         session_store = session.get('file_store', '')
         
         # Check which database would be loaded
@@ -3538,13 +3406,7 @@ def debug_database():
         }
         
         # Check store-specific database
-        if current_store:
-            store_db_path = os.path.join(current_dir, 'uploads', f'product_database_{current_store}.db')
-            db_info['store_db'] = {
-                'path': store_db_path,
-                'exists': os.path.exists(store_db_path),
-                'size': os.path.getsize(store_db_path) if os.path.exists(store_db_path) else 0
-            }
+        # Store context removed - using single database
         
         # Check global database instance
         global _product_database
@@ -3555,8 +3417,8 @@ def debug_database():
         
         # Test database connection
         try:
-            if current_store:
-                test_db = get_product_database(current_store)
+            # Store context removed - using single database
+                test_db = get_product_database()
                 db_info['connection_test'] = {
                     'success': True,
                     'db_path': test_db.db_path,
@@ -3578,7 +3440,7 @@ def debug_database():
         return jsonify({
             'success': True,
             'session': {
-                'selected_store': current_store,
+                # Store context removed - using single database
                 'file_store': session_store,
                 'file_path': session.get('file_path', '')
             },
@@ -4213,8 +4075,8 @@ def generate_labels():
         # Check if database is available
         try:
             from src.core.data.product_database import get_product_database
-            current_store = session.get('selected_store', 'AGT_Bothell')
-            product_db = get_product_database(current_store)
+            # Store context removed - using single database
+            product_db = get_product_database()
             if product_db:
                 # Test if database has data
                 conn = product_db._get_connection()
@@ -4340,8 +4202,8 @@ def generate_labels():
                 # First, try to check if we have database data available
                 try:
                     from src.core.data.product_database import get_product_database
-                    current_store = session.get('selected_store', 'AGT_Bothell')
-                    product_db = get_product_database(current_store)
+                    # Store context removed - using single database
+                    product_db = get_product_database()
                     if product_db:
                         logging.info("Attempting to validate selected tags against database...")
                         # Check if tags exist in database by trying to get them
@@ -4428,8 +4290,8 @@ def generate_labels():
             logging.info("Using database for record generation (preferred source)")
             try:
                 from src.core.data.product_database import get_product_database
-                current_store = session.get('selected_store', '')
-                product_db = get_product_database(current_store)
+                # Store context removed - using single database
+                product_db = get_product_database()
                 if product_db:
                     # ENHANCED: Replace JSON matched tags with database data
                     logging.info(f"Original valid_selected_tags: {valid_selected_tags}")
@@ -4898,14 +4760,7 @@ def get_available_tags():
         logging.info("=== AVAILABLE TAGS DEBUG START ===")
         logging.info(f"Available tags request at {datetime.now().strftime('%H:%M:%S')}")
         
-        # Store validation to prevent cross-store data access
-        current_store = session.get('selected_store', '')
-        file_store = session.get('file_store', '')
-        
-        if file_store and current_store and file_store != current_store:
-            logging.warning(f"Store mismatch! File was uploaded for {file_store}, but current store is {current_store}")
-            logging.warning("Returning empty tags to prevent cross-store data access")
-            return jsonify([])
+        # Store validation removed - using single database for all stores
         
         # Get products from both Excel processor and database
         all_tags = []
@@ -4924,7 +4779,7 @@ def get_available_tags():
         # 2. Get products from database
         database_tags = []
         try:
-            product_db = get_product_database(current_store)
+            product_db = get_product_database()
             logging.info(f"Got product database: {product_db}")
             if product_db:
                 logging.info(f"Database path: {product_db.db_path}")
@@ -4941,8 +4796,8 @@ def get_available_tags():
                         if not cursor.fetchone():
                             logging.error(f"Products table not found in database at {product_db.db_path}")
                             # If store-specific database doesn't have products table, fall back to main database
-                            if current_store:
-                                logging.info(f"Falling back to main database for store {current_store}")
+                            # Store context removed - using single database
+                                logging.info(f"Falling back to main database")
                                 # Use main database path
                                 current_dir = os.path.dirname(os.path.abspath(__file__))
                                 main_db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
@@ -4982,10 +4837,10 @@ def get_available_tags():
                                 logging.error(f"Products table not found and no store specified")
                         else:
                             # Products table exists, proceed with normal query
-                            cursor.execute('SELECT COUNT(*) FROM products')
-                            total_count = cursor.fetchone()[0]
-                            logging.info(f"Total products in database: {total_count}")
-                            
+                        cursor.execute('SELECT COUNT(*) FROM products')
+                        total_count = cursor.fetchone()[0]
+                        logging.info(f"Total products in database: {total_count}")
+                        
                             # Get available columns dynamically to avoid SQL errors
                             cursor.execute("PRAGMA table_info(products)")
                             available_columns = [row[1] for row in cursor.fetchall()]
@@ -4998,21 +4853,21 @@ def get_available_tags():
                             query = f'SELECT {quoted_columns} FROM products ORDER BY id DESC LIMIT 20000'
                             
                             cursor.execute(query)
-                            rows = cursor.fetchall()
+                        rows = cursor.fetchall()
                             columns = columns_to_query
-                            logging.info(f"Database query returned {len(rows)} rows")
-                            
-                            for row in rows:
-                                product_dict = dict(zip(columns, row))
-                                # Convert to the format expected by the frontend
-                                database_tags.append(product_dict)
-                            
-                            logging.info(f"Database returned {len(database_tags)} products")
-                            
-                            # Debug: Check if we have products with specific indicators
-                            ray_count = sum(1 for tag in database_tags if 'Ray' in tag.get('Product Name*', ''))
-                            hustler_count = sum(1 for tag in database_tags if 'Hustler' in tag.get('Product Name*', ''))
-                            logging.info(f"Database products - Ray: {ray_count}, Hustler: {hustler_count}")
+                        logging.info(f"Database query returned {len(rows)} rows")
+                        
+                        for row in rows:
+                            product_dict = dict(zip(columns, row))
+                            # Convert to the format expected by the frontend
+                            database_tags.append(product_dict)
+                        
+                        logging.info(f"Database returned {len(database_tags)} products")
+                        
+                        # Debug: Check if we have products with specific indicators
+                        ray_count = sum(1 for tag in database_tags if 'Ray' in tag.get('Product Name*', ''))
+                        hustler_count = sum(1 for tag in database_tags if 'Hustler' in tag.get('Product Name*', ''))
+                        logging.info(f"Database products - Ray: {ray_count}, Hustler: {hustler_count}")
                 else:
                     logging.error(f"Database file does not exist: {product_db.db_path}")
         except Exception as e:
@@ -5057,14 +4912,7 @@ def get_available_tags():
 @app.route('/api/selected-tags', methods=['GET'])
 def get_selected_tags():
     try:
-        # Store validation to prevent cross-store data access
-        current_store = session.get('selected_store', '')
-        file_store = session.get('file_store', '')
-        
-        if file_store and current_store and file_store != current_store:
-            logging.warning(f"Store mismatch! File was uploaded for {file_store}, but current store is {current_store}")
-            logging.warning("Returning empty tags to prevent cross-store data access")
-            return jsonify([])
+        # Store validation removed - using single database for all stores
         
         excel_processor = get_session_excel_processor()
         if excel_processor is None:
@@ -5390,8 +5238,8 @@ def update_strain_lineage():
             return jsonify({'error': 'Missing strain_name or lineage'}), 400
         
         try:
-            current_store = session.get('selected_store', 'AGT_Bothell')
-            product_db = get_product_database(current_store)
+            # Store context removed - using single database
+            product_db = get_product_database()
             if not product_db:
                 return jsonify({'error': 'Product database not available'}), 500
             
@@ -5507,8 +5355,8 @@ def batch_update_lineage():
         
         # Force database persistence for batch lineage changes
         try:
-            current_store = session.get('selected_store', 'AGT_Bothell')
-            product_db = get_product_database(current_store)
+            # Store context removed - using single database
+            product_db = get_product_database()
             if product_db:
                 for change in changes_made:
                     tag_name = change['tag_name']
@@ -5767,8 +5615,8 @@ def database_stats():
     """Get statistics about the product database."""
     try:
         # Get current store from session
-        current_store = session.get('selected_store', '')
-        product_db = get_product_database(current_store)
+        # Store context removed - using single database
+        product_db = get_product_database()
         
         # Ensure database is initialized
         if not product_db._initialized:
@@ -5783,8 +5631,8 @@ def database_stats():
             if not test_cursor.fetchone():
                 logging.error(f"Products table not found in database at {product_db.db_path}")
                 # If store-specific database doesn't have products table, fall back to main database
-                if current_store:
-                    logging.info(f"Falling back to main database for store {current_store}")
+                # Store context removed - using single database
+                    logging.info(f"Falling back to main database")
                     # Create main database instance directly (don't clear the global variable!)
                     from src.core.data.product_database import ProductDatabase
                     main_db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
@@ -5920,8 +5768,8 @@ def database_stats():
 def database_schema():
     """Get database schema information for debugging."""
     try:
-        current_store = session.get('selected_store', '')
-        product_db = get_product_database(current_store)
+        # Store context removed - using single database
+        product_db = get_product_database()
         
         import sqlite3
         with sqlite3.connect(product_db.db_path) as conn:
@@ -6719,8 +6567,8 @@ def database_status():
 def get_database_products():
     """Get products from the database for the editor."""
     try:
-        current_store = session.get('selected_store', '')
-        product_db = get_product_database(current_store)
+        # Store context removed - using single database
+        product_db = get_product_database()
         
         # Ensure we have a usable database; fallback to main DB if products table missing or empty
         try:
@@ -12841,8 +12689,8 @@ def fix_descriptions():
         logging.info("=== FIX DESCRIPTIONS REQUEST START ===")
         
         # Get the product database instance
-        current_store = session.get('selected_store', 'AGT_Bothell')
-        product_db = get_product_database(current_store)
+                    # Store context removed - using single database
+        product_db = get_product_database()
         if not product_db:
             return jsonify({'error': 'Product database not available'}), 500
         
@@ -12943,12 +12791,11 @@ def backfill_units():
                 logging.error(f"Error reading Excel file {excel_file_path}: {e}")
                 return {}
         
-        # Get database path
-        current_store = session.get('selected_store', 'AGT_Bothell')
-        db_path = os.path.join(current_dir, 'uploads', f'product_database_{current_store}.db')
+        # Get database path - using main database
+        db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
         
         if not os.path.exists(db_path):
-            return jsonify({'error': f'Database not found for store: {current_store}'}), 400
+            return jsonify({'error': 'Database not found'}), 400
         
         # Excel files to process
         uploads_dir = Path(current_dir) / 'uploads'
@@ -13027,8 +12874,8 @@ def backfill_units():
 def identify_bad_descriptions():
     """Identify all description values that don't meet Product Name transformation criteria."""
     try:
-        current_store = session.get('selected_store', 'AGT_Bothell')
-        product_db = get_product_database(current_store)
+                    # Store context removed - using single database
+        product_db = get_product_database()
         
         # Get the list of bad descriptions
         result = product_db.identify_bad_descriptions()
@@ -13054,8 +12901,8 @@ def identify_bad_descriptions():
 def fix_description_format():
     """Fix Description field format to extract just product name from 'Product Name by Vendor - Weight' format."""
     try:
-        current_store = session.get('selected_store', 'AGT_Bothell')
-        product_db = get_product_database(current_store)
+                    # Store context removed - using single database
+        product_db = get_product_database()
         
         # Run the original fix
         result = product_db.fix_description_format()
