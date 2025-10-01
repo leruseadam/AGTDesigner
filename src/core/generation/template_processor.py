@@ -1596,36 +1596,28 @@ class TemplateProcessor:
                 formatted_val = self.format_with_soft_hyphen(val)
                 label_context[key] = wrap_with_marker(unwrap_marker(formatted_val, marker), marker)
         
-        # CRITICAL FIX: Provide raw values for template fields (after all processing)
-        # The template needs raw values, not wrapped values - override main fields with raw values
+        # Preserve template-side formatting: keep wrapped markers during render.
+        # Also compute raw values and expose them under *_RAW keys for logic.
         try:
             if label_context.get('Price'):
                 label_context['Price_RAW'] = unwrap_marker(label_context['Price'], 'PRICE')
-                # Override the main field with raw value for template rendering
-                label_context['Price'] = label_context['Price_RAW']
             if label_context.get('WeightUnits'):
                 label_context['WeightUnits_RAW'] = unwrap_marker(label_context['WeightUnits'], 'WEIGHTUNITS')
-                label_context['WeightUnits'] = label_context['WeightUnits_RAW']
             if label_context.get('DescAndWeight'):
                 label_context['DescAndWeight_RAW'] = unwrap_marker(label_context['DescAndWeight'], 'DESC')
-                label_context['DescAndWeight'] = label_context['DescAndWeight_RAW']
             if label_context.get('Lineage'):
                 label_context['Lineage_RAW'] = unwrap_marker(label_context['Lineage'], 'LINEAGE')
-                label_context['Lineage'] = label_context['Lineage_RAW']
             if label_context.get('ProductStrain'):
                 label_context['ProductStrain_RAW'] = unwrap_marker(label_context['ProductStrain'], 'PRODUCTSTRAIN')
-                label_context['ProductStrain'] = label_context['ProductStrain_RAW']
             if label_context.get('ProductVendor'):
                 label_context['ProductVendor_RAW'] = unwrap_marker(label_context['ProductVendor'], 'PRODUCTVENDOR')
-                label_context['ProductVendor'] = label_context['ProductVendor_RAW']
             if label_context.get('ProductBrand'):
                 label_context['ProductBrand_RAW'] = unwrap_marker(label_context['ProductBrand'], 'PRODUCTBRAND')
-                label_context['ProductBrand'] = label_context['ProductBrand_RAW']
             if label_context.get('Ratio_or_THC_CBD'):
                 label_context['Ratio_or_THC_CBD_RAW'] = unwrap_marker(label_context['Ratio_or_THC_CBD'], 'THC_CBD')
-                label_context['Ratio_or_THC_CBD'] = label_context['Ratio_or_THC_CBD_RAW']
-        except Exception as e:
-            self.logger.error(f"Error unwrapping raw values: {e}")
+        except Exception:
+            # Fail-safe: continue with wrapped values
+            pass
         
         # Ensure JointRatio stays on the same line - no line break processing
         if label_context.get('JointRatio'):
