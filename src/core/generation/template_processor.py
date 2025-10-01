@@ -1582,9 +1582,6 @@ class TemplateProcessor:
                 formatted_val = self.format_with_soft_hyphen(val)
                 label_context[key] = wrap_with_marker(unwrap_marker(formatted_val, marker), marker)
         
-        # CRITICAL FIX: Provide raw values for template fields (after all processing)
-        # The template needs raw values, not wrapped values
-        if label_context.get('Price'):
         # Preserve template-side formatting: keep wrapped markers during render.
         # We still compute raw values and expose them under *_RAW keys for any logic that needs plain text.
         # This avoids stripping run-level styling defined in the .docx placeholders.
