@@ -1538,93 +1538,66 @@ def generation_splash():
     return render_template('generation-splash.html')
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    """Simple file upload with deferred processing"""
+    """Simple file upload - just save and return success"""
+    start_time = time.time()
+    
     try:
-        start_time = time.time()
-        logging.info("=== UPLOAD REQUEST START ===")
-        logging.info(f"Request method: {request.method}")
-        logging.info(f"Content-Type: {request.content_type}")
-        logging.info(f"Files in request: {list(request.files.keys())}")
+        logging.info("=== UPLOAD START ===")
         
-        # Check if file is present
+        # Validate request
         if 'file' not in request.files:
-            logging.error("No 'file' field in request.files")
+            logging.error("No file in request")
             return jsonify({'error': 'No file provided'}), 400
         
         file = request.files['file']
-        logging.info(f"File object: {file}")
-        logging.info(f"Filename: {file.filename}")
-        
-        if file.filename == '':
-            logging.error("Empty filename")
+        if not file or file.filename == '':
+            logging.error("Empty file or filename")
             return jsonify({'error': 'No file selected'}), 400
         
-        # Validate file type
+        logging.info(f"Uploading: {file.filename}")
+        
+        # Validate extension
         if not file.filename.lower().endswith(('.xlsx', '.xls')):
-            logging.error(f"Invalid file type: {file.filename}")
-            return jsonify({'error': 'Invalid file type. Please upload an Excel file.'}), 400
+            return jsonify({'error': 'Only Excel files allowed'}), 400
         
-        # Save file
-        try:
-            uploads_dir = Path('uploads')
-            uploads_dir.mkdir(exist_ok=True)
-            logging.info(f"Uploads directory: {uploads_dir.absolute()}")
-            
-            timestamp = int(time.time())
-            filename = f"{timestamp}_{file.filename}"
-            file_path = uploads_dir / filename
-            
-            logging.info(f"Attempting to save to: {file_path}")
-            file.save(str(file_path))
-            logging.info(f"File saved successfully: {file_path}")
-            
-            # Verify file exists
-            if not file_path.exists():
-                raise Exception(f"File was not saved: {file_path}")
-            
-            file_size = file_path.stat().st_size
-            logging.info(f"File size: {file_size} bytes")
-            
-        except Exception as save_error:
-            logging.error(f"Error saving file: {save_error}")
-            logging.error(traceback.format_exc())
-            return jsonify({'error': f'Failed to save file: {str(save_error)}'}), 500
+        # Create uploads directory
+        import os
+        uploads_dir = os.path.join(os.getcwd(), 'uploads')
+        os.makedirs(uploads_dir, exist_ok=True)
         
-        # Store in session
-        try:
-            session['file_path'] = str(file_path)
-            session['uploaded_filename'] = file.filename
-            session.modified = True
-            logging.info(f"Session updated with file path: {file_path}")
-        except Exception as session_error:
-            logging.error(f"Error updating session: {session_error}")
-            # Continue anyway - this is not critical
+        # Save file with timestamp
+        timestamp = int(time.time())
+        safe_filename = f"{timestamp}_{file.filename}"
+        file_path = os.path.join(uploads_dir, safe_filename)
         
-        # Mark as ready
-        try:
-            update_processing_status(file.filename, 'ready')
-            logging.info(f"Processing status updated to 'ready'")
-        except Exception as status_error:
-            logging.error(f"Error updating processing status: {status_error}")
-            # Continue anyway
+        file.save(file_path)
+        logging.info(f"Saved: {file_path}")
+        
+        # Verify saved
+        if not os.path.exists(file_path):
+            return jsonify({'error': 'File save failed'}), 500
+        
+        # Update session
+        session['file_path'] = file_path
+        session['uploaded_filename'] = file.filename
+        session.modified = True
+        
+        # Mark ready
+        update_processing_status(file.filename, 'ready')
         
         upload_time = time.time() - start_time
-        logging.info(f"=== UPLOAD COMPLETE === Time: {upload_time:.3f}s")
+        logging.info(f"=== UPLOAD COMPLETE: {upload_time:.3f}s ===")
         
         return jsonify({
             'success': True,
-            'message': 'File uploaded successfully',
-            'filename': file.filename,
-            'upload_time': upload_time,
-            'file_size': file_size
-        }), 200
+            'message': 'File uploaded',
+            'filename': file.filename
+        })
         
     except Exception as e:
-        logging.error(f"=== UPLOAD FAILED ===")
-        logging.error(f"Error: {str(e)}")
-        logging.error(f"Type: {type(e)}")
-        logging.error(f"Traceback: {traceback.format_exc()}")
-        return jsonify({'error': str(e), 'type': str(type(e).__name__)}), 500
+        logging.error(f"Upload failed: {e}")
+        logging.error(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/upload-pythonanywhere', methods=['POST'])
