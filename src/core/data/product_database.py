@@ -1154,7 +1154,11 @@ class ProductDatabase:
                             row_dict.get('Description', '')
                         ),
                         'Weight*': self._ensure_crucial_value(row_dict.get('Weight*', ''), '1g', 'Weight'),
-                        'Units': self._ensure_crucial_value(row_dict.get('Units', ''), 'each', 'Units'),
+                        'Units': self._ensure_crucial_value(
+                            row_dict.get('Units', row_dict.get('Weight Unit* (grams/gm or ounces/oz)', '')), 
+                            'each', 
+                            'Units'
+                        ),
                         'Price': self._ensure_crucial_value(row_dict.get('Price*', row_dict.get('Price', '')), '0.00', 'Price'),
                         'Product Strain': row_dict.get('Product Strain', ''),
                         'Quantity*': row_dict.get('Quantity*', ''),
