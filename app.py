@@ -4934,38 +4934,83 @@ def get_available_tags():
                     with sqlite3.connect(product_db.db_path) as conn:
                         cursor = conn.cursor()
                         
-                        # First check how many products are in the database
-                        cursor.execute('SELECT COUNT(*) FROM products')
-                        total_count = cursor.fetchone()[0]
-                        logging.info(f"Total products in database: {total_count}")
-                        
-                        # Get available columns dynamically to avoid SQL errors
-                        cursor.execute("PRAGMA table_info(products)")
-                        available_columns = [row[1] for row in cursor.fetchall()]
-                        
-                        # Filter to only columns we want, excluding internal ones
-                        columns_to_query = [col for col in available_columns if col not in ['id', 'normalized_name', 'strain_id']]
-                        
-                        # Build dynamic query
-                        quoted_columns = ', '.join([f'"{col}"' for col in columns_to_query])
-                        query = f'SELECT {quoted_columns} FROM products ORDER BY id DESC LIMIT 20000'
-                        
-                        cursor.execute(query)
-                        rows = cursor.fetchall()
-                        columns = columns_to_query
-                        logging.info(f"Database query returned {len(rows)} rows")
-                        
-                        for row in rows:
-                            product_dict = dict(zip(columns, row))
-                            # Convert to the format expected by the frontend
-                            database_tags.append(product_dict)
-                        
-                        logging.info(f"Database returned {len(database_tags)} products")
-                        
-                        # Debug: Check if we have products with specific indicators
-                        ray_count = sum(1 for tag in database_tags if 'Ray' in tag.get('Product Name*', ''))
-                        hustler_count = sum(1 for tag in database_tags if 'Hustler' in tag.get('Product Name*', ''))
-                        logging.info(f"Database products - Ray: {ray_count}, Hustler: {hustler_count}")
+                        # First check if products table exists
+                        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+                        if not cursor.fetchone():
+                            logging.error(f"Products table not found in database at {product_db.db_path}")
+                            # If store-specific database doesn't have products table, fall back to main database
+                            if current_store:
+                                logging.info(f"Falling back to main database for store {current_store}")
+                                # Use main database path
+                                current_dir = os.path.dirname(os.path.abspath(__file__))
+                                main_db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
+                                logging.info(f"Using main database path: {main_db_path}")
+                                if os.path.exists(main_db_path):
+                                    with sqlite3.connect(main_db_path) as main_conn:
+                                        main_cursor = main_conn.cursor()
+                                        main_cursor.execute('SELECT COUNT(*) FROM products')
+                                        total_count = main_cursor.fetchone()[0]
+                                        logging.info(f"Main database has {total_count} products")
+                                        
+                                        # Get available columns dynamically
+                                        main_cursor.execute("PRAGMA table_info(products)")
+                                        available_columns = [row[1] for row in main_cursor.fetchall()]
+                                        
+                                        # Filter to only columns we want, excluding internal ones
+                                        columns_to_query = [col for col in available_columns if col not in ['id', 'normalized_name', 'strain_id']]
+                                        
+                                        # Build dynamic query
+                                        quoted_columns = ', '.join([f'"{col}"' for col in columns_to_query])
+                                        query = f'SELECT {quoted_columns} FROM products ORDER BY id DESC LIMIT 20000'
+                                        
+                                        main_cursor.execute(query)
+                                        rows = main_cursor.fetchall()
+                                        columns = columns_to_query
+                                        logging.info(f"Main database query returned {len(rows)} rows")
+                                        
+                                        for row in rows:
+                                            product_dict = dict(zip(columns, row))
+                                            # Convert to the format expected by the frontend
+                                            database_tags.append(product_dict)
+                                        
+                                        logging.info(f"Main database returned {len(database_tags)} products")
+                                else:
+                                    logging.error(f"Main database file does not exist: {main_db_path}")
+                            else:
+                                logging.error(f"Products table not found and no store specified")
+                        else:
+                            # Products table exists, proceed with normal query
+                            cursor.execute('SELECT COUNT(*) FROM products')
+                            total_count = cursor.fetchone()[0]
+                            logging.info(f"Total products in database: {total_count}")
+                            
+                            # Get available columns dynamically to avoid SQL errors
+                            cursor.execute("PRAGMA table_info(products)")
+                            available_columns = [row[1] for row in cursor.fetchall()]
+                            
+                            # Filter to only columns we want, excluding internal ones
+                            columns_to_query = [col for col in available_columns if col not in ['id', 'normalized_name', 'strain_id']]
+                            
+                            # Build dynamic query
+                            quoted_columns = ', '.join([f'"{col}"' for col in columns_to_query])
+                            query = f'SELECT {quoted_columns} FROM products ORDER BY id DESC LIMIT 20000'
+                            
+                            cursor.execute(query)
+                            rows = cursor.fetchall()
+                            columns = columns_to_query
+                            logging.info(f"Database query returned {len(rows)} rows")
+                            
+                            for row in rows:
+                                product_dict = dict(zip(columns, row))
+                                # Convert to the format expected by the frontend
+                                database_tags.append(product_dict)
+                            
+                            logging.info(f"Database returned {len(database_tags)} products")
+                            
+                            # Debug: Check if we have products with specific indicators
+                            ray_count = sum(1 for tag in database_tags if 'Ray' in tag.get('Product Name*', ''))
+                            hustler_count = sum(1 for tag in database_tags if 'Hustler' in tag.get('Product Name*', ''))
+                            logging.info(f"Database products - Ray: {ray_count}, Hustler: {hustler_count}")
                 else:
                     logging.error(f"Database file does not exist: {product_db.db_path}")
         except Exception as e:
