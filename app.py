@@ -989,11 +989,14 @@ def initialize_excel_processor():
         logging.error(f"Traceback: {traceback.format_exc()}")
 
 # Initialize on startup
-# Use simple initialization on PythonAnywhere to prevent hangs
-if os.environ.get('PYTHONANYWHERE_DOMAIN'):
-    simple_initialize_excel_processor()
-else:
-    initialize_excel_processor()
+# DISABLED: Skip initialization to prevent PythonAnywhere hangs
+# Excel processor will be lazily initialized on first request
+if not os.environ.get('PYTHONANYWHERE_DOMAIN') and not os.environ.get('PYTHONANYWHERE_SITE'):
+    # Only initialize on local development
+    try:
+        initialize_excel_processor()
+    except Exception as e:
+        logging.warning(f"Startup initialization failed (non-fatal): {e}")
 
 # Add missing function
 def save_template_settings(template_type, font_settings):
