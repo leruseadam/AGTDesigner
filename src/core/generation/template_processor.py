@@ -1248,6 +1248,15 @@ class TemplateProcessor:
             else:
                 label_context[key] = ""
 
+        # Ensure WeightUnits is populated from available weight fields
+        if not label_context.get('WeightUnits'):
+            label_context['WeightUnits'] = (
+                label_context.get('weightWithUnits') or 
+                label_context.get('WeightWithUnits') or 
+                label_context.get('WeightUnits') or 
+                ''
+            )
+
         # Define product type sets for use throughout the method
         from src.core.constants import CLASSIC_TYPES
         classic_types = CLASSIC_TYPES
@@ -1515,6 +1524,10 @@ class TemplateProcessor:
         label_context['Ratio_or_THC_CBD_END'] = 'THC_CBD_END'
         label_context['Price_START'] = 'PRICE_START'
         label_context['Price_END'] = 'PRICE_END'
+        
+        # Wrap WeightUnits with markers if it exists
+        if label_context.get('WeightUnits'):
+            label_context['WeightUnits'] = wrap_with_marker(label_context['WeightUnits'], 'WEIGHTUNITS')
         label_context['WeightUnits_START'] = 'WEIGHTUNITS_START'
         label_context['WeightUnits_END'] = 'WEIGHTUNITS_END'
         label_context['Ratio_START'] = 'RATIO_START'
