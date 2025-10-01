@@ -3842,6 +3842,13 @@ def _calculate_joint_ratio_for_record(db_record):
             except ValueError:
                 continue
     
+    # Look for single pre-roll patterns like "Product Name - 1g", "Product Name - 0.5g"
+    single_pre_roll_pattern = r'-\s*(\d+(?:\.\d+)?)g\s*$'
+    match = re.search(single_pre_roll_pattern, product_name_str, re.IGNORECASE)
+    if match:
+        amount = match.group(1)
+        return f"{amount}g"
+    
     # If no pattern found, try to generate from weight
     if weight and str(weight).strip() != '' and str(weight).lower() != 'nan':
         try:
