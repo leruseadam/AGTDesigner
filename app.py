@@ -1109,7 +1109,8 @@ def get_session_excel_processor():
                     logging.warning(f"CRITICAL FIX: Clearing file data to prevent cross-store data leakage")
                     session.pop('file_path', None)
                     session.pop('file_store', None)
-                    session.pop('selected_tags', None)
+                    # Don't clear selected_tags on store mismatch - preserve user selections
+                    # session.pop('selected_tags', None)
                     g.excel_processor.df = pd.DataFrame()
                     g.excel_processor.selected_tags = []
                     return g.excel_processor
@@ -3407,7 +3408,8 @@ def set_store():
         # (but keep the selected_store we just set)
         session.pop('file_path', None)
         session.pop('file_store', None)
-        session.pop('selected_tags', None)
+        # Don't clear selected_tags when switching stores - preserve user selections
+        # session.pop('selected_tags', None)
         
         # Clear global Excel processor to force reload with new store context
         reset_excel_processor()
