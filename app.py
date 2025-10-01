@@ -1582,7 +1582,7 @@ def upload_file():
         session['uploaded_filename'] = file.filename
         session.modified = True
         
-        # Load file into ExcelProcessor immediately (simple sync load)
+        # Load file into ExcelProcessor and store in database
         try:
             logging.info(f"Loading file into ExcelProcessor: {file_path}")
             processor = get_excel_processor()
@@ -1592,6 +1592,24 @@ def upload_file():
             if success:
                 row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
                 logging.info(f"File loaded successfully: {row_count} rows")
+                
+                # Store in database for persistence across workers
+                try:
+                    from src.core.data.product_database import get_product_database
+                    current_store = session.get('selected_store', 'AGT_Bothell')
+                    product_db = get_product_database(current_store)
+                    
+                    if product_db and hasattr(product_db, 'store_excel_data'):
+                        logging.info(f"Storing {row_count} products in database...")
+                        result = product_db.store_excel_data(processor.df, file_path)
+                        logging.info(f"Database storage result: {result}")
+                    else:
+                        logging.warning("Database storage not available")
+                        
+                except Exception as db_error:
+                    logging.warning(f"Database storage failed (non-fatal): {db_error}")
+                    # Continue anyway - file is still loaded in processor
+                
                 update_processing_status(file.filename, 'ready')
             else:
                 logging.error("File load returned False")
