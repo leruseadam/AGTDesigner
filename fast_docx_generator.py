@@ -117,7 +117,25 @@ class FastDocxGenerator:
             brand = record.get('ProductBrand', record.get('Product Brand', 'N/A'))
             
             # Improved weight mapping - prioritize CombinedWeight which includes units
-            weight = record.get('CombinedWeight', record.get('Weight', record.get('Weight*', 'N/A')))
+            weight = record.get('CombinedWeight')
+            if not weight or weight == 'N/A':
+                # Create combined weight from Weight* and Units fields
+                weight_value = record.get('Weight', record.get('Weight*', ''))
+                units = record.get('Units', '')
+                
+                if weight_value and units and str(units) != 'None' and str(units) != '':
+                    # Format weight properly (remove .0 if it's a whole number)
+                    try:
+                        if float(weight_value) == int(float(weight_value)):
+                            weight = f"{int(float(weight_value))}{units}"
+                        else:
+                            weight = f"{weight_value}{units}"
+                    except (ValueError, TypeError):
+                        weight = f"{weight_value}{units}"
+                elif weight_value:
+                    weight = str(weight_value)
+                else:
+                    weight = 'N/A'
             
             # Improved price mapping - use correct Excel field name
             price = record.get('Price* (Tier Name for Bulk)', record.get('Price', 'N/A'))

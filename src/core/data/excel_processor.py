@@ -6090,20 +6090,38 @@ class ExcelProcessor:
                 # Convert database products to tag format
                 tags = []
                 for product in products:
+                    # Create combined weight from Weight* and Units if available
+                    weight_value = product.get('Weight*', '')
+                    units_value = product.get('Units', '')
+                    combined_weight = ''
+                    
+                    if weight_value and units_value and str(units_value) != 'None' and str(units_value) != '':
+                        try:
+                            if float(weight_value) == int(float(weight_value)):
+                                combined_weight = f"{int(float(weight_value))}{units_value}"
+                            else:
+                                combined_weight = f"{weight_value}{units_value}"
+                        except (ValueError, TypeError):
+                            combined_weight = f"{weight_value}{units_value}"
+                    elif weight_value:
+                        combined_weight = str(weight_value)
+                    
                     tag = {
                         'Product Name*': product.get('Product Name*', ''),
                         'Product Type*': product.get('Product Type*', ''),
                         'Vendor/Supplier*': product.get('Vendor/Supplier*', ''),
                         'Product Brand': product.get('Product Brand', ''),
                         'Weight*': product.get('Weight*', ''),
+                        'Units': product.get('Units', ''),  # Add Units field
+                        'CombinedWeight': combined_weight,  # Create combined weight
                         'Price*': product.get('Price*', '') or product.get('Price* (Tier Name for Bulk)', ''),
                         'Lineage': product.get('Lineage', ''),
                         'Product Strain': product.get('Product Strain', ''),
                         'DOH': product.get('DOH', ''),
+                        'DOH Compliant (Yes/No)': product.get('DOH Compliant (Yes/No)', ''),
                         'Ratio': product.get('Ratio', ''),
                         'THC test result': product.get('THC test result', ''),
                         'CBD test result': product.get('CBD test result', ''),
-                        'CombinedWeight': product.get('CombinedWeight', ''),
                         'Source': 'Database'
                     }
                     tags.append(tag)
