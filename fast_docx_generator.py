@@ -115,9 +115,16 @@ class FastDocxGenerator:
             product_name = record.get('ProductName', record.get('Product Name*', 'N/A'))
             product_type = record.get('ProductType', record.get('Product Type*', 'N/A'))
             brand = record.get('ProductBrand', record.get('Product Brand', 'N/A'))
-            weight = record.get('Weight', record.get('Weight*', 'N/A'))
-            price = record.get('Price', 'N/A')
+            
+            # Improved weight mapping - prioritize CombinedWeight which includes units
+            weight = record.get('CombinedWeight', record.get('Weight', record.get('Weight*', 'N/A')))
+            
+            # Improved price mapping - use correct Excel field name
+            price = record.get('Price* (Tier Name for Bulk)', record.get('Price', 'N/A'))
             lineage = record.get('Lineage', 'N/A')
+            
+            # Add DOH field processing - check correct column name
+            doh = record.get('DOH Compliant (Yes/No)', record.get('DOH', record.get('DOH Compliant*', '')))
             
             # Clean lineage
             if 'LINEAGE_START' in lineage and 'LINEAGE_END' in lineage:
@@ -128,20 +135,20 @@ class FastDocxGenerator:
             
             # Add content based on template type
             if template_type == 'vertical':
-                self._add_vertical_content(cell, product_name, product_type, brand, weight, price, lineage)
+                self._add_vertical_content(cell, product_name, product_type, brand, weight, price, lineage, doh)
             elif template_type == 'horizontal':
-                self._add_horizontal_content(cell, product_name, product_type, brand, weight, price, lineage)
+                self._add_horizontal_content(cell, product_name, product_type, brand, weight, price, lineage, doh)
             elif template_type == 'mini':
-                self._add_mini_content(cell, product_name, product_type, brand, weight, price, lineage)
+                self._add_mini_content(cell, product_name, product_type, brand, weight, price, lineage, doh)
             else:
-                self._add_vertical_content(cell, product_name, product_type, brand, weight, price, lineage)
+                self._add_vertical_content(cell, product_name, product_type, brand, weight, price, lineage, doh)
                 
         except Exception as e:
             logger.error(f"[FAST-DOCX] Error adding label content: {e}")
             # Add fallback content
             cell.text = f"Product: {product_name}\nType: {product_type}\nBrand: {brand}"
     
-    def _add_vertical_content(self, cell, product_name, product_type, brand, weight, price, lineage):
+    def _add_vertical_content(self, cell, product_name, product_type, brand, weight, price, lineage, doh):
         """Add vertical label content"""
         # Product Name (bold)
         p1 = cell.paragraphs[0]
@@ -173,21 +180,31 @@ class FastDocxGenerator:
         p5.alignment = WD_ALIGN_PARAGRAPH.CENTER
         run5 = p5.add_run(lineage)
         run5.font.size = Pt(8)
+        
+        # DOH (if applicable)
+        if doh and str(doh).strip().upper() == 'YES':
+            p6 = cell.add_paragraph()
+            p6.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            run6 = p6.add_run('DOH')
+            run6.bold = True
+            run6.font.size = Pt(8)
     
-    def _add_horizontal_content(self, cell, product_name, product_type, brand, weight, price, lineage):
+    def _add_horizontal_content(self, cell, product_name, product_type, brand, weight, price, lineage, doh):
         """Add horizontal label content"""
-        # Single line format
+        # Single line format with DOH
+        doh_text = ' | DOH' if doh and str(doh).strip().upper() == 'YES' else ''
         p1 = cell.paragraphs[0]
         p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        run1 = p1.add_run(f"{product_name} | {product_type} | {brand} | {weight} | ${price} | {lineage}")
+        run1 = p1.add_run(f"{product_name} | {product_type} | {brand} | {weight} | ${price} | {lineage}{doh_text}")
         run1.font.size = Pt(8)
     
-    def _add_mini_content(self, cell, product_name, product_type, brand, weight, price, lineage):
+    def _add_mini_content(self, cell, product_name, product_type, brand, weight, price, lineage, doh):
         """Add mini label content"""
-        # Compact format
+        # Compact format with DOH
+        doh_text = ' | DOH' if doh and str(doh).strip().upper() == 'YES' else ''
         p1 = cell.paragraphs[0]
         p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        run1 = p1.add_run(f"{product_name}\n{product_type} | {weight}")
+        run1 = p1.add_run(f"{product_name}\n{product_type} | {weight}{doh_text}")
         run1.font.size = Pt(7)
 
 def generate_fast_docx(records: List[Dict], template_type: str = 'vertical', 
@@ -242,8 +259,8 @@ def create_fast_docx_routes(app):
                     'ProductName': row.get('ProductName', row.get('Product Name*', '')),
                     'ProductType': row.get('ProductType', row.get('Product Type*', '')),
                     'ProductBrand': row.get('ProductBrand', row.get('Product Brand', '')),
-                    'Weight': row.get('Weight', row.get('Weight*', '')),
-                    'Price': row.get('Price', '0.00'),
+                    'Weight': row.get('CombinedWeight', row.get('Weight', row.get('Weight*', ''))),
+                    'Price': row.get('Price* (Tier Name for Bulk)', row.get('Price', '0.00')),
                     'Lineage': row.get('Lineage', 'HYBRID')
                 }
                 records.append(record)

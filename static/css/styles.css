@@ -2640,6 +2640,57 @@ img, video, canvas, svg {
       0 2px 4px rgba(255, 192, 203, 0.4) !important;
   }
   
+  /* Tag row styles (for table view) - matching tag-item styles */
+  .tag-row[data-lineage="SATIVA"] {
+    background: rgba(237, 65, 35, 0.6) !important;
+    border-color: rgba(237, 65, 35, 0.3);
+  }
+  
+  .tag-row[data-lineage="INDICA"] {
+    background: rgba(153, 0, 255, 0.6) !important;
+    border-color: rgba(153, 0, 255, 0.3);
+  }
+  
+  .tag-row[data-lineage="HYBRID"] {
+    background: rgba(0, 153, 0, 0.6) !important;
+    border-color: rgba(0, 153, 0, 0.3);
+  }
+  
+  .tag-row[data-lineage="HYBRID/SATIVA"] {
+    background: rgba(237, 65, 35, 0.6) !important;
+    border-color: rgba(237, 65, 35, 0.3);
+  }
+  
+  .tag-row[data-lineage="HYBRID/INDICA"] {
+    background: rgba(153, 0, 255, 0.6) !important;
+    border-color: rgba(153, 0, 255, 0.3);
+  }
+  
+  .tag-row[data-lineage="CBD"] {
+    background: rgba(241, 194, 50, 0.6) !important;
+    border-color: rgba(241, 194, 50, 0.3);
+  }
+  
+  .tag-row[data-lineage="CBD_BLEND"] {
+    background: rgba(241, 194, 50, 0.6) !important;
+    border-color: rgba(241, 194, 50, 0.3);
+  }
+  
+  .tag-row[data-lineage="MIXED"] {
+    background: rgba(0, 33, 245, 0.6) !important;
+    border-color: rgba(0, 33, 245, 0.3);
+  }
+  
+  .tag-row[data-lineage="PARA"] {
+    background: rgba(255, 192, 203, 0.6) !important;
+    border-color: rgba(255, 192, 203, 0.3);
+  }
+  
+  .tag-row[data-lineage="PARAPHERNALIA"] {
+    background: rgba(255, 192, 203, 0.6) !important;
+    border-color: rgba(255, 192, 203, 0.3);
+  }
+  
   /* Brand headers */
   .brand-category {
     margin-bottom: 1rem;

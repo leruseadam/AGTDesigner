@@ -2384,12 +2384,14 @@ const TagManager = {
           tagElement.style.borderRadius = '8px';
         }
         
-        // Set data-lineage attribute for CSS coloring
+        // Set data-lineage attribute for CSS coloring on both row and tagElement
         const lineage = tag.lineage || tag.Lineage || 'MIXED';
         if (lineage) {
           tagElement.dataset.lineage = lineage.toUpperCase();
+          row.dataset.lineage = lineage.toUpperCase();  // Add lineage to row element too
         } else {
           tagElement.dataset.lineage = 'MIXED';
+          row.dataset.lineage = 'MIXED';  // Add lineage to row element too
         }
         tagElement.dataset.tagId = tag.tagId;
         tagElement.dataset.vendor = tag.vendor;

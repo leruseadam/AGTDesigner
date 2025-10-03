@@ -64,7 +64,7 @@ ENABLE_LAZY_PROCESSING = False  # DISABLED: Ensure consistent processing
 ENABLE_MINIMAL_PROCESSING = True  # ENABLED: For ultra-fast uploads
 ENABLE_BATCH_OPERATIONS = False  # DISABLED: Ensure consistent processing
 ENABLE_VECTORIZED_OPERATIONS = False  # DISABLED: Ensure consistent processing
-ENABLE_LINEAGE_PERSISTENCE = False  # TEMPORARILY DISABLED: To fix app hanging issue
+ENABLE_LINEAGE_PERSISTENCE = True  # ENABLED: Enhanced lineage persistence with product name fallback
 
 # Performance constants - STANDARDIZED
 BATCH_SIZE = 1000  # Standard batch size
@@ -139,13 +139,47 @@ def optimized_lineage_assignment(df, product_types, lineages, classic_types):
     # Vectorized lineage assignment
     result = lineages.copy()
     
+    # Enhanced check for missing lineage (includes NaN, null, empty, and 'nan' strings)
+    empty_lineage_mask = (
+        lineages.isna() | 
+        (lineages.astype(str).str.strip() == '') |
+        (lineages.astype(str).str.lower().str.strip() == 'nan')
+    )
+    
     # Apply lineage rules vectorized
     classic_mask = product_types.isin(classic_types)
-    empty_lineage_mask = (lineages.isna()) | (lineages.astype(str).str.strip() == '')
+    nonclassic_mask = ~classic_mask
     
-    # Set default lineage for classic types with empty lineage
-    default_mask = classic_mask & empty_lineage_mask
-    result[default_mask] = 'HYBRID'
+    # Set default lineage for classic types with empty lineage (HYBRID)
+    classic_default_mask = classic_mask & empty_lineage_mask
+    result[classic_default_mask] = 'HYBRID'
+    
+    # Use Product Strain to determine lineage for ALL non-classic types (override existing lineage)
+    if 'Product Strain' in df.columns:
+        product_strain = df['Product Strain'].astype(str)
+        
+        # CBD Blend products -> CBD lineage (yellow) - override existing lineage
+        cbd_blend_mask = nonclassic_mask & (product_strain.str.contains('CBD Blend', case=False, na=False))
+        result[cbd_blend_mask] = 'CBD'
+        
+        # Paraphernalia products -> PARAPHERNALIA lineage (pink) - override existing lineage
+        paraphernalia_mask = nonclassic_mask & (product_strain.str.contains('Paraphernalia', case=False, na=False))
+        result[paraphernalia_mask] = 'PARAPHERNALIA'
+        
+        # Mixed products -> MIXED lineage (blue) - override existing lineage
+        mixed_mask = nonclassic_mask & (product_strain.str.contains('Mixed', case=False, na=False))
+        result[mixed_mask] = 'MIXED'
+        
+        # Default fallback for any remaining non-classic types
+        remaining_nonclassic_mask = nonclassic_mask & ~(cbd_blend_mask | paraphernalia_mask | mixed_mask)
+        
+        # Only set default for empty lineages in remaining non-classic types
+        remaining_empty_mask = remaining_nonclassic_mask & empty_lineage_mask
+        result[remaining_empty_mask] = 'MIXED'
+    else:
+        # Fallback if Product Strain column doesn't exist - only for empty lineages
+        nonclassic_default_mask = nonclassic_mask & empty_lineage_mask
+        result[nonclassic_default_mask] = 'MIXED'
     
     return result
 
@@ -1240,6 +1274,55 @@ class ExcelProcessor:
             # Only essential processing - no heavy operations
             df = df.dropna(how='all')  # Remove completely empty rows
             df.reset_index(drop=True, inplace=True)
+            
+            # CRITICAL FIX: Add minimal JointRatio processing for pre-roll products
+            try:
+                if 'Product Type*' in df.columns:
+                    # Add JointRatio column if it doesn't exist
+                    if 'JointRatio' not in df.columns:
+                        df['JointRatio'] = ''
+                    
+                    # Process JointRatio for pre-roll products
+                    preroll_mask = df['Product Type*'].str.strip().str.lower().isin(['pre-roll', 'infused pre-roll'])
+                    
+                    if preroll_mask.any():
+                        self.logger.info(f"Processing JointRatio for {preroll_mask.sum()} pre-roll products")
+                        
+                        # Simple JointRatio extraction from product names
+                        import re
+                        for idx in df[preroll_mask].index:
+                            if df.loc[idx, 'JointRatio'] == '' or pd.isna(df.loc[idx, 'JointRatio']):
+                                # Get product name
+                                product_name_col = 'Product Name*' if 'Product Name*' in df.columns else 'ProductName'
+                                if product_name_col in df.columns:
+                                    product_name = str(df.loc[idx, product_name_col])
+                                    
+                                    # Extract joint ratio patterns like "0.5g x 2", "1g x 28 Pack"
+                                    pattern = r'(\d*\.?\d+g)\s*x\s*(\d+)(?:\s*Pack)?'
+                                    match = re.search(pattern, product_name, re.IGNORECASE)
+                                    if match:
+                                        weight = match.group(1)
+                                        count = match.group(2)
+                                        df.loc[idx, 'JointRatio'] = f"{weight} x {count}"
+                                    else:
+                                        # Try just weight pattern
+                                        weight_pattern = r'(\d*\.?\d+g)'
+                                        weight_match = re.search(weight_pattern, product_name, re.IGNORECASE)
+                                        if weight_match:
+                                            df.loc[idx, 'JointRatio'] = weight_match.group(1)
+                                        elif 'Weight*' in df.columns and pd.notna(df.loc[idx, 'Weight*']):
+                                            # Fallback to Weight* column
+                                            weight_val = df.loc[idx, 'Weight*']
+                                            try:
+                                                weight_float = float(weight_val)
+                                                df.loc[idx, 'JointRatio'] = f"{weight_float:g}g"
+                                            except (ValueError, TypeError):
+                                                df.loc[idx, 'JointRatio'] = '1g'  # Default
+                        
+                        self.logger.info(f"JointRatio processing completed for pre-roll products")
+                
+            except Exception as joint_error:
+                self.logger.warning(f"JointRatio processing failed in minimal load: {joint_error}")
             
             self.df = df
             self._last_loaded_file = file_path
@@ -2479,15 +2562,35 @@ class ExcelProcessor:
                     self.logger.info(f"Converting {hybrid_mask.sum()} non-classic products from HYBRID to MIXED")
                     self.df.loc[hybrid_mask, "Lineage"] = "MIXED"
 
-            # --- Set default lineage for classic types if missing ---
+            # --- Set default lineage for ALL products with missing lineage ---
             if "Product Type*" in self.df.columns and "Lineage" in self.df.columns:
+                # Enhanced check for missing lineage (includes NaN, null, empty, and 'nan' strings)
+                empty_lineage_mask = (
+                    self.df["Lineage"].isnull() | 
+                    (self.df["Lineage"].astype(str).str.strip() == "") |
+                    (self.df["Lineage"].astype(str).str.lower().str.strip() == "nan")
+                )
+                
                 classic_mask = self.df["Product Type*"].str.strip().str.lower().isin([c.lower() for c in CLASSIC_TYPES])
-                empty_lineage_mask = self.df["Lineage"].isnull() | (self.df["Lineage"].astype(str).str.strip() == "")
-                set_hybrid_mask = classic_mask & empty_lineage_mask
+                nonclassic_mask = ~classic_mask
+                
+                # Add categories if they don't exist
                 if "HYBRID" not in self.df["Lineage"].cat.categories:
                     self.df["Lineage"] = self.df["Lineage"].cat.add_categories(["HYBRID"])
+                if "MIXED" not in self.df["Lineage"].cat.categories:
+                    self.df["Lineage"] = self.df["Lineage"].cat.add_categories(["MIXED"])
+                
+                # Set default lineage for classic types (HYBRID)
+                set_hybrid_mask = classic_mask & empty_lineage_mask
                 if set_hybrid_mask.any():
                     self.df.loc[set_hybrid_mask, "Lineage"] = "HYBRID"
+                    self.logger.info(f"Set HYBRID lineage for {set_hybrid_mask.sum()} classic products with missing lineage")
+                
+                # Set default lineage for non-classic types (MIXED)
+                set_mixed_mask = nonclassic_mask & empty_lineage_mask
+                if set_mixed_mask.any():
+                    self.df.loc[set_mixed_mask, "Lineage"] = "MIXED"
+                    self.logger.info(f"Set MIXED lineage for {set_mixed_mask.sum()} non-classic products with missing lineage")
                 
                 # Fix any MIXED lineage for classic types
                 mixed_lineage_mask = (self.df["Lineage"] == "MIXED") & classic_mask
@@ -2761,10 +2864,15 @@ class ExcelProcessor:
             product_type = str(tag['productType']).strip().lower().replace('  ', ' ')
             weight = str(tag['weight']).strip().lower()
 
-            # Sanitize lineage
-            lineage = str(row.get('Lineage', 'MIXED') or '').strip().upper()
-            if lineage not in VALID_LINEAGES:
-                lineage = "MIXED"
+            # Sanitize lineage - prioritize existing lineage, fall back to inference from name  
+            existing_lineage = str(row.get('Lineage', '') or '').strip().upper()
+            if existing_lineage and existing_lineage in VALID_LINEAGES:
+                lineage = existing_lineage
+            else:
+                # No valid lineage column - infer from product name and type
+                product_type_for_inference = safe_get_value(row.get('Product Type*', ''))
+                lineage = self._infer_lineage_from_name(product_name, product_type_for_inference)
+            
             tag['Lineage'] = lineage
             tag['lineage'] = lineage
 
@@ -2973,37 +3081,37 @@ class ExcelProcessor:
                         json_matched_products = cache.get(json_matched_cache_key)
                         if json_matched_products:
                             logger.info(f"CRITICAL FIX: Found {len(json_matched_products)} JSON matched products in cache")
-                            # Create records directly from cached JSON matched products
+                            # Create records directly from cached JSON matched products with DATABASE PRIORITY
                             records = []
                             for product in json_matched_products:
                                 if isinstance(product, dict):
-                                    # Ensure the product has all required fields
+                                    # DATABASE PRIORITY: Ensure all fields come from database with safe defaults
                                     record = {
                                         'ProductName': product.get('Product Name*', product.get('ProductName', '')),
                                         'Product Name*': product.get('Product Name*', product.get('ProductName', '')),
                                         'Description': product.get('Description', product.get('Product Name*', product.get('ProductName', ''))),
                                         'DescAndWeight': self._process_description_from_product_name(product.get('Product Name*', product.get('ProductName', ''))),  # Use Excel processor formula
-                                        'Product Type*': product.get('Product Type*', 'Unknown'),
-                                        'Product Brand': product.get('Product Brand', 'Unknown'),
-                                        'Product Strain': product.get('Product Strain', 'Unknown'),
-                                        'Lineage': product.get('Lineage', 'MIXED'),
-                                        'Vendor': product.get('Vendor', 'Unknown'),
-                                        'Price': product.get('Price', '$0'),
-                                        'Weight*': product.get('Weight*', '1g'),
-                                        'Quantity*': product.get('Quantity*', '1'),
-                                        'Units': product.get('Units', 'each'),
-                                        'THC test result': product.get('THC test result', 0.0),
-                                        'CBD test result': product.get('CBD test result', 0.0),
-                                        'Test result unit (% or mg)': product.get('Test result unit (% or mg)', '%'),
-                                        'Source': 'JSON Match'
+                                        'Product Type*': product.get('Product Type*', 'Edible (Solid)'),  # Database default
+                                        'Product Brand': product.get('Product Brand', 'CERES'),  # Database default
+                                        'Product Strain': product.get('Product Strain', 'Mixed'),  # Database default
+                                        'Lineage': product.get('Lineage', 'MIXED'),  # Database default
+                                        'Vendor': product.get('Vendor/Supplier*', product.get('Vendor', 'A Greener Today')),  # Database default
+                                        'Price': product.get('Price', '25.00'),  # Database default price
+                                        'Weight*': product.get('Weight*', '1'),  # Database default weight
+                                        'Quantity*': product.get('Quantity*', '1'),  # Database default quantity
+                                        'Units': product.get('Units', 'g'),  # Database default units
+                                        'THC test result': product.get('THC test result', '0.00'),  # Database default
+                                        'CBD test result': product.get('CBD test result', '0.00'),  # Database default
+                                        'Test result unit (% or mg)': product.get('Test result unit (% or mg)', '%'),  # Database default
+                                        'Source': product.get('Source', 'Database Priority (100% DB)')  # Updated source
                                     }
                                     records.append(record)
                             
                             if records:
-                                logger.info(f"CRITICAL FIX: Created {len(records)} records from cached JSON matched products")
+                                logger.info(f"DATABASE PRIORITY: Created {len(records)} records from cached database-priority products")
                                 return records
                             else:
-                                logger.warning("CRITICAL FIX: No valid records created from cached JSON matched products")
+                                logger.warning("DATABASE PRIORITY: No valid records created from cached database-priority products")
                         else:
                             logger.warning("CRITICAL FIX: No JSON matched products found in cache")
                     else:
@@ -3203,7 +3311,11 @@ class ExcelProcessor:
                     lineage_needs_centering = False  # Lineage should not be centered
                     
                     # Debug print for verification
-                    # Product: {product_name}, Type: {product_type}, Lineage: '{final_lineage}', ProductStrain: '{final_product_strain}'
+                    logger.debug(f"LINEAGE DEBUG: Product '{product_name}', Type: '{product_type}', Original Lineage: '{original_lineage}', Final Lineage: '{final_lineage}', ProductStrain: '{final_product_strain}'")
+                    
+                    # CRITICAL FIX: Log lineage value being used in final output
+                    if 'Lineage' in record:
+                        logger.info(f"LINEAGE TRACKING: Product '{product_name}' -> Final lineage value: '{final_lineage}' (from record: '{record.get('Lineage', 'NOT_IN_RECORD')}')")
                     
                     # Debug ProductStrain logic
                     include_product_strain = (product_type in ["rso/co2 tankers", "capsule"] or product_type not in classic_types)
@@ -3767,6 +3879,51 @@ class ExcelProcessor:
             
         except Exception as e:
             self.logger.error(f"Error in batch lineage update: {e}")
+            return False
+
+    def update_lineage_in_database_enhanced(self, identifier: str, new_lineage: str, is_strain: bool = True) -> bool:
+        """Enhanced database update that handles both strain names and product names."""
+        if not ENABLE_LINEAGE_PERSISTENCE:
+            self.logger.warning("Lineage persistence is disabled")
+            return False
+        
+        try:
+            from .product_database import ProductDatabase
+            product_db = ProductDatabase(store_name=self._store_name)
+            
+            if is_strain:
+                # Traditional strain-based update
+                strain_id = product_db.add_or_update_strain(identifier, new_lineage, sovereign=True)
+                if strain_id:
+                    self.logger.info(f"Updated lineage for strain '{identifier}' to '{new_lineage}' in database")
+                    return True
+                else:
+                    self.logger.warning(f"Failed to update strain '{identifier}' in database")
+                    return False
+            else:
+                # Product name-based update - directly update products table
+                conn = product_db._get_connection()
+                cursor = conn.cursor()
+                
+                # Update the lineage for the specific product by name
+                cursor.execute('''
+                    UPDATE products 
+                    SET "Lineage" = ? 
+                    WHERE "Product Name*" = ?
+                ''', (new_lineage, identifier))
+                
+                updated_rows = cursor.rowcount
+                conn.commit()
+                
+                if updated_rows > 0:
+                    self.logger.info(f"Updated lineage for product '{identifier}' to '{new_lineage}' in database ({updated_rows} rows)")
+                    return True
+                else:
+                    self.logger.warning(f"No products found with name '{identifier}' for lineage update")
+                    return False
+                    
+        except Exception as e:
+            self.logger.error(f"Error updating lineage for '{identifier}': {e}")
             return False
 
     def get_lineage_suggestions(self, strain_name: str) -> Dict[str, Any]:
@@ -4446,16 +4603,10 @@ class ExcelProcessor:
         # Import constants to check product type classification
         from src.core.constants import CLASSIC_TYPES
         
-        # If product type is provided, check if it's a classic type
-        if product_type:
-            product_type_lower = product_type.strip().lower()
-            if product_type_lower not in CLASSIC_TYPES:
-                # Nonclassic types (edibles, tinctures, topicals, etc.) should ALWAYS be MIXED for blue color
-                return 'MIXED'
-        
         name_lower = product_name.lower()
         
-        # Check for specific lineage indicators
+        # CRITICAL FIX: Check for explicit lineage indicators FIRST, regardless of product type
+        # This ensures JSON matched tags like "Indica Salted Caramel" get proper lineage
         if any(word in name_lower for word in ['sativa', 'sativa-dominant']):
             return 'SATIVA'
         elif any(word in name_lower for word in ['indica', 'indica-dominant']):
@@ -4464,6 +4615,13 @@ class ExcelProcessor:
             return 'HYBRID'
         elif any(word in name_lower for word in ['cbd', 'hemp', 'low-thc']):
             return 'CBD'
+        
+        # If product type is provided and no explicit lineage found, check if it's a classic type
+        if product_type:
+            product_type_lower = product_type.strip().lower()
+            if product_type_lower not in CLASSIC_TYPES:
+                # Nonclassic types without explicit lineage indicators default to MIXED
+                return 'MIXED'
         
         # Try to infer from strain name patterns
         strain = self._infer_strain_from_name(product_name)
@@ -5919,8 +6077,43 @@ class ExcelProcessor:
     def get_available_tags(self, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """Return a list of tag objects with all necessary data."""
         if self.df is None:
-            logger.warning("DataFrame is None in get_available_tags")
-            return []
+            logger.warning("DataFrame is None in get_available_tags, attempting to use database")
+            try:
+                from src.core.data.product_database import ProductDatabase
+                # Use default store name if not available
+                store_name = getattr(self, 'store_name', 'AGT_Bothell')
+                db = ProductDatabase(store_name)
+                products = db.get_all_products()
+                
+                logger.info(f"Retrieved {len(products)} products from database")
+                
+                # Convert database products to tag format
+                tags = []
+                for product in products:
+                    tag = {
+                        'Product Name*': product.get('Product Name*', ''),
+                        'Product Type*': product.get('Product Type*', ''),
+                        'Vendor/Supplier*': product.get('Vendor/Supplier*', ''),
+                        'Product Brand': product.get('Product Brand', ''),
+                        'Weight*': product.get('Weight*', ''),
+                        'Price*': product.get('Price*', '') or product.get('Price* (Tier Name for Bulk)', ''),
+                        'Lineage': product.get('Lineage', ''),
+                        'Product Strain': product.get('Product Strain', ''),
+                        'DOH': product.get('DOH', ''),
+                        'Ratio': product.get('Ratio', ''),
+                        'THC test result': product.get('THC test result', ''),
+                        'CBD test result': product.get('CBD test result', ''),
+                        'CombinedWeight': product.get('CombinedWeight', ''),
+                        'Source': 'Database'
+                    }
+                    tags.append(tag)
+                
+                logger.info(f"Converted {len(tags)} database products to tags")
+                return tags
+                
+            except Exception as e:
+                logger.error(f"Failed to get products from database: {e}")
+                return []
         
         filtered_df = self.apply_filters(filters) if filters else self.df
         logger.info(f"get_available_tags: DataFrame shape {self.df.shape}, filtered shape {filtered_df.shape}")
@@ -6090,10 +6283,15 @@ class ExcelProcessor:
             product_type = str(tag['productType']).strip().lower().replace('  ', ' ')
             weight = str(tag['weight']).strip().lower()
 
-            # Sanitize lineage
-            lineage = str(row.get('Lineage', 'MIXED') or '').strip().upper()
-            if lineage not in VALID_LINEAGES:
-                lineage = "MIXED"
+            # Sanitize lineage - prioritize existing lineage, fall back to inference from name  
+            existing_lineage = str(row.get('Lineage', '') or '').strip().upper()
+            if existing_lineage and existing_lineage in VALID_LINEAGES:
+                lineage = existing_lineage
+            else:
+                # No valid lineage column - infer from product name and type
+                product_type_for_inference = safe_get_value(row.get('Product Type*', ''))
+                lineage = self._infer_lineage_from_name(product_name, product_type_for_inference)
+            
             tag['Lineage'] = lineage
             tag['lineage'] = lineage
 
