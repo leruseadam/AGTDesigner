@@ -2386,9 +2386,16 @@ const TagManager = {
         
         // Set data-lineage attribute for CSS coloring on both row and tagElement
         const lineage = tag.lineage || tag.Lineage || 'MIXED';
-        if (lineage) {
-          tagElement.dataset.lineage = lineage.toUpperCase();
-          row.dataset.lineage = lineage.toUpperCase();  // Add lineage to row element too
+        let displayLineage = lineage;
+        
+        // Map HYBRID to MIXED for visual consistency (user request)
+        if (lineage === 'HYBRID') {
+          displayLineage = 'MIXED';
+        }
+        
+        if (displayLineage) {
+          tagElement.dataset.lineage = displayLineage.toUpperCase();
+          row.dataset.lineage = displayLineage.toUpperCase();  // Add lineage to row element too
         } else {
           tagElement.dataset.lineage = 'MIXED';
           row.dataset.lineage = 'MIXED';  // Add lineage to row element too
