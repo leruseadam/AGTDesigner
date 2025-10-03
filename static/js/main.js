@@ -4545,45 +4545,50 @@ const TagManager = {
             console.error('Cannot generate: No tags loaded. Please upload a file first.');
             return;
         }
-        
+
+        // Force refresh persistentSelectedTags from UI checkboxes before generation
+        const checkedFromUI = Array.from(document.querySelectorAll('#selectedTags input[type="checkbox"].tag-checkbox:checked')).map(cb => cb.value);
+        if (checkedFromUI.length > 0) {
+            this.state.persistentSelectedTags = checkedFromUI;
+        }
+
         console.time('debouncedGenerate');
         const generateBtn = document.getElementById('generateBtn');
         const splashModal = document.getElementById('generationSplashModal');
         const splashCanvas = document.getElementById('generation-splash-canvas');
-        
+
         // Add generation lock to prevent multiple simultaneous requests
         if (this.isGenerating) {
             console.log('Generation already in progress, ignoring duplicate request');
             return;
         }
         this.isGenerating = true;
-        
+
         try {
-            // Get checked tags from the DOM in the correct visual order
-            // Use persistent selected tags for generation (more reliable than DOM checkboxes)
+            // Always use the latest persistentSelectedTags for generation
             let checkedTags = [...this.state.persistentSelectedTags];
-            
+
             console.log('Generation request - persistentSelectedTags:', checkedTags);
             console.log('Generation request - persistentSelectedTags count:', checkedTags.length);
-            
+
             if (checkedTags.length === 0) {
                 console.error('Please select at least one tag to generate');
                 return;
             }
-            
+
             // Get template, scale, and format info
             const templateType = document.getElementById('templateSelect')?.value || 'horizontal';
             const scaleFactor = parseFloat(document.getElementById('scaleInput')?.value) || 1.0;
-            
+
             // Show enhanced generation splash
             this.showEnhancedGenerationSplash(checkedTags.length, templateType);
-            
+
             // Disable button and show loading spinner
             generateBtn.disabled = true;
             generateBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Generating...';
             // Always use DOCX generation
             const apiEndpoint = '/api/generate';
-            
+
             const response = await fetch(apiEndpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
