@@ -3743,19 +3743,7 @@ def _extract_product_name_from_full_name(full_name):
             return name.strip()
         return name.strip()
 
-def _create_desc_and_weight(full_name, weight_units):
-    """Create DescAndWeight field with 'Product Name - Weight' format."""
-    # Extract just the product name from the full name
-    product_name = _extract_product_name_from_full_name(full_name)
-    
-    # Get weight units, clean them up
-    weight = str(weight_units).strip() if weight_units else ''
-    if weight and weight.lower() not in ['nan', 'none', 'null', '']:
-        # Combine product name and weight
-        return f"{product_name} - {weight}"
-    else:
-        # Just return the product name if no weight
-        return product_name
+# Removed duplicate function - using the more sophisticated version at line 3839
 
 def _validate_tags_against_excel(excel_processor, selected_tags):
     """Helper function to validate tags against Excel data."""
