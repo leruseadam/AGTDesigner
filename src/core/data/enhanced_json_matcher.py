@@ -459,8 +459,50 @@ class ProductTypeSpecificMatcher:
         return sorted(matches, key=lambda x: x.score, reverse=True)
         
     def _match_preroll(self, json_product: Dict, database_products: List[Dict]) -> List[MatchResult]:
-        """Pre-roll specific matching"""
-        return self._match_flower(json_product, database_products)  # Similar to flower
+        """Pre-roll specific matching focusing on JointRatio, strain, and pack size"""
+        matches = []
+        json_name = self._get_product_name(json_product).lower()
+        
+        for db_product in database_products:
+            db_name = str(db_product.get('Product Name*', '')).lower()
+            
+            score = 0
+            factors = {}
+            
+            # Product name similarity (30% weight)
+            name_score = fuzz.ratio(json_name, db_name) / 100.0
+            factors['name_match'] = name_score
+            score += name_score * 0.30
+            
+            # Strain name matching (25% weight for pre-rolls)
+            strain_score = self._compare_strains(json_product, db_product)
+            factors['strain_match'] = strain_score
+            score += strain_score * 0.25
+            
+            # JointRatio matching (25% weight) - unique to pre-rolls
+            joint_ratio_score = self._compare_joint_ratios(json_product, db_product)
+            factors['joint_ratio_match'] = joint_ratio_score
+            score += joint_ratio_score * 0.25
+            
+            # THC content matching (15% weight)
+            thc_score = self._compare_thc_content(json_product, db_product)
+            factors['thc_match'] = thc_score
+            score += thc_score * 0.15
+            
+            # Vendor matching (5% weight)
+            vendor_score = self._compare_vendors(json_product, db_product)
+            factors['vendor_match'] = vendor_score
+            score += vendor_score * 0.05
+            
+            if score > 0.1:  # Threshold for pre-roll matches
+                matches.append(MatchResult(
+                    score=score,
+                    matched_product=db_product,
+                    algorithm="Enhanced PreRoll",
+                    factors=factors
+                ))
+                
+        return sorted(matches, key=lambda x: x.score, reverse=True)[:10]
         
     def _match_topical(self, json_product: Dict, database_products: List[Dict]) -> List[MatchResult]:
         """Topical-specific matching"""
@@ -656,6 +698,103 @@ class ProductTypeSpecificMatcher:
         partial_score = fuzz.partial_ratio(json_vendor, db_vendor) / 100.0
         
         return max(score, partial_score)
+
+    def _compare_joint_ratios(self, json_product: Dict, db_product: Dict) -> float:
+        """Compare joint ratios for pre-roll products (e.g., '0.5g x 2 Pack', '1g x 1')"""
+        # Try to extract joint ratio from JSON product name
+        json_name = self._get_product_name(json_product).lower()
+        db_joint_ratio = str(db_product.get('JointRatio', '')).lower().strip()
+        
+        # If no database JointRatio, return neutral score
+        if not db_joint_ratio or db_joint_ratio in ['', 'null', 'none', '0']:
+            return 0.3
+        
+        # Look for pack indicators in JSON name
+        json_pack_indicators = []
+        
+        # Extract pack size patterns (e.g., "2 pack", "twin pack", "single", "1g x 2")
+        pack_patterns = [
+            r'(\d+)\s*pack',           # "2 pack", "twin pack"
+            r'(\d+)\s*count',          # "5 count"
+            r'twin|double',            # "twin pack" -> 2
+            r'single',                 # "single" -> 1
+            r'(\d+(?:\.\d+)?)\s*g\s*x\s*(\d+)',  # "0.5g x 2"
+            r'(\d+)\s*x\s*(\d+(?:\.\d+)?)\s*g',  # "2 x 0.5g"
+        ]
+        
+        for pattern in pack_patterns:
+            matches = re.findall(pattern, json_name)
+            if matches:
+                if pattern in [r'twin|double']:
+                    json_pack_indicators.append('2')
+                elif pattern in [r'single']:
+                    json_pack_indicators.append('1')
+                else:
+                    for match in matches:
+                        if isinstance(match, tuple):
+                            json_pack_indicators.extend(match)
+                        else:
+                            json_pack_indicators.append(match)
+        
+        # Compare with database JointRatio
+        best_score = 0.0
+        
+        # Direct fuzzy comparison
+        fuzzy_score = fuzz.ratio(json_name, db_joint_ratio) / 100.0
+        best_score = max(best_score, fuzzy_score)
+        
+        # Pattern-based comparison
+        for indicator in json_pack_indicators:
+            if indicator in db_joint_ratio:
+                best_score = max(best_score, 0.8)
+        
+        # Special patterns (e.g., if JSON has "twin" and DB has "x 2")
+        if 'twin' in json_name and ('x 2' in db_joint_ratio or '2 pack' in db_joint_ratio):
+            best_score = max(best_score, 0.9)
+        
+        if 'single' in json_name and ('x 1' in db_joint_ratio or '1 pack' in db_joint_ratio or '1g' in db_joint_ratio):
+            best_score = max(best_score, 0.9)
+        
+        return best_score
+
+    def _compare_strains(self, json_product: Dict, db_product: Dict) -> float:
+        """Compare strain names with fuzzy matching"""
+        # Extract strain from JSON
+        json_strain = ""
+        for field in ['strain', 'strain_name', 'product_strain']:
+            if field in json_product:
+                json_strain = str(json_product[field]).lower().strip()
+                break
+        
+        # If no explicit strain field, try to extract from product name
+        if not json_strain:
+            json_name = self._get_product_name(json_product).lower()
+            # Look for common strain patterns in name
+            strain_patterns = [
+                r'og\s+kush', r'sour\s+diesel', r'blue\s+dream', r'white\s+widow',
+                r'granddaddy\s+purple', r'green\s+crack', r'northern\s+lights'
+            ]
+            for pattern in strain_patterns:
+                if re.search(pattern, json_name):
+                    json_strain = re.search(pattern, json_name).group()
+                    break
+        
+        # Extract strain from database
+        db_strain = str(db_product.get('Product Strain', '') or db_product.get('Strain', '')).lower().strip()
+        
+        # If no strain info available, return neutral score
+        if not json_strain or not db_strain or db_strain in ['', 'mixed', 'unknown']:
+            return 0.5
+        
+        # Perfect match
+        if json_strain == db_strain:
+            return 1.0
+        
+        # Fuzzy matching
+        score = fuzz.ratio(json_strain, db_strain) / 100.0
+        partial_score = fuzz.partial_ratio(json_strain, db_strain) / 100.0
+        
+        return max(score, partial_score)
         
     def _extract_strain_similarity(self, json_name: str, db_name: str) -> float:
         """Extract and compare strain names"""
@@ -760,6 +899,30 @@ class ProductTypeSpecificMatcher:
             return 0.5
             
         return fuzz.ratio(json_brand, db_brand) / 100.0
+
+# Enhanced JSON field mapping for hybrid approach
+ENHANCED_JSON_FIELD_MAP = {
+    "product_name": "Product Name*",
+    "description": "Description", 
+    "vendor": "Vendor/Supplier*",
+    "brand": "Product Brand",
+    "price": "Price",
+    "weight": "Weight*",
+    "strain": "Product Strain",
+    "product_type": "Product Type*",
+    "sku": "Internal Product Identifier",
+    "batch_number": "Batch Number",
+    "lot_number": "Lot Number",
+    "room": "Room*",
+    "quantity": "Quantity*",
+    "units": "Units",
+    "unit_weight_uom": "Units",
+    "thc_percentage": "THC test result",
+    "cbd_percentage": "CBD test result",
+    "harvest_date": "Accepted Date",
+    "package_date": "Accepted Date",
+    "lineage": "Lineage"
+}
 
 class EnhancedJSONMatcher:
     """
@@ -928,6 +1091,143 @@ class EnhancedJSONMatcher:
         except Exception as e:
             logging.warning(f"Error extracting JSON weight: {e}")
             return None
+
+    def _merge_json_data_hybrid(self, product_dict: dict, json_items: list, match_result=None) -> dict:
+        """
+        DATABASE-PRIORITY approach: Use 100% database-derived information.
+        JSON is only used for matching purposes, all data comes from database.
+        """
+        if not json_items:
+            logging.debug("🔄 DATABASE PRIORITY: No JSON items to merge")
+            return product_dict
+            
+        # Find the best matching JSON item for this product (for matching purposes only)
+        json_item = None
+        product_name = (product_dict.get('Product Name*') or 
+                       product_dict.get('ProductName') or '').lower().strip()
+        
+        logging.debug(f"🔍 DATABASE PRIORITY: Looking for JSON match for '{product_name}' (matching only)")
+        
+        # Try to find exact or best matching JSON item with multiple strategies
+        best_match_score = 0
+        for i, item in enumerate(json_items):
+            item_name = (item.get('product_name') or 
+                        item.get('inventory_name') or '').lower().strip()
+            if item_name:
+                # Strategy 1: Word overlap similarity
+                similarity = len(set(item_name.split()) & set(product_name.split())) / max(len(set(item_name.split())), len(set(product_name.split())), 1)
+                
+                # Strategy 2: Substring matching
+                substring_score = 0
+                if item_name in product_name or product_name in item_name:
+                    substring_score = 0.8
+                
+                # Strategy 3: Fuzzy matching (simple)
+                common_chars = set(item_name) & set(product_name)
+                fuzzy_score = len(common_chars) / max(len(set(item_name)), len(set(product_name)), 1) * 0.6
+                
+                # Combined score
+                total_score = max(similarity, substring_score, fuzzy_score)
+                
+                if total_score > best_match_score:
+                    best_match_score = total_score
+                    json_item = item
+                    logging.debug(f"🎯 DATABASE PRIORITY: Better match found at index {i}: '{item_name}' (score: {total_score:.3f})")
+        
+        # CRITICAL FIX: If no good match found, still use first JSON item but with lower confidence
+        if not json_item and json_items:
+            json_item = json_items[0]
+            best_match_score = 0.1  # Low confidence fallback
+            json_item_name = (json_item.get('product_name') or json_item.get('inventory_name') or 'UNKNOWN')
+            logging.info(f"🔄 DATABASE PRIORITY: No good match found, using first JSON item '{json_item_name}' as fallback")
+            
+        if not json_item:
+            logging.warning("🔄 DATABASE PRIORITY: No JSON item available for match")
+            return product_dict
+            
+        # Create database-priority product: 100% database data
+        db_priority_product = dict(product_dict)  # Start with database match - this is our complete data source
+        
+        logging.info(f"� DATABASE PRIORITY: Using 100% database-derived information for '{product_name}'")
+        logging.debug(f"💽 DATABASE PRIORITY: Database product contains {len(db_priority_product)} fields")
+        
+        # IMPORTANT: NO JSON data merging - all information comes from database
+        # JSON is only used for matching purposes, not for data extraction
+        
+        # Ensure all critical fields have database values or safe defaults
+        critical_fields = {
+            'Price': '25.00',  # Default price if missing
+            'Weight*': '1',    # Default weight if missing
+            'Units': 'g',      # Default units if missing
+            'THC test result': '0.00',  # Default THC if missing
+            'CBD test result': '0.00',  # Default CBD if missing
+            'Quantity*': '1',  # Default quantity if missing
+            'Product Type*': 'Unknown',  # Default type if missing
+            'Lineage': 'MIXED',  # Default lineage if missing
+        }
+        
+        # SPECIAL HANDLING FOR PRE-ROLL PRODUCTS: Use JointRatio instead of Weight* 
+        product_type = (db_priority_product.get('Product Type*') or '').lower().strip()
+        is_preroll = 'pre-roll' in product_type or 'infused pre-roll' in product_type
+        
+        logging.info(f"🔍 ENHANCED MATCHER DEBUG: Product '{db_priority_product.get('Product Name*', 'N/A')}' Type: '{product_type}' Is Pre-roll: {is_preroll}")
+        
+        if is_preroll:
+            # For pre-roll products, preserve JointRatio and update Weight* for display
+            joint_ratio = db_priority_product.get('JointRatio', '').strip()
+            logging.info(f"🔍 PRE-ROLL JOINT RATIO: Found '{joint_ratio}' for product '{db_priority_product.get('Product Name*', 'N/A')}'")
+            if joint_ratio and joint_ratio not in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
+                # Preserve JointRatio field and set Weight* for display compatibility
+                db_priority_product['Weight*'] = joint_ratio
+                # Ensure JointRatio field is explicitly preserved for template processing
+                db_priority_product['JointRatio'] = joint_ratio
+                logging.info(f"🚬 PRE-ROLL FIXED: Using JointRatio '{joint_ratio}' as Weight* for {product_type}")
+            else:
+                # Default JointRatio if missing - preserve both fields
+                default_ratio = '0.5g x 2 Pack'
+                db_priority_product['JointRatio'] = default_ratio
+                db_priority_product['Weight*'] = default_ratio
+                logging.debug(f"🚬 PRE-ROLL PRIORITY: Set default JointRatio '{default_ratio}' for {product_type}")
+        
+        filled_defaults = 0
+        for field, default_value in critical_fields.items():
+            current_value = db_priority_product.get(field)
+            if not current_value or str(current_value).strip() in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
+                db_priority_product[field] = default_value
+                filled_defaults += 1
+                logging.debug(f"� DATABASE PRIORITY: Set default for {field} = '{default_value}'")
+        
+        if filled_defaults > 0:
+            logging.info(f"� DATABASE PRIORITY: Applied {filled_defaults} default values for missing database fields")
+                
+        # CRITICAL: Add metadata about the database priority approach
+        db_priority_product['Source'] = 'Database Priority (100% DB)'
+        db_priority_product['JSON_Source'] = 'Matching Only'
+        db_priority_product['Match_Confidence'] = f"{best_match_score:.3f}"
+        db_priority_product['Data_Source'] = 'Database'
+        
+        # Preserve original match information
+        if hasattr(match_result, 'score'):
+            db_priority_product['Match_Score'] = float(getattr(match_result, 'score', 0.8))
+        else:
+            db_priority_product['Match_Score'] = 0.8  # Default score
+            
+        if hasattr(match_result, 'algorithm'):
+            db_priority_product['Match_Algorithm'] = str(getattr(match_result, 'algorithm', 'Enhanced'))
+        elif hasattr(match_result, 'strategy_used'):
+            strategy = getattr(match_result, 'strategy_used')
+            db_priority_product['Match_Algorithm'] = str(getattr(strategy, 'value', str(strategy)))
+        else:
+            db_priority_product['Match_Algorithm'] = 'Enhanced'
+            
+        # CRITICAL: Add JSON item tracking for debugging (matching info only)
+        json_item_name = json_item.get('product_name') or json_item.get('inventory_name') or 'UNKNOWN'
+        db_priority_product['JSON_Item_Name'] = json_item_name
+        db_priority_product['JSON_Fields_Used'] = 0  # No JSON fields used for data
+        db_priority_product['Default_Fields_Applied'] = filled_defaults
+            
+        logging.info(f"💽 DATABASE PRIORITY COMPLETE: '{product_name}' using 100% database data, matched with JSON '{json_item_name}' (match score: {best_match_score:.3f}, defaults applied: {filled_defaults})")
+        return db_priority_product
 
     def _select_db_price(self, product: dict) -> str:
         """Pick the best available price field from a DB product record."""
@@ -1434,7 +1734,7 @@ class EnhancedJSONMatcher:
             return 'vape_cartridge'
         elif any(term in inventory_type or term in product_name for term in ['edible', 'gummy', 'chocolate', 'cookie']):
             return 'edible'
-        elif any(term in inventory_type or term in product_name for term in ['pre-roll', 'preroll', 'joint']):
+        elif any(term in inventory_type or term in product_name for term in ['pre-roll', 'preroll', 'joint', 'infused pre-roll']):
             return 'pre_roll'
         elif any(term in inventory_type or term in product_name for term in ['topical', 'balm', 'cream', 'lotion']):
             return 'topical'
@@ -1716,6 +2016,8 @@ class EnhancedJSONMatcher:
                     json_items = payload.get("items", [])
                 if not json_items:
                     json_items = payload.get("products", [])
+                if not json_items:
+                    json_items = payload.get("inventory", [])
             else:
                 json_items = []
                 
@@ -1796,32 +2098,38 @@ class EnhancedJSONMatcher:
                 if product_dict:
                     if not isinstance(algo_val, str):
                         algo_val = getattr(algo_val, 'value', str(algo_val))
-                    product_dict['Source'] = 'JSON Match'
-                    product_dict['Match_Score'] = score_val
-                    product_dict['Match_Algorithm'] = algo_val
+                    
+                    # HYBRID APPROACH: Merge JSON data with database match
+                    hybrid_product = self._merge_json_data_hybrid(product_dict, json_data, match_result)
+                    
+                    # Ensure match metadata is preserved
+                    hybrid_product['Match_Score'] = score_val
+                    hybrid_product['Match_Algorithm'] = algo_val
+                    
                     # Ensure Description reflects the matched DB item values (not JSON codes)
-                    description_value = (product_dict.get('Description') or 
-                                         product_dict.get('Product Name*') or 
-                                         product_dict.get('ProductName') or '')
-                    product_dict['Description'] = description_value
-                    # Ensure Price comes from JSON data first, then DB record's price fields
-                    json_price = self._extract_json_price(json_data, product_dict)
+                    if not hybrid_product.get('Description'):
+                        description_value = (hybrid_product.get('Product Name*') or 
+                                             hybrid_product.get('ProductName') or '')
+                        hybrid_product['Description'] = description_value
+                    
+                    # Final price and weight handling with JSON priority
+                    json_price = self._extract_json_price(json_data, hybrid_product)
                     if json_price:
-                        product_dict['Price'] = self._format_price(json_price)
-                    else:
-                        db_price_raw = self._select_db_price(product_dict)
-                        product_dict['Price'] = self._format_price(db_price_raw)
-                    # Ensure Weight comes from JSON data first, then DB record's weight fields
-                    json_weight = self._extract_json_weight(json_data, product_dict)
+                        hybrid_product['Price'] = self._format_price(json_price)
+                    elif not hybrid_product.get('Price'):
+                        db_price_raw = self._select_db_price(hybrid_product)
+                        hybrid_product['Price'] = self._format_price(db_price_raw)
+                    
+                    json_weight = self._extract_json_weight(json_data, hybrid_product)
                     if json_weight:
-                        product_dict['Weight*'] = json_weight
-                        product_dict['WeightUnits'] = json_weight
-                        product_dict['WeightWithUnits'] = json_weight
+                        hybrid_product['Weight*'] = json_weight
+                        hybrid_product['WeightUnits'] = json_weight
+                        hybrid_product['WeightWithUnits'] = json_weight
                     
                     # Ensure Units prefer weight units over 'each'
-                    product_dict['Units'] = self._select_units(product_dict)
-                    product_dict = self._to_json_safe(product_dict)
-                    matched_products.append(product_dict)
+                    hybrid_product['Units'] = self._select_units(hybrid_product)
+                    hybrid_product = self._to_json_safe(hybrid_product)
+                    matched_products.append(hybrid_product)
                     
             # Filter out *VOID* products
             try:

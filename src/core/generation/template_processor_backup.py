@@ -1779,6 +1779,9 @@ class TemplateProcessor:
             
             # CRITICAL FIX: Final marker cleanup to ensure ALL markers are stripped
             self._final_marker_cleanup(doc)
+            
+            # FINAL ENFORCEMENT: Absolutely ensure DOH images are centered - this overrides all other positioning
+            self._final_doh_positioning_enforcement(doc)
         except Exception as e:
             self.logger.warning(f"DOH centering failed: {e}")
         
@@ -4879,5 +4882,102 @@ class TemplateProcessor:
         except Exception as e:
             self.logger.error(f"Error during manual placeholder replacement: {e}")
             raise
+    
+    def _cell_contains_doh_image(self, cell):
+        """
+        Check if a cell contains a DOH image.
+        This is used to preserve center alignment for DOH images when setting other content to TOP alignment.
+        
+        Args:
+            cell: The table cell to check
+            
+        Returns:
+            bool: True if the cell contains a DOH image, False otherwise
+        """
+        # Use the common utility function
+        from src.core.utils.common import cell_contains_doh_image
+        return cell_contains_doh_image(cell)
+
+    def _final_doh_positioning_enforcement(self, doc):
+        """
+        Final enforcement pass to ensure DOH images are ALWAYS centered.
+        This method runs at the very end and overrides any other positioning logic.
+        It addresses the issue where Advanced Layout gets set to "top" instead of "center".
+        """
+        try:
+            from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
+            from docx.enum.text import WD_ALIGN_PARAGRAPH
+            from docx.oxml.ns import qn
+            from docx.oxml import OxmlElement
+            
+            doh_cells_fixed = 0
+            
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        # Check if this cell contains a DOH image
+                        has_doh_image = False
+                        doh_paragraphs = []
+                        
+                        for paragraph in cell.paragraphs:
+                            for run in paragraph.runs:
+                                if hasattr(run, '_element'):
+                                    # Check for drawing elements (InlineImage) or picture elements
+                                    if (run._element.find(qn('w:drawing')) is not None or 
+                                        run._element.find(qn('w:pict')) is not None):
+                                        has_doh_image = True
+                                        doh_paragraphs.append(paragraph)
+                                        break
+                            if has_doh_image:
+                                break
+                        
+                        if has_doh_image:
+                            doh_cells_fixed += 1
+                            
+                            # FORCE cell vertical alignment to CENTER
+                            cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+                            
+                            # FORCE paragraph alignment to CENTER for all DOH image paragraphs
+                            for paragraph in doh_paragraphs:
+                                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                
+                                # FORCE XML-level centering to override any Word template defaults
+                                try:
+                                    pPr = paragraph._element.get_or_add_pPr()
+                                    
+                                    # Remove any existing justification and set to center
+                                    existing_jc = pPr.find(qn('w:jc'))
+                                    if existing_jc is not None:
+                                        pPr.remove(existing_jc)
+                                    
+                                    jc = OxmlElement('w:jc')
+                                    jc.set(qn('w:val'), 'center')
+                                    pPr.append(jc)
+                                    
+                                    # Ensure proper spacing
+                                    existing_spacing = pPr.find(qn('w:spacing'))
+                                    if existing_spacing is not None:
+                                        pPr.remove(existing_spacing)
+                                    
+                                    spacing = OxmlElement('w:spacing')
+                                    spacing.set(qn('w:before'), '60')  # 3pt before
+                                    spacing.set(qn('w:after'), '60')   # 3pt after
+                                    spacing.set(qn('w:line'), '240')   # Single line spacing
+                                    spacing.set(qn('w:lineRule'), 'auto')
+                                    pPr.append(spacing)
+                                    
+                                    # Remove any indentation that might affect centering
+                                    existing_ind = pPr.find(qn('w:ind'))
+                                    if existing_ind is not None:
+                                        pPr.remove(existing_ind)
+                                    
+                                except Exception as xml_error:
+                                    self.logger.warning(f"Error applying XML-level DOH centering: {xml_error}")
+            
+            if doh_cells_fixed > 0:
+                self.logger.info(f"Final DOH positioning enforcement: Fixed {doh_cells_fixed} DOH image cells to ensure CENTER alignment")
+                
+        except Exception as e:
+            self.logger.warning(f"Error in final DOH positioning enforcement: {e}")
 
 __all__ = ['get_font_scheme', 'TemplateProcessor']

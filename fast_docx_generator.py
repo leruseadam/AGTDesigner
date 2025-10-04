@@ -116,9 +116,13 @@ class FastDocxGenerator:
             product_type = record.get('ProductType', record.get('Product Type*', 'N/A'))
             brand = record.get('ProductBrand', record.get('Product Brand', 'N/A'))
             
-            # Improved weight mapping - prioritize CombinedWeight which includes units
+            # Improved weight mapping - check multiple weight fields
             weight = record.get('CombinedWeight')
-            if not weight or weight == 'N/A':
+            if not weight or weight == 'N/A' or weight == '':
+                # Try WeightWithUnits field (from database)
+                weight = record.get('WeightWithUnits')
+                
+            if not weight or weight == 'N/A' or weight == '':
                 # Create combined weight from Weight* and Units fields
                 weight_value = record.get('Weight', record.get('Weight*', ''))
                 units = record.get('Units', '')

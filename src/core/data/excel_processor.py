@@ -2832,6 +2832,7 @@ class ExcelProcessor:
                 'Product Type': safe_get_value(row.get('Product Type*', '')),
                 'Weight*': safe_get_value(raw_weight),
                 'Weight': safe_get_value(raw_weight),
+                'Units': safe_get_value(row.get('Units', '')),  # Add Units field for label generation
                 'WeightWithUnits': safe_get_value(weight_with_units),
                 'WeightUnits': safe_get_value(weight_with_units),  # Add WeightUnits for frontend compatibility
                 'Quantity*': safe_get_value(quantity),
@@ -6127,6 +6128,35 @@ class ExcelProcessor:
                     tags.append(tag)
                 
                 logger.info(f"Converted {len(tags)} database products to tags")
+                
+                # Apply filters if provided
+                if filters:
+                    filtered_tags = []
+                    for tag in tags:
+                        # Apply same filtering logic as Excel processor
+                        if filters.get('productType'):
+                            tag_product_type = str(tag.get('Product Type*', '')).strip().lower()
+                            filter_product_type = str(filters['productType']).strip().lower()
+                            if tag_product_type != filter_product_type:
+                                continue
+                        
+                        if filters.get('vendor'):
+                            tag_vendor = str(tag.get('Vendor/Supplier*', '')).strip().lower()
+                            filter_vendor = str(filters['vendor']).strip().lower()
+                            if tag_vendor != filter_vendor:
+                                continue
+                        
+                        if filters.get('brand'):
+                            tag_brand = str(tag.get('Product Brand', '')).strip().lower()
+                            filter_brand = str(filters['brand']).strip().lower()
+                            if tag_brand != filter_brand:
+                                continue
+                        
+                        filtered_tags.append(tag)
+                    
+                    logger.info(f"Applied filters, returning {len(filtered_tags)} tags")
+                    return filtered_tags
+                
                 return tags
                 
             except Exception as e:

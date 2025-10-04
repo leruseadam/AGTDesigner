@@ -288,7 +288,8 @@ def process_chunk(args):
                     logger.debug("Skipping DOH image - value is not 'YES'")
                 
             # --- Wrap all fields with markers ---
-            price_val = f"{row.get('Price', '')}"
+            # Updated price mapping to use correct Excel field name
+            price_val = f"{row.get('Price* (Tier Name for Bulk)', row.get('Price', ''))}"
             label_data["Price"] = wrap_with_marker(price_val, "PRICE")  # Fixed: Use "PRICE" marker to match markers.py definition
             
             lineage_text   = str(row.get("Lineage", "")).strip()
@@ -346,15 +347,26 @@ def process_chunk(args):
             except Exception:
                 description = str(description_raw or "")
             
-            # Construct WeightUnits from Weight* and Units
-            weight = str(row.get("Weight*", "")).strip()
-            units = str(row.get("Units", "")).strip()
-            if weight and units:
-                weight_units = f"{weight}{units}"
-            elif weight:
-                weight_units = weight
+            # Construct WeightUnits from Weight* and Units, but use JointRatio for pre-roll products
+            product_type = str(row.get("Product Type*", "")).lower().strip()
+            
+            # For pre-roll and infused pre-roll products, use JointRatio instead of Weight* + Units
+            if product_type in ["pre-roll", "infused pre-roll"]:
+                joint_ratio = str(row.get("JointRatio", "")).strip()
+                if joint_ratio and joint_ratio not in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
+                    weight_units = joint_ratio  # Use JointRatio directly (e.g., "0.5g x 2 Pack")
+                else:
+                    weight_units = "0.5g x 2 Pack"  # Default for pre-rolls
             else:
-                weight_units = ""
+                # Regular products: construct from Weight* + Units
+                weight = str(row.get("Weight*", "")).strip()
+                units = str(row.get("Units", "")).strip()
+                if weight and units:
+                    weight_units = f"{weight}{units}"
+                elif weight:
+                    weight_units = weight
+                else:
+                    weight_units = ""
             
             # Preserve original ProductName; keep Description as the clean field
             label_data["ProductName"] = product_name  # Do not repurpose ProductName

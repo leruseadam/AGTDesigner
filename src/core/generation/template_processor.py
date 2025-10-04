@@ -1238,6 +1238,11 @@ class TemplateProcessor:
 
     def _build_label_context(self, record, doc):
         """Ultra-optimized label context building for maximum performance."""
+        # CRITICAL FIX: Log lineage value received in template processor
+        lineage_value = record.get('Lineage', 'NOT_FOUND')
+        product_name = record.get('ProductName', 'Unknown')
+        self.logger.info(f"LINEAGE TEMPLATE DEBUG: Building context for '{product_name}' with lineage: '{lineage_value}'")
+        
         # Fast dictionary copy
         label_context = dict(record)
 
@@ -1249,7 +1254,46 @@ class TemplateProcessor:
                 label_context[key] = ""
 
         # Ensure WeightUnits is populated from available weight fields
-        if not label_context.get('WeightUnits'):
+        # Special handling for pre-roll products: use JointRatio instead of Weight* + Units
+        product_type = (label_context.get('Product Type*', '').lower() or 
+                       label_context.get('ProductType', '').lower())
+        
+        # ALWAYS LOG TO SEE WHAT PRODUCT TYPES ARE PROCESSED
+        self.logger.info(f"🔍 ALL PRODUCTS DEBUG: Product '{record.get('ProductName', 'N/A')}', Raw Type: '{label_context.get('Product Type*', 'NOT_FOUND')}', Processed: '{product_type}'")
+        
+        if product_type in ['pre-roll', 'infused pre-roll']:
+            # For pre-roll products, use JointRatio as WeightUnits
+            joint_ratio = (record.get('JointRatio') or 
+                          record.get('Joint Ratio') or 
+                          '')
+            
+            # CRITICAL FIX: If JointRatio is missing from record, try to get it from database directly
+            if not joint_ratio or joint_ratio.strip() in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
+                product_name = record.get('ProductName') or record.get('Product Name*', '')
+                if product_name:
+                    try:
+                        # Get JointRatio directly from database
+                        from src.core.data.product_database import get_product_database
+                        product_db = get_product_database()
+                        if product_db:
+                            conn = product_db._get_connection()
+                            cursor = conn.cursor()
+                            cursor.execute('SELECT JointRatio FROM products WHERE "Product Name*" = ?', (product_name,))
+                            result = cursor.fetchone()
+                            if result and result[0]:
+                                joint_ratio = result[0]
+                                self.logger.info(f"🔧 FIXED: Retrieved JointRatio '{joint_ratio}' from database for '{product_name}'")
+                    except Exception as e:
+                        self.logger.warning(f"🔧 FAILED: Could not retrieve JointRatio from database: {e}")
+            
+            self.logger.info(f"🔴 TEMPLATE DEBUG: Product '{record.get('ProductName', 'N/A')}', Type '{product_type}', JointRatio received: '{joint_ratio}'")
+            if joint_ratio and joint_ratio.strip() not in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
+                label_context['WeightUnits'] = joint_ratio.strip()
+                self.logger.debug(f"PRE-ROLL WeightUnits: Using JointRatio '{joint_ratio}' for {product_type}")
+            else:
+                label_context['WeightUnits'] = "0.5g x 2 Pack"  # Default for pre-rolls
+                self.logger.debug(f"PRE-ROLL WeightUnits: Using default '0.5g x 2 Pack' for {product_type}")
+        elif not label_context.get('WeightUnits'):
             label_context['WeightUnits'] = (
                 label_context.get('weightWithUnits') or 
                 label_context.get('WeightWithUnits') or 
@@ -1891,6 +1935,9 @@ class TemplateProcessor:
             
             # CRITICAL FIX: Final marker cleanup to ensure ALL markers are stripped
             self._final_marker_cleanup(doc)
+            
+            # FINAL ENFORCEMENT: Absolutely ensure DOH images are centered - this overrides all other positioning
+            self._final_doh_positioning_enforcement(doc)
         except Exception as e:
             self.logger.warning(f"DOH centering failed: {e}")
         
@@ -5184,6 +5231,88 @@ class TemplateProcessor:
         # Use the common utility function
         from src.core.utils.common import cell_contains_doh_image
         return cell_contains_doh_image(cell)
+
+    def _final_doh_positioning_enforcement(self, doc):
+        """
+        Final enforcement pass to ensure DOH images are ALWAYS centered.
+        This method runs at the very end and overrides any other positioning logic.
+        It addresses the issue where Advanced Layout gets set to "top" instead of "center".
+        """
+        try:
+            from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
+            from docx.enum.text import WD_ALIGN_PARAGRAPH
+            from docx.oxml.ns import qn
+            from docx.oxml import OxmlElement
+            
+            doh_cells_fixed = 0
+            
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        # Check if this cell contains a DOH image
+                        has_doh_image = False
+                        doh_paragraphs = []
+                        
+                        for paragraph in cell.paragraphs:
+                            for run in paragraph.runs:
+                                if hasattr(run, '_element'):
+                                    # Check for drawing elements (InlineImage) or picture elements
+                                    if (run._element.find(qn('w:drawing')) is not None or 
+                                        run._element.find(qn('w:pict')) is not None):
+                                        has_doh_image = True
+                                        doh_paragraphs.append(paragraph)
+                                        break
+                            if has_doh_image:
+                                break
+                        
+                        if has_doh_image:
+                            doh_cells_fixed += 1
+                            
+                            # FORCE cell vertical alignment to CENTER
+                            cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+                            
+                            # FORCE paragraph alignment to CENTER for all DOH image paragraphs
+                            for paragraph in doh_paragraphs:
+                                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                
+                                # FORCE XML-level centering to override any Word template defaults
+                                try:
+                                    pPr = paragraph._element.get_or_add_pPr()
+                                    
+                                    # Remove any existing justification and set to center
+                                    existing_jc = pPr.find(qn('w:jc'))
+                                    if existing_jc is not None:
+                                        pPr.remove(existing_jc)
+                                    
+                                    jc = OxmlElement('w:jc')
+                                    jc.set(qn('w:val'), 'center')
+                                    pPr.append(jc)
+                                    
+                                    # Ensure proper spacing
+                                    existing_spacing = pPr.find(qn('w:spacing'))
+                                    if existing_spacing is not None:
+                                        pPr.remove(existing_spacing)
+                                    
+                                    spacing = OxmlElement('w:spacing')
+                                    spacing.set(qn('w:before'), '60')  # 3pt before
+                                    spacing.set(qn('w:after'), '60')   # 3pt after
+                                    spacing.set(qn('w:line'), '240')   # Single line spacing
+                                    spacing.set(qn('w:lineRule'), 'auto')
+                                    pPr.append(spacing)
+                                    
+                                    # Remove any indentation that might affect centering
+                                    existing_ind = pPr.find(qn('w:ind'))
+                                    if existing_ind is not None:
+                                        pPr.remove(existing_ind)
+                                    
+                                except Exception as xml_error:
+                                    self.logger.warning(f"Error applying XML-level DOH centering: {xml_error}")
+            
+            if doh_cells_fixed > 0:
+                self.logger.info(f"Final DOH positioning enforcement: Fixed {doh_cells_fixed} DOH image cells to ensure CENTER alignment")
+                
+        except Exception as e:
+            self.logger.warning(f"Error in final DOH positioning enforcement: {e}")
 
     def _clean_doh_cells_before_processing(self, doc):
         """
