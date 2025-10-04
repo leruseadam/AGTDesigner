@@ -1295,6 +1295,7 @@ class TemplateProcessor:
                 self.logger.debug(f"PRE-ROLL WeightUnits: Using default '0.5g x 2 Pack' for {product_type}")
         elif not label_context.get('WeightUnits'):
             label_context['WeightUnits'] = (
+                label_context.get('CombinedWeight') or
                 label_context.get('weightWithUnits') or 
                 label_context.get('WeightWithUnits') or 
                 label_context.get('WeightUnits') or 
