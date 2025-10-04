@@ -4372,76 +4372,77 @@ def generate_labels():
                         records = []
                         for db_record in valid_db_records:
                             logging.info(f"Processing database record: {db_record.get('Product Name*', '')} - Units: {db_record.get('Units', 'MISSING')}, Weight: {db_record.get('Weight*', 'MISSING')}")
+                            
+                            # CRITICAL FIX: Use process_database_product_for_api to ensure consistent DescAndWeight creation
+                            processed_record = process_database_product_for_api(db_record)
+                            
                             # Map database fields to template fields (using correct field names from database)
                             record = {
-                                'Product Name*': db_record.get('Product Name*', ''),
-                                'ProductName': db_record.get('Product Name*', ''),  # Add ProductName for Excel processor compatibility
-                                'ProductType': db_record.get('Product Type*', ''),
-                                'Lineage': db_record.get('Lineage', 'MIXED'),
-                                'ProductBrand': db_record.get('Product Brand', ''),
-                                'Product Brand': db_record.get('Product Brand', ''),  # Add Product Brand for template processor compatibility
-                                'Vendor': db_record.get('Vendor/Supplier*', ''),
-                                'Product Strain': db_record.get('Product Strain', ''),  # Correct field name
-                                'ProductStrain': db_record.get('Product Strain', ''),  # Add ProductStrain for template processor compatibility
-                                'Price': db_record.get('Price', '25'),  # Default price if missing
-                                'DOH': db_record.get('DOH', ''),
-                                'Ratio': db_record.get('Ratio', ''),
-                                'Weight*': db_record.get('Weight*', '1'),  # Default weight if missing
-                                'Units': db_record.get('Units', 'g'),  # Default units if missing
-                                'WeightUnits': f"{db_record.get('Weight*', '1')}{db_record.get('Units', 'g')}",  # Construct WeightUnits from Weight* and Units
-                                'CombinedWeight': f"{db_record.get('Weight*', '1')}{db_record.get('Units', 'g')}",  # Add CombinedWeight for template compatibility
-                                # Add database weight and units as fallback data for Excel processor
-                                'db_weight': db_record.get('Weight*', '1'),
-                                'db_units': db_record.get('Units', 'g'),
-                                'Description': _create_desc_and_weight(db_record.get('Product Name*', ''), f"{db_record.get('Weight*', '1')}{db_record.get('Units', 'g')}"),
-                                'DescAndWeight': _create_desc_and_weight(db_record.get('Product Name*', ''), f"{db_record.get('Weight*', '1')}{db_record.get('Units', 'g')}"),  # Use Excel processor formula with weight
-                                'THC test result': db_record.get('THC test result', ''),
-                                'CBD test result': db_record.get('CBD test result', ''),
-                                'Test result unit (% or mg)': db_record.get('Test result unit (% or mg)', '%'),  # Default to % if missing
-                                'Quantity*': db_record.get('Quantity*', '1'),  # Default quantity if missing
-                                'Concentrate Type': db_record.get('Concentrate Type', ''),  # Correct field name
-                                'JointRatio': _calculate_joint_ratio_for_record(db_record),
-                                'Ratio_or_THC_CBD': db_record.get('Ratio_or_THC_CBD', ''),
-                                'State': db_record.get('State', 'active'),  # Default state if missing
-                                'Is Sample? (yes/no)': db_record.get('Is Sample? (yes/no)', 'no'),  # Default sample status
-                                'Is MJ product?(yes/no)': db_record.get('Is MJ product?(yes/no)', 'yes'),  # Default MJ product status
-                                'Discountable? (yes/no)': db_record.get('Discountable? (yes/no)', 'yes'),  # Default discountable status
-                                'Room*': db_record.get('Room*', 'Default'),  # Default room if missing
-                                'Batch Number': db_record.get('Batch Number', ''),  # Correct field name
-                                'Lot Number': db_record.get('Lot Number', ''),  # Correct field name
-                                'Barcode*': db_record.get('Barcode*', ''),  # Correct field name
-                                'Medical Only (Yes/No)': db_record.get('Medical Only (Yes/No)', ''),  # Correct field name
-                                'Med Price': db_record.get('Med Price', ''),  # Correct field name
-                                'Expiration Date(YYYY-MM-DD)': db_record.get('Expiration Date(YYYY-MM-DD)', ''),  # Correct field name
-                                'Is Archived? (yes/no)': db_record.get('Is Archived? (yes/no)', 'no'),  # Default archived status
-                                'THC Per Serving': db_record.get('THC Per Serving', ''),  # Correct field name
-                                'Allergens': db_record.get('Allergens', ''),  # Correct field name
-                                'Solvent': db_record.get('Solvent', ''),  # Correct field name
-                                'Accepted Date': db_record.get('Accepted Date', ''),  # Correct field name
-                                'Internal Product Identifier': db_record.get('Internal Product Identifier', ''),  # Correct field name
-                                'Product Tags (comma separated)': db_record.get('Product Tags (comma separated)', ''),  # Correct field name
-                                'Image URL': db_record.get('Image URL', ''),  # Correct field name
-                                'Ingredients': db_record.get('Ingredients', ''),  # Correct field name
-                                'CombinedWeight': db_record.get('CombinedWeight', ''),  # Correct field name
-                                'Description_Complexity': db_record.get('Description_Complexity', ''),  # Correct field name
-                                'Total THC': db_record.get('Total THC', ''),
-                                'THCA': db_record.get('THCA', ''),
-                                'CBDA': db_record.get('CBDA', ''),
-                                'CBN': db_record.get('CBN', ''),
+                                'Product Name*': processed_record.get('Product Name*', ''),
+                                'ProductName': processed_record.get('Product Name*', ''),  # Add ProductName for Excel processor compatibility
+                                'ProductType': processed_record.get('Product Type*', ''),
+                                'Lineage': processed_record.get('Lineage', 'MIXED'),
+                                'ProductBrand': processed_record.get('Product Brand', ''),
+                                'Product Brand': processed_record.get('Product Brand', ''),  # Add Product Brand for template processor compatibility
+                                'Vendor': processed_record.get('Vendor/Supplier*', ''),
+                                'Product Strain': processed_record.get('Product Strain', ''),  # Correct field name
+                                'ProductStrain': processed_record.get('Product Strain', ''),  # Add ProductStrain for template processor compatibility
+                                'Price': processed_record.get('Price', '25'),  # Default price if missing
+                                'DOH': processed_record.get('DOH', ''),
+                                'Ratio': processed_record.get('Ratio', ''),
+                                'Weight*': processed_record.get('Weight*', '1'),  # Default weight if missing
+                                'Units': processed_record.get('Units', 'g'),  # Default units if missing
+                                'WeightUnits': processed_record.get('CombinedWeight', f"{processed_record.get('Weight*', '1')}{processed_record.get('Units', 'g')}"),  # Use processed CombinedWeight
+                                'CombinedWeight': processed_record.get('CombinedWeight', f"{processed_record.get('Weight*', '1')}{processed_record.get('Units', 'g')}"),  # Use processed CombinedWeight
+                                # CRITICAL FIX: Use processed DescAndWeight from process_database_product_for_api
+                                'Description': processed_record.get('DescAndWeight', processed_record.get('Product Name*', '')),  # Use processed DescAndWeight
+                                'DescAndWeight': processed_record.get('DescAndWeight', f"{processed_record.get('Product Name*', '')} - {processed_record.get('CombinedWeight', '1g')}"),  # Use processed DescAndWeight
+                                'THC test result': processed_record.get('THC test result', ''),
+                                'CBD test result': processed_record.get('CBD test result', ''),
+                                'Test result unit (% or mg)': processed_record.get('Test result unit (% or mg)', '%'),  # Default to % if missing
+                                'Quantity*': processed_record.get('Quantity*', '1'),  # Default quantity if missing
+                                'Concentrate Type': processed_record.get('Concentrate Type', ''),  # Correct field name
+                                'JointRatio': _calculate_joint_ratio_for_record(processed_record),
+                                'Ratio_or_THC_CBD': processed_record.get('Ratio_or_THC_CBD', ''),
+                                'State': processed_record.get('State', 'active'),  # Default state if missing
+                                'Is Sample? (yes/no)': processed_record.get('Is Sample? (yes/no)', 'no'),  # Default sample status
+                                'Is MJ product?(yes/no)': processed_record.get('Is MJ product?(yes/no)', 'yes'),  # Default MJ product status
+                                'Discountable? (yes/no)': processed_record.get('Discountable? (yes/no)', 'yes'),  # Default discountable status
+                                'Room*': processed_record.get('Room*', 'Default'),  # Default room if missing
+                                'Batch Number': processed_record.get('Batch Number', ''),  # Correct field name
+                                'Lot Number': processed_record.get('Lot Number', ''),  # Correct field name
+                                'Barcode*': processed_record.get('Barcode*', ''),  # Correct field name
+                                'Medical Only (Yes/No)': processed_record.get('Medical Only (Yes/No)', ''),  # Correct field name
+                                'Med Price': processed_record.get('Med Price', ''),  # Correct field name
+                                'Expiration Date(YYYY-MM-DD)': processed_record.get('Expiration Date(YYYY-MM-DD)', ''),  # Correct field name
+                                'Is Archived? (yes/no)': processed_record.get('Is Archived? (yes/no)', 'no'),  # Default archived status
+                                'THC Per Serving': processed_record.get('THC Per Serving', ''),  # Correct field name
+                                'Allergens': processed_record.get('Allergens', ''),  # Correct field name
+                                'Solvent': processed_record.get('Solvent', ''),  # Correct field name
+                                'Accepted Date': processed_record.get('Accepted Date', ''),  # Correct field name
+                                'Internal Product Identifier': processed_record.get('Internal Product Identifier', ''),  # Correct field name
+                                'Product Tags (comma separated)': processed_record.get('Product Tags (comma separated)', ''),  # Correct field name
+                                'Image URL': processed_record.get('Image URL', ''),  # Correct field name
+                                'Ingredients': processed_record.get('Ingredients', ''),  # Correct field name
+                                'Description_Complexity': processed_record.get('Description_Complexity', ''),  # Correct field name
+                                'Total THC': processed_record.get('Total THC', ''),
+                                'THCA': processed_record.get('THCA', ''),
+                                'CBDA': processed_record.get('CBDA', ''),
+                                'CBN': processed_record.get('CBN', ''),
                                 # Add missing fields for template processor compatibility
-                                'THC': db_record.get('THC', ''),
-                                'CBD': db_record.get('CBD', ''),
-                                'AI': db_record.get('Total THC', ''),  # Map Total THC to AI field for template processor
-                                'AJ': db_record.get('THCA', ''),  # Map THCA to AJ field for template processor
-                                'AK': db_record.get('CBDA', ''),  # Map CBDA to AK field for template processor
-                                'ProductVendor': db_record.get('Vendor/Supplier*', ''),
-                                'Quantity Received*': db_record.get('Quantity Received*', ''),
-                                'Barcode': db_record.get('Barcode*', ''),
-                                'Quantity': db_record.get('Quantity*', '1')
+                                'THC': processed_record.get('THC', ''),
+                                'CBD': processed_record.get('CBD', ''),
+                                'AI': processed_record.get('Total THC', ''),  # Map Total THC to AI field for template processor
+                                'AJ': processed_record.get('THCA', ''),  # Map THCA to AJ field for template processor
+                                'AK': processed_record.get('CBDA', ''),  # Map CBDA to AK field for template processor
+                                'ProductVendor': processed_record.get('Vendor/Supplier*', ''),
+                                'Quantity Received*': processed_record.get('Quantity Received*', ''),
+                                'Barcode': processed_record.get('Barcode*', ''),
+                                'Quantity': processed_record.get('Quantity*', '1')
                             }
-                            print(f"DEBUG: Final record DescAndWeight: '{record.get('DescAndWeight', '')}' (from: '{db_record.get('Product Name*', '')}' + '{db_record.get('Units', '')}')")
-                            print(f"DEBUG: THC/CBD values - THC: '{db_record.get('THC test result', '')}', CBD: '{db_record.get('CBD test result', '')}', Unit: '{db_record.get('Test result unit (% or mg)', '')}'")
-                            print(f"DEBUG: AI/AJ/AK values - AI (Total THC): '{db_record.get('Total THC', '')}', AJ (THCA): '{db_record.get('THCA', '')}', AK (CBDA): '{db_record.get('CBDA', '')}'")
+                            print(f"DEBUG: Database record processed - DescAndWeight: '{record.get('DescAndWeight', '')}' (from processed: '{processed_record.get('DescAndWeight', '')}')")
+                            print(f"DEBUG: THC/CBD values - THC: '{processed_record.get('THC test result', '')}', CBD: '{processed_record.get('CBD test result', '')}', Unit: '{processed_record.get('Test result unit (% or mg)', '')}'")
+                            print(f"DEBUG: AI/AJ/AK values - AI (Total THC): '{processed_record.get('Total THC', '')}', AJ (THCA): '{processed_record.get('THCA', '')}', AK (CBDA): '{processed_record.get('CBDA', '')}'")
                             records.append(record)
                         logging.info(f"✅ Generated {len(records)} records from database")
                     else:
