@@ -6303,6 +6303,7 @@ class ExcelProcessor:
                 'WeightWithUnits': safe_get_value(weight_with_units),
                 'WeightUnits': safe_get_value(weight_with_units),  # Add WeightUnits for frontend compatibility
                 'CombinedWeight': safe_get_value(weight_with_units),  # Add CombinedWeight field for consistency with database products
+                'weightWithUnits': safe_get_value(weight_with_units),  # Add lowercase version for frontend compatibility
                 'Units': safe_get_value(row.get('Units', '')),  # Add Units field for consistency
                 'Quantity*': safe_get_value(quantity),
                 'Quantity Received*': safe_get_value(quantity),

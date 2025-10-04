@@ -4837,17 +4837,21 @@ def process_database_product_for_api(db_product):
                     combined_weight = f'{int(weight_float)}{units}'
                 else:
                     combined_weight = f'{weight_value}{units}'
-                processed_product['CombinedWeight'] = combined_weight
             except (ValueError, TypeError):
                 # If conversion fails, just concatenate as strings
                 combined_weight = f'{weight_value}{units}'
-                processed_product['CombinedWeight'] = combined_weight
         elif weight_value:
             # Weight without units
-            processed_product['CombinedWeight'] = str(weight_value)
+            combined_weight = str(weight_value)
         else:
             # No weight available
-            processed_product['CombinedWeight'] = 'N/A'
+            combined_weight = 'N/A'
+    
+    # CRITICAL FIX: Set all weight field variations for frontend compatibility
+    processed_product['CombinedWeight'] = combined_weight
+    processed_product['WeightWithUnits'] = combined_weight
+    processed_product['WeightUnits'] = combined_weight
+    processed_product['weightWithUnits'] = combined_weight
     
     # Create DescAndWeight field if missing or empty
     desc_and_weight = processed_product.get('DescAndWeight', '')

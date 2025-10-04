@@ -1075,9 +1075,11 @@ const TagManager = {
                     if (normalizedType) availableOptions.productType.add(normalizedType);
                 }
                 if (tag.Lineage || tag.lineage) availableOptions.lineage.add((tag.Lineage || tag.lineage || '').toString().trim());
-                if (tag['Weight*'] || tag.weight || tag.weightWithUnits || tag.WeightUnits) {
-                    // Always use the combined value for display and filtering
-                    const combined = (tag.weightWithUnits || tag.WeightUnits || tag['Weight*'] || tag.weight).toString().trim();
+                // CRITICAL FIX: Check all possible weight field variations for options generation
+                if (tag['Weight*'] || tag.weight || tag.weightWithUnits || tag.WeightWithUnits || tag.WeightUnits || tag.CombinedWeight) {
+                    // Always use the combined value for display and filtering - check all possible sources
+                    const combined = (tag.weightWithUnits || tag.WeightWithUnits || tag.WeightUnits || 
+                                    tag.CombinedWeight || tag['Weight*'] || tag.weight).toString().trim();
                     if (combined) availableOptions.weight.add(combined);
                 }
                 if (tag.DOH || tag.doh) availableOptions.doh.add((tag.DOH || tag.doh || '').toString().trim());
@@ -1270,7 +1272,9 @@ const TagManager = {
             if (weightFilter && weightFilter.trim() !== '' && weightFilter.toLowerCase() !== 'all') {
                 // Get the tag's weight in multiple possible formats
                 const tagWeight = (tag['Weight*'] || tag.weight || '').toString().trim();
-                const tagWeightWithUnits = (tag.weightWithUnits || tag.WeightUnits || '').toString().trim();
+                // CRITICAL FIX: Check all possible weight field variations for filtering
+                const tagWeightWithUnits = (tag.weightWithUnits || tag.WeightWithUnits || tag.WeightUnits || 
+                                          tag.CombinedWeight || tag.weightWithUnits || '').toString().trim();
                 const tagUnits = (tag.Units || '').toString().trim();
                 
                 // Create a normalized weight string for comparison
@@ -1557,7 +1561,9 @@ const TagManager = {
               : 'Unknown Type';
             const lineage = tag.lineage || tag['Lineage'] || 'MIXED';
             const weight = (tag.weight || tag['Weight*'] || tag['Weight'] || tag['WeightUnits'] || '').toString().trim();
-            const weightWithUnits = (tag.weightWithUnits || weight || tag['WeightUnits'] || '').toString().trim();
+            // CRITICAL FIX: Ensure weightWithUnits is properly populated from multiple possible sources
+            const weightWithUnits = (tag.weightWithUnits || tag.WeightWithUnits || tag.WeightUnits || 
+                                   tag.CombinedWeight || tag.weightWithUnits || weight || '').toString().trim();
 
             // If no vendor found, try to extract from product name
             if (!vendor) {
@@ -6274,7 +6280,9 @@ const TagManager = {
         // Check and clear weight filter if it matches the deselected tag
         const weightFilter = document.getElementById('weightFilter');
         if (weightFilter && weightFilter.value && weightFilter.value.trim() !== '') {
-            const tagWeight = (tag.WeightUnits || tag.weightUnits || '').toString().trim();
+            // CRITICAL FIX: Check all possible weight field variations when clearing filters
+            const tagWeight = (tag.WeightUnits || tag.WeightWithUnits || tag.weightWithUnits || 
+                             tag.CombinedWeight || tag.weightUnits || '').toString().trim();
             if (tagWeight.toLowerCase() === weightFilter.value.toLowerCase()) {
                 console.log(`Clearing weight filter: ${weightFilter.value} (matches deselected tag)`);
                 weightFilter.value = '';
