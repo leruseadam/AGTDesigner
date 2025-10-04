@@ -4815,7 +4815,13 @@ def process_database_product_for_api(db_product):
     Specifically, creates CombinedWeight from Weight* + Units fields and DescAndWeight.
     """
     # Create a copy to avoid modifying the original
-    processed_product = db_product.copy()
+    # Handle both dict and sqlite3.Row objects
+    if hasattr(db_product, 'keys'):
+        # It's a sqlite3.Row or dict-like object
+        processed_product = dict(db_product)
+    else:
+        # It's already a dict
+        processed_product = db_product.copy()
     
     # Create CombinedWeight if missing or empty
     combined_weight = processed_product.get('CombinedWeight', '')
