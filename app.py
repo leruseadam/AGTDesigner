@@ -1082,7 +1082,7 @@ class LabelMakerApp:
             
     def run(self):
         host = os.environ.get('HOST', '127.0.0.1')
-        port = int(os.environ.get('FLASK_PORT', 8000))  # Changed to 5003 to avoid port conflict
+        port = int(os.environ.get('FLASK_PORT', 8001))  # Changed to 5003 to avoid port conflict
         development_mode = self.app.config.get('DEVELOPMENT_MODE', False)
         
         # Show optimization status
@@ -1140,6 +1140,18 @@ def get_session_excel_processor():
                                     logging.warning("No strain filter found in dropdown cache")
                             except Exception as e:
                                 logging.error(f"Failed to populate dropdown cache from session uploaded file: {e}")
+                    else:
+                        logging.warning(f"Failed to load uploaded file from session: {session_file_path}")
+                        # Mark file as failed for cleanup
+                        filename = session.get('uploaded_filename', '')
+                        if filename:
+                            update_processing_status(filename, 'error: File load failed on session restore')
+            elif session_file_path:
+                logging.warning(f"Session uploaded file does not exist: {session_file_path}")
+                # Clear invalid session data
+                session.pop('file_path', None)
+                session.pop('uploaded_filename', None)
+                session.pop('upload_timestamp', None)
             
             # CRITICAL FIX: Ensure ExcelProcessor has data for JSON matching
             if not hasattr(g.excel_processor, 'df') or g.excel_processor.df is None or g.excel_processor.df.empty:
@@ -1485,19 +1497,42 @@ def index():
         
         # Store selection will be handled by frontend JavaScript using localStorage
         
-        # Remove uploaded file if it exists and is not the default file
+        # Only remove uploaded files if they're old (more than 1 hour) or failed to process
         if uploaded_file:
             try:
                 from src.core.data.excel_processor import get_default_upload_file
                 default_file = get_default_upload_file()
+                
                 if uploaded_file != default_file and os.path.exists(uploaded_file):
-                    try:
-                        os.remove(uploaded_file)
-                        logging.info(f"Removed uploaded file: {uploaded_file}")
-                    except Exception as e:
-                        logging.warning(f"Failed to remove uploaded file: {e}")
+                    # Check if file is old (more than 1 hour)
+                    file_age = time.time() - os.path.getmtime(uploaded_file)
+                    upload_timestamp = session.get('upload_timestamp', 0)
+                    
+                    # Get processing status
+                    filename = session.get('uploaded_filename', '')
+                    status = processing_status.get(filename, 'unknown')
+                    
+                    # Only remove if file is old OR processing failed
+                    should_remove = (
+                        file_age > 3600 or  # More than 1 hour old
+                        status.startswith('error:') or  # Processing failed
+                        (upload_timestamp > 0 and time.time() - upload_timestamp > 3600)  # Upload session expired
+                    )
+                    
+                    if should_remove:
+                        try:
+                            os.remove(uploaded_file)
+                            logging.info(f"Removed old/failed uploaded file: {uploaded_file} (age: {file_age:.0f}s, status: {status})")
+                            # Clear session data for removed file
+                            session.pop('file_path', None)
+                            session.pop('uploaded_filename', None)
+                            session.pop('upload_timestamp', None)
+                        except Exception as e:
+                            logging.warning(f"Failed to remove uploaded file: {e}")
+                    else:
+                        logging.info(f"Preserving recent uploaded file: {uploaded_file} (age: {file_age:.0f}s, status: {status})")
             except Exception as e:
-                logging.warning(f"Error checking default file: {e}")
+                logging.warning(f"Error checking uploaded file: {e}")
         
         # Periodic cleanup (much less frequent - every 200th page load)
         import random
@@ -3044,7 +3079,7 @@ def move_tags():
         # Save current state for undo using the dedicated endpoint
         try:
             undo_response = requests.post(
-                f"http://127.0.0.1:{app.config.get('PORT', 8000)}/api/save-selection-state",
+                f"http://127.0.0.1:{app.config.get('PORT', 8001)}/api/save-selection-state",
                 json={'action_type': 'move_tags'},
                 headers={'Content-Type': 'application/json'}
             )
@@ -4788,7 +4823,7 @@ def get_session_cache_key(base_key):
 def process_database_product_for_api(db_product):
     """
     Process a database product to ensure it has the same format as Excel products.
-    Specifically, creates CombinedWeight from Weight* + Units fields.
+    Specifically, creates CombinedWeight from Weight* + Units fields and DescAndWeight.
     """
     # Create a copy to avoid modifying the original
     processed_product = db_product.copy()
@@ -4818,6 +4853,20 @@ def process_database_product_for_api(db_product):
         else:
             # No weight available
             processed_product['CombinedWeight'] = 'N/A'
+    
+    # Create DescAndWeight field if missing or empty
+    desc_and_weight = processed_product.get('DescAndWeight', '')
+    if not desc_and_weight or desc_and_weight == '' or str(desc_and_weight).strip() == '':
+        product_name = processed_product.get('Product Name*', processed_product.get('Product Name', ''))
+        description = processed_product.get('Description', product_name)  # Use description if available, fallback to product name
+        weight_units = processed_product.get('CombinedWeight', '')
+        
+        if description and weight_units and weight_units != 'N/A':
+            processed_product['DescAndWeight'] = _create_desc_and_weight(description, weight_units)
+        elif description:
+            processed_product['DescAndWeight'] = str(description).strip()
+        else:
+            processed_product['DescAndWeight'] = 'N/A'
     
     return processed_product
 
@@ -13027,7 +13076,7 @@ if FAST_DOCX_AVAILABLE and create_fast_docx_routes:
 
 if __name__ == '__main__':
     # Use the global app instance that has all routes registered
-    port = int(os.environ.get('FLASK_PORT', 8000))  # Use port 5001 by default
+    port = int(os.environ.get('FLASK_PORT', 8001))  # Use port 5001 by default
     # Auto-kill any existing process on the target port before starting
     def _kill_listeners_on_port(port_num):
         try:

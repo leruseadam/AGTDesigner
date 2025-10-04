@@ -6302,6 +6302,8 @@ class ExcelProcessor:
                 'Weight': safe_get_value(raw_weight),
                 'WeightWithUnits': safe_get_value(weight_with_units),
                 'WeightUnits': safe_get_value(weight_with_units),  # Add WeightUnits for frontend compatibility
+                'CombinedWeight': safe_get_value(weight_with_units),  # Add CombinedWeight field for consistency with database products
+                'Units': safe_get_value(row.get('Units', '')),  # Add Units field for consistency
                 'Quantity*': safe_get_value(quantity),
                 'Quantity Received*': safe_get_value(quantity),
                 'quantity': safe_get_value(quantity),
