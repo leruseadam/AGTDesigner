@@ -4785,6 +4785,42 @@ def get_session_cache_key(base_key):
     key_str = f"{base_key}:{sid}:{file_path}"
     return hashlib.sha256(key_str.encode()).hexdigest()
 
+def process_database_product_for_api(db_product):
+    """
+    Process a database product to ensure it has the same format as Excel products.
+    Specifically, creates CombinedWeight from Weight* + Units fields.
+    """
+    # Create a copy to avoid modifying the original
+    processed_product = db_product.copy()
+    
+    # Create CombinedWeight if missing or empty
+    combined_weight = processed_product.get('CombinedWeight', '')
+    if not combined_weight or combined_weight == '' or str(combined_weight).strip() == '':
+        weight_value = processed_product.get('Weight*', '')
+        units = processed_product.get('Units', '')
+        
+        if weight_value and units and str(units) != 'None' and str(units) != '':
+            try:
+                # Convert weight to number and format properly
+                weight_float = float(weight_value)
+                if weight_float == int(weight_float):
+                    combined_weight = f'{int(weight_float)}{units}'
+                else:
+                    combined_weight = f'{weight_value}{units}'
+                processed_product['CombinedWeight'] = combined_weight
+            except (ValueError, TypeError):
+                # If conversion fails, just concatenate as strings
+                combined_weight = f'{weight_value}{units}'
+                processed_product['CombinedWeight'] = combined_weight
+        elif weight_value:
+            # Weight without units
+            processed_product['CombinedWeight'] = str(weight_value)
+        else:
+            # No weight available
+            processed_product['CombinedWeight'] = 'N/A'
+    
+    return processed_product
+
 @app.route('/api/available-tags', methods=['GET'])
 def get_available_tags():
     try:
@@ -4920,7 +4956,9 @@ def get_available_tags():
         for db_tag in database_tags:
             product_name = db_tag.get('Product Name*', '')
             if product_name and product_name not in excel_product_names:
-                all_tags.append(db_tag)
+                # Process database product to ensure it has proper weight formatting
+                processed_db_tag = process_database_product_for_api(db_tag)
+                all_tags.append(processed_db_tag)
                 added_db_count += 1
             else:
                 skipped_db_count += 1
