@@ -2340,18 +2340,6 @@ class ProductDatabase:
             logger.error(f"Error adding missing columns: {e}")
             # Don't raise - continue with existing schema
     
-    def get_product_count(self) -> int:
-        """Get the total number of products in the database."""
-        try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            cursor.execute('SELECT COUNT(*) FROM products')
-            count = cursor.fetchone()[0]
-            return count
-        except Exception as e:
-            logger.error(f"Error getting product count: {e}")
-            return 0
-
     def get_performance_stats(self) -> Dict[str, Any]:
         """Get performance statistics for the database."""
         self._clean_expired_cache()
@@ -3879,7 +3867,6 @@ class ProductDatabase:
             placeholders = ','.join(['?' for _ in normalized_names])
             
             # Fixed query - use products table directly with correct column names
-            # CONCENTRATE FIX: Also search by Description field for base product names
             cursor.execute(f'''
                 SELECT id, "Product Name*", normalized_name, "Product Type*", "Vendor/Supplier*", "Product Brand", "Lineage",
                        "Product Strain" as strain_name, "Lineage" as canonical_lineage, total_occurrences, first_seen_date, last_seen_date,
@@ -3891,8 +3878,8 @@ class ProductDatabase:
                        "Solvent", "Accepted Date", "Internal Product Identifier", "Product Tags (comma separated)", "Image URL", "Ingredients",
                        "CombinedWeight", "Ratio_or_THC_CBD", "Description_Complexity", "Total THC", "THCA", "CBDA", "CBN"
                 FROM products
-                WHERE normalized_name IN ({placeholders}) OR "Description" IN ({placeholders})
-            ''', normalized_names + normalized_names)
+                WHERE normalized_name IN ({placeholders})
+            ''', normalized_names)
             
             results = cursor.fetchall()
             

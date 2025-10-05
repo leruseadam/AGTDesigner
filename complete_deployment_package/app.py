@@ -75,7 +75,7 @@ IS_PRODUCTION = os.environ.get('FLASK_ENV') == 'production' or IS_PYTHONANYWHERE
 
 # OPTIMIZATION: Disable startup file loading for faster app startup
 # Set to False to enable default file loading on startup
-DISABLE_STARTUP_FILE_LOADING = True
+DISABLE_STARTUP_FILE_LOADING = False
 
 # OPTIMIZATION: Enable lazy loading for faster app startup
 # Set to False to load files immediately
@@ -3961,32 +3961,6 @@ def _replace_json_tags_with_database_data(selected_tags, product_db):
         logging.error(f"Error replacing JSON tags with database data: {e}")
         return selected_tags  # Return original tags if enhancement fails
 
-def _normalize_product_name(product_name):
-    """
-    Normalize product names by extracting the base product name from formatted names.
-    
-    Examples:
-    - "Grape Slurpee Wax by Hustler's Ambition - 1g" -> "Grape Slurpee Wax"
-    - "Ice Cream Cake Wax by Huster's Ambition - 1g" -> "Ice Cream Cake Wax"
-    """
-    try:
-        # Remove " by [vendor] - [weight]" pattern
-        import re
-        
-        # Pattern to match " by [vendor] - [weight]" at the end
-        # This captures various weight formats like "1g", "3.5g", "0.5oz", etc.
-        pattern = r'\s+by\s+[^-]+-\s*\d+(\.\d+)?\s*(g|gram|grams|oz|ounce|ounces)\s*$'
-        normalized = re.sub(pattern, '', product_name, flags=re.IGNORECASE)
-        
-        # Also handle cases where there's just " - [weight]" without "by vendor"
-        pattern2 = r'\s*-\s*\d+(\.\d+)?\s*(g|gram|grams|oz|ounce|ounces)\s*$'
-        normalized = re.sub(pattern2, '', normalized, flags=re.IGNORECASE)
-        
-        return normalized.strip()
-    except Exception as e:
-        logging.warning(f"Error normalizing product name '{product_name}': {e}")
-        return product_name
-
 @app.route('/api/generate', methods=['POST'])
 @performance_monitor if PERFORMANCE_ENABLED else lambda x: x
 def generate_labels():
@@ -4245,23 +4219,16 @@ def generate_labels():
                                   tag.get('ProductName') or 
                                   str(tag))
                     if product_name and str(product_name).strip():
-                        # Normalize the product name to remove "by vendor - weight" formatting
-                        base_name = _normalize_product_name(str(product_name).strip())
-                        normalized_tags.append(base_name)
+                        normalized_tags.append(str(product_name).strip())
                 elif isinstance(tag, str):
-                    # Already a string - normalize it
-                    base_name = _normalize_product_name(tag.strip())
-                    normalized_tags.append(base_name)
+                    # Already a string
+                    normalized_tags.append(tag.strip())
                 else:
-                    # Convert to string and normalize
-                    base_name = _normalize_product_name(str(tag).strip())
-                    normalized_tags.append(base_name)
+                    # Convert to string
+                    normalized_tags.append(str(tag).strip())
             
             logging.info(f"Normalized {len(selected_tags_to_use)} tags to {len(normalized_tags)} product names")
             logging.debug(f"Sample normalized tags: {normalized_tags[:3]}")
-            logging.info(f"CONCENTRATE FIX: Sample tag normalization:")
-            for i, (original, normalized) in enumerate(zip(selected_tags_to_use[:3], normalized_tags[:3])):
-                logging.info(f"  {i+1}. '{original}' -> '{normalized}'")
             
             # CRITICAL FIX: Check if these are JSON matched tags first
             json_matched_cache_key = session.get('json_matched_cache_key')
@@ -4870,44 +4837,17 @@ def process_database_product_for_api(db_product):
                     combined_weight = f'{int(weight_float)}{units}'
                 else:
                     combined_weight = f'{weight_value}{units}'
+                processed_product['CombinedWeight'] = combined_weight
             except (ValueError, TypeError):
                 # If conversion fails, just concatenate as strings
                 combined_weight = f'{weight_value}{units}'
+                processed_product['CombinedWeight'] = combined_weight
         elif weight_value:
             # Weight without units
-            combined_weight = str(weight_value)
+            processed_product['CombinedWeight'] = str(weight_value)
         else:
             # No weight available
-            combined_weight = 'N/A'
-    
-    # CRITICAL FIX: Set all weight field variations for frontend compatibility
-    processed_product['CombinedWeight'] = combined_weight
-    processed_product['WeightWithUnits'] = combined_weight
-    processed_product['WeightUnits'] = combined_weight
-    processed_product['weightWithUnits'] = combined_weight
-    
-    # CRITICAL FIX: Ensure concentrate products have weight information
-    product_type = str(processed_product.get('Product Type*', '')).lower()
-    product_name = str(processed_product.get('Product Name*', '')).lower()
-    if ('concentrate' in product_type or 'wax' in product_name or 'hash' in product_name or 'oil' in product_name) and combined_weight == 'N/A':
-        # Try to extract weight from product name
-        import re
-        weight_match = re.search(r'(\d+(?:\.\d+)?)\s*(g|gram|grams|oz|ounce|ounces)', product_name)
-        if weight_match:
-            weight_value = weight_match.group(1)
-            unit = weight_match.group(2)
-            if unit.lower() in ['oz', 'ounce', 'ounces']:
-                # Convert oz to grams for consistency
-                weight_float = float(weight_value) * 28.35
-                combined_weight = f"{weight_float:.1f}g"
-            else:
-                combined_weight = f"{weight_value}g"
-            
-            # Update all weight field variations
-            processed_product['CombinedWeight'] = combined_weight
-            processed_product['WeightWithUnits'] = combined_weight
-            processed_product['WeightUnits'] = combined_weight
-            processed_product['weightWithUnits'] = combined_weight
+            processed_product['CombinedWeight'] = 'N/A'
     
     # Create DescAndWeight field if missing or empty
     desc_and_weight = processed_product.get('DescAndWeight', '')
@@ -4930,11 +4870,6 @@ def get_available_tags():
     try:
         logging.info("=== AVAILABLE TAGS DEBUG START ===")
         logging.info(f"Available tags request at {datetime.now().strftime('%H:%M:%S')}")
-        
-        # CRITICAL FIX: Force cache invalidation for weight field fixes
-        cache_key = get_session_cache_key('available_tags')
-        cache.delete(cache_key)
-        logging.info("Cleared available_tags cache to ensure weight field fixes are applied")
         
         # Store validation removed - using single database for all stores
         
@@ -5002,8 +4937,6 @@ def get_available_tags():
                                     
                                     for row in rows:
                                         product_dict = dict(zip(columns, row))
-                                        # Apply weight formatting for database products
-                                        product_dict = _format_database_product_weight(product_dict)
                                         # Convert to the format expected by the frontend
                                         database_tags.append(product_dict)
                                     
@@ -5034,8 +4967,6 @@ def get_available_tags():
                         
                             for row in rows:
                                 product_dict = dict(zip(columns, row))
-                                # Apply weight formatting for database products
-                                product_dict = _format_database_product_weight(product_dict)
                                 # Convert to the format expected by the frontend
                                 database_tags.append(product_dict)
                             
@@ -5071,11 +5002,6 @@ def get_available_tags():
             if product_name and product_name not in excel_product_names:
                 # Process database product to ensure it has proper weight formatting
                 processed_db_tag = process_database_product_for_api(db_tag)
-                
-                # CRITICAL FIX: Debug weight fields for concentrate products
-                if 'concentrate' in str(processed_db_tag.get('Product Type*', '')).lower() or 'wax' in str(processed_db_tag.get('Product Name*', '')).lower():
-                    logging.info(f"DEBUG: Concentrate product weight fields - {product_name}: WeightWithUnits={processed_db_tag.get('WeightWithUnits')}, WeightUnits={processed_db_tag.get('WeightUnits')}, CombinedWeight={processed_db_tag.get('CombinedWeight')}")
-                
                 all_tags.append(processed_db_tag)
                 added_db_count += 1
             else:
@@ -5729,48 +5655,6 @@ def get_filter_options():
     except Exception as e:
         logging.error(f"Error in filter_options: {str(e)}")
         return jsonify({'error': str(e)}), 500
-
-def _format_database_product_weight(product_dict):
-    """
-    Format database product with weight information for concentrate products.
-    Similar to Excel processor's _format_weight_units but for database products.
-    """
-    try:
-        # Get product information
-        product_name = product_dict.get('Product Name*', '') or product_dict.get('product_name', '') or ''
-        product_type = (product_dict.get('Product Type*', '') or product_dict.get('product_type', '') or '').lower()
-        weight = product_dict.get('Weight*', '') or product_dict.get('weight', '') or ''
-        units = product_dict.get('Units', '') or product_dict.get('units', '') or ''
-        
-        # Check if this is a concentrate product that needs weight formatting
-        concentrate_types = ['concentrate', 'solventless concentrate', 'wax', 'shatter', 'rosin', 'resin', 'budder', 'badder']
-        is_concentrate = any(conc_type in product_type for conc_type in concentrate_types)
-        
-        if is_concentrate and weight and units:
-            # Format weight with units
-            try:
-                weight_float = float(weight)
-                if weight_float.is_integer():
-                    weight_str = f"{int(weight_float)}"
-                else:
-                    weight_str = f"{weight_float:.2f}".rstrip("0").rstrip(".")
-                weight_with_units = f"{weight_str}{units}"
-                
-                # Add WeightUnits field for frontend compatibility
-                product_dict['WeightUnits'] = weight_with_units
-                product_dict['weightWithUnits'] = weight_with_units
-                
-            except (ValueError, TypeError):
-                # If weight conversion fails, just concatenate as strings
-                weight_with_units = f"{weight}{units}"
-                product_dict['WeightUnits'] = weight_with_units
-                product_dict['weightWithUnits'] = weight_with_units
-        
-        return product_dict
-        
-    except Exception as e:
-        logging.warning(f"Error formatting database product weight: {e}")
-        return product_dict
 
 @app.route('/api/debug-weight-formatting', methods=['GET'])
 def debug_weight_formatting():
