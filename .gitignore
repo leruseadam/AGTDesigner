@@ -82,3 +82,18 @@ backup/
 pythonanywhere.log product_database_fixed.db.gz
 *.xlsx
 *.tar.gz
+# Large files to exclude from git
+*.db
+*.db.gz
+*.tar.gz
+*.zip
+*.xlsx
+uploads/*.db
+uploads/*.db.gz
+uploads/*.xlsx
+cache/*
+sessions/*
+__pycache__/*
+*.pyc
+*.pyo
+.DS_Store
