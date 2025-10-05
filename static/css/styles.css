@@ -8509,3 +8509,22 @@ img, video, canvas, svg {
     font-size: 18px;
   }
 }
+/* --- Single-color tag override (web) --- */
+.tag-item,
+.list-group-item.tag-item,
+.inventory-list .list-group-item,
+.tag-row,
+.tag-card {
+  background-image: none !important;
+  background: var(--tagColor, #1f2937) !important;
+  box-shadow: none !important;
+}
+.tag-item::before,
+.tag-item::after,
+.list-group-item.tag-item::before,
+.list-group-item.tag-item::after,
+.tag-row::before,
+.tag-row::after {
+  display: none !important;
+  content: none !important;
+}
