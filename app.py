@@ -4853,6 +4853,29 @@ def process_database_product_for_api(db_product):
     processed_product['WeightUnits'] = combined_weight
     processed_product['weightWithUnits'] = combined_weight
     
+    # CRITICAL FIX: Ensure concentrate products have weight information
+    product_type = str(processed_product.get('Product Type*', '')).lower()
+    product_name = str(processed_product.get('Product Name*', '')).lower()
+    if ('concentrate' in product_type or 'wax' in product_name or 'hash' in product_name or 'oil' in product_name) and combined_weight == 'N/A':
+        # Try to extract weight from product name
+        import re
+        weight_match = re.search(r'(\d+(?:\.\d+)?)\s*(g|gram|grams|oz|ounce|ounces)', product_name)
+        if weight_match:
+            weight_value = weight_match.group(1)
+            unit = weight_match.group(2)
+            if unit.lower() in ['oz', 'ounce', 'ounces']:
+                # Convert oz to grams for consistency
+                weight_float = float(weight_value) * 28.35
+                combined_weight = f"{weight_float:.1f}g"
+            else:
+                combined_weight = f"{weight_value}g"
+            
+            # Update all weight field variations
+            processed_product['CombinedWeight'] = combined_weight
+            processed_product['WeightWithUnits'] = combined_weight
+            processed_product['WeightUnits'] = combined_weight
+            processed_product['weightWithUnits'] = combined_weight
+    
     # Create DescAndWeight field if missing or empty
     desc_and_weight = processed_product.get('DescAndWeight', '')
     if not desc_and_weight or desc_and_weight == '' or str(desc_and_weight).strip() == '':
@@ -4874,6 +4897,11 @@ def get_available_tags():
     try:
         logging.info("=== AVAILABLE TAGS DEBUG START ===")
         logging.info(f"Available tags request at {datetime.now().strftime('%H:%M:%S')}")
+        
+        # CRITICAL FIX: Force cache invalidation for weight field fixes
+        cache_key = get_session_cache_key('available_tags')
+        cache.delete(cache_key)
+        logging.info("Cleared available_tags cache to ensure weight field fixes are applied")
         
         # Store validation removed - using single database for all stores
         
@@ -5006,6 +5034,11 @@ def get_available_tags():
             if product_name and product_name not in excel_product_names:
                 # Process database product to ensure it has proper weight formatting
                 processed_db_tag = process_database_product_for_api(db_tag)
+                
+                # CRITICAL FIX: Debug weight fields for concentrate products
+                if 'concentrate' in str(processed_db_tag.get('Product Type*', '')).lower() or 'wax' in str(processed_db_tag.get('Product Name*', '')).lower():
+                    logging.info(f"DEBUG: Concentrate product weight fields - {product_name}: WeightWithUnits={processed_db_tag.get('WeightWithUnits')}, WeightUnits={processed_db_tag.get('WeightUnits')}, CombinedWeight={processed_db_tag.get('CombinedWeight')}")
+                
                 all_tags.append(processed_db_tag)
                 added_db_count += 1
             else:
