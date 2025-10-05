@@ -1,72 +1,32 @@
 #!/usr/bin/env python3
-"""
-PythonAnywhere WSGI configuration - Fixed for directory path issues
-This fixes the chdir() errors and logging issues
-"""
-
-import os
 import sys
-import logging
-
-# Fix the directory path issue
-# The error shows it's trying to chdir to /home/adamcordova/AGTDesigner
-# but the actual directory is /home/adamcordova/labelMaker_fresh
-project_dir = '/home/adamcordova/labelMaker_fresh'
-
-# Verify directory exists, fallback to current directory
-if not os.path.exists(project_dir):
-    project_dir = os.path.dirname(os.path.abspath(__file__))
-    print(f"⚠️  Project directory not found, using current directory: {project_dir}")
+import os
 
 # Add the project directory to Python path
-if project_dir not in sys.path:
-    sys.path.insert(0, project_dir)
+project_home = '/Users/adamcordova/Desktop/labelMaker_ QR copy SAFEST copy 23'
+if project_home not in sys.path:
+    sys.path.insert(0, project_home)
 
-# Set environment variables for PythonAnywhere
-os.environ['PYTHONANYWHERE_SITE'] = 'True'
-os.environ['PYTHONANYWHERE_DOMAIN'] = 'www.agtpricetags.com'
-os.environ['FLASK_ENV'] = 'production'
-os.environ['FLASK_DEBUG'] = 'False'
+# Change to the project directory
+os.chdir(project_home)
 
-# Configure logging to prevent "Message too long" errors
-logging.basicConfig(
-    level=logging.ERROR,  # Only show errors to reduce log size
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler()
-    ]
-)
-
-# Suppress verbose logging from all libraries
-logging.getLogger('werkzeug').setLevel(logging.ERROR)
-logging.getLogger('urllib3').setLevel(logging.ERROR)
-logging.getLogger('requests').setLevel(logging.ERROR)
-logging.getLogger('pandas').setLevel(logging.ERROR)
-logging.getLogger('openpyxl').setLevel(logging.ERROR)
-logging.getLogger('xlrd').setLevel(logging.ERROR)
-
-# Import and configure the Flask app
+# Import the Flask app
 try:
-    from app import app
-    
-    # Configure Flask for PythonAnywhere
-    app.config['DEBUG'] = False
-    app.config['TESTING'] = False
-    app.config['TEMPLATES_AUTO_RELOAD'] = False
-    app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 31536000
-    
-    # Set the application
-    application = app
-    
-    # Log successful startup
-    logging.info("WSGI application loaded successfully")
-    
+    from app import app as application
+    print("✅ Successfully imported Flask app")
 except ImportError as e:
-    logging.error(f"Failed to import Flask app: {e}")
-    raise
-except Exception as e:
-    logging.error(f"Error configuring Flask app: {e}")
-    raise
+    print(f"❌ Failed to import Flask app: {e}")
+    # Try alternative import paths
+    try:
+        import app
+        application = app.app
+        print("✅ Successfully imported Flask app (alternative method)")
+    except ImportError as e2:
+        print(f"❌ Alternative import also failed: {e2}")
+        raise e2
 
-if __name__ == "__main__":
-    application.run()
+# Debug information
+print(f"Project home: {project_home}")
+print(f"Python path: {sys.path[:3]}")
+print(f"Current working directory: {os.getcwd()}")
+print(f"Files in current directory: {os.listdir('.')[:5]}")

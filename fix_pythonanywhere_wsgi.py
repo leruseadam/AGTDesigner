@@ -1,56 +1,134 @@
 #!/usr/bin/env python3
 """
-Simple script to fix PythonAnywhere web app
-Run this on PythonAnywhere Bash console
+PythonAnywhere WSGI Configuration Fix
+This script helps fix the WSGI configuration for PythonAnywhere deployment
 """
 
 import os
-import shutil
+import sys
 
-def fix_pythonanywhere_wsgi():
-    """Fix the PythonAnywhere WSGI file"""
-    print("🔧 Fixing PythonAnywhere WSGI File...")
-    print("=" * 40)
+def create_wsgi_file():
+    """Create a proper WSGI file for PythonAnywhere"""
     
-    # Paths
-    source_file = '/home/adamcordova/AGTDesigner/wsgi_pythonanywhere_python311.py'
-    target_file = '/var/www/www_agtpricetags_com_wsgi.py'
+    # Get the current directory (where the app.py file is located)
+    current_dir = os.path.dirname(os.path.abspath(__file__))
     
-    print(f"Source: {source_file}")
-    print(f"Target: {target_file}")
-    
-    # Check if source exists
-    if not os.path.exists(source_file):
-        print(f"❌ Source file not found: {source_file}")
-        print("💡 Make sure you're in the right directory and the file exists")
-        return False
-    
+    wsgi_content = f'''#!/usr/bin/env python3
+import sys
+import os
+
+# Add the project directory to Python path
+project_home = '{current_dir}'
+if project_home not in sys.path:
+    sys.path.insert(0, project_home)
+
+# Change to the project directory
+os.chdir(project_home)
+
+# Import the Flask app
+try:
+    from app import app as application
+    print("✅ Successfully imported Flask app")
+except ImportError as e:
+    print(f"❌ Failed to import Flask app: {{e}}")
+    # Try alternative import paths
     try:
-        # Create backup
-        if os.path.exists(target_file):
-            backup_file = f"{target_file}.backup"
-            shutil.copy2(target_file, backup_file)
-            print(f"✅ Created backup: {backup_file}")
-        
-        # Copy the file
-        shutil.copy2(source_file, target_file)
-        print(f"✅ Successfully copied WSGI file!")
-        
-        # Verify the copy
-        with open(target_file, 'r') as f:
-            content = f.read()
-        
-        if "application = app" in content and "DB_HOST" in content:
-            print("✅ WSGI file verification passed!")
-            print("💡 Now go to PythonAnywhere Web tab and click 'Reload'")
-            return True
-        else:
-            print("❌ WSGI file verification failed!")
-            return False
-            
-    except Exception as e:
-        print(f"❌ Error copying file: {e}")
-        return False
+        import app
+        application = app.app
+        print("✅ Successfully imported Flask app (alternative method)")
+    except ImportError as e2:
+        print(f"❌ Alternative import also failed: {{e2}}")
+        raise e2
+
+# Debug information
+print(f"Project home: {{project_home}}")
+print(f"Python path: {{sys.path[:3]}}")
+print(f"Current working directory: {{os.getcwd()}}")
+print(f"Files in current directory: {{os.listdir('.')[:5]}}")
+'''
+    
+    # Write the WSGI file
+    with open('wsgi_pythonanywhere_fixed.py', 'w') as f:
+        f.write(wsgi_content)
+    
+    print("✅ Created wsgi_pythonanywhere_fixed.py")
+    print(f"📁 Project directory: {current_dir}")
+    print(f"📄 App file exists: {os.path.exists('app.py')}")
+    
+    return current_dir
+
+def create_deployment_instructions():
+    """Create deployment instructions for PythonAnywhere"""
+    
+    instructions = """
+# PythonAnywhere WSGI Fix Instructions
+
+## The Problem
+The error "No module named 'app'" occurs because the WSGI file can't find your app.py file.
+
+## The Solution
+
+### 1. Upload the Fixed WSGI File
+- Upload `wsgi_pythonanywhere_fixed.py` to your PythonAnywhere home directory
+- Make sure it's in the same directory as your `app.py` file
+
+### 2. Update PythonAnywhere WSGI Configuration
+- Go to PythonAnywhere Dashboard → Web tab
+- Click on your WSGI configuration file
+- Replace the entire content with the content from `wsgi_pythonanywhere_fixed.py`
+
+### 3. Alternative: Manual WSGI Configuration
+If the above doesn't work, manually set your WSGI file to:
+
+```python
+#!/usr/bin/env python3
+import sys
+import os
+
+# Add the project directory to Python path
+project_home = '/home/yourusername/AGTDesigner_deployment'  # Update this path
+if project_home not in sys.path:
+    sys.path.insert(0, project_home)
+
+# Change to the project directory  
+os.chdir(project_home)
+
+# Import the Flask app
+from app import app as application
+```
+
+### 4. Reload Your Web App
+- Click the "Reload" button in the Web tab
+- Check the error logs if there are still issues
+
+## Troubleshooting
+
+### If you still get "No module named 'app'":
+1. Check that `app.py` exists in your project directory
+2. Verify the path in the WSGI file matches your actual directory
+3. Make sure you've uploaded all the necessary files
+4. Check the PythonAnywhere error logs for more details
+
+### If you get import errors:
+1. Make sure you've installed all requirements: `pip3.10 install --user -r requirements.txt`
+2. Check that all Python files are uploaded correctly
+3. Verify the project structure is intact
+
+## Expected Result
+After fixing the WSGI configuration, your app should load successfully and the weight field fixes should be active.
+"""
+    
+    with open('PYTHONANYWHERE_WSGI_FIX.md', 'w') as f:
+        f.write(instructions)
+    
+    print("✅ Created PYTHONANYWHERE_WSGI_FIX.md")
 
 if __name__ == "__main__":
-    fix_pythonanywhere_wsgi()
+    print("=== PythonAnywhere WSGI Fix ===")
+    project_dir = create_wsgi_file()
+    create_deployment_instructions()
+    print("\n✅ WSGI fix files created!")
+    print("📋 Next steps:")
+    print("1. Upload wsgi_pythonanywhere_fixed.py to PythonAnywhere")
+    print("2. Update your WSGI configuration")
+    print("3. Reload your web app")
