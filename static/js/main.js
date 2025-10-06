@@ -6453,6 +6453,32 @@ const TagManager = {
 window.TagManager = TagManager;
 window.updateAvailableTags = TagManager.debouncedUpdateAvailableTags.bind(TagManager);
 
+// Non-blocking bootstrap: render UI immediately, update when data arrives
+(function bootstrapWithoutBlocking(){
+  try { AppLoadingSplash?.stopAutoAdvance?.(); AppLoadingSplash?.complete?.(); } catch(_) {}
+  try { TagManager?.initializeEmptyState?.(); } catch(_) {}
+  (async () => {
+    const max=20; let delay=300;
+    for (let i=1;i<=max;i++){
+      try{
+        const r = await fetch('/api/initial-data');
+        if (r.ok){
+          const j = await r.json();
+          if (j && j.success && Array.isArray(j.available_tags) && j.available_tags.length){
+            TagManager?._updateAvailableTags(j.available_tags, null);
+            TagManager?.updateTagCount?.('available', j.available_tags.length);
+            TagManager?.updateFilters?.(j.filters || {vendor:[],brand:[],productType:[],lineage:[],weight:[]}, true);
+            break;
+          }
+        }
+      }catch(e){/* ignore and retry */}
+      await new Promise(r=>setTimeout(r, delay));
+      if (delay<1500) delay += 150; // backoff
+    }
+  })();
+})();
+
+
 // Init fail-safe: never hang on splash
 setTimeout(async () => {
   try { AppLoadingSplash?.stopAutoAdvance?.(); AppLoadingSplash?.complete?.(); } catch(_) {}
