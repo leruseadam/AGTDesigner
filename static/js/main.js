@@ -4362,7 +4362,7 @@ const TagManager = {
         try {
             // Use the new initial-data endpoint for faster loading with timeout
             const response = await Promise.race([
-                fetch('/api/initial-data?ts=' + Date.now(), { cache: 'no-store' }),
+                fetch('/api/initial-data'),
                 timeoutPromise
             ]);
             
@@ -5777,7 +5777,7 @@ const TagManager = {
             try {
                 console.log(`📡 Checking for data availability (attempt ${attempt}/${maxAttempts})...`);
                 
-                const response = await fetch('/api/initial-data?ts=' + Date.now(), { cache: 'no-store' });
+                const response = await fetch('/api/initial-data');
                 if (response.ok) {
                     const data = await response.json();
                     if (data.success && data.available_tags && Array.isArray(data.available_tags) && data.available_tags.length > 0) {
