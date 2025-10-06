@@ -9523,11 +9523,84 @@ def get_initial_data():
                         'message': f'Failed to load default file: {str(e)}'
                     })
             else:
-                logging.warning("No default file found")
-                return jsonify({
-                    'success': False,
-                    'message': 'No default file found and no data currently loaded'
-                })
+                # Fallback: build initial data directly from SQLite database if available
+                logging.warning("No default file found - attempting database fallback for initial-data")
+                try:
+                    import sqlite3
+                    db_path = os.path.join(os.getcwd(), 'product_database.db')
+                    if os.path.exists(db_path):
+                        conn = sqlite3.connect(db_path)
+                        cur = conn.cursor()
+                        # Ensure table exists
+                        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+                        if cur.fetchone():
+                            # Fetch a reasonable number to keep payload small
+                            cur.execute("SELECT product_name, vendor, brand, product_type, weight, weight_units, thc_content, cbd_content, lineage, doh_status, price FROM products LIMIT 500")
+                            rows = cur.fetchall()
+                            conn.close()
+
+                            def to_weight_with_units(w, u):
+                                w = (w or '').strip()
+                                u = (u or '').strip()
+                                return f"{w} {u}".strip()
+
+                            available_tags = []
+                            for (name, vendor, brand, ptype, weight, units, thc, cbd, lineage, doh, price) in rows:
+                                tag = {
+                                    'Product Name*': name or '',
+                                    'Vendor': vendor or '',
+                                    'Product Brand': brand or '',
+                                    'Product Type*': ptype or '',
+                                    'Lineage': (lineage or 'MIXED').upper(),
+                                    'DOH': (doh or ''),
+                                    'Price': price or '',
+                                    'WeightWithUnits': to_weight_with_units(weight or '', units or ''),
+                                    'weightWithUnits': to_weight_with_units(weight or '', units or ''),
+                                    'WeightUnits': to_weight_with_units(weight or '', units or ''),
+                                    'CombinedWeight': to_weight_with_units(weight or '', units or ''),
+                                    'THC*': thc or '',
+                                    'CBD*': cbd or ''
+                                }
+                                available_tags.append(tag)
+
+                            # Build lightweight filters from these rows
+                            def uniq(seq):
+                                return sorted({(x or '').strip() for x in seq if (x or '').strip()})
+
+                            filters = {
+                                'vendor': uniq([r[1] for r in rows]),
+                                'brand': uniq([r[2] for r in rows]),
+                                'productType': uniq([r[3] for r in rows]),
+                                'lineage': uniq([(r[8] or 'MIXED').upper() for r in rows]),
+                                'weight': uniq([to_weight_with_units(r[4] or '', r[5] or '') for r in rows])
+                            }
+
+                            logging.info(f"Database fallback produced {len(available_tags)} tags")
+                            return jsonify({
+                                'success': True,
+                                'data_loaded': True,
+                                'filename': 'Database: product_database.db',
+                                'filepath': db_path,
+                                'columns': ['Product Name*','Vendor','Product Brand','Product Type*','Lineage','DOH','Price','WeightWithUnits','THC*','CBD*'],
+                                'filters': filters,
+                                'available_tags': available_tags,
+                                'selected_tags': [],
+                                'total_records': len(available_tags)
+                            })
+                        else:
+                            conn.close()
+                            logging.warning("Database found but products table missing")
+                    # If we reach here, no DB data
+                    return jsonify({
+                        'success': False,
+                        'message': 'No default file or database data found'
+                    })
+                except Exception as db_fallback_error:
+                    logging.error(f"Database fallback failed: {db_fallback_error}")
+                    return jsonify({
+                        'success': False,
+                        'message': f'Database fallback failed: {db_fallback_error}'
+                    })
         
         if hasattr(excel_processor, 'df') and excel_processor.df is not None:
             logging.info(f"Data loaded - DataFrame shape: {excel_processor.df.shape}")
