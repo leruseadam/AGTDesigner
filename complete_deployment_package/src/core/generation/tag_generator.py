@@ -361,6 +361,29 @@ def process_chunk(args):
                 # Regular products: construct from Weight* + Units
                 weight = str(row.get("Weight*", "")).strip()
                 units = str(row.get("Units", "")).strip()
+                
+                # Apply weight conversion for nonclassic products (grams to ounces)
+                if weight and units and units.lower() in ['g', 'grams', 'gram']:
+                    # Define CLASSIC_TYPES locally to avoid import issues
+                    CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
+                    is_nonclassic = product_type not in [ct.lower() for ct in CLASSIC_TYPES]
+                    
+                    if is_nonclassic:
+                        try:
+                            weight_float = float(weight)
+                            # Convert grams to ounces
+                            weight_float = weight_float * 0.03527396195
+                            units = "oz"
+                            # Format weight similar to price formatting - no decimals unless needed
+                            if weight_float.is_integer():
+                                weight = str(int(weight_float))
+                            else:
+                                # Round to 2 decimal places and remove trailing zeros
+                                weight = f"{weight_float:.2f}".rstrip("0").rstrip(".")
+                        except (ValueError, TypeError):
+                            # If conversion fails, keep original values
+                            pass
+                
                 if weight and units:
                     weight_units = f"{weight}{units}"
                 elif weight:
