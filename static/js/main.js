@@ -800,15 +800,15 @@ const TagManager = {
         originalTags: [], // Store original tags separately
         originalFilterOptions: {}, // Store original filter options to preserve order
         lineageColors: {
-            'SATIVA': 'rgba(237, 65, 35, 0.6)',
-            'INDICA': 'rgba(153, 0, 255, 0.6)',
-            'HYBRID': 'rgba(0, 153, 0, 0.6)',
-            'HYBRID/SATIVA': 'rgba(237, 65, 35, 0.6)',
-            'HYBRID/INDICA': 'rgba(153, 0, 255, 0.6)',
-            'CBD': 'rgba(255, 255, 0, 0.6)',
-            'PARA': 'rgba(128, 128, 128, 0.6)',
-            'MIXED': 'rgba(0, 33, 245, 0.6)',
-            'CBD_BLEND': 'rgba(255, 255, 0, 0.6)'
+            'SATIVA': 'var(--lineage-sativa)',
+            'INDICA': 'var(--lineage-indica)',
+            'HYBRID': 'var(--lineage-hybrid)',
+            'HYBRID/SATIVA': 'var(--lineage-hybrid-sativa)',
+            'HYBRID/INDICA': 'var(--lineage-hybrid-indica)',
+            'CBD': 'var(--lineage-cbd)',
+            'PARA': 'var(--lineage-para)',
+            'MIXED': 'var(--lineage-mixed)',
+            'CBD_BLEND': 'var(--lineage-cbd)'
         },
         filterCache: null,
         updateAvailableTagsTimer: null, // Add timer tracking
@@ -1510,46 +1510,6 @@ const TagManager = {
             .join(' ');
     },
 
-    formatProductDisplayName(tag, productType, weightWithUnits) {
-        const baseName = tag['Product Name*'] || tag.ProductName || tag.Description || 'Unknown Product';
-        
-        // For concentrates, append weight to the product name if not already present
-        if (productType && (
-            productType.toLowerCase().includes('concentrate') || 
-            productType.toLowerCase() === 'wax' ||
-            productType.toLowerCase() === 'shatter' ||
-            productType.toLowerCase() === 'rosin' ||
-            productType.toLowerCase() === 'resin' ||
-            productType.toLowerCase() === 'budder' ||
-            productType.toLowerCase() === 'badder'
-        )) {
-            // Get weight information from multiple sources
-            const weight = weightWithUnits || tag.WeightUnits || tag.weightWithUnits || 
-                          tag.CombinedWeight || tag['Weight*'] || tag.Weight || '';
-            
-            console.log('DEBUG formatProductDisplayName:', {
-                baseName: baseName,
-                productType: productType,
-                weight: weight,
-                weightWithUnits: weightWithUnits,
-                CombinedWeight: tag.CombinedWeight,
-                WeightUnits: tag.WeightUnits
-            });
-            
-            // Check if weight is already in the product name
-            if (weight && !baseName.toLowerCase().includes(weight.toLowerCase())) {
-                // Check if the product name already ends with a weight pattern (like "1g", "3.5g", etc.)
-                const hasWeightPattern = /\s*-?\s*\d+(\.\d+)?\s*(g|gram|grams|oz|ounce|ounces)\s*$/i.test(baseName);
-                
-                if (!hasWeightPattern) {
-                    return `${baseName} - ${weight}`;
-                }
-            }
-        }
-        
-        return baseName;
-    },
-
     organizeBrandCategories(tags) {
         const vendorGroups = new Map();
         let skippedTags = 0;
@@ -1634,7 +1594,7 @@ const TagManager = {
                 lineage: (lineage || '').toString().trim().toUpperCase(), // always uppercase for color
                 weight: weight,
                 weightWithUnits: weightWithUnits,
-                displayName: this.formatProductDisplayName(tag, productType, weightWithUnits)
+                displayName: tag['Product Name*'] || tag.ProductName || tag.Description || 'Unknown Product'
             };
 
             // Always create vendor group (even if vendor === brand)
@@ -2434,6 +2394,10 @@ const TagManager = {
         const lineage = tag.lineage || tag.Lineage || 'MIXED';
         let displayLineage = lineage;
         
+        // Map HYBRID to MIXED for visual consistency (user request)
+        if (lineage === 'HYBRID') {
+          displayLineage = 'MIXED';
+        }
         
         if (displayLineage) {
           tagElement.dataset.lineage = displayLineage.toUpperCase();
@@ -2641,13 +2605,7 @@ const TagManager = {
         uniqueLineages.forEach(option => {
             const optionElement = document.createElement('option');
             optionElement.value = option.value;
-            if (option.placeholder) {
-                optionElement.textContent = option.label;
-                optionElement.style.fontStyle = "italic";
-                optionElement.style.color = "#999";
-            } else {
-                optionElement.textContent = option.label;
-            }
+            optionElement.textContent = option.label;
             if ((lineage === option.value) || (option.value === 'CBD' && lineage === 'CBD_BLEND')) {
                 optionElement.selected = true;
             }
@@ -2709,11 +2667,11 @@ const TagManager = {
         dohSelect.style.transition = 'all 0.2s ease';
         dohSelect.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.1)';
         dohSelect.style.marginLeft = '4px';
-        dohSelect.style.minWidth = '50px';
+        dohSelect.style.minWidth = '60px';
 
         // Add DOH options
         const dohOptions = [
-            { value: 'NONE', label: 'DOH', placeholder: true },
+            { value: 'NONE', label: '' },
             { value: 'DOH', label: 'DOH' },
             { value: 'THC', label: 'THC' },
             { value: 'CBD', label: 'CBD' }
@@ -2740,13 +2698,7 @@ const TagManager = {
         dohOptions.forEach(option => {
             const optionElement = document.createElement('option');
             optionElement.value = option.value;
-            if (option.placeholder) {
-                optionElement.textContent = option.label;
-                optionElement.style.fontStyle = "italic";
-                optionElement.style.color = "#999";
-            } else {
-                optionElement.textContent = option.label;
-            }
+            optionElement.textContent = option.label;
             if (currentDropdownStatus === option.value) {
                 optionElement.selected = true;
             }
@@ -4627,7 +4579,6 @@ const TagManager = {
 
             if (checkedTags.length === 0) {
                 console.error('Please select at least one tag to generate');
-                alert('Please select at least one product from the list before generating labels.\n\nTo select products:\n1. Use filters to find products\n2. Click the checkboxes next to products you want\n3. Verify "Selected Tags" counter shows > 0\n4. Then click "Generate Tags"');
                 return;
             }
 
@@ -4717,7 +4668,7 @@ const TagManager = {
     },
 
     getLineageColor(lineage) {
-        return this.state.lineageColors[lineage] || 'rgba(0, 33, 245, 0.6)';
+        return this.state.lineageColors[lineage] || 'var(--lineage-mixed)';
     },
 
     async moveToSelected() {
@@ -5579,8 +5530,11 @@ const TagManager = {
             this.updateUploadUI(`✅ ${file.name} ready!`, 'File processed successfully', 'success');
             console.log(`✅ Lightning upload completed! Upload: ${uploadData.upload_time?.toFixed(3)}s, Process: ${processData.process_time?.toFixed(3)}s`);
             
-            // Wait for data to be available before reloading
-            this.waitForDataAndReload(file.name);
+            // Refresh the page to show new data
+            setTimeout(() => {
+                console.log('🔄 Refreshing page to show new data...');
+                window.location.reload();
+            }, 1000);
             
             return; // Success!
         } catch (error) {
@@ -5608,8 +5562,8 @@ const TagManager = {
             if (response.ok && data.status === 'ready') {
                 console.log('Fallback upload successful');
                 this.updateUploadUI(file.name, 'File uploaded successfully', 'success');
-                // Wait for data to be available before reloading
-                this.waitForDataAndReload(file.name);
+                // Refresh the page to load the new file
+                window.location.reload();
                 return true;
             } else {
                 console.error('Fallback upload failed:', data.error);
@@ -5764,41 +5718,6 @@ const TagManager = {
         this.hideExcelLoadingSplash();
         this.updateUploadUI('Upload timed out', 'Processing took too long', 'error');
                             console.error('Upload timed out. Please try again.');
-    },
-
-    // Wait for data to be available before reloading the page
-    async waitForDataAndReload(filename) {
-        console.log('🔄 Waiting for data to be available before reloading...');
-        
-        const maxAttempts = 10;
-        const delayMs = 500;
-        
-        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-            try {
-                console.log(`📡 Checking for data availability (attempt ${attempt}/${maxAttempts})...`);
-                
-                const response = await fetch('/api/initial-data');
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.success && data.available_tags && Array.isArray(data.available_tags) && data.available_tags.length > 0) {
-                        console.log(`✅ Data is available! Found ${data.available_tags.length} tags. Reloading page...`);
-                        window.location.reload();
-                        return;
-                    }
-                }
-                
-                console.log(`⏳ Data not ready yet, waiting ${delayMs}ms...`);
-                await new Promise(resolve => setTimeout(resolve, delayMs));
-                
-            } catch (error) {
-                console.log(`❌ Error checking data availability (attempt ${attempt}):`, error.message);
-                await new Promise(resolve => setTimeout(resolve, delayMs));
-            }
-        }
-        
-        // If we get here, data wasn't available after max attempts
-        console.log('⚠️ Data not available after maximum attempts, reloading anyway...');
-        window.location.reload();
     },
 
     updateUploadUI(fileName, statusMessage, statusType) {

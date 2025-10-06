@@ -964,7 +964,7 @@ img, video, canvas, svg {
       padding: 6px 12px !important;
       font-size: 0.85rem !important;
       min-height: 36px !important;
-      min-width: 60px !important;
+      min-width: 80px !important;
       border-radius: 8px !important;
       gap: 3px !important;
     }
@@ -2414,13 +2414,13 @@ img, video, canvas, svg {
   }
   
   .lineage-dropdown option[value="CBD"], .form-select.lineage-dropdown option[value="CBD"] {
-    background: rgba(255, 255, 0, 0.9) !important;
+    background: rgba(241, 194, 50, 0.9) !important;
     color: white !important;
     font-weight: 600 !important;
   }
   
   .lineage-dropdown option[value="CBD_BLEND"], .form-select.lineage-dropdown option[value="CBD_BLEND"] {
-    background: rgba(255, 255, 0, 0.9) !important;
+    background: rgba(241, 194, 50, 0.9) !important;
     color: white !important;
     font-weight: 600 !important;
   }
@@ -2453,9 +2453,9 @@ img, video, canvas, svg {
   /* DOH Dropdown Styling */
   .doh-dropdown,
   .doh-dropdown-mini {
-    width: 60px !important;
-    max-width: 60px !important;
-    min-width: 60px !important;
+    width: 80px !important;
+    max-width: 80px !important;
+    min-width: 80px !important;
     font-size: 0.85rem !important;
     padding: 4px 8px !important;
     padding-right: 20px !important;
@@ -2533,7 +2533,7 @@ img, video, canvas, svg {
   
   .tag-item[data-lineage="HYBRID"] {
     background: rgba(0, 153, 0, 0.6) !important;
-    border-color: rgba(44, 62, 80, 0.3);
+    border-color: rgba(0, 153, 0, 0.3);
   }
   
   .tag-item[data-lineage="HYBRID/SATIVA"] {
@@ -2547,13 +2547,13 @@ img, video, canvas, svg {
   }
   
   .tag-item[data-lineage="CBD"] {
-    background: rgba(255, 255, 0, 0.6) !important;
-    border-color: rgba(255, 255, 0, 0.3);
+    background: rgba(241, 194, 50, 0.6) !important;
+    border-color: rgba(241, 194, 50, 0.3);
   }
   
   .tag-item[data-lineage="CBD_BLEND"] {
-    background: rgba(255, 255, 0, 0.6) !important;
-    border-color: rgba(255, 255, 0, 0.3);
+    background: rgba(241, 194, 50, 0.6) !important;
+    border-color: rgba(241, 194, 50, 0.3);
   }
   
   .tag-item[data-lineage="MIXED"] {
@@ -2562,13 +2562,13 @@ img, video, canvas, svg {
   }
   
   .tag-item[data-lineage="PARA"] {
-    background: rgba(255, 255, 0, 0.6) !important;
-    border-color: rgba(255, 255, 0, 0.3);
+    background: rgba(255, 192, 203, 0.6) !important;
+    border-color: rgba(255, 192, 203, 0.3);
   }
   
   .tag-item[data-lineage="PARAPHERNALIA"] {
-    background: rgba(255, 255, 0, 0.6) !important;
-    border-color: rgba(255, 255, 0, 0.3);
+    background: rgba(255, 192, 203, 0.6) !important;
+    border-color: rgba(255, 192, 203, 0.3);
   }
 
   /* Lineage-specific checkbox colors */
@@ -2610,11 +2610,11 @@ img, video, canvas, svg {
   .tag-item[data-lineage="CBD"] .tag-checkbox:checked,
   .tag-item[data-lineage="CBD_BLEND"] .custom-checkbox:checked,
   .tag-item[data-lineage="CBD_BLEND"] .tag-checkbox:checked {
-    background: linear-gradient(135deg, #ffff00 0%, #cccc00 100%) !important;
-    border-color: rgba(255, 255, 0, 0.9) !important;
+    background: linear-gradient(135deg, #f1c232 0%, #e6b800 100%) !important;
+    border-color: rgba(241, 194, 50, 0.9) !important;
     box-shadow: 
       inset 0 2px 4px rgba(0, 0, 0, 0.2),
-      0 4px 15px rgba(255, 255, 0, 0.6),
+      0 4px 15px rgba(241, 194, 50, 0.6),
       0 2px 4px rgba(241, 194, 50, 0.4) !important;
   }
   
@@ -2636,7 +2636,7 @@ img, video, canvas, svg {
     border-color: rgba(255, 192, 203, 0.9) !important;
     box-shadow: 
       inset 0 2px 4px rgba(0, 0, 0, 0.2),
-      0 4px 15px rgba(255, 255, 0, 0.6),
+      0 4px 15px rgba(255, 192, 203, 0.6),
       0 2px 4px rgba(255, 192, 203, 0.4) !important;
   }
   
@@ -2653,7 +2653,7 @@ img, video, canvas, svg {
   
   .tag-row[data-lineage="HYBRID"] {
     background: rgba(0, 153, 0, 0.6) !important;
-    border-color: rgba(44, 62, 80, 0.3);
+    border-color: rgba(0, 153, 0, 0.3);
   }
   
   .tag-row[data-lineage="HYBRID/SATIVA"] {
@@ -2667,13 +2667,13 @@ img, video, canvas, svg {
   }
   
   .tag-row[data-lineage="CBD"] {
-    background: rgba(255, 255, 0, 0.6) !important;
-    border-color: rgba(255, 255, 0, 0.3);
+    background: rgba(241, 194, 50, 0.6) !important;
+    border-color: rgba(241, 194, 50, 0.3);
   }
   
   .tag-row[data-lineage="CBD_BLEND"] {
-    background: rgba(255, 255, 0, 0.6) !important;
-    border-color: rgba(255, 255, 0, 0.3);
+    background: rgba(241, 194, 50, 0.6) !important;
+    border-color: rgba(241, 194, 50, 0.3);
   }
   
   .tag-row[data-lineage="MIXED"] {
@@ -2682,13 +2682,13 @@ img, video, canvas, svg {
   }
   
   .tag-row[data-lineage="PARA"] {
-    background: rgba(255, 255, 0, 0.6) !important;
-    border-color: rgba(255, 255, 0, 0.3);
+    background: rgba(255, 192, 203, 0.6) !important;
+    border-color: rgba(255, 192, 203, 0.3);
   }
   
   .tag-row[data-lineage="PARAPHERNALIA"] {
-    background: rgba(255, 255, 0, 0.6) !important;
-    border-color: rgba(255, 255, 0, 0.3);
+    background: rgba(255, 192, 203, 0.6) !important;
+    border-color: rgba(255, 192, 203, 0.3);
   }
   
   /* Brand headers */
@@ -8508,118 +8508,4 @@ img, video, canvas, svg {
     height: 45px;
     font-size: 18px;
   }
-}
-/* --- Single-color tag override (web) --- */
-.tag-item,
-.list-group-item.tag-item,
-.inventory-list .list-group-item,
-.tag-row,
-.tag-card {
-  background-image: none !important;
-  box-shadow: none !important;
-}
-.tag-item::before,
-.tag-item::after,
-.list-group-item.tag-item::before,
-.list-group-item.tag-item::after,
-.tag-row::before,
-.tag-row::after {
-  display: none !important;
-  content: none !important;
-}
-
-/* --- Remove checkbox gradients to fix second color shade --- */
-.tag-item[data-lineage="SATIVA"] .custom-checkbox:checked,
-.tag-item[data-lineage="SATIVA"] .tag-checkbox:checked,
-.tag-item[data-lineage="HYBRID/SATIVA"] .custom-checkbox:checked,
-.tag-item[data-lineage="HYBRID/SATIVA"] .tag-checkbox:checked,
-.tag-item[data-lineage="INDICA"] .custom-checkbox:checked,
-.tag-item[data-lineage="INDICA"] .tag-checkbox:checked,
-.tag-item[data-lineage="HYBRID/INDICA"] .custom-checkbox:checked,
-.tag-item[data-lineage="HYBRID/INDICA"] .tag-checkbox:checked,
-.tag-item[data-lineage="HYBRID"] .custom-checkbox:checked,
-.tag-item[data-lineage="HYBRID"] .tag-checkbox:checked,
-.tag-item[data-lineage="CBD"] .custom-checkbox:checked,
-.tag-item[data-lineage="CBD"] .tag-checkbox:checked,
-.tag-item[data-lineage="MIXED"] .custom-checkbox:checked,
-.tag-item[data-lineage="MIXED"] .tag-checkbox:checked {
-  background-image: none !important;
-  box-shadow: none !important;
-}
-
-/* --- Force HYBRID tags to show green, not blue --- */
-.tag-item[data-lineage="HYBRID"],
-.tag-item[data-lineage="MIXED"],
-.tag-row[data-lineage="HYBRID"],
-.tag-row[data-lineage="MIXED"] {
-  background: rgba(0, 153, 0, 0.6) !important;
-  border-color: rgba(44, 62, 80, 0.3) !important;
-}
-
-/* --- Preserve lineage colors but remove gradients --- */
-.tag-item,
-.list-group-item.tag-item,
-.inventory-list .list-group-item,
-.tag-row,
-.tag-card {
-  background-image: none !important;
-  box-shadow: none !important;
-}
-.tag-item::before,
-.tag-item::after,
-.list-group-item.tag-item::before,
-.list-group-item.tag-item::after,
-.tag-row::before,
-.tag-row::after {
-  display: none !important;
-  content: none !important;
-}
-
-/* --- Ensure lineage colors override everything --- */
-.tag-item[data-lineage="SATIVA"] {
-  background: rgba(237, 65, 35, 0.6) !important;
-  border-color: rgba(237, 65, 35, 0.3) !important;
-}
-.tag-item[data-lineage="INDICA"] {
-  background: rgba(153, 0, 255, 0.6) !important;
-  border-color: rgba(153, 0, 255, 0.3) !important;
-}
-.tag-item[data-lineage="HYBRID"] {
-  background: rgba(0, 153, 0, 0.6) !important;
-  border-color: rgba(44, 62, 80, 0.3) !important;
-}
-.tag-item[data-lineage="CBD"] {
-  background: rgba(255, 255, 0, 0.6) !important;
-  border-color: rgba(255, 255, 0, 0.3) !important;
-}
-.tag-item[data-lineage="MIXED"] {
-  background: rgba(0, 153, 0, 0.6) !important;
-  border-color: rgba(44, 62, 80, 0.3) !important;
-}
-
-/* --- DOH dropdown placeholder styling --- */
-.doh-dropdown option[value="NONE"] {
-  font-style: italic !important;
-  color: #999 !important;
-  opacity: 0.7 !important;
-}
-
-/* --- Force HYBRID and MIXED to always show green, not blue --- */
-.tag-item[data-lineage="HYBRID"],
-.tag-item[data-lineage="MIXED"],
-.tag-row[data-lineage="HYBRID"],
-.tag-row[data-lineage="MIXED"] {
-  background: rgba(0, 153, 0, 0.6) !important;
-  border-color: rgba(0, 153, 0, 0.3) !important;
-}
-
-/* Override any blue MIXED colors */
-.tag-item[data-lineage="MIXED"] {
-  background: rgba(0, 153, 0, 0.6) !important;
-  border-color: rgba(0, 153, 0, 0.3) !important;
-}
-
-.tag-row[data-lineage="MIXED"] {
-  background: rgba(0, 153, 0, 0.6) !important;
-  border-color: rgba(0, 153, 0, 0.3) !important;
 }

@@ -75,7 +75,7 @@ IS_PRODUCTION = os.environ.get('FLASK_ENV') == 'production' or IS_PYTHONANYWHERE
 
 # OPTIMIZATION: Disable startup file loading for faster app startup
 # Set to False to enable default file loading on startup
-DISABLE_STARTUP_FILE_LOADING = True
+DISABLE_STARTUP_FILE_LOADING = False
 
 # OPTIMIZATION: Enable lazy loading for faster app startup
 # Set to False to load files immediately
@@ -3961,32 +3961,6 @@ def _replace_json_tags_with_database_data(selected_tags, product_db):
         logging.error(f"Error replacing JSON tags with database data: {e}")
         return selected_tags  # Return original tags if enhancement fails
 
-def _normalize_product_name(product_name):
-    """
-    Normalize product names by extracting the base product name from formatted names.
-    
-    Examples:
-    - "Grape Slurpee Wax by Hustler's Ambition - 1g" -> "Grape Slurpee Wax"
-    - "Ice Cream Cake Wax by Huster's Ambition - 1g" -> "Ice Cream Cake Wax"
-    """
-    try:
-        # Remove " by [vendor] - [weight]" pattern
-        import re
-        
-        # Pattern to match " by [vendor] - [weight]" at the end
-        # This captures various weight formats like "1g", "3.5g", "0.5oz", etc.
-        pattern = r'\s+by\s+[^-]+-\s*\d+(\.\d+)?\s*(g|gram|grams|oz|ounce|ounces)\s*$'
-        normalized = re.sub(pattern, '', product_name, flags=re.IGNORECASE)
-        
-        # Also handle cases where there's just " - [weight]" without "by vendor"
-        pattern2 = r'\s*-\s*\d+(\.\d+)?\s*(g|gram|grams|oz|ounce|ounces)\s*$'
-        normalized = re.sub(pattern2, '', normalized, flags=re.IGNORECASE)
-        
-        return normalized.strip()
-    except Exception as e:
-        logging.warning(f"Error normalizing product name '{product_name}': {e}")
-        return product_name
-
 @app.route('/api/generate', methods=['POST'])
 @performance_monitor if PERFORMANCE_ENABLED else lambda x: x
 def generate_labels():
@@ -4159,19 +4133,6 @@ def generate_labels():
                 logging.info(f"Database has {count} products")
         except Exception as e:
             logging.warning(f"Could not check database: {e}")
-
-        # Excel-first generation preference (but keep DB for persistence like lineage updates)
-        try:
-            prefer_excel = True  # default to Excel-first per user request
-            # Optional env toggle: set EXCEL_FIRST=false to use DB-first
-            env_pref = os.environ.get('EXCEL_FIRST')
-            if env_pref is not None and env_pref.lower() in ['0','false','no']:
-                prefer_excel = False
-            if prefer_excel and has_database:
-                logging.info("Excel-first mode enabled: generating from Excel, DB used only for persistence")
-                has_database = False
-        except Exception:
-            pass
         
         if not has_excel_data and not has_database:
             logging.error("No data loaded in Excel processor or database")
@@ -4258,23 +4219,16 @@ def generate_labels():
                                   tag.get('ProductName') or 
                                   str(tag))
                     if product_name and str(product_name).strip():
-                        # Normalize the product name to remove "by vendor - weight" formatting
-                        base_name = _normalize_product_name(str(product_name).strip())
-                        normalized_tags.append(base_name)
+                        normalized_tags.append(str(product_name).strip())
                 elif isinstance(tag, str):
-                    # Already a string - normalize it
-                    base_name = _normalize_product_name(tag.strip())
-                    normalized_tags.append(base_name)
+                    # Already a string
+                    normalized_tags.append(tag.strip())
                 else:
-                    # Convert to string and normalize
-                    base_name = _normalize_product_name(str(tag).strip())
-                    normalized_tags.append(base_name)
+                    # Convert to string
+                    normalized_tags.append(str(tag).strip())
             
             logging.info(f"Normalized {len(selected_tags_to_use)} tags to {len(normalized_tags)} product names")
             logging.debug(f"Sample normalized tags: {normalized_tags[:3]}")
-            logging.info(f"CONCENTRATE FIX: Sample tag normalization:")
-            for i, (original, normalized) in enumerate(zip(selected_tags_to_use[:3], normalized_tags[:3])):
-                logging.info(f"  {i+1}. '{original}' -> '{normalized}'")
             
             # CRITICAL FIX: Check if these are JSON matched tags first
             json_matched_cache_key = session.get('json_matched_cache_key')
@@ -4291,50 +4245,45 @@ def generate_labels():
                 valid_selected_tags = normalized_tags
                 logging.info(f"CRITICAL FIX: Accepted all {len(valid_selected_tags)} JSON matched tags as valid")
             else:
-                # Excel-first mode: validate against Excel only to avoid skipping products
-                if 'prefer_excel' in locals() and prefer_excel:
-                    logging.info("Excel-first validation: validating selected tags against Excel only")
-                    valid_selected_tags, invalid_selected_tags = _validate_tags_against_excel(excel_processor, normalized_tags)
-                else:
-                    # First, try to check if we have database data available
-                    try:
-                        from src.core.data.product_database import get_product_database
-                        # Store context removed - using single database
-                        product_db = get_product_database()
-                        if product_db:
-                            logging.info("Attempting to validate selected tags against database...")
-                            # Check if tags exist in database by trying to get them
-                            db_records = product_db.get_products_by_names(normalized_tags)
-                            if db_records:
-                                # Some or all tags were found in database
-                                found_names = []
-                                for record in db_records:
-                                    if isinstance(record, dict):
-                                        name = record.get('Product Name*', record.get('ProductName', ''))
-                                        if name:
-                                            found_names.append(name)
-                                
-                                # Use the found names as valid tags
-                                valid_selected_tags = found_names
-                                invalid_selected_tags = [tag for tag in normalized_tags if tag not in found_names]
-                                
-                                logging.info(f"CRITICAL FIX: Found {len(valid_selected_tags)} tags in database")
-                                logging.info(f"CRITICAL FIX: {len(invalid_selected_tags)} tags not found in database")
-                                
-                                if invalid_selected_tags:
-                                    logging.warning(f"CRITICAL FIX: Some tags not found in database: {invalid_selected_tags}")
-                            else:
-                                logging.warning("No database records found for selected tags, falling back to Excel validation")
-                                # Fall back to Excel validation
-                                valid_selected_tags, invalid_selected_tags = _validate_tags_against_excel(excel_processor, normalized_tags)
+                # First, try to check if we have database data available
+                try:
+                    from src.core.data.product_database import get_product_database
+                    # Store context removed - using single database
+                    product_db = get_product_database()
+                    if product_db:
+                        logging.info("Attempting to validate selected tags against database...")
+                        # Check if tags exist in database by trying to get them
+                        db_records = product_db.get_products_by_names(normalized_tags)
+                        if db_records:
+                            # Some or all tags were found in database
+                            found_names = []
+                            for record in db_records:
+                                if isinstance(record, dict):
+                                    name = record.get('Product Name*', record.get('ProductName', ''))
+                                    if name:
+                                        found_names.append(name)
+                            
+                            # Use the found names as valid tags
+                            valid_selected_tags = found_names
+                            invalid_selected_tags = [tag for tag in normalized_tags if tag not in found_names]
+                            
+                            logging.info(f"CRITICAL FIX: Found {len(valid_selected_tags)} tags in database")
+                            logging.info(f"CRITICAL FIX: {len(invalid_selected_tags)} tags not found in database")
+                            
+                            if invalid_selected_tags:
+                                logging.warning(f"CRITICAL FIX: Some tags not found in database: {invalid_selected_tags}")
                         else:
-                            logging.warning("Product database not available, using Excel validation")
+                            logging.warning("No database records found for selected tags, falling back to Excel validation")
                             # Fall back to Excel validation
                             valid_selected_tags, invalid_selected_tags = _validate_tags_against_excel(excel_processor, normalized_tags)
-                    except Exception as e:
-                        logging.warning(f"Database validation failed, falling back to Excel validation: {e}")
+                    else:
+                        logging.warning("Product database not available, using Excel validation")
                         # Fall back to Excel validation
                         valid_selected_tags, invalid_selected_tags = _validate_tags_against_excel(excel_processor, normalized_tags)
+                except Exception as e:
+                    logging.warning(f"Database validation failed, falling back to Excel validation: {e}")
+                    # Fall back to Excel validation
+                    valid_selected_tags, invalid_selected_tags = _validate_tags_against_excel(excel_processor, normalized_tags)
             
             if invalid_selected_tags:
                 logging.warning(f"Removed {len(invalid_selected_tags)} invalid tags: {invalid_selected_tags}")
@@ -5020,8 +4969,6 @@ def get_available_tags():
                                     
                                     for row in rows:
                                         product_dict = dict(zip(columns, row))
-                                        # Apply weight formatting for database products
-                                        product_dict = _format_database_product_weight(product_dict)
                                         # Convert to the format expected by the frontend
                                         database_tags.append(product_dict)
                                     
@@ -5052,8 +4999,6 @@ def get_available_tags():
                         
                             for row in rows:
                                 product_dict = dict(zip(columns, row))
-                                # Apply weight formatting for database products
-                                product_dict = _format_database_product_weight(product_dict)
                                 # Convert to the format expected by the frontend
                                 database_tags.append(product_dict)
                             
@@ -5074,15 +5019,9 @@ def get_available_tags():
         # 3. Combine and deduplicate products
         # Use Excel processor products as primary (they have processed fields)
         # Add database products that aren't already in Excel processor
-        # Index Excel products by name for safe merge with DB
-        excel_by_name = {}
-        for tag in excel_tags:
-            name = tag.get('Product Name*', '')
-            if name:
-                excel_by_name[name] = tag
-        excel_product_names = set(excel_by_name.keys())
+        excel_product_names = {tag.get('Product Name*', '') for tag in excel_tags}
         logging.info(f"Excel product names set has {len(excel_product_names)} unique names")
-
+        
         # Add Excel processor products first
         all_tags.extend(excel_tags)
         logging.info(f"Added {len(excel_tags)} Excel products to all_tags")
@@ -5090,93 +5029,20 @@ def get_available_tags():
         # Add database products that aren't duplicates
         added_db_count = 0
         skipped_db_count = 0
-        def first_non_empty(a, b):
-            a_str = str(a).strip() if a is not None else ''
-            b_str = str(b).strip() if b is not None else ''
-            return a_str if a_str else b_str
-
-        def merge_records(excel_rec, db_rec):
-            merged = dict(excel_rec)  # don't mutate
-            # Only fill blanks, never overwrite non-empty Excel values
-            for k, v in db_rec.items():
-                if k not in merged or str(merged.get(k, '')).strip() == '':
-                    if v is not None and str(v).strip() != '':
-                        merged[k] = v
-            # Normalize weight via DB formatter
-            processed_db = process_database_product_for_api(db_rec)
-            cw = first_non_empty(merged.get('CombinedWeight'), processed_db.get('CombinedWeight'))
-            if cw:
-                merged['CombinedWeight'] = cw
-                merged['WeightWithUnits'] = cw
-                merged['WeightUnits'] = cw
-                merged['weightWithUnits'] = cw
-            # Key identity fields
-            merged['Product Name*'] = first_non_empty(merged.get('Product Name*'), db_rec.get('Product Name*'))
-            merged['Product Brand'] = first_non_empty(merged.get('Product Brand'), db_rec.get('Product Brand'))
-            merged['Vendor'] = first_non_empty(merged.get('Vendor'), db_rec.get('Vendor'))
-            merged['Lineage'] = (first_non_empty(merged.get('Lineage'), db_rec.get('Lineage')) or 'MIXED')
-            if merged['Lineage']:
-                merged['Lineage'] = str(merged['Lineage']).upper()
-            else:
-                merged['Lineage'] = 'MIXED'
-
-            # Normalize price from multiple possible fields
-            def normalize_price(val):
-                if val is None:
-                    return ''
-                s = str(val).strip()
-                if not s:
-                    return ''
-                # already formatted
-                if s.startswith('$'):
-                    return s
-                # numeric -> format
-                try:
-                    num = float(s)
-                    if num.is_integer():
-                        return f"${int(num)}"
-                    return f"${num:.2f}".rstrip('0').rstrip('.')
-                except Exception:
-                    return s
-
-            price_candidates = [
-                merged.get('Price'), merged.get('Price*'), merged.get('Retail'), merged.get('Retail Price'),
-                merged.get('Unit Price'), merged.get('Med Price'), db_rec.get('Price'), db_rec.get('Price*'),
-                db_rec.get('Retail'), db_rec.get('Retail Price'), db_rec.get('Unit Price'), db_rec.get('Med Price')
-            ]
-            for cand in price_candidates:
-                p = normalize_price(cand)
-                if p:
-                    merged['Price'] = p
-                    break
-            return merged
-
         for db_tag in database_tags:
             product_name = db_tag.get('Product Name*', '')
-            if product_name and product_name in excel_product_names:
-                # Merge into the existing Excel record
-                excel_rec = excel_by_name.get(product_name)
-                if excel_rec:
-                    merged = merge_records(excel_rec, db_tag)
-                    # Replace the existing record in all_tags if present
-                    try:
-                        idx = all_tags.index(excel_rec)
-                        all_tags[idx] = merged
-                        added_db_count += 1
-                    except ValueError:
-                        all_tags.append(merged)
-                        added_db_count += 1
-                else:
-                    skipped_db_count += 1
+            if product_name and product_name not in excel_product_names:
+                # Process database product to ensure it has proper weight formatting
+                processed_db_tag = process_database_product_for_api(db_tag)
+                
+                # CRITICAL FIX: Debug weight fields for concentrate products
+                if 'concentrate' in str(processed_db_tag.get('Product Type*', '')).lower() or 'wax' in str(processed_db_tag.get('Product Name*', '')).lower():
+                    logging.info(f"DEBUG: Concentrate product weight fields - {product_name}: WeightWithUnits={processed_db_tag.get('WeightWithUnits')}, WeightUnits={processed_db_tag.get('WeightUnits')}, CombinedWeight={processed_db_tag.get('CombinedWeight')}")
+                
+                all_tags.append(processed_db_tag)
+                added_db_count += 1
             else:
-                if product_name:
-                    processed_db_tag = process_database_product_for_api(db_tag)
-                    if 'concentrate' in str(processed_db_tag.get('Product Type*', '')).lower() or 'wax' in str(processed_db_tag.get('Product Name*', '')).lower():
-                        logging.info(f"DEBUG: Concentrate product weight fields - {product_name}: WeightWithUnits={processed_db_tag.get('WeightWithUnits')}, WeightUnits={processed_db_tag.get('WeightUnits')}, CombinedWeight={processed_db_tag.get('CombinedWeight')}")
-                    all_tags.append(processed_db_tag)
-                    added_db_count += 1
-                else:
-                    skipped_db_count += 1
+                skipped_db_count += 1
         
         logging.info(f"Database products: {added_db_count} added, {skipped_db_count} skipped as duplicates")
         logging.info(f"Combined total: {len(all_tags)} products ({len(excel_tags)} from Excel, {len(database_tags)} from database)")
@@ -5826,48 +5692,6 @@ def get_filter_options():
     except Exception as e:
         logging.error(f"Error in filter_options: {str(e)}")
         return jsonify({'error': str(e)}), 500
-
-def _format_database_product_weight(product_dict):
-    """
-    Format database product with weight information for concentrate products.
-    Similar to Excel processor's _format_weight_units but for database products.
-    """
-    try:
-        # Get product information
-        product_name = product_dict.get('Product Name*', '') or product_dict.get('product_name', '') or ''
-        product_type = (product_dict.get('Product Type*', '') or product_dict.get('product_type', '') or '').lower()
-        weight = product_dict.get('Weight*', '') or product_dict.get('weight', '') or ''
-        units = product_dict.get('Units', '') or product_dict.get('units', '') or ''
-        
-        # Check if this is a concentrate product that needs weight formatting
-        concentrate_types = ['concentrate', 'solventless concentrate', 'wax', 'shatter', 'rosin', 'resin', 'budder', 'badder']
-        is_concentrate = any(conc_type in product_type for conc_type in concentrate_types)
-        
-        if is_concentrate and weight and units:
-            # Format weight with units
-            try:
-                weight_float = float(weight)
-                if weight_float.is_integer():
-                    weight_str = f"{int(weight_float)}"
-                else:
-                    weight_str = f"{weight_float:.2f}".rstrip("0").rstrip(".")
-                weight_with_units = f"{weight_str}{units}"
-                
-                # Add WeightUnits field for frontend compatibility
-                product_dict['WeightUnits'] = weight_with_units
-                product_dict['weightWithUnits'] = weight_with_units
-                
-            except (ValueError, TypeError):
-                # If weight conversion fails, just concatenate as strings
-                weight_with_units = f"{weight}{units}"
-                product_dict['WeightUnits'] = weight_with_units
-                product_dict['weightWithUnits'] = weight_with_units
-        
-        return product_dict
-        
-    except Exception as e:
-        logging.warning(f"Error formatting database product weight: {e}")
-        return product_dict
 
 @app.route('/api/debug-weight-formatting', methods=['GET'])
 def debug_weight_formatting():

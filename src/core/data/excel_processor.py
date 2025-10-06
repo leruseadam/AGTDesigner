@@ -6091,28 +6091,21 @@ class ExcelProcessor:
                 # Convert database products to tag format
                 tags = []
                 for product in products:
-                    # Use the same weight formatting logic as Excel processing
-                    # Convert database product dict to a pandas Series-like object for _format_weight_units
-                    product_row = pd.Series(product)
+                    # Create combined weight from Weight* and Units if available
+                    weight_value = product.get('Weight*', '')
+                    units_value = product.get('Units', '')
+                    combined_weight = ''
                     
-                    # Use the sophisticated weight formatting from _format_weight_units
-                    combined_weight = self._format_weight_units(product_row, excel_priority=False)
-                    
-                    # Fallback to simple concatenation if _format_weight_units returns empty
-                    if not combined_weight:
-                        weight_value = product.get('Weight*', '')
-                        units_value = product.get('Units', '')
-                        
-                        if weight_value and units_value and str(units_value) != 'None' and str(units_value) != '':
-                            try:
-                                if float(weight_value) == int(float(weight_value)):
-                                    combined_weight = f"{int(float(weight_value))}{units_value}"
-                                else:
-                                    combined_weight = f"{weight_value}{units_value}"
-                            except (ValueError, TypeError):
+                    if weight_value and units_value and str(units_value) != 'None' and str(units_value) != '':
+                        try:
+                            if float(weight_value) == int(float(weight_value)):
+                                combined_weight = f"{int(float(weight_value))}{units_value}"
+                            else:
                                 combined_weight = f"{weight_value}{units_value}"
-                        elif weight_value:
-                            combined_weight = str(weight_value)
+                        except (ValueError, TypeError):
+                            combined_weight = f"{weight_value}{units_value}"
+                    elif weight_value:
+                        combined_weight = str(weight_value)
                     
                     tag = {
                         'Product Name*': product.get('Product Name*', ''),
@@ -6121,7 +6114,7 @@ class ExcelProcessor:
                         'Product Brand': product.get('Product Brand', ''),
                         'Weight*': product.get('Weight*', ''),
                         'Units': product.get('Units', ''),  # Add Units field
-                        'CombinedWeight': combined_weight,  # Use properly formatted weight
+                        'CombinedWeight': combined_weight,  # Create combined weight
                         'Price*': product.get('Price*', '') or product.get('Price* (Tier Name for Bulk)', ''),
                         'Lineage': product.get('Lineage', ''),
                         'Product Strain': product.get('Product Strain', ''),
@@ -6130,10 +6123,7 @@ class ExcelProcessor:
                         'Ratio': product.get('Ratio', ''),
                         'THC test result': product.get('THC test result', ''),
                         'CBD test result': product.get('CBD test result', ''),
-                        'Source': 'Database',
-                        # Add raw weight data that _format_weight_units expects
-                        'db_weight': product.get('Weight*', ''),
-                        'db_units': product.get('Units', '')
+                        'Source': 'Database'
                     }
                     tags.append(tag)
                 
