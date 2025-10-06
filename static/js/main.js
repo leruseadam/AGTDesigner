@@ -800,15 +800,15 @@ const TagManager = {
         originalTags: [], // Store original tags separately
         originalFilterOptions: {}, // Store original filter options to preserve order
         lineageColors: {
-            'SATIVA': 'var(--lineage-sativa)',
-            'INDICA': 'var(--lineage-indica)',
-            'HYBRID': 'var(--lineage-hybrid)',
-            'HYBRID/SATIVA': 'var(--lineage-hybrid-sativa)',
-            'HYBRID/INDICA': 'var(--lineage-hybrid-indica)',
-            'CBD': 'var(--lineage-cbd)',
-            'PARA': 'var(--lineage-para)',
-            'MIXED': 'var(--lineage-mixed)',
-            'CBD_BLEND': 'var(--lineage-cbd)'
+            'SATIVA': 'rgba(237, 65, 35, 0.6)',
+            'INDICA': 'rgba(153, 0, 255, 0.6)',
+            'HYBRID': 'rgba(0, 153, 0, 0.6)',
+            'HYBRID/SATIVA': 'rgba(237, 65, 35, 0.6)',
+            'HYBRID/INDICA': 'rgba(153, 0, 255, 0.6)',
+            'CBD': 'rgba(255, 255, 0, 0.6)',
+            'PARA': 'rgba(128, 128, 128, 0.6)',
+            'MIXED': 'rgba(0, 153, 0, 0.6)',
+            'CBD_BLEND': 'rgba(255, 255, 0, 0.6)'
         },
         filterCache: null,
         updateAvailableTagsTimer: null, // Add timer tracking
@@ -4717,7 +4717,7 @@ const TagManager = {
     },
 
     getLineageColor(lineage) {
-        return this.state.lineageColors[lineage] || 'var(--lineage-mixed)';
+        return this.state.lineageColors[lineage] || 'rgba(0, 153, 0, 0.6)';
     },
 
     async moveToSelected() {
