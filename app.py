@@ -5056,9 +5056,15 @@ def get_available_tags():
         # 3. Combine and deduplicate products
         # Use Excel processor products as primary (they have processed fields)
         # Add database products that aren't already in Excel processor
-        excel_product_names = {tag.get('Product Name*', '') for tag in excel_tags}
+        # Index Excel products by name for safe merge with DB
+        excel_by_name = {}
+        for tag in excel_tags:
+            name = tag.get('Product Name*', '')
+            if name:
+                excel_by_name[name] = tag
+        excel_product_names = set(excel_by_name.keys())
         logging.info(f"Excel product names set has {len(excel_product_names)} unique names")
-        
+
         # Add Excel processor products first
         all_tags.extend(excel_tags)
         logging.info(f"Added {len(excel_tags)} Excel products to all_tags")
@@ -5066,20 +5072,59 @@ def get_available_tags():
         # Add database products that aren't duplicates
         added_db_count = 0
         skipped_db_count = 0
+        def first_non_empty(a, b):
+            a_str = str(a).strip() if a is not None else ''
+            b_str = str(b).strip() if b is not None else ''
+            return a_str if a_str else b_str
+
+        def merge_records(excel_rec, db_rec):
+            merged = dict(excel_rec)  # don't mutate
+            # Only fill blanks, never overwrite non-empty Excel values
+            for k, v in db_rec.items():
+                if k not in merged or str(merged.get(k, '')).strip() == '':
+                    if v is not None and str(v).strip() != '':
+                        merged[k] = v
+            # Normalize weight via DB formatter
+            processed_db = process_database_product_for_api(db_rec)
+            cw = first_non_empty(merged.get('CombinedWeight'), processed_db.get('CombinedWeight'))
+            if cw:
+                merged['CombinedWeight'] = cw
+                merged['WeightWithUnits'] = cw
+                merged['WeightUnits'] = cw
+                merged['weightWithUnits'] = cw
+            # Key identity fields
+            merged['Product Name*'] = first_non_empty(merged.get('Product Name*'), db_rec.get('Product Name*'))
+            merged['Product Brand'] = first_non_empty(merged.get('Product Brand'), db_rec.get('Product Brand'))
+            merged['Vendor'] = first_non_empty(merged.get('Vendor'), db_rec.get('Vendor'))
+            merged['Lineage'] = (first_non_empty(merged.get('Lineage'), db_rec.get('Lineage')) or 'MIXED')
+            return merged
+
         for db_tag in database_tags:
             product_name = db_tag.get('Product Name*', '')
-            if product_name and product_name not in excel_product_names:
-                # Process database product to ensure it has proper weight formatting
-                processed_db_tag = process_database_product_for_api(db_tag)
-                
-                # CRITICAL FIX: Debug weight fields for concentrate products
-                if 'concentrate' in str(processed_db_tag.get('Product Type*', '')).lower() or 'wax' in str(processed_db_tag.get('Product Name*', '')).lower():
-                    logging.info(f"DEBUG: Concentrate product weight fields - {product_name}: WeightWithUnits={processed_db_tag.get('WeightWithUnits')}, WeightUnits={processed_db_tag.get('WeightUnits')}, CombinedWeight={processed_db_tag.get('CombinedWeight')}")
-                
-                all_tags.append(processed_db_tag)
-                added_db_count += 1
+            if product_name and product_name in excel_product_names:
+                # Merge into the existing Excel record
+                excel_rec = excel_by_name.get(product_name)
+                if excel_rec:
+                    merged = merge_records(excel_rec, db_tag)
+                    # Replace the existing record in all_tags if present
+                    try:
+                        idx = all_tags.index(excel_rec)
+                        all_tags[idx] = merged
+                        added_db_count += 1
+                    except ValueError:
+                        all_tags.append(merged)
+                        added_db_count += 1
+                else:
+                    skipped_db_count += 1
             else:
-                skipped_db_count += 1
+                if product_name:
+                    processed_db_tag = process_database_product_for_api(db_tag)
+                    if 'concentrate' in str(processed_db_tag.get('Product Type*', '')).lower() or 'wax' in str(processed_db_tag.get('Product Name*', '')).lower():
+                        logging.info(f"DEBUG: Concentrate product weight fields - {product_name}: WeightWithUnits={processed_db_tag.get('WeightWithUnits')}, WeightUnits={processed_db_tag.get('WeightUnits')}, CombinedWeight={processed_db_tag.get('CombinedWeight')}")
+                    all_tags.append(processed_db_tag)
+                    added_db_count += 1
+                else:
+                    skipped_db_count += 1
         
         logging.info(f"Database products: {added_db_count} added, {skipped_db_count} skipped as duplicates")
         logging.info(f"Combined total: {len(all_tags)} products ({len(excel_tags)} from Excel, {len(database_tags)} from database)")
