@@ -121,31 +121,8 @@ class TagsTable {
     const type = tag['Product Type*'] || tag.Type || '';
     const safeTagName = tagName.replace(/"/g, '&quot;');
     const safeId = `tag_${safeTagName.replace(/[^a-zA-Z0-9]/g, '_')}`;
-    // Get lineage color with improved fallback logic
     const lineageColors = (window.TagManager && window.TagManager.state && window.TagManager.state.lineageColors) || {};
-    const normalizedLineage = lineage.toString().trim().toUpperCase();
-    let color = lineageColors[normalizedLineage];
-    
-    // Handle common variations and aliases
-    if (!color) {
-        const lineageAliases = {
-            'PARA': 'PARAPHERNALIA',
-            'PARAPHERNALIA': 'PARAPHERNALIA',
-            'UNKNOWN': 'MIXED',
-            'NULL': 'MIXED',
-            'NAN': 'MIXED'
-        };
-        
-        const alias = lineageAliases[normalizedLineage];
-        if (alias && lineageColors[alias]) {
-            color = lineageColors[alias];
-        }
-    }
-    
-    // Final fallback
-    if (!color) {
-        color = lineageColors['MIXED'] || 'rgba(0, 33, 245, 0.6)';
-    }
+    const color = lineageColors[lineage.toUpperCase()] || 'var(--lineage-mixed)';
 
     // Use abbreviated lineage names for compact dropdown
     const uniqueLineages = getUniqueLineages();

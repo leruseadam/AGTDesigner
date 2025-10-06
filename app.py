@@ -4297,44 +4297,44 @@ def generate_labels():
                     valid_selected_tags, invalid_selected_tags = _validate_tags_against_excel(excel_processor, normalized_tags)
                 else:
                     # First, try to check if we have database data available
-                    try:
-                        from src.core.data.product_database import get_product_database
-                        # Store context removed - using single database
-                        product_db = get_product_database()
-                        if product_db:
-                            logging.info("Attempting to validate selected tags against database...")
-                            # Check if tags exist in database by trying to get them
-                            db_records = product_db.get_products_by_names(normalized_tags)
-                            if db_records:
-                                # Some or all tags were found in database
-                                found_names = []
-                                for record in db_records:
-                                    if isinstance(record, dict):
-                                        name = record.get('Product Name*', record.get('ProductName', ''))
-                                        if name:
-                                            found_names.append(name)
-                                
-                                # Use the found names as valid tags
-                                valid_selected_tags = found_names
-                                invalid_selected_tags = [tag for tag in normalized_tags if tag not in found_names]
-                                
-                                logging.info(f"CRITICAL FIX: Found {len(valid_selected_tags)} tags in database")
-                                logging.info(f"CRITICAL FIX: {len(invalid_selected_tags)} tags not found in database")
-                                
-                                if invalid_selected_tags:
-                                    logging.warning(f"CRITICAL FIX: Some tags not found in database: {invalid_selected_tags}")
-                            else:
-                                logging.warning("No database records found for selected tags, falling back to Excel validation")
-                                # Fall back to Excel validation
-                                valid_selected_tags, invalid_selected_tags = _validate_tags_against_excel(excel_processor, normalized_tags)
+                try:
+                    from src.core.data.product_database import get_product_database
+                    # Store context removed - using single database
+                    product_db = get_product_database()
+                    if product_db:
+                        logging.info("Attempting to validate selected tags against database...")
+                        # Check if tags exist in database by trying to get them
+                        db_records = product_db.get_products_by_names(normalized_tags)
+                        if db_records:
+                            # Some or all tags were found in database
+                            found_names = []
+                            for record in db_records:
+                                if isinstance(record, dict):
+                                    name = record.get('Product Name*', record.get('ProductName', ''))
+                                    if name:
+                                        found_names.append(name)
+                            
+                            # Use the found names as valid tags
+                            valid_selected_tags = found_names
+                            invalid_selected_tags = [tag for tag in normalized_tags if tag not in found_names]
+                            
+                            logging.info(f"CRITICAL FIX: Found {len(valid_selected_tags)} tags in database")
+                            logging.info(f"CRITICAL FIX: {len(invalid_selected_tags)} tags not found in database")
+                            
+                            if invalid_selected_tags:
+                                logging.warning(f"CRITICAL FIX: Some tags not found in database: {invalid_selected_tags}")
                         else:
-                            logging.warning("Product database not available, using Excel validation")
+                            logging.warning("No database records found for selected tags, falling back to Excel validation")
                             # Fall back to Excel validation
                             valid_selected_tags, invalid_selected_tags = _validate_tags_against_excel(excel_processor, normalized_tags)
-                    except Exception as e:
-                        logging.warning(f"Database validation failed, falling back to Excel validation: {e}")
+                    else:
+                        logging.warning("Product database not available, using Excel validation")
                         # Fall back to Excel validation
                         valid_selected_tags, invalid_selected_tags = _validate_tags_against_excel(excel_processor, normalized_tags)
+                except Exception as e:
+                    logging.warning(f"Database validation failed, falling back to Excel validation: {e}")
+                    # Fall back to Excel validation
+                    valid_selected_tags, invalid_selected_tags = _validate_tags_against_excel(excel_processor, normalized_tags)
             
             if invalid_selected_tags:
                 logging.warning(f"Removed {len(invalid_selected_tags)} invalid tags: {invalid_selected_tags}")

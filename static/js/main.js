@@ -807,16 +807,8 @@ const TagManager = {
             'HYBRID/INDICA': 'rgba(153, 0, 255, 0.6)',
             'CBD': 'rgba(255, 255, 0, 0.6)',
             'PARA': 'rgba(128, 128, 128, 0.6)',
-            'PARAPHERNALIA': 'rgba(128, 128, 128, 0.6)',
             'MIXED': 'rgba(0, 33, 245, 0.6)',
-            'CBD_BLEND': 'rgba(255, 255, 0, 0.6)',
-            'EDIBLE': 'rgba(255, 165, 0, 0.6)',
-            'CONCENTRATE': 'rgba(255, 69, 0, 0.6)',
-            'FLOWER': 'rgba(34, 197, 94, 0.6)',
-            'PREROLL': 'rgba(156, 39, 176, 0.6)',
-            'VAPE': 'rgba(33, 150, 243, 0.6)',
-            'TOPICAL': 'rgba(76, 175, 80, 0.6)',
-            'TINCTURE': 'rgba(255, 193, 7, 0.6)'
+            'CBD_BLEND': 'rgba(255, 255, 0, 0.6)'
         },
         filterCache: null,
         updateAvailableTagsTimer: null, // Add timer tracking
@@ -2442,20 +2434,14 @@ const TagManager = {
         const lineage = tag.lineage || tag.Lineage || 'MIXED';
         let displayLineage = lineage;
         
-        // Normalize lineage: uppercase, trim whitespace
-        displayLineage = displayLineage.toString().trim().toUpperCase();
         
-        // Handle empty or null lineage
-        if (!displayLineage || displayLineage === 'NULL' || displayLineage === 'NAN') {
-          displayLineage = 'MIXED';
+        if (displayLineage) {
+          tagElement.dataset.lineage = displayLineage.toUpperCase();
+          row.dataset.lineage = displayLineage.toUpperCase();  // Add lineage to row element too
+        } else {
+          tagElement.dataset.lineage = 'MIXED';
+          row.dataset.lineage = 'MIXED';  // Add lineage to row element too
         }
-        
-        // Set the lineage data attribute for CSS styling
-        tagElement.dataset.lineage = displayLineage;
-        row.dataset.lineage = displayLineage;
-        
-        // Debug logging to help troubleshoot color issues
-        console.log(`Tag "${tagName}" lineage: "${lineage}" -> normalized: "${displayLineage}"`);
         tagElement.dataset.tagId = tag.tagId;
         tagElement.dataset.vendor = tag.vendor;
         tagElement.dataset.brand = tag.brand;
@@ -4730,55 +4716,8 @@ const TagManager = {
         }
     },
 
-    // Function to refresh tag colors when lineage changes
-    refreshTagColors() {
-        console.log('[DEBUG] Refreshing tag colors...');
-        
-        // Refresh available tags display
-        if (this.state.tags && this.state.tags.length > 0) {
-            this._updateAvailableTags(this.state.tags);
-        }
-        
-        // Refresh selected tags display
-        if (this.state.selectedTags && this.state.selectedTags.size > 0) {
-            this.updateSelectedTagsDisplay();
-        }
-        
-        console.log('[DEBUG] Tag colors refreshed');
-    },
-
     getLineageColor(lineage) {
-        if (!lineage) return 'rgba(0, 33, 245, 0.6)'; // Default MIXED color
-        
-        // Normalize lineage: uppercase, trim whitespace
-        const normalizedLineage = lineage.toString().trim().toUpperCase();
-        
-        // Direct match first
-        if (this.state.lineageColors[normalizedLineage]) {
-            return this.state.lineageColors[normalizedLineage];
-        }
-        
-        // Handle common variations and aliases
-        const lineageAliases = {
-            'PARA': 'PARAPHERNALIA',
-            'PARAPHERNALIA': 'PARAPHERNALIA',
-            'HYBRID/SATIVA': 'HYBRID/SATIVA',
-            'HYBRID/INDICA': 'HYBRID/INDICA',
-            'HYBRID/SATIVA': 'HYBRID/SATIVA',
-            'HYBRID/INDICA': 'HYBRID/INDICA',
-            'CBD_BLEND': 'CBD_BLEND',
-            'MIXED': 'MIXED',
-            'UNKNOWN': 'MIXED'
-        };
-        
-        // Check aliases
-        const alias = lineageAliases[normalizedLineage];
-        if (alias && this.state.lineageColors[alias]) {
-            return this.state.lineageColors[alias];
-        }
-        
-        // Default fallback
-        return 'rgba(0, 33, 245, 0.6)'; // MIXED color as default
+        return this.state.lineageColors[lineage] || 'rgba(0, 33, 245, 0.6)';
     },
 
     async moveToSelected() {
