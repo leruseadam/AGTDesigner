@@ -43,7 +43,7 @@ class LineageEditor:
         },
         "MIXED": {
             "abbr": "(M)",
-            "color": "#2C3E50",
+            "color": "#1E3A8A",
             "display": "Mixed"
         },
         "PARAPHERNALIA": {

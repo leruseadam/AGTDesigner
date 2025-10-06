@@ -9,7 +9,7 @@ LINEAGE_COLOR_MAP: Dict[str, str] = {
     "HYBRID/SATIVA": "#E74C3C",
     "HYBRID/INDICA": "#8E44AD",
     "CBD": "#F1C40F",
-    "MIXED": "#2C3E50",
+    "MIXED": "#1E3A8A",
     "PARAPHERNALIA": "#FF69B4",
 }
 
