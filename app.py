@@ -4291,7 +4291,12 @@ def generate_labels():
                 valid_selected_tags = normalized_tags
                 logging.info(f"CRITICAL FIX: Accepted all {len(valid_selected_tags)} JSON matched tags as valid")
             else:
-                # First, try to check if we have database data available
+                # Excel-first mode: validate against Excel only to avoid skipping products
+                if 'prefer_excel' in locals() and prefer_excel:
+                    logging.info("Excel-first validation: validating selected tags against Excel only")
+                    valid_selected_tags, invalid_selected_tags = _validate_tags_against_excel(excel_processor, normalized_tags)
+                else:
+                    # First, try to check if we have database data available
                 try:
                     from src.core.data.product_database import get_product_database
                     # Store context removed - using single database
