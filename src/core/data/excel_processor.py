@@ -3615,11 +3615,12 @@ class ExcelProcessor:
         if self._debug_count <= 5:  # Log first 5 records for debugging
             self.logger.info(f"Record {self._debug_count}: excel_weight={excel_weight}, excel_units={excel_units}, db_weight={db_weight}, db_units={db_units}, final_weight={weight_val}, final_units={units_val}, product_type={product_type}")
         
-        # Product types that need gram-to-ounce conversion
-        conversion_types = {
-            "edible (solid)", "edible (liquid)", "high cbd edible liquid", 
-            "doh edible/solid/topical", "topical", "capsule", "tincture"
-        }
+        # Import CLASSIC_TYPES to determine nonclassic products
+        from src.core.constants import CLASSIC_TYPES
+        
+        # Determine if this is a nonclassic product type
+        is_nonclassic = product_type not in [ct.lower() for ct in CLASSIC_TYPES]
+        
         preroll_types = {"pre-roll", "infused pre-roll"}
 
         # FIRST: Check if Weight* already contains units (like "1g", "3.5oz", etc.)
@@ -3656,9 +3657,9 @@ class ExcelProcessor:
             except Exception:
                 weight_float = None
 
-            # Apply unit conversion for specific product types
+            # Apply unit conversion for ALL nonclassic product types
             if (weight_float is not None and units_val and 
-                product_type in conversion_types and 
+                is_nonclassic and 
                 units_val.lower() in ['g', 'grams', 'gram']):
                 
                 # FIRST: Check if there are identical products with existing ounce weights
@@ -3671,7 +3672,7 @@ class ExcelProcessor:
                 # If no identical product found, convert grams to ounces
                 weight_float = weight_float * 0.03527396195
                 units_val = "oz"
-                self.logger.info(f"Converted {weight_val}g to {weight_float:.4f}oz for product type: {product_type}")
+                self.logger.info(f"Converted {weight_val}g to {weight_float:.4f}oz for nonclassic product type: {product_type}")
 
             # Now combine weight and units properly
             if weight_float is not None and units_val:

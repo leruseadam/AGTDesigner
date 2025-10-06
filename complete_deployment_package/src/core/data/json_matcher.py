@@ -7899,8 +7899,8 @@ class JSONMatcher:
             'co2': 'HYBRID',
             'tanker': 'HYBRID',
             
-            # Capsules - typically HYBRID
-            'capsule': 'HYBRID',
+            # Capsules - typically MIXED (nonclassic type)
+            'capsule': 'MIXED',
             
             # Only truly mixed products should be MIXED
             'mixed': 'MIXED',
@@ -7919,9 +7919,17 @@ class JSONMatcher:
                 logging.info(f"🧬 Assigned lineage '{lineage}' based on product type '{product_type}'")
                 return lineage
         
-        # If no specific match found, default to HYBRID (most cannabis products are hybrid)
-        logging.info(f"🧬 No specific lineage mapping found for product type '{product_type}', defaulting to HYBRID")
-        return 'HYBRID'
+        # If no specific match found, default based on product type classification
+        # Import CLASSIC_TYPES to determine if this is a nonclassic product
+        from src.core.constants import CLASSIC_TYPES
+        is_nonclassic = product_type.lower() not in [ct.lower() for ct in CLASSIC_TYPES]
+        
+        if is_nonclassic:
+            logging.info(f"🧬 No specific lineage mapping found for nonclassic product type '{product_type}', defaulting to MIXED")
+            return 'MIXED'
+        else:
+            logging.info(f"🧬 No specific lineage mapping found for classic product type '{product_type}', defaulting to HYBRID")
+            return 'HYBRID'
 
     def _find_strain_in_database(self, product_name: str, product_db) -> Optional[str]:
         """
