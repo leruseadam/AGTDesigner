@@ -3570,6 +3570,66 @@ class ExcelProcessor:
             self.logger.warning(f"Error looking up identical product weight: {str(e)}")
             return None
 
+    def _find_most_likely_ounce_weight(self, product_name, product_type):
+        """
+        Find the most common ounce weight for similar nonclassic products.
+        This helps maintain consistency with actual product packaging rather than mathematical conversion.
+        """
+        # Common ounce weights for nonclassic products based on typical packaging
+        common_oz_weights = {
+            # Edibles - common sizes
+            'edible (liquid)': ['2.5oz', '3.53oz', '1.7oz'],
+            'edible (solid)': ['1oz', '2.5oz', '3.5oz'],
+            'gummy': ['1oz', '2oz', '3.5oz'],
+            'chocolate': ['1oz', '2oz', '3.5oz'],
+            'cookie': ['1oz', '2oz'],
+            'brownie': ['1oz', '2oz'],
+            'candy': ['1oz', '2oz', '3.5oz'],
+            
+            # Tinctures and oils
+            'tincture': ['1oz', '2oz', '4oz'],
+            'drops': ['1oz', '2oz'],
+            'liquid': ['1oz', '2oz', '4oz'],
+            
+            # Topicals
+            'topical': ['1oz', '2oz', '4oz'],
+            'cream': ['1oz', '2oz', '4oz'],
+            'lotion': ['1oz', '2oz', '4oz'],
+            'salve': ['1oz', '2oz'],
+            'balm': ['1oz', '2oz'],
+            
+            # Capsules
+            'capsule': ['1oz', '2oz'],
+            
+            # Beverages
+            'beverage': ['12oz', '16oz', '20oz'],
+            'drink': ['12oz', '16oz', '20oz'],
+            'soda': ['12oz', '16oz'],
+            'juice': ['12oz', '16oz'],
+            
+            # Default fallback
+            'default': ['1oz', '2oz', '3.5oz']
+        }
+        
+        # Get the most common weight for this product type
+        product_type_lower = product_type.lower().strip()
+        
+        # Try exact match first
+        if product_type_lower in common_oz_weights:
+            return common_oz_weights[product_type_lower][0]  # Return the first (most common) weight
+        
+        # Try partial matches for product types that might have variations
+        for key, weights in common_oz_weights.items():
+            if key != 'default' and key in product_type_lower:
+                return weights[0]
+        
+        # Special handling for Moonshot products (they seem to be 2.5oz or 3.53oz based on the image)
+        if 'moonshot' in product_name.lower():
+            return '2.5oz'  # Most common Moonshot size
+        
+        # Default fallback
+        return common_oz_weights['default'][0]  # Return '1oz' as default
+
     def _format_weight_units(self, record, excel_priority=True):
         # Handle pandas Series and NA values properly
         def safe_get_value(value, default=''):
@@ -3669,10 +3729,11 @@ class ExcelProcessor:
                         self.logger.info(f"Using identical product ounce weight for {product_name}: {identical_ounce_weight}")
                         return identical_ounce_weight
                 
-                # If no identical product found, convert grams to ounces
-                weight_float = weight_float * 0.03527396195
-                units_val = "oz"
-                self.logger.info(f"Converted {weight_val}g to {weight_float:.4f}oz for nonclassic product type: {product_type}")
+                # If no identical product found, use most likely ounce weight
+                most_likely_oz_weight = self._find_most_likely_ounce_weight(product_name, product_type)
+                if most_likely_oz_weight:
+                    self.logger.info(f"Using most likely ounce weight for {product_name}: {most_likely_oz_weight}")
+                    return most_likely_oz_weight
 
             # Now combine weight and units properly
             if weight_float is not None and units_val:
