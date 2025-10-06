@@ -336,10 +336,10 @@ class DragAndDropManager {
         this.draggedElement = tagRow;
         
         // Disable checkbox interactions during drag
-        const checkbox = tagRow.querySelector('.tag-checkbox');
-        if (checkbox) {
-            checkbox.style.pointerEvents = 'none';
-            checkbox.setAttribute('data-drag-disabled', 'true');
+        const checkboxElement = tagRow.querySelector('.tag-checkbox');
+        if (checkboxElement) {
+            checkboxElement.style.pointerEvents = 'none';
+            checkboxElement.setAttribute('data-drag-disabled', 'true');
         }
         
         // Disable click events on tag-item during drag to prevent conflicts

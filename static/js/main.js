@@ -2488,7 +2488,7 @@ const TagManager = {
         
         // Add DOH and High CBD/THC images if applicable
         const dohValue = (tag.DOH || '').toString().toUpperCase();
-        const productType = (tag['Product Type*'] || '').toString().toLowerCase();
+        const productTypeForImages = (tag['Product Type*'] || '').toString().toLowerCase();
         
         // Create image container for dynamic updates
         const imageContainer = document.createElement('span');
@@ -2548,9 +2548,9 @@ const TagManager = {
             initialDohStatus = 'CBD';
         } 
         // Then check product type for High CBD/THC indicators (DOH High CBD, DOH High THC)
-        else if (productType.startsWith('high cbd') || productType.includes('doh high cbd')) {
+        else if (productTypeForImages.startsWith('high cbd') || productTypeForImages.includes('doh high cbd')) {
             initialDohStatus = 'CBD';
-        } else if (productType.startsWith('high thc') || productType.includes('doh high thc') || productType.includes('high thc')) {
+        } else if (productTypeForImages.startsWith('high thc') || productTypeForImages.includes('doh high thc') || productTypeForImages.includes('high thc')) {
             initialDohStatus = 'THC';
         }
         
@@ -2696,9 +2696,9 @@ const TagManager = {
             currentDropdownStatus = 'CBD';
         } 
         // Then check product type for High CBD/THC indicators (DOH High CBD, DOH High THC)
-        else if (productType.startsWith('high cbd') || productType.includes('doh high cbd')) {
+        else if (productTypeForImages.startsWith('high cbd') || productTypeForImages.includes('doh high cbd')) {
             currentDropdownStatus = 'CBD';
-        } else if (productType.startsWith('high thc') || productType.includes('doh high thc') || productType.includes('high thc')) {
+        } else if (productTypeForImages.startsWith('high thc') || productTypeForImages.includes('doh high thc') || productTypeForImages.includes('high thc')) {
             currentDropdownStatus = 'THC';
         }
         
