@@ -4893,8 +4893,23 @@ def process_database_product_for_api(db_product):
         product_type = str(processed_product.get('Product Type*', '')).lower()
         product_name = str(processed_product.get('Product Name*', ''))
         
+        # CRITICAL FIX: For pre-roll and infused pre-roll products, use JointRatio instead of Weight* + Units
+        if product_type in ['pre-roll', 'infused pre-roll']:
+            joint_ratio = str(processed_product.get('JointRatio', '')).strip()
+            if joint_ratio and joint_ratio not in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
+                combined_weight = joint_ratio  # Use JointRatio directly (e.g., "0.5g x 2 Pack")
+                print(f"DEBUG: Using JointRatio for pre-roll: {product_name} -> {joint_ratio}")
+            else:
+                # Calculate JointRatio from product name or use default
+                calculated_joint_ratio = _calculate_joint_ratio_for_record(processed_product)
+                if calculated_joint_ratio:
+                    combined_weight = calculated_joint_ratio
+                    print(f"DEBUG: Calculated JointRatio for pre-roll: {product_name} -> {calculated_joint_ratio}")
+                else:
+                    combined_weight = "0.5g x 2 Pack"  # Default for pre-rolls
+                    print(f"DEBUG: Using default JointRatio for pre-roll: {product_name} -> {combined_weight}")
         # Special override for Moonshot products - force to 2.5oz
-        if 'moonshot' in product_name.lower() and weight_value and units and units.lower() in ['g', 'grams', 'gram']:
+        elif 'moonshot' in product_name.lower() and weight_value and units and units.lower() in ['g', 'grams', 'gram']:
             print(f"DEBUG: FORCING Moonshot database conversion: {product_name} {weight_value}{units} -> 2.5oz")
             combined_weight = "2.5oz"
             processed_product['CombinedWeight'] = combined_weight
