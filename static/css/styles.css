@@ -8548,3 +8548,12 @@ img, video, canvas, svg {
   background-image: none !important;
   box-shadow: none !important;
 }
+
+/* --- Force HYBRID tags to show green, not blue --- */
+.tag-item[data-lineage="HYBRID"],
+.tag-item[data-lineage="MIXED"],
+.tag-row[data-lineage="HYBRID"],
+.tag-row[data-lineage="MIXED"] {
+  background: rgba(0, 153, 0, 0.6) !important;
+  border-color: rgba(0, 153, 0, 0.3) !important;
+}
