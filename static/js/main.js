@@ -2434,10 +2434,6 @@ const TagManager = {
         const lineage = tag.lineage || tag.Lineage || 'MIXED';
         let displayLineage = lineage;
         
-        // Map HYBRID to MIXED for visual consistency (user request)
-        if (lineage === 'HYBRID') {
-          displayLineage = 'MIXED';
-        }
         
         if (displayLineage) {
           tagElement.dataset.lineage = displayLineage.toUpperCase();
