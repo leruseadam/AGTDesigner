@@ -2567,8 +2567,43 @@ img, video, canvas, svg {
   }
   
   .tag-item[data-lineage="PARAPHERNALIA"] {
-    background: rgba(255, 255, 0, 0.6) !important;
-    border-color: rgba(255, 255, 0, 0.3);
+    background: rgba(128, 128, 128, 0.6) !important;
+    border-color: rgba(128, 128, 128, 0.3);
+  }
+  
+  .tag-item[data-lineage="EDIBLE"] {
+    background: rgba(255, 165, 0, 0.6) !important;
+    border-color: rgba(255, 165, 0, 0.3);
+  }
+  
+  .tag-item[data-lineage="CONCENTRATE"] {
+    background: rgba(255, 69, 0, 0.6) !important;
+    border-color: rgba(255, 69, 0, 0.3);
+  }
+  
+  .tag-item[data-lineage="FLOWER"] {
+    background: rgba(34, 197, 94, 0.6) !important;
+    border-color: rgba(34, 197, 94, 0.3);
+  }
+  
+  .tag-item[data-lineage="PREROLL"] {
+    background: rgba(156, 39, 176, 0.6) !important;
+    border-color: rgba(156, 39, 176, 0.3);
+  }
+  
+  .tag-item[data-lineage="VAPE"] {
+    background: rgba(33, 150, 243, 0.6) !important;
+    border-color: rgba(33, 150, 243, 0.3);
+  }
+  
+  .tag-item[data-lineage="TOPICAL"] {
+    background: rgba(76, 175, 80, 0.6) !important;
+    border-color: rgba(76, 175, 80, 0.3);
+  }
+  
+  .tag-item[data-lineage="TINCTURE"] {
+    background: rgba(255, 193, 7, 0.6) !important;
+    border-color: rgba(255, 193, 7, 0.3);
   }
 
   /* Lineage-specific checkbox colors */

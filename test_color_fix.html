@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tag Color Fix Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: #1a1a1a;
+            color: white;
+        }
+        .test-container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .tag-item {
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .tag-item[data-lineage="SATIVA"] {
+            background: rgba(237, 65, 35, 0.6) !important;
+            border-color: rgba(237, 65, 35, 0.3);
+        }
+        .tag-item[data-lineage="INDICA"] {
+            background: rgba(153, 0, 255, 0.6) !important;
+            border-color: rgba(153, 0, 255, 0.3);
+        }
+        .tag-item[data-lineage="HYBRID"] {
+            background: rgba(0, 153, 0, 0.6) !important;
+            border-color: rgba(44, 62, 80, 0.3);
+        }
+        .tag-item[data-lineage="HYBRID/SATIVA"] {
+            background: rgba(237, 65, 35, 0.6) !important;
+            border-color: rgba(237, 65, 35, 0.3);
+        }
+        .tag-item[data-lineage="HYBRID/INDICA"] {
+            background: rgba(153, 0, 255, 0.6) !important;
+            border-color: rgba(153, 0, 255, 0.3);
+        }
+        .tag-item[data-lineage="CBD"] {
+            background: rgba(255, 255, 0, 0.6) !important;
+            border-color: rgba(255, 255, 0, 0.3);
+        }
+        .tag-item[data-lineage="PARAPHERNALIA"] {
+            background: rgba(128, 128, 128, 0.6) !important;
+            border-color: rgba(128, 128, 128, 0.3);
+        }
+        .tag-item[data-lineage="MIXED"] {
+            background: rgba(0, 33, 245, 0.6) !important;
+            border-color: rgba(0, 33, 245, 0.3);
+        }
+        .tag-item[data-lineage="CBD_BLEND"] {
+            background: rgba(255, 255, 0, 0.6) !important;
+            border-color: rgba(255, 255, 0, 0.3);
+        }
+        .test-result {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 5px;
+            background: rgba(40, 167, 69, 0.2);
+            border: 1px solid rgba(40, 167, 69, 0.5);
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>Tag Color Fix Test</h1>
+        <p>This page tests the tag color mapping to ensure lineage values are properly colored.</p>
+        
+        <h2>Test Tags with Different Lineages:</h2>
+        
+        <div class="tag-item" data-lineage="SATIVA">
+            <strong>Blue Dream</strong> - SATIVA
+        </div>
+        
+        <div class="tag-item" data-lineage="INDICA">
+            <strong>Granddaddy Purple</strong> - INDICA
+        </div>
+        
+        <div class="tag-item" data-lineage="HYBRID">
+            <strong>OG Kush</strong> - HYBRID
+        </div>
+        
+        <div class="tag-item" data-lineage="HYBRID/SATIVA">
+            <strong>Girl Scout Cookies</strong> - HYBRID/SATIVA
+        </div>
+        
+        <div class="tag-item" data-lineage="HYBRID/INDICA">
+            <strong>White Widow</strong> - HYBRID/INDICA
+        </div>
+        
+        <div class="tag-item" data-lineage="CBD">
+            <strong>Charlotte's Web</strong> - CBD
+        </div>
+        
+        <div class="tag-item" data-lineage="PARAPHERNALIA">
+            <strong>Glass Pipe</strong> - PARAPHERNALIA
+        </div>
+        
+        <div class="tag-item" data-lineage="MIXED">
+            <strong>Unknown Strain</strong> - MIXED
+        </div>
+        
+        <div class="tag-item" data-lineage="CBD_BLEND">
+            <strong>CBD Gummies</strong> - CBD_BLEND
+        </div>
+        
+        <div class="test-result">
+            <h3>✅ Color Fix Applied</h3>
+            <p>Each tag above should display with its appropriate lineage color:</p>
+            <ul>
+                <li><strong>SATIVA</strong>: Red background</li>
+                <li><strong>INDICA</strong>: Purple background</li>
+                <li><strong>HYBRID</strong>: Green background</li>
+                <li><strong>HYBRID/SATIVA</strong>: Red background</li>
+                <li><strong>HYBRID/INDICA</strong>: Purple background</li>
+                <li><strong>CBD</strong>: Yellow background</li>
+                <li><strong>PARAPHERNALIA</strong>: Gray background</li>
+                <li><strong>MIXED</strong>: Blue background</li>
+                <li><strong>CBD_BLEND</strong>: Yellow background</li>
+            </ul>
+        </div>
+        
+        <h2>JavaScript Color Mapping Test:</h2>
+        <div id="js-test-results"></div>
+        
+        <script>
+            // Simulate the lineage color mapping logic
+            const lineageColors = {
+                'SATIVA': 'rgba(237, 65, 35, 0.6)',
+                'INDICA': 'rgba(153, 0, 255, 0.6)',
+                'HYBRID': 'rgba(0, 153, 0, 0.6)',
+                'HYBRID/SATIVA': 'rgba(237, 65, 35, 0.6)',
+                'HYBRID/INDICA': 'rgba(153, 0, 255, 0.6)',
+                'CBD': 'rgba(255, 255, 0, 0.6)',
+                'PARA': 'rgba(128, 128, 128, 0.6)',
+                'PARAPHERNALIA': 'rgba(128, 128, 128, 0.6)',
+                'MIXED': 'rgba(0, 33, 245, 0.6)',
+                'CBD_BLEND': 'rgba(255, 255, 0, 0.6)'
+            };
+            
+            function getLineageColor(lineage) {
+                if (!lineage) return 'rgba(0, 33, 245, 0.6)';
+                
+                const normalizedLineage = lineage.toString().trim().toUpperCase();
+                
+                if (lineageColors[normalizedLineage]) {
+                    return lineageColors[normalizedLineage];
+                }
+                
+                const lineageAliases = {
+                    'PARA': 'PARAPHERNALIA',
+                    'PARAPHERNALIA': 'PARAPHERNALIA',
+                    'UNKNOWN': 'MIXED',
+                    'NULL': 'MIXED',
+                    'NAN': 'MIXED'
+                };
+                
+                const alias = lineageAliases[normalizedLineage];
+                if (alias && lineageColors[alias]) {
+                    return lineageColors[alias];
+                }
+                
+                return 'rgba(0, 33, 245, 0.6)';
+            }
+            
+            // Test various lineage values
+            const testLineages = [
+                'SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA',
+                'CBD', 'PARA', 'PARAPHERNALIA', 'MIXED', 'CBD_BLEND',
+                'sativa', 'indica', 'hybrid', '  CBD  ', 'UNKNOWN', 'NULL', ''
+            ];
+            
+            const resultsDiv = document.getElementById('js-test-results');
+            let resultsHtml = '<div class="test-result"><h3>JavaScript Color Mapping Results:</h3><ul>';
+            
+            testLineages.forEach(lineage => {
+                const color = getLineageColor(lineage);
+                resultsHtml += `<li><strong>"${lineage}"</strong> → <span style="color: ${color}">${color}</span></li>`;
+            });
+            
+            resultsHtml += '</ul></div>';
+            resultsDiv.innerHTML = resultsHtml;
+        </script>
+    </div>
+</body>
+</html>
