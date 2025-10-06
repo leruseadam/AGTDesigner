@@ -4159,6 +4159,19 @@ def generate_labels():
                 logging.info(f"Database has {count} products")
         except Exception as e:
             logging.warning(f"Could not check database: {e}")
+
+        # Excel-first generation preference (but keep DB for persistence like lineage updates)
+        try:
+            prefer_excel = True  # default to Excel-first per user request
+            # Optional env toggle: set EXCEL_FIRST=false to use DB-first
+            env_pref = os.environ.get('EXCEL_FIRST')
+            if env_pref is not None and env_pref.lower() in ['0','false','no']:
+                prefer_excel = False
+            if prefer_excel and has_database:
+                logging.info("Excel-first mode enabled: generating from Excel, DB used only for persistence")
+                has_database = False
+        except Exception:
+            pass
         
         if not has_excel_data and not has_database:
             logging.error("No data loaded in Excel processor or database")
