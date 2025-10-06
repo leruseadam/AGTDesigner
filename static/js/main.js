@@ -2641,7 +2641,13 @@ const TagManager = {
         uniqueLineages.forEach(option => {
             const optionElement = document.createElement('option');
             optionElement.value = option.value;
-            optionElement.textContent = option.label;
+            if (option.placeholder) {
+                optionElement.textContent = option.label;
+                optionElement.style.fontStyle = "italic";
+                optionElement.style.color = "#999";
+            } else {
+                optionElement.textContent = option.label;
+            }
             if ((lineage === option.value) || (option.value === 'CBD' && lineage === 'CBD_BLEND')) {
                 optionElement.selected = true;
             }
@@ -2703,11 +2709,11 @@ const TagManager = {
         dohSelect.style.transition = 'all 0.2s ease';
         dohSelect.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.1)';
         dohSelect.style.marginLeft = '4px';
-        dohSelect.style.minWidth = '60px';
+        dohSelect.style.minWidth = '50px';
 
         // Add DOH options
         const dohOptions = [
-            { value: 'NONE', label: '' },
+            { value: 'NONE', label: 'DOH', placeholder: true },
             { value: 'DOH', label: 'DOH' },
             { value: 'THC', label: 'THC' },
             { value: 'CBD', label: 'CBD' }
@@ -2734,7 +2740,13 @@ const TagManager = {
         dohOptions.forEach(option => {
             const optionElement = document.createElement('option');
             optionElement.value = option.value;
-            optionElement.textContent = option.label;
+            if (option.placeholder) {
+                optionElement.textContent = option.label;
+                optionElement.style.fontStyle = "italic";
+                optionElement.style.color = "#999";
+            } else {
+                optionElement.textContent = option.label;
+            }
             if (currentDropdownStatus === option.value) {
                 optionElement.selected = true;
             }
