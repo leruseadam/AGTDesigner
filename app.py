@@ -5097,6 +5097,40 @@ def get_available_tags():
             merged['Product Brand'] = first_non_empty(merged.get('Product Brand'), db_rec.get('Product Brand'))
             merged['Vendor'] = first_non_empty(merged.get('Vendor'), db_rec.get('Vendor'))
             merged['Lineage'] = (first_non_empty(merged.get('Lineage'), db_rec.get('Lineage')) or 'MIXED')
+            if merged['Lineage']:
+                merged['Lineage'] = str(merged['Lineage']).upper()
+            else:
+                merged['Lineage'] = 'MIXED'
+
+            # Normalize price from multiple possible fields
+            def normalize_price(val):
+                if val is None:
+                    return ''
+                s = str(val).strip()
+                if not s:
+                    return ''
+                # already formatted
+                if s.startswith('$'):
+                    return s
+                # numeric -> format
+                try:
+                    num = float(s)
+                    if num.is_integer():
+                        return f"${int(num)}"
+                    return f"${num:.2f}".rstrip('0').rstrip('.')
+                except Exception:
+                    return s
+
+            price_candidates = [
+                merged.get('Price'), merged.get('Price*'), merged.get('Retail'), merged.get('Retail Price'),
+                merged.get('Unit Price'), merged.get('Med Price'), db_rec.get('Price'), db_rec.get('Price*'),
+                db_rec.get('Retail'), db_rec.get('Retail Price'), db_rec.get('Unit Price'), db_rec.get('Med Price')
+            ]
+            for cand in price_candidates:
+                p = normalize_price(cand)
+                if p:
+                    merged['Price'] = p
+                    break
             return merged
 
         for db_tag in database_tags:
