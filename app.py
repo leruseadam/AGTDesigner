@@ -9527,7 +9527,9 @@ def get_initial_data():
                 logging.warning("No default file found - attempting database fallback for initial-data")
                 try:
                     import sqlite3
-                    db_path = os.path.join(os.getcwd(), 'product_database.db')
+                    # Use absolute path based on this file's location (reliable on PythonAnywhere)
+                    base_dir = os.path.dirname(os.path.abspath(__file__))
+                    db_path = os.path.join(base_dir, 'product_database.db')
                     if os.path.exists(db_path):
                         conn = sqlite3.connect(db_path)
                         cur = conn.cursor()
