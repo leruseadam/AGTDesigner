@@ -8528,3 +8528,23 @@ img, video, canvas, svg {
   display: none !important;
   content: none !important;
 }
+
+/* --- Remove checkbox gradients to fix second color shade --- */
+.tag-item[data-lineage="SATIVA"] .custom-checkbox:checked,
+.tag-item[data-lineage="SATIVA"] .tag-checkbox:checked,
+.tag-item[data-lineage="HYBRID/SATIVA"] .custom-checkbox:checked,
+.tag-item[data-lineage="HYBRID/SATIVA"] .tag-checkbox:checked,
+.tag-item[data-lineage="INDICA"] .custom-checkbox:checked,
+.tag-item[data-lineage="INDICA"] .tag-checkbox:checked,
+.tag-item[data-lineage="HYBRID/INDICA"] .custom-checkbox:checked,
+.tag-item[data-lineage="HYBRID/INDICA"] .tag-checkbox:checked,
+.tag-item[data-lineage="HYBRID"] .custom-checkbox:checked,
+.tag-item[data-lineage="HYBRID"] .tag-checkbox:checked,
+.tag-item[data-lineage="CBD"] .custom-checkbox:checked,
+.tag-item[data-lineage="CBD"] .tag-checkbox:checked,
+.tag-item[data-lineage="MIXED"] .custom-checkbox:checked,
+.tag-item[data-lineage="MIXED"] .tag-checkbox:checked {
+  background: var(--tagColor, #1f2937) !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
