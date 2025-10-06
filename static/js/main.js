@@ -4425,7 +4425,7 @@ const TagManager = {
                     AppLoadingSplash.complete();
                     
                     // Load test data since no initial data was found
-                    this.loadTestData();
+                    if (!window.IS_PRODUCTION) this.loadTestData();
                     return;
                 }
             } else {
@@ -4435,7 +4435,7 @@ const TagManager = {
                 AppLoadingSplash.complete();
                 
                 // Load test data since initial data failed
-                this.loadTestData();
+                if (!window.IS_PRODUCTION) this.loadTestData();
                 return;
             }
         } catch (error) {
@@ -4452,7 +4452,7 @@ const TagManager = {
             AppLoadingSplash.complete();
             
             // Load test data since initial data failed
-            this.loadTestData();
+            if (!window.IS_PRODUCTION) this.loadTestData();
             return;
         }
         
@@ -5782,7 +5782,7 @@ const TagManager = {
                     const data = await response.json();
                     if (data.success && data.available_tags && Array.isArray(data.available_tags) && data.available_tags.length > 0) {
                         console.log(`✅ Data is available! Found ${data.available_tags.length} tags. Reloading page...`);
-                        window.location.reload();
+                        try { const resp = await fetch('/api/initial-data'); if (resp.ok) { const data = await resp.json(); if (data.success && Array.isArray(data.available_tags)) { TagManager._updateAvailableTags(data.available_tags, null); TagManager.updateTagCount('available', data.available_tags.length); TagManager.updateFilters(data.filters || {vendor:[],brand:[],productType:[],lineage:[],weight:[]}, true); AppLoadingSplash.stopAutoAdvance && AppLoadingSplash.complete && AppLoadingSplash.complete(); return; } } } catch(e) { console.log('post-upload UI update failed', e); }
                         return;
                     }
                 }
@@ -5798,7 +5798,7 @@ const TagManager = {
         
         // If we get here, data wasn't available after max attempts
         console.log('⚠️ Data not available after maximum attempts, reloading anyway...');
-        window.location.reload();
+        try { const resp = await fetch('/api/initial-data'); if (resp.ok) { const data = await resp.json(); if (data.success && Array.isArray(data.available_tags)) { TagManager._updateAvailableTags(data.available_tags, null); TagManager.updateTagCount('available', data.available_tags.length); TagManager.updateFilters(data.filters || {vendor:[],brand:[],productType:[],lineage:[],weight:[]}, true); AppLoadingSplash.stopAutoAdvance && AppLoadingSplash.complete && AppLoadingSplash.complete(); return; } } } catch(e) { console.log('post-upload UI update failed', e); }
     },
 
     updateUploadUI(fileName, statusMessage, statusType) {
@@ -7006,7 +7006,7 @@ async function clearStuckUploads() {
             
             // Refresh the page to reset the UI state
             setTimeout(() => {
-                window.location.reload();
+                try { const resp = await fetch('/api/initial-data'); if (resp.ok) { const data = await resp.json(); if (data.success && Array.isArray(data.available_tags)) { TagManager._updateAvailableTags(data.available_tags, null); TagManager.updateTagCount('available', data.available_tags.length); TagManager.updateFilters(data.filters || {vendor:[],brand:[],productType:[],lineage:[],weight:[]}, true); AppLoadingSplash.stopAutoAdvance && AppLoadingSplash.complete && AppLoadingSplash.complete(); return; } } } catch(e) { console.log('post-upload UI update failed', e); }
             }, 1000);
         } else {
             console.error('Failed to clear upload status:', response.statusText);
@@ -7694,7 +7694,7 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // Reload the page after a brief delay for visual feedback
             setTimeout(() => {
-                window.location.reload();
+                try { const resp = await fetch('/api/initial-data'); if (resp.ok) { const data = await resp.json(); if (data.success && Array.isArray(data.available_tags)) { TagManager._updateAvailableTags(data.available_tags, null); TagManager.updateTagCount('available', data.available_tags.length); TagManager.updateFilters(data.filters || {vendor:[],brand:[],productType:[],lineage:[],weight:[]}, true); AppLoadingSplash.stopAutoAdvance && AppLoadingSplash.complete && AppLoadingSplash.complete(); return; } } } catch(e) { console.log('post-upload UI update failed', e); }
             }, 200);
         });
     }
