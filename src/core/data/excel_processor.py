@@ -3685,6 +3685,10 @@ class ExcelProcessor:
 
         # FIRST: Check if Weight* already contains units (like "1g", "3.5oz", etc.)
         if weight_val and any(unit in weight_val.lower() for unit in ['g', 'oz', 'gram', 'ounce']):
+            # Special override for Moonshot products - force to 2.5oz
+            if 'moonshot' in product_name.lower() and 'g' in weight_val.lower():
+                self.logger.info(f"FORCING Moonshot conversion: {product_name} {weight_val} -> 2.5oz")
+                return "2.5oz"
             # Weight* already has units embedded, return as-is
             result = weight_val
         elif product_type in preroll_types:
@@ -3734,6 +3738,11 @@ class ExcelProcessor:
                 if most_likely_oz_weight:
                     self.logger.info(f"Using most likely ounce weight for {product_name}: {most_likely_oz_weight}")
                     return most_likely_oz_weight
+                else:
+                    # Fallback: force conversion for Moonshot products
+                    if 'moonshot' in product_name.lower():
+                        self.logger.info(f"Forcing Moonshot conversion for {product_name}: 2.5oz")
+                        return "2.5oz"
 
             # Now combine weight and units properly
             if weight_float is not None and units_val:
