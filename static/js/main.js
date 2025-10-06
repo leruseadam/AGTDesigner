@@ -802,12 +802,12 @@ const TagManager = {
         lineageColors: {
             'SATIVA': 'rgba(237, 65, 35, 0.6)',
             'INDICA': 'rgba(153, 0, 255, 0.6)',
-            'HYBRID': 'rgba(0, 153, 0, 0.6)',
+            'HYBRID': 'rgba(0, 33, 245, 0.6)',
             'HYBRID/SATIVA': 'rgba(237, 65, 35, 0.6)',
             'HYBRID/INDICA': 'rgba(153, 0, 255, 0.6)',
             'CBD': 'rgba(255, 255, 0, 0.6)',
             'PARA': 'rgba(128, 128, 128, 0.6)',
-            'MIXED': 'rgba(0, 153, 0, 0.6)',
+            'MIXED': 'rgba(0, 33, 245, 0.6)',
             'CBD_BLEND': 'rgba(255, 255, 0, 0.6)'
         },
         filterCache: null,
@@ -4717,7 +4717,7 @@ const TagManager = {
     },
 
     getLineageColor(lineage) {
-        return this.state.lineageColors[lineage] || 'rgba(0, 153, 0, 0.6)';
+        return this.state.lineageColors[lineage] || 'rgba(0, 33, 245, 0.6)';
     },
 
     async moveToSelected() {
