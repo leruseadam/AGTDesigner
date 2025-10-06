@@ -34,8 +34,7 @@ def warmup_caches():
         
         time.sleep(0.5)
     
-    print("
-✅ Cache warmup complete!")
+    print("\n✅ Cache warmup complete!")
 
 if __name__ == "__main__":
     warmup_caches()
