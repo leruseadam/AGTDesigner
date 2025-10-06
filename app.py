@@ -9541,9 +9541,19 @@ def get_initial_data():
             filters = {k: clean_list(v) for k, v in filters.items()}
             logging.info(f"Filter options processed: {len(filters)} filter categories")
             
-            # Get the current file path
-            current_file = getattr(excel_processor, '_last_loaded_file', 'Unknown file')
-            logging.info(f"Current file: {current_file}")
+            # Get the current file path (robust against None)
+            current_file_attr = getattr(excel_processor, '_last_loaded_file', None)
+            if not current_file_attr:
+                current_filename = 'Unknown file'
+                current_filepath = ''
+            else:
+                try:
+                    current_filepath = str(current_file_attr)
+                    current_filename = os.path.basename(current_filepath)
+                except Exception:
+                    current_filename = 'Unknown file'
+                    current_filepath = ''
+            logging.info(f"Current file: {current_filepath or current_filename}")
             
             # Get available tags
             logging.info("Getting available tags...")
@@ -9553,8 +9563,8 @@ def get_initial_data():
             initial_data = {
                 'success': True,
                 'data_loaded': True,  # Add this field for frontend compatibility
-                'filename': os.path.basename(current_file),
-                'filepath': current_file,
+                'filename': current_filename,
+                'filepath': current_filepath,
                 'columns': excel_processor.df.columns.tolist(),
                 'filters': filters,  # Use the properly formatted filters
                 'available_tags': available_tags,
