@@ -5579,11 +5579,8 @@ const TagManager = {
             this.updateUploadUI(`✅ ${file.name} ready!`, 'File processed successfully', 'success');
             console.log(`✅ Lightning upload completed! Upload: ${uploadData.upload_time?.toFixed(3)}s, Process: ${processData.process_time?.toFixed(3)}s`);
             
-            // Refresh the page to show new data
-            setTimeout(() => {
-                console.log('🔄 Refreshing page to show new data...');
-                window.location.reload();
-            }, 1000);
+            // Wait for data to be available before reloading
+            this.waitForDataAndReload(file.name);
             
             return; // Success!
         } catch (error) {
@@ -5611,8 +5608,8 @@ const TagManager = {
             if (response.ok && data.status === 'ready') {
                 console.log('Fallback upload successful');
                 this.updateUploadUI(file.name, 'File uploaded successfully', 'success');
-                // Refresh the page to load the new file
-                window.location.reload();
+                // Wait for data to be available before reloading
+                this.waitForDataAndReload(file.name);
                 return true;
             } else {
                 console.error('Fallback upload failed:', data.error);
@@ -5767,6 +5764,41 @@ const TagManager = {
         this.hideExcelLoadingSplash();
         this.updateUploadUI('Upload timed out', 'Processing took too long', 'error');
                             console.error('Upload timed out. Please try again.');
+    },
+
+    // Wait for data to be available before reloading the page
+    async waitForDataAndReload(filename) {
+        console.log('🔄 Waiting for data to be available before reloading...');
+        
+        const maxAttempts = 10;
+        const delayMs = 500;
+        
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                console.log(`📡 Checking for data availability (attempt ${attempt}/${maxAttempts})...`);
+                
+                const response = await fetch('/api/initial-data');
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.success && data.available_tags && Array.isArray(data.available_tags) && data.available_tags.length > 0) {
+                        console.log(`✅ Data is available! Found ${data.available_tags.length} tags. Reloading page...`);
+                        window.location.reload();
+                        return;
+                    }
+                }
+                
+                console.log(`⏳ Data not ready yet, waiting ${delayMs}ms...`);
+                await new Promise(resolve => setTimeout(resolve, delayMs));
+                
+            } catch (error) {
+                console.log(`❌ Error checking data availability (attempt ${attempt}):`, error.message);
+                await new Promise(resolve => setTimeout(resolve, delayMs));
+            }
+        }
+        
+        // If we get here, data wasn't available after max attempts
+        console.log('⚠️ Data not available after maximum attempts, reloading anyway...');
+        window.location.reload();
     },
 
     updateUploadUI(fileName, statusMessage, statusType) {
