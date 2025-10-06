@@ -8516,7 +8516,6 @@ img, video, canvas, svg {
 .tag-row,
 .tag-card {
   background-image: none !important;
-  background: var(--tagColor, #1f2937) !important;
   box-shadow: none !important;
 }
 .tag-item::before,
@@ -8544,7 +8543,6 @@ img, video, canvas, svg {
 .tag-item[data-lineage="CBD"] .tag-checkbox:checked,
 .tag-item[data-lineage="MIXED"] .custom-checkbox:checked,
 .tag-item[data-lineage="MIXED"] .tag-checkbox:checked {
-  background: var(--tagColor, #1f2937) !important;
   background-image: none !important;
   box-shadow: none !important;
 }
@@ -8554,6 +8552,47 @@ img, video, canvas, svg {
 .tag-item[data-lineage="MIXED"],
 .tag-row[data-lineage="HYBRID"],
 .tag-row[data-lineage="MIXED"] {
+  background: rgba(0, 153, 0, 0.6) !important;
+  border-color: rgba(0, 153, 0, 0.3) !important;
+}
+
+/* --- Preserve lineage colors but remove gradients --- */
+.tag-item,
+.list-group-item.tag-item,
+.inventory-list .list-group-item,
+.tag-row,
+.tag-card {
+  background-image: none !important;
+  box-shadow: none !important;
+}
+.tag-item::before,
+.tag-item::after,
+.list-group-item.tag-item::before,
+.list-group-item.tag-item::after,
+.tag-row::before,
+.tag-row::after {
+  display: none !important;
+  content: none !important;
+}
+
+/* --- Ensure lineage colors override everything --- */
+.tag-item[data-lineage="SATIVA"] {
+  background: rgba(237, 65, 35, 0.6) !important;
+  border-color: rgba(237, 65, 35, 0.3) !important;
+}
+.tag-item[data-lineage="INDICA"] {
+  background: rgba(153, 0, 255, 0.6) !important;
+  border-color: rgba(153, 0, 255, 0.3) !important;
+}
+.tag-item[data-lineage="HYBRID"] {
+  background: rgba(0, 153, 0, 0.6) !important;
+  border-color: rgba(0, 153, 0, 0.3) !important;
+}
+.tag-item[data-lineage="CBD"] {
+  background: rgba(255, 192, 203, 0.6) !important;
+  border-color: rgba(255, 192, 203, 0.3) !important;
+}
+.tag-item[data-lineage="MIXED"] {
   background: rgba(0, 153, 0, 0.6) !important;
   border-color: rgba(0, 153, 0, 0.3) !important;
 }
