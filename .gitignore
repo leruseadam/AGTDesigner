@@ -55,6 +55,8 @@ logs/
 *.db
 *.sqlite
 *.sqlite3
+*.db-shm
+*.db-wal
 
 # Temporary files
 *.tmp
@@ -62,8 +64,12 @@ logs/
 temp/
 tmp/
 
-# Uploads and outputs
-uploads/
+# Uploads and outputs (keep structure but exclude large files)
+uploads/*.db
+uploads/*.db-shm  
+uploads/*.db-wal
+uploads/*.db.gz
+uploads/*.xlsx
 output/
 cache/
 
@@ -88,9 +94,6 @@ pythonanywhere.log product_database_fixed.db.gz
 *.tar.gz
 *.zip
 *.xlsx
-uploads/*.db
-uploads/*.db.gz
-uploads/*.xlsx
 cache/*
 sessions/*
 __pycache__/*

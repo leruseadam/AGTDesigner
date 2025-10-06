@@ -428,14 +428,19 @@ def process_chunk(args):
                     CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
                     is_nonclassic = product_type not in [ct.lower() for ct in CLASSIC_TYPES]
                     
+                    # DEBUG: Log weight conversion attempts
+                    print(f"DEBUG: Weight conversion for {product_name}: weight={weight}, units={units}, product_type={product_type}, is_nonclassic={is_nonclassic}")
+                    
                     if is_nonclassic:
                         # Find the most common ounce weight for this product type
                         most_likely_oz_weight = _find_most_likely_ounce_weight(product_name, product_type)
+                        print(f"DEBUG: Most likely oz weight for {product_name}: {most_likely_oz_weight}")
                         if most_likely_oz_weight:
                             weight, units = most_likely_oz_weight.split(' ', 1) if ' ' in most_likely_oz_weight else (most_likely_oz_weight.replace('oz', ''), 'oz')
                             # Ensure units is 'oz' even if not in the found weight
                             if 'oz' not in units.lower():
                                 units = 'oz'
+                            print(f"DEBUG: Converted {product_name} to {weight}{units}")
                 
                 if weight and units:
                     weight_units = f"{weight}{units}"
