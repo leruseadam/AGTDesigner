@@ -802,7 +802,7 @@ const TagManager = {
         lineageColors: {
             'SATIVA': 'rgba(237, 65, 35, 0.6)',
             'INDICA': 'rgba(153, 0, 255, 0.6)',
-            'HYBRID': 'rgba(0, 33, 245, 0.6)',
+            'HYBRID': 'rgba(0, 153, 0, 0.6)',
             'HYBRID/SATIVA': 'rgba(237, 65, 35, 0.6)',
             'HYBRID/INDICA': 'rgba(153, 0, 255, 0.6)',
             'CBD': 'rgba(255, 255, 0, 0.6)',
