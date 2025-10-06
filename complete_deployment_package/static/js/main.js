@@ -2388,6 +2388,15 @@ const TagManager = {
         const lineage = tag.lineage || tag.Lineage || 'MIXED';
         let displayLineage = lineage;
         
+        // Force nonclassic products to show MIXED (dark blue) instead of CBD (yellow)
+        const productType = tag['Product Type*'] || tag.productType || '';
+        const classicTypes = ['flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'];
+        const isNonclassic = !classicTypes.map(ct => ct.toLowerCase()).includes(productType.toLowerCase());
+        
+        if (isNonclassic && (lineage === 'CBD' || lineage === 'CBD_BLEND')) {
+          displayLineage = 'MIXED';
+        }
+        
         // Keep HYBRID as HYBRID - hybrids should be green, not blue
         // Only nonclassic products should be MIXED (blue)
         
