@@ -6452,6 +6452,25 @@ const TagManager = {
 // Expose TagManager to global scope
 window.TagManager = TagManager;
 window.updateAvailableTags = TagManager.debouncedUpdateAvailableTags.bind(TagManager);
+
+// Init fail-safe: never hang on splash
+setTimeout(async () => {
+  try { AppLoadingSplash?.stopAutoAdvance?.(); AppLoadingSplash?.complete?.(); } catch(_) {}
+  try {
+    const resp = await fetch('/api/initial-data');
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data && data.success && Array.isArray(data.available_tags)) {
+        TagManager?._updateAvailableTags(data.available_tags, null);
+        TagManager?.updateTagCount?.('available', data.available_tags.length);
+        TagManager?.updateFilters?.(data.filters || {vendor:[],brand:[],productType:[],lineage:[],weight:[]}, true);
+        return;
+      }
+    }
+  } catch(e) { console.log('init fail-safe fetch error', e); }
+  if (!window.IS_PRODUCTION && TagManager?.loadTestData) { TagManager.loadTestData(); }
+}, 3000);
+
 window.updateFilters = TagManager.updateFilters.bind(TagManager);
 window.fetchAndUpdateSelectedTags = TagManager.fetchAndUpdateSelectedTags.bind(TagManager);
 
