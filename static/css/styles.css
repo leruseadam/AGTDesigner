@@ -2414,13 +2414,13 @@ img, video, canvas, svg {
   }
   
   .lineage-dropdown option[value="CBD"], .form-select.lineage-dropdown option[value="CBD"] {
-    background: rgba(241, 194, 50, 0.9) !important;
+    background: rgba(255, 255, 0, 0.9) !important;
     color: white !important;
     font-weight: 600 !important;
   }
   
   .lineage-dropdown option[value="CBD_BLEND"], .form-select.lineage-dropdown option[value="CBD_BLEND"] {
-    background: rgba(241, 194, 50, 0.9) !important;
+    background: rgba(255, 255, 0, 0.9) !important;
     color: white !important;
     font-weight: 600 !important;
   }
@@ -2547,13 +2547,13 @@ img, video, canvas, svg {
   }
   
   .tag-item[data-lineage="CBD"] {
-    background: rgba(241, 194, 50, 0.6) !important;
-    border-color: rgba(241, 194, 50, 0.3);
+    background: rgba(255, 255, 0, 0.6) !important;
+    border-color: rgba(255, 255, 0, 0.3);
   }
   
   .tag-item[data-lineage="CBD_BLEND"] {
-    background: rgba(241, 194, 50, 0.6) !important;
-    border-color: rgba(241, 194, 50, 0.3);
+    background: rgba(255, 255, 0, 0.6) !important;
+    border-color: rgba(255, 255, 0, 0.3);
   }
   
   .tag-item[data-lineage="MIXED"] {
@@ -2562,13 +2562,13 @@ img, video, canvas, svg {
   }
   
   .tag-item[data-lineage="PARA"] {
-    background: rgba(255, 192, 203, 0.6) !important;
-    border-color: rgba(255, 192, 203, 0.3);
+    background: rgba(255, 255, 0, 0.6) !important;
+    border-color: rgba(255, 255, 0, 0.3);
   }
   
   .tag-item[data-lineage="PARAPHERNALIA"] {
-    background: rgba(255, 192, 203, 0.6) !important;
-    border-color: rgba(255, 192, 203, 0.3);
+    background: rgba(255, 255, 0, 0.6) !important;
+    border-color: rgba(255, 255, 0, 0.3);
   }
 
   /* Lineage-specific checkbox colors */
@@ -2610,11 +2610,11 @@ img, video, canvas, svg {
   .tag-item[data-lineage="CBD"] .tag-checkbox:checked,
   .tag-item[data-lineage="CBD_BLEND"] .custom-checkbox:checked,
   .tag-item[data-lineage="CBD_BLEND"] .tag-checkbox:checked {
-    background: linear-gradient(135deg, #f1c232 0%, #e6b800 100%) !important;
-    border-color: rgba(241, 194, 50, 0.9) !important;
+    background: linear-gradient(135deg, #ffff00 0%, #cccc00 100%) !important;
+    border-color: rgba(255, 255, 0, 0.9) !important;
     box-shadow: 
       inset 0 2px 4px rgba(0, 0, 0, 0.2),
-      0 4px 15px rgba(241, 194, 50, 0.6),
+      0 4px 15px rgba(255, 255, 0, 0.6),
       0 2px 4px rgba(241, 194, 50, 0.4) !important;
   }
   
@@ -2636,7 +2636,7 @@ img, video, canvas, svg {
     border-color: rgba(255, 192, 203, 0.9) !important;
     box-shadow: 
       inset 0 2px 4px rgba(0, 0, 0, 0.2),
-      0 4px 15px rgba(255, 192, 203, 0.6),
+      0 4px 15px rgba(255, 255, 0, 0.6),
       0 2px 4px rgba(255, 192, 203, 0.4) !important;
   }
   
@@ -2667,13 +2667,13 @@ img, video, canvas, svg {
   }
   
   .tag-row[data-lineage="CBD"] {
-    background: rgba(241, 194, 50, 0.6) !important;
-    border-color: rgba(241, 194, 50, 0.3);
+    background: rgba(255, 255, 0, 0.6) !important;
+    border-color: rgba(255, 255, 0, 0.3);
   }
   
   .tag-row[data-lineage="CBD_BLEND"] {
-    background: rgba(241, 194, 50, 0.6) !important;
-    border-color: rgba(241, 194, 50, 0.3);
+    background: rgba(255, 255, 0, 0.6) !important;
+    border-color: rgba(255, 255, 0, 0.3);
   }
   
   .tag-row[data-lineage="MIXED"] {
@@ -2682,13 +2682,13 @@ img, video, canvas, svg {
   }
   
   .tag-row[data-lineage="PARA"] {
-    background: rgba(255, 192, 203, 0.6) !important;
-    border-color: rgba(255, 192, 203, 0.3);
+    background: rgba(255, 255, 0, 0.6) !important;
+    border-color: rgba(255, 255, 0, 0.3);
   }
   
   .tag-row[data-lineage="PARAPHERNALIA"] {
-    background: rgba(255, 192, 203, 0.6) !important;
-    border-color: rgba(255, 192, 203, 0.3);
+    background: rgba(255, 255, 0, 0.6) !important;
+    border-color: rgba(255, 255, 0, 0.3);
   }
   
   /* Brand headers */
@@ -8589,8 +8589,8 @@ img, video, canvas, svg {
   border-color: rgba(0, 153, 0, 0.3) !important;
 }
 .tag-item[data-lineage="CBD"] {
-  background: rgba(255, 192, 203, 0.6) !important;
-  border-color: rgba(255, 192, 203, 0.3) !important;
+  background: rgba(255, 255, 0, 0.6) !important;
+  border-color: rgba(255, 255, 0, 0.3) !important;
 }
 .tag-item[data-lineage="MIXED"] {
   background: rgba(0, 153, 0, 0.6) !important;
