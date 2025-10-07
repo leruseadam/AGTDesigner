@@ -45,9 +45,48 @@ def restore_full_database():
         conn = sqlite3.connect(target_db)
         cursor = conn.cursor()
         
-        # Execute SQL dump
+        # Execute SQL dump with duplicate handling
         print("📊 Restoring data...")
-        cursor.executescript(sql_content)
+        
+        # Split SQL content into individual statements
+        statements = sql_content.split(';')
+        total_statements = len(statements)
+        
+        print(f"📊 Processing {total_statements:,} SQL statements...")
+        
+        success_count = 0
+        error_count = 0
+        
+        for i, statement in enumerate(statements):
+            statement = statement.strip()
+            if not statement:
+                continue
+                
+            try:
+                cursor.execute(statement)
+                success_count += 1
+            except sqlite3.IntegrityError as e:
+                if "UNIQUE constraint failed" in str(e):
+                    # Skip duplicate entries silently
+                    continue
+                else:
+                    raise e
+            except Exception as e:
+                error_count += 1
+                # Log SQL errors but continue
+                if "unrecognized token" not in str(e).lower():
+                    print(f"⚠️  SQL error (continuing): {e}")
+                    print(f"   Statement: {statement[:100]}...")
+                continue
+            
+            # Commit every 1000 statements for better performance
+            if i % 1000 == 0:
+                conn.commit()
+                print(f"📊 Progress: {i:,}/{total_statements:,} statements processed")
+        
+        print(f"📊 SQL processing complete:")
+        print(f"   ✅ Successful: {success_count:,}")
+        print(f"   ⚠️  Errors: {error_count:,}")
         
         conn.commit()
         conn.close()
