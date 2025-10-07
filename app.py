@@ -23,7 +23,7 @@ import time
 import re
 import json
 # Startup Performance Optimization
-DISABLE_STARTUP_FILE_LOADING = True  # Disable startup file loading to prevent hangs
+# DISABLE_STARTUP_FILE_LOADING = True  # Disable startup file loading to prevent hangs
 
 # PythonAnywhere Performance Optimization
 PYTHONANYWHERE_OPTIMIZATION = os.environ.get('PYTHONANYWHERE_DOMAIN') is not None
