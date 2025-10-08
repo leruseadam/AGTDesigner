@@ -612,36 +612,6 @@ class ProductTypeSpecificMatcher:
             
         return None
         
-    def _extract_vendor_from_json(self, json_product: Dict) -> str:
-        """Extract vendor information directly from JSON fields."""
-        try:
-            # Check various vendor fields in the JSON according to field_mapping.py
-            vendor_fields = [
-                'vendor',
-                'vendor_name', 
-                'from_license_name',
-                'supplier',
-                'supplier_name',
-                'Vendor',
-                'Vendor/Supplier*',
-                'Vendor/Supplier'
-            ]
-            
-            for field in vendor_fields:
-                vendor = json_product.get(field, '')
-                if vendor and str(vendor).strip():
-                    vendor_clean = str(vendor).strip()
-                    logging.debug(f"🔍 VENDOR EXTRACTION: Found vendor '{vendor_clean}' from JSON field '{field}'")
-                    return vendor_clean.lower()
-            
-            # If no vendor found in JSON fields, return empty string
-            # (don't fall back to product name parsing as that's unreliable)
-            return ""
-            
-        except Exception as e:
-            logging.warning(f"Error in _extract_vendor_from_json: {e}")
-            return ""
-        
     def _extract_vendor(self, name: str) -> str:
         """Extract vendor/brand information from product name."""
         try:
@@ -1821,21 +1791,14 @@ class EnhancedJSONMatcher:
         """Match a single JSON product using the specified strategy"""
         start_time = time.perf_counter()
         
-        # CRITICAL FIX: Extract vendor information from JSON fields first, not product name
+        # CRITICAL FIX: Extract vendor information from product name if not present
         if not json_product.get('vendor') or json_product.get('vendor') == 'NO_VENDOR':
-            # First try to extract vendor from proper JSON fields
-            extracted_vendor = self._extract_vendor_from_json(json_product)
-            if extracted_vendor:
-                json_product['vendor'] = extracted_vendor
-                logging.debug(f"🔍 VENDOR EXTRACTION: Found vendor '{extracted_vendor}' from JSON fields")
-            else:
-                # Only fall back to product name parsing if no vendor found in JSON fields
-                product_name = self._get_product_name(json_product) or json_product.get('product_name', '')
-                if product_name:
-                    extracted_vendor = self._extract_vendor(product_name)
-                    if extracted_vendor:
-                        json_product['vendor'] = extracted_vendor
-                        logging.debug(f"🔍 VENDOR EXTRACTION FALLBACK: '{product_name}' -> vendor: '{extracted_vendor}'")
+            product_name = self._get_product_name(json_product) or json_product.get('product_name', '')
+            if product_name:
+                extracted_vendor = self._extract_vendor(product_name)
+                if extracted_vendor:
+                    json_product['vendor'] = extracted_vendor
+                    logging.debug(f"🔍 VENDOR EXTRACTION: '{product_name}' -> vendor: '{extracted_vendor}'")
         
         # Determine product type for specialized matching
         product_type = self._classify_product_type(json_product)
@@ -1843,30 +1806,18 @@ class EnhancedJSONMatcher:
         # Get database products (with caching)
         database_products = self._get_database_products()
         
-        # VENDOR RESTRICTION: Apply lenient vendor matching to improve results
+        # VENDOR RESTRICTION: DISABLED FOR MAXIMUM COMPATIBILITY
+        # The vendor filtering was causing the enhanced matcher to return fewer results
+        # than the basic JSONMatcher. To maintain compatibility and ensure maximum matches,
+        # we now skip vendor filtering and match against all database products.
         json_vendor = self._normalize_vendor(json_product.get('vendor', ''))
         if json_vendor and json_vendor != 'no_vendor':
-            # Try strict vendor filtering first
-            vendor_filtered_products = []
-            for db_product in database_products:
-                raw_db_vendor = str(db_product.get('Vendor/Supplier*', '') or db_product.get('Vendor', '') or db_product.get('Product Brand', ''))
-                db_vendor = self._normalize_vendor(raw_db_vendor)
-                
-                # Check for exact vendor match or partial match
-                if (json_vendor == db_vendor or 
-                    (json_vendor and db_vendor and (json_vendor in db_vendor or db_vendor in json_vendor)) or
-                    self._vendors_match(json_vendor, db_vendor)):
-                    vendor_filtered_products.append(db_product)
-            
-            # LENIENT FALLBACK: If strict filtering returns too few results, use all products
-            # This ensures the web version provides as many results as the local version
-            min_required_matches = max(10, len(database_products) // 100)  # At least 10 or 1% of database
-            if vendor_filtered_products and len(vendor_filtered_products) >= min_required_matches:
-                database_products = vendor_filtered_products
-                logging.debug(f"🏢 VENDOR FILTER: Restricted to {len(database_products)} products from vendor '{json_vendor}'")
-            else:
-                logging.warning(f"⚠️ VENDOR FILTER: Only {len(vendor_filtered_products)} products found for vendor '{json_vendor}', using all {len(database_products)} products for better results")
-                # Keep all database_products - no filtering applied
+            logging.debug(f"🏢 VENDOR INFO: JSON product has vendor '{json_vendor}' - will be used for scoring but not filtering")
+            # Vendor information is still used in scoring within the matching algorithms
+            # but we don't filter the database products by vendor anymore
+        
+        # Use ALL database products for matching to ensure maximum compatibility with basic JSONMatcher
+        logging.debug(f"✅ MAXIMUM MATCHING: Using all {len(database_products)} database products for matching")
         
         database_products = database_products
         
@@ -2212,36 +2163,6 @@ class EnhancedJSONMatcher:
         
         logging.info("Cache warm-up completed")
 
-    def _extract_vendor_from_json(self, json_product: Dict) -> str:
-        """Extract vendor information directly from JSON fields."""
-        try:
-            # Check various vendor fields in the JSON according to field_mapping.py
-            vendor_fields = [
-                'vendor',
-                'vendor_name', 
-                'from_license_name',
-                'supplier',
-                'supplier_name',
-                'Vendor',
-                'Vendor/Supplier*',
-                'Vendor/Supplier'
-            ]
-            
-            for field in vendor_fields:
-                vendor = json_product.get(field, '')
-                if vendor and str(vendor).strip():
-                    vendor_clean = str(vendor).strip()
-                    logging.debug(f"🔍 VENDOR EXTRACTION: Found vendor '{vendor_clean}' from JSON field '{field}'")
-                    return vendor_clean.lower()
-            
-            # If no vendor found in JSON fields, return empty string
-            # (don't fall back to product name parsing as that's unreliable)
-            return ""
-            
-        except Exception as e:
-            logging.warning(f"Error in _extract_vendor_from_json: {e}")
-            return ""
-
     def _extract_vendor(self, name: str) -> str:
         """Extract vendor/brand information from product name."""
         try:
@@ -2395,19 +2316,13 @@ class EnhancedJSONMatcher:
                         # Keep existing vendor info
                         pass
                     else:
-                        # Try to extract vendor from JSON fields first, then fall back to product name
-                        extracted_vendor = self._extract_vendor_from_json(normalized_item)
-                        if extracted_vendor:
-                            normalized_item['vendor'] = extracted_vendor
-                            logging.debug(f"🔍 EXTRACTED VENDOR FROM JSON: Found vendor '{extracted_vendor}' from JSON fields")
-                        else:
-                            # Only extract vendor from product name if no vendor info is available in JSON fields
-                            product_name = normalized_item.get('inventory_name', '') or normalized_item.get('product_name', '')
-                            if product_name:
-                                extracted_vendor = self._extract_vendor(product_name)
-                                if extracted_vendor and len(extracted_vendor) > 2:  # Avoid very short vendor names
-                                    normalized_item['vendor'] = extracted_vendor
-                                    logging.debug(f"🔍 EXTRACTED VENDOR FALLBACK: '{product_name}' -> vendor: '{extracted_vendor}'")
+                        # Only extract vendor from product name if no vendor info is available
+                        product_name = normalized_item.get('inventory_name', '') or normalized_item.get('product_name', '')
+                        if product_name:
+                            extracted_vendor = self._extract_vendor(product_name)
+                            if extracted_vendor and len(extracted_vendor) > 2:  # Avoid very short vendor names
+                                normalized_item['vendor'] = extracted_vendor
+                                logging.debug(f"🔍 EXTRACTED VENDOR: '{product_name}' -> vendor: '{extracted_vendor}'")
                     
                     json_data.append(normalized_item)
                     

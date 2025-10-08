@@ -1532,26 +1532,18 @@ class EnhancedJSONMatcher:
         # Get database products (with caching)
         database_products = self._get_database_products()
         
-        # VENDOR RESTRICTION: Filter database products to match the JSON product's vendor
+        # VENDOR RESTRICTION: DISABLED FOR MAXIMUM COMPATIBILITY
+        # The vendor filtering was causing the enhanced matcher to return fewer results
+        # than the basic JSONMatcher. To maintain compatibility and ensure maximum matches,
+        # we now skip vendor filtering and match against all database products.
         json_vendor = self._normalize_vendor(json_product.get('vendor', ''))
         if json_vendor and json_vendor != 'no_vendor':
-            # Filter database products to only include those from the same vendor
-            vendor_filtered_products = []
-            for db_product in database_products:
-                raw_db_vendor = str(db_product.get('Vendor/Supplier*', '') or db_product.get('Vendor', '') or db_product.get('Product Brand', ''))
-                db_vendor = self._normalize_vendor(raw_db_vendor)
-                
-                # Check for exact vendor match or partial match
-                if (json_vendor == db_vendor or 
-                    (json_vendor and db_vendor and (json_vendor in db_vendor or db_vendor in json_vendor)) or
-                    self._vendors_match(json_vendor, db_vendor)):
-                    vendor_filtered_products.append(db_product)
-            
-            if vendor_filtered_products:
-                database_products = vendor_filtered_products
-                logging.debug(f"🏢 VENDOR FILTER: Restricted to {len(database_products)} products from vendor '{json_vendor}'")
-            else:
-                logging.warning(f"⚠️ VENDOR FILTER: No products found for vendor '{json_vendor}', using all products")
+            logging.debug(f"🏢 VENDOR INFO: JSON product has vendor '{json_vendor}' - will be used for scoring but not filtering")
+            # Vendor information is still used in scoring within the matching algorithms
+            # but we don't filter the database products by vendor anymore
+        
+        # Use ALL database products for matching to ensure maximum compatibility with basic JSONMatcher
+        logging.debug(f"✅ MAXIMUM MATCHING: Using all {len(database_products)} database products for matching")
         
         database_products = database_products
         
