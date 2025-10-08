@@ -2228,12 +2228,31 @@ class JSONMatcher:
                     return default
                 return str_value
             
-            # Sanitize lineage - use intelligent defaults based on product type
+            # CRITICAL FIX: Always prioritize actual lineage from Excel/database over product type-based guessing
             lineage = str(safe_row_get(excel_row, 'Lineage', '') or '').strip().upper()
-            if not lineage or lineage not in ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA', 'CBD', 'MIXED', 'PARAPHERNALIA']:
-                # Use intelligent lineage assignment based on product type
+            
+            # Clean up common lineage variations to ensure consistency
+            lineage_mappings = {
+                'PARAPHERNALIA': 'MIXED',  # Paraphernalia items get MIXED lineage
+                'PARA': 'MIXED',
+                'CBD_BLEND': 'CBD',
+                'UNKNOWN': 'MIXED',
+                '': 'MIXED'  # Empty lineage defaults to MIXED
+            }
+            
+            # Apply lineage mappings for consistency
+            if lineage in lineage_mappings:
+                lineage = lineage_mappings[lineage]
+            
+            # Only fall back to product type-based assignment if lineage is completely missing or invalid
+            if not lineage or lineage not in ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA', 'CBD', 'MIXED']:
+                # Last resort: use product type-based assignment only when no Excel lineage exists
                 product_type = str(safe_row_get(excel_row, 'Product Type*', '') or '').strip()
                 lineage = self._get_default_lineage_for_product_type(product_type)
+                logging.info(f"Using fallback lineage '{lineage}' for product type '{product_type}' (no Excel lineage available)")
+            else:
+                # Use the actual Excel lineage data - this is the preferred path
+                logging.info(f"Using actual Excel lineage '{lineage}' for matched product")
             
             # Use global vendor from JSON if available, otherwise use Excel vendor
             vendor_value = global_vendor if global_vendor else safe_get_value(safe_row_get(excel_row, 'Vendor', ''))
@@ -2473,10 +2492,19 @@ class JSONMatcher:
             # Use simple display name to avoid deduplication issues
             comprehensive_display_name = cleaned_product_name
             
+            # CRITICAL FIX: Prioritize inferred lineage from database over product type-based guessing
+            # If we have inferred lineage from database matches, use that
+            if inferred_data.get('lineage') and inferred_data.get('lineage') in ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA', 'CBD', 'MIXED']:
+                final_lineage = inferred_data.get('lineage')
+                logging.info(f"🧬 Using inferred lineage '{final_lineage}' from database matches for '{cleaned_product_name}'")
+            else:
+                # Only fall back to product type-based assignment when no database lineage is available
+                final_lineage = self._get_default_lineage_for_product_type(product_type)
+                logging.info(f"⚠️ Using fallback lineage '{final_lineage}' for product type '{product_type}' (no database lineage available)")
+            
             # Use inferred data from similar database matches, with fallbacks
             final_brand = inferred_data.get('brand') or brand or self._infer_brand_from_name(cleaned_product_name)
             final_product_type = inferred_data.get('product_type') or self._infer_product_type_from_name(cleaned_product_name)
-            final_lineage = inferred_data.get('lineage') or self._get_default_lineage_for_product_type(product_type)
             
             # Determine the final product type to use
             raw_final_type = product_type or final_product_type or map_inventory_type_to_product_type(
@@ -5390,6 +5418,23 @@ class JSONMatcher:
         weight = row.get('Weight*') or row.get('weight') or ''
         ratio = row.get('Ratio_or_THC_CBD') or row.get('Ratio') or ''
         strain = row.get('Product Strain') or row.get('strain_name') or ''
+        
+        # CRITICAL FIX: Include lineage from database data
+        lineage = row.get('Lineage') or row.get('lineage') or ''
+        # Clean up lineage for consistency
+        if lineage:
+            lineage = str(lineage).strip().upper()
+            # Map common variations
+            lineage_mappings = {
+                'PARAPHERNALIA': 'MIXED',
+                'PARA': 'MIXED', 
+                'CBD_BLEND': 'CBD',
+                'UNKNOWN': 'MIXED'
+            }
+            if lineage in lineage_mappings:
+                lineage = lineage_mappings[lineage]
+        else:
+            lineage = 'MIXED'  # Default fallback
 
         product = {
             'Product Name*': name,
@@ -5400,6 +5445,7 @@ class JSONMatcher:
             'Weight*': weight,
             'Ratio_or_THC_CBD': ratio,
             'Product Strain': strain,
+            'Lineage': lineage,  # CRITICAL FIX: Add lineage field
             'displayName': name,
             'Source': 'DB_ALL'
         }
