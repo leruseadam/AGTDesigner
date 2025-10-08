@@ -2390,28 +2390,33 @@ const TagManager = {
           tagElement.style.borderRadius = '8px';
         }
         
-        // Set data-lineage attribute for CSS coloring on both row and tagElement
+        // CRITICAL FIX: Use EXACT database lineage values for UI colors - no frontend overrides
+        // This ensures JSON matched products display with their actual database lineage colors
         const lineage = tag.lineage || tag.Lineage || 'MIXED';
-        let displayLineage = lineage;
         
-        // Force nonclassic products to show MIXED (dark blue) instead of CBD (yellow)
-        const productType = tag['Product Type*'] || tag.productType || '';
-        const classicTypes = ['flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'];
-        const isNonclassic = !classicTypes.map(ct => ct.toLowerCase()).includes(productType.toLowerCase());
+        // Use the exact lineage from database without any product type-based overrides
+        // The backend JSON matching already provides the correct lineage from database records
+        let displayLineage = lineage.toUpperCase();
         
-        if (isNonclassic && (lineage === 'CBD' || lineage === 'CBD_BLEND')) {
-          displayLineage = 'MIXED';
+        // Only normalize common variations for consistency
+        const lineageNormalizations = {
+            'CBD_BLEND': 'CBD',
+            'PARAPHERNALIA': 'MIXED',
+            'PARA': 'MIXED',
+            'UNKNOWN': 'MIXED'
+        };
+        
+        if (lineageNormalizations[displayLineage]) {
+            displayLineage = lineageNormalizations[displayLineage];
         }
         
-        // Keep HYBRID as HYBRID - hybrids should be green, not blue
-        // Only nonclassic products should be MIXED (blue)
-        
+        // Set the lineage data attributes using EXACT database values
         if (displayLineage) {
-          tagElement.dataset.lineage = displayLineage.toUpperCase();
-          row.dataset.lineage = displayLineage.toUpperCase();  // Add lineage to row element too
+            tagElement.dataset.lineage = displayLineage;
+            row.dataset.lineage = displayLineage;
         } else {
-          tagElement.dataset.lineage = 'MIXED';
-          row.dataset.lineage = 'MIXED';  // Add lineage to row element too
+            tagElement.dataset.lineage = 'MIXED';
+            row.dataset.lineage = 'MIXED';
         }
         tagElement.dataset.tagId = tag.tagId;
         tagElement.dataset.vendor = tag.vendor;
