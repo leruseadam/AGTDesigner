@@ -1532,10 +1532,10 @@ class EnhancedJSONMatcher:
         # Get database products (with caching)
         database_products = self._get_database_products()
         
-        # VENDOR RESTRICTION: Filter database products to match the JSON product's vendor
+        # VENDOR RESTRICTION: Apply lenient vendor matching to improve results
         json_vendor = self._normalize_vendor(json_product.get('vendor', ''))
         if json_vendor and json_vendor != 'no_vendor':
-            # Filter database products to only include those from the same vendor
+            # Try strict vendor filtering first
             vendor_filtered_products = []
             for db_product in database_products:
                 raw_db_vendor = str(db_product.get('Vendor/Supplier*', '') or db_product.get('Vendor', '') or db_product.get('Product Brand', ''))
@@ -1547,11 +1547,15 @@ class EnhancedJSONMatcher:
                     self._vendors_match(json_vendor, db_vendor)):
                     vendor_filtered_products.append(db_product)
             
-            if vendor_filtered_products:
+            # LENIENT FALLBACK: If strict filtering returns too few results, use all products
+            # This ensures the web version provides as many results as the local version
+            min_required_matches = max(10, len(database_products) // 100)  # At least 10 or 1% of database
+            if vendor_filtered_products and len(vendor_filtered_products) >= min_required_matches:
                 database_products = vendor_filtered_products
                 logging.debug(f"🏢 VENDOR FILTER: Restricted to {len(database_products)} products from vendor '{json_vendor}'")
             else:
-                logging.warning(f"⚠️ VENDOR FILTER: No products found for vendor '{json_vendor}', using all products")
+                logging.warning(f"⚠️ VENDOR FILTER: Only {len(vendor_filtered_products)} products found for vendor '{json_vendor}', using all {len(database_products)} products for better results")
+                # Keep all database_products - no filtering applied
         
         database_products = database_products
         
