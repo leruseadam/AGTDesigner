@@ -1156,17 +1156,217 @@ class EnhancedJSONMatcher:
         json_item_name = json_item.get('product_name') or json_item.get('inventory_name') or ''
         json_fields_used = 0
         
-        # Priority field mapping: JSON field -> Excel field
+        # COMPREHENSIVE Priority field mapping: JSON field -> Excel field
         json_to_excel_mapping = {
+            # Vendor/Supplier information
             'vendor': ['Vendor/Supplier*', 'Vendor', 'Product Brand'],
-            'quantity': ['Quantity*'],
-            'weight': ['Weight*'],
-            'thc_content': ['THC test result', 'THC %'],
-            'cbd_content': ['CBD test result', 'CBD %'],
-            'price': ['Price', 'Price*'],
-            'strain': ['Strain', 'Strain*'],
-            'product_type': ['Product Type*', 'Type'],
+            'supplier': ['Vendor/Supplier*', 'Vendor', 'Product Brand'],
+            'brand': ['Product Brand', 'Vendor/Supplier*', 'Vendor'],
+            'manufacturer': ['Vendor/Supplier*', 'Vendor', 'Product Brand'],
+            
+            # Product identification
+            'product_name': ['Product Name*', 'ProductName', 'Description'],
+            'inventory_name': ['Product Name*', 'ProductName', 'Description'], 
+            'description': ['Description', 'Product Name*'],
+            'product_id': ['Product ID', 'SKU'],
+            'sku': ['SKU', 'Product ID'],
+            'upc': ['UPC', 'Barcode'],
+            'barcode': ['Barcode', 'UPC'],
+            
+            # Quantities and measurements
+            'quantity': ['Quantity*', 'Qty'],
+            'qty': ['Quantity*', 'Qty'],
+            'weight': ['Weight*', 'Net Weight'],
+            'unit_weight': ['Weight*', 'Net Weight'],
+            'net_weight': ['Weight*', 'Net Weight'],
+            'volume': ['Volume', 'Weight*'],
+            'unit_volume': ['Volume', 'Weight*'],
+            'package_size': ['Weight*', 'Package Size'],
+            'serving_size': ['Serving Size', 'Weight*'],
+            'units_per_package': ['Units per Package', 'Package Count'],
+            
+            # Lab results and potency
+            'thc_content': ['THC test result', 'THC %', 'THC'],
+            'thc_percent': ['THC test result', 'THC %', 'THC'],
+            'thc_percentage': ['THC test result', 'THC %', 'THC'],
+            'total_thc': ['THC test result', 'THC %', 'THC'],
+            'total_thc_percent': ['THC test result', 'THC %', 'THC'],
+            'thca_content': ['THCA', 'THCA %'],
+            'thca_percent': ['THCA', 'THCA %'],
+            'cbd_content': ['CBD test result', 'CBD %', 'CBD'],
+            'cbd_percent': ['CBD test result', 'CBD %', 'CBD'],
+            'cbd_percentage': ['CBD test result', 'CBD %', 'CBD'],
+            'total_cbd': ['CBD test result', 'CBD %', 'CBD'],
+            'total_cbd_percent': ['CBD test result', 'CBD %', 'CBD'],
+            'cbda_content': ['CBDA', 'CBDA %'],
+            'cbda_percent': ['CBDA', 'CBDA %'],
+            'cbn_content': ['CBN', 'CBN %'],
+            'cbg_content': ['CBG', 'CBG %'],
+            'total_cannabinoids': ['Total Cannabinoids', 'Total Cannabinoids %'],
+            
+            # Pricing
+            'price': ['Price', 'Price*', 'Unit Price'],
+            'unit_price': ['Price', 'Price*', 'Unit Price'],
+            'wholesale_price': ['Wholesale Price', 'Price'],
+            'retail_price': ['Price*', 'Price', 'Retail Price'],
+            'cost': ['Cost', 'Price'],
+            
+            # Strain and genetics
+            'strain': ['Product Strain', 'Strain', 'Strain*'],
+            'strain_name': ['Product Strain', 'Strain', 'Strain*'],
+            'product_strain': ['Product Strain', 'Strain', 'Strain*'],
+            'genetics': ['Genetics', 'Product Strain'],
+            'lineage': ['Lineage', 'Strain Lineage'],
+            'dominant_terpene': ['Dominant Terpene', 'Terpenes'],
+            'terpene_profile': ['Terpene Profile', 'Terpenes'],
+            
+            # Product classification
+            'product_type': ['Product Type*', 'Type', 'Category'],
+            'inventory_type': ['Product Type*', 'Type', 'Category'],
+            'inventory_category': ['Category', 'Product Type*', 'Type'],
+            'category': ['Category', 'Product Type*', 'Type'],
+            'subcategory': ['Subcategory', 'Product Type*'],
+            'classification': ['Product Type*', 'Classification'],
+            
+            # Dates and compliance
+            'harvest_date': ['Harvest Date', 'Date Harvested'],
+            'package_date': ['Package Date', 'Date Packaged'],
+            'test_date': ['Test Date', 'Lab Test Date'],
+            'expiration_date': ['Expiration Date', 'Expires'],
+            'best_by_date': ['Best By Date', 'Expiration Date'],
+            'manufacture_date': ['Manufacture Date', 'Date Manufactured'],
+            
+            # Cultivation and processing
+            'cultivation_method': ['Cultivation Method', 'Growing Method'],
+            'extraction_method': ['Extraction Method', 'Processing Method'],
+            'processing_method': ['Processing Method', 'Extraction Method'],
+            'cure_method': ['Cure Method', 'Processing Method'],
+            'trim_method': ['Trim Method', 'Processing Method'],
+            
+            # Compliance and testing
+            'lab_result_id': ['Lab Result ID', 'Test ID'],
+            'batch_number': ['Batch Number', 'Lot Number'],
+            'lot_number': ['Lot Number', 'Batch Number'],
+            'batch_id': ['Batch ID', 'Batch Number'],
+            'test_results': ['Test Results', 'Lab Results'],
+            'coa_url': ['COA URL', 'Certificate URL'],
+            'compliance_status': ['Compliance Status', 'Status'],
+            
+            # Physical properties
+            'color': ['Color', 'Appearance'],
+            'texture': ['Texture', 'Consistency'],
+            'aroma': ['Aroma', 'Smell'],
+            'flavor': ['Flavor', 'Taste'],
+            'appearance': ['Appearance', 'Visual'],
+            
+            # Additional metadata
+            'notes': ['Notes', 'Comments'],
+            'comments': ['Comments', 'Notes'],
+            'special_instructions': ['Special Instructions', 'Notes'],
+            'storage_instructions': ['Storage Instructions', 'Storage'],
+            'dosage_instructions': ['Dosage Instructions', 'Dosage'],
+            'serving_instructions': ['Serving Instructions', 'Instructions'],
         }
+        
+        # ENHANCED JSON DATA EXTRACTION: Handle nested structures and lab results
+        # Extract from lab_result_data if available
+        lab_result_data = json_item.get('lab_result_data') or json_item.get('lab_results') or {}
+        if isinstance(lab_result_data, dict):
+            # Extract potency data from lab results
+            potency_data = lab_result_data.get('potency', [])
+            if isinstance(potency_data, list):
+                for potency_item in potency_data:
+                    if isinstance(potency_item, dict):
+                        ptype = potency_item.get('type', '').lower()
+                        pvalue = potency_item.get('value')
+                        if pvalue is not None:
+                            if 'thc' in ptype and 'thca' not in ptype:
+                                hybrid_product['THC test result'] = str(pvalue)
+                                json_fields_used += 1
+                                logging.debug(f"🧪 LAB DATA: Set THC = '{pvalue}' from lab_result_data")
+                            elif 'cbd' in ptype and 'cbda' not in ptype:
+                                hybrid_product['CBD test result'] = str(pvalue)
+                                json_fields_used += 1
+                                logging.debug(f"🧪 LAB DATA: Set CBD = '{pvalue}' from lab_result_data")
+                            elif 'thca' in ptype:
+                                hybrid_product['THCA'] = str(pvalue)
+                                json_fields_used += 1
+                                logging.debug(f"🧪 LAB DATA: Set THCA = '{pvalue}' from lab_result_data")
+                            elif 'cbda' in ptype:
+                                hybrid_product['CBDA'] = str(pvalue)
+                                json_fields_used += 1
+                                logging.debug(f"🧪 LAB DATA: Set CBDA = '{pvalue}' from lab_result_data")
+            
+            # Extract COA information
+            coa_url = lab_result_data.get('coa_url') or lab_result_data.get('coa')
+            if coa_url:
+                hybrid_product['COA URL'] = str(coa_url)
+                json_fields_used += 1
+                logging.debug(f"🧪 LAB DATA: Set COA URL from lab_result_data")
+            
+            # Extract test dates
+            test_date = (lab_result_data.get('test_date') or 
+                        lab_result_data.get('coa_release_date') or 
+                        lab_result_data.get('date_tested'))
+            if test_date:
+                hybrid_product['Test Date'] = str(test_date)
+                json_fields_used += 1
+                logging.debug(f"🧪 LAB DATA: Set Test Date = '{test_date}' from lab_result_data")
+        
+        # Extract from package_info if available
+        package_info = json_item.get('package_info') or json_item.get('packaging') or {}
+        if isinstance(package_info, dict):
+            for field in ['weight', 'volume', 'units', 'package_size']:
+                value = package_info.get(field)
+                if value:
+                    if field == 'weight':
+                        hybrid_product['Weight*'] = str(value)
+                        json_fields_used += 1
+                        logging.debug(f"📦 PACKAGE DATA: Set Weight = '{value}' from package_info")
+                    elif field == 'volume':
+                        hybrid_product['Volume'] = str(value)
+                        json_fields_used += 1
+                        logging.debug(f"📦 PACKAGE DATA: Set Volume = '{value}' from package_info")
+                    elif field == 'units':
+                        hybrid_product['Units per Package'] = str(value)
+                        json_fields_used += 1
+                        logging.debug(f"📦 PACKAGE DATA: Set Units = '{value}' from package_info")
+        
+        # Extract from compliance_info if available
+        compliance_info = json_item.get('compliance_info') or json_item.get('compliance') or {}
+        if isinstance(compliance_info, dict):
+            for field in ['batch_number', 'lot_number', 'harvest_date', 'package_date']:
+                value = compliance_info.get(field)
+                if value:
+                    excel_field = {
+                        'batch_number': 'Batch Number',
+                        'lot_number': 'Lot Number', 
+                        'harvest_date': 'Harvest Date',
+                        'package_date': 'Package Date'
+                    }.get(field)
+                    if excel_field:
+                        hybrid_product[excel_field] = str(value)
+                        json_fields_used += 1
+                        logging.debug(f"📋 COMPLIANCE DATA: Set {excel_field} = '{value}' from compliance_info")
+        
+        # FALLBACK: Try direct potency fields at root level if lab_result_data didn't work
+        if 'THC test result' not in hybrid_product or not hybrid_product.get('THC test result', '').strip():
+            for thc_field in ['thc', 'thc_percent', 'thc_percentage', 'total_thc', 'THC', 'THC_PERCENT']:
+                thc_value = json_item.get(thc_field)
+                if thc_value is not None and str(thc_value).strip():
+                    hybrid_product['THC test result'] = str(thc_value)
+                    json_fields_used += 1
+                    logging.debug(f"🔄 FALLBACK: Set THC = '{thc_value}' from root field '{thc_field}'")
+                    break
+        
+        if 'CBD test result' not in hybrid_product or not hybrid_product.get('CBD test result', '').strip():
+            for cbd_field in ['cbd', 'cbd_percent', 'cbd_percentage', 'total_cbd', 'CBD', 'CBD_PERCENT']:
+                cbd_value = json_item.get(cbd_field)
+                if cbd_value is not None and str(cbd_value).strip():
+                    hybrid_product['CBD test result'] = str(cbd_value)
+                    json_fields_used += 1
+                    logging.debug(f"🔄 FALLBACK: Set CBD = '{cbd_value}' from root field '{cbd_field}'")
+                    break
         
         # Merge JSON data with priority over database defaults
         for json_key, excel_fields in json_to_excel_mapping.items():
@@ -1180,19 +1380,78 @@ class EnhancedJSONMatcher:
                         logging.debug(f"🔀 JSON MERGE: Set {excel_field} = '{json_value}' from JSON")
                         break
         
-        # Ensure critical fields have values (database or safe defaults)
+        # ENHANCED critical fields with comprehensive defaults
         critical_fields = {
-            'THC test result': '0.00',  # Default THC if missing
-            'CBD test result': '0.00',  # Default CBD if missing
-            'Quantity*': '1',  # Default quantity if missing
+            'THC test result': '0.00',      # Default THC if missing
+            'CBD test result': '0.00',      # Default CBD if missing
+            'Quantity*': '1',               # Default quantity if missing
+            'Weight*': '1g',                # Default weight if missing (except pre-rolls)
+            'Price': '0',                   # Default price if missing
+            'Lineage': 'MIXED',             # Default lineage if missing
+            'Product Brand': 'Unknown',     # Default brand if missing
+            'Vendor/Supplier*': 'Unknown',  # Default vendor if missing
+            'DOH': 'N/A',                   # Default DOH if missing
         }
         
-        # SPECIAL HANDLING FOR PRE-ROLL PRODUCTS: Use JointRatio instead of Weight* 
+        # SPECIAL: Don't override Weight* for pre-rolls since they use JointRatio
         product_type = (hybrid_product.get('Product Type*') or '').lower().strip()
         is_preroll = 'pre-roll' in product_type or 'infused pre-roll' in product_type
         
-        logging.info(f"🔍 ENHANCED MATCHER DEBUG: Product '{hybrid_product.get('Product Name*', 'N/A')}' Type: '{product_type}' Is Pre-roll: {is_preroll}")
+        if is_preroll:
+            # Remove Weight* from critical fields for pre-rolls
+            critical_fields.pop('Weight*', None)
+            
+        # Apply defaults only if fields are truly missing or empty
+        filled_defaults = 0
+        for field, default_value in critical_fields.items():
+            current_value = hybrid_product.get(field)
+            if not current_value or str(current_value).strip() in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan', 'Unknown', 'N/A']:
+                # Only apply default if we don't have a value from JSON or database
+                if field not in ['Price', 'Lineage'] or not current_value:  # Be more selective about Price and Lineage
+                    hybrid_product[field] = default_value
+                    filled_defaults += 1
+                    logging.debug(f"💡 ENHANCED DEFAULT: Set {field} = '{default_value}'")
         
+        # ENHANCED: Try to extract missing data from product name or other fields
+        product_name = hybrid_product.get('Product Name*', '').lower()
+        
+        # Extract brand from product name if missing
+        if hybrid_product.get('Product Brand', '').strip() in ['', 'Unknown']:
+            # Common brand patterns in product names
+            brand_patterns = [
+                r'^([A-Za-z\s]+)\s-\s',          # "Brand Name - Product"
+                r'by\s+([A-Za-z\s]+)',           # "Product by Brand Name"
+                r'from\s+([A-Za-z\s]+)',         # "Product from Brand Name"
+                r'^([A-Za-z]+)\s+[A-Z]',         # "Brand PRODUCT" (first word)
+            ]
+            
+            for pattern in brand_patterns:
+                import re
+                match = re.search(pattern, hybrid_product.get('Product Name*', ''))
+                if match:
+                    extracted_brand = match.group(1).strip()
+                    if len(extracted_brand) > 2:  # Valid brand name
+                        hybrid_product['Product Brand'] = extracted_brand
+                        hybrid_product['Vendor/Supplier*'] = extracted_brand
+                        logging.debug(f"� EXTRACTED BRAND: '{extracted_brand}' from product name")
+                        break
+        
+        # Extract lineage from product name if missing
+        if hybrid_product.get('Lineage', '').strip() in ['', 'MIXED', 'Unknown']:
+            lineage_keywords = {
+                'sativa': 'SATIVA',
+                'indica': 'INDICA', 
+                'hybrid': 'HYBRID',
+                'cbd': 'CBD'
+            }
+            
+            for keyword, lineage in lineage_keywords.items():
+                if keyword in product_name:
+                    hybrid_product['Lineage'] = lineage
+                    logging.debug(f"🔍 EXTRACTED LINEAGE: '{lineage}' from product name")
+                    break
+        
+        # SPECIAL HANDLING FOR PRE-ROLL PRODUCTS: Use JointRatio instead of Weight*
         if is_preroll:
             # For pre-roll products, preserve JointRatio and update Weight* for display
             joint_ratio = hybrid_product.get('JointRatio', '').strip()
@@ -1210,16 +1469,10 @@ class EnhancedJSONMatcher:
                 hybrid_product['Weight*'] = default_ratio
                 logging.debug(f"🚬 PRE-ROLL PRIORITY: Set default JointRatio '{default_ratio}' for {product_type}")
         
-        filled_defaults = 0
-        for field, default_value in critical_fields.items():
-            current_value = hybrid_product.get(field)
-            if not current_value or str(current_value).strip() in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
-                hybrid_product[field] = default_value
-                filled_defaults += 1
-                logging.debug(f"� HYBRID PRIORITY: Set default for {field} = '{default_value}'")
+        logging.info(f"🔍 ENHANCED MATCHER DEBUG: Product '{hybrid_product.get('Product Name*', 'N/A')}' Type: '{product_type}' Is Pre-roll: {is_preroll}")
         
         if filled_defaults > 0:
-            logging.info(f"� HYBRID PRIORITY: Applied {filled_defaults} default values for missing fields")
+            logging.info(f"💡 ENHANCED PRIORITY: Applied {filled_defaults} default values for missing fields")
                 
         # CRITICAL: Add metadata about the hybrid approach
         hybrid_product['Source'] = f'Hybrid (JSON: {json_fields_used}, DB: {len(hybrid_product)-json_fields_used})'
