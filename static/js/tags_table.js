@@ -121,8 +121,60 @@ class TagsTable {
     const type = tag['Product Type*'] || tag.Type || '';
     const safeTagName = tagName.replace(/"/g, '&quot;');
     const safeId = `tag_${safeTagName.replace(/[^a-zA-Z0-9]/g, '_')}`;
-    const lineageColors = (window.TagManager && window.TagManager.state && window.TagManager.state.lineageColors) || {};
-    const color = lineageColors[lineage.toUpperCase()] || 'var(--lineage-mixed)';
+    
+    // SYNCHRONIZED WITH BACKEND: Apply same lineage coloring logic as backend docx_formatting.py
+    function getLineageColorFromBackendRules(lineage) {
+        if (!lineage) return 'var(--lineage-mixed)';
+        
+        const text = lineage.toString().toUpperCase().trim();
+        
+        // Remove any marker wrappers for robust matching (same as backend)
+        const markers = ["LINEAGE_START", "LINEAGE_END", "PRODUCTSTRAIN_START", "PRODUCTSTRAIN_END", "PRODUCTBRAND_CENTER_START", "PRODUCTBRAND_CENTER_END"];
+        let cleanText = text;
+        markers.forEach(marker => {
+            cleanText = cleanText.replace(marker, "");
+        });
+        cleanText = cleanText.trim();
+        
+        // Apply EXACT same lineage coloring logic as backend (priority order matters!)
+        if (cleanText.includes("PARAPHERNALIA")) {
+            return 'var(--lineage-para)';
+        } else if (cleanText.includes("HYBRID/INDICA") || cleanText.includes("HYBRID INDICA")) {
+            return 'var(--lineage-hybrid-indica)';
+        } else if (cleanText.includes("HYBRID/SATIVA") || cleanText.includes("HYBRID SATIVA")) {
+            return 'var(--lineage-hybrid-sativa)';
+        } else if (cleanText.includes("SATIVA")) {
+            return 'var(--lineage-sativa)';
+        } else if (cleanText.includes("INDICA")) {
+            return 'var(--lineage-indica)';
+        } else if (cleanText.includes("HYBRID")) {
+            return 'var(--lineage-hybrid)';
+        } else if (cleanText.includes("CBD") || cleanText.includes("CBD_BLEND") || cleanText.includes("CBD BLEND")) {
+            return 'var(--lineage-cbd)';
+        } else if (cleanText.includes("MIXED")) {
+            // MIXED lineage always gets blue bars (covers non-classic types like edibles)
+            return 'var(--lineage-mixed)';
+        } else {
+            // Check for product brand values that get blue bars for non-classic types
+            const brandKeywords = [
+                "MOONSHOT", "PLATINUM", "PREMIUM", "GOLD", "SILVER", "ELITE", "SELECT", "RESERVE", 
+                "CRAFT", "ARTISAN", "BOUTIQUE", "SIGNATURE", "LIMITED", "EXCLUSIVE", "PRIVATE", 
+                "CUSTOM", "SPECIAL", "DELUXE", "ULTRA", "SUPER", "MEGA", "MAX", "PRO", "PLUS", 
+                "X", "CONSTELLATION"
+            ];
+            
+            const hasBrandKeyword = brandKeywords.some(brand => cleanText.includes(brand));
+            if (hasBrandKeyword) {
+                // Product Brand values get blue bars for non-classic types
+                return 'var(--lineage-mixed)';
+            }
+        }
+        
+        // Default fallback (same as backend)
+        return 'var(--lineage-mixed)';
+    }
+    
+    const color = getLineageColorFromBackendRules(lineage);
 
     // Use abbreviated lineage names for compact dropdown
     const uniqueLineages = getUniqueLineages();
