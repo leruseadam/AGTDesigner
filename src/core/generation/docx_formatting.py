@@ -7,17 +7,17 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Define colors for lineage
+# Define colors for lineage - SYNCHRONIZED WITH FRONTEND CSS
 COLORS = {
-    'SATIVA': 'ED4123',
-    'INDICA': '9900FF',
-    'HYBRID': '009900',
-    'HYBRID_INDICA': '9900FF',
-    'HYBRID_SATIVA': 'ED4123',
-    'CBD': 'F1C232',
-    'CBD_BLEND': 'F1C232',  # Same color as CBD
-    'MIXED': '0021F5',
-    'PARA': 'FFC0CB'
+    'SATIVA': 'ED4123',        # rgba(237, 65, 35, 1.0) - matches --lineage-sativa
+    'INDICA': 'A084E8',        # rgba(160, 132, 232, 1.0) - matches --lineage-indica
+    'HYBRID': '7C3AED',        # rgba(124, 58, 237, 1.0) - matches --lineage-hybrid
+    'HYBRID_INDICA': 'A084E8', # rgba(160, 132, 232, 1.0) - matches --lineage-hybrid-indica
+    'HYBRID_SATIVA': 'ED4123', # rgba(237, 65, 35, 1.0) - matches --lineage-hybrid-sativa
+    'CBD': 'F1C232',           # rgba(241, 194, 50, 1.0) - matches --lineage-cbd
+    'CBD_BLEND': 'F1C232',     # Same color as CBD
+    'MIXED': '0021F5',         # rgba(0, 33, 245, 1.0) - matches --lineage-mixed
+    'PARA': 'FFC0CB'           # rgba(255, 192, 203, 1.0) - matches --lineage-para
 }
 
 def apply_lineage_colors(doc):

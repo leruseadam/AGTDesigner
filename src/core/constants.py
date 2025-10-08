@@ -1,16 +1,16 @@
 from typing import Dict
 import copy
 
-# Lineage color mapping
+# Lineage color mapping - SYNCHRONIZED WITH FRONTEND CSS
 LINEAGE_COLOR_MAP: Dict[str, str] = {
-    "SATIVA": "#E74C3C",
-    "INDICA": "#8E44AD",
-    "HYBRID": "#27AE60",
-    "HYBRID/SATIVA": "#E74C3C",
-    "HYBRID/INDICA": "#8E44AD",
-    "CBD": "#F1C40F",
-    "MIXED": "#1E3A8A",
-    "PARAPHERNALIA": "#FF69B4",
+    "SATIVA": "#ED4123",        # rgba(237, 65, 35, 1.0) - matches --lineage-sativa
+    "INDICA": "#A084E8",        # rgba(160, 132, 232, 1.0) - matches --lineage-indica  
+    "HYBRID": "#7C3AED",        # rgba(124, 58, 237, 1.0) - matches --lineage-hybrid
+    "HYBRID/SATIVA": "#ED4123", # rgba(237, 65, 35, 1.0) - matches --lineage-hybrid-sativa
+    "HYBRID/INDICA": "#A084E8", # rgba(160, 132, 232, 1.0) - matches --lineage-hybrid-indica
+    "CBD": "#F1C232",           # rgba(241, 194, 50, 1.0) - matches --lineage-cbd
+    "MIXED": "#0021F5",         # rgba(0, 33, 245, 1.0) - matches --lineage-mixed
+    "PARAPHERNALIA": "#FFC0CB", # rgba(255, 192, 203, 1.0) - matches --lineage-para
 }
 
 # Product type mapping
