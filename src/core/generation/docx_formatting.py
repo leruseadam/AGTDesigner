@@ -20,8 +20,8 @@ COLORS = {
     'PARA': 'FFC0CB'           # rgba(255, 192, 203, 1.0) - matches --lineage-para
 }
 
-def apply_lineage_colors(doc):
-    """Apply lineage colors to all cells based on keywords in cell text."""
+def apply_lineage_colors(doc, excel_data=None):
+    """Apply lineage colors to all cells using excel processor rules when available."""
     try:
         for table in doc.tables:
             for row in table.rows:
@@ -34,9 +34,22 @@ def apply_lineage_colors(doc):
                         text = text.replace(marker, "")
                     text = text.strip()
                     
-                    # Apply lineage coloring logic based on clean text
-                    if "PARAPHERNALIA" in text:
+                    # If we have excel data, use excel processor rules to determine lineage
+                    if excel_data is not None:
+                        # Try to match this cell's content with excel data to get proper lineage
+                        lineage = _get_lineage_from_excel_rules(text, excel_data)
+                        if lineage:
+                            text = lineage  # Use the lineage determined by excel rules
+                    
+                    # Apply lineage coloring logic based on excel processor rules
+                    # Priority order matching excel processor: CBD Blend > Paraphernalia > Mixed > then standard lineages
+                    if "CBD BLEND" in text or "CBD_BLEND" in text:
+                        color_hex = COLORS['CBD_BLEND']
+                    elif "PARAPHERNALIA" in text:
                         color_hex = COLORS['PARA']
+                    elif "MIXED" in text:
+                        # MIXED lineage always gets blue bars (this covers non-classic types like edibles)
+                        color_hex = COLORS['MIXED']  # Blue for Mixed
                     elif "HYBRID/INDICA" in text or "HYBRID INDICA" in text:
                         color_hex = COLORS['HYBRID_INDICA']
                     elif "HYBRID/SATIVA" in text or "HYBRID SATIVA" in text:
@@ -47,13 +60,8 @@ def apply_lineage_colors(doc):
                         color_hex = COLORS['INDICA']
                     elif "HYBRID" in text:
                         color_hex = COLORS['HYBRID']
-                    elif "CBD" in text or "CBD_BLEND" in text:
+                    elif "CBD" in text:
                         color_hex = COLORS['CBD']
-                    elif "CBD BLEND" in text:
-                        color_hex = COLORS['CBD_BLEND']
-                    elif "MIXED" in text:
-                        # MIXED lineage always gets blue bars (this covers non-classic types like edibles)
-                        color_hex = COLORS['MIXED']  # Blue for Mixed
                     elif any(brand in text.upper() for brand in ["MOONSHOT", "PLATINUM", "PREMIUM", "GOLD", "SILVER", "ELITE", "SELECT", "RESERVE", "CRAFT", "ARTISAN", "BOUTIQUE", "SIGNATURE", "LIMITED", "EXCLUSIVE", "PRIVATE", "CUSTOM", "SPECIAL", "DELUXE", "ULTRA", "SUPER", "MEGA", "MAX", "PRO", "PLUS", "X", "CONSTELLATION"]):
                         # Product Brand values (like "MOONSHOT", "PLATINUM", "CONSTELLATION", etc.) get blue bars for non-classic types
                         color_hex = COLORS['MIXED']  # Blue for Product Brand
@@ -77,11 +85,65 @@ def apply_lineage_colors(doc):
         # FINAL LINEAGE CLEANUP: Remove any leading spaces from lineage content after coloring
         _final_lineage_cleanup_after_coloring(doc)
         
-        logger.debug("Applied lineage colors to document")
+        logger.debug("Applied lineage colors to document using excel processor rules")
         return doc
     except Exception as e:
         logger.error(f"Error applying lineage colors: {str(e)}")
         raise
+
+def _get_lineage_from_excel_rules(cell_text, excel_data):
+    """Get lineage using excel processor rules for a given cell text."""
+    try:
+        import pandas as pd
+        
+        # Convert excel_data to DataFrame if it's not already
+        if not isinstance(excel_data, pd.DataFrame):
+            return None
+            
+        # Check if we have the required columns
+        if 'Product Type' not in excel_data.columns:
+            return None
+            
+        # Define classic types (matching excel processor)
+        classic_types = [
+            'Flower', 'Pre-Roll', 'Joint', 'Blunt', 'Cone', 'Preroll',
+            'Flower - Outdoor', 'Flower - Indoor', 'Flower - Greenhouse'
+        ]
+        
+        # Try to find matching row in excel data by searching for product name or strain
+        for _, row in excel_data.iterrows():
+            # Check if this row matches the cell content somehow
+            if any(str(cell_text).upper() in str(row.get(col, '')).upper() for col in ['Product Name', 'Strain', 'Product Brand']):
+                product_type = str(row.get('Product Type', ''))
+                lineage = str(row.get('Lineage', ''))
+                product_strain = str(row.get('Product Strain', ''))
+                
+                # Apply excel processor rules
+                is_classic = product_type in classic_types
+                is_empty_lineage = not lineage or lineage.lower().strip() in ['', 'nan', 'null']
+                
+                if is_classic and is_empty_lineage:
+                    return 'HYBRID'  # Default for classic types
+                elif not is_classic:
+                    # Use Product Strain to determine lineage for non-classic types
+                    if 'CBD Blend' in product_strain:
+                        return 'CBD'
+                    elif 'Paraphernalia' in product_strain:
+                        return 'PARAPHERNALIA'
+                    elif 'Mixed' in product_strain:
+                        return 'MIXED'
+                    elif is_empty_lineage:
+                        return 'MIXED'  # Default for non-classic types
+                
+                # Return existing lineage if not empty
+                if not is_empty_lineage:
+                    return lineage
+        
+        return None  # No match found
+        
+    except Exception as e:
+        logger.warning(f"Error in _get_lineage_from_excel_rules: {e}")
+        return None
 
 def _final_lineage_cleanup_after_coloring(doc):
     """
