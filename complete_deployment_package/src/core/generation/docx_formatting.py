@@ -675,25 +675,17 @@ def remove_extra_spacing(doc):
         # Clear and reset paragraph
         paragraph.clear()
         
-        # Split text into runs and preserve font sizes
-        words = text.split()
-        size_index = 0
+        # Instead of splitting and reconstructing, preserve the original text
+        # This prevents issues with apostrophes and other punctuation
+        run = paragraph.add_run(text)
         
-        for i, word in enumerate(words):
-            run = paragraph.add_run(word)
-            
-            # Set consistent font
-            run.font.name = "Arial"
-            run.font.bold = True
-            
-            # Restore font size if available
-            if size_index < len(existing_sizes) and existing_sizes[size_index]:
-                run.font.size = existing_sizes[size_index]
-                size_index += 1
-            
-            # Add space between words (except for last word)
-            if i < len(words) - 1:
-                run.add_text(' ')
+        # Set consistent font
+        run.font.name = "Arial"
+        run.font.bold = True
+        
+        # Restore font size if available
+        if existing_sizes and existing_sizes[0]:
+            run.font.size = existing_sizes[0]
         
         # Set paragraph spacing to minimum to prevent cell expansion
         paragraph.paragraph_format.space_before = Pt(0)
