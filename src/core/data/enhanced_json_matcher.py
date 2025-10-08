@@ -1094,19 +1094,19 @@ class EnhancedJSONMatcher:
 
     def _merge_json_data_hybrid(self, product_dict: dict, json_items: list, match_result=None) -> dict:
         """
-        DATABASE-PRIORITY approach: Use 100% database-derived information.
-        JSON is only used for matching purposes, all data comes from database.
+        HYBRID PRIORITY approach: Preserve JSON data while using database for enhanced matching.
+        JSON data takes priority for specific fields, database provides additional information.
         """
         if not json_items:
-            logging.debug("🔄 DATABASE PRIORITY: No JSON items to merge")
+            logging.debug("🔄 HYBRID PRIORITY: No JSON items to merge")
             return product_dict
             
-        # Find the best matching JSON item for this product (for matching purposes only)
+        # Find the best matching JSON item for this product
         json_item = None
         product_name = (product_dict.get('Product Name*') or 
                        product_dict.get('ProductName') or '').lower().strip()
         
-        logging.debug(f"🔍 DATABASE PRIORITY: Looking for JSON match for '{product_name}' (matching only)")
+        logging.debug(f"🔍 HYBRID PRIORITY: Looking for JSON match for '{product_name}'")
         
         # Try to find exact or best matching JSON item with multiple strategies
         best_match_score = 0
@@ -1132,102 +1132,123 @@ class EnhancedJSONMatcher:
                 if total_score > best_match_score:
                     best_match_score = total_score
                     json_item = item
-                    logging.debug(f"🎯 DATABASE PRIORITY: Better match found at index {i}: '{item_name}' (score: {total_score:.3f})")
+                    logging.debug(f"🎯 HYBRID PRIORITY: Better match found at index {i}: '{item_name}' (score: {total_score:.3f})")
         
         # CRITICAL FIX: If no good match found, still use first JSON item but with lower confidence
         if not json_item and json_items:
             json_item = json_items[0]
             best_match_score = 0.1  # Low confidence fallback
             json_item_name = (json_item.get('product_name') or json_item.get('inventory_name') or 'UNKNOWN')
-            logging.info(f"🔄 DATABASE PRIORITY: No good match found, using first JSON item '{json_item_name}' as fallback")
+            logging.info(f"🔄 HYBRID PRIORITY: No good match found, using first JSON item '{json_item_name}' as fallback")
             
         if not json_item:
-            logging.warning("🔄 DATABASE PRIORITY: No JSON item available for match")
+            logging.warning("🔄 HYBRID PRIORITY: No JSON item available for match")
             return product_dict
             
-        # Create database-priority product: 100% database data
-        db_priority_product = dict(product_dict)  # Start with database match - this is our complete data source
+        # Create hybrid product: Start with database match, then overlay JSON data
+        hybrid_product = dict(product_dict)  # Start with database match as foundation
         
-        logging.info(f"� DATABASE PRIORITY: Using 100% database-derived information for '{product_name}'")
-        logging.debug(f"💽 DATABASE PRIORITY: Database product contains {len(db_priority_product)} fields")
+        logging.info(f"� HYBRID PRIORITY: Merging JSON data with database information for '{product_name}'")
+        logging.debug(f"💽 HYBRID PRIORITY: Database product contains {len(hybrid_product)} fields")
         
-        # IMPORTANT: NO JSON data merging - all information comes from database
-        # JSON is only used for matching purposes, not for data extraction
+        # IMPORTANT: PRESERVE JSON data where available, supplement with database
+        # Merge specific JSON fields that contain valuable information
+        json_item_name = json_item.get('product_name') or json_item.get('inventory_name') or ''
+        json_fields_used = 0
         
-        # Ensure all critical fields have database values or safe defaults
+        # Priority field mapping: JSON field -> Excel field
+        json_to_excel_mapping = {
+            'vendor': ['Vendor/Supplier*', 'Vendor', 'Product Brand'],
+            'quantity': ['Quantity*'],
+            'weight': ['Weight*'],
+            'thc_content': ['THC test result', 'THC %'],
+            'cbd_content': ['CBD test result', 'CBD %'],
+            'price': ['Price', 'Price*'],
+            'strain': ['Strain', 'Strain*'],
+            'product_type': ['Product Type*', 'Type'],
+        }
+        
+        # Merge JSON data with priority over database defaults
+        for json_key, excel_fields in json_to_excel_mapping.items():
+            json_value = json_item.get(json_key)
+            if json_value and str(json_value).strip() and str(json_value).strip().lower() not in ['none', 'null', '']:
+                # Find the first matching Excel field and update it
+                for excel_field in excel_fields:
+                    if excel_field in hybrid_product or any(excel_field in k for k in hybrid_product.keys()):
+                        hybrid_product[excel_field] = str(json_value).strip()
+                        json_fields_used += 1
+                        logging.debug(f"🔀 JSON MERGE: Set {excel_field} = '{json_value}' from JSON")
+                        break
+        
+        # Ensure critical fields have values (database or safe defaults)
         critical_fields = {
-            'Price': '25.00',  # Default price if missing
-            'Weight*': '1',    # Default weight if missing
-            'Units': 'g',      # Default units if missing
             'THC test result': '0.00',  # Default THC if missing
             'CBD test result': '0.00',  # Default CBD if missing
             'Quantity*': '1',  # Default quantity if missing
-            'Product Type*': 'Unknown',  # Default type if missing
-            'Lineage': 'MIXED',  # Default lineage if missing
         }
         
         # SPECIAL HANDLING FOR PRE-ROLL PRODUCTS: Use JointRatio instead of Weight* 
-        product_type = (db_priority_product.get('Product Type*') or '').lower().strip()
+        product_type = (hybrid_product.get('Product Type*') or '').lower().strip()
         is_preroll = 'pre-roll' in product_type or 'infused pre-roll' in product_type
         
-        logging.info(f"🔍 ENHANCED MATCHER DEBUG: Product '{db_priority_product.get('Product Name*', 'N/A')}' Type: '{product_type}' Is Pre-roll: {is_preroll}")
+        logging.info(f"🔍 ENHANCED MATCHER DEBUG: Product '{hybrid_product.get('Product Name*', 'N/A')}' Type: '{product_type}' Is Pre-roll: {is_preroll}")
         
         if is_preroll:
             # For pre-roll products, preserve JointRatio and update Weight* for display
-            joint_ratio = db_priority_product.get('JointRatio', '').strip()
-            logging.info(f"🔍 PRE-ROLL JOINT RATIO: Found '{joint_ratio}' for product '{db_priority_product.get('Product Name*', 'N/A')}'")
+            joint_ratio = hybrid_product.get('JointRatio', '').strip()
+            logging.info(f"🔍 PRE-ROLL JOINT RATIO: Found '{joint_ratio}' for product '{hybrid_product.get('Product Name*', 'N/A')}'")
             if joint_ratio and joint_ratio not in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
                 # Preserve JointRatio field and set Weight* for display compatibility
-                db_priority_product['Weight*'] = joint_ratio
+                hybrid_product['Weight*'] = joint_ratio
                 # Ensure JointRatio field is explicitly preserved for template processing
-                db_priority_product['JointRatio'] = joint_ratio
+                hybrid_product['JointRatio'] = joint_ratio
                 logging.info(f"🚬 PRE-ROLL FIXED: Using JointRatio '{joint_ratio}' as Weight* for {product_type}")
             else:
                 # Default JointRatio if missing - preserve both fields
                 default_ratio = '0.5g x 2 Pack'
-                db_priority_product['JointRatio'] = default_ratio
-                db_priority_product['Weight*'] = default_ratio
+                hybrid_product['JointRatio'] = default_ratio
+                hybrid_product['Weight*'] = default_ratio
                 logging.debug(f"🚬 PRE-ROLL PRIORITY: Set default JointRatio '{default_ratio}' for {product_type}")
         
         filled_defaults = 0
         for field, default_value in critical_fields.items():
-            current_value = db_priority_product.get(field)
+            current_value = hybrid_product.get(field)
             if not current_value or str(current_value).strip() in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
-                db_priority_product[field] = default_value
+                hybrid_product[field] = default_value
                 filled_defaults += 1
-                logging.debug(f"� DATABASE PRIORITY: Set default for {field} = '{default_value}'")
+                logging.debug(f"� HYBRID PRIORITY: Set default for {field} = '{default_value}'")
         
         if filled_defaults > 0:
-            logging.info(f"� DATABASE PRIORITY: Applied {filled_defaults} default values for missing database fields")
+            logging.info(f"� HYBRID PRIORITY: Applied {filled_defaults} default values for missing fields")
                 
-        # CRITICAL: Add metadata about the database priority approach
-        db_priority_product['Source'] = 'Database Priority (100% DB)'
-        db_priority_product['JSON_Source'] = 'Matching Only'
-        db_priority_product['Match_Confidence'] = f"{best_match_score:.3f}"
-        db_priority_product['Data_Source'] = 'Database'
+        # CRITICAL: Add metadata about the hybrid approach
+        hybrid_product['Source'] = f'Hybrid (JSON: {json_fields_used}, DB: {len(hybrid_product)-json_fields_used})'
+        hybrid_product['JSON_Source'] = 'Data Merged'
+        hybrid_product['Match_Confidence'] = f"{best_match_score:.3f}"
+        hybrid_product['Data_Source'] = 'JSON + Database'
         
         # Preserve original match information
         if hasattr(match_result, 'score'):
-            db_priority_product['Match_Score'] = float(getattr(match_result, 'score', 0.8))
+            hybrid_product['Match_Score'] = float(getattr(match_result, 'score', 0.8))
         else:
-            db_priority_product['Match_Score'] = 0.8  # Default score
+            hybrid_product['Match_Score'] = 0.8  # Default score
             
         if hasattr(match_result, 'algorithm'):
-            db_priority_product['Match_Algorithm'] = str(getattr(match_result, 'algorithm', 'Enhanced'))
+            hybrid_product['Match_Algorithm'] = str(getattr(match_result, 'algorithm', 'Enhanced'))
         elif hasattr(match_result, 'strategy_used'):
             strategy = getattr(match_result, 'strategy_used')
-            db_priority_product['Match_Algorithm'] = str(getattr(strategy, 'value', str(strategy)))
+            hybrid_product['Match_Algorithm'] = str(getattr(strategy, 'value', str(strategy)))
         else:
-            db_priority_product['Match_Algorithm'] = 'Enhanced'
+            hybrid_product['Match_Algorithm'] = 'Enhanced'
             
-        # CRITICAL: Add JSON item tracking for debugging (matching info only)
+        # CRITICAL: Add JSON item tracking for debugging  
         json_item_name = json_item.get('product_name') or json_item.get('inventory_name') or 'UNKNOWN'
-        db_priority_product['JSON_Item_Name'] = json_item_name
-        db_priority_product['JSON_Fields_Used'] = 0  # No JSON fields used for data
-        db_priority_product['Default_Fields_Applied'] = filled_defaults
+        hybrid_product['JSON_Item_Name'] = json_item_name
+        hybrid_product['JSON_Fields_Used'] = json_fields_used
+        hybrid_product['Default_Fields_Applied'] = filled_defaults
             
-        logging.info(f"💽 DATABASE PRIORITY COMPLETE: '{product_name}' using 100% database data, matched with JSON '{json_item_name}' (match score: {best_match_score:.3f}, defaults applied: {filled_defaults})")
-        return db_priority_product
+        logging.info(f"💽 HYBRID PRIORITY COMPLETE: '{product_name}' using {json_fields_used} JSON fields + database data, matched with JSON '{json_item_name}' (match score: {best_match_score:.3f}, defaults applied: {filled_defaults})")
+        return hybrid_product
 
     def _select_db_price(self, product: dict) -> str:
         """Pick the best available price field from a DB product record."""
