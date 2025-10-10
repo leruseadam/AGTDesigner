@@ -2247,7 +2247,9 @@ const TagManager = {
     createTagElement(tag, isForSelectedTags = false) {
         // For JSON matched tags and educated guess tags, prioritize the matched database display information
         let displayName;
-        if (tag.Source && (tag.Source.includes('JSON Match') || tag.Source.includes('Educated Guess'))) {
+        const isJsonMatched = (tag.Source && (tag.Source === 'JSON Match' || tag.Source.includes('Educated Guess'))) ||
+                              (tag.JSON_Source && (tag.JSON_Source === 'JSON Match' || tag.JSON_Source.includes('Educated Guess')));
+        if (isJsonMatched) {
             // JSON matched tags and educated guess tags: use matched database product name
             displayName = tag.displayName || tag['Product Name*'] || tag.ProductName || tag.Description || 'Unnamed Product';
         } else {
@@ -2383,40 +2385,58 @@ const TagManager = {
         tagElement.className = 'tag-item d-flex align-items-center p-1 mb-1';
         
         // Add special styling for JSON matched tags and educated guess tags
-        if (tag.Source && (tag.Source === 'JSON Match' || tag.Source.includes('Educated Guess'))) {
+        if (isJsonMatched) {
           tagElement.classList.add('json-matched-tag');
-          tagElement.style.border = '2px solid #28a745';
-          tagElement.style.backgroundColor = 'rgba(40, 167, 69, 0.1)';
-          tagElement.style.borderRadius = '8px';
+          // Remove inline styles that conflict with lineage-based CSS coloring
+          // The lineage-based CSS will handle the proper colors
         }
         
-        // CRITICAL FIX: Use EXACT database lineage values for UI colors - no frontend overrides
-        // This ensures JSON matched products display with their actual database lineage colors
-        const lineage = tag.lineage || tag.Lineage || 'MIXED';
-        
-        // Use the exact lineage from database without any product type-based overrides
-        // The backend JSON matching already provides the correct lineage from database records
-        let displayLineage = lineage.toUpperCase();
-        
-        // Only normalize common variations for consistency
-        const lineageNormalizations = {
-            'CBD_BLEND': 'CBD',
-            'PARAPHERNALIA': 'MIXED',
-            'PARA': 'MIXED',
-            'UNKNOWN': 'MIXED'
-        };
-        
-        if (lineageNormalizations[displayLineage]) {
-            displayLineage = lineageNormalizations[displayLineage];
-        }
-        
-        // Set the lineage data attributes using EXACT database values
-        if (displayLineage) {
-            tagElement.dataset.lineage = displayLineage;
-            row.dataset.lineage = displayLineage;
+        // Set data-lineage attribute for CSS coloring on both row and tagElement
+        // CRITICAL FIX: For JSON matched tags, prioritize the Lineage field from the matched database data
+        let lineage;
+        if (isJsonMatched) {
+            // For JSON matched tags, use the Lineage field from the matched database data
+            lineage = tag.Lineage || tag.lineage || 'MIXED';
         } else {
-            tagElement.dataset.lineage = 'MIXED';
-            row.dataset.lineage = 'MIXED';
+            // For regular tags, use the standard fallback
+            lineage = tag.lineage || tag.Lineage || 'MIXED';
+        }
+        
+        let displayLineage = lineage;
+        
+        // Apply nonclassic product type logic to ensure correct lineage colors
+        const productType = tag['Product Type*'] || tag.productType || tag.ProductType || '';
+        const classicTypes = ['flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'];
+        const isNonclassic = !classicTypes.map(ct => ct.toLowerCase()).includes(productType.toLowerCase());
+        
+        if (isNonclassic) {
+            // For nonclassic products, use Product Strain to determine lineage
+            const productStrain = tag['Product Strain'] || tag.productStrain || tag.ProductStrain || '';
+            const strainStr = String(productStrain).toLowerCase();
+            
+            if (strainStr.includes('cbd blend')) {
+                displayLineage = 'CBD'; // Yellow color
+            } else if (strainStr.includes('paraphernalia')) {
+                displayLineage = 'PARAPHERNALIA'; // Pink color
+            } else if (strainStr.includes('mixed')) {
+                displayLineage = 'MIXED'; // Blue color
+            } else {
+                // Default for nonclassic products without specific strain
+                displayLineage = 'MIXED'; // Blue color
+            }
+        }
+        
+        // Backend now handles lineage assignment correctly:
+        // CBD Blend products = yellow (CBD lineage)
+        // Mixed (everything else non-classic) = blue (MIXED lineage)
+        // Paraphernalia = pink (PARAPHERNALIA lineage)
+        
+        if (displayLineage) {
+          tagElement.dataset.lineage = displayLineage.toUpperCase();
+          row.dataset.lineage = displayLineage.toUpperCase();  // Add lineage to row element too
+        } else {
+          tagElement.dataset.lineage = 'MIXED';
+          row.dataset.lineage = 'MIXED';  // Add lineage to row element too
         }
         tagElement.dataset.tagId = tag.tagId;
         tagElement.dataset.vendor = tag.vendor;
@@ -2471,9 +2491,9 @@ const TagManager = {
         checkbox.checked = this.state.persistentSelectedTags.includes(displayName);
         
         // Log JSON matched tag display logic
-        if (tag.Source && (tag.Source.includes('JSON Match') || tag.Source.includes('Educated Guess'))) {
+        if (isJsonMatched) {
             console.log('JSON matched/educated guess tag display logic:', {
-                source: tag.Source,
+                source: tag.Source || tag.JSON_Source,
                 displayName: tag.displayName,
                 productName: tag['Product Name*'],
                 finalDisplayName: displayName
@@ -2492,7 +2512,15 @@ const TagManager = {
 
         
         // Add DOH and High CBD/THC images if applicable
-        const dohValue = (tag.DOH || '').toString().toUpperCase();
+        // CRITICAL FIX: For JSON matched tags, prioritize the DOH field from the matched database data
+        let dohValue;
+        if (isJsonMatched) {
+            // For JSON matched tags, use the DOH field from the matched database data
+            dohValue = (tag['DOH Compliant (Yes/No)'] || tag.DOH || '').toString().toUpperCase();
+        } else {
+            // For regular tags, use the standard DOH field
+            dohValue = (tag.DOH || '').toString().toUpperCase();
+        }
         const productTypeForImages = (tag['Product Type*'] || '').toString().toLowerCase();
         
         // Create image container for dynamic updates
@@ -2563,13 +2591,14 @@ const TagManager = {
         tagInfo.appendChild(imageContainer);
         
         // Add JSON match indicator if this tag came from JSON matching or educated guessing
-        if (tag.Source && (tag.Source.includes('JSON Match') || tag.Source.includes('Educated Guess'))) {
+        if (isJsonMatched) {
           const jsonBadge = document.createElement('span');
           jsonBadge.className = 'badge bg-success me-2';
           jsonBadge.style.fontSize = '0.7rem';
           jsonBadge.style.padding = '2px 6px';
-          jsonBadge.textContent = tag.Source.includes('Educated Guess') ? 'AI' : 'JSON';
-          jsonBadge.title = `This item was ${tag.Source.includes('Educated Guess') ? 'inferred by AI' : 'matched from JSON data'} (${tag.Source})`;
+          const source = tag.Source || tag.JSON_Source || 'JSON Match';
+          jsonBadge.textContent = source.includes('Educated Guess') ? 'AI' : 'JSON';
+          jsonBadge.title = `This item was ${source.includes('Educated Guess') ? 'inferred by AI' : 'matched from JSON data'} (${source})`;
           tagInfo.appendChild(jsonBadge);
         }
         // Create lineage dropdown
@@ -4680,55 +4709,107 @@ const TagManager = {
     },
 
     getLineageColor(lineage) {
-        // SYNCHRONIZED WITH BACKEND: Apply same lineage coloring logic as backend docx_formatting.py
-        if (!lineage) return 'var(--lineage-mixed)';
+        // Use the new backend-matching lineage determination logic
+        return this.getLineageColorFromOptimizedRules(lineage);
+    },
+
+    getLineageColorFromOptimizedRules(inputLineage) {
+        // BACKEND RULES IMPLEMENTATION: Match optimized_lineage_assignment() from excel_processor.py
         
-        const text = lineage.toString().toUpperCase().trim();
+        // Get tag data if available for Product Type and Product Strain analysis
+        const tagData = this.getCurrentTagData();
+        let finalLineage = inputLineage;
         
-        // Remove any marker wrappers for robust matching (same as backend)
-        const markers = ["LINEAGE_START", "LINEAGE_END", "PRODUCTSTRAIN_START", "PRODUCTSTRAIN_END", "PRODUCTBRAND_CENTER_START", "PRODUCTBRAND_CENTER_END"];
-        let cleanText = text;
-        markers.forEach(marker => {
-            cleanText = cleanText.replace(marker, "");
-        });
-        cleanText = cleanText.trim();
-        
-        // Apply EXACT same lineage coloring logic as backend (priority order matters!)
-        if (cleanText.includes("PARAPHERNALIA")) {
-            return 'var(--lineage-para)';
-        } else if (cleanText.includes("HYBRID/INDICA") || cleanText.includes("HYBRID INDICA")) {
-            return 'var(--lineage-hybrid-indica)';
-        } else if (cleanText.includes("HYBRID/SATIVA") || cleanText.includes("HYBRID SATIVA")) {
-            return 'var(--lineage-hybrid-sativa)';
-        } else if (cleanText.includes("SATIVA")) {
-            return 'var(--lineage-sativa)';
-        } else if (cleanText.includes("INDICA")) {
-            return 'var(--lineage-indica)';
-        } else if (cleanText.includes("HYBRID")) {
-            return 'var(--lineage-hybrid)';
-        } else if (cleanText.includes("CBD") || cleanText.includes("CBD_BLEND") || cleanText.includes("CBD BLEND")) {
-            return 'var(--lineage-cbd)';
-        } else if (cleanText.includes("MIXED")) {
-            // MIXED lineage always gets blue bars (covers non-classic types like edibles)
-            return 'var(--lineage-mixed)';
-        } else {
-            // Check for product brand values that get blue bars for non-classic types
-            const brandKeywords = [
-                "MOONSHOT", "PLATINUM", "PREMIUM", "GOLD", "SILVER", "ELITE", "SELECT", "RESERVE", 
-                "CRAFT", "ARTISAN", "BOUTIQUE", "SIGNATURE", "LIMITED", "EXCLUSIVE", "PRIVATE", 
-                "CUSTOM", "SPECIAL", "DELUXE", "ULTRA", "SUPER", "MEGA", "MAX", "PRO", "PLUS", 
-                "X", "CONSTELLATION"
-            ];
-            
-            const hasBrandKeyword = brandKeywords.some(brand => cleanText.includes(brand));
-            if (hasBrandKeyword) {
-                // Product Brand values get blue bars for non-classic types
-                return 'var(--lineage-mixed)';
-            }
+        if (tagData) {
+            // Use the comprehensive backend rules function
+            finalLineage = this.determineLineageFromBackendRules(tagData);
         }
         
-        // Default fallback (same as backend)
-        return 'var(--lineage-mixed)';
+        // Apply color mapping based on final determined lineage
+        const lineageColors = {
+            'SATIVA': 'var(--lineage-sativa)',
+            'INDICA': 'var(--lineage-indica)', 
+            'HYBRID': 'var(--lineage-hybrid)',
+            'HYBRID/SATIVA': 'var(--lineage-hybrid-sativa)',
+            'HYBRID/INDICA': 'var(--lineage-hybrid-indica)',
+            'CBD': 'var(--lineage-cbd)',
+            'CBD_BLEND': 'var(--lineage-cbd)',
+            'MIXED': 'var(--lineage-mixed)',
+            'PARAPHERNALIA': 'var(--lineage-para)',
+            'PARA': 'var(--lineage-para)'
+        };
+        
+        return lineageColors[finalLineage] || 'var(--lineage-mixed)';
+    },
+
+    // Helper function to get current tag data for lineage rules
+    getCurrentTagData() {
+        // Try to get tag data from various sources
+        if (this.currentTag) {
+            return this.currentTag;
+        }
+        
+        // Fallback: return null if no tag data available
+        return null;
+    },
+
+    // Main function to determine lineage using backend rules (optimized_lineage_assignment equivalent)
+    determineLineageFromBackendRules(productData) {
+        if (!productData) {
+            return 'MIXED'; // Default fallback
+        }
+        
+        const productType = (productData['Product Type*'] || productData.Type || '').toString().trim().toLowerCase();
+        const productStrain = (productData['Product Strain'] || '').toString().trim();
+        const currentLineage = productData.Lineage || productData.lineage || '';
+        
+        // Define classic types (matching backend CLASSIC_TYPES)
+        const classicTypes = [
+            'flower', 'pre-roll', 'joint', 'blunt', 'cone', 'preroll',
+            'flower - outdoor', 'flower - indoor', 'flower - greenhouse'
+        ];
+        
+        // Check if lineage is empty/invalid (matching backend empty_lineage_mask)
+        const isEmptyLineage = !currentLineage || 
+                             currentLineage.toString().trim() === '' || 
+                             currentLineage.toString().toLowerCase().trim() === 'nan' ||
+                             currentLineage === null || 
+                             currentLineage === undefined;
+        
+        const isClassicType = classicTypes.includes(productType);
+        const isNonClassicType = !isClassicType;
+        
+        // BACKEND RULE 1: Set default lineage for classic types with empty lineage (HYBRID)
+        if (isClassicType && isEmptyLineage) {
+            return 'HYBRID';
+        }
+        
+        // BACKEND RULE 2: Use Product Strain to determine lineage for ALL non-classic types (override existing lineage)
+        if (isNonClassicType && productStrain) {
+            // CBD Blend products -> CBD lineage (yellow) - override existing lineage
+            if (productStrain.toLowerCase().includes('cbd blend')) {
+                return 'CBD';
+            }
+            // Paraphernalia products -> PARAPHERNALIA lineage (pink) - override existing lineage
+            else if (productStrain.toLowerCase().includes('paraphernalia')) {
+                return 'PARAPHERNALIA';
+            }
+            // Mixed products -> MIXED lineage (blue) - override existing lineage
+            else if (productStrain.toLowerCase().includes('mixed')) {
+                return 'MIXED';
+            }
+            // Default fallback for non-classic types with empty lineage -> MIXED
+            else if (isEmptyLineage) {
+                return 'MIXED';
+            }
+        }
+        // BACKEND RULE 3: Fallback if Product Strain doesn't exist - only for empty lineages in non-classic types
+        else if (isNonClassicType && isEmptyLineage) {
+            return 'MIXED';
+        }
+        
+        // If we get here, return the current lineage (no changes needed)
+        return currentLineage || 'MIXED';
     },
 
     async moveToSelected() {

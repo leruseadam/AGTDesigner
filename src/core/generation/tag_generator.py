@@ -407,52 +407,22 @@ def process_chunk(args):
             except Exception:
                 description = str(description_raw or "")
             
-            # Construct WeightUnits from Weight* and Units, but use JointRatio for pre-roll products
-            product_type = str(row.get("Product Type*", "")).lower().strip()
+            # ULTRA SIMPLE: Build weight directly from database Weight* + Units - no processing
+            weight_value = str(row.get("Weight*", "")).strip()
+            units_value = str(row.get("Units", "")).strip()
             
-            # For pre-roll and infused pre-roll products, use JointRatio instead of Weight* + Units
-            if product_type in ["pre-roll", "infused pre-roll"]:
-                joint_ratio = str(row.get("JointRatio", "")).strip()
-                if joint_ratio and joint_ratio not in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
-                    weight_units = joint_ratio  # Use JointRatio directly (e.g., "0.5g x 2 Pack")
-                else:
-                    weight_units = "0.5g x 2 Pack"  # Default for pre-rolls
+            # Simple concatenation - no checks, no processing, no fallbacks
+            if weight_value and units_value:
+                weight_units = f"{weight_value}{units_value}"
             else:
-                # Regular products: construct from Weight* + Units
-                weight = str(row.get("Weight*", "")).strip()
-                units = str(row.get("Units", "")).strip()
-                
-                # Apply weight conversion for nonclassic products (copy most likely ounce weight)
-                if weight and units and units.lower() in ['g', 'grams', 'gram']:
-                    # Define CLASSIC_TYPES locally to avoid import issues
-                    CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
-                    is_nonclassic = product_type not in [ct.lower() for ct in CLASSIC_TYPES]
-                    
-                    # DEBUG: Log weight conversion attempts
-                    print(f"DEBUG: Weight conversion for {product_name}: weight={weight}, units={units}, product_type={product_type}, is_nonclassic={is_nonclassic}")
-                    
-                    if is_nonclassic:
-                        # Find the most common ounce weight for this product type
-                        most_likely_oz_weight = _find_most_likely_ounce_weight(product_name, product_type)
-                        print(f"DEBUG: Most likely oz weight for {product_name}: {most_likely_oz_weight}")
-                        if most_likely_oz_weight:
-                            weight, units = most_likely_oz_weight.split(' ', 1) if ' ' in most_likely_oz_weight else (most_likely_oz_weight.replace('oz', ''), 'oz')
-                            # Ensure units is 'oz' even if not in the found weight
-                            if 'oz' not in units.lower():
-                                units = 'oz'
-                            print(f"DEBUG: Converted {product_name} to {weight}{units}")
-                
-                if weight and units:
-                    weight_units = f"{weight}{units}"
-                elif weight:
-                    weight_units = weight
-                else:
-                    weight_units = ""
+                weight_units = weight_value or ""
+            
+            print(f"DEBUG: Direct weight construction - Weight*: '{weight_value}', Units: '{units_value}' -> '{weight_units}'")
             
             # Preserve original ProductName; keep Description as the clean field
             label_data["ProductName"] = product_name  # Do not repurpose ProductName
             label_data["Description"] = description  # Primary clean display field
-            label_data["WeightUnits"] = weight_units  # Don't wrap with markers for template rendering
+            label_data["WeightUnits"] = wrap_with_marker(weight_units, "WEIGHTUNITS")  # CRITICAL FIX: Wrap with markers for template rendering
             
             # For edibles, use brand instead of lineage in the label
             edible_types = {"edible (solid)", "edible (liquid)", "high cbd edible liquid", "tincture", "topical", "capsule"}

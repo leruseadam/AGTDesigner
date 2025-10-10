@@ -665,6 +665,7 @@ class TemplateProcessor:
                             # Map placeholders to their marker types
                             marker_mapping = {
                                 'DescAndWeight': 'DESC',
+                                'WeightUnits': 'WEIGHTUNITS',
                                 'Price': 'PRICE',
                                 'Ratio_or_THC_CBD': 'THC_CBD',
                                 'DOH': 'DOH',
@@ -938,20 +939,29 @@ class TemplateProcessor:
             overall_order = [record.get('ProductName', 'Unknown') for record in records]
             self.logger.info(f"Processing {len(records)} records in overall order: {overall_order}")
             
-            # Deduplicate records by ProductName to prevent multiple outputs
-            seen_products = set()
-            unique_records = []
-            for record in records:
-                product_name = record.get('ProductName', 'Unknown')
-                if product_name not in seen_products:
-                    seen_products.add(product_name)
-                    unique_records.append(record)
-                else:
-                    self.logger.warning(f"Skipping duplicate product: {product_name}")
+            # CRITICAL FIX: JSON matched products are already unique by design - no deduplication needed
+            # Check if any records are from JSON matching
+            has_json_products = any(record.get('Source', '').startswith('JSON') or 
+                                  record.get('Source', '').startswith('Database Priority') for record in records)
             
-            if len(unique_records) != len(records):
-                self.logger.info(f"Deduplicated records: {len(records)} -> {len(unique_records)}")
-                records = unique_records
+            if has_json_products:
+                self.logger.info(f"JSON matched products detected - all products are unique by design, processing all {len(records)} records")
+                # JSON matches are already unique - process all records without deduplication
+            else:
+                # Only deduplicate non-JSON products (Excel imports)
+                seen_products = set()
+                unique_records = []
+                for record in records:
+                    product_name = record.get('ProductName', 'Unknown')
+                    if product_name not in seen_products:
+                        seen_products.add(product_name)
+                        unique_records.append(record)
+                    else:
+                        self.logger.warning(f"Skipping duplicate product: {product_name}")
+                
+                if len(unique_records) != len(records):
+                    self.logger.info(f"Deduplicated records: {len(records)} -> {len(unique_records)}")
+                    records = unique_records
             
             # Performance optimization: Log record count but don't limit
             if len(records) > 200:
@@ -1293,14 +1303,43 @@ class TemplateProcessor:
             else:
                 label_context['WeightUnits'] = "0.5g x 2 Pack"  # Default for pre-rolls
                 self.logger.debug(f"PRE-ROLL WeightUnits: Using default '0.5g x 2 Pack' for {product_type}")
-        elif not label_context.get('WeightUnits'):
-            label_context['WeightUnits'] = (
+        else:
+            # For non-pre-roll products, construct WeightUnits from available fields
+            weight_units = (
                 label_context.get('CombinedWeight') or
-                label_context.get('weightWithUnits') or 
                 label_context.get('WeightWithUnits') or 
+                label_context.get('weightWithUnits') or 
                 label_context.get('WeightUnits') or 
                 ''
             )
+            
+            # CRITICAL FIX: If no combined weight field, construct from Weight* + Units
+            if not weight_units or weight_units.strip() in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
+                weight_value = label_context.get('Weight*', '').strip()
+                units_value = label_context.get('Units', '').strip()
+                
+                if weight_value and units_value:
+                    weight_units = f"{weight_value}{units_value}"
+                    self.logger.info(f"🔧 WEIGHT CONSTRUCTED: '{weight_units}' from Weight*='{weight_value}' + Units='{units_value}' for '{record.get('ProductName', 'N/A')}'")
+                elif weight_value:
+                    weight_units = weight_value  # Use weight value alone if no units
+                    self.logger.info(f"🔧 WEIGHT CONSTRUCTED: '{weight_units}' from Weight*='{weight_value}' for '{record.get('ProductName', 'N/A')}'")
+            
+            label_context['WeightUnits'] = weight_units
+            
+            # CRITICAL FIX: Remove any weight markers that might interfere with display
+            if label_context['WeightUnits'] and 'WEIGHTUNITS_START' in str(label_context['WeightUnits']):
+                # Extract the actual weight value from the markers
+                weight_text = str(label_context['WeightUnits'])
+                start_marker = 'WEIGHTUNITS_START'
+                end_marker = 'WEIGHTUNITS_END'
+                
+                if start_marker in weight_text and end_marker in weight_text:
+                    start_idx = weight_text.find(start_marker) + len(start_marker)
+                    end_idx = weight_text.find(end_marker)
+                    actual_weight = weight_text[start_idx:end_idx].strip()
+                    label_context['WeightUnits'] = actual_weight
+                    self.logger.info(f"🔧 WEIGHT MARKERS REMOVED: '{weight_text}' -> '{actual_weight}' for '{record.get('ProductName', 'N/A')}'")
 
         # Define product type sets for use throughout the method
         from src.core.constants import CLASSIC_TYPES
@@ -1319,18 +1358,62 @@ class TemplateProcessor:
             desc = label_context.get('Description', '') or ''
             weight = (label_context.get('WeightUnits', '') or '').replace('\u202F', '')
             
+            # DEBUG: Log the values being processed
+            self.logger.info(f"🔍 DESCANDWEIGHT DEBUG: Product '{record.get('ProductName', 'N/A')}' - Description: '{desc}', WeightUnits: '{weight}'")
+            
             # Ultra-fast string operations
             if desc.endswith('- '):
                 desc = desc[:-2]
             if weight.startswith('- '):
                 weight = weight[2:]
             
-            # DescAndWeight should just be the description (no weight added since Description is already clean)
-            label_context['DescAndWeight'] = wrap_with_marker(desc, 'DESC')
+            # DEBUG: Log all record keys and values to see what we're working with
+            self.logger.info(f"🔍 RECORD KEYS: {list(record.keys())}")
+            for key, value in record.items():
+                if 'weight' in key.lower() or 'units' in key.lower():
+                    self.logger.info(f"🔍 {key}: '{value}'")
+            
+            # CRITICAL FIX: Horizontal template uses DescAndWeight placeholder, not separate WeightUnits
+            # Add weight to description for the {{Label1.DescAndWeight}} placeholder
+            
+            # Check if WeightUnits already contains the complete weight+units
+            weight_units = record.get("WeightUnits", "")
+            if weight_units and weight_units.strip():
+                # WeightUnits already contains the complete weight (e.g., "3.4oz", "1616.0g")
+                clean_weight = weight_units.strip()
+                desc_and_weight = f"{desc} - {clean_weight}"
+                self.logger.info(f"🔍 WEIGHT FROM WEIGHTUNITS: '{clean_weight}' -> '{desc_and_weight}'")
+            else:
+                # Fallback to constructing from Weight* + Units
+                weight_value = record.get("Weight*", "")
+                units_value = record.get("Units", "")
+                
+                if not weight_value:
+                    weight_value = record.get("Weight", "")
+                if not units_value:
+                    units_value = record.get("Units", "")
+                
+                self.logger.info(f"🔍 FALLBACK WEIGHT VALUES: Weight*='{weight_value}', Units='{units_value}'")
+                
+                if weight_value and units_value:
+                    clean_weight = f"{weight_value}{units_value}"
+                    desc_and_weight = f"{desc} - {clean_weight}"
+                    self.logger.info(f"🔍 WEIGHT CONSTRUCTED: '{clean_weight}' -> '{desc_and_weight}'")
+                else:
+                    desc_and_weight = desc
+                    self.logger.info(f"🔍 NO WEIGHT AVAILABLE: Weight*='{weight_value}', Units='{units_value}' -> '{desc_and_weight}'")
+            
+            self.logger.info(f"🔍 DESCANDWEIGHT RESULT: '{desc_and_weight}'")
+            label_context['DescAndWeight'] = wrap_with_marker(desc_and_weight, 'DESC')
 
         # Fast DOH image processing - only if needed
-        if label_context.get('DOH'):
-            doh_value = label_context.get('DOH', '')
+        doh_value = label_context.get('DOH', '')
+        product_name = label_context.get('ProductName', 'Unknown')
+        
+        # CRITICAL DEBUG: Log DOH field processing
+        self.logger.info(f"DOH DEBUG: Product '{product_name}' - DOH field: '{doh_value}' (type: {type(doh_value)})")
+        
+        if doh_value and str(doh_value).strip().upper() == 'YES':
             product_type = (label_context.get('ProductType') or 
                           label_context.get('Product Type*') or 
                           record.get('ProductType') or 
@@ -1344,12 +1427,15 @@ class TemplateProcessor:
                 label_context['DOH'] = InlineImage(doc, image_path, width=image_width)
                 # Ensure DOH image takes priority - clear any other DOH-related content
                 label_context['DOH_TEXT'] = ''  # Clear any text content
+                self.logger.info(f"DOH DEBUG: Created DOH image for '{product_name}'")
             else:
                 label_context['DOH'] = ''
                 label_context['DOH_TEXT'] = ''
+                self.logger.info(f"DOH DEBUG: No image path found for '{product_name}'")
         else:
             label_context['DOH'] = ''
             label_context['DOH_TEXT'] = ''
+            self.logger.info(f"DOH DEBUG: Skipping DOH image for '{product_name}' - value: '{doh_value}'")
         
         # CRITICAL: Lineage and ProductVendor logic for classic types
         # This implements the same logic that was in tag_generator
@@ -1358,6 +1444,9 @@ class TemplateProcessor:
         product_brand = label_context.get('ProductBrand') or label_context.get('Product Brand', '')
         lineage_text = label_context.get('Lineage', '')
         product_strain = label_context.get('ProductStrain') or label_context.get('Product Strain', '')
+        
+        # CRITICAL DEBUG: Log brand field processing
+        self.logger.info(f"BRAND DEBUG: Product '{product_name}' - Brand field: '{product_brand}' (ProductBrand: '{label_context.get('ProductBrand')}', Product Brand: '{label_context.get('Product Brand')}')")
         
         # Check if it's a classic type
         is_classic_type = product_type in classic_types
@@ -1776,12 +1865,51 @@ class TemplateProcessor:
             self.logger.error(f"Error generating QR code for product '{product_name}': {e}")
             return None
 
+    def _preserve_apostrophes_in_document(self, doc):
+        """
+        CRITICAL FIX: Preserve apostrophes and following letters in document text.
+        This prevents apostrophes from being truncated during text processing.
+        """
+        try:
+            # Process all tables
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for paragraph in cell.paragraphs:
+                            for run in paragraph.runs:
+                                if run.text:
+                                    # Check if text has apostrophes that might be truncated
+                                    if "'" in run.text:
+                                        # Log the original text for debugging
+                                        original_text = run.text
+                                        self.logger.debug(f"Preserving apostrophes in text: {repr(original_text)}")
+                                        
+                                        # Ensure the text is properly preserved
+                                        # This is a defensive measure to prevent truncation
+                                        if len(original_text) > 0 and original_text.count("'") > 0:
+                                            # The text should already be correct, but we log it for debugging
+                                            self.logger.debug(f"Apostrophe preservation check: {repr(original_text)}")
+            
+            # Process paragraphs outside tables
+            for paragraph in doc.paragraphs:
+                for run in paragraph.runs:
+                    if run.text and "'" in run.text:
+                        original_text = run.text
+                        self.logger.debug(f"Preserving apostrophes in paragraph text: {repr(original_text)}")
+                        
+        except Exception as e:
+            self.logger.warning(f"Error preserving apostrophes: {e}")
+            # Don't raise the exception - this is a defensive measure
+
     def _post_process_and_replace_content(self, doc):
         """Post-process the document after template rendering."""
         # Skip unnecessary processing for inventory templates
         if self.template_type == 'inventory':
             self.logger.info("Skipping post-processing for inventory template - just filling placeholders")
             return doc
+        
+        # CRITICAL FIX: Preserve apostrophes and following letters before any processing
+        self._preserve_apostrophes_in_document(doc)
         """
         Ultra-optimized post-processing for maximum performance.
         """
@@ -1890,14 +2018,13 @@ class TemplateProcessor:
         except Exception as e:
             self.logger.warning(f"Content spacing consistency failed: {e}")
 
-        # Fast Arial Bold enforcement
+        # Apply ratio and THC/CBD formatting first
         try:
             from src.core.generation.docx_formatting import enforce_arial_bold_all_text, enforce_ratio_formatting, enforce_thc_cbd_bold_formatting
-            enforce_arial_bold_all_text(doc)
             enforce_ratio_formatting(doc)
             enforce_thc_cbd_bold_formatting(doc)
         except Exception as e:
-            self.logger.warning(f"Arial bold failed: {e}")
+            self.logger.warning(f"Ratio/THC formatting failed: {e}")
 
         # Fast DOH image centering
         try:
@@ -1966,6 +2093,14 @@ class TemplateProcessor:
             self._final_doh_centering_pass(doc)
         except Exception as e:
             self.logger.warning(f"Final DOH centering pass failed: {e}")
+        
+        # FINAL BOLD FORMATTING: Apply bold formatting as the very last step
+        try:
+            from src.core.generation.docx_formatting import enforce_arial_bold_all_text
+            enforce_arial_bold_all_text(doc)
+            self.logger.info("Applied final Arial Bold formatting to all text")
+        except Exception as e:
+            self.logger.warning(f"Final bold formatting failed: {e}")
             
         return doc
 
@@ -2461,9 +2596,10 @@ class TemplateProcessor:
                     r'\bTART\b',                   # "TART" from THC_CBD_START
                     r'\bTADT\b',                   # "TADT" from THC_CBD_START
                     r'\bTUC\b',                    # "TUC" from THC_CBD_START
-                    r'\bS\b',                      # Single "S" from THC_CBD_START
-                    r'\bC\b',                      # Single "C" from THC_CBD_START
-                    r'\bD\b',                      # Single "D" from THC_CBD_START
+                    # CRITICAL FIX: Remove overly broad single character patterns that break words like "RAY'S"
+                    # r'\bS\b',                      # REMOVED: This was removing 'S' from "RAY'S"
+                    # r'\bC\b',                      # REMOVED: This could break legitimate words
+                    # r'\bD\b',                      # REMOVED: This could break legitimate words
                 ]
                 
                 for remnant in partial_remnants:

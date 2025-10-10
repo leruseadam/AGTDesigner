@@ -2571,6 +2571,24 @@ img, video, canvas, svg {
     border-color: rgba(255, 192, 203, 0.3);
   }
 
+  /* JSON matched tag styling - subtle indicator without overriding lineage colors */
+  .json-matched-tag {
+    position: relative;
+  }
+  
+  .json-matched-tag::before {
+    content: '';
+    position: absolute;
+    top: -2px;
+    left: -2px;
+    right: -2px;
+    bottom: -2px;
+    border: 2px solid rgba(40, 167, 69, 0.6);
+    border-radius: 8px;
+    pointer-events: none;
+    z-index: 1;
+  }
+
   /* Lineage-specific checkbox colors */
   .tag-item[data-lineage="SATIVA"] .custom-checkbox:checked,
   .tag-item[data-lineage="SATIVA"] .tag-checkbox:checked,

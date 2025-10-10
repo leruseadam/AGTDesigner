@@ -11,6 +11,7 @@ import pandas as pd
 from .product_database import ProductDatabase
 from .ai_product_matcher import AIProductMatcher
 from .advanced_matcher import AdvancedMatcher, MatchResult
+from .enhanced_json_matcher import ENHANCED_JSON_FIELD_MAP
 from collections import defaultdict
 from fuzzywuzzy import fuzz
 from fuzzywuzzy import process
@@ -370,11 +371,38 @@ def extract_products_from_manifest(manifest_json):
     products = []
     for item in items:
         product = {}
-        # Map flat fields
+        # Map flat fields using enhanced field mapping
+        logging.info(f"🔍 DEBUG: Mapping JSON fields for item keys: {list(item.keys())}")
         for k, v in item.items():
-            db_field = JSON_TO_DB_FIELD_MAP.get(k, None)
+            db_field = ENHANCED_JSON_FIELD_MAP.get(k, None)
             if db_field:
                 product[db_field] = v
+                logging.info(f"🔍 DEBUG: Mapped '{k}' -> '{db_field}' = '{v}'")
+            else:
+                logging.info(f"🔍 DEBUG: No mapping found for key '{k}' = '{v}'")
+        
+        # CRITICAL FIX: Ensure basic fields are always populated even if mapping fails
+        if not product.get('Product Name*') and not product.get('ProductName'):
+            product['Product Name*'] = item.get('product_name', '') or item.get('inventory_name', '') or item.get('name', '')
+            product['ProductName'] = product['Product Name*']
+            logging.info(f"🔍 DEBUG: Fallback product name: '{product['Product Name*']}'")
+        
+        if not product.get('Product Brand') and not product.get('ProductBrand'):
+            product['Product Brand'] = item.get('brand', '') or item.get('vendor', '') or 'CERES'
+            product['ProductBrand'] = product['Product Brand']
+            logging.info(f"🔍 DEBUG: Fallback brand: '{product['Product Brand']}'")
+        
+        if not product.get('Price') and not product.get('Price*'):
+            product['Price'] = item.get('price', '') or item.get('line_price', '') or ''
+            product['Price*'] = product['Price']
+            logging.info(f"🔍 DEBUG: Fallback price: '{product['Price']}'")
+        
+        if not product.get('Product Type*') and not product.get('ProductType'):
+            product['Product Type*'] = item.get('inventory_type', '') or item.get('product_type', '') or 'Edible (Solid)'
+            product['ProductType'] = product['Product Type*']
+            logging.info(f"🔍 DEBUG: Fallback product type: '{product['Product Type*']}'")
+        
+        logging.info(f"🔍 DEBUG: Final mapped product: {product}")
         # Nested lab_result_data
         lab_result_data = item.get("lab_result_data", {})
         cannabinoids = extract_cannabinoids(lab_result_data)
@@ -1979,6 +2007,12 @@ class JSONMatcher:
                             # Store original JSON product name for reference
                             product['Original JSON Product Name'] = str(item.get("product_name", ""))
                             
+                            # CRITICAL: Ensure DOH field is preserved from database match
+                            # Database products should have DOH='YES' for compliance stamp
+                            if 'DOH' not in product or not product.get('DOH'):
+                                product['DOH'] = 'YES'  # Default to YES for database matches
+                                product['DOH Compliant (Yes/No)'] = 'Yes'
+                            
                             # Add JSON quantity if available and database doesn't have it
                             current_qty = product.get('Quantity*') if hasattr(product, 'get') else (product['Quantity*'] if hasattr(product, 'index') and 'Quantity*' in product.index else '') if hasattr(product, 'index') else ''
                             if not current_qty and item.get('qty'):
@@ -2228,31 +2262,12 @@ class JSONMatcher:
                     return default
                 return str_value
             
-            # CRITICAL FIX: Always prioritize actual lineage from Excel/database over product type-based guessing
+            # Sanitize lineage - use intelligent defaults based on product type
             lineage = str(safe_row_get(excel_row, 'Lineage', '') or '').strip().upper()
-            
-            # Clean up common lineage variations to ensure consistency
-            lineage_mappings = {
-                'PARAPHERNALIA': 'MIXED',  # Paraphernalia items get MIXED lineage
-                'PARA': 'MIXED',
-                'CBD_BLEND': 'CBD',
-                'UNKNOWN': 'MIXED',
-                '': 'MIXED'  # Empty lineage defaults to MIXED
-            }
-            
-            # Apply lineage mappings for consistency
-            if lineage in lineage_mappings:
-                lineage = lineage_mappings[lineage]
-            
-            # Only fall back to product type-based assignment if lineage is completely missing or invalid
-            if not lineage or lineage not in ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA', 'CBD', 'MIXED']:
-                # Last resort: use product type-based assignment only when no Excel lineage exists
+            if not lineage or lineage not in ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA', 'CBD', 'MIXED', 'PARAPHERNALIA']:
+                # Use intelligent lineage assignment based on product type
                 product_type = str(safe_row_get(excel_row, 'Product Type*', '') or '').strip()
                 lineage = self._get_default_lineage_for_product_type(product_type)
-                logging.info(f"Using fallback lineage '{lineage}' for product type '{product_type}' (no Excel lineage available)")
-            else:
-                # Use the actual Excel lineage data - this is the preferred path
-                logging.info(f"Using actual Excel lineage '{lineage}' for matched product")
             
             # Use global vendor from JSON if available, otherwise use Excel vendor
             vendor_value = global_vendor if global_vendor else safe_get_value(safe_row_get(excel_row, 'Vendor', ''))
@@ -2492,19 +2507,10 @@ class JSONMatcher:
             # Use simple display name to avoid deduplication issues
             comprehensive_display_name = cleaned_product_name
             
-            # CRITICAL FIX: Prioritize inferred lineage from database over product type-based guessing
-            # If we have inferred lineage from database matches, use that
-            if inferred_data.get('lineage') and inferred_data.get('lineage') in ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA', 'CBD', 'MIXED']:
-                final_lineage = inferred_data.get('lineage')
-                logging.info(f"🧬 Using inferred lineage '{final_lineage}' from database matches for '{cleaned_product_name}'")
-            else:
-                # Only fall back to product type-based assignment when no database lineage is available
-                final_lineage = self._get_default_lineage_for_product_type(product_type)
-                logging.info(f"⚠️ Using fallback lineage '{final_lineage}' for product type '{product_type}' (no database lineage available)")
-            
             # Use inferred data from similar database matches, with fallbacks
             final_brand = inferred_data.get('brand') or brand or self._infer_brand_from_name(cleaned_product_name)
             final_product_type = inferred_data.get('product_type') or self._infer_product_type_from_name(cleaned_product_name)
+            final_lineage = inferred_data.get('lineage') or self._get_default_lineage_for_product_type(product_type)
             
             # Determine the final product type to use
             raw_final_type = product_type or final_product_type or map_inventory_type_to_product_type(
@@ -2606,7 +2612,8 @@ class JSONMatcher:
                 'Discountable? (yes/no)': 'yes',
                 'Room*': 'Default',
                 'Medical Only (Yes/No)': 'No',
-                'DOH': 'No',
+                'DOH': 'YES',  # JSON matched products should show DOH compliance stamp
+                'DOH Compliant (Yes/No)': 'Yes',
                 'Source': 'JSON Match'  # Mark as JSON matched item
             }
             
@@ -3158,7 +3165,7 @@ class JSONMatcher:
                 logging.info(f"💵 Inferred cost ${median_cost:.2f} from {len(costs)} similar products for '{product_name}'")
             else:
                 # Estimate cost as 60-70% of price (typical wholesale markup)
-                price_str = inferred_data.get('price', '$25.00')
+                price_str = inferred_data.get('price', '$35')
                 price_clean = re.sub(r'[^\d.]', '', price_str)
                 try:
                     price_float = float(price_clean)
@@ -3287,7 +3294,7 @@ class JSONMatcher:
                 'cartridge': '$40.00',
                 'disposable vape': '$45.00',
                 'edible': '$15.00',
-                'tincture': '$25.00',
+                'tincture': '$35',
                 'topical': '$20.00',
                 'pre-roll': '$15.00',
                 'vape cartridge': '$40.00'
@@ -3300,13 +3307,13 @@ class JSONMatcher:
                     return fallback_price
             
             # Ultimate fallback
-            price = '$25.00'
+            price = '$35'
             logging.info(f"💰 Using ultimate fallback price '{price}' for '{product_name}'")
             return price
             
         except Exception as e:
             logging.warning(f"Error in intelligent price matching: {e}")
-            return "$25.00"  # Safe fallback
+            return "$35"  # Safe fallback
     
     def _intelligently_match_cost(self, json_item, inferred_data, final_price, product_name):
         """
@@ -3611,7 +3618,7 @@ class JSONMatcher:
             
             # Find matching product type
             product_type_lower = str(product_type).lower()
-            base_price = 25.0  # Default price
+            base_price = None  # No default price - extract from data
             
             for type_key, price in base_prices.items():
                 if type_key in product_type_lower:
@@ -3741,10 +3748,43 @@ class JSONMatcher:
                 logging.warning("No inventory transfer items found in JSON")
                 return []
                 
-            # CRITICAL FIX: Preserve ALL items from JSON - no deduplication
-            logging.info(f"Processing {len(items)} JSON items with Product Database priority - preserving ALL items as requested")
+            # CRITICAL FIX: Intelligent deduplication to remove near-identical products
+            logging.info(f"Processing {len(items)} JSON items with intelligent deduplication")
+            
+            def normalize_product_name(name):
+                """Normalize product name to catch variations like 'Cookies & Cream' vs 'Cookies N Cream'"""
+                if not name:
+                    return ""
+                
+                # Convert to lowercase and replace common variations
+                normalized = name.lower()
+                
+                # Replace common variations with standard forms
+                variations = {
+                    '&': 'and',
+                    'n ': 'and ',
+                    'n\'': 'and',
+                    'cookies n cream': 'cookies and cream',
+                    'cookies & cream': 'cookies and cream',
+                    'cookies cream': 'cookies and cream',
+                    ' by ceres': '',
+                    ' ceres': '',
+                    ' - ': ' ',
+                    '  ': ' '  # Remove double spaces
+                }
+                
+                for variation, standard in variations.items():
+                    normalized = normalized.replace(variation, standard)
+                
+                # Remove extra whitespace
+                normalized = ' '.join(normalized.split())
+                
+                return normalized
             
             unique_items = []
+            seen_normalized = set()
+            duplicate_count = 0
+            
             for item in items:
                 if not isinstance(item, dict):
                     continue
@@ -3775,12 +3815,21 @@ class JSONMatcher:
                     
                     logging.info(f"⚠️  Created fallback product name: '{product_name}' for JSON item with missing name")
                 
-                # Add ALL items without any deduplication - each item gets its own label
+                # Check for duplicates using normalized name
+                normalized_name = normalize_product_name(product_name)
+                
+                if normalized_name and normalized_name in seen_normalized:
+                    duplicate_count += 1
+                    logging.info(f"🔄 Skipping duplicate product: '{product_name}' (normalized: '{normalized_name}')")
+                    continue
+                
+                # Add to seen set and unique items
+                seen_normalized.add(normalized_name)
                 unique_items.append(item)
             
-            logging.info(f"CRITICAL FIX: Processed {len(items)} items -> {len(unique_items)} products (ALL preserved)")
+            logging.info(f"INTELLIGENT DEDUPLICATION: {len(items)} items -> {len(unique_items)} unique products ({duplicate_count} duplicates removed)")
             
-            # Use all items for processing (no deduplication)
+            # Use deduplicated items for processing
             items = unique_items
             
             # Initialize tracking variables
@@ -4269,7 +4318,7 @@ class JSONMatcher:
                             else:
                                 price = "50"
                         else:
-                            price = "25"
+                            price = ""  # No default price
                     
                     # Enhanced strain information extraction
                     strain = str(item.get("strain_name", "")).strip()
@@ -4370,8 +4419,8 @@ class JSONMatcher:
                         'Discountable? (yes/no)': 'yes',
                         'Room*': 'Default',
                         'Medical Only (Yes/No)': 'No',
-                        'DOH': 'No',
-                        'DOH Compliant (Yes/No)': 'No',
+                        'DOH': 'YES',  # JSON matched products should show DOH compliance stamp
+                        'DOH Compliant (Yes/No)': 'Yes',
                         
                         # New database column mappings
                         'Concentrate Type': product_type if "concentrate" in product_type.lower() else '',
@@ -4397,7 +4446,7 @@ class JSONMatcher:
                         'Ingredients': ingredients,
                         
                         # Legacy fields for compatibility - CRITICAL FIX: Use Excel-compatible source
-                        'Source': 'Excel Import',  # Changed from 'JSON Match - New Product' to 'Excel Import'
+                        'Source': 'JSON Match',  # Changed back to 'JSON Match' for proper frontend detection
                         'Quantity Received*': quantity,
                         'Weight Unit* (grams/gm or ounces/oz)': units,
                         'CombinedWeight': weight,
@@ -5418,23 +5467,6 @@ class JSONMatcher:
         weight = row.get('Weight*') or row.get('weight') or ''
         ratio = row.get('Ratio_or_THC_CBD') or row.get('Ratio') or ''
         strain = row.get('Product Strain') or row.get('strain_name') or ''
-        
-        # CRITICAL FIX: Include lineage from database data
-        lineage = row.get('Lineage') or row.get('lineage') or ''
-        # Clean up lineage for consistency
-        if lineage:
-            lineage = str(lineage).strip().upper()
-            # Map common variations
-            lineage_mappings = {
-                'PARAPHERNALIA': 'MIXED',
-                'PARA': 'MIXED', 
-                'CBD_BLEND': 'CBD',
-                'UNKNOWN': 'MIXED'
-            }
-            if lineage in lineage_mappings:
-                lineage = lineage_mappings[lineage]
-        else:
-            lineage = 'MIXED'  # Default fallback
 
         product = {
             'Product Name*': name,
@@ -5445,7 +5477,6 @@ class JSONMatcher:
             'Weight*': weight,
             'Ratio_or_THC_CBD': ratio,
             'Product Strain': strain,
-            'Lineage': lineage,  # CRITICAL FIX: Add lineage field
             'displayName': name,
             'Source': 'DB_ALL'
         }
@@ -6285,19 +6316,33 @@ class JSONMatcher:
         
         return description
 
-    def _determine_lineage_for_product(self, product_type: str, existing_lineage: str) -> str:
+    def _determine_lineage_for_product(self, product_type: str, existing_lineage: str, product_name: str = "") -> str:
         """
         Determine the appropriate lineage for a product based on its type.
         
         Args:
             product_type: The product type (e.g., "edible (solid)", "flower", etc.)
             existing_lineage: Any existing lineage from the database
+            product_name: The product name to check for explicit lineage indicators
             
         Returns:
             The appropriate lineage string
         """
         # Import constants to check product type classification
         from src.core.constants import CLASSIC_TYPES
+        
+        # CRITICAL FIX: Check for explicit lineage indicators FIRST, regardless of product type
+        # This ensures JSON matched tags like "Indica Salted Caramel" get proper lineage
+        if product_name:
+            name_lower = product_name.lower()
+            if any(word in name_lower for word in ['sativa', 'sativa-dominant']):
+                return 'SATIVA'
+            elif any(word in name_lower for word in ['indica', 'indica-dominant']):
+                return 'INDICA'
+            elif any(word in name_lower for word in ['hybrid', 'balanced']):
+                return 'HYBRID'
+            elif any(word in name_lower for word in ['cbd', 'hemp', 'low-thc']):
+                return 'CBD'
         
         # Check if this is a classic product type
         if product_type and product_type.strip().lower() in CLASSIC_TYPES:
@@ -6407,7 +6452,7 @@ class JSONMatcher:
                 'ProductBrand': brand,
                 'Product Strain': strain,
                 'Strain Name': strain,
-                'Lineage': self._determine_lineage_for_product(product_type, lineage),
+                'Lineage': self._determine_lineage_for_product(product_type, lineage, product_name),
                 'Weight*': f"{weight or '1'} {units or 'g'}",
                 'Weight': f"{weight or '1'} {units or 'g'}",
                 'Quantity*': "1",
@@ -6423,8 +6468,8 @@ class JSONMatcher:
                 'Discountable? (yes/no)': 'yes',
                 'Room*': 'Default',
                 'Medical Only (Yes/No)': medical_only or 'No',
-                'DOH': 'No',
-                'DOH Compliant (Yes/No)': 'No',
+                'DOH': db_info.get('DOH', ''),  # Use DOH from database
+                'DOH Compliant (Yes/No)': db_info.get('DOH Compliant (Yes/No)', db_info.get('DOH', '')),
                 
                 # Database column mappings
                 'Concentrate Type': product_type if product_type and "concentrate" in product_type.lower() else '',
@@ -6449,8 +6494,8 @@ class JSONMatcher:
                 'Image URL': image_url,
                 'Ingredients': ingredients,
                 
-                # Legacy fields for compatibility - CRITICAL FIX: Use Excel-compatible source
-                'Source': 'Excel Import',  # Changed from 'JSON Match - Product Database' to 'Excel Import'
+                # Legacy fields for compatibility - CRITICAL FIX: Use JSON Match source for proper frontend detection
+                'Source': 'JSON Match',  # Changed back to 'JSON Match' for proper frontend detection
                 'Quantity Received*': "1",
                 'Weight Unit* (grams/gm or ounces/oz)': units or "g",
                 'CombinedWeight': weight or "1",
@@ -6464,7 +6509,7 @@ class JSONMatcher:
                 # Additional fields for consistency
                 'vendor': vendor,
                 'productBrand': brand,
-                'lineage': self._determine_lineage_for_product(product_type, lineage),
+                'lineage': self._determine_lineage_for_product(product_type, lineage, product_name),
                 'productType': product_type or "Unknown",
                 'weight': weight or "1",
                 'units': units or "g",
@@ -6510,7 +6555,7 @@ class JSONMatcher:
                 'Description': primary_product_name,
                 'displayName': clean_product_name(primary_product_name),  # Add cleaned displayName
                 'Vendor': vendor,
-                'Source': 'Excel Import',  # Changed from 'JSON Match - Product Database (Fallback)' to 'Excel Import'
+                'Source': 'JSON Match',  # Changed back to 'JSON Match' for proper frontend detection
                 'Product Type*': 'Unknown',
                 'Price': '25',
                 'Weight*': '1 g',
@@ -6877,35 +6922,124 @@ class JSONMatcher:
     def _create_tag_from_product(self, product: Dict, item: Dict, global_vendor: str) -> Dict[str, Any]:
         """Create a tag from a product object."""
         try:
-            # Extract basic information
-            product_name = product.get('Product Name*', '') or product.get('ProductName', '') or product.get('Description', '')
-            vendor = product.get('Vendor', '') or global_vendor
-            brand = product.get('Product Brand', '') or product.get('Brand', '')
-            product_type = product.get('Product Type*', '') or product.get('ProductType', '')
+            # DEBUG: Log the actual product dictionary structure
+            logging.info(f"🔍 DEBUG: _create_tag_from_product called with product keys: {list(product.keys())}")
+            logging.info(f"🔍 DEBUG: _create_tag_from_product called with item keys: {list(item.keys())}")
+            logging.info(f"🔍 DEBUG: Full product dict: {product}")
+            logging.info(f"🔍 DEBUG: Full item dict: {item}")
+            
+            # Extract basic information - try multiple field name variations
+            product_name = (product.get('Product Name*', '') or 
+                          product.get('ProductName', '') or 
+                          product.get('Description', '') or
+                          product.get('product_name', '') or
+                          product.get('name', ''))
+            
+            vendor = (product.get('Vendor', '') or 
+                     product.get('Vendor/Supplier*', '') or 
+                     product.get('vendor', '') or 
+                     global_vendor)
+            
+            # Try multiple brand field variations - ensure we always get a brand
+            brand = (product.get('Product Brand', '') or 
+                    product.get('ProductBrand', '') or 
+                    product.get('Brand', '') or 
+                    product.get('brand', '') or
+                    product.get('vendor', '') or
+                    item.get('brand', '') or
+                    item.get('vendor', '') or
+                    'CERES')  # Always default to CERES for Ceres products
+            
+            # Try multiple product type field variations
+            product_type = (product.get('Product Type*', '') or 
+                           product.get('ProductType', '') or 
+                           product.get('product_type', '') or
+                           product.get('inventory_type', '') or
+                           'Edible (Solid)')  # Default for Ceres products
+            
+            # DEBUG: Log extracted values
+            logging.info(f"🔍 DEBUG: Extracted values - product_name: '{product_name}', brand: '{brand}', product_type: '{product_type}', vendor: '{vendor}', weight: '{weight}', units: '{units}'")
             description = product.get('Description', '') or product_name
-            weight = product.get('Weight*', '') or product.get('Weight', '')
-            units = product.get('Units', '') or product.get('Weight Unit*', '')
-            price = product.get('Price*', '') or product.get('Price', '')
+            weight = (product.get('Weight*', '') or 
+                     product.get('Weight', '') or 
+                     item.get('weight', '') or
+                     item.get('Weight', '') or
+                     item.get('weight_with_units', '') or
+                     item.get('size', '') or
+                     item.get('Size', ''))
+            units = (product.get('Units', '') or 
+                    product.get('Weight Unit*', '') or
+                    item.get('units', '') or
+                    item.get('Units', '') or
+                    item.get('weight_unit', '') or
+                    'g')
+            # Try multiple price field variations - extract actual price from data
+            price = (product.get('Price*', '') or 
+                    product.get('Price', '') or 
+                    product.get('price', '') or
+                    product.get('Price* (Tier Name for Bulk)', '') or
+                    item.get('price', '') or
+                    item.get('line_price', '') or
+                    '')  # Leave blank if no price found - don't use defaults
             thc = product.get('THC test result', '') or product.get('THC Content', '')
             cbd = product.get('CBD test result', '') or product.get('CBD Content', '')
             strain = product.get('Product Strain', '') or product.get('Strain', '')
-            lineage = product.get('Lineage', '')
+            lineage = product.get('Lineage', '') or self._determine_lineage_for_product(product_type, '', product_name)
             
-            # Create the tag
+            # Get DOH field: try multiple variations, then blank if not found
+            doh = (product.get('DOH', '') or 
+                   product.get('DOH Compliant (Yes/No)', '') or 
+                   product.get('doh', '') or
+                   product.get('doh_compliant', '') or
+                   item.get('doh', '') or
+                   item.get('doh_compliant', '') or
+                   '')  # Leave blank if not found in data
+            
+            # Create the tag with proper field names that template generation expects
             tag = {
-                'product_name': product_name,
-                'vendor': vendor,
-                'brand': brand,
-                'product_type': product_type,
-                'description': description,
-                'weight': weight,
-                'units': units,
-                'price': price,
-                'thc': thc,
-                'cbd': cbd,
-                'strain': strain,
-                'lineage': lineage,
-                'source': 'Main Matching Logic'
+                # Core product information - use template generation field names
+                'Product Name*': product_name,
+                'ProductName': product_name,
+                'Description': description,
+                'Product Type*': product_type,
+                'ProductType': product_type,
+                'Vendor': vendor,
+                'Vendor/Supplier*': vendor,
+                'Product Brand': brand,
+                'ProductBrand': brand,
+                'Product Strain': strain,
+                'Strain Name': strain,
+                'Lineage': lineage,
+                'Weight*': f"{weight} {units}" if weight and units else weight,
+                'Weight': f"{weight} {units}" if weight and units else weight,
+                'Quantity*': '1',
+                'Quantity': '1',
+                'Units': units,
+                'Price': price,
+                'Price* (Tier Name for Bulk)': price,
+                
+                # Enhanced fields
+                'State': 'active',
+                'Is Sample? (yes/no)': 'no',
+                'Is MJ product?(yes/no)': 'yes',
+                'Discountable? (yes/no)': 'yes',
+                'Room*': 'Default',
+                'Medical Only (Yes/No)': 'No',
+                'DOH': doh,  # Use DOH from Excel/database, not hardcoded
+                'DOH Compliant (Yes/No)': doh,
+                
+                # Database column mappings
+                'Concentrate Type': product_type if product_type and "concentrate" in product_type.lower() else '',
+                'Ratio': '',
+                'Joint Ratio': '',
+                'JointRatio': '',
+                'THC test result': thc,
+                'CBD test result': cbd,
+                'Test result unit (% or mg)': '%',
+                'Batch Number': '',
+                'Lot Number': '',
+                'Barcode*': '',
+                'Source': 'JSON Match - Database Priority (100% DB)'
             }
             
             return tag
@@ -6913,19 +7047,49 @@ class JSONMatcher:
         except Exception as e:
             logging.warning(f"Error creating tag from product: {e}")
             return {
-                'product_name': str(item.get("product_name", "")),
-                'vendor': global_vendor,
-                'brand': '',
-                'product_type': '',
-                'description': str(item.get("product_name", "")),
-                'weight': '',
-                'units': '',
-                'price': '',
-                'thc': '',
-                'cbd': '',
-                'strain': '',
-                'lineage': '',
-                'source': 'Main Matching Logic (Error)'
+                # Core product information - use template generation field names
+                'Product Name*': str(item.get("product_name", "")),
+                'ProductName': str(item.get("product_name", "")),
+                'Description': str(item.get("product_name", "")),
+                'Product Type*': 'Edible (Solid)',  # Default product type for error cases
+                'ProductType': 'Edible (Solid)',
+                'Vendor': global_vendor,
+                'Vendor/Supplier*': global_vendor,
+                'Product Brand': 'CERES',  # Default brand for error cases
+                'ProductBrand': 'CERES',
+                'Product Strain': '',
+                'Strain Name': '',
+                'Lineage': '',
+                'Weight*': '',
+                'Weight': '',
+                'Quantity*': '1',
+                'Quantity': '1',
+                'Units': '',
+                'Price': '',  # Leave blank for error cases - no default pricing
+                'Price* (Tier Name for Bulk)': '',
+                
+                # Enhanced fields
+                'State': 'active',
+                'Is Sample? (yes/no)': 'no',
+                'Is MJ product?(yes/no)': 'yes',
+                'Discountable? (yes/no)': 'yes',
+                'Room*': 'Default',
+                'Medical Only (Yes/No)': 'No',
+                'DOH': '',  # Leave blank for error cases - don't assume DOH compliance
+                'DOH Compliant (Yes/No)': '',
+                
+                # Database column mappings
+                'Concentrate Type': '',
+                'Ratio': '',
+                'Joint Ratio': '',
+                'JointRatio': '',
+                'THC test result': '',
+                'CBD test result': '',
+                'Test result unit (% or mg)': '%',
+                'Batch Number': '',
+                'Lot Number': '',
+                'Barcode*': '',
+                'Source': 'JSON Match - Database Priority (Error)'
             }
 
     def _are_product_types_compatible(self, type1: str, type2: str) -> bool:
@@ -7134,8 +7298,8 @@ class JSONMatcher:
                 'Lot Number': '',
                 'Barcode*': '',
                 'Medical Only (Yes/No)': 'No',
-                'DOH': 'No',
-                'DOH Compliant (Yes/No)': 'No',
+                'DOH': '',  # Use blank DOH for educated guesses (no database source)
+                'DOH Compliant (Yes/No)': '',
                 'State': 'active',
                 'Is Sample? (yes/no)': 'no',
                 'Is MJ product?(yes/no)': 'yes',
@@ -7434,6 +7598,7 @@ class JSONMatcher:
         
         # Fallback to exact brand keyword matching
         brand_patterns = {
+            'CERES': ['ceres', 'by ceres', 'ceres gardens'],
             'Oleum': ['oleum'],
             'Dabstract': ['dabstract'],
             'Constellation Cannabis': ['constellation'],
@@ -7489,6 +7654,21 @@ class JSONMatcher:
             # Define brand-specific product patterns
             # These patterns are based on actual branded products in the data
             brand_patterns = {
+                'CERES': [
+                    # Ceres-specific patterns
+                    'ceres',
+                    'by ceres',
+                    'ceres gardens',
+                    'ceres -',
+                    'ceres capsules',
+                    'ceres tincture',
+                    'ceres balm',
+                    'ceres chews',
+                    'ceres boost',
+                    'ceres dragon',
+                    'ceres chill',
+                    'ceres lifted'
+                ],
                 'Oleum': [
                     # Live Resin patterns
                     'live resin cartridge',

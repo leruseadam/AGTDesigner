@@ -1094,19 +1094,19 @@ class EnhancedJSONMatcher:
 
     def _merge_json_data_hybrid(self, product_dict: dict, json_items: list, match_result=None) -> dict:
         """
-        HYBRID PRIORITY approach: Preserve JSON data while using database for enhanced matching.
-        JSON data takes priority for specific fields, database provides additional information.
+        DATABASE-PRIORITY approach: Use 100% database-derived information.
+        JSON is only used for matching purposes, all data comes from database.
         """
         if not json_items:
-            logging.debug("🔄 HYBRID PRIORITY: No JSON items to merge")
+            logging.debug("🔄 DATABASE PRIORITY: No JSON items to merge")
             return product_dict
             
-        # Find the best matching JSON item for this product
+        # Find the best matching JSON item for this product (for matching purposes only)
         json_item = None
         product_name = (product_dict.get('Product Name*') or 
                        product_dict.get('ProductName') or '').lower().strip()
         
-        logging.debug(f"🔍 HYBRID PRIORITY: Looking for JSON match for '{product_name}'")
+        logging.debug(f"🔍 DATABASE PRIORITY: Looking for JSON match for '{product_name}' (matching only)")
         
         # Try to find exact or best matching JSON item with multiple strategies
         best_match_score = 0
@@ -1132,376 +1132,176 @@ class EnhancedJSONMatcher:
                 if total_score > best_match_score:
                     best_match_score = total_score
                     json_item = item
-                    logging.debug(f"🎯 HYBRID PRIORITY: Better match found at index {i}: '{item_name}' (score: {total_score:.3f})")
+                    logging.debug(f"🎯 DATABASE PRIORITY: Better match found at index {i}: '{item_name}' (score: {total_score:.3f})")
         
         # CRITICAL FIX: If no good match found, still use first JSON item but with lower confidence
         if not json_item and json_items:
             json_item = json_items[0]
             best_match_score = 0.1  # Low confidence fallback
             json_item_name = (json_item.get('product_name') or json_item.get('inventory_name') or 'UNKNOWN')
-            logging.info(f"🔄 HYBRID PRIORITY: No good match found, using first JSON item '{json_item_name}' as fallback")
+            logging.info(f"🔄 DATABASE PRIORITY: No good match found, using first JSON item '{json_item_name}' as fallback")
             
         if not json_item:
-            logging.warning("🔄 HYBRID PRIORITY: No JSON item available for match")
+            logging.warning("🔄 DATABASE PRIORITY: No JSON item available for match")
             return product_dict
             
-        # Create hybrid product: Start with database match, then overlay JSON data
-        hybrid_product = dict(product_dict)  # Start with database match as foundation
+        # Create database-priority product: 100% database data
+        db_priority_product = dict(product_dict)  # Start with database match - this is our complete data source
         
-        logging.info(f"� HYBRID PRIORITY: Merging JSON data with database information for '{product_name}'")
-        logging.debug(f"💽 HYBRID PRIORITY: Database product contains {len(hybrid_product)} fields")
+        logging.info(f"� DATABASE PRIORITY: Using 100% database-derived information for '{product_name}'")
+        logging.debug(f"💽 DATABASE PRIORITY: Database product contains {len(db_priority_product)} fields")
         
-        # IMPORTANT: PRESERVE JSON data where available, supplement with database
-        # Merge specific JSON fields that contain valuable information
-        json_item_name = json_item.get('product_name') or json_item.get('inventory_name') or ''
-        json_fields_used = 0
+        # IMPORTANT: NO JSON data merging - all information comes from database
+        # JSON is only used for matching purposes, not for data extraction
         
-        # COMPREHENSIVE Priority field mapping: JSON field -> Excel field
-        json_to_excel_mapping = {
-            # Vendor/Supplier information
-            'vendor': ['Vendor/Supplier*', 'Vendor', 'Product Brand'],
-            'supplier': ['Vendor/Supplier*', 'Vendor', 'Product Brand'],
-            'brand': ['Product Brand', 'Vendor/Supplier*', 'Vendor'],
-            'manufacturer': ['Vendor/Supplier*', 'Vendor', 'Product Brand'],
-            
-            # Product identification
-            'product_name': ['Product Name*', 'ProductName', 'Description'],
-            'inventory_name': ['Product Name*', 'ProductName', 'Description'], 
-            'description': ['Description', 'Product Name*'],
-            'product_id': ['Product ID', 'SKU'],
-            'sku': ['SKU', 'Product ID'],
-            'upc': ['UPC', 'Barcode'],
-            'barcode': ['Barcode', 'UPC'],
-            
-            # Quantities and measurements
-            'quantity': ['Quantity*', 'Qty'],
-            'qty': ['Quantity*', 'Qty'],
-            'weight': ['Weight*', 'Net Weight'],
-            'unit_weight': ['Weight*', 'Net Weight'],
-            'net_weight': ['Weight*', 'Net Weight'],
-            'volume': ['Volume', 'Weight*'],
-            'unit_volume': ['Volume', 'Weight*'],
-            'package_size': ['Weight*', 'Package Size'],
-            'serving_size': ['Serving Size', 'Weight*'],
-            'units_per_package': ['Units per Package', 'Package Count'],
-            
-            # Lab results and potency
-            'thc_content': ['THC test result', 'THC %', 'THC'],
-            'thc_percent': ['THC test result', 'THC %', 'THC'],
-            'thc_percentage': ['THC test result', 'THC %', 'THC'],
-            'total_thc': ['THC test result', 'THC %', 'THC'],
-            'total_thc_percent': ['THC test result', 'THC %', 'THC'],
-            'thca_content': ['THCA', 'THCA %'],
-            'thca_percent': ['THCA', 'THCA %'],
-            'cbd_content': ['CBD test result', 'CBD %', 'CBD'],
-            'cbd_percent': ['CBD test result', 'CBD %', 'CBD'],
-            'cbd_percentage': ['CBD test result', 'CBD %', 'CBD'],
-            'total_cbd': ['CBD test result', 'CBD %', 'CBD'],
-            'total_cbd_percent': ['CBD test result', 'CBD %', 'CBD'],
-            'cbda_content': ['CBDA', 'CBDA %'],
-            'cbda_percent': ['CBDA', 'CBDA %'],
-            'cbn_content': ['CBN', 'CBN %'],
-            'cbg_content': ['CBG', 'CBG %'],
-            'total_cannabinoids': ['Total Cannabinoids', 'Total Cannabinoids %'],
-            
-            # Pricing
-            'price': ['Price', 'Price*', 'Unit Price'],
-            'unit_price': ['Price', 'Price*', 'Unit Price'],
-            'wholesale_price': ['Wholesale Price', 'Price'],
-            'retail_price': ['Price*', 'Price', 'Retail Price'],
-            'cost': ['Cost', 'Price'],
-            
-            # Strain and genetics
-            'strain': ['Product Strain', 'Strain', 'Strain*'],
-            'strain_name': ['Product Strain', 'Strain', 'Strain*'],
-            'product_strain': ['Product Strain', 'Strain', 'Strain*'],
-            'genetics': ['Genetics', 'Product Strain'],
-            'lineage': ['Lineage', 'Strain Lineage'],
-            'dominant_terpene': ['Dominant Terpene', 'Terpenes'],
-            'terpene_profile': ['Terpene Profile', 'Terpenes'],
-            
-            # Product classification
-            'product_type': ['Product Type*', 'Type', 'Category'],
-            'inventory_type': ['Product Type*', 'Type', 'Category'],
-            'inventory_category': ['Category', 'Product Type*', 'Type'],
-            'category': ['Category', 'Product Type*', 'Type'],
-            'subcategory': ['Subcategory', 'Product Type*'],
-            'classification': ['Product Type*', 'Classification'],
-            
-            # Dates and compliance
-            'harvest_date': ['Harvest Date', 'Date Harvested'],
-            'package_date': ['Package Date', 'Date Packaged'],
-            'test_date': ['Test Date', 'Lab Test Date'],
-            'expiration_date': ['Expiration Date', 'Expires'],
-            'best_by_date': ['Best By Date', 'Expiration Date'],
-            'manufacture_date': ['Manufacture Date', 'Date Manufactured'],
-            
-            # Cultivation and processing
-            'cultivation_method': ['Cultivation Method', 'Growing Method'],
-            'extraction_method': ['Extraction Method', 'Processing Method'],
-            'processing_method': ['Processing Method', 'Extraction Method'],
-            'cure_method': ['Cure Method', 'Processing Method'],
-            'trim_method': ['Trim Method', 'Processing Method'],
-            
-            # Compliance and testing
-            'lab_result_id': ['Lab Result ID', 'Test ID'],
-            'batch_number': ['Batch Number', 'Lot Number'],
-            'lot_number': ['Lot Number', 'Batch Number'],
-            'batch_id': ['Batch ID', 'Batch Number'],
-            'test_results': ['Test Results', 'Lab Results'],
-            'coa_url': ['COA URL', 'Certificate URL'],
-            'compliance_status': ['Compliance Status', 'Status'],
-            
-            # Physical properties
-            'color': ['Color', 'Appearance'],
-            'texture': ['Texture', 'Consistency'],
-            'aroma': ['Aroma', 'Smell'],
-            'flavor': ['Flavor', 'Taste'],
-            'appearance': ['Appearance', 'Visual'],
-            
-            # Additional metadata
-            'notes': ['Notes', 'Comments'],
-            'comments': ['Comments', 'Notes'],
-            'special_instructions': ['Special Instructions', 'Notes'],
-            'storage_instructions': ['Storage Instructions', 'Storage'],
-            'dosage_instructions': ['Dosage Instructions', 'Dosage'],
-            'serving_instructions': ['Serving Instructions', 'Instructions'],
-        }
-        
-        # ENHANCED JSON DATA EXTRACTION: Handle nested structures and lab results
-        # Extract from lab_result_data if available
-        lab_result_data = json_item.get('lab_result_data') or json_item.get('lab_results') or {}
-        if isinstance(lab_result_data, dict):
-            # Extract potency data from lab results
-            potency_data = lab_result_data.get('potency', [])
-            if isinstance(potency_data, list):
-                for potency_item in potency_data:
-                    if isinstance(potency_item, dict):
-                        ptype = potency_item.get('type', '').lower()
-                        pvalue = potency_item.get('value')
-                        if pvalue is not None:
-                            if 'thc' in ptype and 'thca' not in ptype:
-                                hybrid_product['THC test result'] = str(pvalue)
-                                json_fields_used += 1
-                                logging.debug(f"🧪 LAB DATA: Set THC = '{pvalue}' from lab_result_data")
-                            elif 'cbd' in ptype and 'cbda' not in ptype:
-                                hybrid_product['CBD test result'] = str(pvalue)
-                                json_fields_used += 1
-                                logging.debug(f"🧪 LAB DATA: Set CBD = '{pvalue}' from lab_result_data")
-                            elif 'thca' in ptype:
-                                hybrid_product['THCA'] = str(pvalue)
-                                json_fields_used += 1
-                                logging.debug(f"🧪 LAB DATA: Set THCA = '{pvalue}' from lab_result_data")
-                            elif 'cbda' in ptype:
-                                hybrid_product['CBDA'] = str(pvalue)
-                                json_fields_used += 1
-                                logging.debug(f"🧪 LAB DATA: Set CBDA = '{pvalue}' from lab_result_data")
-            
-            # Extract COA information
-            coa_url = lab_result_data.get('coa_url') or lab_result_data.get('coa')
-            if coa_url:
-                hybrid_product['COA URL'] = str(coa_url)
-                json_fields_used += 1
-                logging.debug(f"🧪 LAB DATA: Set COA URL from lab_result_data")
-            
-            # Extract test dates
-            test_date = (lab_result_data.get('test_date') or 
-                        lab_result_data.get('coa_release_date') or 
-                        lab_result_data.get('date_tested'))
-            if test_date:
-                hybrid_product['Test Date'] = str(test_date)
-                json_fields_used += 1
-                logging.debug(f"🧪 LAB DATA: Set Test Date = '{test_date}' from lab_result_data")
-        
-        # Extract from package_info if available
-        package_info = json_item.get('package_info') or json_item.get('packaging') or {}
-        if isinstance(package_info, dict):
-            for field in ['weight', 'volume', 'units', 'package_size']:
-                value = package_info.get(field)
-                if value:
-                    if field == 'weight':
-                        hybrid_product['Weight*'] = str(value)
-                        json_fields_used += 1
-                        logging.debug(f"📦 PACKAGE DATA: Set Weight = '{value}' from package_info")
-                    elif field == 'volume':
-                        hybrid_product['Volume'] = str(value)
-                        json_fields_used += 1
-                        logging.debug(f"📦 PACKAGE DATA: Set Volume = '{value}' from package_info")
-                    elif field == 'units':
-                        hybrid_product['Units per Package'] = str(value)
-                        json_fields_used += 1
-                        logging.debug(f"📦 PACKAGE DATA: Set Units = '{value}' from package_info")
-        
-        # Extract from compliance_info if available
-        compliance_info = json_item.get('compliance_info') or json_item.get('compliance') or {}
-        if isinstance(compliance_info, dict):
-            for field in ['batch_number', 'lot_number', 'harvest_date', 'package_date']:
-                value = compliance_info.get(field)
-                if value:
-                    excel_field = {
-                        'batch_number': 'Batch Number',
-                        'lot_number': 'Lot Number', 
-                        'harvest_date': 'Harvest Date',
-                        'package_date': 'Package Date'
-                    }.get(field)
-                    if excel_field:
-                        hybrid_product[excel_field] = str(value)
-                        json_fields_used += 1
-                        logging.debug(f"📋 COMPLIANCE DATA: Set {excel_field} = '{value}' from compliance_info")
-        
-        # FALLBACK: Try direct potency fields at root level if lab_result_data didn't work
-        if 'THC test result' not in hybrid_product or not hybrid_product.get('THC test result', '').strip():
-            for thc_field in ['thc', 'thc_percent', 'thc_percentage', 'total_thc', 'THC', 'THC_PERCENT']:
-                thc_value = json_item.get(thc_field)
-                if thc_value is not None and str(thc_value).strip():
-                    hybrid_product['THC test result'] = str(thc_value)
-                    json_fields_used += 1
-                    logging.debug(f"🔄 FALLBACK: Set THC = '{thc_value}' from root field '{thc_field}'")
-                    break
-        
-        if 'CBD test result' not in hybrid_product or not hybrid_product.get('CBD test result', '').strip():
-            for cbd_field in ['cbd', 'cbd_percent', 'cbd_percentage', 'total_cbd', 'CBD', 'CBD_PERCENT']:
-                cbd_value = json_item.get(cbd_field)
-                if cbd_value is not None and str(cbd_value).strip():
-                    hybrid_product['CBD test result'] = str(cbd_value)
-                    json_fields_used += 1
-                    logging.debug(f"🔄 FALLBACK: Set CBD = '{cbd_value}' from root field '{cbd_field}'")
-                    break
-        
-        # Merge JSON data with priority over database defaults
-        for json_key, excel_fields in json_to_excel_mapping.items():
-            json_value = json_item.get(json_key)
-            if json_value and str(json_value).strip() and str(json_value).strip().lower() not in ['none', 'null', '']:
-                # Find the first matching Excel field and update it
-                for excel_field in excel_fields:
-                    if excel_field in hybrid_product or any(excel_field in k for k in hybrid_product.keys()):
-                        hybrid_product[excel_field] = str(json_value).strip()
-                        json_fields_used += 1
-                        logging.debug(f"🔀 JSON MERGE: Set {excel_field} = '{json_value}' from JSON")
-                        break
-        
-        # ENHANCED critical fields with comprehensive defaults
+        # CRITICAL FIX: Use database weight data, don't override with defaults
+        # Only set defaults for fields that are truly missing, not for weight data
         critical_fields = {
-            'THC test result': '0.00',      # Default THC if missing
-            'CBD test result': '0.00',      # Default CBD if missing
-            'Quantity*': '1',               # Default quantity if missing
-            'Weight*': '1g',                # Default weight if missing (except pre-rolls)
-            'Price': '0',                   # Default price if missing
-            'Lineage': 'MIXED',             # Default lineage if missing
-            'Product Brand': 'Unknown',     # Default brand if missing
-            'Vendor/Supplier*': 'Unknown',  # Default vendor if missing
-            'DOH': 'N/A',                   # Default DOH if missing
+            'Price': '25.00',  # Default price if missing
+            'THC test result': '0.00',  # Default THC if missing
+            'CBD test result': '0.00',  # Default CBD if missing
+            'Quantity*': '1',  # Default quantity if missing
+            'Product Type*': 'Unknown',  # Default type if missing
+            'Lineage': 'MIXED',  # Default lineage if missing
         }
         
-        # SPECIAL: Don't override Weight* for pre-rolls since they use JointRatio
-        product_type = (hybrid_product.get('Product Type*') or '').lower().strip()
+        # CRITICAL FIX: Preserve database weight data - don't override with defaults
+        if db_priority_product.get('Weight*'):
+            logging.info(f"✅ DATABASE WEIGHT PRESERVED: {db_priority_product.get('Weight*')}{db_priority_product.get('Units', 'g')} for '{product_name}'")
+            logging.info(f"🔍 MATCHED DB PRODUCT: '{db_priority_product.get('Product Name*', 'N/A')}'")
+        else:
+            logging.warning(f"⚠️ NO DATABASE WEIGHT: Product '{product_name}' has no weight data in database")
+            logging.warning(f"🔍 MATCHED DB PRODUCT: '{db_priority_product.get('Product Name*', 'N/A')}'")
+            logging.warning(f"🔍 DEBUG: Available fields in db_priority_product: {list(db_priority_product.keys())}")
+            logging.warning(f"🔍 DEBUG: Weight-related fields: Weight*='{db_priority_product.get('Weight*', 'None')}', Units='{db_priority_product.get('Units', 'None')}', CombinedWeight='{db_priority_product.get('CombinedWeight', 'None')}'")
+            # Only set default weight if truly missing from database
+            critical_fields['Weight*'] = '1'
+            critical_fields['Units'] = 'g'
+        
+        # SPECIAL HANDLING FOR PRE-ROLL PRODUCTS: Use JointRatio instead of Weight* 
+        product_type = (db_priority_product.get('Product Type*') or '').lower().strip()
         is_preroll = 'pre-roll' in product_type or 'infused pre-roll' in product_type
         
-        if is_preroll:
-            # Remove Weight* from critical fields for pre-rolls
-            critical_fields.pop('Weight*', None)
-            
-        # Apply defaults only if fields are truly missing or empty
-        filled_defaults = 0
-        for field, default_value in critical_fields.items():
-            current_value = hybrid_product.get(field)
-            if not current_value or str(current_value).strip() in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan', 'Unknown', 'N/A']:
-                # Only apply default if we don't have a value from JSON or database
-                if field not in ['Price', 'Lineage'] or not current_value:  # Be more selective about Price and Lineage
-                    hybrid_product[field] = default_value
-                    filled_defaults += 1
-                    logging.debug(f"💡 ENHANCED DEFAULT: Set {field} = '{default_value}'")
+        logging.info(f"🔍 ENHANCED MATCHER DEBUG: Product '{db_priority_product.get('Product Name*', 'N/A')}' Type: '{product_type}' Is Pre-roll: {is_preroll}")
         
-        # ENHANCED: Try to extract missing data from product name or other fields
-        product_name = hybrid_product.get('Product Name*', '').lower()
-        
-        # Extract brand from product name if missing
-        if hybrid_product.get('Product Brand', '').strip() in ['', 'Unknown']:
-            # Common brand patterns in product names
-            brand_patterns = [
-                r'^([A-Za-z\s]+)\s-\s',          # "Brand Name - Product"
-                r'by\s+([A-Za-z\s]+)',           # "Product by Brand Name"
-                r'from\s+([A-Za-z\s]+)',         # "Product from Brand Name"
-                r'^([A-Za-z]+)\s+[A-Z]',         # "Brand PRODUCT" (first word)
-            ]
-            
-            for pattern in brand_patterns:
-                import re
-                match = re.search(pattern, hybrid_product.get('Product Name*', ''))
-                if match:
-                    extracted_brand = match.group(1).strip()
-                    if len(extracted_brand) > 2:  # Valid brand name
-                        hybrid_product['Product Brand'] = extracted_brand
-                        hybrid_product['Vendor/Supplier*'] = extracted_brand
-                        logging.debug(f"� EXTRACTED BRAND: '{extracted_brand}' from product name")
-                        break
-        
-        # Extract lineage from product name if missing
-        if hybrid_product.get('Lineage', '').strip() in ['', 'MIXED', 'Unknown']:
-            lineage_keywords = {
-                'sativa': 'SATIVA',
-                'indica': 'INDICA', 
-                'hybrid': 'HYBRID',
-                'cbd': 'CBD'
-            }
-            
-            for keyword, lineage in lineage_keywords.items():
-                if keyword in product_name:
-                    hybrid_product['Lineage'] = lineage
-                    logging.debug(f"🔍 EXTRACTED LINEAGE: '{lineage}' from product name")
-                    break
-        
-        # SPECIAL HANDLING FOR PRE-ROLL PRODUCTS: Use JointRatio instead of Weight*
         if is_preroll:
             # For pre-roll products, preserve JointRatio and update Weight* for display
-            joint_ratio = hybrid_product.get('JointRatio', '').strip()
-            logging.info(f"🔍 PRE-ROLL JOINT RATIO: Found '{joint_ratio}' for product '{hybrid_product.get('Product Name*', 'N/A')}'")
+            joint_ratio = db_priority_product.get('JointRatio', '').strip()
+            logging.info(f"🔍 PRE-ROLL JOINT RATIO: Found '{joint_ratio}' for product '{db_priority_product.get('Product Name*', 'N/A')}'")
             if joint_ratio and joint_ratio not in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
                 # Preserve JointRatio field and set Weight* for display compatibility
-                hybrid_product['Weight*'] = joint_ratio
+                db_priority_product['Weight*'] = joint_ratio
                 # Ensure JointRatio field is explicitly preserved for template processing
-                hybrid_product['JointRatio'] = joint_ratio
+                db_priority_product['JointRatio'] = joint_ratio
                 logging.info(f"🚬 PRE-ROLL FIXED: Using JointRatio '{joint_ratio}' as Weight* for {product_type}")
             else:
                 # Default JointRatio if missing - preserve both fields
                 default_ratio = '0.5g x 2 Pack'
-                hybrid_product['JointRatio'] = default_ratio
-                hybrid_product['Weight*'] = default_ratio
+                db_priority_product['JointRatio'] = default_ratio
+                db_priority_product['Weight*'] = default_ratio
                 logging.debug(f"🚬 PRE-ROLL PRIORITY: Set default JointRatio '{default_ratio}' for {product_type}")
         
-        logging.info(f"🔍 ENHANCED MATCHER DEBUG: Product '{hybrid_product.get('Product Name*', 'N/A')}' Type: '{product_type}' Is Pre-roll: {is_preroll}")
+        filled_defaults = 0
+        for field, default_value in critical_fields.items():
+            current_value = db_priority_product.get(field)
+            if not current_value or str(current_value).strip() in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
+                db_priority_product[field] = default_value
+                filled_defaults += 1
+                logging.debug(f"� DATABASE PRIORITY: Set default for {field} = '{default_value}'")
         
         if filled_defaults > 0:
-            logging.info(f"💡 ENHANCED PRIORITY: Applied {filled_defaults} default values for missing fields")
+            logging.info(f"� DATABASE PRIORITY: Applied {filled_defaults} default values for missing database fields")
                 
-        # CRITICAL: Add metadata about the hybrid approach
-        hybrid_product['Source'] = f'Hybrid (JSON: {json_fields_used}, DB: {len(hybrid_product)-json_fields_used})'
-        hybrid_product['JSON_Source'] = 'Data Merged'
-        hybrid_product['Match_Confidence'] = f"{best_match_score:.3f}"
-        hybrid_product['Data_Source'] = 'JSON + Database'
+        # CRITICAL FIX: Ensure weight data is properly formatted for template generation
+        if db_priority_product.get('Weight*'):
+            weight_value = str(db_priority_product.get('Weight*', '')).strip()
+            units_value = str(db_priority_product.get('Units', 'g')).strip()
+            
+            # CRITICAL FIX: Check if weight_value already contains units to avoid duplication
+            if weight_value and units_value:
+                # Check if weight_value already ends with the units (e.g., "0.5oz" already contains "oz")
+                if weight_value.lower().endswith(units_value.lower()):
+                    # Weight already has units, use as-is
+                    clean_weight = weight_value
+                else:
+                    # Weight doesn't have units, add them
+                    clean_weight = f"{weight_value}{units_value}"
+            else:
+                clean_weight = weight_value or ''
+            
+            # CRITICAL FIX: Remove any existing duplication in WeightUnits field
+            existing_weight_units = str(db_priority_product.get('WeightUnits', '')).strip()
+            if existing_weight_units:
+                # Check if WeightUnits already contains a clean weight format
+                import re
+                # Pattern to match weight formats like "3.4oz", "1616.0g", "22.0oz"
+                weight_pattern = r'^(\d+(?:\.\d+)?)(oz|g|mg|kg|lb|lbs)$'
+                match = re.match(weight_pattern, existing_weight_units, re.IGNORECASE)
+                if match:
+                    # WeightUnits is already clean, use it
+                    clean_weight = existing_weight_units
+                    logging.info(f"✅ USING CLEAN WEIGHTUNITS: {clean_weight} for '{product_name}'")
+                else:
+                    # WeightUnits has duplication, try to fix specific patterns from the labels
+                    # Handle patterns like: "0.50.5oz", "1010.0g", "0.220.22g", "0.220.22oz"
+                    
+                    # Pattern 1: Decimal duplication like "0.50.5oz" -> "0.5oz"
+                    decimal_dup_pattern = r'^(\d+\.\d{1,2})\1(oz|g|mg|kg|lb|lbs)$'
+                    match1 = re.match(decimal_dup_pattern, existing_weight_units, re.IGNORECASE)
+                    if match1:
+                        clean_weight = f"{match1.group(1)}{match1.group(2)}"
+                        logging.info(f"✅ FIXED DECIMAL DUPLICATION: '{existing_weight_units}' -> '{clean_weight}' for '{product_name}'")
+                    else:
+                        # Pattern 2: Integer duplication like "1010.0g" -> "10.0g"
+                        integer_dup_pattern = r'^(\d+)\1\.0(oz|g|mg|kg|lb|lbs)$'
+                        match2 = re.match(integer_dup_pattern, existing_weight_units, re.IGNORECASE)
+                        if match2:
+                            clean_weight = f"{match2.group(1)}.0{match2.group(2)}"
+                            logging.info(f"✅ FIXED INTEGER DUPLICATION: '{existing_weight_units}' -> '{clean_weight}' for '{product_name}'")
+                        else:
+                            # Pattern 3: Mixed duplication like "0.220.22g" -> "0.22g"
+                            mixed_dup_pattern = r'^(\d+\.\d+)\1(oz|g|mg|kg|lb|lbs)$'
+                            match3 = re.match(mixed_dup_pattern, existing_weight_units, re.IGNORECASE)
+                            if match3:
+                                clean_weight = f"{match3.group(1)}{match3.group(2)}"
+                                logging.info(f"✅ FIXED MIXED DUPLICATION: '{existing_weight_units}' -> '{clean_weight}' for '{product_name}'")
+                            else:
+                                # Use our constructed clean_weight as fallback
+                                logging.info(f"✅ FIXING DUPLICATED WEIGHTUNITS: '{existing_weight_units}' -> '{clean_weight}' for '{product_name}'")
+            
+            db_priority_product['WeightUnits'] = clean_weight
+            db_priority_product['WeightWithUnits'] = clean_weight
+            db_priority_product['CombinedWeight'] = clean_weight
+            logging.info(f"✅ WEIGHT FORMATTED: {clean_weight} for '{product_name}'")
+        
+        # CRITICAL: Add metadata about the database priority approach
+        db_priority_product['Source'] = 'Database Priority (100% DB)'
+        db_priority_product['JSON_Source'] = 'Matching Only'
+        db_priority_product['Match_Confidence'] = f"{best_match_score:.3f}"
+        db_priority_product['Data_Source'] = 'Database'
         
         # Preserve original match information
         if hasattr(match_result, 'score'):
-            hybrid_product['Match_Score'] = float(getattr(match_result, 'score', 0.8))
+            db_priority_product['Match_Score'] = float(getattr(match_result, 'score', 0.8))
         else:
-            hybrid_product['Match_Score'] = 0.8  # Default score
+            db_priority_product['Match_Score'] = 0.8  # Default score
             
         if hasattr(match_result, 'algorithm'):
-            hybrid_product['Match_Algorithm'] = str(getattr(match_result, 'algorithm', 'Enhanced'))
+            db_priority_product['Match_Algorithm'] = str(getattr(match_result, 'algorithm', 'Enhanced'))
         elif hasattr(match_result, 'strategy_used'):
             strategy = getattr(match_result, 'strategy_used')
-            hybrid_product['Match_Algorithm'] = str(getattr(strategy, 'value', str(strategy)))
+            db_priority_product['Match_Algorithm'] = str(getattr(strategy, 'value', str(strategy)))
         else:
-            hybrid_product['Match_Algorithm'] = 'Enhanced'
+            db_priority_product['Match_Algorithm'] = 'Enhanced'
             
-        # CRITICAL: Add JSON item tracking for debugging  
+        # CRITICAL: Add JSON item tracking for debugging (matching info only)
         json_item_name = json_item.get('product_name') or json_item.get('inventory_name') or 'UNKNOWN'
-        hybrid_product['JSON_Item_Name'] = json_item_name
-        hybrid_product['JSON_Fields_Used'] = json_fields_used
-        hybrid_product['Default_Fields_Applied'] = filled_defaults
+        db_priority_product['JSON_Item_Name'] = json_item_name
+        db_priority_product['JSON_Fields_Used'] = 0  # No JSON fields used for data
+        db_priority_product['Default_Fields_Applied'] = filled_defaults
             
-        logging.info(f"💽 HYBRID PRIORITY COMPLETE: '{product_name}' using {json_fields_used} JSON fields + database data, matched with JSON '{json_item_name}' (match score: {best_match_score:.3f}, defaults applied: {filled_defaults})")
-        return hybrid_product
+        logging.info(f"💽 DATABASE PRIORITY COMPLETE: '{product_name}' using 100% database data, matched with JSON '{json_item_name}' (match score: {best_match_score:.3f}, defaults applied: {filled_defaults})")
+        return db_priority_product
 
     def _select_db_price(self, product: dict) -> str:
         """Pick the best available price field from a DB product record."""
@@ -1806,18 +1606,26 @@ class EnhancedJSONMatcher:
         # Get database products (with caching)
         database_products = self._get_database_products()
         
-        # VENDOR RESTRICTION: DISABLED FOR MAXIMUM COMPATIBILITY
-        # The vendor filtering was causing the enhanced matcher to return fewer results
-        # than the basic JSONMatcher. To maintain compatibility and ensure maximum matches,
-        # we now skip vendor filtering and match against all database products.
+        # VENDOR RESTRICTION: Filter database products to match the JSON product's vendor
         json_vendor = self._normalize_vendor(json_product.get('vendor', ''))
         if json_vendor and json_vendor != 'no_vendor':
-            logging.debug(f"🏢 VENDOR INFO: JSON product has vendor '{json_vendor}' - will be used for scoring but not filtering")
-            # Vendor information is still used in scoring within the matching algorithms
-            # but we don't filter the database products by vendor anymore
-        
-        # Use ALL database products for matching to ensure maximum compatibility with basic JSONMatcher
-        logging.debug(f"✅ MAXIMUM MATCHING: Using all {len(database_products)} database products for matching")
+            # Filter database products to only include those from the same vendor
+            vendor_filtered_products = []
+            for db_product in database_products:
+                raw_db_vendor = str(db_product.get('Vendor/Supplier*', '') or db_product.get('Vendor', '') or db_product.get('Product Brand', ''))
+                db_vendor = self._normalize_vendor(raw_db_vendor)
+                
+                # Check for exact vendor match or partial match
+                if (json_vendor == db_vendor or 
+                    (json_vendor and db_vendor and (json_vendor in db_vendor or db_vendor in json_vendor)) or
+                    self._vendors_match(json_vendor, db_vendor)):
+                    vendor_filtered_products.append(db_product)
+            
+            if vendor_filtered_products:
+                database_products = vendor_filtered_products
+                logging.debug(f"🏢 VENDOR FILTER: Restricted to {len(database_products)} products from vendor '{json_vendor}'")
+            else:
+                logging.warning(f"⚠️ VENDOR FILTER: No products found for vendor '{json_vendor}', using all products")
         
         database_products = database_products
         
@@ -2378,6 +2186,10 @@ class EnhancedJSONMatcher:
                                              hybrid_product.get('ProductName') or '')
                         hybrid_product['Description'] = description_value
                     
+                    # DEBUG: Log weight data before processing
+                    logging.info(f"🔍 DEBUG: Weight data for '{hybrid_product.get('Product Name*', 'Unknown')}': Weight*={hybrid_product.get('Weight*', 'None')}, Units={hybrid_product.get('Units', 'None')}")
+                    logging.info(f"🔍 DEBUG: Processing JSON product: '{hybrid_product.get('Product Name*', 'Unknown')}' -> Database match: '{hybrid_product.get('Product Name*', 'N/A')}'")
+                    
                     # Final price and weight handling with JSON priority
                     json_price = self._extract_json_price(json_data, hybrid_product)
                     if json_price:
@@ -2386,11 +2198,52 @@ class EnhancedJSONMatcher:
                         db_price_raw = self._select_db_price(hybrid_product)
                         hybrid_product['Price'] = self._format_price(db_price_raw)
                     
+                    # CRITICAL FIX: Always preserve database weight data, even if JSON weight is found
                     json_weight = self._extract_json_weight(json_data, hybrid_product)
                     if json_weight:
                         hybrid_product['Weight*'] = json_weight
                         hybrid_product['WeightUnits'] = json_weight
                         hybrid_product['WeightWithUnits'] = json_weight
+                        logging.info(f"✅ DEBUG: Using JSON weight: {json_weight}")
+                    else:
+                        # If no JSON weight, ensure database weight data is preserved
+                        if hybrid_product.get('Weight*'):
+                            hybrid_product['WeightUnits'] = f"{hybrid_product.get('Weight*', '')}{hybrid_product.get('Units', 'g')}"
+                            hybrid_product['WeightWithUnits'] = hybrid_product['WeightUnits']
+                            logging.info(f"✅ DEBUG: Using database weight: {hybrid_product['Weight*']}{hybrid_product.get('Units', 'g')}")
+                        else:
+                            logging.info(f"⚠️ DEBUG: No database weight found for '{hybrid_product.get('Product Name*', 'Unknown')}'")
+                            # CRITICAL FIX: If no weight data at all, try to extract from product name
+                            product_name = hybrid_product.get('Product Name*', '') or hybrid_product.get('ProductName', '')
+                            if product_name:
+                                import re
+                                # Look for weight patterns in product name like "0.22oz", "2.2oz", "100mg", etc.
+                                weight_patterns = [
+                                    r'(\d+(?:\.\d+)?)\s*(oz|ounce)',
+                                    r'(\d+(?:\.\d+)?)\s*(g|gram|grams)',
+                                    r'(\d+(?:\.\d+)?)\s*(mg|milligram)',
+                                    r'(\d+(?:\.\d+)?)(oz|g|mg)',  # No space
+                                ]
+                                
+                                for pattern in weight_patterns:
+                                    match = re.search(pattern, product_name, re.IGNORECASE)
+                                    if match:
+                                        extracted_weight = match.group(1)
+                                        extracted_units = match.group(2).lower()
+                                        # Normalize units
+                                        if extracted_units in ['ounce', 'ounces']:
+                                            extracted_units = 'oz'
+                                        elif extracted_units in ['gram', 'grams']:
+                                            extracted_units = 'g'
+                                        elif extracted_units in ['milligram', 'milligrams']:
+                                            extracted_units = 'mg'
+                                        
+                                        hybrid_product['Weight*'] = extracted_weight
+                                        hybrid_product['Units'] = extracted_units
+                                        hybrid_product['WeightUnits'] = f"{extracted_weight}{extracted_units}"
+                                        hybrid_product['WeightWithUnits'] = hybrid_product['WeightUnits']
+                                        logging.info(f"CRITICAL FIX: Extracted weight from product name '{product_name}': {extracted_weight}{extracted_units}")
+                                        break
                     
                     # Ensure Units prefer weight units over 'each'
                     hybrid_product['Units'] = self._select_units(hybrid_product)

@@ -4074,20 +4074,22 @@ def generate_labels():
                                     row = {
                                         'ProductName': product_name,  # Use ProductName to match Excel data
                                         'Product Name*': product_name,  # Also include Product Name* for compatibility
-                                        'Product Brand': tag.get('Product Brand', ''),
-                                        'Product Type*': tag.get('Product Type*', 'Edible (Solid)'),  # Database default
+                                        'Product Brand': tag.get('Product Brand', tag.get('Vendor', '')),  # Use actual brand or vendor from JSON
+                                        'Product Type*': tag.get('Product Type*', 'Flower'),  # Most common product type
                                         'Vendor/Supplier*': tag.get('Vendor/Supplier*', 'A Greener Today'),  # Database default
                                         'Description': tag.get('Description', product_name),  # Use product name as description
-                                        'Lineage': tag.get('Lineage', 'MIXED'),  # Database default
+                                        'Lineage': tag.get('Lineage', 'MIXED'),  # Use database result directly
                                         'THC test result': tag.get('THC test result', '0.00'),  # Database default
                                         'CBD test result': tag.get('CBD test result', '0.00'),  # Database default
                                         'Test result unit (% or mg)': tag.get('Test result unit (% or mg)', '%'),  # Database default
                                         'Weight*': tag.get('Weight*', '1'),  # Database default (no units in weight field)
                                         'Units': tag.get('Units', 'g'),  # Database default units
-                                        'Price': tag.get('Price', '25.00'),  # Database default price
+                                        'Price': tag.get('Price', '$35'),  # Most common price in database
+                                        'Price* (Tier Name for Bulk)': tag.get('Price', '$35'),  # Add the field template generation looks for
                                         'Quantity*': tag.get('Quantity*', '1'),  # Database default
-                                        'Product Brand': tag.get('Product Brand', 'CERES'),  # Database default
                                         'Product Strain': tag.get('Product Strain', 'Mixed'),  # Database default
+                                        'DOH': tag.get('DOH', ''),  # Use DOH from JSON/database, not hardcoded
+                                        'DOH Compliant (Yes/No)': tag.get('DOH Compliant (Yes/No)', ''),  # Use DOH compliance from JSON/database
                                         'displayName': tag.get('displayName', product_name),
                                         'Source': tag.get('Source', 'Database Priority (100% DB)')  # Updated source
                                     }
@@ -4331,8 +4333,88 @@ def generate_labels():
         # PRIORITY: Use database data when available, fall back to Excel data
         records = []
         
-        # First, try to get records from database (preferred source)
-        if has_database:
+        # CRITICAL FIX: Check if this is a JSON matched session first
+        json_matched_cache_key = session.get('json_matched_cache_key')
+        is_json_matched_session = json_matched_cache_key is not None
+        
+        if is_json_matched_session:
+            logging.info("CRITICAL FIX: JSON matched session detected - processing JSON matched products directly")
+            # For JSON matched sessions, use the JSON matched data directly
+            json_matched_tags = session.get('json_matched_tags', [])
+            if json_matched_tags:
+                logging.info(f"Processing {len(json_matched_tags)} JSON matched products directly")
+                records = []
+                
+                # Try to get database for weight lookup
+                product_db = None
+                try:
+                    from src.core.data.product_database import get_product_database
+                    product_db = get_product_database()
+                except:
+                    logging.warning("Could not get product database for weight lookup")
+                
+                for tag in json_matched_tags:
+                    if isinstance(tag, dict):
+                        logging.info(f"CRITICAL DEBUG: Processing JSON matched tag: {tag}")
+                        # Try to get weight data from database if available
+                        product_name = tag.get('Product Name*', '') or tag.get('ProductName', '')
+                        db_weight_data = None
+                        
+                        if product_db and product_name:
+                            try:
+                                db_products = product_db.get_products_by_names([product_name])
+                                if db_products and len(db_products) > 0:
+                                    db_weight_data = db_products[0]
+                                    logging.info(f"Found database weight data for '{product_name}': Weight*='{db_weight_data.get('Weight*', '')}', Units='{db_weight_data.get('Units', '')}'")
+                            except Exception as e:
+                                logging.warning(f"Error looking up database weight for '{product_name}': {e}")
+                        
+                        # CRITICAL FIX: Use database match weight data from JSON matched tags
+                        # The JSON matched tags should already contain database weight data from the matching process
+                        
+                        # Convert JSON matched tag to record format
+                        record = {
+                            'Product Name*': tag.get('Product Name*', ''),
+                            'ProductName': tag.get('ProductName', ''),
+                            'Product Brand': tag.get('Product Brand', 'CERES'),
+                            'ProductBrand': tag.get('Product Brand', 'CERES'),
+                            'Product Type*': tag.get('Product Type*', 'Edible (Solid)'),
+                            'ProductType': tag.get('Product Type*', 'Edible (Solid)'),
+                            'Vendor/Supplier*': tag.get('Vendor/Supplier*', 'A Greener Today'),
+                            'Vendor': tag.get('Vendor/Supplier*', 'A Greener Today'),
+                            'Description': tag.get('Description', tag.get('Product Name*', '')),
+                            'Lineage': tag.get('Lineage', 'MIXED'),
+                            'THC test result': tag.get('THC test result', '0.00'),
+                            'CBD test result': tag.get('CBD test result', '0.00'),
+                            'Test result unit (% or mg)': tag.get('Test result unit (% or mg)', '%'),
+                            'Weight*': tag.get('Weight*', ''),
+                            'Units': tag.get('Units', ''),
+                            'CombinedWeight': tag.get('CombinedWeight', ''),
+                            'WeightUnits': tag.get('WeightUnits', ''),
+                            'Price': tag.get('Price', ''),
+                            'Price* (Tier Name for Bulk)': tag.get('Price', ''),
+                            'Quantity*': tag.get('Quantity*', '1'),
+                            'Product Strain': tag.get('Product Strain', 'Mixed'),
+                            'DOH': tag.get('DOH', ''),
+                            'DOH Compliant (Yes/No)': tag.get('DOH Compliant (Yes/No)', ''),
+                            'displayName': tag.get('displayName', tag.get('Product Name*', '')),
+                            'Source': tag.get('Source', 'JSON Match - Database Priority (100% DB)')
+                        }
+                        
+                        # CRITICAL DEBUG: Log all weight-related fields
+                        logging.info(f"CRITICAL DEBUG: Weight fields for '{record.get('Product Name*', '')}':")
+                        logging.info(f"  Weight*: '{record.get('Weight*', '')}'")
+                        logging.info(f"  Units: '{record.get('Units', '')}'")
+                        logging.info(f"  CombinedWeight: '{record.get('CombinedWeight', '')}'")
+                        logging.info(f"  WeightUnits: '{record.get('WeightUnits', '')}'")
+                        logging.info(f"  All record keys: {list(record.keys())}")
+                        
+                        records.append(record)
+                logging.info(f"CRITICAL FIX: Generated {len(records)} records from JSON matched data")
+            else:
+                logging.warning("CRITICAL FIX: JSON matched session but no json_matched_tags found")
+                records = []
+        elif has_database:
             logging.info("Using database for record generation (preferred source)")
             try:
                 from src.core.data.product_database import get_product_database
@@ -5006,10 +5088,16 @@ def get_available_tags():
         logging.info("=== AVAILABLE TAGS DEBUG START ===")
         logging.info(f"Available tags request at {datetime.now().strftime('%H:%M:%S')}")
         
-        # CRITICAL FIX: Force cache invalidation for weight field fixes
+        # Check for cached available tags first (JSON matched products)
         cache_key = get_session_cache_key('available_tags')
-        cache.delete(cache_key)
-        logging.info("Cleared available_tags cache to ensure weight field fixes are applied")
+        cached_tags = cache.get(cache_key)
+        if cached_tags:
+            logging.info(f"Using {len(cached_tags)} cached available tags (JSON matched products)")
+            return jsonify({
+                'available_tags': cached_tags,
+                'total_count': len(cached_tags),
+                'source': 'cache'
+            })
         
         # Store validation removed - using single database for all stores
         
