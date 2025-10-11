@@ -163,6 +163,92 @@ def fix_all_weights(dry_run=False):
     total_updated += g_count
     print()
     
+    # FIX 4: Non-classic types (topicals, edible solids) → oz
+    print("4. Converting non-classic products (topicals, edible solids) to oz...")
+    print("-" * 80)
+    
+    cursor.execute('''
+        SELECT rowid, "Product Name*", "Product Brand", "Weight*", "Units", "Product Type*"
+        FROM products
+        WHERE (
+            ("Product Type*" LIKE '%Topical%' AND CAST("Weight*" AS REAL) > 100)
+            OR
+            ("Product Type*" LIKE '%Edible (Solid)%' AND CAST("Weight*" AS REAL) > 100)
+        )
+        AND LOWER("Units") = 'g'
+    ''')
+    
+    nonclassic_products = cursor.fetchall()
+    nonclassic_count = 0
+    
+    for rowid, name, brand, weight, units, ptype in nonclassic_products:
+        try:
+            weight_g = float(weight)
+            weight_oz = round(weight_g / 28.3495, 2)  # Convert grams to oz
+            
+            display_name = name if name and name.strip() else f"{brand} - {ptype}"
+            print(f"  {display_name}")
+            print(f"    {weight}g → {weight_oz} oz")
+            
+            if not dry_run:
+                cursor.execute('''
+                    UPDATE products
+                    SET "Weight*" = ?,
+                        "Units" = 'oz',
+                        "updated_at" = ?
+                    WHERE rowid = ?
+                ''', (str(weight_oz), datetime.now().isoformat(), rowid))
+            
+            nonclassic_count += 1
+        except ValueError:
+            pass
+    
+    if nonclassic_count == 0:
+        print("  ✓ No non-classic products need conversion")
+    else:
+        print(f"  ✓ Converted {nonclassic_count} products")
+    
+    total_updated += nonclassic_count
+    print()
+    
+    # FIX 5: Flower weight mismatches (e.g., "14g" in name but wrong weight in DB)
+    print("5. Fixing flower weight mismatches...")
+    print("-" * 80)
+    
+    cursor.execute('''
+        SELECT rowid, "Product Name*", "Weight*"
+        FROM products
+        WHERE "Product Name*" LIKE '%14g%'
+        AND "Weight*" != '14'
+        AND "Weight*" != '14.0'
+    ''')
+    
+    flower_mismatches = cursor.fetchall()
+    flower_count = 0
+    
+    for rowid, name, weight in flower_mismatches:
+        print(f"  {name}")
+        print(f"    {weight} → 14g (based on product name)")
+        
+        if not dry_run:
+            cursor.execute('''
+                UPDATE products
+                SET "Weight*" = '14',
+                    "Units" = 'g',
+                    "updated_at" = ?
+                WHERE rowid = ?
+            ''', (datetime.now().isoformat(), rowid))
+        
+        flower_count += 1
+    
+    if flower_count == 0:
+        print("  ✓ No flower weight mismatches found")
+    else:
+        print(f"  ✓ Fixed {flower_count} products")
+    
+    total_updated += flower_count
+    print()
+    
     # Commit changes
     if not dry_run:
         conn.commit()
@@ -269,6 +355,8 @@ if __name__ == "__main__":
         print("  1. Constellation Moonshots → 1.7 oz")
         print("  2. Major beverages → 6.7 oz")
         print("  3. Any 190g → 6.7 oz")
+        print("  4. Non-classic types (topicals, edible solids >100g) → oz")
+        print("  5. Flower weight mismatches (name vs database)")
         sys.exit(0)
     
     if len(sys.argv) > 1 and sys.argv[1] == 'verify':
