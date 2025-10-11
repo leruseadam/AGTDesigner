@@ -6699,13 +6699,40 @@
         }, 1500); // Start attention animation after 1.5 seconds
       });
       
-      // File upload functionality
-      document.getElementById('fileInput').addEventListener('change', function(e) {
-        const file = e.target.files[0];
-        if (file && window.TagManager) {
-          window.TagManager.uploadFile(file);
+      // File upload functionality - FIXED for PythonAnywhere
+      // Wait for TagManager to be fully loaded before attaching listener
+      function initializeFileUpload() {
+        const fileInput = document.getElementById('fileInput');
+        if (!fileInput) {
+          console.error('fileInput element not found');
+          return;
         }
-      });
+        
+        // Check if TagManager and uploadFile method are available
+        if (window.TagManager && typeof window.TagManager.uploadFile === 'function') {
+          console.log('✓ TagManager ready, attaching file upload listener');
+          
+          fileInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+              console.log('File selected:', file.name);
+              try {
+                window.TagManager.uploadFile(file);
+              } catch (error) {
+                console.error('Error uploading file:', error);
+                alert('Error uploading file. Please try again or refresh the page.');
+              }
+            }
+          });
+        } else {
+          console.warn('TagManager not ready yet, retrying in 100ms...');
+          // Retry after a short delay
+          setTimeout(initializeFileUpload, 100);
+        }
+      }
+      
+      // Initialize file upload with retry mechanism
+      initializeFileUpload();
       
       // On page load, show default file if present
       var initialData = document.getElementById('initialData');

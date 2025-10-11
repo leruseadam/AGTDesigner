@@ -1471,6 +1471,19 @@ def favicon():
     return send_from_directory(os.path.join(app.root_path, 'static'),
                                'favicon.ico', mimetype='image/vnd.microsoft.icon')
 
+@app.after_request
+def add_cache_control_headers(response):
+    """Add cache control headers to prevent aggressive caching on PythonAnywhere."""
+    # Don't cache JavaScript, CSS, or HTML files
+    if (response.content_type and 
+        ('javascript' in response.content_type or 
+         'css' in response.content_type or 
+         'html' in response.content_type)):
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+    return response
+
 @app.route('/test')
 def test():
     """Simple test route to verify the app is working."""
