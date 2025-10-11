@@ -87,6 +87,9 @@ const PRODUCT_TYPE_OVERRIDES = {
   "mini buds": "flower",
   "bud": "flower",
   "pre-roll": "pre-roll",
+  "Pre-Roll": "pre-roll",  // Map title case to lowercase for filtering
+  "Infused Pre-Roll": "infused pre-roll",  // Map title case to lowercase for filtering
+  "infused pre-roll": "infused pre-roll",  // Map lowercase to lowercase for filtering
   "alcohol/ethanol extract": "rso/co2 tankers",
   "Alcohol/Ethanol Extract": "rso/co2 tankers",
   "alcohol ethanol extract": "rso/co2 tankers",
@@ -1185,6 +1188,16 @@ const TagManager = {
             highCbd: highCbdFilter
         });
         
+        // DEBUG: Check if productTypeFilter is being set correctly
+        if (productTypeFilter) {
+            console.log('🔍 Product Type Filter Debug:', {
+                rawValue: productTypeFilter,
+                normalizedValue: normalizeProductType(productTypeFilter),
+                elementValue: document.getElementById('productTypeFilter')?.value,
+                elementOptions: Array.from(document.getElementById('productTypeFilter')?.options || []).map(opt => opt.value)
+            });
+        }
+        
         // Store current filters in state for use by updateSelectedTags
         this.state.filters = {
             vendor: vendorFilter,
@@ -1255,6 +1268,15 @@ const TagManager = {
             if (productTypeFilter && productTypeFilter.trim() !== '' && productTypeFilter.toLowerCase() !== 'all') {
                 const tagProductType = (tag['Product Type*'] || tag.productType || '').toString().trim();
                 const normalizedTagProductType = normalizeProductType(tagProductType);
+                
+                // DEBUG: Log product type filtering details
+                console.log('🔍 Product Type Filtering Debug:', {
+                    tagProductType: tagProductType,
+                    normalizedTagProductType: normalizedTagProductType,
+                    productTypeFilter: productTypeFilter,
+                    match: normalizedTagProductType.toLowerCase() === productTypeFilter.toLowerCase()
+                });
+                
                 if (normalizedTagProductType.toLowerCase() !== productTypeFilter.toLowerCase()) {
                     return false;
                 }
@@ -1324,6 +1346,18 @@ const TagManager = {
             }
             
             return true;
+        });
+        
+        // DEBUG: Log filtering results
+        console.log('🔍 Filtering Results:', {
+            originalTagsCount: tagsToFilter.length,
+            filteredTagsCount: filteredTags.length,
+            productTypeFilter: productTypeFilter,
+            prerollTags: filteredTags.filter(tag => {
+                const tagProductType = (tag['Product Type*'] || tag.productType || '').toString().trim();
+                const normalizedType = normalizeProductType(tagProductType);
+                return normalizedType.toLowerCase() === 'pre-roll';
+            }).length
         });
         
         // Cache the results
@@ -2398,8 +2432,22 @@ const TagManager = {
             // For JSON matched tags, use the Lineage field from the matched database data
             lineage = tag.Lineage || tag.lineage || 'MIXED';
         } else {
-            // For regular tags, use the standard fallback
-            lineage = tag.lineage || tag.Lineage || 'MIXED';
+            // For regular tags, use the standard fallback with comprehensive field checking
+            lineage = tag.lineage || tag.Lineage || tag['Lineage*'] || tag.currentLineage || tag.canonical_lineage || 'MIXED';
+        }
+        
+        // DEBUG: Log lineage resolution for selected tags
+        if (isForSelectedTags) {
+            console.log(`DEBUG: Lineage resolution for selected tag "${displayName}":`, {
+                'tag.lineage': tag.lineage,
+                'tag.Lineage': tag.Lineage,
+                'tag.Lineage*': tag['Lineage*'],
+                'tag.currentLineage': tag.currentLineage,
+                'tag.canonical_lineage': tag.canonical_lineage,
+                'resolved lineage': lineage,
+                'isJsonMatched': isJsonMatched,
+                'tag object': tag
+            });
         }
         
         let displayLineage = lineage;
@@ -2411,18 +2459,43 @@ const TagManager = {
         
         if (isNonclassic) {
             // For nonclassic products, use Product Strain to determine lineage
+            // UPDATED: Use the same conservative logic as backend
             const productStrain = tag['Product Strain'] || tag.productStrain || tag.ProductStrain || '';
             const strainStr = String(productStrain).toLowerCase();
             
+            // Define edible types for more conservative CBD assignment
+            const edibleTypes = ['edible (solid)', 'edible (liquid)', 'high cbd edible liquid', 'tincture', 'topical', 'capsule'];
+            const isEdible = edibleTypes.includes(productType.toLowerCase());
+            
             if (strainStr.includes('cbd blend')) {
-                displayLineage = 'CBD'; // Yellow color
+                // For edibles, only assign CBD lineage if explicitly high-CBD
+                if (isEdible) {
+                    const productName = (tag['Product Name*'] || tag.ProductName || '').toString().toUpperCase();
+                    if (productType.toLowerCase() === 'high cbd edible liquid' || 
+                        (productName.includes('CBD') && ['HIGH', 'PURE', 'ISOLATE'].some(word => productName.includes(word)))) {
+                        displayLineage = 'CBD'; // Explicitly high-CBD edible
+                    } else {
+                        displayLineage = 'MIXED'; // Regular edible with CBD Blend strain
+                    }
+                } else {
+                    displayLineage = 'CBD'; // Non-edible with CBD Blend strain
+                }
+            } else if (strainStr.includes('cbn') || strainStr.includes('cbc') || strainStr.includes('cbg')) {
+                // CBN, CBC, CBG products should get CBD lineage (yellow color)
+                displayLineage = 'CBD';
             } else if (strainStr.includes('paraphernalia')) {
                 displayLineage = 'PARAPHERNALIA'; // Pink color
             } else if (strainStr.includes('mixed')) {
                 displayLineage = 'MIXED'; // Blue color
             } else {
-                // Default for nonclassic products without specific strain
-                displayLineage = 'MIXED'; // Blue color
+                // Check product name for CBN/CBC/CBG content
+                const productName = (tag['Product Name*'] || tag.ProductName || '').toString().toUpperCase();
+                if (productName.includes('CBN') || productName.includes('CBC') || productName.includes('CBG')) {
+                    displayLineage = 'CBD'; // CBN/CBC/CBG products get CBD lineage (yellow color)
+                } else {
+                    // Default for nonclassic products without specific strain
+                    displayLineage = 'MIXED'; // Blue color
+                }
             }
         }
         
@@ -2434,9 +2507,11 @@ const TagManager = {
         if (displayLineage) {
           tagElement.dataset.lineage = displayLineage.toUpperCase();
           row.dataset.lineage = displayLineage.toUpperCase();  // Add lineage to row element too
+          console.log(`🎨 Set data-lineage for ${displayName}: ${displayLineage.toUpperCase()}`);
         } else {
           tagElement.dataset.lineage = 'MIXED';
           row.dataset.lineage = 'MIXED';  // Add lineage to row element too
+          console.log(`🎨 Set data-lineage for ${displayName}: MIXED (fallback)`);
         }
         tagElement.dataset.tagId = tag.tagId;
         tagElement.dataset.vendor = tag.vendor;
@@ -2643,16 +2718,41 @@ const TagManager = {
             { value: 'PARA', label: 'P' },
             { value: 'MIXED', label: 'THC' }
         ];
+        // Helper function to determine if a lineage should map to MIXED
+        const shouldMapToMixed = (lineageValue) => {
+            const validLineages = ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/INDICA', 'HYBRID/SATIVA', 'CBD', 'CBD_BLEND', 'PARA', 'PARAPHERNALIA', 'MIXED'];
+            return !validLineages.includes((lineageValue || '').toUpperCase());
+        };
+        
         uniqueLineages.forEach(option => {
             const optionElement = document.createElement('option');
             optionElement.value = option.value;
             optionElement.textContent = option.label;
-            if ((lineage === option.value) || (option.value === 'CBD' && lineage === 'CBD_BLEND')) {
+            
+            // Enhanced selection logic to handle various mappings
+            let shouldSelect = false;
+            if (lineage === option.value) {
+                shouldSelect = true;
+            } else if (option.value === 'CBD' && lineage === 'CBD_BLEND') {
+                shouldSelect = true;
+            } else if (option.value === 'MIXED' && shouldMapToMixed(lineage)) {
+                shouldSelect = true;
+            }
+            
+            if (shouldSelect) {
                 optionElement.selected = true;
             }
             lineageSelect.appendChild(optionElement);
         });
-        lineageSelect.value = lineage;
+        
+        // Set the dropdown value - handle mappings for display
+        if (lineage === 'CBD_BLEND') {
+            lineageSelect.value = 'CBD';
+        } else if (shouldMapToMixed(lineage)) {
+            lineageSelect.value = 'MIXED';
+        } else {
+            lineageSelect.value = lineage;
+        }
         if (tag.productType === 'Paraphernalia' || tag['Product Type*'] === 'Paraphernalia') {
             lineageSelect.disabled = true;
             lineageSelect.style.opacity = '0.7';
@@ -2676,6 +2776,10 @@ const TagManager = {
                 lineageSelect.value = newLineage;
                 // Update the data-lineage attribute
                 tagElement.dataset.lineage = newLineage.toUpperCase();
+                
+                // CRITICAL FIX: Update the tag color to reflect the new lineage
+                // Force a re-render of the tag to apply the new lineage color
+                this.forceTagColorUpdate(tag, newLineage);
                 
                 // Remove saving option
                 lineageSelect.removeChild(savingOption);
@@ -3037,6 +3141,24 @@ const TagManager = {
             // Optimized: Only update the specific tag elements instead of rebuilding everything
             this.updateTagLineageInUI(tagName, newLineage);
             console.log(`🎨 Updated UI elements for ${tagName}`);
+
+            // CRITICAL FIX: Update selected tags locally without backend fetch
+            // This ensures the selected tags dropdowns reflect the current lineage values
+            if (this.state.selectedTags.has(tagName)) {
+                // Find the tag in the selected tags list and update its lineage
+                const selectedTagsList = document.querySelectorAll('#selectedTags .tag-item');
+                selectedTagsList.forEach(tagElement => {
+                    const tagData = tagElement.dataset;
+                    if (tagData.productName === tagName) {
+                        // Update the lineage in the tag element
+                        const lineageSelect = tagElement.querySelector('.lineage-dropdown');
+                        if (lineageSelect) {
+                            lineageSelect.value = newLineage;
+                        }
+                        console.log(`✅ Updated lineage in selected tag UI for ${tagName}`);
+                    }
+                });
+            }
 
             // CRITICAL FIX: Don't refresh available tags - just update the UI directly
             // This prevents the available tags list from being wiped when lineage changes
@@ -4683,29 +4805,62 @@ const TagManager = {
     }, 2000), // 2-second debounce delay
 
     updateTagColor(tag, color) {
-        const tagElement = document.querySelector(`[data-tag-id="${tag.id}"]`);
-        if (tagElement) {
-            // Update the color in the tag object
-            tag.color = color;
-            
-            // Update the color in the UI
-            tagElement.style.backgroundColor = color;
-            
-            // Update the color in the tag list
-            const tagListItem = document.querySelector(`[data-tag-id="${tag.id}"]`);
-            if (tagListItem) {
-                tagListItem.style.backgroundColor = color;
-            }
-            
-            // Update the color in the tag editor if it's open
-            const tagEditor = document.getElementById('tagEditor');
-            if (tagEditor && tagEditor.dataset.tagId === tag.id) {
-                const colorInput = tagEditor.querySelector('#tagColor');
-                if (colorInput) {
-                    colorInput.value = color;
+        // Find the tag element by product name since that's how they're identified
+        const productName = tag['Product Name*'] || tag.ProductName || tag.displayName;
+        if (!productName) return;
+        
+        // Find all tag elements with this product name
+        const tagElements = document.querySelectorAll(`[data-tag-name="${productName}"], .tag-item`);
+        
+        tagElements.forEach(tagElement => {
+            // Check if this is the right tag element by comparing the product name
+            const tagNameElement = tagElement.querySelector('.tag-name, .product-name');
+            if (tagNameElement && tagNameElement.textContent.trim() === productName) {
+                // Update the data-lineage attribute which triggers CSS color changes
+                const lineage = tag.lineage || tag.Lineage;
+                if (lineage) {
+                    tagElement.dataset.lineage = lineage.toUpperCase();
                 }
+                
+                // Also update the color in the tag object
+                tag.color = color;
             }
-        }
+        });
+    },
+
+    forceTagColorUpdate(tag, newLineage) {
+        // Find the tag element by product name
+        const productName = tag['Product Name*'] || tag.ProductName || tag.displayName;
+        if (!productName) return;
+        
+        // Find all tag elements that might contain this product
+        const allTagElements = document.querySelectorAll('.tag-item');
+        
+        allTagElements.forEach(tagElement => {
+            // Check if this tag element contains the product name
+            const tagText = tagElement.textContent || '';
+            if (tagText.includes(productName)) {
+                // Update the data-lineage attribute to trigger CSS color changes
+                tagElement.dataset.lineage = newLineage.toUpperCase();
+                
+                // Force a style recalculation by temporarily modifying and restoring a style
+                const originalDisplay = tagElement.style.display;
+                tagElement.style.display = 'none';
+                tagElement.offsetHeight; // Trigger reflow
+                tagElement.style.display = originalDisplay;
+                
+                console.log(`🎨 Updated color for ${productName}: lineage=${newLineage}, data-lineage=${tagElement.dataset.lineage}`);
+                
+                // Debug: Check if the element actually has the correct data-lineage attribute
+                console.log(`🔍 Debug: Element found for ${productName}:`, {
+                    element: tagElement,
+                    dataLineage: tagElement.dataset.lineage,
+                    className: tagElement.className,
+                    computedStyle: window.getComputedStyle(tagElement).backgroundColor,
+                    allAttributes: Array.from(tagElement.attributes).map(attr => `${attr.name}="${attr.value}"`)
+                });
+            }
+        });
     },
 
     getLineageColor(lineage) {
@@ -4785,10 +4940,25 @@ const TagManager = {
         }
         
         // BACKEND RULE 2: Use Product Strain to determine lineage for ALL non-classic types (override existing lineage)
+        // UPDATED: Be more conservative with edible CBD lineage assignment
         if (isNonClassicType && productStrain) {
-            // CBD Blend products -> CBD lineage (yellow) - override existing lineage
+            // Define edible types for more conservative CBD assignment
+            const edibleTypes = ['edible (solid)', 'edible (liquid)', 'high cbd edible liquid', 'tincture', 'topical', 'capsule'];
+            const isEdible = edibleTypes.includes(productType);
+            
             if (productStrain.toLowerCase().includes('cbd blend')) {
-                return 'CBD';
+                // For edibles, only assign CBD lineage if explicitly high-CBD
+                if (isEdible) {
+                    const productName = (productData['Product Name*'] || productData.ProductName || '').toString().toUpperCase();
+                    if (productType === 'high cbd edible liquid' || 
+                        (productName.includes('CBD') && ['HIGH', 'PURE', 'ISOLATE'].some(word => productName.includes(word)))) {
+                        return 'CBD'; // Explicitly high-CBD edible
+                    } else {
+                        return 'MIXED'; // Regular edible with CBD Blend strain
+                    }
+                } else {
+                    return 'CBD'; // Non-edible with CBD Blend strain
+                }
             }
             // Paraphernalia products -> PARAPHERNALIA lineage (pink) - override existing lineage
             else if (productStrain.toLowerCase().includes('paraphernalia')) {
@@ -4806,6 +4976,28 @@ const TagManager = {
         // BACKEND RULE 3: Fallback if Product Strain doesn't exist - only for empty lineages in non-classic types
         else if (isNonClassicType && isEmptyLineage) {
             return 'MIXED';
+        }
+        
+        // BACKEND RULE 4: Check for CBD content in product name/description (matching backend logic)
+        if (isNonClassicType) {
+            const productName = (productData['Product Name*'] || productData.ProductName || '').toString().toUpperCase();
+            const description = (productData.Description || '').toString().toUpperCase();
+            const hasCbdContent = productName.includes('CBD') || productName.includes('CBG') || productName.includes('CBN') || productName.includes('CBC') ||
+                                description.includes('CBD') || description.includes('CBG') || description.includes('CBN') || description.includes('CBC');
+            
+            if (hasCbdContent) {
+                // For edibles, only assign CBD lineage if explicitly high-CBD
+                if (isEdible) {
+                    if (productType === 'high cbd edible liquid' || 
+                        (productName.includes('CBD') && ['HIGH', 'PURE', 'ISOLATE'].some(word => productName.includes(word)))) {
+                        return 'CBD'; // Explicitly high-CBD edible
+                    } else {
+                        return 'MIXED'; // Regular edible with CBD content
+                    }
+                } else {
+                    return 'CBD'; // Non-edible with CBD content
+                }
+            }
         }
         
         // If we get here, return the current lineage (no changes needed)
@@ -5949,6 +6141,17 @@ const TagManager = {
                     const filterType = self.getFilterTypeFromId(filterId);
                     const value = event.target.value;
                     
+                    // DEBUG: Special logging for product type filter
+                    if (filterId === 'productTypeFilter') {
+                        console.log('🔍 Product Type Filter Changed:', {
+                            filterId: filterId,
+                            value: value,
+                            filterType: filterType,
+                            element: event.target,
+                            options: Array.from(event.target.options).map(opt => ({ value: opt.value, text: opt.text }))
+                        });
+                    }
+                    
                     // Special handling for vendor filter - reset all other filters when vendor changes
                     if (filterId === 'vendorFilter' && value && value.trim() !== '' && value.toLowerCase() !== 'all') {
                         console.log('Vendor filter changed, resetting all other filters...');
@@ -6057,6 +6260,14 @@ const TagManager = {
         filterIds.forEach(({ id, label }) => {
             const select = document.getElementById(id);
             if (select && select.value && select.value !== '' && select.value.toLowerCase() !== 'all') {
+                // DEBUG: Log active filter detection
+                console.log('🔍 Active Filter Detected:', {
+                    id: id,
+                    label: label,
+                    value: select.value,
+                    isActive: true
+                });
+                
                 const filterDiv = document.createElement('div');
                 filterDiv.style.display = 'flex';
                 filterDiv.style.alignItems = 'center';
@@ -6081,6 +6292,14 @@ const TagManager = {
                 });
                 filterDiv.appendChild(closeBtn);
                 container.appendChild(filterDiv);
+            } else {
+                // DEBUG: Log inactive filter
+                console.log('🔍 Inactive Filter:', {
+                    id: id,
+                    label: label,
+                    value: select?.value || 'undefined',
+                    isActive: false
+                });
             }
         });
     },

@@ -3,14 +3,14 @@ import copy
 
 # Lineage color mapping - SYNCHRONIZED WITH FRONTEND CSS
 LINEAGE_COLOR_MAP: Dict[str, str] = {
-    "SATIVA": "#ED4123",        # rgba(237, 65, 35, 1.0) - matches --lineage-sativa
-    "INDICA": "#A084E8",        # rgba(160, 132, 232, 1.0) - matches --lineage-indica  
-    "HYBRID": "#7C3AED",        # rgba(124, 58, 237, 1.0) - matches --lineage-hybrid
-    "HYBRID/SATIVA": "#ED4123", # rgba(237, 65, 35, 1.0) - matches --lineage-hybrid-sativa
-    "HYBRID/INDICA": "#A084E8", # rgba(160, 132, 232, 1.0) - matches --lineage-hybrid-indica
-    "CBD": "#F1C232",           # rgba(241, 194, 50, 1.0) - matches --lineage-cbd
-    "MIXED": "#0021F5",         # rgba(0, 33, 245, 1.0) - matches --lineage-mixed
-    "PARAPHERNALIA": "#FFC0CB", # rgba(255, 192, 203, 1.0) - matches --lineage-para
+    "SATIVA": "#ED4123",
+    "INDICA": "#9900FF",
+    "HYBRID": "#009900",
+    "HYBRID/SATIVA": "#ED4123",
+    "HYBRID/INDICA": "#9900FF",
+    "CBD": "#F1C232",
+    "MIXED": "#0021F5",
+    "PARAPHERNALIA": "#FFC0CB",
 }
 
 # Product type mapping
@@ -19,7 +19,10 @@ TYPE_OVERRIDES: Dict[str, str] = {
     "rosin": "Concentrate",
     "mini buds": "Flower",
     "bud": "Flower",
-    "pre-roll": "Pre-roll",
+    "pre-roll": "pre-roll",  # Consistent lowercase for filtering
+    "Pre-Roll": "pre-roll",  # Map title case to lowercase for frontend filtering
+    "Infused Pre-Roll": "infused pre-roll",  # Map title case to lowercase for frontend filtering
+    "infused pre-roll": "infused pre-roll",  # Map lowercase to lowercase for frontend filtering
     "alcohol/ethanol extract": "RSO/CO2 Tankers",
     "Alcohol/Ethanol Extract": "RSO/CO2 Tankers",
     "alcohol ethanol extract": "RSO/CO2 Tankers",

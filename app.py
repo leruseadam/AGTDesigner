@@ -630,19 +630,17 @@ def get_product_database(store_name=None):
     return _product_database
 
 def get_json_matcher():
-    """Lazy load Enhanced JSONMatcher to avoid startup delay."""
+    """Lazy load regular JSONMatcher with Excel-priority to avoid startup delay."""
     global _json_matcher
     if _json_matcher is None:
         try:
-            # Try to load enhanced JSON matcher first
-            from src.core.data.enhanced_json_matcher import EnhancedJSONMatcher
-            _json_matcher = EnhancedJSONMatcher(get_excel_processor())
-            logging.info("Enhanced JSON Matcher initialized successfully")
-        except ImportError as e:
-            # Fallback to original JSON matcher
-            logging.warning(f"Enhanced JSON Matcher not available, using fallback: {e}")
+            # Use regular JSON matcher with Excel-priority (not Enhanced)
             from src.core.data.json_matcher import JSONMatcher
             _json_matcher = JSONMatcher(get_excel_processor())
+            logging.info("Regular JSON Matcher initialized successfully (Excel-priority)")
+        except ImportError as e:
+            logging.error(f"Regular JSON Matcher not available: {e}")
+            _json_matcher = None
     return _json_matcher
 
 def get_enhanced_ai_matcher():
@@ -1319,15 +1317,15 @@ def get_session_excel_processor():
 
 def get_session_json_matcher():
     try:
-        from src.core.data.enhanced_json_matcher import EnhancedJSONMatcher
+        from src.core.data.json_matcher import JSONMatcher
         excel_processor = get_session_excel_processor()
         if excel_processor is None:
-            logging.error("Cannot create EnhancedJSONMatcher: ExcelProcessor is None")
+            logging.error("Cannot create JSONMatcher: ExcelProcessor is None")
             return None
         
         # Use a global JSON matcher instance to persist the cache
         if not hasattr(app, '_json_matcher'):
-            app._json_matcher = EnhancedJSONMatcher(excel_processor)
+            app._json_matcher = JSONMatcher(excel_processor)
             
             # CRITICAL FIX: Populate excel processor with database data for ML models
             try:
@@ -1391,8 +1389,9 @@ def _enhance_json_with_excel_data(json_tag, excel_product):
     enhanced_tag = json_tag.copy()
     
     # Use canonical fields for priority
-    json_priority_fields = [get_canonical_field(f) for f in ['Product Name*', 'ProductName', 'Vendor', 'Product Brand', 'Price', 'Weight*', 'Weight', 'Quantity*', 'Quantity']]
-    excel_priority_fields = [get_canonical_field(f) for f in ['Lineage', 'Product Type*', 'Product Strain', 'Description', 'THC test result', 'CBD test result', 'Test result unit (% or mg)', 'Room*', 'State', 'Is Sample? (yes/no)', 'Is MJ product?(yes/no)', 'Discountable? (yes/no)', 'Medical Only (Yes/No)', 'DOH']]
+    # CRITICAL FIX: Move Price, Weight, and DOH to Excel priority to ensure Excel data is used first
+    json_priority_fields = [get_canonical_field(f) for f in ['Product Name*', 'ProductName', 'Vendor', 'Product Brand', 'Quantity*', 'Quantity']]
+    excel_priority_fields = [get_canonical_field(f) for f in ['Lineage', 'Product Type*', 'Product Strain', 'Description', 'THC test result', 'CBD test result', 'Test result unit (% or mg)', 'Room*', 'State', 'Is Sample? (yes/no)', 'Is MJ product?(yes/no)', 'Discountable? (yes/no)', 'Medical Only (Yes/No)', 'DOH', 'Price', 'Weight*', 'Weight']]
 
     # Fill missing fields from Excel data
     for field in excel_priority_fields:
@@ -4411,6 +4410,26 @@ def generate_labels():
                         
                         records.append(record)
                 logging.info(f"CRITICAL FIX: Generated {len(records)} records from JSON matched data")
+                
+                # CRITICAL FIX: Override lineage from Excel processor if it has been updated
+                if has_excel_data and excel_processor.df is not None and 'Lineage' in excel_processor.df.columns:
+                    logging.info("LINEAGE OVERRIDE: Checking for updated lineage in Excel processor for JSON matched products...")
+                    for record in records:
+                        product_name = record.get('Product Name*', '')
+                        if product_name:
+                            # Try different column names for product names
+                            product_name_columns = ['ProductName', 'Product Name*', 'Product Name']
+                            for col in product_name_columns:
+                                if col in excel_processor.df.columns:
+                                    mask = excel_processor.df[col] == product_name
+                                    if mask.any():
+                                        excel_lineage = excel_processor.df.loc[mask, 'Lineage'].iloc[0]
+                                        if excel_lineage and str(excel_lineage).strip():
+                                            original_lineage = record.get('Lineage', '')
+                                            if str(excel_lineage).strip() != str(original_lineage).strip():
+                                                logging.info(f"LINEAGE OVERRIDE (JSON): '{product_name}' - Original: '{original_lineage}' -> Excel: '{excel_lineage}'")
+                                                record['Lineage'] = str(excel_lineage).strip()
+                                        break
             else:
                 logging.warning("CRITICAL FIX: JSON matched session but no json_matched_tags found")
                 records = []
@@ -4515,6 +4534,26 @@ def generate_labels():
                             print(f"DEBUG: AI/AJ/AK values - AI (Total THC): '{processed_record.get('Total THC', '')}', AJ (THCA): '{processed_record.get('THCA', '')}', AK (CBDA): '{processed_record.get('CBDA', '')}'")
                             records.append(record)
                         logging.info(f"✅ Generated {len(records)} records from database")
+                        
+                        # CRITICAL FIX: Override lineage from Excel processor if it has been updated
+                        if has_excel_data and excel_processor.df is not None and 'Lineage' in excel_processor.df.columns:
+                            logging.info("LINEAGE OVERRIDE: Checking for updated lineage in Excel processor...")
+                            for record in records:
+                                product_name = record.get('Product Name*', '')
+                                if product_name:
+                                    # Try different column names for product names
+                                    product_name_columns = ['ProductName', 'Product Name*', 'Product Name']
+                                    for col in product_name_columns:
+                                        if col in excel_processor.df.columns:
+                                            mask = excel_processor.df[col] == product_name
+                                            if mask.any():
+                                                excel_lineage = excel_processor.df.loc[mask, 'Lineage'].iloc[0]
+                                                if excel_lineage and str(excel_lineage).strip():
+                                                    original_lineage = record.get('Lineage', '')
+                                                    if str(excel_lineage).strip() != str(original_lineage).strip():
+                                                        logging.info(f"LINEAGE OVERRIDE: '{product_name}' - Database: '{original_lineage}' -> Excel: '{excel_lineage}'")
+                                                        record['Lineage'] = str(excel_lineage).strip()
+                                                break
                     else:
                         logging.warning("No database records found for selected tags, falling back to Excel data")
                         records = []
@@ -4567,7 +4606,7 @@ def generate_labels():
         
         # Use the already imported TemplateProcessor and get_font_scheme
         font_scheme = get_font_scheme(template_type)
-        processor = TemplateProcessor(template_type, font_scheme, saved_scale_factor)
+        processor = TemplateProcessor(template_type, font_scheme, saved_scale_factor, excel_processor)
         
         # CRITICAL: For mini templates, NEVER force re-expansion as they have fixed capacity
         if hasattr(processor, '_expand_template_if_needed') and processor.template_type != 'mini':
@@ -4610,8 +4649,10 @@ def generate_labels():
 
         # Apply custom formatting based on saved settings
         if template_settings:
-            from src.core.generation.docx_formatting import apply_custom_formatting
+            from src.core.generation.docx_formatting import apply_custom_formatting, enforce_arial_bold_all_text
             apply_custom_formatting(final_doc, template_settings)
+            # ALWAYS enforce Arial Bold as final step - NO EXCEPTIONS
+            enforce_arial_bold_all_text(final_doc)
         else:
             # Ensure all fonts are Arial Bold for consistency across platforms
             from src.core.generation.docx_formatting import enforce_arial_bold_all_text
@@ -5294,6 +5335,15 @@ def get_selected_tags():
         
         for tag in selected_tags:
             if isinstance(tag, dict):
+                # For dict objects, ensure we have the latest lineage value
+                tag_name = tag.get('Product Name*', '')
+                if tag_name:
+                    # Get the current lineage value from the data
+                    current_lineage = excel_processor.get_current_lineage_for_product(tag_name)
+                    if current_lineage:
+                        tag['lineage'] = current_lineage
+                        tag['Lineage'] = current_lineage
+                        logging.debug(f"Updated lineage for selected tag '{tag_name}' to '{current_lineage}'")
                 # Return the full dictionary object
                 selected_tag_objects.append(tag)
             elif isinstance(tag, str):
@@ -5301,14 +5351,33 @@ def get_selected_tags():
                 available_tags = excel_processor.get_available_tags()
                 for available_tag in available_tags:
                     if isinstance(available_tag, dict) and available_tag.get('Product Name*', '') == tag:
+                        # Ensure we have the latest lineage value
+                        current_lineage = excel_processor.get_current_lineage_for_product(tag)
+                        if current_lineage:
+                            available_tag['lineage'] = current_lineage
+                            available_tag['Lineage'] = current_lineage
+                            logging.debug(f"Updated lineage for selected tag '{tag}' to '{current_lineage}'")
                         selected_tag_objects.append(available_tag)
                         break
                 else:
-                    # If not found, create a simple dict with just the name
-                    selected_tag_objects.append({'Product Name*': tag})
+                    # If not found, create a simple dict with just the name and current lineage
+                    tag_dict = {'Product Name*': tag}
+                    current_lineage = excel_processor.get_current_lineage_for_product(tag)
+                    if current_lineage:
+                        tag_dict['lineage'] = current_lineage
+                        tag_dict['Lineage'] = current_lineage
+                        logging.debug(f"Created selected tag dict for '{tag}' with lineage '{current_lineage}'")
+                    selected_tag_objects.append(tag_dict)
             else:
                 # Convert to string and create simple dict
-                selected_tag_objects.append({'Product Name*': str(tag)})
+                tag_name = str(tag)
+                tag_dict = {'Product Name*': tag_name}
+                current_lineage = excel_processor.get_current_lineage_for_product(tag_name)
+                if current_lineage:
+                    tag_dict['lineage'] = current_lineage
+                    tag_dict['Lineage'] = current_lineage
+                    logging.debug(f"Created selected tag dict for '{tag_name}' with lineage '{current_lineage}'")
+                selected_tag_objects.append(tag_dict)
         
         logging.info(f"Returning {len(selected_tag_objects)} selected tag objects")
         if selected_tag_objects:
@@ -8666,7 +8735,7 @@ def json_inventory():
         logging.info(f"Creating TemplateProcessor with type: {template_type}")
         logging.info(f"Template path: {template_path}")
         
-        processor = TemplateProcessor(template_type, font_scheme, 1.0)
+        processor = TemplateProcessor(template_type, font_scheme, 1.0, excel_processor)
         
         # CRITICAL: For mini templates, NEVER force re-expansion as they have fixed capacity
         if hasattr(processor, '_expand_template_if_needed') and processor.template_type != 'mini':
@@ -8821,8 +8890,8 @@ def json_match_detailed():
             
         available_tags = excel_processor.df.to_dict('records')
         
-        # FIXED: Use Enhanced JSON Matcher with database-priority system
-        logging.info("Using Enhanced JSON Matcher with 100% database-priority approach")
+        # FIXED: Use regular JSON Matcher with Excel-priority system
+        logging.info("Using regular JSON Matcher with Excel-priority approach")
         
         # Use the Enhanced JSON Matcher to get database-enhanced results
         enhanced_matches = json_matcher.fetch_and_match(url)

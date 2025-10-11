@@ -7,21 +7,21 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Define colors for lineage - SYNCHRONIZED WITH FRONTEND CSS
+# Define colors for lineage
 COLORS = {
-    'SATIVA': 'ED4123',        # rgba(237, 65, 35, 1.0) - matches --lineage-sativa
-    'INDICA': 'A084E8',        # rgba(160, 132, 232, 1.0) - matches --lineage-indica
-    'HYBRID': '7C3AED',        # rgba(124, 58, 237, 1.0) - matches --lineage-hybrid
-    'HYBRID_INDICA': 'A084E8', # rgba(160, 132, 232, 1.0) - matches --lineage-hybrid-indica
-    'HYBRID_SATIVA': 'ED4123', # rgba(237, 65, 35, 1.0) - matches --lineage-hybrid-sativa
-    'CBD': 'F1C232',           # rgba(241, 194, 50, 1.0) - matches --lineage-cbd
-    'CBD_BLEND': 'F1C232',     # Same color as CBD
-    'MIXED': '0021F5',         # rgba(0, 33, 245, 1.0) - matches --lineage-mixed
-    'PARA': 'FFC0CB'           # rgba(255, 192, 203, 1.0) - matches --lineage-para
+    'SATIVA': 'ED4123',
+    'INDICA': '9900FF',
+    'HYBRID': '009900',
+    'HYBRID_INDICA': '9900FF',
+    'HYBRID_SATIVA': 'ED4123',
+    'CBD': 'F1C232',
+    'CBD_BLEND': 'F1C232',  # Same color as CBD
+    'MIXED': '0021F5',
+    'PARA': 'FFC0CB'
 }
 
-def apply_lineage_colors(doc, excel_data=None):
-    """Apply lineage colors to all cells using excel processor rules when available."""
+def apply_lineage_colors(doc):
+    """Apply lineage colors to all cells based on keywords in cell text."""
     try:
         for table in doc.tables:
             for row in table.rows:
@@ -34,22 +34,9 @@ def apply_lineage_colors(doc, excel_data=None):
                         text = text.replace(marker, "")
                     text = text.strip()
                     
-                    # If we have excel data, use excel processor rules to determine lineage
-                    if excel_data is not None:
-                        # Try to match this cell's content with excel data to get proper lineage
-                        lineage = _get_lineage_from_excel_rules(text, excel_data)
-                        if lineage:
-                            text = lineage  # Use the lineage determined by excel rules
-                    
-                    # Apply lineage coloring logic based on excel processor rules
-                    # Priority order matching excel processor: CBD Blend > Paraphernalia > Mixed > then standard lineages
-                    if "CBD BLEND" in text or "CBD_BLEND" in text:
-                        color_hex = COLORS['CBD_BLEND']
-                    elif "PARAPHERNALIA" in text:
+                    # Apply lineage coloring logic based on clean text
+                    if "PARAPHERNALIA" in text:
                         color_hex = COLORS['PARA']
-                    elif "MIXED" in text:
-                        # MIXED lineage always gets blue bars (this covers non-classic types like edibles)
-                        color_hex = COLORS['MIXED']  # Blue for Mixed
                     elif "HYBRID/INDICA" in text or "HYBRID INDICA" in text:
                         color_hex = COLORS['HYBRID_INDICA']
                     elif "HYBRID/SATIVA" in text or "HYBRID SATIVA" in text:
@@ -60,11 +47,20 @@ def apply_lineage_colors(doc, excel_data=None):
                         color_hex = COLORS['INDICA']
                     elif "HYBRID" in text:
                         color_hex = COLORS['HYBRID']
-                    elif "CBD" in text:
+                    elif "CBD" in text or "CBD_BLEND" in text:
                         color_hex = COLORS['CBD']
+                    elif "CBD BLEND" in text:
+                        color_hex = COLORS['CBD_BLEND']
+                    elif "MIXED" in text:
+                        # MIXED lineage always gets blue bars (this covers non-classic types like edibles)
+                        color_hex = COLORS['MIXED']  # Blue for Mixed
                     elif any(brand in text.upper() for brand in ["MOONSHOT", "PLATINUM", "PREMIUM", "GOLD", "SILVER", "ELITE", "SELECT", "RESERVE", "CRAFT", "ARTISAN", "BOUTIQUE", "SIGNATURE", "LIMITED", "EXCLUSIVE", "PRIVATE", "CUSTOM", "SPECIAL", "DELUXE", "ULTRA", "SUPER", "MEGA", "MAX", "PRO", "PLUS", "X", "CONSTELLATION"]):
-                        # Product Brand values (like "MOONSHOT", "PLATINUM", "CONSTELLATION", etc.) get blue bars for non-classic types
-                        color_hex = COLORS['MIXED']  # Blue for Product Brand
+                        # Only apply brand-based blue coloring if the text doesn't contain classic lineage indicators
+                        # This prevents classic types (like infused prerolls) from getting blue bars when they should show lineage colors
+                        has_classic_lineage = any(lineage in text for lineage in ["SATIVA", "INDICA", "HYBRID", "CBD"])
+                        if not has_classic_lineage:
+                            # Product Brand values get blue bars for non-classic types only
+                            color_hex = COLORS['MIXED']  # Blue for Product Brand
                     
                     if color_hex:
                         # Set cell background color
@@ -85,7 +81,7 @@ def apply_lineage_colors(doc, excel_data=None):
         # FINAL LINEAGE CLEANUP: Remove any leading spaces from lineage content after coloring
         _final_lineage_cleanup_after_coloring(doc)
         
-        logger.debug("Applied lineage colors to document using excel processor rules")
+        logger.debug("Applied lineage colors to document")
         return doc
     except Exception as e:
         logger.error(f"Error applying lineage colors: {str(e)}")
@@ -198,19 +194,23 @@ def _final_lineage_cleanup_after_coloring(doc):
         logger.warning(f"Error in final lineage cleanup after coloring: {e}")
 
 def fix_table_row_heights(doc, template_type):
-    """Fix table row heights based on template type."""
+    """Fix table row heights based on template type using CELL_DIMENSIONS constants."""
     try:
-        row_height = {
-            'horizontal': 2.4,
-            'vertical': 3.4,
-            'mini': 1.5,
-            'inventory': 2.0
-        }.get(template_type, 2.4)
+        from src.core.constants import CELL_DIMENSIONS
+        
+        # Use the standardized cell dimensions
+        cell_dims = CELL_DIMENSIONS.get(template_type)
+        if not cell_dims:
+            logger.warning(f"No cell dimensions found for template type: {template_type}, using vertical defaults")
+            cell_dims = CELL_DIMENSIONS.get('vertical', {'height': 3.4})
+        
+        row_height = cell_dims['height']
+        
         for table in doc.tables:
             for row in table.rows:
                 row.height = Inches(row_height)
                 row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
-        logger.debug(f"Fixed table row heights for template type: {template_type}")
+        logger.debug(f"Fixed table row heights for template type: {template_type} to {row_height} inches")
         return doc
     except Exception as e:
         logger.error(f"Error fixing table row heights: {str(e)}")
@@ -819,8 +819,22 @@ def create_3x3_grid(doc, template_type='vertical'):
             p = doc.paragraphs[0]
             p._element.getparent().remove(p._element)
         
-        # Create new table
-        table = doc.add_table(rows=3, cols=3)
+        # Use predefined template cell dimensions from CELL_DIMENSIONS constants
+        from src.core.constants import CELL_DIMENSIONS, GRID_LAYOUTS
+        
+        cell_dims = CELL_DIMENSIONS.get(template_type)
+        grid_layout = GRID_LAYOUTS.get(template_type)
+        
+        if not cell_dims:
+            logger.warning(f"No cell dimensions found for template type: {template_type}, using vertical defaults")
+            cell_dims = CELL_DIMENSIONS.get('vertical', {'width': 2.4, 'height': 3.4})
+        
+        if not grid_layout:
+            logger.warning(f"No grid layout found for template type: {template_type}, using 3x3 default")
+            grid_layout = {'rows': 3, 'cols': 3}
+        
+        # Create new table with proper dimensions
+        table = doc.add_table(rows=grid_layout['rows'], cols=grid_layout['cols'])
         table.alignment = WD_TABLE_ALIGNMENT.CENTER
         
         # Set table properties
@@ -832,32 +846,33 @@ def create_3x3_grid(doc, template_type='vertical'):
         tblPr.append(tblLayout)
         table._element.insert(0, tblPr)
         
-        # Calculate optimal column width based on available space
-        # Standard letter paper is 8.5" wide, with 0.25" margins = 8.0" available
-        # We need 3 columns, so each column should be about 2.6" wide
-        # Leave some space for borders and spacing
-        available_width = 8.0  # 8.5" - 0.5" total margins
-        col_width_inches = min(2.6, available_width / 3)  # Don't exceed available space
+        # Use predefined template cell dimensions from CELL_DIMENSIONS constants
+        from src.core.constants import CELL_DIMENSIONS, GRID_LAYOUTS
         
-        # Set column widths
-        col_width = Inches(col_width_inches)
+        cell_dims = CELL_DIMENSIONS.get(template_type)
+        grid_layout = GRID_LAYOUTS.get(template_type)
+        
+        if not cell_dims:
+            logger.warning(f"No cell dimensions found for template type: {template_type}, using vertical defaults")
+            cell_dims = CELL_DIMENSIONS.get('vertical', {'width': 2.4, 'height': 3.4})
+        
+        if not grid_layout:
+            logger.warning(f"No grid layout found for template type: {template_type}, using 3x3 default")
+            grid_layout = {'rows': 3, 'cols': 3}
+        
+        # Set column widths using predefined dimensions
+        col_width = Inches(cell_dims['width'])
         tblGrid = OxmlElement('w:tblGrid')
-        for _ in range(3):
+        for _ in range(grid_layout['cols']):
             gridCol = OxmlElement('w:gridCol')
-            gridCol.set(qn('w:w'), str(int(col_width.inches * 1440)))  # Convert to twips
+            gridCol.set(qn('w:w'), str(int(cell_dims['width'] * 1440)))  # Convert to twips
             tblGrid.append(gridCol)
         table._element.insert(0, tblGrid)
         
-        # Calculate optimal row height based on available space
-        # Standard letter paper is 11" tall, with 0.25" margins = 10.5" available
-        # We need 3 rows, so each row should fit within available space
-        available_height = 10.5  # 11" - 0.5" total margins
-        # Leave minimal buffer space for borders and spacing
-        usable_height = available_height - 0.1  # 0.1" buffer for borders/spacing
-        row_height_inches = min(3.47, usable_height / 3)  # Ensure total height fits with minimal buffer
+        # Set row heights using predefined dimensions
         
-        # Set row heights
-        row_height = Inches(row_height_inches)
+        # Set row heights using predefined dimensions
+        row_height = Inches(cell_dims['height'])
         for row in table.rows:
             row.height = row_height
             row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
@@ -865,7 +880,7 @@ def create_3x3_grid(doc, template_type='vertical'):
         # Enforce fixed cell dimensions to prevent any growth
         enforce_fixed_cell_dimensions(table, template_type)
         
-        logger.debug(f"Created 3x3 grid table with {col_width_inches:.2f}\" columns and {row_height_inches:.2f}\" rows")
+        logger.debug(f"Created {grid_layout['rows']}x{grid_layout['cols']} grid table with {cell_dims['width']}\" columns and {cell_dims['height']}\" rows for template type: {template_type}")
         return table
     except Exception as e:
         logger.error(f"Error creating 3x3 grid: {str(e)}")
@@ -1358,22 +1373,22 @@ def apply_custom_formatting(doc, template_settings):
             
             # Apply formatting to runs
             for run in paragraph.runs:
-                # Set font family
-                run.font.name = font_family
+                # ALWAYS force Arial Bold - NO EXCEPTIONS
+                run.font.name = "Arial"
+                run.font.bold = True
                 
                 # Set font color
                 if text_color != '#000000':
                     run.font.color.rgb = RGBColor.from_string(text_color[1:])  # Remove # from hex
                 
-                # Apply bold to headers (if enabled)
+                # Apply header color if enabled
                 if bold_headers and any(keyword in run.text.lower() for keyword in ['brand', 'price', 'lineage', 'thc', 'cbd']):
-                    run.font.bold = True
                     if header_color != '#333333':
                         run.font.color.rgb = RGBColor.from_string(header_color[1:])
                 
-                # Apply italic to descriptions (if enabled)
-                if italic_descriptions and len(run.text) > 20:  # Assume long text is description
-                    run.font.italic = True
+                # Skip italic descriptions - we want everything bold
+                # if italic_descriptions and len(run.text) > 20:  # Assume long text is description
+                #     run.font.italic = True
         
         # Apply background color to tables if specified
         if background_color != '#ffffff':

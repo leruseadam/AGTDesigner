@@ -58,8 +58,8 @@ def _load_font_sizing_config():
                 },
                 'vertical': {
                     'description': [(5, 34), (30, 32), (40, 28), (60, 26), (70, 24), (80, 22), (100, 20), (float('inf'), 18)],
-                    'brand': [(10, 16), (15, 14), (20, 12), (float('inf'), 10)],
-                    'price': [(4, 34), (5, 30), (10, 28), (float('inf'), 26)],  # Updated: complexity-based thresholds for better vertical price sizing
+                    'brand': [(10, 16), (15, 14), (20, 11), (float('inf'), 10)],
+                    'price': [(4, 34), (10, 30), (15, 28), (float('inf'), 26)],  # Updated: complexity-based thresholds for better vertical price sizing
                     'lineage': [(20, 20), (40, 18), (60, 16), (float('inf'), 12)],
                     'ratio': [(10, 14), (20, 12), (30, 9), (float('inf'), 9)],
                     'thc_cbd': [(10, 12), (float('inf'), 12)],
@@ -69,7 +69,7 @@ def _load_font_sizing_config():
                     'default': [(30, 16), (60, 14), (100, 12), (float('inf'), 10)]
                 },
                 'horizontal': {
-                    'description': [(10, 36), (20, 34), (25, 32), (30, 28), (40, 26), (45, 24), (60, 23), (80, 21), (float('inf'), 18)],
+                    'description': [(10, 36), (15, 34), (20, 32), (25, 30), (30, 28), (40, 26), (60, 24), (70, 22), (80, 20), (100, 18), (float('inf'), 16)],
                     'brand': [(20, 18), (40, 16), (120, 14), (140, 12), (160, 10), (float('inf'), 10)],
                     'price': [(10, 38), (20, 36), (80, 20), (float('inf'), 18)],
                     'lineage': [(10, 20), (20, 18), (30, 16), (50, 12), (60, 10), (float('inf'), 10)],
@@ -152,7 +152,7 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
         # Force specific large brand names to use much smaller fonts
         large_brands = ['CONSTELLATION', 'MARY JONES', 'MARY JONES CANNABIS']
         if any(brand in text.upper() for brand in large_brands):
-            final_size = 5.5 * scale_factor
+            final_size = 8 * scale_factor
             logger.debug(f"Special double template brand rule: text='{text}' matches large brand list, forcing 5.5pt font")
             return Pt(final_size)
         
@@ -222,19 +222,54 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
     return Pt(fallback_size)
 
 def set_run_font_size(run, font_size):
-    """Set font size for both the run and its XML element."""
+    """Set font size for both the run and its XML element while preserving bold formatting."""
     if not isinstance(font_size, Pt):
         logger.warning(f"Font size was not Pt: {font_size} (type: {type(font_size)}), converting to Pt.")
         font_size = Pt(font_size)
+    
+    # Set font size at run level
     run.font.size = font_size
+    
+    # Ensure Arial Bold is always applied - NO EXCEPTIONS
+    run.font.name = "Arial"
+    run.font.bold = True
+    
+    # Set font size and bold at XML level for maximum compatibility
     sz_val = str(int(font_size.pt * 2))
     rPr = run._element.get_or_add_rPr()
+    
+    # Set font size
     sz = rPr.find(qn('w:sz'))
     if sz is None:
         sz = OxmlElement('w:sz')
         rPr.append(sz)
     sz.set(qn('w:val'), sz_val)
-    logger.debug(f"Set font size to {font_size.pt}pt for text: {run.text}")
+    
+    # Also set szCs for complex scripts
+    szCs = rPr.find(qn('w:szCs'))
+    if szCs is None:
+        szCs = OxmlElement('w:szCs')
+        rPr.append(szCs)
+    szCs.set(qn('w:val'), sz_val)
+    
+    # Force Arial font at XML level
+    rFonts = rPr.find(qn('w:rFonts'))
+    if rFonts is None:
+        rFonts = OxmlElement('w:rFonts')
+        rPr.append(rFonts)
+    rFonts.set(qn('w:ascii'), 'Arial')
+    rFonts.set(qn('w:hAnsi'), 'Arial')
+    rFonts.set(qn('w:eastAsia'), 'Arial')
+    rFonts.set(qn('w:cs'), 'Arial')
+    
+    # Force bold at XML level
+    b = rPr.find(qn('w:b'))
+    if b is None:
+        b = OxmlElement('w:b')
+        rPr.append(b)
+    b.set(qn('w:val'), '1')
+    
+    logger.debug(f"Set font size to {font_size.pt}pt with Arial Bold for text: {run.text}")
 
 # Legacy function aliases for backward compatibility
 def get_thresholded_font_size(text, orientation='vertical', scale_factor=1.0, field_type='default'):

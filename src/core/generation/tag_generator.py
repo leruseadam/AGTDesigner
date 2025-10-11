@@ -307,6 +307,9 @@ def process_chunk(args):
     if orientation == "mini":
         local_template_buffer = expand_template_to_4x5_fixed_scaled(base_template, scale_factor=scale_factor)
         num_labels = 20  # Fixed: 4x5 grid = 20 labels per page
+    elif orientation == "double":
+        local_template_buffer = base_template
+        num_labels = 12  # Fixed: 4x3 grid = 12 labels per page
     else:
         local_template_buffer = base_template
         num_labels = 9
@@ -349,7 +352,8 @@ def process_chunk(args):
                 
             # --- Wrap all fields with markers ---
             # Updated price mapping to use correct Excel field name
-            price_val = f"{row.get('Price* (Tier Name for Bulk)', row.get('Price', ''))}"
+            # CRITICAL FIX: Use Excel-first price logic (same as excel_processor.py)
+            price_val = str(row.get('Price*', '')).strip() if row.get('Price*') and str(row.get('Price*', '')).strip() else str(row.get('Price', '')).strip()
             label_data["Price"] = wrap_with_marker(price_val, "PRICE")  # Fixed: Use "PRICE" marker to match markers.py definition
             
             lineage_text   = str(row.get("Lineage", "")).strip()
@@ -384,12 +388,17 @@ def process_chunk(args):
                 else:
                     brand_content = product_brand.upper()
                 
-                label_data["ProductBrand"] = f"PRODUCTBRAND_CENTER_START{brand_content}PRODUCTBRAND_CENTER_END"
-                label_data["ProductBrand_Center"] = f"PRODUCTBRAND_CENTER_START{brand_content}PRODUCTBRAND_CENTER_END"
+                # For non-vertical templates, don't set ProductBrand fields to prevent duplication
+                # The brand content will be handled by the Lineage field with PRODUCTBRAND_CENTER markers
+                label_data["ProductBrand"] = ""
+                label_data["ProductBrand_Center"] = ""
             
             # Add other fields to label_data
-            # Get product name
+            # Get product name and apply non-breaking hyphens to prevent "Pre-Roll" splitting
             product_name = str(row.get("ProductName", ""))
+            if product_name:
+                from src.core.generation.text_processing import make_nonbreaking_hyphens
+                product_name = make_nonbreaking_hyphens(product_name)
             
             # Use Description as the primary field (never force ProductName here)
             description_raw = row.get("Description", "")
@@ -407,17 +416,16 @@ def process_chunk(args):
             except Exception:
                 description = str(description_raw or "")
             
-            # ULTRA SIMPLE: Build weight directly from database Weight* + Units - no processing
-            weight_value = str(row.get("Weight*", "")).strip()
-            units_value = str(row.get("Units", "")).strip()
+            # Apply non-breaking hyphens to description to prevent "Pre-Roll" splitting
+            if description:
+                description = make_nonbreaking_hyphens(description)
             
-            # Simple concatenation - no checks, no processing, no fallbacks
-            if weight_value and units_value:
-                weight_units = f"{weight_value}{units_value}"
-            else:
-                weight_units = weight_value or ""
+            # CRITICAL FIX: Use Excel processor's weight normalization with Excel-first priority
+            from src.core.data.excel_processor import ExcelProcessor
+            excel_processor = ExcelProcessor()
+            weight_units = excel_processor._format_weight_units(row, excel_priority=True)
             
-            print(f"DEBUG: Direct weight construction - Weight*: '{weight_value}', Units: '{units_value}' -> '{weight_units}'")
+            print(f"DEBUG: Excel-first weight construction - Weight*: '{row.get('Weight*', '')}', Units: '{row.get('Units', '')}' -> '{weight_units}'")
             
             # Preserve original ProductName; keep Description as the clean field
             label_data["ProductName"] = product_name  # Do not repurpose ProductName
@@ -517,21 +525,27 @@ def process_chunk(args):
             if DEBUG_ENABLED:
                 logger.debug(f"Created label data for Label{i+1}")
         else:
-            # Empty label data for unused slots
-            context[f"Label{i+1}"] = {
-                "Description": "",
-                "WeightUnits": "",
-                "ProductBrand": "",
-                "Price": "",
-                "Lineage": "",
-                "DOH": "",
-                "Ratio_or_THC_CBD": "",
-                # ProductStrain handled by template processor
-                "DescAndWeight": "",
-                "JointRatio": ""
-            }
-            if DEBUG_ENABLED:
-                logger.debug(f"Created empty label data for Label{i+1}")
+            # For double templates, don't create empty contexts to avoid blank tags
+            if orientation != "double":
+                # Empty label data for unused slots
+                context[f"Label{i+1}"] = {
+                    "Description": "",
+                    "WeightUnits": "",
+                    "ProductBrand": "",
+                    "Price": "",
+                    "Lineage": "",
+                    "DOH": "",
+                    "Ratio_or_THC_CBD": "",
+                    # ProductStrain handled by template processor
+                    "DescAndWeight": "",
+                    "JointRatio": ""
+                }
+                if DEBUG_ENABLED:
+                    logger.debug(f"Created empty label data for Label{i+1}")
+            else:
+                # For double templates, only create contexts for actual records
+                if DEBUG_ENABLED:
+                    logger.debug(f"Double template: Skipping empty slot Label{i+1} to prevent blank tags")
 
     # Render template
     if DEBUG_ENABLED:

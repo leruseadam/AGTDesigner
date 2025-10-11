@@ -68,11 +68,12 @@ def get_font_scheme(template_type, base_size=12):
     }
 
 class TemplateProcessor:
-    def __init__(self, template_type, font_scheme, scale_factor=1.0):
+    def __init__(self, template_type, font_scheme, scale_factor=1.0, excel_processor=None):
         self.template_type = template_type
         self.font_scheme = font_scheme
         self.scale_factor = scale_factor
         self.logger = logging.getLogger(__name__)
+        self.excel_processor = excel_processor  # Store the session's Excel processor
         self._template_path = self._get_template_path()
         self._expanded_template_buffer = self._expand_template_if_needed()
         
@@ -610,7 +611,8 @@ class TemplateProcessor:
                     'Ratio_or_THC_CBD',
                     'DOH',
                     'QR',  # QR codes enabled
-                    'ProductStrain'
+                    'ProductStrain',
+                    'Lineage'  # CRITICAL FIX: Add Lineage to double template
                 ]
                 
                 # Keep adding missing placeholders until all are present
@@ -630,7 +632,7 @@ class TemplateProcessor:
                     missing_placeholders = []
                     for placeholder in required_placeholders:
                         placeholder_pattern = f'{{{{Label{cnt}.{placeholder}}}}}'
-                        if placeholder_pattern not in cell_text and placeholder not in cell_text:
+                        if placeholder_pattern not in cell_text:
                             missing_placeholders.append(placeholder)
                     
                     self.logger.debug(f"Cell {cnt} iteration {iteration} checking placeholders:")
@@ -670,7 +672,7 @@ class TemplateProcessor:
                                 'Ratio_or_THC_CBD': 'THC_CBD',
                                 'DOH': 'DOH',
                                 'ProductStrain': 'PRODUCTSTRAIN',
-                                'Lineage': 'PRODUCTBRAND_CENTER'
+                                'Lineage': 'LINEAGE'
                             }
                             
                             marker_type = marker_mapping.get(placeholder, 'DEFAULT')
@@ -717,6 +719,43 @@ class TemplateProcessor:
                     
                     iteration += 1
                 
+                # CRITICAL FIX: For Cell 1, need to clear the old concatenated placeholders
+                # and ensure all required placeholders are added with proper markers
+                if cnt == 1:
+                    # Clear any old concatenated placeholders from the first paragraph
+                    paragraphs = list(tc.iter(qn('w:p')))
+                    if paragraphs:
+                        first_para = paragraphs[0]
+                        # Remove text that contains concatenated placeholders
+                        for t in first_para.iter(qn('w:t')):
+                            if t.text and ('{{Label1.DescAndWeight}}' in t.text or '{{Label1.Price}}' in t.text):
+                                # This is the old concatenated placeholder string, clear it
+                                t.text = ''
+                                self.logger.debug(f"Cleared old concatenated placeholders from Cell 1")
+                    
+                    # Now add all required placeholders with markers to Cell 1
+                    # Build the placeholder text with all required fields
+                    cell1_placeholder_text = ''
+                    marker_mapping = {
+                        'DescAndWeight': 'DESC',
+                        'Price': 'PRICE',
+                        'DOH': 'DOH',
+                        'QR': 'DEFAULT'
+                    }
+                    for placeholder in ['DescAndWeight', 'Price', 'DOH', 'QR']:
+                        marker_type = marker_mapping.get(placeholder, 'DEFAULT')
+                        cell1_placeholder_text += f'\n{marker_type}_START{{{{Label1.{placeholder}}}}}{marker_type}_END'
+                    
+                    # Find the last text element and append the placeholders
+                    text_elements = list(tc.iter(qn('w:t')))
+                    if text_elements:
+                        last_text_element = text_elements[-1]
+                        if last_text_element.text:
+                            last_text_element.text += cell1_placeholder_text
+                        else:
+                            last_text_element.text = cell1_placeholder_text
+                        self.logger.debug(f"Added missing placeholders to Cell 1: {list(marker_mapping.keys())}")
+                
                 # CRITICAL FIX: Replace Label1 with Label{cnt} in all placeholders
                 # Only replace exact matches to prevent creating extra labels
                 for t in tc.iter(qn('w:t')):
@@ -728,12 +767,13 @@ class TemplateProcessor:
                 # Copy the original cell content and styling exactly as it is
                 for el in tc.xpath('./*'):
                     cell._tc.append(deepcopy(el))
-                cnt += 1
                 
-                # CRITICAL FIX: Ensure cnt never exceeds 12 for double template
-                if cnt > 12:
-                    self.logger.error(f"CRITICAL: Counter exceeded 12! Current value: {cnt}")
+                # CRITICAL FIX: Check counter before incrementing to prevent exceeding 12
+                if cnt >= 12:
+                    self.logger.info(f"Reached maximum cells for double template (12), stopping at cell {cnt}")
                     break
+                
+                cnt += 1
                 
         # Add minimal spacing between cells
         from docx.oxml.shared import OxmlElement as OE
@@ -839,7 +879,9 @@ class TemplateProcessor:
                 # Add ProductBrand placeholder if it's missing for non-classic type compatibility
                 
                 # Add ProductBrand placeholder if it's missing for non-classic type compatibility
-                if '{{Label1.ProductBrand}}' not in cell_text and 'ProductBrand' not in cell_text:
+                # BUT NOT for double templates to prevent brand duplication
+                if (self.template_type != 'double' and 
+                    '{{Label1.ProductBrand}}' not in cell_text and 'ProductBrand' not in cell_text):
                     self.logger.debug(f"Adding ProductBrand placeholder to cell {cnt}")
                     # Find the position after the Lineage placeholder
                     text_elements = list(tc.iter(qn('w:t')))
@@ -1043,16 +1085,22 @@ class TemplateProcessor:
                 product_name = record.get('ProductName', 'Unknown')
                 self.logger.debug(f"Label{i+1} -> {product_name} - ProductBrand: '{label_context.get('ProductBrand', 'NOT_FOUND')}', Price: '{label_context.get('Price', 'NOT_FOUND')}', THC: '{label_context.get('THC', 'NOT_FOUND')}', CBD: '{label_context.get('CBD', 'NOT_FOUND')}'")
             # Leave remaining labels blank instead of duplicating data
-            for i in range(len(chunk), self.chunk_size):
-                # Create empty context for unfilled labels
-                context[f'Label{i+1}'] = {
-                    'ProductBrand': '',
-                    'DescAndWeight': '',
-                    'Price': '',
-                    'DOH': '',
-                    'Ratio_or_THC_CBD': ''
-                }
-                self.logger.debug(f"Label{i+1} left blank (no data duplication)")
+            # For double templates, only create contexts for actual records to avoid blank tags
+            if self.template_type != 'double':
+                for i in range(len(chunk), self.chunk_size):
+                    # Create empty context for unfilled labels
+                    context[f'Label{i+1}'] = {
+                        'ProductBrand': '',
+                        'DescAndWeight': '',
+                        'Price': '',
+                        'DOH': '',
+                        'Ratio_or_THC_CBD': ''
+                    }
+                    self.logger.debug(f"Label{i+1} left blank (no data duplication)")
+            else:
+                # For double templates, only create contexts for actual records
+                # This prevents blank tags from appearing
+                self.logger.debug(f"Double template: Only creating contexts for {len(chunk)} actual records, no blank slots")
 
             # DOH images are already created in _build_label_context, no need for redundant creation here
             
@@ -1313,17 +1361,27 @@ class TemplateProcessor:
                 ''
             )
             
-            # CRITICAL FIX: If no combined weight field, construct from Weight* + Units
+            # CRITICAL FIX: If no combined weight field, use session Excel processor's weight normalization
             if not weight_units or weight_units.strip() in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
-                weight_value = label_context.get('Weight*', '').strip()
-                units_value = label_context.get('Units', '').strip()
-                
-                if weight_value and units_value:
-                    weight_units = f"{weight_value}{units_value}"
-                    self.logger.info(f"🔧 WEIGHT CONSTRUCTED: '{weight_units}' from Weight*='{weight_value}' + Units='{units_value}' for '{record.get('ProductName', 'N/A')}'")
-                elif weight_value:
-                    weight_units = weight_value  # Use weight value alone if no units
-                    self.logger.info(f"🔧 WEIGHT CONSTRUCTED: '{weight_units}' from Weight*='{weight_value}' for '{record.get('ProductName', 'N/A')}'")
+                if self.excel_processor:
+                    # Create a record dict from label_context for weight normalization
+                    weight_record = {
+                        'Weight*': label_context.get('Weight*', ''),
+                        'Units': label_context.get('Units', ''),
+                        'Product Type*': label_context.get('Product Type*', ''),
+                        'Product Name*': label_context.get('ProductName', '')
+                    }
+                    weight_units = self.excel_processor._format_weight_units(weight_record, excel_priority=True)
+                    self.logger.info(f"🔧 WEIGHT NORMALIZED: '{weight_units}' using session Excel processor for '{record.get('ProductName', 'N/A')}'")
+                else:
+                    # Fallback to simple concatenation if no Excel processor available
+                    weight_value = label_context.get('Weight*', '').strip()
+                    units_value = label_context.get('Units', '').strip()
+                    if weight_value and units_value:
+                        weight_units = f"{weight_value}{units_value}"
+                    elif weight_value:
+                        weight_units = weight_value
+                    self.logger.warning(f"⚠️ WEIGHT FALLBACK: No Excel processor available, using simple concatenation: '{weight_units}'")
             
             label_context['WeightUnits'] = weight_units
             
@@ -1381,7 +1439,33 @@ class TemplateProcessor:
             if weight_units and weight_units.strip():
                 # WeightUnits already contains the complete weight (e.g., "3.4oz", "1616.0g")
                 clean_weight = weight_units.strip()
-                desc_and_weight = f"{desc} - {clean_weight}"
+                
+                # CRITICAL FIX: Clean weight duplication patterns directly in template processor
+                import re
+                
+                # Pattern 1: Decimal duplication like "0.50.5oz" -> "0.5oz"
+                decimal_dup_pattern = r'^(\d+\.\d{1,2})\1(oz|g|mg|kg|lb|lbs)$'
+                match1 = re.match(decimal_dup_pattern, clean_weight, re.IGNORECASE)
+                if match1:
+                    clean_weight = f"{match1.group(1)}{match1.group(2)}"
+                    self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED DECIMAL DUPLICATION: '{weight_units}' -> '{clean_weight}'")
+                else:
+                    # Pattern 2: Integer duplication like "1010.0g" -> "10.0g"
+                    integer_dup_pattern = r'^(\d+)\1\.0(oz|g|mg|kg|lb|lbs)$'
+                    match2 = re.match(integer_dup_pattern, clean_weight, re.IGNORECASE)
+                    if match2:
+                        clean_weight = f"{match2.group(1)}.0{match2.group(2)}"
+                        self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED INTEGER DUPLICATION: '{weight_units}' -> '{clean_weight}'")
+                    else:
+                        # Pattern 3: Mixed duplication like "0.220.22g" -> "0.22g"
+                        mixed_dup_pattern = r'^(\d+\.\d+)\1(oz|g|mg|kg|lb|lbs)$'
+                        match3 = re.match(mixed_dup_pattern, clean_weight, re.IGNORECASE)
+                        if match3:
+                            clean_weight = f"{match3.group(1)}{match3.group(2)}"
+                            self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED MIXED DUPLICATION: '{weight_units}' -> '{clean_weight}'")
+                
+                # Keep weight on the same line as description with non-breaking space
+                desc_and_weight = f"{desc} -\u00A0{clean_weight}"
                 self.logger.info(f"🔍 WEIGHT FROM WEIGHTUNITS: '{clean_weight}' -> '{desc_and_weight}'")
             else:
                 # Fallback to constructing from Weight* + Units
@@ -1397,7 +1481,7 @@ class TemplateProcessor:
                 
                 if weight_value and units_value:
                     clean_weight = f"{weight_value}{units_value}"
-                    desc_and_weight = f"{desc} - {clean_weight}"
+                    desc_and_weight = f"{desc} -\u00A0{clean_weight}"
                     self.logger.info(f"🔍 WEIGHT CONSTRUCTED: '{clean_weight}' -> '{desc_and_weight}'")
                 else:
                     desc_and_weight = desc
@@ -1433,9 +1517,11 @@ class TemplateProcessor:
                 label_context['DOH_TEXT'] = ''
                 self.logger.info(f"DOH DEBUG: No image path found for '{product_name}'")
         else:
+            # For any DOH value other than "YES", leave it blank (don't display text)
+            # This ensures DOH="no" results in blank space, not "No" text
             label_context['DOH'] = ''
             label_context['DOH_TEXT'] = ''
-            self.logger.info(f"DOH DEBUG: Skipping DOH image for '{product_name}' - value: '{doh_value}'")
+            self.logger.info(f"DOH DEBUG: Clearing DOH for '{product_name}' - value: '{doh_value}' (not YES)")
         
         # CRITICAL: Lineage and ProductVendor logic for classic types
         # This implements the same logic that was in tag_generator
@@ -1447,6 +1533,40 @@ class TemplateProcessor:
         
         # CRITICAL DEBUG: Log brand field processing
         self.logger.info(f"BRAND DEBUG: Product '{product_name}' - Brand field: '{product_brand}' (ProductBrand: '{label_context.get('ProductBrand')}', Product Brand: '{label_context.get('Product Brand')}')")
+        
+        # BRAND ENRICHMENT: If brand is missing, try to get it from database, then fallback to vendor
+        if not product_brand or product_brand.strip() in ['', 'None', 'NULL', 'null', 'nan']:
+            # Try to enrich brand from database first
+            enriched_brand = ""
+            try:
+                from src.core.data.product_database import get_product_database
+                product_db = get_product_database()
+                if product_db:
+                    # Try to find brand in database by product name
+                    conn = product_db._get_connection()
+                    cursor = conn.cursor()
+                    cursor.execute('SELECT "Product Brand" FROM products WHERE "Product Name*" = ? AND "Product Brand" IS NOT NULL AND "Product Brand" != ""', (product_name,))
+                    result = cursor.fetchone()
+                    if result and result[0] and result[0].strip() not in ['', 'None', 'NULL', 'null', 'nan']:
+                        enriched_brand = result[0].strip()
+                        self.logger.info(f"🔧 BRAND ENRICHED: Retrieved brand '{enriched_brand}' from database for '{product_name}'")
+            except Exception as e:
+                self.logger.warning(f"🔧 BRAND ENRICHMENT FAILED: Could not retrieve brand from database: {e}")
+            
+            # If database enrichment failed, fallback to vendor
+            if not enriched_brand:
+                vendor_fallback = (record.get('Vendor') or 
+                                 record.get('Vendor/Supplier*') or 
+                                 record.get('ProductVendor', ''))
+                if vendor_fallback and str(vendor_fallback).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
+                    enriched_brand = str(vendor_fallback).strip()
+                    self.logger.info(f"🔧 BRAND FALLBACK: Using vendor '{enriched_brand}' as brand for '{product_name}'")
+            
+            # Update the brand field if enrichment was successful
+            if enriched_brand:
+                product_brand = enriched_brand
+                # Don't set ProductBrand fields here - they will be set later based on template type
+                self.logger.info(f"✅ BRAND UPDATED: Product '{product_name}' brand set to '{enriched_brand}'")
         
         # Check if it's a classic type
         is_classic_type = product_type in classic_types
@@ -1522,6 +1642,7 @@ class TemplateProcessor:
             # Color is determined by Product Strain (CBD Blend = yellow, Mixed = blue)
             self.logger.debug(f"Processing non-classic type '{product_type}' for Lineage and ProductVendor")
             if product_brand:
+                self.logger.info(f"BRAND PROCESSING: Non-classic type '{product_type}' with brand '{product_brand}', template_type='{self.template_type}'")
                 # For non-classic types, separate Product Strain and Product Brand for different font sizing
                 # Lineage shows Product Brand only (centered) - this is the primary field
                 # For vertical template, don't wrap with markers since it uses simple placeholders
@@ -1529,11 +1650,16 @@ class TemplateProcessor:
                 brand_center_text = str(product_brand).upper()
                 if self.template_type == 'vertical':
                     label_context['Lineage'] = brand_center_text
+                    # CRITICAL FIX: Vertical template needs BOTH Lineage AND ProductBrand populated
+                    # The 3x3 expansion adds ProductBrand placeholders, so we must provide data for them
+                    label_context['ProductBrand'] = brand_center_text
+                    label_context['ProductBrand_Center'] = brand_center_text
+                    self.logger.info(f"🎯 VERTICAL BRAND FIX: Set both Lineage and ProductBrand to '{brand_center_text}' for vertical template")
                 else:
                     label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{brand_center_text}PRODUCTBRAND_CENTER_END"
-                # Set ProductBrand fields to empty to prevent duplication
-                label_context['ProductBrand'] = ""
-                label_context['ProductBrand_Center'] = ""
+                    # Set ProductBrand fields to empty to prevent duplication for non-vertical templates
+                    label_context['ProductBrand'] = ""
+                    label_context['ProductBrand_Center'] = ""
                 
                 # Product Strain gets its own field with small font size
                 if product_strain:
@@ -1547,9 +1673,17 @@ class TemplateProcessor:
                 
                 self.logger.debug(f"Set Lineage/ProductBrand to '{product_brand}' and ProductStrain to '{product_strain}' for non-classic type '{product_type}'")
             else:
-                label_context['Lineage'] = ""
-                label_context['ProductBrand'] = ""
-                label_context['ProductBrand_Center'] = ""
+                # No brand available for non-classic type
+                if self.template_type == 'vertical':
+                    # For vertical template, still set empty values but don't prevent data population
+                    label_context['Lineage'] = ""
+                    label_context['ProductBrand'] = ""
+                    label_context['ProductBrand_Center'] = ""
+                    self.logger.debug(f"VERTICAL BRAND FIX: Set empty brand values for vertical template (no brand available)")
+                else:
+                    label_context['Lineage'] = ""
+                    label_context['ProductBrand'] = ""
+                    label_context['ProductBrand_Center'] = ""
                 self.logger.debug(f"Lineage, ProductBrand, and ProductBrand_Center set to empty for non-classic type '{product_type}'")
             
             # Always set ProductStrain for nonclassic types, regardless of whether there's a product brand
@@ -1691,23 +1825,39 @@ class TemplateProcessor:
         if label_context.get('Description'):
             label_context['Description'] = self.fix_hyphen_spacing(label_context['Description'])
 
+        # CRITICAL FIX: Apply non-breaking hyphens to ProductName to prevent "Pre-Roll" splitting
+        if label_context.get('ProductName'):
+            from src.core.generation.text_processing import make_nonbreaking_hyphens
+            original_product_name = label_context['ProductName']
+            label_context['ProductName'] = make_nonbreaking_hyphens(label_context['ProductName'])
+            self.logger.info(f"🔧 NON-BREAKING HYPHEN DEBUG: ProductName '{original_product_name}' -> '{label_context['ProductName']}'")
+        
+        # CRITICAL FIX: Also apply non-breaking hyphens to DescAndWeight to prevent "Pre-Roll" splitting
+        if label_context.get('DescAndWeight'):
+            from src.core.generation.text_processing import make_nonbreaking_hyphens
+            original_desc_weight = label_context['DescAndWeight']
+            label_context['DescAndWeight'] = make_nonbreaking_hyphens(label_context['DescAndWeight'])
+            self.logger.info(f"🔧 NON-BREAKING HYPHEN DEBUG: DescAndWeight '{original_desc_weight}' -> '{label_context['DescAndWeight']}'")
+        
+
         # Fast line break processing
         product_type = (label_context.get('ProductType', '').lower() or 
                        label_context.get('Product Type*', '').lower())
         
         if product_type not in classic_types and label_context.get('DescAndWeight'):
             desc_weight = label_context['DescAndWeight']
-            if desc_weight.endswith(' - '):
-                desc_weight = desc_weight[:-3] + '\n- '
-            elif desc_weight.endswith(' -'):
-                desc_weight = desc_weight[:-2] + '\n- '
-            desc_weight = desc_weight.replace(' - ', '\n- ')
+            # Keep hyphen on same line - no forced line breaks
+            # if desc_weight.endswith(' - '):
+            #     desc_weight = desc_weight[:-3] + '\n- '
+            # elif desc_weight.endswith(' -'):
+            #     desc_weight = desc_weight[:-2] + '\n- '
+            # desc_weight = desc_weight.replace(' - ', '\n- ')
             label_context['DescAndWeight'] = desc_weight
         
-        # Fast pre-roll processing
+        # Fast pre-roll processing - keep hyphen on same line
         if product_type in {"pre-roll", "infused pre-roll"} and label_context.get('DescAndWeight'):
             desc_weight = label_context['DescAndWeight']
-            desc_weight = desc_weight.replace(' - ', '\n- ')
+            # desc_weight = desc_weight.replace(' - ', '\n- ')  # Removed forced line break
             label_context['DescAndWeight'] = desc_weight
 
         # Fast weight and ratio formatting
@@ -2018,13 +2168,7 @@ class TemplateProcessor:
         except Exception as e:
             self.logger.warning(f"Content spacing consistency failed: {e}")
 
-        # Apply ratio and THC/CBD formatting first
-        try:
-            from src.core.generation.docx_formatting import enforce_arial_bold_all_text, enforce_ratio_formatting, enforce_thc_cbd_bold_formatting
-            enforce_ratio_formatting(doc)
-            enforce_thc_cbd_bold_formatting(doc)
-        except Exception as e:
-            self.logger.warning(f"Ratio/THC formatting failed: {e}")
+        # Arial Bold enforcement moved to the very end to prevent override
 
         # Fast DOH image centering
         try:
@@ -2094,15 +2238,80 @@ class TemplateProcessor:
         except Exception as e:
             self.logger.warning(f"Final DOH centering pass failed: {e}")
         
-        # FINAL BOLD FORMATTING: Apply bold formatting as the very last step
+        # CREATIVE FIX: Force bold formatting on DescAndWeight content specifically
         try:
-            from src.core.generation.docx_formatting import enforce_arial_bold_all_text
-            enforce_arial_bold_all_text(doc)
-            self.logger.info("Applied final Arial Bold formatting to all text")
+            self._force_descandweight_bold(doc)
+            self.logger.info("✅ CREATIVE DESCANDWEIGHT BOLD FIX: Applied comprehensive bold formatting")
         except Exception as e:
-            self.logger.warning(f"Final bold formatting failed: {e}")
+            self.logger.warning(f"DescAndWeight bold enforcement failed: {e}")
+        
+        # FINAL STEP: Enforce bold formatting on ALL text - this must be the very last operation
+        try:
+            from src.core.generation.docx_formatting import enforce_arial_bold_all_text, enforce_ratio_formatting, enforce_thc_cbd_bold_formatting
+            enforce_arial_bold_all_text(doc)
+            enforce_ratio_formatting(doc)
+            enforce_thc_cbd_bold_formatting(doc)
+            self.logger.info("✅ FINAL BOLD ENFORCEMENT: Applied bold formatting to all text")
+        except Exception as e:
+            self.logger.warning(f"Final bold enforcement failed: {e}")
             
         return doc
+
+    def _force_descandweight_bold(self, doc):
+        """CREATIVE FIX: Aggressively force bold formatting on DescAndWeight content."""
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+        import re
+        
+        # Pattern to identify DescAndWeight content (product name with weight)
+        descandweight_pattern = r'^[^-]+ - \d+\.?\d*(oz|g|mg|kg|lb|lbs)$'
+        
+        def process_run(run):
+            """Process a single run and make it bold if it contains DescAndWeight content."""
+            if not run.text:
+                return
+                
+            # Check if this looks like DescAndWeight content
+            text = run.text.strip()
+            if re.match(descandweight_pattern, text, re.IGNORECASE):
+                # This is DescAndWeight content - force it to be bold
+                run.font.bold = True
+                run.font.name = "Arial"
+                
+                # Force bold at XML level for maximum compatibility
+                rPr = run._element.get_or_add_rPr()
+                
+                # Remove any existing bold formatting
+                for b_elem in rPr.xpath('.//w:b'):
+                    rPr.remove(b_elem)
+                
+                # Add new bold formatting
+                b = OxmlElement('w:b')
+                b.set(qn('w:val'), '1')
+                rPr.append(b)
+                
+                # Force Arial font
+                rFonts = OxmlElement('w:rFonts')
+                rFonts.set(qn('w:ascii'), 'Arial')
+                rFonts.set(qn('w:hAnsi'), 'Arial')
+                rFonts.set(qn('w:eastAsia'), 'Arial')
+                rFonts.set(qn('w:cs'), 'Arial')
+                rPr.append(rFonts)
+                
+                self.logger.debug(f"🔧 CREATIVE BOLD FIX: Made DescAndWeight bold: '{text}'")
+        
+        # Process all tables
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    for paragraph in cell.paragraphs:
+                        for run in paragraph.runs:
+                            process_run(run)
+        
+        # Process all paragraphs outside tables
+        for paragraph in doc.paragraphs:
+            for run in paragraph.runs:
+                process_run(run)
 
     def _ensure_doh_image_centering(self, doc):
         """
@@ -2531,7 +2740,7 @@ class TemplateProcessor:
                 r'\bLINEAGE\b',                   # Standalone LINEAGE
                 r'\bPRODUCTVENDOR\b',             # Standalone PRODUCTVENDOR
                 r'\bTHC_CBD\b',                   # Standalone THC_CBD
-                r'\bRATIO\b',                     # Standalone RATIO
+                # REMOVED: r'\bRATIO\b' - Don't remove RATIO as it's part of brand names like "Ratio"
                 r'\bWEIGHTUNITS\b',               # Standalone WEIGHTUNITS
                 r'\bPRICE\b',                     # Standalone PRICE
                 r'\bDESC\b',                      # Standalone DESC
@@ -2588,7 +2797,7 @@ class TemplateProcessor:
                     # REMOVED: r'\bLINEAGE\b' - Don't remove LINEAGE as it might be part of content
                     # REMOVED: r'\bCBD\b' - Don't remove CBD as it's part of lineage content like "CBD Blend"
                     r'\bTHC\b',                    # Any remaining THC
-                    r'\bRATIO\b',                  # Any remaining RATIO
+                    # REMOVED: r'\bRATIO\b' - Don't remove RATIO as it's part of brand names like "Ratio"
                     r'\bWEIGHT\b',                 # Any remaining WEIGHT
                     r'\bUNITS\b',                  # Any remaining UNITS
                     r'\bPRICE\b',                  # Any remaining PRICE
@@ -2606,7 +2815,13 @@ class TemplateProcessor:
                     cleaned = re.sub(remnant, '', cleaned, flags=re.IGNORECASE)
                 
                 # Clean up any double spaces, leading/trailing spaces
+                # CRITICAL FIX: Preserve non-breaking hyphens (\u2011) when cleaning whitespace
+                # First, temporarily replace non-breaking hyphens with a placeholder
+                cleaned = cleaned.replace('\u2011', '___NONBREAKING_HYPHEN___')
+                # Then clean up whitespace
                 cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+                # Finally, restore non-breaking hyphens
+                cleaned = cleaned.replace('___NONBREAKING_HYPHEN___', '\u2011')
                 return cleaned
             
             # Clean markers in all tables
@@ -2659,8 +2874,13 @@ class TemplateProcessor:
                                 # Check if this run contains lineage content
                                 for lineage in lineage_values:
                                     if lineage in original_text.upper():
-                                        # Aggressively clean leading spaces
-                                        cleaned_text = original_text.lstrip(' \t\n\r\u00A0\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u200B\u200C\u200D\u200E\u200F\u2028\u2029\u202A\u202B\u202C\u202D\u202E\u202F\u205F\u2060\u2061\u2062\u2063\u2064\u2065\u2066\u2067\u2068\u2069\u206A\u206B\u206C\u206D\u206E\u206F\u3000\uFEFF')
+                                        # CRITICAL FIX: Preserve non-breaking hyphens (\u2011) when cleaning leading spaces
+                                        # First, temporarily replace non-breaking hyphens with a placeholder
+                                        temp_text = original_text.replace('\u2011', '___NONBREAKING_HYPHEN___')
+                                        # Then clean leading spaces
+                                        cleaned_text = temp_text.lstrip(' \t\n\r\u00A0\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u200B\u200C\u200D\u200E\u200F\u2028\u2029\u202A\u202B\u202C\u202D\u202E\u202F\u205F\u2060\u2061\u2062\u2063\u2064\u2065\u2066\u2067\u2068\u2069\u206A\u206B\u206C\u206D\u206E\u206F\u3000\uFEFF')
+                                        # Finally, restore non-breaking hyphens
+                                        cleaned_text = cleaned_text.replace('___NONBREAKING_HYPHEN___', '\u2011')
                                         
                                         if cleaned_text != original_text:
                                             run.text = cleaned_text
@@ -2674,8 +2894,13 @@ class TemplateProcessor:
                     # Check if this run contains lineage content
                     for lineage in lineage_values:
                         if lineage in original_text.upper():
-                            # Aggressively clean leading spaces
-                            cleaned_text = original_text.lstrip(' \t\n\r\u00A0\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u200B\u200C\u200D\u200E\u200F\u2028\u2029\u202A\u202B\u202C\u202D\u202E\u202F\u205F\u2060\u2061\u2062\u2063\u2064\u2065\u2066\u2067\u2068\u2069\u206A\u206B\u206C\u206D\u206E\u206F\u3000\uFEFF')
+                            # CRITICAL FIX: Preserve non-breaking hyphens (\u2011) when cleaning leading spaces
+                            # First, temporarily replace non-breaking hyphens with a placeholder
+                            temp_text = original_text.replace('\u2011', '___NONBREAKING_HYPHEN___')
+                            # Then clean leading spaces
+                            cleaned_text = temp_text.lstrip(' \t\n\r\u00A0\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u200B\u200C\u200D\u200E\u200F\u2028\u2029\u202A\u202B\u202C\u202D\u202E\u202F\u205F\u2060\u2061\u2062\u2063\u2064\u2065\u2066\u2067\u2068\u2069\u206A\u206B\u206C\u206D\u206E\u206F\u3000\uFEFF')
+                            # Finally, restore non-breaking hyphens
+                            cleaned_text = cleaned_text.replace('___NONBREAKING_HYPHEN___', '\u2011')
                             
                             if cleaned_text != original_text:
                                 run.text = cleaned_text
@@ -2910,11 +3135,8 @@ class TemplateProcessor:
                 run = paragraph.add_run()
                 run.font.name = "Arial"
                 
-                # Special handling for PRODUCTVENDOR - don't make it bold
-                if marker_name == 'PRODUCTVENDOR':
-                    run.font.bold = False
-                else:
-                    run.font.bold = True
+                # Make everything bold - no exceptions
+                run.font.bold = True
                 
                 run.font.size = marker_data['font_size']
                 set_run_font_size(run, marker_data['font_size'])
@@ -3149,7 +3371,7 @@ class TemplateProcessor:
                     set_run_font_size(run, font_size)
                     
                     # Add the content with line breaks as text
-                    run.add_text(content)
+                    run.text = content  # Use assignment instead of add_text to avoid duplication
                     
                     # Convert line breaks to actual line breaks, passing the font size
                     self._convert_br_markers_to_line_breaks(paragraph, font_size)
@@ -3163,18 +3385,15 @@ class TemplateProcessor:
                     paragraph.clear()
                     run = paragraph.add_run()
                     run.font.name = "Arial"
-                    # Special handling for PRODUCTVENDOR - don't make it bold
-                    if marker_name == 'PRODUCTVENDOR':
-                        run.font.bold = False
-                    else:
-                        run.font.bold = True
+                    # Make everything bold - no exceptions
+                    run.font.bold = True
                     run.font.size = font_size
                     
                     # Apply template-specific font size setting
                     set_run_font_size(run, font_size)
                     
                     # Add the content to the run
-                    run.add_text(content)
+                    run.text = content  # Use assignment instead of add_text to avoid duplication
                     
                     # Convert |BR| markers to actual line breaks for other markers
                     self._convert_br_markers_to_line_breaks(paragraph, font_size)
@@ -3264,7 +3483,7 @@ class TemplateProcessor:
                         run.font.bold = True
                         run.font.size = font_size
                         set_run_font_size(run, font_size)
-                        run.add_text(brand_content)
+                        run.text = brand_content  # Use assignment instead of add_text to avoid duplication
                         
                         # Center the paragraph for nonclassic types (ProductBrand content)
                         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -3413,19 +3632,27 @@ class TemplateProcessor:
             size_index = 0
             for i, part in enumerate(parts):
                 if part.strip():  # Only add non-empty parts
-                    # Strip whitespace for all content to remove extra spaces
-                    run = paragraph.add_run(part.strip())
+                    # CRITICAL FIX: Preserve non-breaking hyphens when stripping whitespace
+                    # Check for non-breaking hyphens before stripping
+                    if '\u2011' in part:
+                        self.logger.debug(f"BR CONVERSION DEBUG: Found non-breaking hyphens in part: '{part}'")
+                    # Strip whitespace for all content to remove extra spaces, but preserve non-breaking hyphens
+                    # First, temporarily replace non-breaking hyphens with a placeholder
+                    temp_part = part.replace('\u2011', '___NONBREAKING_HYPHEN___')
+                    # Then strip whitespace
+                    stripped_part = temp_part.strip()
+                    # Finally, restore non-breaking hyphens
+                    stripped_part = stripped_part.replace('___NONBREAKING_HYPHEN___', '\u2011')
+                    # Check for non-breaking hyphens after stripping
+                    if '\u2011' in stripped_part:
+                        self.logger.debug(f"BR CONVERSION DEBUG: Preserved non-breaking hyphens after strip: '{stripped_part}'")
+                    else:
+                        self.logger.debug(f"BR CONVERSION DEBUG: Lost non-breaking hyphens after strip: '{stripped_part}'")
+                    run = paragraph.add_run(stripped_part)
                     run.font.name = "Arial"
                     
-                    # Check if this paragraph contains ratio content and should be bold
-                    # This ensures multi-line ratio content stays bold
-                    if any(pattern in full_text for pattern in [
-                        'mg THC', 'mg CBD', 'mg CBC', 'mg CBG', 'mg CBN',
-                        'THC:', 'CBD:', 'CBC:', 'CBG:', 'CBN:',
-                        '1:1', '2:1', '3:1', '1:1:1', '2:1:1',
-                        'RATIO_START', 'THC_CBD_START'
-                    ]):
-                        run.font.bold = True
+                    # ALL text should be Arial Bold - NO EXCEPTIONS
+                    run.font.bold = True
                     
                     # Use consistent font size for all runs
                     if consistent_font_size:
@@ -4074,11 +4301,21 @@ class TemplateProcessor:
                                 
                                 if is_weight_unit and 'RATIO_START' not in run_text:
                                     # This is likely weight units content that needs markers
+                                    # CRITICAL FIX: Preserve non-breaking hyphens when adding markers
+                                    # Check for non-breaking hyphens before processing
+                                    if '\u2011' in run_text:
+                                        self.logger.debug(f"WEIGHT UNITS DEBUG: Found non-breaking hyphens in weight units: '{run_text}'")
                                     # Replace the run text with marked content
                                     run.text = f"RATIO_START{run_text}RATIO_END"
                                     run.font.name = "Arial"
                                     run.font.bold = True
                                     run.font.size = Pt(12)  # Default size, will be adjusted by post-processing
+                                    
+                                    # Check for non-breaking hyphens after processing
+                                    if '\u2011' in run.text:
+                                        self.logger.debug(f"WEIGHT UNITS DEBUG: Preserved non-breaking hyphens: '{run.text}'")
+                                    else:
+                                        self.logger.debug(f"WEIGHT UNITS DEBUG: Lost non-breaking hyphens: '{run.text}'")
                                     
                                     self.logger.debug(f"Added RATIO markers around weight units: {run_text}")
             
@@ -4150,11 +4387,21 @@ class TemplateProcessor:
                                     not run_text.strip().endswith('g') and
                                     not run_text.strip().endswith('mg')):
                                     # This is likely brand content that needs markers
+                                    # CRITICAL FIX: Preserve non-breaking hyphens when adding markers
+                                    # Check for non-breaking hyphens before processing
+                                    if '\u2011' in run_text:
+                                        self.logger.debug(f"BRAND MARKERS DEBUG: Found non-breaking hyphens in brand: '{run_text}'")
                                     # Replace the run text with marked content
                                     run.text = f"PRODUCTBRAND_CENTER_START{run_text}PRODUCTBRAND_CENTER_END"
                                     run.font.name = "Arial"
                                     run.font.bold = True
                                     run.font.size = Pt(12)  # Default size, will be adjusted by post-processing
+                                    
+                                    # Check for non-breaking hyphens after processing
+                                    if '\u2011' in run.text:
+                                        self.logger.debug(f"BRAND MARKERS DEBUG: Preserved non-breaking hyphens: '{run.text}'")
+                                    else:
+                                        self.logger.debug(f"BRAND MARKERS DEBUG: Lost non-breaking hyphens: '{run.text}'")
                                     
                                     # Ensure brand content is centered for mini templates
                                     if self.template_type == 'mini':
@@ -4402,7 +4649,7 @@ class TemplateProcessor:
                                 run.font.size = lineage_font_size
                                 
                                 run.font.color.rgb = RGBColor(255, 255, 255)  # Set text to white
-                                run.add_text(cleaned_text)
+                                run.text = cleaned_text  # Use assignment instead of add_text to avoid duplication
                                 paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT  # Left-align classic lineage
                                 
         except Exception as e:
@@ -4466,14 +4713,21 @@ class TemplateProcessor:
         if not text:
             return text
         
-        # First, normalize hyphen spacing to ensure consistent format
-        text = re.sub(r'\s*-\s*', ' - ', text)
+        # CRITICAL FIX: Preserve existing non-breaking hyphens (\u2011) and only convert regular hyphens
+        # First, temporarily replace non-breaking hyphens with a placeholder
+        text = text.replace('\u2011', '___NONBREAKING_HYPHEN___')
+        
+        # Then normalize regular hyphen spacing to use non-breaking hyphens instead of hyphen + non-breaking space
+        text = re.sub(r'\s*-\s*', '\u2011', text)
         
         # Check for hanging hyphens (hyphen at the end of a line or followed by a space and then end)
-        # Pattern: space + hyphen + space + end of string, or space + hyphen + end of string
-        if re.search(r' - $', text) or re.search(r' - \s*$', text):
+        # Pattern: non-breaking hyphen at end of string
+        if re.search(r'\u2011$', text) or re.search(r'\u2011\s*$', text):
             # Add line break before the hanging hyphen
-            text = re.sub(r' - (\s*)$', r'\n- \1', text)
+            text = re.sub(r'\u2011(\s*)$', r'\n\u2011\1', text)
+        
+        # Finally, restore non-breaking hyphens
+        text = text.replace('___NONBREAKING_HYPHEN___', '\u2011')
         
         return text
 
@@ -4654,17 +4908,17 @@ class TemplateProcessor:
                     if count and count.isdigit():
                         count_int = int(count)
                         if count_int == 1:
-                            # For single units, just show the weight with hyphen
-                            formatted = f"- {amount}g"
+                            # For single units, just show the weight with hyphen and non-breaking space
+                            formatted = f"-\u00A0{amount}g"
                         else:
-                            # For multiple units, show the full pack format with hyphen
-                            formatted = f"- {amount}g x {count} Pack"
+                            # For multiple units, show the full pack format with hyphen and non-breaking space
+                            formatted = f"-\u00A0{amount}g x {count} Pack"
                     else:
-                        # Only amount found (like "1g") - show just the weight with hyphen
-                        formatted = f"- {amount}g"
+                        # Only amount found (like "1g") - show just the weight with hyphen and non-breaking space
+                        formatted = f"-\u00A0{amount}g"
                 except IndexError:
-                    # Only amount found (like "1g") - show just the weight with hyphen
-                    formatted = f"- {amount}g"
+                    # Only amount found (like "1g") - show just the weight with hyphen and non-breaking space
+                    formatted = f"-\u00A0{amount}g"
                 return formatted
         
         # If no pattern matches, return the original text
@@ -4815,8 +5069,13 @@ class TemplateProcessor:
                 # Debug: Log the lineage content to see what we're working with
                 self.logger.debug(f"DEBUG: Original lineage_content: '{repr(lineage_content)}'")
                 
-                # Ensure no leading spaces in lineage content - aggressive cleaning
-                clean_lineage = lineage_content.strip().lstrip().lstrip(' \t\n\r\u00A0\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u200B\u200C\u200D\u200E\u200F\u2028\u2029\u202A\u202B\u202C\u202D\u202E\u202F\u205F\u2060\u2061\u2062\u2063\u2064\u2065\u2066\u2067\u2068\u2069\u206A\u206B\u206C\u206D\u206E\u206F\u3000\uFEFF')
+                # CRITICAL FIX: Preserve non-breaking hyphens (\u2011) when cleaning leading spaces
+                # First, temporarily replace non-breaking hyphens with a placeholder
+                temp_lineage = lineage_content.replace('\u2011', '___NONBREAKING_HYPHEN___')
+                # Then clean leading spaces
+                clean_lineage = temp_lineage.strip().lstrip().lstrip(' \t\n\r\u00A0\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u200B\u200C\u200D\u200E\u200F\u2028\u2029\u202A\u202B\u202C\u202D\u202E\u202F\u205F\u2060\u2061\u2062\u2063\u2064\u2065\u2066\u2067\u2068\u2069\u206A\u206B\u206C\u206D\u206E\u206F\u3000\uFEFF')
+                # Finally, restore non-breaking hyphens
+                clean_lineage = clean_lineage.replace('___NONBREAKING_HYPHEN___', '\u2011')
                 self.logger.debug(f"DEBUG: Cleaned lineage_content: '{repr(clean_lineage)}'")
                 
                 lineage_run = paragraph.add_run(clean_lineage)
@@ -4839,7 +5098,7 @@ class TemplateProcessor:
             if vendor_content and vendor_content.strip():
                 vendor_run = paragraph.add_run(vendor_content.strip())
                 vendor_run.font.name = "Arial"
-                vendor_run.font.bold = False
+                vendor_run.font.bold = True
                 vendor_run.font.italic = True  # Make vendor text italic
                 
                 # Set vendor color to light gray (#CCCCCC)
@@ -4926,8 +5185,13 @@ class TemplateProcessor:
             
             # Add lineage on first line with larger font size
             if lineage_content and lineage_content.strip():
-                # Ensure no leading spaces in lineage content - aggressive cleaning
-                clean_lineage = lineage_content.strip().lstrip(' \t\n\r\u00A0\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u200B\u200C\u200D\u200E\u200F\u2028\u2029\u202A\u202B\u202C\u202D\u202E\u202F\u205F\u2060\u2061\u2062\u2063\u2064\u2065\u2066\u2067\u2068\u2069\u206A\u206B\u206C\u206D\u206E\u206F\u3000\uFEFF')
+                # CRITICAL FIX: Preserve non-breaking hyphens (\u2011) when cleaning leading spaces
+                # First, temporarily replace non-breaking hyphens with a placeholder
+                temp_lineage = lineage_content.replace('\u2011', '___NONBREAKING_HYPHEN___')
+                # Then clean leading spaces
+                clean_lineage = temp_lineage.strip().lstrip(' \t\n\r\u00A0\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u200B\u200C\u200D\u200E\u200F\u2028\u2029\u202A\u202B\u202C\u202D\u202E\u202F\u205F\u2060\u2061\u2062\u2063\u2064\u2065\u2066\u2067\u2068\u2069\u206A\u206B\u206C\u206D\u206E\u206F\u3000\uFEFF')
+                # Finally, restore non-breaking hyphens
+                clean_lineage = clean_lineage.replace('___NONBREAKING_HYPHEN___', '\u2011')
                 lineage_run = paragraph.add_run(clean_lineage)
                 lineage_run.font.name = "Arial"
                 lineage_run.font.bold = True
@@ -4938,7 +5202,9 @@ class TemplateProcessor:
             
             # Add line break
             if lineage_content and vendor_content:
-                paragraph.add_run("\n")
+                newline_run = paragraph.add_run("\n")
+                newline_run.font.name = "Arial"
+                newline_run.font.bold = True  # ALL text should be bold - NO EXCEPTIONS
             
             # Add vendor on second line with smaller font size and right alignment
             if vendor_content and vendor_content.strip():
@@ -4950,7 +5216,7 @@ class TemplateProcessor:
                 
                 vendor_run = paragraph.add_run(vendor_content.strip())
                 vendor_run.font.name = "Arial"
-                vendor_run.font.bold = False
+                vendor_run.font.bold = True
                 vendor_run.font.italic = True  # Make vendor text italic
                 
                 # Set vendor color to light gray (#CCCCCC)
@@ -5078,7 +5344,7 @@ class TemplateProcessor:
                     lineage_font_size = get_font_size_by_marker(lineage_content, 'LINEAGE', self.template_type, self.scale_factor, product_type)
                     set_run_font_size(run, lineage_font_size)
                     
-                    run.add_text(lineage_content)
+                    run.text = lineage_content  # Use assignment instead of add_text to avoid duplication
                     paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT  # Left-align classic lineage
                     
                     # Mark as processed to prevent re-processing
@@ -5562,14 +5828,24 @@ class TemplateProcessor:
                             # Process each run for placeholder replacement
                             for run in paragraph.runs:
                                 text = run.text
+                                self.logger.debug(f"BRAND DEBUG: Processing run with initial text: '{text}'")
                                 for label_key, label_context in context.items():
                                     for field_key, field_value in label_context.items():
                                         placeholder = f"{{{{{label_key}.{field_key}}}}}"
                                         
                                         # Check if placeholder is in this run or split across runs
                                         if placeholder in text or placeholder in full_paragraph_text:
+                                            self.logger.debug(f"BRAND DEBUG: Found placeholder {placeholder} in text: '{text}' or paragraph: '{full_paragraph_text}'")
                                             if placeholder in text:
                                                 self.logger.debug(f"Found placeholder to replace: {placeholder}")
+                                                # CRITICAL FIX: Check if this placeholder has already been processed
+                                                if hasattr(run, '_processed_placeholders'):
+                                                    if placeholder in run._processed_placeholders:
+                                                        self.logger.debug(f"BRAND DEBUG: Placeholder {placeholder} already processed, skipping")
+                                                        continue
+                                                    run._processed_placeholders.add(placeholder)
+                                                else:
+                                                    run._processed_placeholders = {placeholder}
                                             else:
                                                 self.logger.debug(f"Found split placeholder to replace: {placeholder}")
                                             replacements_made += 1
@@ -5620,62 +5896,74 @@ class TemplateProcessor:
                                                     clean_value = unwrap_marker(clean_value, 'PRODUCTVENDOR')
                                                 elif 'PRODUCTSTRAIN_START' in clean_value and 'PRODUCTSTRAIN_END' in clean_value:
                                                     clean_value = unwrap_marker(clean_value, 'PRODUCTSTRAIN')
+                                                elif 'LINEAGE_START' in clean_value and 'LINEAGE_END' in clean_value:
+                                                    clean_value = unwrap_marker(clean_value, 'LINEAGE')
                                                 
                                                 # Replace placeholder with clean value
+                                                original_text = text
                                                 text = text.replace(placeholder, clean_value)
-                                                self.logger.debug(f"Replaced {placeholder} with unwrapped value: {clean_value}")
+                                                self.logger.debug(f"BRAND DEBUG: Replaced {placeholder} with unwrapped value: {clean_value}")
+                                                self.logger.debug(f"BRAND DEBUG: Original text: '{original_text}' -> New text: '{text}'")
                                                 
                                                 # CRITICAL FIX: Apply centering for Lineage field with PRODUCTBRAND_CENTER markers
                                                 if field_key == 'Lineage' and 'PRODUCTBRAND_CENTER_START' in str(field_value) and 'PRODUCTBRAND_CENTER_END' in str(field_value):
                                                     # This is a non-classic type with Product Brand in Lineage field
-                                                    # For double template, we need to create a separate paragraph for the brand
-                                                    # to center it properly within the yellow banner area
-                                                    from docx.oxml.ns import qn
-                                                    from docx.oxml import OxmlElement
+                                                    # For double template, center the existing paragraph instead of creating a new one
                                                     from docx.enum.text import WD_ALIGN_PARAGRAPH
                                                     
                                                     self.logger.debug(f"Applying centering to Lineage field with value: {field_value}")
                                                     
-                                                    # Find the paragraph and cell
+                                                    # Find the paragraph and center it
                                                     paragraph = run._element.getparent()
                                                     if paragraph is not None:
-                                                        cell = paragraph.getparent()
-                                                        if cell is not None:
-                                                            # Create a new paragraph specifically for the centered brand
-                                                            new_para = OxmlElement('w:p')
-                                                            
-                                                            # Add paragraph properties with center alignment
-                                                            pPr = OxmlElement('w:pPr')
-                                                            jc = OxmlElement('w:jc')
-                                                            jc.set(qn('w:val'), 'center')
-                                                            pPr.append(jc)
-                                                            new_para.append(pPr)
-                                                            
-                                                            # Create run with the brand text
-                                                            new_run = OxmlElement('w:r')
-                                                            run_props = OxmlElement('w:rPr')
-                                                            new_run.append(run_props)
-                                                            
-                                                            # Add text
-                                                            text_elem = OxmlElement('w:t')
-                                                            text_elem.text = clean_value
-                                                            new_run.append(text_elem)
-                                                            new_para.append(new_run)
-                                                            
-                                                            # Insert the new centered paragraph before the current paragraph
-                                                            cell.insert(cell.index(paragraph), new_para)
-                                                            
-                                                            # Remove the brand text from the original run
-                                                            text = text.replace(clean_value, '')
-                                                            
-                                                            self.logger.debug(f"Created separate centered paragraph for brand: {clean_value}")
-                                                        else:
-                                                            self.logger.debug(f"Could not find cell for centering")
+                                                        # Center the existing paragraph
+                                                        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                                        self.logger.debug(f"Centered existing paragraph for brand: {clean_value}")
                                                     else:
                                                         self.logger.debug(f"Could not find paragraph for centering")
                                                 
                                                 # Update the run text
+                                                self.logger.debug(f"BRAND DEBUG: Setting run.text to: '{text}'")
+                                                # Check for non-breaking hyphens before setting
+                                                if '\u2011' in text:
+                                                    self.logger.debug(f"BRAND DEBUG: Text contains non-breaking hyphens: '{text}'")
                                                 run.text = text
+                                                self.logger.debug(f"BRAND DEBUG: After setting, run.text is: '{run.text}'")
+                                                # Check for non-breaking hyphens after setting
+                                                if '\u2011' in run.text:
+                                                    self.logger.debug(f"BRAND DEBUG: Run.text still contains non-breaking hyphens: '{run.text}'")
+                                                else:
+                                                    self.logger.debug(f"BRAND DEBUG: Run.text lost non-breaking hyphens: '{run.text}'")
+                                                
+                                                # CRITICAL FIX: Apply bold formatting to DESC content
+                                                if field_key == 'DescAndWeight' and 'DESC_START' in str(field_value) and 'DESC_END' in str(field_value):
+                                                    # Apply bold formatting at multiple levels for maximum compatibility
+                                                    run.font.bold = True
+                                                    
+                                                    # Force bold at XML level for maximum compatibility
+                                                    from docx.oxml import OxmlElement
+                                                    from docx.oxml.ns import qn
+                                                    rPr = run._element.get_or_add_rPr()
+                                                    
+                                                    # Remove any existing bold formatting
+                                                    for b_elem in rPr.xpath('.//w:b'):
+                                                        rPr.remove(b_elem)
+                                                    
+                                                    # Add new bold formatting
+                                                    b = OxmlElement('w:b')
+                                                    b.set(qn('w:val'), '1')
+                                                    rPr.append(b)
+                                                    
+                                                    # Also force Arial font
+                                                    run.font.name = "Arial"
+                                                    rFonts = OxmlElement('w:rFonts')
+                                                    rFonts.set(qn('w:ascii'), 'Arial')
+                                                    rFonts.set(qn('w:hAnsi'), 'Arial')
+                                                    rFonts.set(qn('w:eastAsia'), 'Arial')
+                                                    rFonts.set(qn('w:cs'), 'Arial')
+                                                    rPr.append(rFonts)
+                                                    
+                                                    self.logger.debug(f"Applied comprehensive bold formatting to DescAndWeight: {clean_value}")
                                                 
                                                 # Apply unified font sizing for double templates
                                                 field_type_mapping = {
@@ -5701,9 +5989,41 @@ class TemplateProcessor:
                                                 self.logger.debug(f"Replaced {placeholder} with {field_value}")
                                 
                                 run.text = text
+                                
+                                # CRITICAL FIX: Apply bold formatting to DESC content for other templates
+                                if field_key == 'DescAndWeight' and 'DESC_START' in str(field_value) and 'DESC_END' in str(field_value):
+                                    # Apply bold formatting at multiple levels for maximum compatibility
+                                    run.font.bold = True
+                                    
+                                    # Force bold at XML level for maximum compatibility
+                                    from docx.oxml import OxmlElement
+                                    from docx.oxml.ns import qn
+                                    rPr = run._element.get_or_add_rPr()
+                                    
+                                    # Remove any existing bold formatting
+                                    for b_elem in rPr.xpath('.//w:b'):
+                                        rPr.remove(b_elem)
+                                    
+                                    # Add new bold formatting
+                                    b = OxmlElement('w:b')
+                                    b.set(qn('w:val'), '1')
+                                    rPr.append(b)
+                                    
+                                    # Also force Arial font
+                                    run.font.name = "Arial"
+                                    rFonts = OxmlElement('w:rFonts')
+                                    rFonts.set(qn('w:ascii'), 'Arial')
+                                    rFonts.set(qn('w:hAnsi'), 'Arial')
+                                    rFonts.set(qn('w:eastAsia'), 'Arial')
+                                    rFonts.set(qn('w:cs'), 'Arial')
+                                    rPr.append(rFonts)
+                                    
+                                    self.logger.debug(f"Applied comprehensive bold formatting to DescAndWeight (other templates): {str(field_value)}")
                             
                             # Also check paragraph text for remaining placeholders
                             paragraph_text = paragraph.text
+                            if paragraph_text is None:
+                                paragraph_text = ""
                             for label_key, label_context in context.items():
                                 for field_key, field_value in label_context.items():
                                     placeholder = f"{{{{{label_key}.{field_key}}}}}"

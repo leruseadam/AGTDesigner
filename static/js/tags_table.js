@@ -50,7 +50,7 @@ function createTagRow(tag) {
                         <option value="HYBRID/SATIVA" ${lineage === 'HYBRID/SATIVA' ? 'selected' : ''}>H/S</option>
                         <option value="HYBRID/INDICA" ${lineage === 'HYBRID/INDICA' ? 'selected' : ''}>H/I</option>
                         <option value="CBD" ${(lineage === 'CBD' || lineage === 'CBD_BLEND') ? 'selected' : ''}>CBD</option>
-                        <option value="MIXED" ${lineage === 'MIXED' ? 'selected' : ''}>THC</option>
+                        <option value="MIXED" ${(lineage === 'MIXED' || !['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/INDICA', 'HYBRID/SATIVA', 'CBD', 'CBD_BLEND', 'PARA', 'PARAPHERNALIA', 'MIXED'].includes((lineage || '').toUpperCase())) ? 'selected' : ''}>THC</option>
                         <option value="PARA" ${lineage === 'PARA' ? 'selected' : ''}>P</option>
                     </select>
                 </div>
@@ -349,9 +349,21 @@ class TagsTable {
       // Update the local UI
       if (tagRow) {
         tagRow.dataset.lineage = newLineage;
+        // Force a style recalculation to apply the new lineage color
+        const originalDisplay = tagRow.style.display;
+        tagRow.style.display = 'none';
+        tagRow.offsetHeight; // Trigger reflow
+        tagRow.style.display = originalDisplay;
       } else {
         const tagItem = selectElement.closest(".tag-item");
-        if (tagItem) tagItem.dataset.lineage = newLineage;
+        if (tagItem) {
+          tagItem.dataset.lineage = newLineage;
+          // Force a style recalculation to apply the new lineage color
+          const originalDisplay = tagItem.style.display;
+          tagItem.style.display = 'none';
+          tagItem.offsetHeight; // Trigger reflow
+          tagItem.style.display = originalDisplay;
+        }
       }
       
       // Show success message
@@ -371,10 +383,22 @@ class TagsTable {
         console.log(`📝 Updated tag in TagManager.state.originalTags`);
       }
       
-      // Only update selected tags if the changed tag is in the selected list
+      // CRITICAL FIX: Don't fetch from backend - just update the local selected tag if it exists
       if (TagManager.state.selectedTags.has(tagName)) {
-        console.log(`🔄 Updating selected tags for ${tagName}`);
-        await TagManager.fetchAndUpdateSelectedTags();
+        console.log(`🔄 Updating local selected tag for ${tagName} - no backend fetch needed`);
+        // Find the tag in the selected tags list and update its lineage
+        const selectedTagsList = document.querySelectorAll('#selectedTags .tag-item');
+        selectedTagsList.forEach(tagElement => {
+          const tagData = tagElement.dataset;
+          if (tagData.productName === tagName) {
+            // Update the lineage in the tag element
+            const lineageSelect = tagElement.querySelector('.lineage-dropdown');
+            if (lineageSelect) {
+              lineageSelect.value = newLineage;
+            }
+            console.log(`✅ Updated lineage in selected tag UI for ${tagName}`);
+          }
+        });
       }
 
       // CRITICAL FIX: Don't refresh available tags - just update the UI directly

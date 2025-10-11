@@ -5686,38 +5686,38 @@ class JSONMatcher:
             return []
 
     def _get_all_products(self) -> List[dict]:
-        """Get all available products for matching, DATABASE FIRST with priority."""
+        """Get all available products for matching, EXCEL FIRST with priority."""
         try:
             candidates: List[dict] = []
             
-            # PRIORITY 1: Database products (authoritative source)
-            try:
-                from .product_database import ProductDatabase
-                product_db = ProductDatabase()
-                db_products = product_db.get_all_products()
-                if db_products:
-                    # Mark database products with priority flag
-                    for product in db_products:
-                        product['_source'] = 'database'
-                        product['_priority'] = 1  # Highest priority
-                    candidates.extend(db_products)
-                    logging.info(f"Loaded {len(db_products)} products from DATABASE (highest priority)")
-            except Exception as db_err:
-                logging.warning(f"Database candidates unavailable: {db_err}")
-
-            # PRIORITY 2: Excel rows (secondary source)
+            # PRIORITY 1: Excel rows (authoritative source - Excel data first!)
             if hasattr(self, 'excel_processor') and self.excel_processor and hasattr(self.excel_processor, 'df') and self.excel_processor.df is not None:
                 try:
                     excel_count = 0
                     for _, row in self.excel_processor.df.iterrows():
                         row_dict = row.to_dict()
                         row_dict['_source'] = 'excel'
-                        row_dict['_priority'] = 2  # Lower priority than database
+                        row_dict['_priority'] = 1  # Highest priority - Excel data first!
                         candidates.append(row_dict)
                         excel_count += 1
-                    logging.info(f"Loaded {excel_count} products from EXCEL (secondary priority)")
+                    logging.info(f"Loaded {excel_count} products from EXCEL (highest priority)")
                 except Exception as xl_err:
                     logging.debug(f"Excel candidates unavailable: {xl_err}")
+
+            # PRIORITY 2: Database products (fallback source)
+            try:
+                from .product_database import ProductDatabase
+                product_db = ProductDatabase()
+                db_products = product_db.get_all_products()
+                if db_products:
+                    # Mark database products with lower priority
+                    for product in db_products:
+                        product['_source'] = 'database'
+                        product['_priority'] = 2  # Lower priority than Excel
+                    candidates.extend(db_products)
+                    logging.info(f"Loaded {len(db_products)} products from DATABASE (secondary priority)")
+            except Exception as db_err:
+                logging.warning(f"Database candidates unavailable: {db_err}")
 
             logging.info(f"Total candidates for matching: {len(candidates)} (Database: {len([c for c in candidates if c.get('_source') == 'database'])}, Excel: {len([c for c in candidates if c.get('_source') == 'excel'])})")
             return candidates
@@ -6342,7 +6342,16 @@ class JSONMatcher:
             elif any(word in name_lower for word in ['hybrid', 'balanced']):
                 return 'HYBRID'
             elif any(word in name_lower for word in ['cbd', 'hemp', 'low-thc']):
-                return 'CBD'
+                # For edibles, be more conservative - only assign CBD if it's explicitly high-CBD
+                if product_type and product_type.strip().lower() in ['edible (solid)', 'edible (liquid)', 'high cbd edible liquid', 'tincture', 'topical', 'capsule']:
+                    # Only assign CBD lineage to edibles if they are explicitly high-CBD products
+                    if 'high cbd' in name_lower or 'cbd' in name_lower and any(word in name_lower for word in ['high', 'pure', 'isolate']):
+                        return 'CBD'
+                    else:
+                        # Regular edibles with CBD content should be MIXED
+                        return 'MIXED'
+                else:
+                    return 'CBD'
         
         # Check if this is a classic product type
         if product_type and product_type.strip().lower() in CLASSIC_TYPES:

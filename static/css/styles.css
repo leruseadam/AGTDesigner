@@ -287,14 +287,14 @@ img, video, canvas, svg {
     --text-primary: #fff;
     --text-secondary: rgba(238, 238, 238, 0.8);
     
-    /* Lineage colors - Soft Vibrant */
+    /* Lineage colors */
     --lineage-sativa: rgba(237, 65, 35, 0.5);
-    --lineage-indica: rgba(160, 132, 232, 0.5);
-      --lineage-hybrid: rgba(124, 58, 237, 0.5);
-  --lineage-hybrid-indica: rgba(160, 132, 232, 0.5);
-  --lineage-hybrid-sativa: rgba(237, 65, 35, 0.5);
-  --lineage-cbd: rgba(241, 194, 50, 0.8);
-  --lineage-mixed: rgba(0, 33, 245, 0.8);
+    --lineage-indica: rgba(153, 0, 255, 0.5);
+    --lineage-hybrid: rgba(0, 153, 0, 0.5);
+    --lineage-hybrid-indica: rgba(153, 0, 255, 0.5);
+    --lineage-hybrid-sativa: rgba(237, 65, 35, 0.5);
+    --lineage-cbd: rgba(241, 194, 50, 0.8);
+    --lineage-mixed: rgba(0, 33, 245, 0.8);
     --lineage-para: rgba(255, 192, 203, 0.5);
     
     /* Column Width Variables - Adjust these to change layout */
@@ -2152,6 +2152,8 @@ img, video, canvas, svg {
     max-width: 95%;
     /* Allow content to be visible */
     overflow: visible;
+    /* Make all tag text bold */
+    font-weight: bold !important;
   }
   
   .tag-item::before {
@@ -2396,7 +2398,7 @@ img, video, canvas, svg {
   }
   
   .lineage-dropdown option[value="HYBRID"], .form-select.lineage-dropdown option[value="HYBRID"] {
-    background: rgba(124, 58, 237, 0.9) !important;
+    background: rgba(0, 153, 0, 0.9) !important;  /* Green for HYBRID */
     color: white !important;
     font-weight: 600 !important;
   }
@@ -2408,7 +2410,7 @@ img, video, canvas, svg {
   }
   
   .lineage-dropdown option[value="HYBRID/INDICA"], .form-select.lineage-dropdown option[value="HYBRID/INDICA"] {
-    background: rgba(160, 132, 232, 0.9) !important;
+    background: rgba(153, 0, 255, 0.9) !important;  /* Purple for HYBRID/INDICA (matches INDICA) */
     color: white !important;
     font-weight: 600 !important;
   }
@@ -2524,51 +2526,69 @@ img, video, canvas, svg {
   .tag-item[data-lineage="SATIVA"] {
     background: rgba(237, 65, 35, 0.6) !important;
     border-color: rgba(237, 65, 35, 0.3);
+    font-weight: bold !important;
   }
   
   .tag-item[data-lineage="INDICA"] {
     background: rgba(153, 0, 255, 0.6) !important;
     border-color: rgba(153, 0, 255, 0.3);
+    font-weight: bold !important;
   }
   
   .tag-item[data-lineage="HYBRID"] {
     background: rgba(0, 153, 0, 0.6) !important;
     border-color: rgba(0, 153, 0, 0.3);
+    font-weight: bold !important;
   }
   
   .tag-item[data-lineage="HYBRID/SATIVA"] {
     background: rgba(237, 65, 35, 0.6) !important;
     border-color: rgba(237, 65, 35, 0.3);
+    font-weight: bold !important;
   }
   
   .tag-item[data-lineage="HYBRID/INDICA"] {
     background: rgba(153, 0, 255, 0.6) !important;
     border-color: rgba(153, 0, 255, 0.3);
+    font-weight: bold !important;
   }
   
   .tag-item[data-lineage="CBD"] {
     background: rgba(241, 194, 50, 0.6) !important;
-    border-color: rgba(241, 194, 50, 0.3);
+    border-color: rgba(241, 194, 50, 0.3) !important;
+    font-weight: bold !important;
   }
   
   .tag-item[data-lineage="CBD_BLEND"] {
     background: rgba(241, 194, 50, 0.6) !important;
-    border-color: rgba(241, 194, 50, 0.3);
+    border-color: rgba(241, 194, 50, 0.3) !important;
+    font-weight: bold !important;
   }
   
   .tag-item[data-lineage="MIXED"] {
     background: rgba(0, 33, 245, 0.6) !important;
     border-color: rgba(0, 33, 245, 0.3);
+    font-weight: bold !important;
   }
   
   .tag-item[data-lineage="PARA"] {
     background: rgba(255, 192, 203, 0.6) !important;
     border-color: rgba(255, 192, 203, 0.3);
+    font-weight: bold !important;
   }
   
   .tag-item[data-lineage="PARAPHERNALIA"] {
     background: rgba(255, 192, 203, 0.6) !important;
     border-color: rgba(255, 192, 203, 0.3);
+    font-weight: bold !important;
+  }
+
+  /* CRITICAL FIX: Ensure CBD lineage colors override all other styles */
+  .tag-item[data-lineage="CBD"],
+  .tag-item[data-lineage="CBD_BLEND"] {
+    background: rgba(241, 194, 50, 0.6) !important;
+    border-color: rgba(241, 194, 50, 0.3) !important;
+    font-weight: bold !important;
   }
 
   /* JSON matched tag styling - subtle indicator without overriding lineage colors */
@@ -2707,6 +2727,13 @@ img, video, canvas, svg {
   .tag-row[data-lineage="PARAPHERNALIA"] {
     background: rgba(255, 192, 203, 0.6) !important;
     border-color: rgba(255, 192, 203, 0.3);
+  }
+
+  /* CRITICAL FIX: Ensure CBD lineage colors override all other styles for tag-row */
+  .tag-row[data-lineage="CBD"],
+  .tag-row[data-lineage="CBD_BLEND"] {
+    background: rgba(241, 194, 50, 0.6) !important;
+    border-color: rgba(241, 194, 50, 0.3) !important;
   }
   
   /* Brand headers */
@@ -4641,6 +4668,16 @@ img, video, canvas, svg {
   }
   
   /* Force tag names to wrap and not truncate */
+  /* EMERGENCY FIX: Force CBD colors with maximum specificity */
+  .tag-item[data-lineage="CBD"],
+  .tag-item[data-lineage="CBD_BLEND"],
+  .tag-row[data-lineage="CBD"],
+  .tag-row[data-lineage="CBD_BLEND"] {
+    background: rgba(241, 194, 50, 0.6) !important;
+    border-color: rgba(241, 194, 50, 0.3) !important;
+    font-weight: bold !important;
+  }
+
   .tag-item .tag-name,
   .tag-row .tag-name,
   .tag-info .tag-name {

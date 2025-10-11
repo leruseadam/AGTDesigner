@@ -159,8 +159,34 @@ def optimized_lineage_assignment(df, product_types, lineages, classic_types):
         product_strain = df['Product Strain'].astype(str)
         
         # CBD Blend products -> CBD lineage (yellow) - override existing lineage
+        # But be more conservative with edibles
         cbd_blend_mask = nonclassic_mask & (product_strain.str.contains('CBD Blend', case=False, na=False))
-        result[cbd_blend_mask] = 'CBD'
+        
+        # Define edible types for more conservative CBD assignment
+        edible_types = {"edible (solid)", "edible (liquid)", "high cbd edible liquid", "tincture", "topical", "capsule"}
+        edible_mask = product_types.str.strip().str.lower().isin(edible_types)
+        
+        # For non-edibles with CBD Blend, assign CBD lineage
+        non_edible_cbd_blend = cbd_blend_mask & ~edible_mask
+        result[non_edible_cbd_blend] = 'CBD'
+        
+        # For edibles with CBD Blend, be more conservative - only assign CBD if explicitly high-CBD
+        edible_cbd_blend = cbd_blend_mask & edible_mask
+        # Check if product names contain explicit CBD indicators
+        if 'Product Name*' in df.columns:
+            product_names = df['Product Name*'].astype(str)
+            explicit_cbd_mask = product_names.str.contains(r'\bCBD\b', case=False, na=False)
+            high_cbd_edible_mask = edible_cbd_blend & (
+                (product_types.str.strip().str.lower() == "high cbd edible liquid") |
+                explicit_cbd_mask
+            )
+            result[high_cbd_edible_mask] = 'CBD'
+            # Set remaining edibles with CBD Blend to MIXED
+            remaining_edible_cbd = edible_cbd_blend & ~high_cbd_edible_mask
+            result[remaining_edible_cbd] = 'MIXED'
+        else:
+            # If no product name column, default edibles with CBD Blend to MIXED
+            result[edible_cbd_blend] = 'MIXED'
         
         # Paraphernalia products -> PARAPHERNALIA lineage (pink) - override existing lineage
         paraphernalia_mask = nonclassic_mask & (product_strain.str.contains('Paraphernalia', case=False, na=False))
@@ -851,8 +877,46 @@ class ExcelProcessor:
                         # Update lineage in the dataframe for this strain
                         strain_mask = self.df['Product Strain'] == strain_name
                         if strain_mask.any():
-                            self.df.loc[strain_mask, 'Lineage'] = strain_info['sovereign_lineage']
-                            lineage_updates += strain_mask.sum()
+                            db_lineage = strain_info['sovereign_lineage']
+                            
+                            # CRITICAL FIX: Be more conservative with edible lineage assignments
+                            # Don't override edible lineage assignments with database values unless they're explicitly high-CBD
+                            edible_types = {"edible (solid)", "edible (liquid)", "high cbd edible liquid", "tincture", "topical", "capsule"}
+                            
+                            for idx in self.df[strain_mask].index:
+                                product_type = self.df.loc[idx, 'Product Type*']
+                                product_name = self.df.loc[idx, 'ProductName'] if 'ProductName' in self.df.columns else ''
+                                
+                                # Check if this is an edible product
+                                if product_type and product_type.strip().lower() in edible_types:
+                                    # For edibles, only use database lineage if it's explicitly high-CBD
+                                    if (db_lineage == 'CBD' and 
+                                        (product_type.strip().lower() == "high cbd edible liquid" or
+                                         (product_name and 'CBD' in product_name.upper() and 
+                                          any(word in product_name.upper() for word in ['HIGH', 'PURE', 'ISOLATE'])))):
+                                        # This is an explicitly high-CBD edible, use database lineage
+                                        self.df.loc[idx, 'Lineage'] = db_lineage
+                                        lineage_updates += 1
+                                        self.logger.debug(f"[ProductDB] Loaded lineage for high-CBD edible '{strain_name}': {db_lineage}")
+                                    else:
+                                        # Regular edible, keep MIXED lineage instead of database CBD
+                                        if db_lineage == 'CBD':
+                                            # Ensure MIXED category exists before assignment
+                                            if 'MIXED' not in self.df['Lineage'].cat.categories:
+                                                self.df['Lineage'] = self.df['Lineage'].cat.add_categories(['MIXED'])
+                                            self.df.loc[idx, 'Lineage'] = 'MIXED'
+                                            self.logger.debug(f"[ProductDB] Override: Regular edible '{strain_name}' kept MIXED instead of database CBD")
+                                        else:
+                                            # Ensure category exists before assignment
+                                            if db_lineage not in self.df['Lineage'].cat.categories:
+                                                self.df['Lineage'] = self.df['Lineage'].cat.add_categories([db_lineage])
+                                            self.df.loc[idx, 'Lineage'] = db_lineage
+                                            lineage_updates += 1
+                                else:
+                                    # Non-edible product, use database lineage as before
+                                    self.df.loc[idx, 'Lineage'] = db_lineage
+                                    lineage_updates += 1
+                                    
                             self.logger.debug(f"[ProductDB] Loaded lineage for '{strain_name}': {strain_info['sovereign_lineage']}")
                 except Exception as e:
                     self.logger.warning(f"[ProductDB] Failed to load lineage for strain '{strain_name}': {e}")
@@ -2150,26 +2214,35 @@ class ExcelProcessor:
                 edible_types = {"edible (solid)", "edible (liquid)", "high cbd edible liquid", "tincture", "topical", "capsule"}
                 edible_mask = self.df["Product Type*"].str.strip().str.lower().isin(edible_types)
                 
-                # If Product Strain is 'CBD Blend', set Lineage to 'CBD' (but protect edibles that already have proper lineage)
+                # If Product Strain is 'CBD Blend', set Lineage to 'CBD' (but be more conservative with edibles)
                 if "Product Strain" in self.df.columns and "Lineage" in self.df.columns:
                     cbd_blend_mask = self.df["Product Strain"].astype(str).str.lower().str.strip() == "cbd blend"
-                    # Only apply to non-edibles or edibles that don't already have a proper lineage
+                    # Only apply to non-edibles - edibles with CBD Blend should typically be MIXED unless explicitly CBD-focused
                     non_edible_cbd_blend = cbd_blend_mask & ~edible_mask
-                    edible_cbd_blend_no_lineage = cbd_blend_mask & edible_mask & (
-                        self.df["Lineage"].isnull() | 
-                        (self.df["Lineage"].astype(str).str.strip() == "") |
-                        (self.df["Lineage"].astype(str).str.strip() == "Unknown")
+                    
+                    # For edibles, only assign CBD lineage if they are explicitly high-CBD products
+                    edible_cbd_blend_explicit = cbd_blend_mask & edible_mask & (
+                        (self.df["Product Type*"].str.strip().str.lower() == "high cbd edible liquid") |
+                        (self.df[product_name_col].str.contains(r"\bCBD\b", case=False, na=False) if product_name_col else False)
                     )
                     
-                    combined_cbd_blend_mask = non_edible_cbd_blend | edible_cbd_blend_no_lineage
+                    combined_cbd_blend_mask = non_edible_cbd_blend | edible_cbd_blend_explicit
                     
                     if combined_cbd_blend_mask.any() and "Lineage" in self.df.columns:
                         if "CBD" not in self.df["Lineage"].cat.categories:
                             self.df["Lineage"] = self.df["Lineage"].cat.add_categories(["CBD"])
                         self.df.loc[combined_cbd_blend_mask, "Lineage"] = "CBD"
                         self.logger.info(f"Assigned CBD lineage to {combined_cbd_blend_mask.sum()} products with CBD Blend strain")
+                    
+                    # Set edibles with CBD Blend but not explicitly CBD-focused to MIXED
+                    edible_cbd_blend_mixed = cbd_blend_mask & edible_mask & ~edible_cbd_blend_explicit
+                    if edible_cbd_blend_mixed.any() and "Lineage" in self.df.columns:
+                        if "MIXED" not in self.df["Lineage"].cat.categories:
+                            self.df["Lineage"] = self.df["Lineage"].cat.add_categories(["MIXED"])
+                        self.df.loc[edible_cbd_blend_mixed, "Lineage"] = "MIXED"
+                        self.logger.info(f"Assigned MIXED lineage to {edible_cbd_blend_mixed.sum()} edible products with CBD Blend strain")
 
-                # If Description or Product Name* contains CBD, CBG, CBN, CBC, set Lineage to 'CBD' (but protect edibles)
+                # If Description or Product Name* contains CBD, CBG, CBN, CBC, set Lineage to 'CBD' (but be more conservative with edibles)
                 # Fix: ensure product_name_col is always a Series for .str methods
                 if product_name_col:
                     product_names_for_cbd = self.df[product_name_col]
@@ -2181,20 +2254,28 @@ class ExcelProcessor:
                     self.df["Description"].str.contains(r"CBD|CBG|CBN|CBC", case=False, na=False) |
                     (product_names_for_cbd.str.contains(r"CBD|CBG|CBN|CBC", case=False, na=False) if product_name_col else False)
                 )
-                # Only apply to non-edibles or edibles that don't already have a proper lineage
+                # Only apply to non-edibles or edibles that are explicitly CBD-focused
                 non_edible_cbd = cbd_mask & ~edible_mask
-                edible_cbd_no_lineage = cbd_mask & edible_mask & (
-                    (self.df["Lineage"].isnull() if "Lineage" in self.df.columns else True) | 
-                    (self.df["Lineage"].astype(str).str.strip() == "" if "Lineage" in self.df.columns else True) |
-                    (self.df["Lineage"].astype(str).str.strip() == "Unknown" if "Lineage" in self.df.columns else True)
+                # For edibles, only assign CBD lineage if they are explicitly high-CBD products
+                edible_cbd_explicit = cbd_mask & edible_mask & (
+                    (self.df["Product Type*"].str.strip().str.lower() == "high cbd edible liquid") |
+                    (product_names_for_cbd.str.contains(r"\bCBD\b", case=False, na=False) if product_name_col else False)
                 )
                 
-                combined_cbd_mask = non_edible_cbd | edible_cbd_no_lineage
+                combined_cbd_mask = non_edible_cbd | edible_cbd_explicit
                 
                 # Use .any() to avoid Series boolean ambiguity
                 if combined_cbd_mask.any() and "Lineage" in self.df.columns:
                     self.df.loc[combined_cbd_mask, "Lineage"] = "CBD"
                     self.logger.info(f"Assigned CBD lineage to {combined_cbd_mask.sum()} products with cannabinoid content")
+                
+                # Set edibles with cannabinoid content but not explicitly CBD-focused to MIXED
+                edible_cbd_mixed = cbd_mask & edible_mask & ~edible_cbd_explicit
+                if edible_cbd_mixed.any() and "Lineage" in self.df.columns:
+                    if "MIXED" not in self.df["Lineage"].cat.categories:
+                        self.df["Lineage"] = self.df["Lineage"].cat.add_categories(["MIXED"])
+                    self.df.loc[edible_cbd_mixed, "Lineage"] = "MIXED"
+                    self.logger.info(f"Assigned MIXED lineage to {edible_cbd_mixed.sum()} edible products with cannabinoid content")
 
                 # DISABLED: If Lineage is missing or empty, set to 'MIXED'
                 # empty_lineage_mask = self.df["Lineage"].isnull() | (self.df["Lineage"].astype(str).str.strip() == "")
@@ -3419,7 +3500,7 @@ class ExcelProcessor:
                         'Description': description,
                         'WeightUnits': record.get('JointRatio', '') if product_type in {"pre-roll", "infused pre-roll"} else self._format_weight_units(record, excel_priority=True),
                         'ProductBrand': product_brand,
-                        'Price': str(record.get('Price*', '')).strip() or str(record.get('Price', '')).strip(),
+                        'Price': str(record.get('Price*', '')).strip() if record.get('Price*') and str(record.get('Price*', '')).strip() else str(record.get('Price', '')).strip(),
                         'Lineage': str(final_lineage) if str(final_lineage) else "",
                         'DOH': doh_value,  # Keep DOH as raw value
                         'Ratio_or_THC_CBD': self._construct_thc_cbd_field(ai_value, ak_value, product_type) if product_type in classic_types else ratio_text,  # Use THC_CBD for classic types, ratio for non-classic
@@ -3654,17 +3735,17 @@ class ExcelProcessor:
         # Special handling for Moonshot products - use database values as priority
         is_moonshot = 'moonshot' in product_name.lower()
         
-        # Priority logic: Database first for Moonshot products, Excel first for others
-        if is_moonshot:
-            # For Moonshot products, prioritize database values to get correct 1.7oz weights
-            weight_val = db_weight if db_weight and db_weight not in ['', 'nan', 'NaN'] else excel_weight
-            units_val = db_units if db_units and db_units not in ['', 'nan', 'NaN'] else excel_units
-        elif excel_priority:
-            weight_val = excel_weight if excel_weight and excel_weight not in ['', 'nan', 'NaN'] else db_weight
+        # CRITICAL FIX: Always prioritize Excel data first for weight normalization
+        # Excel data is the authoritative source for weight and units
+        if excel_weight and excel_weight not in ['', 'nan', 'NaN']:
+            weight_val = excel_weight
             units_val = excel_units if excel_units and excel_units not in ['', 'nan', 'NaN'] else db_units
+            self.logger.debug(f"WEIGHT PRIORITY: Using Excel weight '{excel_weight}' for '{product_name}'")
         else:
-            weight_val = db_weight if db_weight and db_weight not in ['', 'nan', 'NaN'] else excel_weight
-            units_val = db_units if db_units and db_units not in ['', 'nan', 'NaN'] else excel_units
+            # Fallback to database only if Excel data is missing
+            weight_val = db_weight if db_weight and db_weight not in ['', 'nan', 'NaN'] else ''
+            units_val = db_units if db_units and db_units not in ['', 'nan', 'NaN'] else ''
+            self.logger.debug(f"WEIGHT FALLBACK: Using database weight '{db_weight}' for '{product_name}' (Excel data missing)")
         
         # Debug: Log first few records
         if hasattr(self, '_debug_count'):
@@ -4172,6 +4253,38 @@ class ExcelProcessor:
                 
         except Exception as e:
             self.logger.error(f"Error getting strain name for product '{tag_name}': {e}")
+            return None
+
+    def get_current_lineage_for_product(self, tag_name: str) -> Optional[str]:
+        """Get the current lineage for a specific product."""
+        try:
+            if self.df is None:
+                return None
+            
+            # Try different column names for product names
+            product_name_columns = ['ProductName', 'Product Name*', 'Product Name']
+            mask = None
+            
+            for col in product_name_columns:
+                if col in self.df.columns:
+                    mask = self.df[col] == tag_name
+                    if mask.any():
+                        break
+            
+            if mask is None or not mask.any():
+                self.logger.debug(f"Product '{tag_name}' not found in any product name column")
+                return None
+            
+            # Get the current lineage
+            try:
+                current_lineage = self.df.loc[mask, 'Lineage'].iloc[0]
+                return str(current_lineage) if current_lineage else None
+            except (IndexError, KeyError):
+                self.logger.debug(f"No Lineage column found for product '{tag_name}'")
+                return None
+                
+        except Exception as e:
+            self.logger.error(f"Error getting current lineage for product '{tag_name}': {e}")
             return None
 
     def update_doh_in_current_data(self, tag_name: str, new_doh: str) -> bool:
@@ -5795,8 +5908,8 @@ class ExcelProcessor:
                     # Create DescAndWeight with "Product Name - Weight" format
                     full_product_name = record.get('Product Name*', '') or record.get('ProductName', '')
                     weight_units = record.get('Units', '') or record.get('Weight*', '')
-                    desc_and_weight = self._create_desc_and_weight(full_product_name, weight_units) if full_product_name else description
                     product_type = record.get('Product Type*', '').strip().lower()
+                    desc_and_weight = self._create_desc_and_weight(full_product_name, weight_units, product_type) if full_product_name else description
                     
                     # Define classic types
                     classic_types = [
@@ -5989,7 +6102,8 @@ class ExcelProcessor:
                         'DescAndWeight': desc_and_weight,  # Use extracted product name for DescAndWeight field
                         'WeightUnits': record.get('JointRatio', '') if product_type in {"pre-roll", "infused pre-roll"} else self._format_weight_units(record, excel_priority=True),
                         'ProductBrand': product_brand,
-                        'Price': str(record.get('Price*', '')).strip() or str(record.get('Price', '')).strip(),  # Use correct price column
+                        'Product Brand': product_brand,  # CRITICAL FIX: Add Product Brand field for template processor compatibility
+                        'Price': str(record.get('Price*', '')).strip() if record.get('Price*') and str(record.get('Price*', '')).strip() else str(record.get('Price', '')).strip(),  # Use correct price column
                         'Lineage': str(final_lineage) if str(final_lineage) else "",
                         'DOH': doh_value,  # Keep DOH as raw value
                         'Ratio_or_THC_CBD': ratio_text,  # Use the processed ratio_text for all product types
@@ -6038,10 +6152,11 @@ class ExcelProcessor:
             return []
 
     def make_nonbreaking_hyphens(self, text: str) -> str:
-        """Replace regular hyphens with non-breaking hyphens to prevent Word from stripping them."""
+        """Replace regular hyphens with non-breaking hyphens to prevent Word from splitting words like 'pre-roll' across lines."""
         if not text:
             return text
-        return str(text).replace('-', '-\u00A0')
+        # Use Unicode non-breaking hyphen (U+2011) which is more effective than hyphen + non-breaking space
+        return str(text).replace('-', '\u2011')
     
     def wrap_with_marker(self, text: str, marker: str) -> str:
         """Wrap text with marker tags for template processing."""
@@ -6075,16 +6190,23 @@ class ExcelProcessor:
                 return name.strip()
         return name.strip()
 
-    def _create_desc_and_weight(self, full_name, weight_units):
+    def _create_desc_and_weight(self, full_name, weight_units, product_type=None):
         """Create DescAndWeight field with 'Product Name - Weight' format using soft hyphen."""
         # Extract just the product name from the full name
         product_name = self._extract_product_name_from_full_name(full_name)
         
+        # Apply non-breaking hyphens to prevent "pre-roll" from being split across lines
+        product_name = self.make_nonbreaking_hyphens(product_name)
+        
         # Get weight units, clean them up
         weight = str(weight_units).strip() if weight_units else ''
         if weight and weight.lower() not in ['nan', 'none', 'null', '']:
-            # Combine product name and weight with hyphen staying with weight (space after hyphen)
-            return f"{product_name} -\u00A0{weight}"
+            # For prerolls and infused prerolls, put weight on a new line
+            if product_type and product_type.lower() in ['pre-roll', 'infused pre-roll']:
+                return f"{product_name}\n{weight}"
+            else:
+                # Combine product name and weight with hyphen staying with weight (space after hyphen)
+                return f"{product_name} -\u00A0{weight}"
         else:
             # Just return the product name if no weight
             return product_name
