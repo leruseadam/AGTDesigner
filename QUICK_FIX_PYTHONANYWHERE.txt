@@ -1,0 +1,59 @@
+================================================================================
+QUICK FIX FOR PYTHONANYWHERE DATABASE - Copy & Paste These Commands
+================================================================================
+
+STEP 1: Open PythonAnywhere Bash Console
+  → Go to www.pythonanywhere.com
+  → Click "Consoles" tab
+  → Click "Bash"
+
+STEP 2: Run These Commands (copy all at once):
+--------------------------------------------------------------------------------
+cd ~/AGTDesigner
+git pull origin main
+python3 fix_database_weights.py moonshots
+--------------------------------------------------------------------------------
+
+STEP 3: Reload Web App
+  → Go to "Web" tab
+  → Click big green "Reload" button
+
+DONE! ✅ All Constellation Moonshots now 1.7oz
+
+================================================================================
+TO VERIFY THE FIX:
+================================================================================
+python3 << 'EOF'
+import sqlite3
+conn = sqlite3.connect('uploads/product_database_AGT_Bothell.db')
+cursor = conn.cursor()
+cursor.execute('''SELECT "Product Name*", "Weight*", "Units" FROM products 
+WHERE "Product Name*" LIKE '%Moonshot%' AND "Product Brand" = 'Constellation Cannabis' 
+ORDER BY "Product Name*"''')
+print("\nMoonshot Weights:")
+for row in cursor.fetchall(): print(f"  {row[0]}: {row[1]} {row[2]}")
+conn.close()
+EOF
+
+Expected: All should show "1.7 oz"
+
+================================================================================
+FILES NOW ON GITHUB:
+================================================================================
+✅ fix_database_weights.py              - Weight normalization tool
+✅ fix_pythonanywhere_db.sh             - Automated script
+✅ PYTHONANYWHERE_DB_FIX_INSTRUCTIONS.md - Full instructions
+✅ DATABASE_WEIGHT_FIXES_SUMMARY.md     - Analysis & recommendations
+
+================================================================================
+NEED HELP?
+================================================================================
+See: PYTHONANYWHERE_DB_FIX_INSTRUCTIONS.md for detailed troubleshooting
+
+Common Issues:
+  • "Database locked" → Stop web app first, then run fix
+  • "Permission denied" → Run: chmod 644 uploads/product_database_AGT_Bothell.db
+  • Changes not showing → Hard refresh browser (Ctrl+Shift+R)
+
+================================================================================
+
