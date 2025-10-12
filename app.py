@@ -5204,6 +5204,35 @@ def get_available_tags():
         
         logging.info("🔄 No cache found, building tag list...")
         
+        # RESOURCE-EFFICIENT MODE: Only use Excel processor to reduce memory usage
+        all_tags = []
+        
+        # Try Excel processor first (lighter than database queries)
+        excel_processor = get_excel_processor()
+        if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
+            try:
+                excel_tags = excel_processor.get_available_tags()
+                all_tags.extend(excel_tags)
+                logging.info(f"✅ Excel processor returned {len(excel_tags)} tags")
+            except Exception as e:
+                logging.warning(f"Excel processor error: {e}")
+        
+        # If we have tags from Excel, use those and skip heavy database queries
+        if all_tags:
+            # Cache the results for faster subsequent requests
+            cache.set(cache_key, all_tags, timeout=300)  # Cache for 5 minutes
+            elapsed = (time.time() - start_time) * 1000
+            logging.info(f"✅ Available tags (Excel-only) completed ({elapsed:.1f}ms)")
+            
+            return jsonify({
+                'tags': all_tags,
+                'total_count': len(all_tags),
+                'source': 'excel-only'
+            })
+        
+        # Fallback: minimal database query if no Excel data
+        logging.info("🔄 No Excel data, trying minimal database query...")
+        
         # Store validation removed - using single database for all stores
         
         # Get products from both Excel processor and database
@@ -9883,6 +9912,48 @@ def diagnostic_check():
             'error': str(e),
             'timestamp': datetime.now().isoformat()
         }), 500
+
+@app.route('/api/available-tags-lite', methods=['GET'])
+def get_available_tags_lite():
+    """Ultra-lightweight version of available-tags for resource-constrained environments."""
+    try:
+        start_time = time.time()
+        
+        # Only try Excel processor - no database queries
+        excel_processor = get_excel_processor()
+        if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
+            try:
+                # Get just the first 1000 tags to reduce memory usage
+                excel_tags = excel_processor.get_available_tags()
+                if len(excel_tags) > 1000:
+                    excel_tags = excel_tags[:1000]
+                
+                elapsed = (time.time() - start_time) * 1000
+                logging.info(f"✅ Lite tags returned {len(excel_tags)} tags ({elapsed:.1f}ms)")
+                
+                return jsonify({
+                    'tags': excel_tags,
+                    'total_count': len(excel_tags),
+                    'source': 'excel-lite',
+                    'limited': len(excel_tags) == 1000
+                })
+            except Exception as e:
+                logging.error(f"Excel processor error in lite mode: {e}")
+        
+        # Ultimate fallback - return empty but valid response
+        return jsonify({
+            'tags': [],
+            'total_count': 0,
+            'source': 'empty-fallback'
+        })
+        
+    except Exception as e:
+        logging.error(f"Lite available-tags error: {e}")
+        return jsonify({
+            'tags': [],
+            'total_count': 0,
+            'source': 'error-fallback'
+        }), 200  # Return 200 instead of 500 to prevent frontend errors
 
 def check_rate_limit(ip_address):
     """Check if IP address is within rate limits."""
