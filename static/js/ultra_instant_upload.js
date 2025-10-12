@@ -38,9 +38,11 @@
                 this.showUploadSuccess(`⚡ Ultra-instant upload complete in ${data.processing_time}s!`);
                 
                 // Refresh tags immediately
-                if (this.refreshTagLists) {
-                    this.refreshTagLists();
-                } else {
+                if (window.TagManager && window.TagManager.refreshTagLists) {
+                    window.TagManager.refreshTagLists();
+                } else if (window.TagManager && window.TagManager.loadAvailableTags) {
+                    window.TagManager.loadAvailableTags();
+                } else if (this.loadTags) {
                     this.loadTags();
                 }
                 
@@ -80,9 +82,11 @@
                 }
                 
                 this.showUploadSuccess(`🔥 Zero upload complete in ${data.processing_time}s!`);
-                if (this.refreshTagLists) {
-                    this.refreshTagLists();
-                } else {
+                if (window.TagManager && window.TagManager.refreshTagLists) {
+                    window.TagManager.refreshTagLists();
+                } else if (window.TagManager && window.TagManager.loadAvailableTags) {
+                    window.TagManager.loadAvailableTags();
+                } else if (this.loadTags) {
                     this.loadTags();
                 }
                 

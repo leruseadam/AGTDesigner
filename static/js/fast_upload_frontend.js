@@ -65,7 +65,21 @@ if (typeof TagManager !== 'undefined') {
                     this.showToast('success', `File uploaded successfully! ${data.rows} rows processed in ultra-fast mode.`);
                     
                     // Refresh the tag lists
-                    await this.refreshTagLists();
+                    console.log('🚀 Upload successful, attempting to refresh tag lists...');
+                    if (window.TagManager && window.TagManager.refreshTagLists) {
+                        console.log('🚀 Calling window.TagManager.refreshTagLists()...');
+                        await window.TagManager.refreshTagLists();
+                        console.log('🚀 Tag refresh completed');
+                    } else {
+                        console.warn('❌ TagManager.refreshTagLists not available, trying to reload page data');
+                        // Force reload the available tags
+                        if (window.TagManager && window.TagManager.loadAvailableTags) {
+                            console.log('🚀 Calling window.TagManager.loadAvailableTags() as fallback...');
+                            window.TagManager.loadAvailableTags();
+                        } else {
+                            console.error('❌ No TagManager methods available for refreshing tags');
+                        }
+                    }
                     
                     return data;
                 } else {
@@ -187,8 +201,13 @@ if (typeof handleFiles !== 'undefined') {
                     }
                     
                     // Refresh tag lists
+                    console.log('🚀 handleFiles upload successful, attempting to refresh tag lists...');
                     if (typeof TagManager !== 'undefined' && TagManager.refreshTagLists) {
+                        console.log('🚀 Calling TagManager.refreshTagLists()...');
                         await TagManager.refreshTagLists();
+                        console.log('🚀 handleFiles tag refresh completed');
+                    } else {
+                        console.warn('❌ TagManager.refreshTagLists not available in handleFiles');
                     }
                     
                     // Show success message

@@ -38,9 +38,11 @@
                 this.showUploadSuccess(`🧠 Smart-fast upload complete in ${data.processing_time}s! Processed ${data.total_products} products.`);
                 
                 // Refresh tags immediately
-                if (this.refreshTagLists) {
-                    this.refreshTagLists();
-                } else {
+                if (window.TagManager && window.TagManager.refreshTagLists) {
+                    window.TagManager.refreshTagLists();
+                } else if (window.TagManager && window.TagManager.loadAvailableTags) {
+                    window.TagManager.loadAvailableTags();
+                } else if (this.loadTags) {
                     this.loadTags();
                 }
                 

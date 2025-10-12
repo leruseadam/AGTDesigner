@@ -6574,20 +6574,26 @@
       },
       
       refreshTagLists: function() {
-        console.log('refreshTagLists called - reloading tags after file upload');
+        console.log('🔄 refreshTagLists called - reloading tags after file upload');
         return new Promise((resolve, reject) => {
           // Reload available tags from the server
+          console.log('🔄 Fetching fresh tags from /api/available-tags...');
           fetch('/api/available-tags')
-            .then(response => response.json())
+            .then(response => {
+              console.log('🔄 Response received:', response.status, response.ok);
+              return response.json();
+            })
             .then(data => {
-              console.log('Tags refreshed after upload:', data.tags.length);
+              console.log('🔄 Tags refreshed after upload:', data.tags ? data.tags.length : 0, 'tags');
               this.state.tags = data.tags || [];
               this.state.originalTags = [...this.state.tags];
+              console.log('🔄 Calling _updateAvailableTags to refresh UI...');
               this._updateAvailableTags();
+              console.log('🔄 Tag refresh complete!');
               resolve(data);
             })
             .catch(error => {
-              console.error('Error refreshing tags:', error);
+              console.error('❌ Error refreshing tags:', error);
               reject(error);
             });
         });
