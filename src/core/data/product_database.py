@@ -134,8 +134,20 @@ class ProductDatabase:
                     timeout=30.0,  # 30 second timeout for database operations
                     check_same_thread=False  # Allow connection sharing across threads
                 )
-                # Enable WAL mode for better concurrency
-                conn.execute("PRAGMA journal_mode=WAL")
+                
+                # Configure journal mode based on environment
+                # WAL mode is great for local development but can cause issues on PythonAnywhere
+                is_pythonanywhere = os.environ.get('PYTHONANYWHERE_DOMAIN') or os.environ.get('PYTHONANYWHERE_SITE')
+                
+                if is_pythonanywhere:
+                    # Use DELETE mode for PythonAnywhere (more compatible with their filesystem)
+                    conn.execute("PRAGMA journal_mode=DELETE")
+                    logger.info("Using DELETE journal mode (PythonAnywhere environment)")
+                else:
+                    # Use WAL mode for better concurrency in local/standard deployments
+                    conn.execute("PRAGMA journal_mode=WAL")
+                    logger.info("Using WAL journal mode (local/standard environment)")
+                
                 # Set busy timeout (60s) to ride out background batches
                 conn.execute("PRAGMA busy_timeout=60000")
                 # Optimize for concurrent access
@@ -152,7 +164,14 @@ class ProductDatabase:
                     if success:
                         # Retry connection
                         conn = sqlite3.connect(self.db_path, timeout=30.0, check_same_thread=False)
-                        conn.execute("PRAGMA journal_mode=WAL")
+                        
+                        # Use same journal mode logic
+                        is_pythonanywhere = os.environ.get('PYTHONANYWHERE_DOMAIN') or os.environ.get('PYTHONANYWHERE_SITE')
+                        if is_pythonanywhere:
+                            conn.execute("PRAGMA journal_mode=DELETE")
+                        else:
+                            conn.execute("PRAGMA journal_mode=WAL")
+                        
                         conn.execute("PRAGMA busy_timeout=60000")
                         conn.execute("PRAGMA synchronous=NORMAL")
                         conn.execute("PRAGMA cache_size=10000")
@@ -164,6 +183,58 @@ class ProductDatabase:
                     raise
                     
         return self._connection_pool[thread_id]
+    
+    def _migrate_schema(self, cursor):
+        """Migrate old database schemas to current schema."""
+        try:
+            # Check if strains table exists
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='strains'")
+            strains_exists = cursor.fetchone() is not None
+            
+            if strains_exists:
+                # Get existing columns in strains table
+                cursor.execute("PRAGMA table_info(strains)")
+                existing_columns = {row[1] for row in cursor.fetchall()}
+                
+                # Add missing normalized_name column if it doesn't exist
+                if 'normalized_name' not in existing_columns:
+                    logger.info("Migrating strains table: adding normalized_name column")
+                    cursor.execute('ALTER TABLE strains ADD COLUMN normalized_name TEXT')
+                    # Populate normalized_name from strain_name for existing rows
+                    cursor.execute('''
+                        UPDATE strains 
+                        SET normalized_name = LOWER(REPLACE(REPLACE(REPLACE(strain_name, ' ', ''), '-', ''), '_', ''))
+                        WHERE normalized_name IS NULL OR normalized_name = ''
+                    ''')
+                    logger.info("Migrated strains table successfully")
+            
+            # Check if products table exists
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+            products_exists = cursor.fetchone() is not None
+            
+            if products_exists:
+                # Get existing columns in products table
+                cursor.execute("PRAGMA table_info(products)")
+                existing_columns = {row[1] for row in cursor.fetchall()}
+                
+                # Add missing normalized_name column if it doesn't exist
+                if 'normalized_name' not in existing_columns:
+                    logger.info("Migrating products table: adding normalized_name column")
+                    cursor.execute('ALTER TABLE products ADD COLUMN normalized_name TEXT')
+                    # Populate normalized_name from Product Name* for existing rows
+                    cursor.execute('''
+                        UPDATE products 
+                        SET normalized_name = LOWER(REPLACE(REPLACE(REPLACE("Product Name*", ' ', ''), '-', ''), '_', ''))
+                        WHERE normalized_name IS NULL OR normalized_name = ''
+                    ''')
+                    logger.info("Migrated products table successfully")
+            
+            cursor.connection.commit()
+            
+        except Exception as e:
+            logger.error(f"Error during schema migration: {e}")
+            # Don't fail initialization if migration fails - table might already be correct
+            pass
     
     def init_database(self):
         """Initialize the database with required tables (lazy initialization)."""
@@ -186,13 +257,22 @@ class ProductDatabase:
                 products_exists = cursor.fetchone() is not None
                 
                 if products_exists:
+                    # Migrate schema if needed before checking data
+                    self._migrate_schema(cursor)
+                    
                     # Check if table has data
                     cursor.execute("SELECT COUNT(*) FROM products")
                     count = cursor.fetchone()[0]
                     if count > 0:
-                        logger.info(f"Database already initialized with {count} products")
+                        logger.info(f"Database already initialized with {count} products (schema migrated if needed)")
                         self._initialized = True
                         return
+                    else:
+                        # Tables exist but empty - still need to ensure indexes exist
+                        logger.info("Database tables exist but are empty, ensuring indexes...")
+                else:
+                    # Tables don't exist - will be created below
+                    pass
                 
                 # Create strains table
                 cursor.execute('''
