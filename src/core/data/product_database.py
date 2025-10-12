@@ -4,7 +4,8 @@ import sqlite3
 import json
 import logging
 import time
-from typing import Dict, List, Optional, Tuple, Any, Set
+import random
+from typing import Dict, List, Optional, Tuple, Any, Set, Callable
 from datetime import datetime
 import pandas as pd
 from pathlib import Path
@@ -92,12 +93,25 @@ class ProductDatabase:
         self._backup_interval_seconds = 3600  # Backup every hour
         self._backup_interval_writes = 100  # Or every 100 writes
         
+        # Connection pooling limits to prevent over-connection
+        self._max_connections = 5  # Limit concurrent connections
+        self._connection_semaphore = threading.Semaphore(self._max_connections)
+        
+        # Write batching for bulk operations
+        self._batch_writes = []
+        self._batch_lock = threading.Lock()
+        self._batch_size = 50  # Commit every 50 writes
+        self._last_batch_commit = time.time()
+        self._batch_timeout = 5.0  # Force commit after 5 seconds
+        
         # Performance timing
         self._timing_stats = {
             'queries': 0,
             'total_time': 0.0,
             'cache_hits': 0,
-            'cache_misses': 0
+            'cache_misses': 0,
+            'write_retries': 0,
+            'batch_commits': 0
         }
     
     def _get_connection(self):
@@ -2526,6 +2540,123 @@ class ProductDatabase:
         self._timing_stats['cache_hits'] = 0
         self._timing_stats['cache_misses'] = 0
     
+    def _safe_transaction(self, operation: Callable, max_retries: int = 5) -> Tuple[bool, Any]:
+        """
+        Execute a database operation safely with automatic retry and error handling.
+        
+        Args:
+            operation: Callable that performs the database operation
+            max_retries: Maximum number of retry attempts
+            
+        Returns:
+            Tuple of (success, result)
+        """
+        last_error = None
+        
+        for attempt in range(max_retries):
+            try:
+                # Acquire connection semaphore to limit concurrent connections
+                with self._connection_semaphore:
+                    with self._write_lock:
+                        result = operation()
+                        return True, result
+                        
+            except sqlite3.OperationalError as e:
+                error_msg = str(e).lower()
+                last_error = e
+                
+                # Handle specific SQLite errors
+                if 'database is locked' in error_msg:
+                    # Database is locked - wait and retry with exponential backoff
+                    wait_time = (0.1 * (2 ** attempt)) + (0.1 * random.random())
+                    logger.warning(f"Database locked, retry {attempt + 1}/{max_retries} after {wait_time:.2f}s")
+                    time.sleep(wait_time)
+                    self._timing_stats['write_retries'] += 1
+                    continue
+                    
+                elif 'file is not a database' in error_msg or 'database disk image is malformed' in error_msg:
+                    # Database corruption - trigger recovery
+                    logger.error(f"Database corruption detected: {e}")
+                    success, recovery_msg = self._reliability.restore_from_backup()
+                    if success:
+                        logger.info(f"Database recovered, retrying operation...")
+                        # Close and recreate connections
+                        self.close_connections()
+                        self._initialized = False
+                        continue
+                    else:
+                        logger.error(f"Failed to recover database: {recovery_msg}")
+                        return False, None
+                else:
+                    # Other operational error
+                    if attempt < max_retries - 1:
+                        time.sleep(0.5 * (attempt + 1))
+                        continue
+                    else:
+                        raise
+                        
+            except Exception as e:
+                last_error = e
+                logger.error(f"Unexpected error in transaction (attempt {attempt + 1}): {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(0.5 * (attempt + 1))
+                    continue
+                else:
+                    raise
+        
+        # All retries exhausted
+        logger.error(f"Transaction failed after {max_retries} attempts: {last_error}")
+        return False, None
+    
+    def _flush_batch_writes(self):
+        """Flush pending batch writes to database."""
+        with self._batch_lock:
+            if not self._batch_writes:
+                return
+            
+            batch_size = len(self._batch_writes)
+            logger.info(f"Flushing {batch_size} batched writes...")
+            
+            def batch_commit():
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                
+                try:
+                    cursor.execute("BEGIN IMMEDIATE")
+                    
+                    # Execute all batched operations
+                    for operation in self._batch_writes:
+                        operation(cursor)
+                    
+                    conn.commit()
+                    logger.info(f"✅ Batch commit successful: {batch_size} operations")
+                    self._timing_stats['batch_commits'] += 1
+                    return True
+                    
+                except Exception as e:
+                    conn.rollback()
+                    logger.error(f"Batch commit failed: {e}")
+                    raise
+            
+            success, _ = self._safe_transaction(batch_commit, max_retries=3)
+            
+            if success:
+                self._batch_writes.clear()
+                self._last_batch_commit = time.time()
+            
+            return success
+    
+    def _should_flush_batch(self) -> bool:
+        """Check if batch should be flushed."""
+        if len(self._batch_writes) >= self._batch_size:
+            return True
+        
+        time_since_last = time.time() - self._last_batch_commit
+        if time_since_last >= self._batch_timeout and self._batch_writes:
+            return True
+        
+        return False
+    
     def _should_create_backup(self) -> bool:
         """Check if we should create an automatic backup."""
         # Check time-based backup
@@ -2549,13 +2680,17 @@ class ProductDatabase:
                 logger.info("Creating automatic backup...")
                 success, backup_path = self._reliability.create_backup("auto")
                 if success:
-                    logger.info(f"Automatic backup created: {os.path.basename(backup_path)}")
+                    logger.info(f"✅ Automatic backup created: {os.path.basename(backup_path)}")
                     self._last_backup_time = time.time()
                     self._writes_since_backup = 0
                 else:
-                    logger.warning(f"Automatic backup failed: {backup_path}")
+                    logger.warning(f"⚠️ Automatic backup failed: {backup_path}")
         except Exception as e:
             logger.warning(f"Error creating automatic backup: {e}")
+        
+        # Periodic connection cleanup (every 10 backups)
+        if self._writes_since_backup % 1000 == 0:
+            self.cleanup_stale_connections()
     
     def get_health_status(self) -> Dict[str, Any]:
         """
@@ -2635,11 +2770,48 @@ class ProductDatabase:
             
         return success, message
     
+    def cleanup_stale_connections(self):
+        """Clean up stale database connections to prevent leaks."""
+        active_threads = {threading.get_ident() for _ in [threading.current_thread()]}
+        active_threads.update({t.ident for t in threading.enumerate()})
+        
+        stale_connections = []
+        for thread_id in list(self._connection_pool.keys()):
+            if thread_id not in active_threads:
+                stale_connections.append(thread_id)
+        
+        if stale_connections:
+            logger.info(f"Cleaning up {len(stale_connections)} stale connections...")
+            for thread_id in stale_connections:
+                try:
+                    conn = self._connection_pool.pop(thread_id, None)
+                    if conn:
+                        conn.close()
+                except Exception as e:
+                    logger.warning(f"Error closing stale connection {thread_id}: {e}")
+    
     def close_connections(self):
-        """Close all database connections."""
-        for conn in self._connection_pool.values():
-            conn.close()
+        """Close all database connections safely."""
+        # Flush any pending batch writes before closing
+        try:
+            if self._batch_writes:
+                logger.info(f"Flushing {len(self._batch_writes)} pending writes before closing connections...")
+                self._flush_batch_writes()
+        except Exception as e:
+            logger.warning(f"Error flushing batch writes on close: {e}")
+        
+        # Close all connections
+        for thread_id, conn in list(self._connection_pool.items()):
+            try:
+                # Ensure any uncommitted transactions are handled
+                conn.commit()
+                conn.close()
+                logger.debug(f"Closed connection for thread {thread_id}")
+            except Exception as e:
+                logger.warning(f"Error closing connection for thread {thread_id}: {e}")
+        
         self._connection_pool.clear()
+        logger.info("All database connections closed")
     
     def _normalize_strain_name(self, strain_name: str) -> str:
         """Normalize strain name for consistent matching."""
