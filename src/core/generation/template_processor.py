@@ -85,19 +85,15 @@ class TemplateProcessor:
             self.chunk_size = min(20, CHUNK_SIZE_LIMIT)  # Fixed: 4x5 grid = 20 labels per page
             if not IS_PYTHONANYWHERE:
                 self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for mini template")
-        elif self.template_type == 'double':
-            self.chunk_size = min(12, CHUNK_SIZE_LIMIT)  # Fixed: 4x3 grid = 12 labels per page
-            if not IS_PYTHONANYWHERE:
-                self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for double template")
         elif self.template_type == 'inventory':
             self.chunk_size = min(4, CHUNK_SIZE_LIMIT)   # Fixed: 2x2 grid = 4 labels per page
             if not IS_PYTHONANYWHERE:
                 self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for inventory template")
         else:
-            # For standard templates (horizontal, vertical), use 3x3 grid = 9 labels per page
+            # For standard templates (horizontal, vertical, double), use 3x3 grid = 9 labels per page
             self.chunk_size = min(9, CHUNK_SIZE_LIMIT)  # Fixed: 3x3 grid = 9 labels per page
             if not IS_PYTHONANYWHERE:
-                self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for template type '{self.template_type}' (fallback to 3x3)")
+                self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for template type '{self.template_type}' (standard 3x3)")
         
         self.logger.info(f"Template type: {self.template_type}, Chunk size: {self.chunk_size}")
         
@@ -155,11 +151,9 @@ class TemplateProcessor:
             text = doc.element.body.xml
             matches = re.findall(r'Label(\d+)\.', text)
             
-            # Check if we have all required labels (9 for 3x3, 20 for 4x5, 12 for 4x3, 4 for 2x2)
+            # Check if we have all required labels (9 for 3x3, 20 for 4x5, 4 for 2x2)
             if self.template_type == 'mini':
                 required_labels = 20  # 4x5 grid
-            elif self.template_type == 'double':
-                required_labels = 12  # 4x3 grid
             elif self.template_type == 'inventory':
                 required_labels = 4   # 2x2 grid
             else:
@@ -167,11 +161,7 @@ class TemplateProcessor:
             
             unique_labels = set(matches)
             
-            # For double template, always expand to 4x3 grid
-            if self.template_type == 'double':
-                self.logger.info("Double template expanding to 4x3 grid")
-                return self._expand_template_to_4x3_fixed_double()
-            elif len(unique_labels) < required_labels or force_expand:
+            if len(unique_labels) < required_labels or force_expand:
                 # Templates need expansion to create proper grid layouts
                 if self.template_type == 'mini':
                     self.logger.info("Calling 4x5 expansion method")
@@ -1085,22 +1075,17 @@ class TemplateProcessor:
                 product_name = record.get('ProductName', 'Unknown')
                 self.logger.debug(f"Label{i+1} -> {product_name} - ProductBrand: '{label_context.get('ProductBrand', 'NOT_FOUND')}', Price: '{label_context.get('Price', 'NOT_FOUND')}', THC: '{label_context.get('THC', 'NOT_FOUND')}', CBD: '{label_context.get('CBD', 'NOT_FOUND')}'")
             # Leave remaining labels blank instead of duplicating data
-            # For double templates, only create contexts for actual records to avoid blank tags
-            if self.template_type != 'double':
-                for i in range(len(chunk), self.chunk_size):
-                    # Create empty context for unfilled labels
-                    context[f'Label{i+1}'] = {
-                        'ProductBrand': '',
-                        'DescAndWeight': '',
-                        'Price': '',
-                        'DOH': '',
-                        'Ratio_or_THC_CBD': ''
-                    }
-                    self.logger.debug(f"Label{i+1} left blank (no data duplication)")
-            else:
-                # For double templates, only create contexts for actual records
-                # This prevents blank tags from appearing
-                self.logger.debug(f"Double template: Only creating contexts for {len(chunk)} actual records, no blank slots")
+            # Create empty contexts for all remaining slots consistently for all templates
+            for i in range(len(chunk), self.chunk_size):
+                # Create empty context for unfilled labels
+                context[f'Label{i+1}'] = {
+                    'ProductBrand': '',
+                    'DescAndWeight': '',
+                    'Price': '',
+                    'DOH': '',
+                    'Ratio_or_THC_CBD': ''
+                }
+                self.logger.debug(f"Label{i+1} left blank (no data duplication)")
 
             # DOH images are already created in _build_label_context, no need for redundant creation here
             
@@ -1147,10 +1132,8 @@ class TemplateProcessor:
             # Apply lineage colors last to ensure they are not overwritten
             apply_lineage_colors(rendered_doc)
             
-            # CRITICAL FIX: For double template, ensure final marker cleanup is called
-            if self.template_type == 'double':
-                self.logger.info("Applying final marker cleanup for double template")
-                self._final_marker_cleanup(rendered_doc)
+            # Apply final marker cleanup for all templates
+            self._final_marker_cleanup(rendered_doc)
             
             # Final enforcement: prevent any cell/row expansion and force EXACT dimensions
             # Cell widths already standardized
@@ -1407,13 +1390,8 @@ class TemplateProcessor:
         # Use DescAndWeight from record if it exists, otherwise construct it
         if 'DescAndWeight' in label_context and label_context['DescAndWeight']:
             # DescAndWeight is already set correctly in the record, use it as-is
-            # For double templates, don't wrap with markers to prevent duplication
             desc_and_weight = label_context['DescAndWeight']
-            if self.template_type == 'double':
-                # Double template uses simple placeholders, no markers needed
-                label_context['DescAndWeight'] = desc_and_weight
-                self.logger.info(f"🎯 DOUBLE TEMPLATE DESC FIX: Using DescAndWeight as-is: '{desc_and_weight}'")
-            elif not is_already_wrapped(desc_and_weight, 'DESC'):
+            if not is_already_wrapped(desc_and_weight, 'DESC'):
                 label_context['DescAndWeight'] = wrap_with_marker(desc_and_weight, 'DESC')
         else:
             # Fallback: construct DescAndWeight from Description and WeightUnits
@@ -1659,12 +1637,6 @@ class TemplateProcessor:
                     label_context['ProductBrand'] = ""
                     label_context['ProductBrand_Center'] = ""
                     self.logger.info(f"🎯 VERTICAL BRAND FIX: Set only Lineage to '{brand_center_text}' for vertical template (no ProductBrand duplication)")
-                elif self.template_type == 'double':
-                    # For double template, use simple Lineage without markers to prevent duplication
-                    label_context['Lineage'] = brand_center_text
-                    label_context['ProductBrand'] = ""
-                    label_context['ProductBrand_Center'] = ""
-                    self.logger.info(f"🎯 DOUBLE TEMPLATE BRAND FIX: Set only Lineage to '{brand_center_text}' for double template (no marker duplication)")
                 elif self.template_type == 'mini':
                     # For mini template, set both Lineage and ProductBrand for maximum compatibility
                     # Mini templates need brand information in multiple fields
@@ -1681,8 +1653,8 @@ class TemplateProcessor:
                 
                 # Product Strain gets its own field with small font size
                 if product_strain:
-                    # For vertical, double, and mini templates, don't wrap with markers since they use simple placeholders
-                    if self.template_type in ['vertical', 'double', 'mini']:
+                    # For vertical and mini templates, don't wrap with markers since they use simple placeholders
+                    if self.template_type in ['vertical', 'mini']:
                         label_context['ProductStrain'] = product_strain
                     else:
                         label_context['ProductStrain'] = f"PRODUCTSTRAIN_START{product_strain}PRODUCTSTRAIN_END"
@@ -1761,14 +1733,9 @@ class TemplateProcessor:
         # Lineage logic is now handled earlier in the method for both classic and non-classic types
 
         # Fast wrapping for remaining fields
-        # For double templates, don't wrap with markers to prevent duplication
-        if self.template_type == 'double':
-            # Double template uses simple placeholders, no markers needed
-            self.logger.info(f"🎯 DOUBLE TEMPLATE MARKER FIX: Skipping marker wrapping for double template")
-        else:
-            # For other templates, wrap with markers as usual
-            if label_context.get('DescAndWeight'):
-                label_context['DescAndWeight'] = wrap_with_marker(unwrap_marker(label_context['DescAndWeight'], 'DESC'), 'DESC')
+        # For all templates, wrap with markers consistently
+        if label_context.get('DescAndWeight'):
+            label_context['DescAndWeight'] = wrap_with_marker(unwrap_marker(label_context['DescAndWeight'], 'DESC'), 'DESC')
         
         if 'ProductType' not in label_context:
             label_context['ProductType'] = record.get('ProductType', '')
@@ -1806,52 +1773,24 @@ class TemplateProcessor:
         label_context['ProductStrain_START'] = 'PRODUCTSTRAIN_START'
         label_context['ProductStrain_END'] = 'PRODUCTSTRAIN_END'
         # Add Lineage markers back for post-processing system to work
-        # For double templates, don't add marker fields to prevent duplication
-        if self.template_type != 'double':
-            label_context['Lineage_START'] = 'LINEAGE_START'
-            label_context['Lineage_END'] = 'LINEAGE_END'
-            label_context['ProductBrand_START'] = 'PRODUCTBRAND_START'
-            label_context['ProductBrand_END'] = 'PRODUCTBRAND_END'
-            label_context['ProductVendor_START'] = 'PRODUCTVENDOR_START'
-            label_context['ProductVendor_END'] = 'PRODUCTVENDOR_END'
-            label_context['DescAndWeight_START'] = 'DESC_START'
-            label_context['DescAndWeight_END'] = 'DESC_END'
-            label_context['Ratio_or_THC_CBD_START'] = 'THC_CBD_START'
-            label_context['Ratio_or_THC_CBD_END'] = 'THC_CBD_END'
-            label_context['Price_START'] = 'PRICE_START'
-            label_context['Price_END'] = 'PRICE_END'
-        else:
-            # For double templates, set marker fields to empty to prevent duplication
-            label_context['Lineage_START'] = ''
-            label_context['Lineage_END'] = ''
-            label_context['ProductBrand_START'] = ''
-            label_context['ProductBrand_END'] = ''
-            label_context['ProductVendor_START'] = ''
-            label_context['ProductVendor_END'] = ''
-            label_context['DescAndWeight_START'] = ''
-            label_context['DescAndWeight_END'] = ''
-            label_context['Ratio_or_THC_CBD_START'] = ''
-            label_context['Ratio_or_THC_CBD_END'] = ''
-            label_context['Price_START'] = ''
-            label_context['Price_END'] = ''
-            self.logger.info(f"🎯 DOUBLE TEMPLATE MARKER FIELDS FIX: Set all marker fields to empty for double template")
+        label_context['Lineage_START'] = 'LINEAGE_START'
+        label_context['Lineage_END'] = 'LINEAGE_END'
+        label_context['ProductBrand_START'] = 'PRODUCTBRAND_START'
+        label_context['ProductBrand_END'] = 'PRODUCTBRAND_END'
+        label_context['ProductVendor_START'] = 'PRODUCTVENDOR_START'
+        label_context['ProductVendor_END'] = 'PRODUCTVENDOR_END'
+        label_context['DescAndWeight_START'] = 'DESC_START'
+        label_context['DescAndWeight_END'] = 'DESC_END'
+        label_context['Ratio_or_THC_CBD_START'] = 'THC_CBD_START'
+        label_context['Ratio_or_THC_CBD_END'] = 'THC_CBD_END'
+        label_context['Price_START'] = 'PRICE_START'
+        label_context['Price_END'] = 'PRICE_END'
         
         # Wrap WeightUnits with markers if it exists
-        # For double templates, don't wrap with markers to prevent duplication
-        if self.template_type == 'double':
-            # Double template uses simple placeholders, no markers needed
-            if label_context.get('WeightUnits'):
-                # Keep WeightUnits as-is without markers
-                pass
-            label_context['WeightUnits_START'] = ''
-            label_context['WeightUnits_END'] = ''
-            self.logger.info(f"🎯 DOUBLE TEMPLATE WEIGHT FIX: Skipping WeightUnits marker wrapping for double template")
-        else:
-            # For other templates, wrap with markers as usual
-            if label_context.get('WeightUnits'):
-                label_context['WeightUnits'] = wrap_with_marker(label_context['WeightUnits'], 'WEIGHTUNITS')
-            label_context['WeightUnits_START'] = 'WEIGHTUNITS_START'
-            label_context['WeightUnits_END'] = 'WEIGHTUNITS_END'
+        if label_context.get('WeightUnits'):
+            label_context['WeightUnits'] = wrap_with_marker(label_context['WeightUnits'], 'WEIGHTUNITS')
+        label_context['WeightUnits_START'] = 'WEIGHTUNITS_START'
+        label_context['WeightUnits_END'] = 'WEIGHTUNITS_END'
         label_context['Ratio_START'] = 'RATIO_START'
         label_context['Ratio_END'] = 'RATIO_END'
         label_context['JointRatio_START'] = 'JOINT_RATIO_START'
@@ -2168,9 +2107,8 @@ class TemplateProcessor:
         # Fast double template processing
         if self.template_type == 'double':
             try:
-                # Skip _add_brand_markers for double template as it's designed for mini templates
-                # and might interfere with the centering logic
-                self._apply_brand_centering_for_double_template(doc)
+                # Use standard processing for double template
+                pass
             except Exception as e:
                 self.logger.warning(f"Double template processing failed: {e}")
 
@@ -4702,12 +4640,12 @@ class TemplateProcessor:
                                 run.font.bold = True
                                 
                                 # Use unified font sizing for lineage instead of hardcoded 12pt
-                                from src.core.generation.unified_font_sizing import get_font_size_by_marker
+                                from src.core.generation.unified_font_sizing import get_font_size
                                 # For vertical templates, use 'brand' field type since brand info is stored in Lineage field
                                 if self.template_type == 'vertical':
-                                    lineage_font_size = get_font_size_by_marker(cleaned_text, 'PRODUCTBRAND_CENTER', self.template_type, self.scale_factor)
+                                    lineage_font_size = get_font_size(cleaned_text, 'brand', self.template_type, self.scale_factor)
                                 else:
-                                    lineage_font_size = get_font_size_by_marker(cleaned_text, 'LINEAGE', self.template_type, self.scale_factor)
+                                    lineage_font_size = get_font_size(cleaned_text, 'lineage', self.template_type, self.scale_factor)
                                 run.font.size = lineage_font_size
                                 
                                 run.font.color.rgb = RGBColor(255, 255, 255)  # Set text to white
