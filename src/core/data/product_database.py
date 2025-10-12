@@ -303,7 +303,11 @@ class ProductDatabase:
                 ''')
                 
                 # Create indexes for better performance
-                cursor.execute('CREATE INDEX IF NOT EXISTS idx_strains_normalized ON strains(normalized_name)')
+                # Check if normalized_name exists in strains table before creating index
+                cursor.execute("PRAGMA table_info(strains)")
+                strain_columns = [col[1] for col in cursor.fetchall()]
+                if 'normalized_name' in strain_columns:
+                    cursor.execute('CREATE INDEX IF NOT EXISTS idx_strains_normalized ON strains(normalized_name)')
                 
                 # Only create normalized_name index if the column exists
                 cursor.execute("PRAGMA table_info(products)")
@@ -370,6 +374,25 @@ class ProductDatabase:
     def _ensure_essential_columns_exist(self, cursor, conn):
         """Ensure essential columns exist that are needed for Excel processor compatibility."""
         try:
+            # First, ensure strains table has normalized_name column
+            cursor.execute("PRAGMA table_info(strains)")
+            strain_columns = {row[1] for row in cursor.fetchall()}
+            
+            if 'normalized_name' not in strain_columns:
+                try:
+                    cursor.execute("ALTER TABLE strains ADD COLUMN normalized_name TEXT")
+                    logger.info("Added normalized_name column to strains table")
+                    # Update existing rows with normalized names
+                    cursor.execute("""
+                        UPDATE strains 
+                        SET normalized_name = LOWER(REPLACE(REPLACE(strain_name, ' ', ''), '-', ''))
+                        WHERE normalized_name IS NULL
+                    """)
+                    conn.commit()
+                except sqlite3.OperationalError as e:
+                    if "duplicate column name" not in str(e).lower():
+                        logger.warning(f"Could not add normalized_name to strains: {e}")
+            
             # Get current columns
             cursor.execute("PRAGMA table_info(products)")
             existing_columns = {row[1] for row in cursor.fetchall()}
