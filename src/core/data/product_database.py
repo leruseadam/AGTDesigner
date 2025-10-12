@@ -6001,9 +6001,30 @@ class ProductDatabase:
             print(f"Error in _calculate_product_strain: {e}")
             return 'Mixed'
 
+# Global database instance for singleton pattern
+_product_database_instance = None
+_product_database_lock = threading.Lock()
+
 def get_product_database(store_name=None):
-    """Get a ProductDatabase instance for the specified store."""
-    return ProductDatabase(store_name=store_name) 
+    """Get a ProductDatabase instance for the specified store (singleton pattern)."""
+    global _product_database_instance
+    
+    # If no store_name specified, use AGT_Bothell as the default store
+    if store_name is None:
+        store_name = 'AGT_Bothell'
+    
+    # If no store_name specified, use the global instance
+    if store_name == 'AGT_Bothell':
+        with _product_database_lock:
+            if _product_database_instance is None:
+                _product_database_instance = ProductDatabase(store_name=store_name)
+                # Initialize the database
+                if not _product_database_instance._initialized:
+                    _product_database_instance.init_database()
+            return _product_database_instance
+    else:
+        # For other store-specific databases, create a new instance
+        return ProductDatabase(store_name=store_name) 
 
 if __name__ == "__main__":
     import argparse

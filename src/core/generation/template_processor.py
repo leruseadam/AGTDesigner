@@ -660,19 +660,8 @@ class TemplateProcessor:
                     if other_placeholders:
                         placeholder_text = ''
                         for placeholder in other_placeholders:
-                            # Map placeholders to their marker types
-                            marker_mapping = {
-                                'DescAndWeight': 'DESC',
-                                'WeightUnits': 'WEIGHTUNITS',
-                                'Price': 'PRICE',
-                                'Ratio_or_THC_CBD': 'THC_CBD',
-                                'DOH': 'DOH',
-                                'ProductStrain': 'PRODUCTSTRAIN',
-                                'Lineage': 'LINEAGE'
-                            }
-                            
-                            marker_type = marker_mapping.get(placeholder, 'DEFAULT')
-                            placeholder_text += f'\n{marker_type}_START{{{{Label{cnt}.{placeholder}}}}}{marker_type}_END'
+                            # CRITICAL FIX: Add simple placeholders without marker wrappers to prevent garbage text
+                            placeholder_text += f'\n{{{{Label{cnt}.{placeholder}}}}}'
                         
                         # Find the last text element and append the non-brand placeholders
                         text_elements = list(tc.iter(qn('w:t')))
@@ -689,7 +678,8 @@ class TemplateProcessor:
                         new_para = OxmlElement('w:p')
                         new_run = OxmlElement('w:r')
                         new_text = OxmlElement('w:t')
-                        new_text.text = f'PRODUCTBRAND_START{{{{Label{cnt}.ProductBrand}}}}PRODUCTBRAND_END'
+                        # CRITICAL FIX: Add simple placeholder without marker wrappers to prevent garbage text
+                        new_text.text = f'{{{{Label{cnt}.ProductBrand}}}}'
                         new_run.append(new_text)
                         new_para.append(new_run)
                         tc.append(new_para)
@@ -729,18 +719,12 @@ class TemplateProcessor:
                                 t.text = ''
                                 self.logger.debug(f"Cleared old concatenated placeholders from Cell 1")
                     
-                    # Now add all required placeholders with markers to Cell 1
+                    # Now add all required placeholders to Cell 1
                     # Build the placeholder text with all required fields
                     cell1_placeholder_text = ''
-                    marker_mapping = {
-                        'DescAndWeight': 'DESC',
-                        'Price': 'PRICE',
-                        'DOH': 'DOH',
-                        'QR': 'DEFAULT'
-                    }
                     for placeholder in ['DescAndWeight', 'Price', 'DOH', 'QR']:
-                        marker_type = marker_mapping.get(placeholder, 'DEFAULT')
-                        cell1_placeholder_text += f'\n{marker_type}_START{{{{Label1.{placeholder}}}}}{marker_type}_END'
+                        # CRITICAL FIX: Add simple placeholders without marker wrappers to prevent garbage text
+                        cell1_placeholder_text += f'\n{{{{Label1.{placeholder}}}}}'
                     
                     # Find the last text element and append the placeholders
                     text_elements = list(tc.iter(qn('w:t')))
@@ -750,7 +734,7 @@ class TemplateProcessor:
                             last_text_element.text += cell1_placeholder_text
                         else:
                             last_text_element.text = cell1_placeholder_text
-                        self.logger.debug(f"Added missing placeholders to Cell 1: {list(marker_mapping.keys())}")
+                        self.logger.debug(f"Added missing placeholders to Cell 1: {['DescAndWeight', 'Price', 'DOH', 'QR']}")
                 
                 # CRITICAL FIX: Replace Label1 with Label{cnt} in all placeholders
                 # Only replace exact matches to prevent creating extra labels
