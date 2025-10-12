@@ -1877,9 +1877,12 @@ def upload_file_simple_pythonanywhere():
             except Exception as storage_error:
                 logging.error(f"[UPLOAD] Error storing data in database: {storage_error}")
             
-            # Update session
+            # Update session with persistence
+            session.permanent = True
             session['file_path'] = temp_path
+            session['uploaded_filename'] = sanitized_filename
             session['selected_tags'] = []
+            session.modified = True
             
             # Clean up temp file
             try:
@@ -1957,9 +1960,12 @@ def upload_file_simple():
             update_processing_status(file.filename, f'error: Failed to start processing')
             return jsonify({'error': 'Failed to start file processing'}), 500
         
-        # Store uploaded file path in session
+        # Store uploaded file path in session with persistence
+        session.permanent = True
         session['file_path'] = file_path
+        session['uploaded_filename'] = file.filename
         session['selected_tags'] = []
+        session.modified = True
         
         # ULTRA-FAST RESPONSE - Return immediately for instant user feedback
         upload_response_time = time.time() - start_time
@@ -10149,30 +10155,46 @@ def get_initial_data():
             excel_processor.df = None
             logging.info("Excel processor missing df attribute - set to None")
             
-        # If no data is loaded, try to load the default file
-        if excel_processor.df is None:
-            logging.info("No data loaded - attempting to load default file")
-            from src.core.data.excel_processor import get_default_upload_file
-            default_file = get_default_upload_file()
+        # If no data is loaded, try to load from session first, then default file
+        if excel_processor.df is None or excel_processor.df.empty:
+            logging.info("No data loaded - checking session for uploaded file")
             
-            if default_file:
+            # PRIORITY 1: Check session for uploaded file
+            session_file_path = session.get('file_path')
+            if session_file_path and os.path.exists(session_file_path):
                 try:
-                    logging.info(f"Loading default file: {os.path.basename(default_file)}")
-                    excel_processor.load_file(default_file)
-                    excel_processor._last_loaded_file = default_file
-                    logging.info(f"Default file loaded successfully")
+                    logging.info(f"✅ Found uploaded file in session: {session_file_path}")
+                    excel_processor.load_file(session_file_path)
+                    excel_processor._last_loaded_file = session_file_path
+                    logging.info(f"✅ Successfully loaded session file: {os.path.basename(session_file_path)}")
                 except Exception as e:
-                    logging.error(f"Failed to load default file: {e}")
+                    logging.error(f"Failed to load session file: {e}")
+                    # Continue to try default file
+            else:
+                logging.info("No uploaded file in session, attempting to load default file")
+                
+                # PRIORITY 2: Load default file if no session file
+                from src.core.data.excel_processor import get_default_upload_file
+                default_file = get_default_upload_file()
+                
+                if default_file:
+                    try:
+                        logging.info(f"Loading default file: {os.path.basename(default_file)}")
+                        excel_processor.load_file(default_file)
+                        excel_processor._last_loaded_file = default_file
+                        logging.info(f"Default file loaded successfully")
+                    except Exception as e:
+                        logging.error(f"Failed to load default file: {e}")
+                        return jsonify({
+                            'success': False,
+                            'message': f'Failed to load default file: {str(e)}'
+                        })
+                else:
+                    logging.warning("No default file found")
                     return jsonify({
                         'success': False,
-                        'message': f'Failed to load default file: {str(e)}'
+                        'message': 'No default file found and no data currently loaded'
                     })
-            else:
-                logging.warning("No default file found")
-                return jsonify({
-                    'success': False,
-                    'message': 'No default file found and no data currently loaded'
-                })
         
         if hasattr(excel_processor, 'df') and excel_processor.df is not None:
             logging.info(f"Data loaded - DataFrame shape: {excel_processor.df.shape}")
@@ -11634,8 +11656,11 @@ def upload_file_optimized():
         upload_time = time.time() - start_time
         logging.info(f"=== ULTRA-FAST UPLOAD REQUEST COMPLETE === Time: {upload_time:.2f}s")
         
-        # Store uploaded file path in session
+        # Store uploaded file path in session with persistence
+        session.permanent = True
         session['file_path'] = temp_path
+        session['uploaded_filename'] = sanitized_filename
+        session.modified = True
         
         # Clear selected tags in session to ensure fresh start
         session['selected_tags'] = []
@@ -11716,9 +11741,12 @@ def upload_file_fast():
         # Save file
         file.save(str(file_path))
         
-        # Store file path in session
+        # Store file path in session with persistence
+        session.permanent = True
         session['file_path'] = str(file_path)
+        session['uploaded_filename'] = filename
         session['selected_tags'] = []
+        session.modified = True
         
         # CRITICAL FIX: Use background processing with database storage
         # This ensures products are stored in the database
