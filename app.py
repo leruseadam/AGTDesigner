@@ -220,6 +220,18 @@ except ImportError:
             pass
         def __getattr__(self, name):
             return lambda *args, **kwargs: None
+
+# Import performance optimization modules
+try:
+    from src.core.utils.performance_cache import cache_manager, get_cache_stats
+    from src.core.utils.performance_monitor import get_performance_monitor, start_performance_monitoring
+    from src.core.utils.lazy_loader import preload_all, get_lazy_stats
+    from src.core.data.ultra_fast_database import get_ultra_fast_database
+    from src.core.data.ultra_fast_excel_processor import get_ultra_fast_processor
+    PERFORMANCE_OPTIMIZATIONS_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Performance optimizations not available: {e}")
+    PERFORMANCE_OPTIMIZATIONS_AVAILABLE = False
 import hashlib
 import glob
 import subprocess
@@ -822,6 +834,16 @@ else:
 # Initialize Flask-Compress after app creation (if available)
 if Compress is not None:
     Compress(app)
+
+# Initialize performance optimizations
+if PERFORMANCE_OPTIMIZATIONS_AVAILABLE:
+    # Start performance monitoring
+    start_performance_monitoring()
+    
+    # Preload critical components
+    preload_all()
+    
+    logger.info("Performance optimizations initialized")
 # Global function to check session size
 def check_session_size():
     """Check if session is too large and clear it if necessary."""
@@ -13383,6 +13405,79 @@ if FAST_DOCX_AVAILABLE and create_fast_docx_routes:
         logging.info("Fast DOCX routes registered successfully")
     except Exception as e:
         logging.warning(f"Failed to register fast DOCX routes: {e}")
+
+# Performance monitoring routes
+@app.route('/api/performance/stats')
+def performance_stats():
+    """Get performance statistics."""
+    if not PERFORMANCE_OPTIMIZATIONS_AVAILABLE:
+        return jsonify({'error': 'Performance optimizations not available'}), 503
+    
+    try:
+        from src.core.utils.performance_monitor import get_performance_summary
+        stats = get_performance_summary()
+        return jsonify(stats)
+    except Exception as e:
+        logger.error(f"Failed to get performance stats: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/performance/cache/stats')
+def cache_stats():
+    """Get cache statistics."""
+    if not PERFORMANCE_OPTIMIZATIONS_AVAILABLE:
+        return jsonify({'error': 'Performance optimizations not available'}), 503
+    
+    try:
+        cache_stats = get_cache_stats()
+        return jsonify(cache_stats)
+    except Exception as e:
+        logger.error(f"Failed to get cache stats: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/performance/cache/clear', methods=['POST'])
+def clear_cache():
+    """Clear all caches."""
+    if not PERFORMANCE_OPTIMIZATIONS_AVAILABLE:
+        return jsonify({'error': 'Performance optimizations not available'}), 503
+    
+    try:
+        from src.core.utils.performance_cache import clear_cache
+        from src.core.data.ultra_fast_excel_processor import clear_excel_cache
+        from src.core.data.ultra_fast_database import clear_database_cache
+        
+        clear_cache()
+        clear_excel_cache()
+        clear_database_cache()
+        
+        return jsonify({'message': 'All caches cleared successfully'})
+    except Exception as e:
+        logger.error(f"Failed to clear caches: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/performance/optimize', methods=['POST'])
+def optimize_performance():
+    """Trigger performance optimizations."""
+    if not PERFORMANCE_OPTIMIZATIONS_AVAILABLE:
+        return jsonify({'error': 'Performance optimizations not available'}), 503
+    
+    try:
+        # Clear caches
+        from src.core.utils.performance_cache import clear_cache
+        clear_cache()
+        
+        # Optimize database
+        from src.core.data.ultra_fast_database import get_ultra_fast_database
+        db = get_ultra_fast_database()
+        db.optimize_database()
+        
+        # Garbage collection
+        import gc
+        gc.collect()
+        
+        return jsonify({'message': 'Performance optimization completed'})
+    except Exception as e:
+        logger.error(f"Failed to optimize performance: {e}")
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     # Use the global app instance that has all routes registered
