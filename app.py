@@ -5187,19 +5187,22 @@ def process_database_product_for_api(db_product):
 @app.route('/api/available-tags', methods=['GET'])
 def get_available_tags():
     try:
-        logging.info("=== AVAILABLE TAGS DEBUG START ===")
-        logging.info(f"Available tags request at {datetime.now().strftime('%H:%M:%S')}")
+        logging.info("=== AVAILABLE TAGS REQUEST START ===")
+        start_time = time.time()
         
         # Check for cached available tags first (JSON matched products)
         cache_key = get_session_cache_key('available_tags')
         cached_tags = cache.get(cache_key)
         if cached_tags:
-            logging.info(f"Using {len(cached_tags)} cached available tags (JSON matched products)")
+            elapsed = (time.time() - start_time) * 1000
+            logging.info(f"✅ Using {len(cached_tags)} cached available tags ({elapsed:.1f}ms)")
             return jsonify({
-                'available_tags': cached_tags,
+                'tags': cached_tags,  # Frontend expects 'tags', not 'available_tags'
                 'total_count': len(cached_tags),
                 'source': 'cache'
             })
+        
+        logging.info("🔄 No cache found, building tag list...")
         
         # Store validation removed - using single database for all stores
         
@@ -5345,14 +5348,46 @@ def get_available_tags():
         logging.info(f"Database products: {added_db_count} added, {skipped_db_count} skipped as duplicates")
         logging.info(f"Combined total: {len(all_tags)} products ({len(excel_tags)} from Excel, {len(database_tags)} from database)")
         
-        # Return the combined tags
-        logging.info("=== AVAILABLE TAGS DEBUG END ===")
-        return jsonify(all_tags)
+        # Cache the results for faster subsequent requests
+        if all_tags:
+            cache.set(cache_key, all_tags, timeout=300)  # Cache for 5 minutes
+            logging.info(f"✅ Cached {len(all_tags)} tags for future requests")
+        
+        # Return the combined tags in the format expected by frontend
+        elapsed = (time.time() - start_time) * 1000
+        logging.info(f"✅ Available tags request completed ({elapsed:.1f}ms)")
+        
+        return jsonify({
+            'tags': all_tags,  # Frontend expects 'tags' property
+            'total_count': len(all_tags),
+            'source': 'fresh'
+        })
         
     except Exception as e:
-        logging.error(f"Error getting available tags: {str(e)}")
+        elapsed = (time.time() - start_time) * 1000 if 'start_time' in locals() else 0
+        logging.error(f"❌ Error getting available tags after {elapsed:.1f}ms: {str(e)}")
         logging.error(traceback.format_exc())
-        return jsonify({'error': f'Server error: {str(e)}'}), 500
+        
+        # Try to return a basic fallback response to prevent total failure
+        try:
+            excel_processor = get_excel_processor()
+            if excel_processor and excel_processor.df is not None and not excel_processor.df.empty:
+                basic_tags = excel_processor.get_available_tags()
+                logging.info(f"🔄 Fallback: returning {len(basic_tags)} tags from Excel only")
+                return jsonify({
+                    'tags': basic_tags,
+                    'total_count': len(basic_tags),
+                    'source': 'fallback'
+                })
+        except Exception as fallback_error:
+            logging.error(f"❌ Fallback also failed: {fallback_error}")
+        
+        return jsonify({
+            'error': f'Server error: {str(e)}',
+            'tags': [],  # Always provide tags array even on error
+            'total_count': 0,
+            'source': 'error'
+        }), 500
 
 @app.route('/api/selected-tags', methods=['GET'])
 def get_selected_tags():
@@ -6323,8 +6358,23 @@ def database_vendor_stats():
     """Get detailed vendor and brand statistics from the product database."""
     try:
         import sqlite3
+        import time
         
-        product_db = get_product_database('AGT_Bothell')
+        start_time = time.time()
+        logging.info("🔍 Database vendor stats request started")
+        
+        # Try to get any available database (don't hardcode store name)
+        try:
+            product_db = get_product_database()
+        except Exception as e:
+            logging.error(f"Failed to get product database: {e}")
+            return jsonify({
+                'error': 'Database not available',
+                'vendors': [],
+                'brands': [],
+                'total_vendors': 0,
+                'total_brands': 0
+            }), 500
         
         # Ensure database is initialized
         if not product_db._initialized:
@@ -6407,6 +6457,9 @@ def database_vendor_stats():
                 ORDER BY product_count DESC
             ''', conn)
             
+            elapsed = (time.time() - start_time) * 1000
+            logging.info(f"✅ Database vendor stats completed ({elapsed:.1f}ms)")
+            
             return jsonify({
                 'vendors': vendors_df.to_dict('records'),
                 'brands': brands_df.to_dict('records'),
@@ -6419,9 +6472,28 @@ def database_vendor_stats():
                     'total_vendor_brand_combinations': len(vendor_brands_df)
                 }
             })
+            
+    except sqlite3.Error as db_error:
+        elapsed = (time.time() - start_time) * 1000 if 'start_time' in locals() else 0
+        logging.error(f"❌ Database error in vendor stats after {elapsed:.1f}ms: {db_error}")
+        return jsonify({
+            'error': 'Database query failed',
+            'vendors': [],
+            'brands': [],
+            'summary': {'total_vendors': 0, 'total_brands': 0}
+        }), 500
+        
     except Exception as e:
-        logging.error(f"Error getting vendor stats: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        elapsed = (time.time() - start_time) * 1000 if 'start_time' in locals() else 0
+        logging.error(f"❌ Error in vendor stats after {elapsed:.1f}ms: {str(e)}")
+        import traceback
+        logging.error(traceback.format_exc())
+        return jsonify({
+            'error': 'Internal server error',
+            'vendors': [],
+            'brands': [],
+            'summary': {'total_vendors': 0, 'total_brands': 0}
+        }), 500
 @app.route('/api/products/search', methods=['GET'])
 def search_products():
     """Search for unique strains by brand within a vendor using Excel data."""
@@ -6779,9 +6851,22 @@ def database_analytics():
     """Get advanced analytics data for the database."""
     try:
         import sqlite3
+        import time
         from datetime import datetime, timedelta
         
-        product_db = get_product_database('AGT_Bothell')
+        start_time = time.time()
+        logging.info("📊 Database analytics request started")
+        
+        # Try to get any available database (don't hardcode store name)
+        try:
+            product_db = get_product_database()
+        except Exception as e:
+            logging.error(f"Failed to get product database for analytics: {e}")
+            return jsonify({
+                'error': 'Database not available',
+                'analytics': {},
+                'summary': {'total_products': 0}
+            }), 500
         
         # Test database connection and fallback if needed
         try:
@@ -6854,6 +6939,9 @@ def database_analytics():
                 WHERE id > (SELECT MAX(id) - 100 FROM products)
             ''', conn)
             
+            elapsed = (time.time() - start_time) * 1000
+            logging.info(f"✅ Database analytics completed ({elapsed:.1f}ms)")
+            
             return jsonify({
                 'product_type_distribution': dict(zip(product_types_df['product_type'], product_types_df['count'])),
                 'lineage_distribution': dict(zip(lineage_df['canonical_lineage'], lineage_df['count'])),
@@ -6861,9 +6949,26 @@ def database_analytics():
                 'recent_activity': recent_activity_df.to_dict('records'),
                 'analytics_generated': datetime.now().isoformat()
             })
+            
+    except sqlite3.Error as db_error:
+        elapsed = (time.time() - start_time) * 1000 if 'start_time' in locals() else 0
+        logging.error(f"❌ Database error in analytics after {elapsed:.1f}ms: {db_error}")
+        return jsonify({
+            'error': 'Database query failed',
+            'analytics': {},
+            'summary': {'total_products': 0}
+        }), 500
+        
     except Exception as e:
-        logging.error(f"Error getting database analytics: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        elapsed = (time.time() - start_time) * 1000 if 'start_time' in locals() else 0
+        logging.error(f"❌ Error in analytics after {elapsed:.1f}ms: {str(e)}")
+        import traceback
+        logging.error(traceback.format_exc())
+        return jsonify({
+            'error': 'Internal server error',
+            'analytics': {},
+            'summary': {'total_products': 0}
+        }), 500
 
 @app.route('/api/database-health', methods=['GET'])
 def database_health():
