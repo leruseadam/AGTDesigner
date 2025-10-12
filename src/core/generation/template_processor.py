@@ -1659,23 +1659,30 @@ class TemplateProcessor:
                     label_context['ProductBrand'] = ""
                     label_context['ProductBrand_Center'] = ""
                     self.logger.info(f"🎯 VERTICAL BRAND FIX: Set only Lineage to '{brand_center_text}' for vertical template (no ProductBrand duplication)")
-                else:
+                elif self.template_type == 'double':
                     # For double template, use simple Lineage without markers to prevent duplication
-                    if self.template_type == 'double':
-                        label_context['Lineage'] = brand_center_text
-                        label_context['ProductBrand'] = ""
-                        label_context['ProductBrand_Center'] = ""
-                        self.logger.info(f"🎯 DOUBLE TEMPLATE BRAND FIX: Set only Lineage to '{brand_center_text}' for double template (no marker duplication)")
-                    else:
-                        label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{brand_center_text}PRODUCTBRAND_CENTER_END"
-                        # Set ProductBrand fields to empty to prevent duplication for non-vertical templates
-                        label_context['ProductBrand'] = ""
-                        label_context['ProductBrand_Center'] = ""
+                    label_context['Lineage'] = brand_center_text
+                    label_context['ProductBrand'] = ""
+                    label_context['ProductBrand_Center'] = ""
+                    self.logger.info(f"🎯 DOUBLE TEMPLATE BRAND FIX: Set only Lineage to '{brand_center_text}' for double template (no marker duplication)")
+                elif self.template_type == 'mini':
+                    # For mini template, set both Lineage and ProductBrand for maximum compatibility
+                    # Mini templates need brand information in multiple fields
+                    label_context['Lineage'] = brand_center_text
+                    label_context['ProductBrand'] = brand_center_text
+                    label_context['ProductBrand_Center'] = brand_center_text
+                    self.logger.info(f"🎯 MINI TEMPLATE BRAND FIX: Set Lineage, ProductBrand, and ProductBrand_Center to '{brand_center_text}' for mini template")
+                else:
+                    # For other templates (horizontal, etc.), use marker-based formatting
+                    label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{brand_center_text}PRODUCTBRAND_CENTER_END"
+                    # Set ProductBrand fields to empty to prevent duplication for non-vertical templates
+                    label_context['ProductBrand'] = ""
+                    label_context['ProductBrand_Center'] = ""
                 
                 # Product Strain gets its own field with small font size
                 if product_strain:
-                    # For vertical and double templates, don't wrap with markers since they use simple placeholders
-                    if self.template_type in ['vertical', 'double']:
+                    # For vertical, double, and mini templates, don't wrap with markers since they use simple placeholders
+                    if self.template_type in ['vertical', 'double', 'mini']:
                         label_context['ProductStrain'] = product_strain
                     else:
                         label_context['ProductStrain'] = f"PRODUCTSTRAIN_START{product_strain}PRODUCTSTRAIN_END"
