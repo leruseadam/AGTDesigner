@@ -1553,9 +1553,8 @@ def index():
                 default_file = get_default_upload_file()
                 
                 if uploaded_file != default_file and os.path.exists(uploaded_file):
-                    # Check if file is old (more than 1 hour)
+                    # Check if file is old (more than 2 hours to match cleanup policy)
                     file_age = time.time() - os.path.getmtime(uploaded_file)
-                    upload_timestamp = session.get('upload_timestamp', 0)
                     
                     # Get processing status
                     filename = session.get('uploaded_filename', '')
@@ -1563,9 +1562,8 @@ def index():
                     
                     # Only remove if file is old OR processing failed
                     should_remove = (
-                        file_age > 3600 or  # More than 1 hour old
-                        status.startswith('error:') or  # Processing failed
-                        (upload_timestamp > 0 and time.time() - upload_timestamp > 3600)  # Upload session expired
+                        file_age > 7200 or  # More than 2 hours old (matches cleanup policy)
+                        status.startswith('error:')  # Processing failed
                     )
                     
                     if should_remove:
@@ -1575,7 +1573,6 @@ def index():
                             # Clear session data for removed file
                             session.pop('file_path', None)
                             session.pop('uploaded_filename', None)
-                            session.pop('upload_timestamp', None)
                         except Exception as e:
                             logging.warning(f"Failed to remove uploaded file: {e}")
                     else:
@@ -1583,9 +1580,9 @@ def index():
             except Exception as e:
                 logging.warning(f"Error checking uploaded file: {e}")
         
-        # Periodic cleanup (much less frequent - every 200th page load)
+        # More frequent cleanup - every 10th page load (10% chance)
         import random
-        if random.random() < 0.005:  # 0.5% chance to run cleanup
+        if random.random() < 0.1:  # 10% chance to run cleanup (was 0.5%)
             try:
                 cleanup_result = cleanup_old_files()
                 if cleanup_result['success'] and cleanup_result['removed_count'] > 0:
@@ -1650,10 +1647,26 @@ def upload_file():
         uploads_dir = os.path.join(os.getcwd(), 'uploads')
         os.makedirs(uploads_dir, exist_ok=True)
         
-        # Save file with timestamp
-        timestamp = int(time.time())
-        safe_filename = f"{timestamp}_{file.filename}"
+        # Clean up old files BEFORE uploading new one
+        try:
+            cleanup_result = cleanup_old_files()
+            if cleanup_result['success'] and cleanup_result['removed_count'] > 0:
+                logging.info(f"Pre-upload cleanup: removed {cleanup_result['removed_count']} old files")
+        except Exception as cleanup_error:
+            logging.warning(f"Pre-upload cleanup failed: {cleanup_error}")
+        
+        # Use simpler filename without timestamp (reuse filenames)
+        # This prevents accumulation of duplicate uploads
+        safe_filename = secure_filename(file.filename)
         file_path = os.path.join(uploads_dir, safe_filename)
+        
+        # If file exists, remove it first (will be replaced)
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+                logging.info(f"Removed existing file: {safe_filename}")
+            except Exception as e:
+                logging.warning(f"Could not remove existing file: {e}")
         
         file.save(file_path)
         logging.info(f"Saved: {file_path}")
@@ -1666,7 +1679,6 @@ def upload_file():
         session.permanent = True
         session['file_path'] = file_path
         session['uploaded_filename'] = file.filename
-        session['upload_timestamp'] = timestamp
         session.modified = True
         
         logging.info(f"Session updated: file_path={file_path}, filename={file.filename}, permanent={session.permanent}")
@@ -9652,26 +9664,26 @@ def cleanup_old_files():
         removed_count = 0
         removed_files = []
         
-        # Define cleanup policies
+        # Define cleanup policies - AGGRESSIVE to minimize storage
         cleanup_policies = {
             'uploads': {
-                'max_age_hours': 24,  # Keep uploads for 24 hours
-                'max_files': 50,      # Keep max 50 upload files
+                'max_age_hours': 2,   # Keep uploads for only 2 hours (was 24)
+                'max_files': 10,      # Keep max 10 upload files (was 50)
                 'pattern': 'uploads/*.xlsx'
             },
             'output': {
-                'max_age_hours': 12,  # Keep outputs for 12 hours
-                'max_files': 30,      # Keep max 30 output files
+                'max_age_hours': 4,   # Keep outputs for 4 hours (was 12)
+                'max_files': 15,      # Keep max 15 output files (was 30)
                 'pattern': 'output/*.docx'
             },
             'cache': {
-                'max_age_hours': 6,   # Keep cache for 6 hours
-                'max_files': 100,     # Keep max 100 cache files
+                'max_age_hours': 2,   # Keep cache for 2 hours (was 6)
+                'max_files': 30,      # Keep max 30 cache files (was 100)
                 'pattern': 'cache/*'
             },
             'logs': {
-                'max_age_hours': 168, # Keep logs for 1 week
-                'max_files': 10,      # Keep max 10 log files
+                'max_age_hours': 48,  # Keep logs for 2 days (was 7 days)
+                'max_files': 5,       # Keep max 5 log files (was 10)
                 'pattern': 'logs/*.log'
             }
         }
@@ -11664,11 +11676,25 @@ def upload_file_fast():
         uploads_dir.mkdir(exist_ok=True)
         logging.info(f"Uploads directory: {uploads_dir.absolute()}")
         
-        # Generate unique filename
-        timestamp = int(time.time())
+        # Clean up old files first
+        try:
+            cleanup_result = cleanup_old_files()
+            if cleanup_result['success'] and cleanup_result['removed_count'] > 0:
+                logging.info(f"Pre-upload cleanup: removed {cleanup_result['removed_count']} old files")
+        except Exception as cleanup_error:
+            logging.warning(f"Pre-upload cleanup failed: {cleanup_error}")
+        
+        # Use simple filename (no timestamp) to avoid accumulation
         safe_filename = secure_filename(file.filename)
-        filename = f"{timestamp}_{safe_filename}"
-        file_path = uploads_dir / filename
+        file_path = uploads_dir / safe_filename
+        
+        # Remove existing file if present
+        if file_path.exists():
+            try:
+                file_path.unlink()
+                logging.info(f"Removed existing file: {safe_filename}")
+            except Exception as e:
+                logging.warning(f"Could not remove existing file: {e}")
         
         logging.info(f"Saving file to: {file_path}")
         
