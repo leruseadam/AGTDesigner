@@ -29,7 +29,7 @@ def _load_font_sizing_config():
         return {
             'standard': {
                 'mini': {
-                    'description': [(5, 18), (20, 16), (40, 14), (60, 12), (80, 10), (100, 9), (float('inf'), 8)],
+                    'description': [(5, 18), (20, 16), (40, 14), (60, 12), (80, 11), (100, 10.5), (float('inf'), 10)],
                     'brand': [(5, 12), (20, 10), (30, 8), (40, 7), (float('inf'), 6.5)],
                     'price': [(1, 18), (2, 16), (float('inf'), 14)],
                     'lineage': [(5, 12), (10, 11), (15, 10), (20, 9), (float('inf'), 8)],
@@ -57,9 +57,9 @@ def _load_font_sizing_config():
                     'default': [(20, 16), (40, 14), (60, 12), (float('inf'), 10)]
                 },
                 'vertical': {
-                    'description': [(5, 34), (30, 32), (40, 28), (60, 26), (70, 24), (80, 22), (100, 20), (float('inf'), 18)],
-                    'brand': [(10, 16), (15, 14), (20, 11), (float('inf'), 10)],
-                    'price': [(4, 34), (10, 30), (15, 28), (float('inf'), 26)],  # Updated: complexity-based thresholds for better vertical price sizing
+                    'description': [(5, 34), (10, 32), (20, 28), (40, 26), (60, 24), (70, 22), (80, 20), (float('inf'), 18)],
+                    'brand': [(10, 28), (20, 26), (30, 24), (40, 22), (50, 20), (60, 18), (float('inf'), 16)],
+                    'price': [(15, 34), (16, 30), (15, 28), (float('inf'), 26)],  # Updated: complexity-based thresholds for better vertical price sizing
                     'lineage': [(20, 20), (40, 18), (60, 16), (float('inf'), 12)],
                     'ratio': [(10, 14), (20, 12), (30, 9), (float('inf'), 9)],
                     'thc_cbd': [(10, 12), (float('inf'), 12)],
@@ -147,33 +147,7 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
                 return Pt(final_size)
     
     
-    # Special rule: Handle specific large brand names that are too big
-    if field_type.lower() == 'brand' and orientation.lower() == 'double':
-        # Force specific large brand names to use much smaller fonts
-        large_brands = ['CONSTELLATION', 'MARY JONES', 'MARY JONES CANNABIS']
-        if any(brand in text.upper() for brand in large_brands):
-            final_size = 8 * scale_factor
-            logger.debug(f"Special double template brand rule: text='{text}' matches large brand list, forcing 5.5pt font")
-            return Pt(final_size)
-        
-        # Special rule: If brand name has multiple words with 8+ characters each, reduce font to 8pt
-        words = text.split()
-        long_words = [word for word in words if len(word) >= 7]
-        if len(long_words) >= 2:  # Multiple words with 8+ characters each
-            final_size = 8 * scale_factor
-            logger.debug(f"Special double template brand rule: text='{text}' has {len(long_words)} words with 8+ chars each: {long_words}, forcing 8pt font")
-            return Pt(final_size)
-        else:
-            logger.debug(f"Special double template brand rule: text='{text}' has {len(long_words)} words with 8+ chars each: {long_words}, NOT triggering 8pt font")
-    
-    # Special rule: If double template description has multiple words with 9+ characters each, automatically reduce to 18pt
-    if orientation.lower() == 'double' and field_type.lower() == 'description':
-        words = str(text).split()
-        long_words = [word for word in words if len(word) >= 9]
-        if len(long_words) >= 2:  # Multiple words with 9+ characters each
-            final_size = 18 * scale_factor
-            logger.debug(f"Double template description word length rule: text='{text}' has {len(long_words)} words with 9+ chars each: {long_words}, forcing 18pt font")
-            return Pt(final_size)
+    # Use standard font sizing for all templates - no special cases
     
     # Get the appropriate configuration
     config = FONT_SIZING_CONFIG.get(complexity_type, {}).get(orientation.lower(), {}).get(field_type.lower(), [])

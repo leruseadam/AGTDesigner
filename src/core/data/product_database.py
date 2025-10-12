@@ -1398,13 +1398,20 @@ class ProductDatabase:
                     # Track this product to prevent duplicates within the same upload
                     self._current_upload_products.add(duplicate_key)
                     
-                    # Normalize weights before storing in database
+                    # Comprehensive smart normalization before storing in database
                     try:
-                        from src.core.data.weight_normalizer import weight_normalizer
-                        product_data = weight_normalizer.normalize_product_data(product_data)
-                        logger.info(f"Normalized weights for product: {product_name}")
+                        from src.core.data.smart_excel_normalizer import smart_normalizer
+                        product_data = smart_normalizer.normalize_product_data(product_data)
+                        logger.info(f"Smart normalized product: {product_name}")
                     except Exception as e:
-                        logger.warning(f"Failed to normalize weights for {product_name}: {e}")
+                        logger.warning(f"Failed to smart normalize {product_name}: {e}")
+                        # Fallback to basic weight normalization
+                        try:
+                            from src.core.data.weight_normalizer import weight_normalizer
+                            product_data = weight_normalizer.normalize_product_data(product_data)
+                            logger.info(f"Fallback weight normalized product: {product_name}")
+                        except Exception as e2:
+                            logger.warning(f"Fallback weight normalization also failed for {product_name}: {e2}")
                     
                     # Store the product in database
                     product_id = self.add_or_update_product(product_data)

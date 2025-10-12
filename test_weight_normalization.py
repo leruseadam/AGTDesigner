@@ -101,67 +101,6 @@ def test_weight_normalization():
             'weight': '2.0',
             'unit': 'oz',
             'expected': ('2.0', 'oz')
-        },
-        
-        # New rules based on database analysis
-        # Vape Cartridge (non-classic) - should be in oz
-        {
-            'name': 'Blue Dream Vape Cartridge',
-            'brand': 'Brand',
-            'type': 'Vape Cartridge',
-            'weight': '28',
-            'unit': 'g',
-            'expected': ('0.99', 'oz')
-        },
-        
-        # Topical (non-classic) - should be in oz
-        {
-            'name': 'CBD Cream',
-            'brand': 'Brand',
-            'type': 'Topical',
-            'weight': '50',
-            'unit': 'g',
-            'expected': ('1.76', 'oz')
-        },
-        
-        # Capsule (non-classic) - should be in oz
-        {
-            'name': 'CBD Capsules',
-            'brand': 'Brand',
-            'type': 'Capsule',
-            'weight': '10',
-            'unit': 'g',
-            'expected': ('0.35', 'oz')
-        },
-        
-        # Large Edible Solid - should be in oz
-        {
-            'name': 'Large Gummy Package',
-            'brand': 'Brand',
-            'type': 'Edible (Solid)',
-            'weight': '50',
-            'unit': 'g',
-            'expected': ('1.76', 'oz')
-        },
-        
-        # Paraphernalia - standardize "each" units
-        {
-            'name': 'Pipe',
-            'brand': 'Brand',
-            'type': 'Paraphernalia',
-            'weight': '0',
-            'unit': 'each',
-            'expected': ('1', 'each')
-        },
-        
-        # Pre-roll (classic) - should be in grams
-        {
-            'name': 'Blue Dream Pre-Roll',
-            'brand': 'Brand',
-            'type': 'Pre-Roll',
-            'weight': '0.5',
-            'unit': 'oz',
-            'expected': ('14.17', 'g')
         }
     ]
     

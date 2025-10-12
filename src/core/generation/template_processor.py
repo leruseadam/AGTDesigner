@@ -1102,16 +1102,18 @@ class TemplateProcessor:
                 self.logger.debug("DocxTemplate render completed successfully")
             except Exception as render_error:
                 self.logger.warning(f"DocxTemplate render failed: {render_error}, using manual replacement")
+                # Only use manual replacement as a fallback when DocxTemplate fails
+                buffer = BytesIO()
+                doc.save(buffer)
+                buffer.seek(0)
+                rendered_doc = Document(buffer)
+                self._manual_replace_placeholders(rendered_doc, context)
+                return rendered_doc
             
             buffer = BytesIO()
             doc.save(buffer)
             buffer.seek(0)
             rendered_doc = Document(buffer)
-            
-            # Use manual placeholder replacement for all template types as fallback
-            # since DocxTemplate was not working reliably
-            self.logger.info(f"Using manual placeholder replacement for {self.template_type} template")
-            self._manual_replace_placeholders(rendered_doc, context)
             
             # Check timeout before post-processing
             if time.time() - chunk_start_time > MAX_PROCESSING_TIME_PER_CHUNK:

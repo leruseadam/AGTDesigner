@@ -1364,6 +1364,7 @@ def get_session_excel_processor():
             return None
 
 def get_session_json_matcher():
+    """Create a simple, fast JSON matcher without enhanced/AI overhead."""
     try:
         from src.core.data.json_matcher import JSONMatcher
         excel_processor = get_session_excel_processor()
@@ -1373,36 +1374,17 @@ def get_session_json_matcher():
         
         # Use a global JSON matcher instance to persist the cache
         if not hasattr(app, '_json_matcher'):
+            # Create basic JSONMatcher without database population or ML models for speed
             app._json_matcher = JSONMatcher(excel_processor)
-            
-            # CRITICAL FIX: Populate excel processor with database data for ML models
-            try:
-                # Get database products and populate the excel processor
-                db_products = app._json_matcher._get_database_products()
-                if db_products and len(db_products) > 0:
-                    import pandas as pd
-                    app._json_matcher.excel_processor.df = pd.DataFrame(db_products)
-                    app._json_matcher._build_ml_models()
-                    logging.info(f"Enhanced JSON matcher loaded {len(db_products)} products from database and built ML models")
-                else:
-                    logging.warning("No database products found for ML model building")
-            except Exception as e:
-                logging.error(f"Error populating JSON matcher with database data: {e}")
-            
-            logging.info("Created new EnhancedJSONMatcher instance")
+            logging.info("Created basic JSONMatcher instance (fast mode)")
         else:
             # Update the Excel processor reference in case it changed
             app._json_matcher.excel_processor = excel_processor
         
         return app._json_matcher
     except Exception as e:
-        logging.warning(f"Enhanced JSON matcher unavailable, falling back to basic matcher: {e}")
-        try:
-            from src.core.data.json_matcher import JSONMatcher
-            return JSONMatcher(get_session_excel_processor())
-        except Exception as e2:
-            logging.error(f"Failed to initialize basic JSON matcher: {e2}")
-            return None
+        logging.error(f"Failed to initialize JSON matcher: {e}")
+        return None
 
 def get_session_product_database():
     """Get ProductDatabase instance for the current session."""
@@ -9118,57 +9100,57 @@ def json_match_detailed():
             
         available_tags = excel_processor.df.to_dict('records')
         
-        # FIXED: Use regular JSON Matcher with Excel-priority system
-        logging.info("Using regular JSON Matcher with Excel-priority approach")
+        # Use regular JSON Matcher for fast matching
+        logging.info("Using regular JSON Matcher (fast mode)")
         
-        # Use the Enhanced JSON Matcher to get database-enhanced results
-        enhanced_matches = json_matcher.fetch_and_match(url)
-        logging.info(f"Enhanced JSON Matcher returned {len(enhanced_matches) if enhanced_matches else 0} database-enhanced products")
+        # Get basic matches from the fast JSON matcher
+        basic_matches = json_matcher.fetch_and_match(url)
+        logging.info(f"JSON Matcher returned {len(basic_matches) if basic_matches else 0} matched products")
         
         detailed_matches = []
-        high_confidence_matches = enhanced_matches or []  # All enhanced matches are high confidence
+        high_confidence_matches = basic_matches or []  # All matches from basic matcher
         
         for i, json_item in enumerate(json_items):
             json_name = str(json_item.get('product_name', ''))
             if not json_name.strip():
                 continue
                 
-            # Find corresponding enhanced match
-            enhanced_match = None
-            if i < len(enhanced_matches):
-                enhanced_match = enhanced_matches[i]
+            # Find corresponding basic match
+            basic_match = None
+            if i < len(basic_matches):
+                basic_match = basic_matches[i]
             
-            # Create detailed match info using database-priority data
+            # Create detailed match info using basic matcher data
             match_info = {
                 'json_name': json_name,
                 'json_data': json_item,
-                'best_score': 0.95 if enhanced_match else 0.0,  # High confidence for database matches
-                'best_match': enhanced_match,
-                'top_candidates': [{'excel_name': enhanced_match.get('Product Name*', 'Enhanced Match'), 'score': 0.95, 'excel_data': enhanced_match}] if enhanced_match else [],
-                'is_match': enhanced_match is not None,
-                'match_reason': 'Database Priority (100% DB data)' if enhanced_match else 'No database match found',
-                'source': enhanced_match.get('Source', 'Database Priority (100% DB)') if enhanced_match else 'No match',
-                'data_source': enhanced_match.get('Data_Source', 'Database') if enhanced_match else 'None',
-                'match_confidence': enhanced_match.get('Match_Confidence', '0.95') if enhanced_match else '0.0'
+                'best_score': 0.85 if basic_match else 0.0,  # Good confidence for basic matches
+                'best_match': basic_match,
+                'top_candidates': [{'excel_name': basic_match.get('Product Name*', 'Basic Match'), 'score': 0.85, 'excel_data': basic_match}] if basic_match else [],
+                'is_match': basic_match is not None,
+                'match_reason': 'Fast JSON Matcher' if basic_match else 'No match found',
+                'source': basic_match.get('Source', 'Fast JSON Matcher') if basic_match else 'No match',
+                'data_source': basic_match.get('Data_Source', 'Excel') if basic_match else 'None',
+                'match_confidence': basic_match.get('Match_Confidence', '0.85') if basic_match else '0.0'
             }
             
             detailed_matches.append(match_info)
             
-        logging.info(f"DATABASE PRIORITY: Generated {len(detailed_matches)} detailed matches with {len(high_confidence_matches)} high-confidence database-enhanced products")
+        logging.info(f"FAST JSON MATCHER: Generated {len(detailed_matches)} detailed matches with {len(high_confidence_matches)} matched products")
         
         return jsonify({
             'success': True,
             'total_json_items': len(json_items),
             'total_matches': len(high_confidence_matches),
-            'threshold': 'Database Priority (100% DB)',
-            'approach': 'Enhanced JSON Matcher with Database Priority',
-            'data_source': '100% Database-derived information',
+            'threshold': 'Fast JSON Matcher',
+            'approach': 'Basic JSON Matcher with Excel data',
+            'data_source': 'Excel spreadsheet data',
             'detailed_matches': detailed_matches,
             'high_confidence_matches': high_confidence_matches,
             'database_info': {
                 'total_database_products': len(available_tags),
-                'enhanced_matches': len(enhanced_matches) if enhanced_matches else 0,
-                'match_strategy': 'Database Priority with safe defaults'
+                'basic_matches': len(basic_matches) if basic_matches else 0,
+                'match_strategy': 'Fast JSON Matcher with Excel data'
             }
         })
         
@@ -13020,20 +13002,8 @@ def enhanced_json_match():
                     if original_matches and len(original_matches) > len(matches):
                         logging.info(f"Original matcher found {len(original_matches)} matches, using original results")
                         
-                        # Convert original matches to enhanced format
-                        enhanced_matches = []
-                        for i, match_data in enumerate(original_matches):
-                            from src.core.data.enhanced_json_matcher import MatchResult, MatchStrategy
-                            enhanced_match = MatchResult(
-                                score=0.8 - (i * 0.01),  # Decreasing scores
-                                match_data=match_data,
-                                strategy_used=MatchStrategy.FUZZY,
-                                confidence=0.7,
-                                processing_time=0.001,
-                                match_factors={'fallback_match': True}
-                            )
-                            enhanced_matches.append(enhanced_match)
-                        matches = enhanced_matches
+                        # Use original matches directly without conversion overhead
+                        matches = original_matches
                         logging.info(f"Using {len(matches)} matches from original matcher fallback")
                 except Exception as fallback_error:
                     logging.warning(f"Fallback to original matcher failed: {fallback_error}")

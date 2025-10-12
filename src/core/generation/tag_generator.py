@@ -509,11 +509,7 @@ def process_chunk(args):
                 desc = re.sub(r'[-\s]+$', '', desc)
             product_type = str(row.get("Product Type*", "")).strip().lower()
             
-            # For edibles in double template, use Product Brand instead of Description
-            edible_types = {"edible (solid)", "edible (liquid)", "high cbd edible liquid", "tincture", "topical", "capsule"}
-            if product_type in edible_types and orientation == "double":
-                # Use Product Brand instead of Description for edibles in double template
-                desc = product_brand if product_brand else desc
+            # Standard processing for all templates - no special cases
             
             # DescAndWeight should only contain the description text, not description + weight
             # This field is mapped to the DESC marker in templates
@@ -525,27 +521,24 @@ def process_chunk(args):
             if DEBUG_ENABLED:
                 logger.debug(f"Created label data for Label{i+1}")
         else:
-            # For double templates, don't create empty contexts to avoid blank tags
-            if orientation != "double":
-                # Empty label data for unused slots
-                context[f"Label{i+1}"] = {
-                    "Description": "",
-                    "WeightUnits": "",
-                    "ProductBrand": "",
-                    "Price": "",
-                    "Lineage": "",
-                    "DOH": "",
-                    "Ratio_or_THC_CBD": "",
-                    # ProductStrain handled by template processor
-                    "DescAndWeight": "",
-                    "JointRatio": ""
-                }
-                if DEBUG_ENABLED:
-                    logger.debug(f"Created empty label data for Label{i+1}")
-            else:
-                # For double templates, only create contexts for actual records
-                if DEBUG_ENABLED:
-                    logger.debug(f"Double template: Skipping empty slot Label{i+1} to prevent blank tags")
+            # Create empty contexts for all templates consistently
+            # Empty label data for unused slots
+            context[f"Label{i+1}"] = {
+                "Description": "",
+                "WeightUnits": "",
+                "ProductBrand": "",
+                "Price": "",
+                "Lineage": "",
+                "DOH": "",
+                "Ratio_or_THC_CBD": "",
+                # ProductStrain handled by template processor
+                "DescAndWeight": "",
+                "JointRatio": "",
+                "ProductStrain": "",
+                "QR": ""
+            }
+            if DEBUG_ENABLED:
+                logger.debug(f"Created empty label data for Label{i+1}")
 
     # Render template
     if DEBUG_ENABLED:
