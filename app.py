@@ -7123,13 +7123,12 @@ def clear_rate_limit():
 @app.route('/api/database-analytics', methods=['GET'])
 def database_analytics():
     """Get advanced analytics data for the database."""
+    start_time = time.time()
     try:
         import sqlite3
-        import time
         import pandas as pd
         from datetime import datetime, timedelta
         
-        start_time = time.time()
         logging.info("📊 Database analytics request started")
         
         # Try to get any available database (don't hardcode store name)
@@ -7137,11 +7136,16 @@ def database_analytics():
             product_db = get_product_database()
         except Exception as e:
             logging.error(f"Failed to get product database for analytics: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
             return jsonify({
                 'error': 'Database not available',
-                'analytics': {},
-                'summary': {'total_products': 0}
-            }), 500
+                'product_type_distribution': {},
+                'lineage_distribution': {},
+                'vendor_performance': [],
+                'recent_activity': [],
+                'analytics_generated': datetime.now().isoformat()
+            }), 200  # Return 200 with empty data
         
         # Test database connection and fallback if needed
         try:
@@ -7175,75 +7179,97 @@ def database_analytics():
             logging.error(f"Database connection test failed: {test_error}")
             return jsonify({'error': f'Database connection failed: {test_error}'}), 500
         
-        with sqlite3.connect(product_db.db_path) as conn:
-            # Get product type distribution
-            product_types_df = pd.read_sql_query('''
-                SELECT "Product Type*" as product_type, COUNT(*) as count
-                FROM products
-                WHERE "Product Type*" IS NOT NULL AND "Product Type*" != ''
-                GROUP BY "Product Type*"
-                ORDER BY count DESC
-            ''', conn)
-            
-            # Get lineage distribution
-            lineage_df = pd.read_sql_query('''
-                SELECT canonical_lineage, COUNT(*) as count
-                FROM strains
-                WHERE canonical_lineage IS NOT NULL AND canonical_lineage != ''
-                GROUP BY canonical_lineage
-                ORDER BY count DESC
-            ''', conn)
-            
-            # Get vendor performance
-            vendor_performance_df = pd.read_sql_query('''
-                SELECT "Vendor/Supplier*" as vendor, COUNT(*) as product_count,
-                       COUNT(DISTINCT "Product Brand") as unique_brands,
-                       COUNT(DISTINCT "Product Type*") as unique_types
-                FROM products
-                WHERE "Vendor/Supplier*" IS NOT NULL AND "Vendor/Supplier*" != ''
-                GROUP BY "Vendor/Supplier*"
-                ORDER BY product_count DESC
-                LIMIT 10
-            ''', conn)
-            
-            # Get recent activity (last 30 days) - using id as proxy for recent activity
-            # Since last_seen_date column doesn't exist in this schema, use id ordering
-            recent_activity_df = pd.read_sql_query('''
-                SELECT 'Recent' as date, COUNT(*) as new_products
-                FROM products
-                WHERE id > (SELECT MAX(id) - 100 FROM products)
-            ''', conn)
-            
-            elapsed = (time.time() - start_time) * 1000
-            logging.info(f"✅ Database analytics completed ({elapsed:.1f}ms)")
-            
+        try:
+            with sqlite3.connect(product_db.db_path) as conn:
+                # Get product type distribution
+                product_types_df = pd.read_sql_query('''
+                    SELECT "Product Type*" as product_type, COUNT(*) as count
+                    FROM products
+                    WHERE "Product Type*" IS NOT NULL AND "Product Type*" != ''
+                    GROUP BY "Product Type*"
+                    ORDER BY count DESC
+                ''', conn)
+                
+                # Get lineage distribution
+                lineage_df = pd.read_sql_query('''
+                    SELECT canonical_lineage, COUNT(*) as count
+                    FROM strains
+                    WHERE canonical_lineage IS NOT NULL AND canonical_lineage != ''
+                    GROUP BY canonical_lineage
+                    ORDER BY count DESC
+                ''', conn)
+                
+                # Get vendor performance
+                vendor_performance_df = pd.read_sql_query('''
+                    SELECT "Vendor/Supplier*" as vendor, COUNT(*) as product_count,
+                           COUNT(DISTINCT "Product Brand") as unique_brands,
+                           COUNT(DISTINCT "Product Type*") as unique_types
+                    FROM products
+                    WHERE "Vendor/Supplier*" IS NOT NULL AND "Vendor/Supplier*" != ''
+                    GROUP BY "Vendor/Supplier*"
+                    ORDER BY product_count DESC
+                    LIMIT 10
+                ''', conn)
+                
+                # Get recent activity (last 30 days) - using id as proxy for recent activity
+                # Since last_seen_date column doesn't exist in this schema, use id ordering
+                recent_activity_df = pd.read_sql_query('''
+                    SELECT 'Recent' as date, COUNT(*) as new_products
+                    FROM products
+                    WHERE id > (SELECT MAX(id) - 100 FROM products)
+                ''', conn)
+                
+                elapsed = (time.time() - start_time) * 1000
+                logging.info(f"✅ Database analytics completed ({elapsed:.1f}ms)")
+                
+                return jsonify({
+                    'product_type_distribution': dict(zip(product_types_df['product_type'], product_types_df['count'])),
+                    'lineage_distribution': dict(zip(lineage_df['canonical_lineage'], lineage_df['count'])),
+                    'vendor_performance': vendor_performance_df.to_dict('records'),
+                    'recent_activity': recent_activity_df.to_dict('records'),
+                    'analytics_generated': datetime.now().isoformat()
+                })
+        except Exception as query_error:
+            logging.error(f"Error executing analytics queries: {query_error}")
+            import traceback
+            logging.error(traceback.format_exc())
+            # Return empty data instead of error
             return jsonify({
-                'product_type_distribution': dict(zip(product_types_df['product_type'], product_types_df['count'])),
-                'lineage_distribution': dict(zip(lineage_df['canonical_lineage'], lineage_df['count'])),
-                'vendor_performance': vendor_performance_df.to_dict('records'),
-                'recent_activity': recent_activity_df.to_dict('records'),
+                'error': 'Query failed',
+                'product_type_distribution': {},
+                'lineage_distribution': {},
+                'vendor_performance': [],
+                'recent_activity': [],
                 'analytics_generated': datetime.now().isoformat()
             })
             
     except sqlite3.Error as db_error:
-        elapsed = (time.time() - start_time) * 1000 if 'start_time' in locals() else 0
+        elapsed = (time.time() - start_time) * 1000
         logging.error(f"❌ Database error in analytics after {elapsed:.1f}ms: {db_error}")
+        import traceback
+        logging.error(traceback.format_exc())
         return jsonify({
             'error': 'Database query failed',
-            'analytics': {},
-            'summary': {'total_products': 0}
-        }), 500
+            'product_type_distribution': {},
+            'lineage_distribution': {},
+            'vendor_performance': [],
+            'recent_activity': [],
+            'analytics_generated': datetime.now().isoformat()
+        }), 200  # Return 200 with empty data for graceful degradation
         
     except Exception as e:
-        elapsed = (time.time() - start_time) * 1000 if 'start_time' in locals() else 0
+        elapsed = (time.time() - start_time) * 1000
         logging.error(f"❌ Error in analytics after {elapsed:.1f}ms: {str(e)}")
         import traceback
         logging.error(traceback.format_exc())
         return jsonify({
             'error': 'Internal server error',
-            'analytics': {},
-            'summary': {'total_products': 0}
-        }), 500
+            'product_type_distribution': {},
+            'lineage_distribution': {},
+            'vendor_performance': [],
+            'recent_activity': [],
+            'analytics_generated': datetime.now().isoformat()
+        }), 200  # Return 200 with empty data for graceful degradation
 
 @app.route('/api/database-test', methods=['GET'])
 def database_test():
