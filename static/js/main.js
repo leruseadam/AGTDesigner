@@ -4116,12 +4116,29 @@ const TagManager = {
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
-            const tags = await response.json();
-            console.log('Available tags response data:', tags);
+            const responseData = await response.json();
+            console.log('Available tags response data:', responseData);
             
-            if (!tags || !Array.isArray(tags) || tags.length === 0) {
-                console.error('No tags loaded from backend or invalid response format');
+            // Handle both old array format and new object format
+            let tags;
+            if (Array.isArray(responseData)) {
+                // Old format: direct array
+                tags = responseData;
+            } else if (responseData && responseData.tags && Array.isArray(responseData.tags)) {
+                // New format: {tags: [...], total_count: N, source: '...'}
+                tags = responseData.tags;
+                console.log(`Backend returned ${tags.length} tags from ${responseData.source || 'unknown source'}`);
+            } else {
+                console.error('No tags loaded from backend or invalid response format:', responseData);
                 // Clear existing tags if no new data
+                this.state.tags = [];
+                this.state.originalTags = [];
+                this._updateAvailableTags([]);
+                return false;
+            }
+            
+            if (tags.length === 0) {
+                console.warn('Backend returned empty tags array');
                 this.state.tags = [];
                 this.state.originalTags = [];
                 this._updateAvailableTags([]);
