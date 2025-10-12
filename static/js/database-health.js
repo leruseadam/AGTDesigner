@@ -4,11 +4,13 @@
 class DatabaseHealthMonitor {
     constructor() {
         this.isMonitoring = false;
-        this.healthCheckInterval = 60000; // Check every 60 seconds
+        this.healthCheckInterval = 120000; // Check every 2 minutes (reduced from 60s)
         this.intervalId = null;
         this.lastHealthStatus = null;
         this.consecutiveFailures = 0;
         this.maxAutoRecoveryAttempts = 3;
+        this.lastRecoveryTime = null;
+        this.recoveryCount = 0;
     }
 
     startMonitoring() {
@@ -79,16 +81,29 @@ class DatabaseHealthMonitor {
             const result = await restoreResponse.json();
             
             if (result.success) {
-                console.log('Database automatically recovered:', result.message);
+                console.log('✅ Database automatically recovered:', result.message);
                 this.consecutiveFailures = 0;
+                this.lastRecoveryTime = new Date();
+                this.recoveryCount++;
                 
-                // Show success notification
-                this.showNotification('Database automatically recovered', 'success');
+                // Show success notification with details
+                this.showNotification(
+                    `✅ Database recovered automatically. Your work is safe and the system is healthy again.`,
+                    'success'
+                );
+                
+                // Log recovery for monitoring
+                console.info(`🔧 Auto-recovery completed successfully (Recovery #${this.recoveryCount}). System operating normally.`);
+                
+                // If we're recovering frequently, log a warning
+                if (this.recoveryCount > 3) {
+                    console.warn(`⚠️ Database has been auto-recovered ${this.recoveryCount} times. Consider checking for underlying issues.`);
+                }
                 
                 // Re-check health
                 setTimeout(() => this.checkHealth(), 2000);
             } else {
-                console.error('Auto-recovery failed:', result.error);
+                console.error('❌ Auto-recovery failed:', result.error);
                 
                 // If restore failed and this is our last attempt, try emergency recovery
                 if (this.consecutiveFailures >= this.maxAutoRecoveryAttempts) {
