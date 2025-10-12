@@ -162,37 +162,10 @@ async function openDatabaseAnalytics() {
       </div>
     `;
 
-    // Add database health section
-    const healthSectionHtml = `
-      <div class="row mt-4">
-        <div class="col-12">
-          <div class="card glass-card">
-            <div class="card-header d-flex justify-content-between">
-              <h6 class="mb-0">Database Health & Reliability</h6>
-              <button class="btn btn-sm btn-outline-info" onclick="refreshHealthStatus()">
-                <i class="bi bi-arrow-clockwise"></i> Refresh
-              </button>
-            </div>
-            <div class="card-body" id="healthStatusContent">
-              <div class="text-center">
-                <div class="spinner-border spinner-border-sm text-info" role="status">
-                  <span class="visually-hidden">Loading...</span>
-                </div>
-                <span class="ms-2">Loading health status...</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    `;
-    
-    // Add export and backup buttons
+    // Add export buttons
     const exportButtonHtml = `
       <div class="row mt-4">
         <div class="col-12 text-end">
-          <button class="btn btn-warning me-2" onclick="createDatabaseBackup()">
-            <i class="bi bi-shield-check"></i> Create Backup
-          </button>
           <button class="btn btn-success me-2" onclick="exportInventory()">
             <i class="bi bi-table"></i> Export Inventory Only
           </button>
@@ -209,14 +182,13 @@ async function openDatabaseAnalytics() {
       ${vendorStatsHtml}
       ${vendorBrandsHtml}
       ${summaryHtml}
-      ${healthSectionHtml}
       ${exportButtonHtml}
     `;
 
     // Update modal content
     showDatabaseModal('Database Analytics', modalContent);
     
-    // Initialize the usage chart and load health status after the modal is shown
+    // Initialize the usage chart after the modal is shown
     const modal = document.getElementById('databaseModal');
     modal.addEventListener('shown.bs.modal', function () {
       // Get historical usage data - handle case where upload_stats might not exist

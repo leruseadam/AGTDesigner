@@ -1,11 +1,5 @@
 from .field_mapping import get_canonical_field
-from .database_reliability import (
-    DatabaseHealthMonitor, 
-    ensure_database_reliability, 
-    create_safe_connection,
-    safe_database_operation,
-    get_health_monitor
-)
+from .database_reliability import get_reliability_manager, DatabaseReliability
 import sqlite3
 import json
 import logging
@@ -74,17 +68,13 @@ def retry_on_lock(max_retries=3, delay=0.5):
     return decorator
 
 class ProductDatabase:
-    """Database for storing and managing product and strain information with crash protection."""
+    """Database for storing and managing product and strain information."""
     
     def __init__(self, db_path: str = None, store_name: str = None):
         if db_path is None:
             self.db_path = get_database_path(store_name)
         else:
             self.db_path = db_path
-        
-        # Initialize reliability monitoring
-        self.health_monitor = get_health_monitor(self.db_path)
-        
         self._connection_pool = {}
         self._cache = {}
         self._cache_lock = threading.Lock()
@@ -93,6 +83,15 @@ class ProductDatabase:
         # Serialize writers to avoid 'database is locked' under concurrent writes
         self._write_lock = threading.RLock()
         
+        # Initialize reliability manager
+        self._reliability = get_reliability_manager(self.db_path)
+        
+        # Automatic backup tracking
+        self._last_backup_time = None
+        self._writes_since_backup = 0
+        self._backup_interval_seconds = 3600  # Backup every hour
+        self._backup_interval_writes = 100  # Or every 100 writes
+        
         # Performance timing
         self._timing_stats = {
             'queries': 0,
@@ -100,63 +99,70 @@ class ProductDatabase:
             'cache_hits': 0,
             'cache_misses': 0
         }
-        
-        logger.info(f"ProductDatabase initialized with crash protection for: {self.db_path}")
-    
-    def get_health_status(self) -> Dict[str, Any]:
-        """Get comprehensive database health status"""
-        try:
-            return self.health_monitor.get_health_report()
-        except Exception as e:
-            logger.error(f"Error getting health status: {e}")
-            return {
-                'is_healthy': False,
-                'error': str(e),
-                'timestamp': datetime.now().isoformat()
-            }
-    
-    def force_backup(self) -> Tuple[bool, str]:
-        """Force creation of a database backup"""
-        try:
-            return self.health_monitor.force_backup()
-        except Exception as e:
-            logger.error(f"Error forcing backup: {e}")
-            return False, f"Backup failed: {e}"
-    
-    def perform_health_check(self):
-        """Perform immediate health check and return status"""
-        try:
-            return self.health_monitor.perform_health_check()
-        except Exception as e:
-            logger.error(f"Error performing health check: {e}")
-            return None
     
     def _get_connection(self):
-        """Get a database connection with reliability checks."""
+        """Get a database connection with automatic health checking and recovery."""
         thread_id = threading.get_ident()
+        
+        # Check if we need to verify health (periodically)
         if thread_id not in self._connection_pool:
+            # Check database health before creating connection
+            health = self._reliability.check_health()
+            
+            if not health['healthy']:
+                logger.error(f"Database corrupted: {health.get('message')}")
+                # Attempt automatic recovery
+                logger.warning("Attempting automatic database recovery...")
+                success, recovery_msg = self._reliability.restore_from_backup()
+                
+                if not success:
+                    # Emergency recovery
+                    success, recovery_msg = self._reliability.emergency_recovery()
+                    if not success:
+                        raise sqlite3.DatabaseError(
+                            f"Database is corrupted and cannot be recovered: {recovery_msg}"
+                        )
+                
+                logger.info(f"Database recovered: {recovery_msg}")
+                # Clear initialization flag to reinitialize after recovery
+                self._initialized = False
+            
             try:
-                # Use safe connection with health checks
-                safe_conn = create_safe_connection(self.db_path, timeout=30.0)
-                self._connection_pool[thread_id] = safe_conn.connection
-                logger.debug(f"Created safe database connection for thread {thread_id}")
-            except Exception as e:
-                logger.error(f"Failed to create safe database connection: {e}")
-                # Fallback to standard connection if safe connection fails
+                # Configure connection for better concurrency
                 conn = sqlite3.connect(
                     self.db_path,
-                    timeout=30.0,
-                    check_same_thread=False
+                    timeout=30.0,  # 30 second timeout for database operations
+                    check_same_thread=False  # Allow connection sharing across threads
                 )
-                # Apply basic reliability settings
+                # Enable WAL mode for better concurrency
                 conn.execute("PRAGMA journal_mode=WAL")
+                # Set busy timeout (60s) to ride out background batches
                 conn.execute("PRAGMA busy_timeout=60000")
+                # Optimize for concurrent access
                 conn.execute("PRAGMA synchronous=NORMAL")
                 conn.execute("PRAGMA cache_size=10000")
                 conn.execute("PRAGMA temp_store=MEMORY")
                 self._connection_pool[thread_id] = conn
-                logger.warning(f"Using fallback database connection for thread {thread_id}")
-        
+                
+            except sqlite3.DatabaseError as e:
+                if 'file is not a database' in str(e).lower():
+                    logger.error(f"Database corruption detected during connection: {e}")
+                    # Attempt recovery one more time
+                    success, recovery_msg = self._reliability.emergency_recovery()
+                    if success:
+                        # Retry connection
+                        conn = sqlite3.connect(self.db_path, timeout=30.0, check_same_thread=False)
+                        conn.execute("PRAGMA journal_mode=WAL")
+                        conn.execute("PRAGMA busy_timeout=60000")
+                        conn.execute("PRAGMA synchronous=NORMAL")
+                        conn.execute("PRAGMA cache_size=10000")
+                        conn.execute("PRAGMA temp_store=MEMORY")
+                        self._connection_pool[thread_id] = conn
+                    else:
+                        raise sqlite3.DatabaseError(f"Cannot recover database: {recovery_msg}")
+                else:
+                    raise
+                    
         return self._connection_pool[thread_id]
     
     def init_database(self):
@@ -303,11 +309,7 @@ class ProductDatabase:
                 ''')
                 
                 # Create indexes for better performance
-                # Check if normalized_name exists in strains table before creating index
-                cursor.execute("PRAGMA table_info(strains)")
-                strain_columns = [col[1] for col in cursor.fetchall()]
-                if 'normalized_name' in strain_columns:
-                    cursor.execute('CREATE INDEX IF NOT EXISTS idx_strains_normalized ON strains(normalized_name)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_strains_normalized ON strains(normalized_name)')
                 
                 # Only create normalized_name index if the column exists
                 cursor.execute("PRAGMA table_info(products)")
@@ -374,25 +376,6 @@ class ProductDatabase:
     def _ensure_essential_columns_exist(self, cursor, conn):
         """Ensure essential columns exist that are needed for Excel processor compatibility."""
         try:
-            # First, ensure strains table has normalized_name column
-            cursor.execute("PRAGMA table_info(strains)")
-            strain_columns = {row[1] for row in cursor.fetchall()}
-            
-            if 'normalized_name' not in strain_columns:
-                try:
-                    cursor.execute("ALTER TABLE strains ADD COLUMN normalized_name TEXT")
-                    logger.info("Added normalized_name column to strains table")
-                    # Update existing rows with normalized names
-                    cursor.execute("""
-                        UPDATE strains 
-                        SET normalized_name = LOWER(REPLACE(REPLACE(strain_name, ' ', ''), '-', ''))
-                        WHERE normalized_name IS NULL
-                    """)
-                    conn.commit()
-                except sqlite3.OperationalError as e:
-                    if "duplicate column name" not in str(e).lower():
-                        logger.warning(f"Could not add normalized_name to strains: {e}")
-            
             # Get current columns
             cursor.execute("PRAGMA table_info(products)")
             existing_columns = {row[1] for row in cursor.fetchall()}
@@ -839,7 +822,6 @@ class ProductDatabase:
 
     @timed_operation("add_or_update_strain")
     @retry_on_lock(max_retries=3, delay=0.5)
-    @safe_database_operation(max_retries=3, backup_on_failure=True)
     def add_or_update_strain(self, strain_name: str, lineage: str = None, sovereign: bool = False) -> int:
         """Add a new strain or update existing strain information. If sovereign is True, set sovereign_lineage."""
         try:
@@ -943,11 +925,13 @@ class ProductDatabase:
     
     @timed_operation("add_or_update_product")
     @retry_on_lock(max_retries=3, delay=0.5)
-    @safe_database_operation(max_retries=3, backup_on_failure=True)
     def add_or_update_product(self, product_data: Dict[str, Any]) -> int:
         """Add a new product or update existing product information."""
         try:
             self.init_database()  # Ensure DB is initialized
+            
+            # Periodic automatic backup
+            self._try_automatic_backup()
             
             # Handle both 'ProductName' and 'Product Name*' column names
             product_name = product_data.get(get_canonical_field('Product Name*'), product_data.get(get_canonical_field('ProductName'), ''))
@@ -961,6 +945,9 @@ class ProductDatabase:
                 # Normalize lineage before storing
                 normalized_lineage = self._normalize_lineage(product_data.get('Lineage'))
                 strain_id = self.add_or_update_strain(strain_name, normalized_lineage)
+            
+            # Track write operation
+            self._writes_since_backup += 1
             
             # Serialize write operations
             with self._write_lock:
@@ -1931,7 +1918,6 @@ class ProductDatabase:
             logger.error(f"Error getting strain statistics: {e}")
             return {}
     
-    @safe_database_operation(max_retries=2, backup_on_failure=False)
     def export_database(self, output_path: str):
         """Export database to Excel file."""
         try:
@@ -2449,6 +2435,115 @@ class ProductDatabase:
             self._cache.clear()
         self._timing_stats['cache_hits'] = 0
         self._timing_stats['cache_misses'] = 0
+    
+    def _should_create_backup(self) -> bool:
+        """Check if we should create an automatic backup."""
+        # Check time-based backup
+        if self._last_backup_time is None:
+            return True
+        
+        time_elapsed = time.time() - self._last_backup_time
+        if time_elapsed >= self._backup_interval_seconds:
+            return True
+        
+        # Check writes-based backup
+        if self._writes_since_backup >= self._backup_interval_writes:
+            return True
+        
+        return False
+    
+    def _try_automatic_backup(self):
+        """Try to create an automatic backup if needed."""
+        try:
+            if self._should_create_backup():
+                logger.info("Creating automatic backup...")
+                success, backup_path = self._reliability.create_backup("auto")
+                if success:
+                    logger.info(f"Automatic backup created: {os.path.basename(backup_path)}")
+                    self._last_backup_time = time.time()
+                    self._writes_since_backup = 0
+                else:
+                    logger.warning(f"Automatic backup failed: {backup_path}")
+        except Exception as e:
+            logger.warning(f"Error creating automatic backup: {e}")
+    
+    def get_health_status(self) -> Dict[str, Any]:
+        """
+        Get comprehensive database health status.
+        
+        Returns:
+            Dictionary with health information including:
+            - healthy: bool indicating if database is healthy
+            - message: status message
+            - last_check: timestamp of last check
+            - db_size_mb: database size in MB
+            - backup_count: number of available backups
+        """
+        health = self._reliability.check_health(force=True)
+        
+        # Add backup information
+        backup_dir = self._reliability.backup_dir
+        backup_count = 0
+        if os.path.exists(backup_dir):
+            backup_files = [f for f in os.listdir(backup_dir) 
+                          if f.startswith('db_backup_') and f.endswith('.db')]
+            backup_count = len(backup_files)
+        
+        health['backup_count'] = backup_count
+        health['backup_dir'] = backup_dir
+        
+        return health
+    
+    def create_backup(self, label: str = "manual") -> Tuple[bool, str]:
+        """
+        Create a manual backup of the database.
+        
+        Args:
+            label: Label for the backup (default: "manual")
+            
+        Returns:
+            Tuple of (success, backup_path or error_message)
+        """
+        return self._reliability.create_backup(label)
+    
+    def restore_from_backup(self, backup_path: str = None) -> Tuple[bool, str]:
+        """
+        Restore database from a backup.
+        
+        Args:
+            backup_path: Optional path to specific backup file
+            
+        Returns:
+            Tuple of (success, message)
+        """
+        # Close all connections before restoring
+        self.close_connections()
+        self._initialized = False
+        
+        success, message = self._reliability.restore_from_backup(backup_path)
+        
+        # Force reinitialization on next operation
+        if success:
+            self._cache.clear()
+        
+        return success, message
+    
+    def emergency_recovery(self) -> Tuple[bool, str]:
+        """
+        Perform emergency database recovery.
+        
+        Returns:
+            Tuple of (success, message)
+        """
+        self.close_connections()
+        self._initialized = False
+        
+        success, message = self._reliability.emergency_recovery()
+        
+        if success:
+            self._cache.clear()
+            
+        return success, message
     
     def close_connections(self):
         """Close all database connections."""

@@ -1,576 +1,490 @@
 """
-Database Reliability System
-==========================
-Comprehensive crash prevention and recovery system for database operations.
-Provides multiple layers of protection against database failures.
+Database Reliability and Recovery System
+========================================
+Comprehensive system to prevent database crashes and ensure data integrity.
+
+Features:
+- Automatic corruption detection and recovery
+- Real-time health monitoring
+- Automatic backups before writes
+- Connection retry with exponential backoff
+- File integrity verification
+- Graceful degradation and failover
 """
 
-import os
 import sqlite3
-import threading
-import time
+import os
 import shutil
+import time
 import logging
-import json
-import psutil
+import threading
 import hashlib
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple, Any, Callable
+from typing import Optional, Tuple, Dict, Any, Callable
 from pathlib import Path
-from contextlib import contextmanager
 import tempfile
 
 logger = logging.getLogger(__name__)
 
-class DatabaseHealthStatus:
-    """Represents the health status of a database"""
-    def __init__(self):
-        self.is_healthy = True
-        self.corruption_detected = False
-        self.connection_errors = 0
-        self.last_check = datetime.now()
-        self.disk_space_ok = True
-        self.memory_usage_ok = True
-        self.backup_status = 'unknown'
-        self.issues = []
-        self.warnings = []
-
-class ResourceMonitor:
-    """Monitors system resources to prevent database crashes"""
+class DatabaseReliability:
+    """Comprehensive database reliability and recovery system."""
     
-    def __init__(self, min_disk_space_mb=1000, max_memory_percent=80):
-        self.min_disk_space_mb = min_disk_space_mb
-        self.max_memory_percent = max_memory_percent
-        
-    def check_disk_space(self, db_path: str) -> Tuple[bool, str, int]:
-        """Check if sufficient disk space is available"""
-        try:
-            # Get disk usage for the directory containing the database
-            db_dir = os.path.dirname(os.path.abspath(db_path))
-            usage = shutil.disk_usage(db_dir)
-            
-            free_mb = usage.free // (1024 * 1024)
-            free_percent = (usage.free / usage.total) * 100
-            
-            if free_mb < self.min_disk_space_mb:
-                return False, f"Low disk space: {free_mb}MB remaining", free_mb
-            
-            return True, f"Disk space OK: {free_mb}MB available ({free_percent:.1f}%)", free_mb
-            
-        except Exception as e:
-            logger.error(f"Error checking disk space: {e}")
-            return False, f"Error checking disk space: {e}", 0
-    
-    def check_memory_usage(self) -> Tuple[bool, str]:
-        """Check system memory usage"""
-        try:
-            memory = psutil.virtual_memory()
-            if memory.percent > self.max_memory_percent:
-                return False, f"High memory usage: {memory.percent:.1f}%"
-            return True, f"Memory usage OK: {memory.percent:.1f}%"
-        except Exception as e:
-            logger.error(f"Error checking memory: {e}")
-            return False, f"Error checking memory: {e}"
-
-class DatabaseBackupManager:
-    """Manages automatic database backups with rotation"""
-    
-    def __init__(self, db_path: str, backup_dir: str = None, max_backups: int = 10):
+    def __init__(self, db_path: str, backup_dir: str = None):
         self.db_path = db_path
         self.backup_dir = backup_dir or os.path.join(os.path.dirname(db_path), 'backups')
-        self.max_backups = max_backups
-        self._ensure_backup_dir()
+        self.health_check_interval = 60  # Check health every 60 seconds
+        self.max_backup_age_hours = 24  # Keep backups for 24 hours
+        self.max_backups = 10  # Maximum number of rolling backups
         
-    def _ensure_backup_dir(self):
-        """Ensure backup directory exists"""
+        # Create backup directory
         os.makedirs(self.backup_dir, exist_ok=True)
         
-    def create_backup(self, backup_name: str = None) -> Tuple[bool, str]:
-        """Create a backup of the database"""
+        # Thread-safe locks
+        self._backup_lock = threading.RLock()
+        self._health_lock = threading.RLock()
+        
+        # Health status
+        self._last_health_check = None
+        self._is_healthy = None
+        self._consecutive_failures = 0
+        self._max_consecutive_failures = 3
+        
+    def verify_database_integrity(self) -> Tuple[bool, str]:
+        """
+        Verify database file integrity.
+        
+        Returns:
+            Tuple of (is_valid, message)
+        """
         try:
+            # Check if file exists
             if not os.path.exists(self.db_path):
-                return False, f"Source database not found: {self.db_path}"
-                
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            if backup_name is None:
-                backup_name = f"backup_{timestamp}.db"
+                return False, "Database file does not exist"
             
-            backup_path = os.path.join(self.backup_dir, backup_name)
+            # Check if file is readable
+            if not os.access(self.db_path, os.R_OK):
+                return False, "Database file is not readable"
             
-            # Create backup using SQLite backup API for consistency
+            # Check file size
+            file_size = os.path.getsize(self.db_path)
+            if file_size == 0:
+                return False, "Database file is empty"
+            
+            if file_size < 100:  # SQLite header is 100 bytes
+                return False, f"Database file is too small ({file_size} bytes)"
+            
+            # Verify SQLite file header
+            with open(self.db_path, 'rb') as f:
+                header = f.read(16)
+                if header != b'SQLite format 3\x00':
+                    return False, "Invalid SQLite file header (file is corrupted)"
+            
+            # Attempt to open and run integrity check
+            conn = None
             try:
-                source_conn = sqlite3.connect(self.db_path)
-                backup_conn = sqlite3.connect(backup_path)
-                source_conn.backup(backup_conn)
-                backup_conn.close()
-                source_conn.close()
-            except Exception as e:
-                # Fallback to file copy if backup API fails
-                logger.warning(f"SQLite backup API failed, using file copy: {e}")
-                shutil.copy2(self.db_path, backup_path)
-            
-            # Verify backup integrity
-            if self._verify_backup(backup_path):
-                self._rotate_backups()
-                return True, f"Backup created successfully: {backup_path}"
-            else:
-                os.remove(backup_path)
-                return False, "Backup verification failed"
+                conn = sqlite3.connect(self.db_path, timeout=10.0)
+                cursor = conn.cursor()
                 
-        except Exception as e:
-            logger.error(f"Error creating backup: {e}")
-            return False, f"Backup failed: {e}"
-    
-    def _verify_backup(self, backup_path: str) -> bool:
-        """Verify backup integrity"""
-        try:
-            conn = sqlite3.connect(backup_path)
-            conn.execute("PRAGMA integrity_check")
-            conn.close()
-            return True
-        except Exception as e:
-            logger.error(f"Backup verification failed: {e}")
-            return False
-    
-    def _rotate_backups(self):
-        """Remove old backups to maintain max_backups limit"""
-        try:
-            backup_files = []
-            for file in os.listdir(self.backup_dir):
-                if file.endswith('.db'):
-                    file_path = os.path.join(self.backup_dir, file)
-                    backup_files.append((file_path, os.path.getctime(file_path)))
-            
-            # Sort by creation time, newest first
-            backup_files.sort(key=lambda x: x[1], reverse=True)
-            
-            # Remove old backups
-            for file_path, _ in backup_files[self.max_backups:]:
-                try:
-                    os.remove(file_path)
-                    logger.info(f"Removed old backup: {file_path}")
-                except Exception as e:
-                    logger.error(f"Error removing old backup {file_path}: {e}")
+                # Run SQLite integrity check
+                cursor.execute("PRAGMA integrity_check")
+                result = cursor.fetchone()
+                
+                if result and result[0] == 'ok':
+                    return True, "Database integrity verified"
+                else:
+                    return False, f"Database integrity check failed: {result[0] if result else 'unknown error'}"
                     
+            except sqlite3.DatabaseError as e:
+                return False, f"Database error during integrity check: {str(e)}"
+            except Exception as e:
+                return False, f"Unexpected error during integrity check: {str(e)}"
+            finally:
+                if conn:
+                    try:
+                        conn.close()
+                    except:
+                        pass
+                        
         except Exception as e:
-            logger.error(f"Error rotating backups: {e}")
+            return False, f"Error verifying database: {str(e)}"
     
-    def get_latest_backup(self) -> Optional[str]:
-        """Get the path to the most recent backup"""
-        try:
-            backup_files = []
-            for file in os.listdir(self.backup_dir):
-                if file.endswith('.db'):
-                    file_path = os.path.join(self.backup_dir, file)
-                    backup_files.append((file_path, os.path.getctime(file_path)))
+    def create_backup(self, label: str = "auto") -> Tuple[bool, str]:
+        """
+        Create a backup of the database.
+        
+        Args:
+            label: Label for the backup (e.g., 'auto', 'manual', 'pre-write')
             
-            if backup_files:
-                backup_files.sort(key=lambda x: x[1], reverse=True)
-                return backup_files[0][0]
+        Returns:
+            Tuple of (success, backup_path or error_message)
+        """
+        with self._backup_lock:
+            try:
+                # Verify source database first
+                is_valid, message = self.verify_database_integrity()
+                if not is_valid:
+                    logger.error(f"Cannot backup corrupted database: {message}")
+                    return False, f"Source database is corrupted: {message}"
+                
+                # Create timestamped backup filename
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                backup_filename = f"db_backup_{label}_{timestamp}.db"
+                backup_path = os.path.join(self.backup_dir, backup_filename)
+                
+                # Create backup using SQLite backup API for consistency
+                source_conn = None
+                backup_conn = None
+                
+                try:
+                    source_conn = sqlite3.connect(self.db_path, timeout=10.0)
+                    backup_conn = sqlite3.connect(backup_path)
+                    
+                    # Use SQLite's backup API
+                    with backup_conn:
+                        source_conn.backup(backup_conn)
+                    
+                    # Verify backup
+                    backup_conn_verify = sqlite3.connect(backup_path, timeout=5.0)
+                    cursor = backup_conn_verify.cursor()
+                    cursor.execute("PRAGMA integrity_check")
+                    result = cursor.fetchone()
+                    backup_conn_verify.close()
+                    
+                    if result and result[0] == 'ok':
+                        logger.info(f"Database backup created successfully: {backup_path}")
+                        
+                        # Clean up old backups
+                        self._cleanup_old_backups()
+                        
+                        return True, backup_path
+                    else:
+                        os.remove(backup_path)
+                        return False, "Backup verification failed"
+                        
+                except Exception as e:
+                    if os.path.exists(backup_path):
+                        try:
+                            os.remove(backup_path)
+                        except:
+                            pass
+                    raise
+                    
+                finally:
+                    if source_conn:
+                        try:
+                            source_conn.close()
+                        except:
+                            pass
+                    if backup_conn:
+                        try:
+                            backup_conn.close()
+                        except:
+                            pass
+                            
+            except Exception as e:
+                logger.error(f"Error creating backup: {str(e)}")
+                return False, str(e)
+    
+    def restore_from_backup(self, backup_path: str = None) -> Tuple[bool, str]:
+        """
+        Restore database from a backup.
+        
+        Args:
+            backup_path: Path to backup file. If None, uses most recent backup.
+            
+        Returns:
+            Tuple of (success, message)
+        """
+        with self._backup_lock:
+            try:
+                # Find backup to restore
+                if backup_path is None:
+                    backup_path = self._find_latest_valid_backup()
+                    if backup_path is None:
+                        return False, "No valid backups found"
+                
+                if not os.path.exists(backup_path):
+                    return False, f"Backup file not found: {backup_path}"
+                
+                # Verify backup integrity before restoring
+                temp_db = backup_path
+                try:
+                    conn = sqlite3.connect(temp_db, timeout=5.0)
+                    cursor = conn.cursor()
+                    cursor.execute("PRAGMA integrity_check")
+                    result = cursor.fetchone()
+                    conn.close()
+                    
+                    if not result or result[0] != 'ok':
+                        return False, f"Backup file is corrupted: {backup_path}"
+                except Exception as e:
+                    return False, f"Cannot verify backup: {str(e)}"
+                
+                # Create a backup of current (corrupted) database for forensics
+                if os.path.exists(self.db_path):
+                    corrupted_path = f"{self.db_path}.corrupted.{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                    try:
+                        shutil.copy2(self.db_path, corrupted_path)
+                        logger.info(f"Corrupted database saved to: {corrupted_path}")
+                    except Exception as e:
+                        logger.warning(f"Could not save corrupted database: {e}")
+                
+                # Close all existing connections
+                # This will be handled by the caller
+                
+                # Replace database with backup
+                shutil.copy2(backup_path, self.db_path)
+                
+                # Verify restored database
+                is_valid, message = self.verify_database_integrity()
+                if is_valid:
+                    logger.info(f"Database restored successfully from: {backup_path}")
+                    self._consecutive_failures = 0
+                    return True, f"Database restored from {os.path.basename(backup_path)}"
+                else:
+                    return False, f"Restored database is still corrupted: {message}"
+                    
+            except Exception as e:
+                logger.error(f"Error restoring from backup: {str(e)}")
+                return False, str(e)
+    
+    def _find_latest_valid_backup(self) -> Optional[str]:
+        """Find the most recent valid backup."""
+        try:
+            if not os.path.exists(self.backup_dir):
+                return None
+            
+            backup_files = []
+            for filename in os.listdir(self.backup_dir):
+                if filename.startswith('db_backup_') and filename.endswith('.db'):
+                    full_path = os.path.join(self.backup_dir, filename)
+                    backup_files.append((os.path.getmtime(full_path), full_path))
+            
+            # Sort by modification time (most recent first)
+            backup_files.sort(reverse=True)
+            
+            # Find first valid backup
+            for _, backup_path in backup_files:
+                try:
+                    conn = sqlite3.connect(backup_path, timeout=5.0)
+                    cursor = conn.cursor()
+                    cursor.execute("PRAGMA integrity_check")
+                    result = cursor.fetchone()
+                    conn.close()
+                    
+                    if result and result[0] == 'ok':
+                        return backup_path
+                except:
+                    continue
+            
             return None
+            
         except Exception as e:
             logger.error(f"Error finding latest backup: {e}")
             return None
-
-class DatabaseRecoveryManager:
-    """Handles database corruption detection and recovery"""
     
-    def __init__(self, db_path: str, backup_manager: DatabaseBackupManager):
-        self.db_path = db_path
-        self.backup_manager = backup_manager
-        
-    def check_corruption(self) -> Tuple[bool, List[str]]:
-        """Check database for corruption"""
-        issues = []
+    def _cleanup_old_backups(self):
+        """Clean up old backup files."""
         try:
-            conn = sqlite3.connect(self.db_path, timeout=10.0)
+            if not os.path.exists(self.backup_dir):
+                return
             
-            # Run integrity check
-            cursor = conn.cursor()
-            cursor.execute("PRAGMA integrity_check")
-            result = cursor.fetchall()
+            backup_files = []
+            for filename in os.listdir(self.backup_dir):
+                if filename.startswith('db_backup_') and filename.endswith('.db'):
+                    full_path = os.path.join(self.backup_dir, filename)
+                    backup_files.append((os.path.getmtime(full_path), full_path))
             
-            # Check if integrity check passed
-            if len(result) == 1 and result[0][0] == 'ok':
-                conn.close()
-                return False, []
+            # Sort by modification time (oldest first)
+            backup_files.sort()
+            
+            # Remove old backups beyond max count
+            if len(backup_files) > self.max_backups:
+                for _, old_backup in backup_files[:-self.max_backups]:
+                    try:
+                        os.remove(old_backup)
+                        logger.info(f"Removed old backup: {old_backup}")
+                    except Exception as e:
+                        logger.warning(f"Could not remove old backup {old_backup}: {e}")
+            
+            # Remove backups older than max age
+            cutoff_time = time.time() - (self.max_backup_age_hours * 3600)
+            for mtime, backup_path in backup_files:
+                if mtime < cutoff_time:
+                    try:
+                        os.remove(backup_path)
+                        logger.info(f"Removed expired backup: {backup_path}")
+                    except Exception as e:
+                        logger.warning(f"Could not remove expired backup {backup_path}: {e}")
+                        
+        except Exception as e:
+            logger.error(f"Error cleaning up backups: {e}")
+    
+    def check_health(self, force: bool = False) -> Dict[str, Any]:
+        """
+        Check database health status.
+        
+        Args:
+            force: Force health check even if recently checked
+            
+        Returns:
+            Dictionary with health status information
+        """
+        with self._health_lock:
+            # Use cached result if recent
+            if not force and self._last_health_check:
+                age = (datetime.now() - self._last_health_check).total_seconds()
+                if age < self.health_check_interval and self._is_healthy is not None:
+                    return {
+                        'healthy': self._is_healthy,
+                        'last_check': self._last_health_check.isoformat(),
+                        'age_seconds': age,
+                        'cached': True
+                    }
+            
+            # Perform health check
+            is_valid, message = self.verify_database_integrity()
+            
+            self._last_health_check = datetime.now()
+            self._is_healthy = is_valid
+            
+            if is_valid:
+                self._consecutive_failures = 0
             else:
-                for row in result:
-                    issues.append(str(row[0]))
-                conn.close()
-                return True, issues
-                
-        except sqlite3.DatabaseError as e:
-            issues.append(f"Database error: {e}")
-            return True, issues
-        except Exception as e:
-            issues.append(f"Unexpected error during corruption check: {e}")
-            return True, issues
+                self._consecutive_failures += 1
+            
+            return {
+                'healthy': is_valid,
+                'message': message,
+                'last_check': self._last_health_check.isoformat(),
+                'consecutive_failures': self._consecutive_failures,
+                'cached': False,
+                'db_path': self.db_path,
+                'db_size_mb': os.path.getsize(self.db_path) / (1024 * 1024) if os.path.exists(self.db_path) else 0
+            }
     
-    def attempt_recovery(self) -> Tuple[bool, str]:
-        """Attempt to recover from corruption"""
-        try:
-            # Create emergency backup before recovery
-            emergency_backup = f"emergency_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
-            try:
-                shutil.copy2(self.db_path, os.path.join(self.backup_manager.backup_dir, emergency_backup))
-            except Exception:
-                pass  # Continue with recovery even if emergency backup fails
-            
-            # Try to recover using .recover command
-            recovery_path = self.db_path + '.recovered'
-            
-            try:
-                # Use sqlite3 .recover command if available (SQLite 3.37+)
-                import subprocess
-                result = subprocess.run([
-                    'sqlite3', self.db_path, '.recover'
-                ], capture_output=True, text=True, timeout=300)
-                
-                if result.returncode == 0 and result.stdout:
-                    # Write recovered data to new file
-                    with open(recovery_path, 'w') as f:
-                        f.write(result.stdout)
-                    
-                    # Replace corrupted database with recovered one
-                    shutil.move(recovery_path, self.db_path)
-                    return True, "Database recovered using .recover command"
-                    
-            except Exception as e:
-                logger.warning(f"Recovery command failed: {e}")
-            
-            # Fallback: Try to restore from latest backup
-            latest_backup = self.backup_manager.get_latest_backup()
-            if latest_backup and os.path.exists(latest_backup):
-                shutil.copy2(latest_backup, self.db_path)
-                return True, f"Database restored from backup: {latest_backup}"
-            
-            return False, "No recovery options available"
-            
-        except Exception as e:
-            logger.error(f"Recovery attempt failed: {e}")
-            return False, f"Recovery failed: {e}"
-
-class ConnectionHealthManager:
-    """Manages database connection health and recovery"""
-    
-    def __init__(self, max_connection_errors=5, connection_timeout=30.0):
-        self.max_connection_errors = max_connection_errors
-        self.connection_timeout = connection_timeout
-        self.connection_errors = {}
-        self.last_health_check = {}
+    def safe_execute(self, operation: Callable, max_retries: int = 3, 
+                    backup_before: bool = True) -> Tuple[bool, Any, str]:
+        """
+        Execute a database operation with automatic recovery.
         
-    def is_connection_healthy(self, db_path: str) -> Tuple[bool, str]:
-        """Check if database connection is healthy"""
-        try:
-            conn = sqlite3.connect(db_path, timeout=self.connection_timeout)
+        Args:
+            operation: Callable that performs database operation
+            max_retries: Maximum number of retry attempts
+            backup_before: Create backup before operation
             
-            # Perform simple query to test connection
-            cursor = conn.cursor()
-            cursor.execute("SELECT 1")
-            cursor.fetchone()
+        Returns:
+            Tuple of (success, result, message)
+        """
+        # Check health first
+        health = self.check_health()
+        if not health['healthy']:
+            logger.warning(f"Database unhealthy before operation: {health.get('message')}")
+            # Attempt recovery
+            success, message = self.restore_from_backup()
+            if not success:
+                return False, None, f"Database corrupted and recovery failed: {message}"
+            logger.info("Database recovered automatically")
+        
+        # Create backup before write operations
+        if backup_before:
+            success, backup_msg = self.create_backup("pre-write")
+            if not success:
+                logger.warning(f"Could not create pre-write backup: {backup_msg}")
+        
+        # Attempt operation with retries
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                result = operation()
+                return True, result, "Operation successful"
+                
+            except sqlite3.DatabaseError as e:
+                last_error = str(e)
+                logger.error(f"Database error on attempt {attempt + 1}/{max_retries}: {e}")
+                
+                # Check if it's a corruption error
+                if 'file is not a database' in str(e).lower() or \
+                   'database disk image is malformed' in str(e).lower() or \
+                   'database is locked' in str(e).lower():
+                    
+                    # Attempt recovery
+                    logger.warning(f"Database corruption detected, attempting recovery...")
+                    success, message = self.restore_from_backup()
+                    
+                    if success:
+                        logger.info("Database recovered, retrying operation...")
+                        time.sleep(0.5 * (attempt + 1))  # Exponential backoff
+                        continue
+                    else:
+                        return False, None, f"Recovery failed: {message}"
+                else:
+                    # Not a corruption error, just retry
+                    if attempt < max_retries - 1:
+                        time.sleep(0.5 * (attempt + 1))
+                        continue
+                        
+            except Exception as e:
+                last_error = str(e)
+                logger.error(f"Unexpected error on attempt {attempt + 1}/{max_retries}: {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(0.5 * (attempt + 1))
+                    continue
+        
+        return False, None, f"Operation failed after {max_retries} attempts: {last_error}"
+    
+    def emergency_recovery(self) -> Tuple[bool, str]:
+        """
+        Perform emergency recovery of database.
+        
+        This will:
+        1. Attempt to restore from most recent backup
+        2. If no backups, create new empty database
+        
+        Returns:
+            Tuple of (success, message)
+        """
+        logger.warning("EMERGENCY RECOVERY INITIATED")
+        
+        # Try to restore from backup
+        success, message = self.restore_from_backup()
+        if success:
+            return True, f"Emergency recovery successful: {message}"
+        
+        # If no valid backups, create new database
+        logger.warning("No valid backups found, creating new database...")
+        
+        try:
+            # Save corrupted database
+            if os.path.exists(self.db_path):
+                corrupted_path = f"{self.db_path}.corrupted.{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                shutil.move(self.db_path, corrupted_path)
+                logger.info(f"Corrupted database moved to: {corrupted_path}")
+            
+            # Create new empty database
+            conn = sqlite3.connect(self.db_path)
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.close()
             
-            # Reset error count on successful connection
-            self.connection_errors[db_path] = 0
-            self.last_health_check[db_path] = datetime.now()
-            
-            return True, "Connection healthy"
-            
-        except sqlite3.OperationalError as e:
-            error_count = self.connection_errors.get(db_path, 0) + 1
-            self.connection_errors[db_path] = error_count
-            
-            if error_count >= self.max_connection_errors:
-                return False, f"Connection failed {error_count} times: {e}"
+            # Verify
+            is_valid, msg = self.verify_database_integrity()
+            if is_valid:
+                return True, "Emergency recovery: new database created"
             else:
-                return True, f"Connection warning ({error_count}/{self.max_connection_errors}): {e}"
+                return False, f"Could not create new database: {msg}"
                 
         except Exception as e:
-            error_count = self.connection_errors.get(db_path, 0) + 1
-            self.connection_errors[db_path] = error_count
-            return False, f"Connection error: {e}"
+            return False, f"Emergency recovery failed: {str(e)}"
 
-class TransactionSafetyWrapper:
-    """Provides safe transaction handling with automatic rollback"""
-    
-    def __init__(self, connection):
-        self.connection = connection
-        self.in_transaction = False
-        
-    @contextmanager
-    def safe_transaction(self):
-        """Context manager for safe transactions with automatic rollback"""
-        if self.in_transaction:
-            # Nested transaction - use savepoint
-            savepoint_name = f"sp_{int(time.time() * 1000000)}"
-            try:
-                self.connection.execute(f"SAVEPOINT {savepoint_name}")
-                yield self.connection
-                self.connection.execute(f"RELEASE SAVEPOINT {savepoint_name}")
-            except Exception as e:
-                try:
-                    self.connection.execute(f"ROLLBACK TO SAVEPOINT {savepoint_name}")
-                except Exception:
-                    pass  # Savepoint may not exist
-                raise e
-        else:
-            # Regular transaction
-            self.in_transaction = True
-            try:
-                self.connection.execute("BEGIN")
-                yield self.connection
-                self.connection.commit()
-            except Exception as e:
-                try:
-                    self.connection.rollback()
-                except Exception:
-                    pass  # Connection may be closed
-                raise e
-            finally:
-                self.in_transaction = False
 
-class DatabaseHealthMonitor:
-    """Comprehensive database health monitoring system"""
-    
-    def __init__(self, db_path: str, check_interval_seconds: int = 300):
-        self.db_path = db_path
-        self.check_interval = check_interval_seconds
-        self.resource_monitor = ResourceMonitor()
-        self.backup_manager = DatabaseBackupManager(db_path)
-        self.recovery_manager = DatabaseRecoveryManager(db_path, self.backup_manager)
-        self.connection_health = ConnectionHealthManager()
-        
-        self.health_status = DatabaseHealthStatus()
-        self.monitoring_thread = None
-        self.stop_monitoring = threading.Event()
-        
-        # Create initial backup
-        self._create_initial_backup()
-        
-    def _create_initial_backup(self):
-        """Create initial backup when monitor starts"""
-        try:
-            success, message = self.backup_manager.create_backup("initial_backup.db")
-            if success:
-                logger.info(f"Initial backup created: {message}")
-            else:
-                logger.warning(f"Initial backup failed: {message}")
-        except Exception as e:
-            logger.error(f"Error creating initial backup: {e}")
-    
-    def start_monitoring(self):
-        """Start the health monitoring thread"""
-        if self.monitoring_thread and self.monitoring_thread.is_alive():
-            return
-            
-        self.stop_monitoring.clear()
-        self.monitoring_thread = threading.Thread(target=self._monitoring_loop, daemon=True)
-        self.monitoring_thread.start()
-        logger.info("Database health monitoring started")
-    
-    def stop_monitoring_thread(self):
-        """Stop the health monitoring thread"""
-        self.stop_monitoring.set()
-        if self.monitoring_thread:
-            self.monitoring_thread.join(timeout=5.0)
-        logger.info("Database health monitoring stopped")
-    
-    def _monitoring_loop(self):
-        """Main monitoring loop"""
-        while not self.stop_monitoring.wait(self.check_interval):
-            try:
-                self.perform_health_check()
-            except Exception as e:
-                logger.error(f"Error in monitoring loop: {e}")
-    
-    def perform_health_check(self) -> DatabaseHealthStatus:
-        """Perform comprehensive health check"""
-        self.health_status = DatabaseHealthStatus()
-        self.health_status.last_check = datetime.now()
-        
-        # Check disk space
-        disk_ok, disk_message, free_mb = self.resource_monitor.check_disk_space(self.db_path)
-        self.health_status.disk_space_ok = disk_ok
-        if not disk_ok:
-            self.health_status.issues.append(disk_message)
-            self.health_status.is_healthy = False
-        
-        # Check memory usage
-        memory_ok, memory_message = self.resource_monitor.check_memory_usage()
-        self.health_status.memory_usage_ok = memory_ok
-        if not memory_ok:
-            self.health_status.warnings.append(memory_message)
-        
-        # Check connection health
-        conn_healthy, conn_message = self.connection_health.is_connection_healthy(self.db_path)
-        if not conn_healthy:
-            self.health_status.issues.append(conn_message)
-            self.health_status.is_healthy = False
-            self.health_status.connection_errors = self.connection_health.connection_errors.get(self.db_path, 0)
-        
-        # Check for corruption
-        corrupted, corruption_issues = self.recovery_manager.check_corruption()
-        self.health_status.corruption_detected = corrupted
-        if corrupted:
-            self.health_status.issues.extend(corruption_issues)
-            self.health_status.is_healthy = False
-            
-            # Attempt recovery if corruption detected
-            logger.error(f"Database corruption detected: {corruption_issues}")
-            recovery_success, recovery_message = self.recovery_manager.attempt_recovery()
-            if recovery_success:
-                logger.info(f"Database recovery successful: {recovery_message}")
-                self.health_status.warnings.append(f"Recovered from corruption: {recovery_message}")
-            else:
-                logger.error(f"Database recovery failed: {recovery_message}")
-                self.health_status.issues.append(f"Recovery failed: {recovery_message}")
-        
-        # Create backup if needed (daily backups)
-        self._check_backup_schedule()
-        
-        # Log health status
-        if not self.health_status.is_healthy:
-            logger.error(f"Database health check failed: {self.health_status.issues}")
-        elif self.health_status.warnings:
-            logger.warning(f"Database health warnings: {self.health_status.warnings}")
-        else:
-            logger.debug("Database health check passed")
-            
-        return self.health_status
-    
-    def _check_backup_schedule(self):
-        """Check if it's time to create a scheduled backup"""
-        try:
-            # Create daily backups
-            backup_files = os.listdir(self.backup_manager.backup_dir)
-            today = datetime.now().strftime('%Y%m%d')
-            
-            # Check if we already have a backup from today
-            has_today_backup = any(today in f for f in backup_files if f.endswith('.db'))
-            
-            if not has_today_backup:
-                success, message = self.backup_manager.create_backup(f"daily_backup_{today}.db")
-                if success:
-                    self.health_status.backup_status = 'success'
-                    logger.info(f"Daily backup created: {message}")
-                else:
-                    self.health_status.backup_status = 'failed'
-                    self.health_status.warnings.append(f"Daily backup failed: {message}")
-            else:
-                self.health_status.backup_status = 'current'
-                
-        except Exception as e:
-            self.health_status.backup_status = 'error'
-            self.health_status.warnings.append(f"Backup schedule check failed: {e}")
-    
-    def force_backup(self) -> Tuple[bool, str]:
-        """Force creation of a backup"""
-        return self.backup_manager.create_backup()
-    
-    def get_health_report(self) -> Dict[str, Any]:
-        """Get detailed health report"""
-        return {
-            'timestamp': self.health_status.last_check.isoformat(),
-            'is_healthy': self.health_status.is_healthy,
-            'corruption_detected': self.health_status.corruption_detected,
-            'connection_errors': self.health_status.connection_errors,
-            'disk_space_ok': self.health_status.disk_space_ok,
-            'memory_usage_ok': self.health_status.memory_usage_ok,
-            'backup_status': self.health_status.backup_status,
-            'issues': self.health_status.issues,
-            'warnings': self.health_status.warnings,
-            'database_path': self.db_path,
-            'backup_directory': self.backup_manager.backup_dir
-        }
+# Global reliability manager cache
+_reliability_managers: Dict[str, DatabaseReliability] = {}
+_reliability_lock = threading.Lock()
 
-# Global health monitors
-_health_monitors = {}
-_monitor_lock = threading.Lock()
+def get_reliability_manager(db_path: str) -> DatabaseReliability:
+    """Get or create a reliability manager for a database."""
+    with _reliability_lock:
+        if db_path not in _reliability_managers:
+            _reliability_managers[db_path] = DatabaseReliability(db_path)
+        return _reliability_managers[db_path]
 
-def get_health_monitor(db_path: str) -> DatabaseHealthMonitor:
-    """Get or create a health monitor for a database"""
-    with _monitor_lock:
-        if db_path not in _health_monitors:
-            monitor = DatabaseHealthMonitor(db_path)
-            monitor.start_monitoring()
-            _health_monitors[db_path] = monitor
-        return _health_monitors[db_path]
-
-def ensure_database_reliability(db_path: str) -> DatabaseHealthStatus:
-    """Ensure database reliability by performing health check"""
-    monitor = get_health_monitor(db_path)
-    return monitor.perform_health_check()
-
-def create_safe_connection(db_path: str, timeout: float = 30.0):
-    """Create a safe database connection with reliability checks"""
-    # Perform health check first
-    health_status = ensure_database_reliability(db_path)
-    
-    if not health_status.is_healthy:
-        raise sqlite3.DatabaseError(f"Database health check failed: {health_status.issues}")
-    
-    # Create connection with optimal settings
-    conn = sqlite3.connect(
-        db_path,
-        timeout=timeout,
-        check_same_thread=False
-    )
-    
-    # Configure for reliability
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=60000")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA cache_size=10000")
-    conn.execute("PRAGMA temp_store=MEMORY")
-    conn.execute("PRAGMA foreign_keys=ON")
-    
-    return TransactionSafetyWrapper(conn)
-
-# Decorator for safe database operations
-def safe_database_operation(max_retries: int = 3, backup_on_failure: bool = True):
-    """Decorator to make database operations safe with automatic retry and backup"""
-    def decorator(func: Callable) -> Callable:
-        def wrapper(*args, **kwargs):
-            db_path = None
-            
-            # Try to extract db_path from args or self
-            if args and hasattr(args[0], 'db_path'):
-                db_path = args[0].db_path
-            
-            for attempt in range(max_retries + 1):
-                try:
-                    # Perform health check before operation
-                    if db_path:
-                        health_status = ensure_database_reliability(db_path)
-                        if not health_status.is_healthy and attempt == 0:
-                            logger.warning(f"Database health issues detected before operation: {health_status.issues}")
-                    
-                    return func(*args, **kwargs)
-                    
-                except (sqlite3.DatabaseError, sqlite3.OperationalError) as e:
-                    if attempt < max_retries:
-                        wait_time = (2 ** attempt) * 0.5  # Exponential backoff
-                        logger.warning(f"Database operation failed (attempt {attempt + 1}/{max_retries + 1}): {e}")
-                        logger.info(f"Retrying in {wait_time} seconds...")
-                        time.sleep(wait_time)
-                        
-                        # Create backup on failure if enabled
-                        if backup_on_failure and db_path and attempt == 0:
-                            try:
-                                monitor = get_health_monitor(db_path)
-                                monitor.force_backup()
-                                logger.info("Emergency backup created due to database error")
-                            except Exception as backup_error:
-                                logger.error(f"Emergency backup failed: {backup_error}")
-                    else:
-                        logger.error(f"Database operation failed after {max_retries + 1} attempts: {e}")
-                        raise
-                        
-                except Exception as e:
-                    logger.error(f"Unexpected error in database operation: {e}")
-                    raise
-                    
-            return None
-        return wrapper
-    return decorator

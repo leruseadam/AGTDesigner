@@ -6863,17 +6863,49 @@ def database_health():
     except Exception as e:
         logging.error(f"Error getting database health: {str(e)}")
         return jsonify({
-            'is_healthy': False,
+            'healthy': False,
             'error': str(e),
             'timestamp': datetime.now().isoformat()
         }), 500
 
 @app.route('/api/database-backup', methods=['POST'])
 def create_database_backup():
-    """Force creation of a database backup."""
+    """Manually create a database backup."""
     try:
         product_db = get_product_database('AGT_Bothell')
-        success, message = product_db.force_backup()
+        success, message = product_db.create_backup("manual")
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': 'Backup created successfully',
+                'backup_path': os.path.basename(message),
+                'timestamp': datetime.now().isoformat()
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': message,
+                'timestamp': datetime.now().isoformat()
+            }), 500
+            
+    except Exception as e:
+        logging.error(f"Error creating backup: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
+@app.route('/api/database-restore', methods=['POST'])
+def restore_database():
+    """Restore database from backup."""
+    try:
+        data = request.get_json() or {}
+        backup_path = data.get('backup_path')  # Optional: specific backup path
+        
+        product_db = get_product_database('AGT_Bothell')
+        success, message = product_db.restore_from_backup(backup_path)
         
         if success:
             return jsonify({
@@ -6889,7 +6921,35 @@ def create_database_backup():
             }), 500
             
     except Exception as e:
-        logging.error(f"Error creating backup: {str(e)}")
+        logging.error(f"Error restoring database: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
+@app.route('/api/database-emergency-recovery', methods=['POST'])
+def emergency_database_recovery():
+    """Perform emergency database recovery."""
+    try:
+        product_db = get_product_database('AGT_Bothell')
+        success, message = product_db.emergency_recovery()
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': message,
+                'timestamp': datetime.now().isoformat()
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': message,
+                'timestamp': datetime.now().isoformat()
+            }), 500
+            
+    except Exception as e:
+        logging.error(f"Error in emergency recovery: {str(e)}")
         return jsonify({
             'success': False,
             'error': str(e),
