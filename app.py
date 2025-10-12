@@ -772,14 +772,20 @@ def create_app():
         Compress(app)
         logging.info("Flask-Compress enabled for better performance")
     
-    # Initialize session management
+    # Initialize session management with filesystem storage
     if Session:
-        # Create sessions directory if it doesn't exist
-        sessions_dir = app.config.get('SESSION_FILE_DIR')
-        if sessions_dir:
-            os.makedirs(sessions_dir, exist_ok=True)
+        # Configure sessions to use filesystem (persistent across refreshes)
+        sessions_dir = os.path.join(current_dir, 'sessions')
+        os.makedirs(sessions_dir, exist_ok=True)
+        
+        app.config['SESSION_TYPE'] = 'filesystem'
+        app.config['SESSION_FILE_DIR'] = sessions_dir
+        app.config['SESSION_PERMANENT'] = True  # Make sessions persistent
+        app.config['SESSION_USE_SIGNER'] = True  # Sign session cookies for security
+        app.config['SESSION_FILE_THRESHOLD'] = 500  # Max number of sessions before cleanup
+        
         Session(app)
-        logging.info("Flask-Session initialized with filesystem storage")
+        logging.info(f"Flask-Session initialized with filesystem storage at: {sessions_dir}")
     else:
         logging.warning("Flask-Session not available, using default session handling")
     

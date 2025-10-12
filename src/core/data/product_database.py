@@ -142,18 +142,23 @@ class ProductDatabase:
                 if is_pythonanywhere:
                     # Use DELETE mode for PythonAnywhere (more compatible with their filesystem)
                     conn.execute("PRAGMA journal_mode=DELETE")
-                    logger.info("Using DELETE journal mode (PythonAnywhere environment)")
+                    # Additional optimizations for PythonAnywhere to compensate for DELETE mode
+                    conn.execute("PRAGMA page_size=4096")  # Optimize page size
+                    conn.execute("PRAGMA cache_size=-10000")  # 10MB cache (negative = KB)
+                    conn.execute("PRAGMA temp_store=MEMORY")  # Use memory for temp storage
+                    conn.execute("PRAGMA mmap_size=268435456")  # 256MB memory-mapped I/O
+                    conn.execute("PRAGMA synchronous=NORMAL")  # Balance safety/speed
+                    logger.info("Using DELETE journal mode with performance optimizations (PythonAnywhere)")
                 else:
                     # Use WAL mode for better concurrency in local/standard deployments
                     conn.execute("PRAGMA journal_mode=WAL")
+                    conn.execute("PRAGMA synchronous=NORMAL")
+                    conn.execute("PRAGMA cache_size=10000")
+                    conn.execute("PRAGMA temp_store=MEMORY")
                     logger.info("Using WAL journal mode (local/standard environment)")
                 
-                # Set busy timeout (60s) to ride out background batches
-                conn.execute("PRAGMA busy_timeout=60000")
-                # Optimize for concurrent access
-                conn.execute("PRAGMA synchronous=NORMAL")
-                conn.execute("PRAGMA cache_size=10000")
-                conn.execute("PRAGMA temp_store=MEMORY")
+                # Common optimizations for all environments
+                conn.execute("PRAGMA busy_timeout=60000")  # 60s timeout for locks
                 self._connection_pool[thread_id] = conn
                 
             except sqlite3.DatabaseError as e:
@@ -162,20 +167,25 @@ class ProductDatabase:
                     # Attempt recovery one more time
                     success, recovery_msg = self._reliability.emergency_recovery()
                     if success:
-                        # Retry connection
+                        # Retry connection with same optimizations
                         conn = sqlite3.connect(self.db_path, timeout=30.0, check_same_thread=False)
                         
-                        # Use same journal mode logic
+                        # Use same journal mode logic and optimizations
                         is_pythonanywhere = os.environ.get('PYTHONANYWHERE_DOMAIN') or os.environ.get('PYTHONANYWHERE_SITE')
                         if is_pythonanywhere:
                             conn.execute("PRAGMA journal_mode=DELETE")
+                            conn.execute("PRAGMA page_size=4096")
+                            conn.execute("PRAGMA cache_size=-10000")
+                            conn.execute("PRAGMA temp_store=MEMORY")
+                            conn.execute("PRAGMA mmap_size=268435456")
+                            conn.execute("PRAGMA synchronous=NORMAL")
                         else:
                             conn.execute("PRAGMA journal_mode=WAL")
+                            conn.execute("PRAGMA synchronous=NORMAL")
+                            conn.execute("PRAGMA cache_size=10000")
+                            conn.execute("PRAGMA temp_store=MEMORY")
                         
                         conn.execute("PRAGMA busy_timeout=60000")
-                        conn.execute("PRAGMA synchronous=NORMAL")
-                        conn.execute("PRAGMA cache_size=10000")
-                        conn.execute("PRAGMA temp_store=MEMORY")
                         self._connection_pool[thread_id] = conn
                     else:
                         raise sqlite3.DatabaseError(f"Cannot recover database: {recovery_msg}")
