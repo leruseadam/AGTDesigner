@@ -1649,12 +1649,12 @@ class TemplateProcessor:
                 # Center brand should always be ALL CAPS
                 brand_center_text = str(product_brand).upper()
                 if self.template_type == 'vertical':
+                    # For vertical template, only set Lineage to prevent brand duplication
+                    # The vertical template uses Lineage placeholder, not ProductBrand
                     label_context['Lineage'] = brand_center_text
-                    # CRITICAL FIX: Vertical template needs BOTH Lineage AND ProductBrand populated
-                    # The 3x3 expansion adds ProductBrand placeholders, so we must provide data for them
-                    label_context['ProductBrand'] = brand_center_text
-                    label_context['ProductBrand_Center'] = brand_center_text
-                    self.logger.info(f"🎯 VERTICAL BRAND FIX: Set both Lineage and ProductBrand to '{brand_center_text}' for vertical template")
+                    label_context['ProductBrand'] = ""
+                    label_context['ProductBrand_Center'] = ""
+                    self.logger.info(f"🎯 VERTICAL BRAND FIX: Set only Lineage to '{brand_center_text}' for vertical template (no ProductBrand duplication)")
                 else:
                     label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{brand_center_text}PRODUCTBRAND_CENTER_END"
                     # Set ProductBrand fields to empty to prevent duplication for non-vertical templates
