@@ -641,23 +641,10 @@ def get_excel_processor():
             return None
 
 def get_product_database(store_name=None):
-    """Lazy load ProductDatabase to avoid startup delay."""
-    global _product_database
-    if _product_database is None or (store_name and getattr(_product_database, '_store_name', None) != store_name):
-        from src.core.data.product_database import ProductDatabase
-        # Use main product_database.db by default, store-specific only if requested
-        if store_name:
-            db_filename = f'product_database_{store_name}.db'
-            db_path = os.path.join(current_dir, 'uploads', db_filename)
-            _product_database = ProductDatabase(db_path)
-            _product_database._store_name = store_name
-            logging.info(f"ProductDatabase created for store '{store_name}' at: {db_path}")
-        else:
-            # Use main product_database.db (524MB database)
-            db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
-            _product_database = ProductDatabase(db_path)
-            logging.info(f"ProductDatabase created (main database) at: {db_path}")
-    return _product_database
+    """Get ProductDatabase singleton instance (defaults to AGT_Bothell)."""
+    # Use the singleton from product_database.py module
+    from src.core.data.product_database import get_product_database as get_db_singleton
+    return get_db_singleton(store_name=store_name)
 
 def get_json_matcher():
     """Lazy load regular JSONMatcher with Excel-priority to avoid startup delay."""
@@ -1394,20 +1381,11 @@ def get_session_json_matcher():
         return None
 
 def get_session_product_database():
-    """Get ProductDatabase instance for the current session."""
+    """Get ProductDatabase singleton instance for the current session."""
     try:
-        if not hasattr(app, '_product_database'):
-            from src.core.data.product_database import ProductDatabase
-            # CRITICAL FIX: Use the main product_database.db file
-            db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
-            
-            # Fallback to AGT_Bothell database if main doesn't exist
-            if not os.path.exists(db_path):
-                db_path = os.path.join(current_dir, 'uploads', 'product_database_AGT_Bothell.db')
-            
-            app._product_database = ProductDatabase(db_path)
-            logging.info(f"Created new ProductDatabase instance for session at {db_path}")
-        return app._product_database
+        # Use the singleton from product_database.py module (defaults to AGT_Bothell)
+        from src.core.data.product_database import get_product_database as get_db_singleton
+        return get_db_singleton()
     except Exception as e:
         logging.error(f"Error getting session product database: {e}")
         return None
