@@ -37,8 +37,12 @@
                 // Show success message
                 this.showUploadSuccess(`⚡ Lightning upload complete in ${data.processing_time}s! Processed ${data.rows_processed} rows, stored ${data.rows_stored} to database.`);
                 
-                // Load tags immediately
-                this.loadTags();
+                // Refresh tags immediately
+                if (this.refreshTagLists) {
+                    this.refreshTagLists();
+                } else {
+                    this.loadTags();
+                }
                 
                 return data;
             })

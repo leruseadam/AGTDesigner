@@ -37,8 +37,12 @@
                 // Show success message with plan specs
                 this.showUploadSuccess(`🚀 Custom plan upload complete in ${data.processing_time}s! Processed ${data.total_products} products with 6 web workers.`);
                 
-                // Load tags immediately
-                this.loadTags();
+                // Refresh tags immediately
+                if (this.refreshTagLists) {
+                    this.refreshTagLists();
+                } else {
+                    this.loadTags();
+                }
                 
                 return data;
             })

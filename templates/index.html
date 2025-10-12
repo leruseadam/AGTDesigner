@@ -6571,6 +6571,26 @@
       debouncedUpdateAvailableTags: function(tags) {
         console.log('debouncedUpdateAvailableTags called');
         this._updateAvailableTags(tags);
+      },
+      
+      refreshTagLists: function() {
+        console.log('refreshTagLists called - reloading tags after file upload');
+        return new Promise((resolve, reject) => {
+          // Reload available tags from the server
+          fetch('/api/available-tags')
+            .then(response => response.json())
+            .then(data => {
+              console.log('Tags refreshed after upload:', data.tags.length);
+              this.state.tags = data.tags || [];
+              this.state.originalTags = [...this.state.tags];
+              this._updateAvailableTags();
+              resolve(data);
+            })
+            .catch(error => {
+              console.error('Error refreshing tags:', error);
+              reject(error);
+            });
+        });
       }
     };
 

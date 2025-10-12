@@ -37,8 +37,12 @@
                 // Show success message
                 this.showUploadSuccess(`🧠 Smart-fast upload complete in ${data.processing_time}s! Processed ${data.total_products} products.`);
                 
-                // Load tags immediately
-                this.loadTags();
+                // Refresh tags immediately
+                if (this.refreshTagLists) {
+                    this.refreshTagLists();
+                } else {
+                    this.loadTags();
+                }
                 
                 return data;
             })

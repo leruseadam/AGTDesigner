@@ -37,8 +37,12 @@
                 // Show success message
                 this.showUploadSuccess(`⚡ Ultra-instant upload complete in ${data.processing_time}s!`);
                 
-                // Load tags immediately
-                this.loadTags();
+                // Refresh tags immediately
+                if (this.refreshTagLists) {
+                    this.refreshTagLists();
+                } else {
+                    this.loadTags();
+                }
                 
                 return data;
             })
@@ -76,7 +80,11 @@
                 }
                 
                 this.showUploadSuccess(`🔥 Zero upload complete in ${data.processing_time}s!`);
-                this.loadTags();
+                if (this.refreshTagLists) {
+                    this.refreshTagLists();
+                } else {
+                    this.loadTags();
+                }
                 
                 return data;
             })
