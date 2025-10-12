@@ -1656,15 +1656,22 @@ class TemplateProcessor:
                     label_context['ProductBrand_Center'] = ""
                     self.logger.info(f"🎯 VERTICAL BRAND FIX: Set only Lineage to '{brand_center_text}' for vertical template (no ProductBrand duplication)")
                 else:
-                    label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{brand_center_text}PRODUCTBRAND_CENTER_END"
-                    # Set ProductBrand fields to empty to prevent duplication for non-vertical templates
-                    label_context['ProductBrand'] = ""
-                    label_context['ProductBrand_Center'] = ""
+                    # For double template, use simple Lineage without markers to prevent duplication
+                    if self.template_type == 'double':
+                        label_context['Lineage'] = brand_center_text
+                        label_context['ProductBrand'] = ""
+                        label_context['ProductBrand_Center'] = ""
+                        self.logger.info(f"🎯 DOUBLE TEMPLATE BRAND FIX: Set only Lineage to '{brand_center_text}' for double template (no marker duplication)")
+                    else:
+                        label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{brand_center_text}PRODUCTBRAND_CENTER_END"
+                        # Set ProductBrand fields to empty to prevent duplication for non-vertical templates
+                        label_context['ProductBrand'] = ""
+                        label_context['ProductBrand_Center'] = ""
                 
                 # Product Strain gets its own field with small font size
                 if product_strain:
-                    # For vertical template, don't wrap with markers since it uses simple placeholders
-                    if self.template_type == 'vertical':
+                    # For vertical and double templates, don't wrap with markers since they use simple placeholders
+                    if self.template_type in ['vertical', 'double']:
                         label_context['ProductStrain'] = product_strain
                     else:
                         label_context['ProductStrain'] = f"PRODUCTSTRAIN_START{product_strain}PRODUCTSTRAIN_END"
