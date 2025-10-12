@@ -57,9 +57,9 @@ def _load_font_sizing_config():
                     'default': [(20, 16), (40, 14), (60, 12), (float('inf'), 10)]
                 },
                 'vertical': {
-                    'description': [(5, 34), (10, 32), (20, 28), (40, 26), (60, 24), (70, 22), (80, 20), (float('inf'), 18)],
-                    'brand': [(10, 28), (20, 26), (30, 24), (40, 22), (50, 20), (60, 18), (float('inf'), 16)],
-                    'price': [(15, 34), (16, 30), (15, 28), (float('inf'), 26)],  # Updated: complexity-based thresholds for better vertical price sizing
+                    'description': [(5, 34), (10, 32), (20, 28), (30, 27), (40, 26), (50, 25), (60, 24), (70, 22), (80, 20), (float('inf'), 18)],
+                    'brand': [(10, 18), (20, 16), (30, 14), (40, 12), (50, 10), (60, 9), (float('inf'), 8)],
+                    'price': [(15, 36), (16, 32), (15, 28), (float('inf'), 26)],  # Updated: complexity-based thresholds for better vertical price sizing
                     'lineage': [(20, 20), (40, 18), (60, 16), (float('inf'), 12)],
                     'ratio': [(10, 14), (20, 12), (30, 9), (float('inf'), 9)],
                     'thc_cbd': [(10, 12), (float('inf'), 12)],
@@ -185,13 +185,12 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
                 logger.info(f"PRICE DEBUG: SELECTED {size}pt for '{text}'")
             return Pt(final_size)
     
-    # Fallback to smallest size - ensure price gets proper fallback
-    if field_type.lower() == 'price':
-        fallback_size = 12 * scale_factor  # Price should never go below 12pt
-    elif field_type.lower() == 'thc_cbd':
-        # Use the configured fallback size for THC_CBD instead of hardcoded 8pt
-        fallback_size = 6.5 * scale_factor  # Use the configured size from the config
+    # Fallback to smallest configured size for the field type
+    if config:
+        # Use the last (smallest) size from the configuration
+        fallback_size = config[-1][1] * scale_factor
     else:
+        # Ultimate fallback if no config at all
         fallback_size = 8 * scale_factor
     return Pt(fallback_size)
 

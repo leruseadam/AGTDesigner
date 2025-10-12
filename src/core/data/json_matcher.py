@@ -1690,6 +1690,9 @@ class JSONMatcher:
             processed_product_names = set()  # Track processed product names to prevent duplicates
             print(f"🔍 DEBUG: Starting to process {len(unique_items)} unique items from JSON")
             for i, item in enumerate(unique_items):
+                # Add unique identifier to each JSON item for deduplication tracking
+                item["Original JSON Item ID"] = f"json_item_{i}_{hash(str(item))}"
+                
                 # CRITICAL FIX: Don't skip items with missing product names - create fallback names
                 if not item.get("product_name"):
                     # Try to create a fallback product name from other available fields
@@ -2155,20 +2158,27 @@ class JSONMatcher:
                         return float(v)
                 return 0.0
 
-            # Group products by their final product name and keep only the best match
-            product_groups = {}
-            for p in matched_products:
-                product_name = str(p.get('Product Name*', '') or '').strip()
-                if product_name:
-                    if product_name not in product_groups or _score_of(p) > _score_of(product_groups[product_name]):
-                        product_groups[product_name] = p
-                        logging.info(f"✅ Kept best match for '{product_name}' (score: {_score_of(p):.1f})")
-                    else:
-                        existing_score = _score_of(product_groups[product_name])
-                        logging.info(f"⚠️  Skipped duplicate '{product_name}' (score: {_score_of(p):.1f} <= {existing_score:.1f})")
+            # CRITICAL FIX: Don't deduplicate by product name - preserve all JSON items
+            # Each JSON item should generate its own label, even if they map to the same product name
+            # Only deduplicate true duplicates (same JSON item processed multiple times)
+            seen_json_items = set()
+            unique_matched_products = []
             
-            matched_products = list(product_groups.values())
-            logging.info(f"CRITICAL FIX: Deduplicated to {len(matched_products)} unique products from {len(matched_products) + sum(1 for _ in product_groups if len(product_groups) > 1)} total matches")
+            for p in matched_products:
+                # Create a unique identifier for each JSON item based on original data
+                json_item_id = p.get('Original JSON Item ID', '')
+                if json_item_id and json_item_id in seen_json_items:
+                    # Skip true duplicates (same JSON item processed multiple times)
+                    logging.info(f"⚠️  Skipped duplicate JSON item: {json_item_id}")
+                    continue
+                
+                if json_item_id:
+                    seen_json_items.add(json_item_id)
+                
+                unique_matched_products.append(p)
+            
+            matched_products = unique_matched_products
+            logging.info(f"CRITICAL FIX: Preserved all unique JSON items: {len(matched_products)} products (no deduplication by product name)")
                 
             logging.info(f"CRITICAL FIX: After deduplication: {len(matched_products)} unique products")
             logging.info(f"CRITICAL FIX: Input items: {len(items)}, Processed items: {len(unique_items)}, Final products: {len(matched_products)}")
@@ -2315,7 +2325,8 @@ class JSONMatcher:
                 'Test result unit (% or mg)': safe_get_value(safe_row_get(excel_row, 'Test result unit (% or mg)', '')),
                 'THC test result': safe_get_value(safe_row_get(excel_row, 'THC test result', '')),
                 'CBD test result': safe_get_value(safe_row_get(excel_row, 'CBD test result', '')),
-                'Source': "JSON Match"  # Mark as JSON matched item
+                'Source': "JSON Match",  # Mark as JSON matched item
+                'Original JSON Item ID': json_item.get('Original JSON Item ID', '')  # Preserve unique identifier
             }
             
             # Add any additional fields from JSON that might be useful
@@ -2614,7 +2625,8 @@ class JSONMatcher:
                 'Medical Only (Yes/No)': 'No',
                 'DOH': 'YES',  # JSON matched products should show DOH compliance stamp
                 'DOH Compliant (Yes/No)': 'Yes',
-                'Source': 'JSON Match'  # Mark as JSON matched item
+                'Source': 'JSON Match',  # Mark as JSON matched item
+                'Original JSON Item ID': json_item.get('Original JSON Item ID', '')  # Preserve unique identifier
             }
             
             # Extract cannabinoid data from lab_result_data if available
@@ -6868,13 +6880,16 @@ class JSONMatcher:
                     if match_source == 'Product Database Match':
                         product = best_match.copy()
                         product['Original JSON Product Name'] = str(item.get("product_name", ""))
+                        product['Original JSON Item ID'] = str(item.get("Original JSON Item ID", ""))
                     elif match_source == 'Advanced Match':
                         # Convert advanced match to product format
                         product = self._create_product_from_advanced_match(best_match, item, global_vendor)
                         product['Original JSON Product Name'] = str(item.get("product_name", ""))
+                        product['Original JSON Item ID'] = str(item.get("Original JSON Item ID", ""))
                     else:  # Excel Match
                         product = self._create_product_from_excel_match(best_match, item, global_vendor)
                         product['Original JSON Product Name'] = str(item.get("product_name", ""))
+                        product['Original JSON Item ID'] = str(item.get("Original JSON Item ID", ""))
                     
                     return [product]
                     
@@ -6919,7 +6934,9 @@ class JSONMatcher:
                 'CBD test result': cbd,
                 'Product Strain': strain,
                 'Lineage': lineage,
-                'Quantity*': '1'
+                'Quantity*': '1',
+                'Source': 'JSON Match',
+                'Original JSON Item ID': item.get('Original JSON Item ID', '')  # Preserve unique identifier
             }
             
             return product

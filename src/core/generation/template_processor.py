@@ -1655,7 +1655,21 @@ class TemplateProcessor:
                     self.logger.info(f"🎯 MINI TEMPLATE BRAND FIX: Set Lineage, ProductBrand, and ProductBrand_Center to '{brand_center_text}' for mini template")
                 else:
                     # For other templates (horizontal, etc.), use marker-based formatting
-                    label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{brand_center_text}PRODUCTBRAND_CENTER_END"
+                    # CRITICAL FIX: Clean brand_center_text to prevent corruption
+                    clean_brand_text = str(brand_center_text).strip().upper()
+                    # Remove any corrupted marker patterns that might already be present
+                    import re
+                    clean_brand_text = re.sub(r'PRODUCTSTRR_STARTCONSTELL.*', '', clean_brand_text)
+                    clean_brand_text = re.sub(r'PRODUCTBRAND_CENTER_START.*', '', clean_brand_text)
+                    clean_brand_text = re.sub(r'CONSTELLATION\$.*', '', clean_brand_text)
+                    clean_brand_text = clean_brand_text.strip()
+                    
+                    if clean_brand_text:
+                        label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{clean_brand_text}PRODUCTBRAND_CENTER_END"
+                    else:
+                        # Fallback to original brand text if cleaning removed everything
+                        label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{brand_center_text}PRODUCTBRAND_CENTER_END"
+                    
                     # Set ProductBrand fields to empty to prevent duplication for non-vertical templates
                     label_context['ProductBrand'] = ""
                     label_context['ProductBrand_Center'] = ""
@@ -2797,6 +2811,13 @@ class TemplateProcessor:
                     r'\bVENDOR\b',                 # Any remaining VENDOR
                     # REMOVED: r'\bLINEAGE\b' - Don't remove LINEAGE as it might be part of content
                     # REMOVED: r'\bCBD\b' - Don't remove CBD as it's part of lineage content like "CBD Blend"
+                    
+                    # CRITICAL FIX: Handle corrupted marker text patterns
+                    r'PRODUCTSTRR_STARTCONSTELL',  # Corrupted PRODUCTBRAND_CENTER_START + CONSTELLATION
+                    r'PRODUCTSTRR_',               # Corrupted PRODUCTBRAND_ patterns
+                    r'STARTCONSTELL',              # Corrupted START + CONSTELLATION
+                    r'CONSTELLATION\$\s*',         # CONSTELLATION$ remnants
+                    
                     r'\bTHC\b',                    # Any remaining THC
                     # REMOVED: r'\bRATIO\b' - Don't remove RATIO as it's part of brand names like "Ratio"
                     r'\bWEIGHT\b',                 # Any remaining WEIGHT
@@ -3531,6 +3552,16 @@ class TemplateProcessor:
                 # Special handling for lineage markers
                 if marker_name == 'LINEAGE':
                     self.logger.debug(f"Processing LINEAGE marker with content: '{content}'")
+                    
+                    # CRITICAL FIX: Clean corrupted marker text before processing
+                    original_content = content
+                    content = re.sub(r'PRODUCTSTRR_STARTCONSTELL.*', '', content)
+                    content = re.sub(r'STARTCONSTELL.*', '', content)
+                    content = re.sub(r'CONSTELLATION\$.*', '', content)
+                    content = content.strip()
+                    
+                    if original_content != content:
+                        self.logger.warning(f"Cleaned corrupted lineage content: '{original_content}' -> '{content}'")
                     
                     # CRITICAL FIX: If Lineage contains PRODUCTBRAND_CENTER markers, process it as PRODUCTBRAND_CENTER
                     if 'PRODUCTBRAND_CENTER_START' in content and 'PRODUCTBRAND_CENTER_END' in content:
