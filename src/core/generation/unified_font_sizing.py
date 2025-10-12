@@ -45,26 +45,26 @@ def _load_font_sizing_config():
                 'double': {
                     'description': [(10, 24), (20, 22), (30, 21), (40, 20), (50, 16), (60, 15), (70, 14), (float('inf'), 10)],
                     'brand': [(1, 10), (2, 9), (5, 8), (10, 8), (float('inf'), 6.5)],
-                    'price': [(10, 20), (15, 18), (float('inf'), 14)],
+                    'price': [(10, 26), (15, 20), (float('inf'), 14)],
                     'lineage': [(15, 13), (25, 12), (35, 10), (45, 9), (float('inf'), 9)],
                     'ratio': [(10, 9), (20, 8), (30, 7), (float('inf'), 6.5)],
                     'thc_cbd': [(20, 7),(float('inf'), 6.5)],
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
                     'weight': [(15, 16), (25, 14), (35, 12), (float('inf'), 9)],
                     'doh': [(15, 20), (25, 16), (float('inf'), 13)],
-                    'vendor': [(10, 5), (20, 4), (40, 3), (70, 2),(float('inf'), 1)],
+                    'vendor': [(10, 1), (20, 1), (40, 1), (70, 1),(float('inf'), 1)],
                     'qr': [(float('inf'), 36)],  # QR codes: Medium size for double template
                     'default': [(20, 16), (40, 14), (60, 12), (float('inf'), 10)]
                 },
                 'vertical': {
                     'description': [(5, 34), (10, 32), (20, 28), (30, 27), (40, 26), (50, 25), (60, 24), (70, 22), (80, 20), (float('inf'), 18)],
                     'brand': [(10, 18), (20, 16), (30, 14), (40, 12), (50, 10), (60, 9), (float('inf'), 8)],
-                    'price': [(15, 36), (16, 32), (15, 28), (float('inf'), 26)],  # Updated: complexity-based thresholds for better vertical price sizing
+                    'price': [(1, 36), (2, 30), (15, 28), (float('inf'), 26)],  # Updated: complexity-based thresholds for better vertical price sizing
                     'lineage': [(20, 20), (40, 18), (60, 16), (float('inf'), 12)],
                     'ratio': [(10, 14), (20, 12), (30, 9), (float('inf'), 9)],
                     'thc_cbd': [(10, 12), (float('inf'), 12)],
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
-                    'vendor': [(10, 6), (20, 5), (40, 4), (70, 3),(float('inf'), 2)],
+                    'vendor': [(10, 1), (20, 1), (40, 1), (70, 1),(float('inf'), 1)],
                     'qr': [(float('inf'), 45)],  # QR codes: Large size for vertical template
                     'default': [(30, 16), (60, 14), (100, 12), (float('inf'), 10)]
                 },

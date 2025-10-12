@@ -19,6 +19,7 @@ import sys  # Add this import
 import logging
 import threading
 import pandas as pd  # Add this import
+import sqlite3
 import time
 import re
 import json
@@ -6763,6 +6764,137 @@ def database_export():
         import traceback
         logging.error(f"Error exporting database: {str(e)}\n" + traceback.format_exc())
         return jsonify({'error': f'Export failed: {str(e)}'}), 500
+
+@app.route('/api/inventory-export', methods=['GET'])
+def inventory_export():
+    """Export only the products data as an Inventory sheet."""
+    try:
+        # Check disk space before creating temporary files
+        disk_ok, disk_message = check_disk_space()
+        if not disk_ok:
+            emergency_cleanup()
+            disk_ok, disk_message = check_disk_space()
+            if not disk_ok:
+                return jsonify({'error': f'Insufficient disk space for export: {disk_message}'}), 507
+        
+        import tempfile
+        import os
+        import pandas as pd
+        
+        product_db = get_product_database('AGT_Bothell')
+        
+        # Create temporary file
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
+        temp_file.close()
+        
+        # Get products data (similar to export_database but only products)
+        with sqlite3.connect(product_db.db_path) as conn:
+            # Get all column names from the products table
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA table_info(products);")
+            table_info = cursor.fetchall()
+            columns = [col[1] for col in table_info if col[1] != 'id']  # Skip id column
+            
+            # Build query to select all columns except id
+            columns_to_export = [col for col in columns if col not in ['id', 'strain_id', 'normalized_name']]
+            columns_str = ', '.join([f'"{col}"' for col in columns_to_export])
+            
+            # Query products
+            query = f"SELECT {columns_str} FROM products ORDER BY id DESC"
+            cursor.execute(query)
+            results = cursor.fetchall()
+            
+            # Build product dictionaries
+            products_data = []
+            for result in results:
+                product = {}
+                for i, col in enumerate(columns_to_export):
+                    product[col] = result[i]
+                products_data.append(product)
+            
+            # Convert to DataFrame
+            products_df = pd.DataFrame(products_data)
+            
+            # Export to Excel with single sheet named "Inventory"
+            with pd.ExcelWriter(temp_file.name, engine='openpyxl') as writer:
+                products_df.to_excel(writer, sheet_name='Inventory', index=False)
+            
+            logger.info(f"Inventory exported to {temp_file.name} with {len(products_df)} products")
+        
+        # Send file with proper cleanup
+        # Generate descriptive filename with timestamp
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        filename = f"AGT_Inventory_{timestamp}.xlsx"
+        response = send_file(
+            temp_file.name,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
+        
+        # Set proper download filename with headers
+        response = set_download_filename(response, filename)
+        response.headers['Content-Type'] = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        
+        # Clean up the temporary file after sending
+        @response.call_on_close
+        def cleanup():
+            try:
+                if os.path.exists(temp_file.name):
+                    os.unlink(temp_file.name)
+            except Exception as cleanup_error:
+                logging.warning(f"Failed to cleanup temp file {temp_file.name}: {cleanup_error}")
+        
+        return response
+        
+    except Exception as e:
+        import traceback
+        logging.error(f"Error exporting inventory: {str(e)}\n" + traceback.format_exc())
+        return jsonify({'error': f'Export failed: {str(e)}'}), 500
+
+@app.route('/api/database-health', methods=['GET'])
+def database_health():
+    """Get comprehensive database health status."""
+    try:
+        product_db = get_product_database('AGT_Bothell')
+        health_status = product_db.get_health_status()
+        return jsonify(health_status)
+    except Exception as e:
+        logging.error(f"Error getting database health: {str(e)}")
+        return jsonify({
+            'is_healthy': False,
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
+@app.route('/api/database-backup', methods=['POST'])
+def create_database_backup():
+    """Force creation of a database backup."""
+    try:
+        product_db = get_product_database('AGT_Bothell')
+        success, message = product_db.force_backup()
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': message,
+                'timestamp': datetime.now().isoformat()
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': message,
+                'timestamp': datetime.now().isoformat()
+            }), 500
+            
+    except Exception as e:
+        logging.error(f"Error creating backup: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
 
 @app.route('/api/database-view', methods=['GET'])
 def database_view():

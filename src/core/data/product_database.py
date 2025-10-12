@@ -1,4 +1,11 @@
 from .field_mapping import get_canonical_field
+from .database_reliability import (
+    DatabaseHealthMonitor, 
+    ensure_database_reliability, 
+    create_safe_connection,
+    safe_database_operation,
+    get_health_monitor
+)
 import sqlite3
 import json
 import logging
@@ -67,13 +74,17 @@ def retry_on_lock(max_retries=3, delay=0.5):
     return decorator
 
 class ProductDatabase:
-    """Database for storing and managing product and strain information."""
+    """Database for storing and managing product and strain information with crash protection."""
     
     def __init__(self, db_path: str = None, store_name: str = None):
         if db_path is None:
             self.db_path = get_database_path(store_name)
         else:
             self.db_path = db_path
+        
+        # Initialize reliability monitoring
+        self.health_monitor = get_health_monitor(self.db_path)
+        
         self._connection_pool = {}
         self._cache = {}
         self._cache_lock = threading.Lock()
@@ -89,26 +100,63 @@ class ProductDatabase:
             'cache_hits': 0,
             'cache_misses': 0
         }
+        
+        logger.info(f"ProductDatabase initialized with crash protection for: {self.db_path}")
+    
+    def get_health_status(self) -> Dict[str, Any]:
+        """Get comprehensive database health status"""
+        try:
+            return self.health_monitor.get_health_report()
+        except Exception as e:
+            logger.error(f"Error getting health status: {e}")
+            return {
+                'is_healthy': False,
+                'error': str(e),
+                'timestamp': datetime.now().isoformat()
+            }
+    
+    def force_backup(self) -> Tuple[bool, str]:
+        """Force creation of a database backup"""
+        try:
+            return self.health_monitor.force_backup()
+        except Exception as e:
+            logger.error(f"Error forcing backup: {e}")
+            return False, f"Backup failed: {e}"
+    
+    def perform_health_check(self):
+        """Perform immediate health check and return status"""
+        try:
+            return self.health_monitor.perform_health_check()
+        except Exception as e:
+            logger.error(f"Error performing health check: {e}")
+            return None
     
     def _get_connection(self):
-        """Get a database connection, reusing if possible."""
+        """Get a database connection with reliability checks."""
         thread_id = threading.get_ident()
         if thread_id not in self._connection_pool:
-            # Configure connection for better concurrency
-            conn = sqlite3.connect(
-                self.db_path,
-                timeout=30.0,  # 30 second timeout for database operations
-                check_same_thread=False  # Allow connection sharing across threads
-            )
-            # Enable WAL mode for better concurrency
-            conn.execute("PRAGMA journal_mode=WAL")
-            # Set busy timeout (60s) to ride out background batches
-            conn.execute("PRAGMA busy_timeout=60000")
-            # Optimize for concurrent access
-            conn.execute("PRAGMA synchronous=NORMAL")
-            conn.execute("PRAGMA cache_size=10000")
-            conn.execute("PRAGMA temp_store=MEMORY")
-            self._connection_pool[thread_id] = conn
+            try:
+                # Use safe connection with health checks
+                safe_conn = create_safe_connection(self.db_path, timeout=30.0)
+                self._connection_pool[thread_id] = safe_conn.connection
+                logger.debug(f"Created safe database connection for thread {thread_id}")
+            except Exception as e:
+                logger.error(f"Failed to create safe database connection: {e}")
+                # Fallback to standard connection if safe connection fails
+                conn = sqlite3.connect(
+                    self.db_path,
+                    timeout=30.0,
+                    check_same_thread=False
+                )
+                # Apply basic reliability settings
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA busy_timeout=60000")
+                conn.execute("PRAGMA synchronous=NORMAL")
+                conn.execute("PRAGMA cache_size=10000")
+                conn.execute("PRAGMA temp_store=MEMORY")
+                self._connection_pool[thread_id] = conn
+                logger.warning(f"Using fallback database connection for thread {thread_id}")
+        
         return self._connection_pool[thread_id]
     
     def init_database(self):
@@ -768,6 +816,7 @@ class ProductDatabase:
 
     @timed_operation("add_or_update_strain")
     @retry_on_lock(max_retries=3, delay=0.5)
+    @safe_database_operation(max_retries=3, backup_on_failure=True)
     def add_or_update_strain(self, strain_name: str, lineage: str = None, sovereign: bool = False) -> int:
         """Add a new strain or update existing strain information. If sovereign is True, set sovereign_lineage."""
         try:
@@ -871,6 +920,7 @@ class ProductDatabase:
     
     @timed_operation("add_or_update_product")
     @retry_on_lock(max_retries=3, delay=0.5)
+    @safe_database_operation(max_retries=3, backup_on_failure=True)
     def add_or_update_product(self, product_data: Dict[str, Any]) -> int:
         """Add a new product or update existing product information."""
         try:
@@ -1858,6 +1908,7 @@ class ProductDatabase:
             logger.error(f"Error getting strain statistics: {e}")
             return {}
     
+    @safe_database_operation(max_retries=2, backup_on_failure=False)
     def export_database(self, output_path: str):
         """Export database to Excel file."""
         try:

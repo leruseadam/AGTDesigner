@@ -2212,6 +2212,32 @@
               }, 1000);
             };
             
+            // Export Inventory Function
+            window.exportInventory = function() {
+              const exportBtn = document.querySelector('button[onclick="exportInventory()"]');
+              
+              // Show loading state
+              const originalBtnText = exportBtn.innerHTML;
+              exportBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Exporting...';
+              exportBtn.disabled = true;
+              
+              // Create a temporary link to trigger download
+              const link = document.createElement('a');
+              link.href = '/api/inventory-export';
+              link.download = `AGT_Inventory_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.xlsx`;
+              
+              // Trigger download
+              document.body.appendChild(link);
+              link.click();
+              document.body.removeChild(link);
+              
+              // Reset button state after a short delay
+              setTimeout(() => {
+                exportBtn.innerHTML = originalBtnText;
+                exportBtn.disabled = false;
+              }, 1000);
+            };
+            
             // Refresh Database Stats Function
             window.refreshDatabaseStats = function() {
               const refreshBtn = document.querySelector('button[onclick="refreshDatabaseStats()"]');
