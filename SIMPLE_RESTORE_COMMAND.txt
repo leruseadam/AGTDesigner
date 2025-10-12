@@ -1,0 +1,16 @@
+# Simple restore command for PythonAnywhere
+# Copy and paste this command in your PythonAnywhere Bash console:
+
+# First, backup current database
+cp uploads/product_database_AGT_Bothell.db uploads/product_database_AGT_Bothell.db.current_backup.$(date +%Y%m%d_%H%M%S)
+
+# Then restore from the specific backup file
+cp uploads/product_database_AGT_Bothell.db.corrupted.20251012_213432 uploads/product_database_AGT_Bothell.db
+
+# Verify the restoration worked
+sqlite3 uploads/product_database_AGT_Bothell.db "SELECT COUNT(*) FROM products;"
+
+# Check database integrity
+sqlite3 uploads/product_database_AGT_Bothell.db "PRAGMA integrity_check;"
+
+# If everything looks good, reload your web app in PythonAnywhere Web tab

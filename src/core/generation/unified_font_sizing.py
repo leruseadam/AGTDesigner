@@ -58,8 +58,8 @@ def _load_font_sizing_config():
                 },
                 'vertical': {
                     'description': [(5, 34), (10, 32), (20, 28), (30, 27), (40, 26), (50, 25), (60, 24), (70, 22), (80, 20), (float('inf'), 18)],
-                    'brand': [(10, 18), (20, 16), (25, 14), (30, 12), (35, 10), (40, 9), (float('inf'), 8)],
-                    'price': [(1, 36), (2, 30), (15, 28), (float('inf'), 26)],  # Updated: complexity-based thresholds for better vertical price sizing
+                    'brand': [(10, 18), (20, 16), (25, 14), (30, 11), (35, 10), (40, 9), (float('inf'), 8)],
+                    'price': [(2, 36), (3, 30), (15, 28), (float('inf'), 26)],  # Updated: complexity-based thresholds for better vertical price sizing
                     'lineage': [(20, 20), (40, 18), (60, 16), (float('inf'), 12)],
                     'ratio': [(10, 14), (20, 12), (30, 9), (float('inf'), 9)],
                     'thc_cbd': [(10, 12), (float('inf'), 12)],

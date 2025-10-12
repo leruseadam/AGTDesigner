@@ -6400,6 +6400,7 @@ def database_vendor_stats():
     try:
         import sqlite3
         import time
+        import pandas as pd
         
         start_time = time.time()
         logging.info("🔍 Database vendor stats request started")
@@ -7084,6 +7085,7 @@ def database_analytics():
     try:
         import sqlite3
         import time
+        import pandas as pd
         from datetime import datetime, timedelta
         
         start_time = time.time()
