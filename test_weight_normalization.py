@@ -101,6 +101,57 @@ def test_weight_normalization():
             'weight': '2.0',
             'unit': 'oz',
             'expected': ('2.0', 'oz')
+        },
+        
+        # New rules from analysis
+        # Pre-roll packs
+        {
+            'name': 'Gelato Pre-Roll by Brand - 0.5g x 2 Pack',
+            'brand': 'Brand',
+            'type': 'Pre-Roll',
+            'weight': '1',
+            'unit': 'each',
+            'expected': ('1.0', 'g')
+        },
+        
+        # Gummies
+        {
+            'name': 'Strawberry Gummies by Brand',
+            'brand': 'Brand',
+            'type': 'Edible (Solid)',
+            'weight': '50',
+            'unit': 'g',
+            'expected': ('1.76', 'oz')
+        },
+        
+        # Small oz topicals
+        {
+            'name': 'CBD Cream by Brand',
+            'brand': 'Brand',
+            'type': 'Topical',
+            'weight': '0.05',
+            'unit': 'oz',
+            'expected': ('1.42', 'g')
+        },
+        
+        # Capsules
+        {
+            'name': 'CBD Capsules by Brand',
+            'brand': 'Brand',
+            'type': 'Capsule',
+            'weight': '0.35',
+            'unit': 'oz',
+            'expected': ('9.92', 'g')
+        },
+        
+        # Tinctures
+        {
+            'name': 'CBD Tincture by Brand',
+            'brand': 'Brand',
+            'type': 'Tincture',
+            'weight': '30',
+            'unit': 'g',
+            'expected': ('1.06', 'oz')
         }
     ]
     
