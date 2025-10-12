@@ -9510,6 +9510,10 @@
         `;
         showDatabaseModal('Database Analytics Dashboard', errorHtml);
       });
+      } catch (error) {
+        console.error('Error in openDatabaseAnalytics:', error);
+        alert('Failed to open analytics dashboard. Please try again.');
+      }
     }
 
     // Product Similarity Finder

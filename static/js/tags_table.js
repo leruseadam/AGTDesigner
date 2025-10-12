@@ -1,5 +1,7 @@
 // Lineage abbreviation mapping (matching Python version)
-const ABBREVIATED_LINEAGE = {
+// Check if already defined in main.js to avoid redeclaration
+if (typeof ABBREVIATED_LINEAGE === 'undefined') {
+  var ABBREVIATED_LINEAGE = {
     "SATIVA": "S",
     "INDICA": "I", 
     "HYBRID": "H",
@@ -9,7 +11,8 @@ const ABBREVIATED_LINEAGE = {
     "CBD_BLEND": "CBD",
     "MIXED": "THC",
     "PARA": "P"
-};
+  };
+}
 
 // Use full lineage names for all dropdowns
 const getUniqueLineages = () => {
