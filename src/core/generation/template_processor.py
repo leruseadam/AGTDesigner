@@ -85,12 +85,16 @@ class TemplateProcessor:
             self.chunk_size = min(20, CHUNK_SIZE_LIMIT)  # Fixed: 4x5 grid = 20 labels per page
             if not IS_PYTHONANYWHERE:
                 self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for mini template")
+        elif self.template_type == 'double':
+            self.chunk_size = min(12, CHUNK_SIZE_LIMIT)  # Fixed: 4x3 grid = 12 labels per page
+            if not IS_PYTHONANYWHERE:
+                self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for double template")
         elif self.template_type == 'inventory':
             self.chunk_size = min(4, CHUNK_SIZE_LIMIT)   # Fixed: 2x2 grid = 4 labels per page
             if not IS_PYTHONANYWHERE:
                 self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for inventory template")
         else:
-            # For standard templates (horizontal, vertical, double), use 3x3 grid = 9 labels per page
+            # For standard templates (horizontal, vertical), use 3x3 grid = 9 labels per page
             self.chunk_size = min(9, CHUNK_SIZE_LIMIT)  # Fixed: 3x3 grid = 9 labels per page
             if not IS_PYTHONANYWHERE:
                 self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for template type '{self.template_type}' (standard 3x3)")
@@ -151,9 +155,11 @@ class TemplateProcessor:
             text = doc.element.body.xml
             matches = re.findall(r'Label(\d+)\.', text)
             
-            # Check if we have all required labels (9 for 3x3, 20 for 4x5, 4 for 2x2)
+            # Check if we have all required labels (9 for 3x3, 20 for 4x5, 12 for 4x3, 4 for 2x2)
             if self.template_type == 'mini':
                 required_labels = 20  # 4x5 grid
+            elif self.template_type == 'double':
+                required_labels = 12  # 4x3 grid
             elif self.template_type == 'inventory':
                 required_labels = 4   # 2x2 grid
             else:
@@ -869,9 +875,7 @@ class TemplateProcessor:
                 # Add ProductBrand placeholder if it's missing for non-classic type compatibility
                 
                 # Add ProductBrand placeholder if it's missing for non-classic type compatibility
-                # BUT NOT for double templates to prevent brand duplication
-                if (self.template_type != 'double' and 
-                    '{{Label1.ProductBrand}}' not in cell_text and 'ProductBrand' not in cell_text):
+                if ('{{Label1.ProductBrand}}' not in cell_text and 'ProductBrand' not in cell_text):
                     self.logger.debug(f"Adding ProductBrand placeholder to cell {cnt}")
                     # Find the position after the Lineage placeholder
                     text_elements = list(tc.iter(qn('w:t')))
@@ -1077,13 +1081,16 @@ class TemplateProcessor:
             # Leave remaining labels blank instead of duplicating data
             # Create empty contexts for all remaining slots consistently for all templates
             for i in range(len(chunk), self.chunk_size):
-                # Create empty context for unfilled labels
+                # Create empty context for unfilled labels with all expected fields
                 context[f'Label{i+1}'] = {
                     'ProductBrand': '',
                     'DescAndWeight': '',
                     'Price': '',
                     'DOH': '',
-                    'Ratio_or_THC_CBD': ''
+                    'Ratio_or_THC_CBD': '',
+                    'Lineage': '',
+                    'ProductStrain': '',
+                    'QR': ''
                 }
                 self.logger.debug(f"Label{i+1} left blank (no data duplication)")
 
@@ -2968,8 +2975,67 @@ class TemplateProcessor:
         # Apply vertical template specific optimizations for minimal spacing
         if self.template_type in ['vertical', 'double']:
             self._optimize_vertical_template_spacing(doc)
+            
+        # Apply unified font sizing to all text in vertical templates (not just markers)
+        if self.template_type == 'vertical':
+            self._apply_unified_font_sizing_to_all_text(doc)
 
 
+
+    def _apply_unified_font_sizing_to_all_text(self, doc):
+        """
+        Apply unified font sizing to all text in vertical templates, not just markers.
+        This ensures that simple placeholders like {{Label1.Lineage}} get proper font sizing.
+        """
+        try:
+            from src.core.generation.unified_font_sizing import get_font_size
+            
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for paragraph in cell.paragraphs:
+                            for run in paragraph.runs:
+                                if run.text and run.text.strip():
+                                    # Determine field type based on text content and position
+                                    field_type = self._determine_field_type_for_vertical_template(run.text, paragraph, cell)
+                                    
+                                    # Apply unified font sizing
+                                    font_size = get_font_size(run.text, field_type, 'vertical', self.scale_factor)
+                                    run.font.size = font_size
+                                    
+                                    self.logger.debug(f"Applied unified font sizing to vertical template text: '{run.text}' -> {field_type} -> {font_size}")
+                                    
+        except Exception as e:
+            self.logger.warning(f"Failed to apply unified font sizing to vertical template text: {e}")
+
+    def _determine_field_type_for_vertical_template(self, text, paragraph, cell):
+        """
+        Determine the field type for vertical template text based on content and context.
+        """
+        text_lower = text.lower().strip()
+        
+        # Check for brand names (typically in lineage field)
+        if any(keyword in text_lower for keyword in ['constellation', 'mary jones', 'skagit', 'artizen', 'sitka']):
+            return 'brand'
+        
+        # Check for prices (contain $ or numbers with decimal)
+        if '$' in text or (any(c.isdigit() for c in text) and '.' in text):
+            return 'price'
+        
+        # Check for THC/CBD content
+        if any(keyword in text_lower for keyword in ['thc', 'cbd', 'cbn', 'cbg']):
+            return 'thc_cbd'
+        
+        # Check for weight/ratio content
+        if any(keyword in text_lower for keyword in ['oz', 'g', 'mg', ':', 'ratio']):
+            return 'ratio'
+        
+        # Check for strain names (typically longer descriptive text)
+        if len(text) > 20 and any(keyword in text_lower for keyword in ['kush', 'dream', 'cookies', 'runtz', 'gelato']):
+            return 'strain'
+        
+        # Default to brand for vertical template (most text is brand-related)
+        return 'brand'
 
     def _optimize_vertical_template_spacing(self, doc):
         """
@@ -4468,88 +4534,6 @@ class TemplateProcessor:
             
         except Exception as e:
             self.logger.error(f"Error ensuring mini template brand centering: {e}")
-
-    def _apply_brand_centering_for_double_template(self, doc):
-        """
-        Apply brand centering logic specifically for the double template.
-        This method ensures that non-classic types get centered brand names,
-        while classic types maintain their default alignment (left-aligned).
-        """
-        try:
-            # Starting _apply_brand_centering_for_double_template
-            
-            # Import CLASSIC_TYPES to check if current product type is classic
-            from src.core.constants import CLASSIC_TYPES
-            
-            # Get current product type if available
-            current_product_type = None
-            if hasattr(self, 'current_record') and self.current_record:
-                current_product_type = (self.current_record.get('ProductType', '').lower() or 
-                                      self.current_record.get('Product Type*', '').lower())
-            elif hasattr(self, 'current_product_type'):
-                current_product_type = self.current_product_type
-            
-            # Check if current product type is a classic type
-            is_classic_type = False
-            if current_product_type:
-                is_classic_type = current_product_type.lower() in [ct.lower() for ct in CLASSIC_TYPES]
-                self.logger.info(f"DEBUG: Double template brand centering - Product type: {current_product_type}, Is classic: {is_classic_type}")
-            else:
-                # If no current_product_type available, assume non-classic (tinctures, etc.)
-                # This ensures that brand content gets centered by default
-                is_classic_type = False
-                self.logger.info(f"DEBUG: Double template brand centering - No current_product_type available, assuming non-classic (will center brand content)")
-            
-            for table in doc.tables:
-                # Validate table structure before processing
-                if not self._validate_and_repair_table_structure(table):
-                    self.logger.warning(f"Skipping table with invalid structure during brand centering")
-                    continue
-                
-                for row in table.rows:
-                    for cell in row.cells:
-                        for paragraph in cell.paragraphs:
-                            paragraph_text = paragraph.text.strip()
-                            
-                            # Skip empty paragraphs
-                            if not paragraph_text:
-                                continue
-                            
-                            # Check if this paragraph contains brand content
-                            # Look for common brand indicators (not lineage, not price, not weight)
-                            is_brand_content = (
-                                paragraph_text and
-                                not paragraph_text.startswith('$') and
-                                not paragraph_text.endswith('g') and
-                                not paragraph_text.endswith('mg') and
-                                not paragraph_text.isdigit() and
-                                # Not classic lineage values
-                                paragraph_text.upper() not in ["SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", "CBD", "MIXED"] and
-                                # Not THC/CBD content
-                                not ('THC:' in paragraph_text and 'CBD:' in paragraph_text) and
-                                # Not description content (usually longer)
-                                len(paragraph_text) < 50
-                            )
-                            
-                            self.logger.info(f"DEBUG: Brand content detection - Text: '{paragraph_text}', Is brand: {is_brand_content}, Current alignment: {paragraph.alignment}")
-                            
-                            # CRITICAL FIX: Don't override paragraphs that are already centered
-                            # This prevents interference with the manual replacement centering
-                            if is_brand_content and paragraph.alignment != WD_ALIGN_PARAGRAPH.CENTER:
-                                if is_classic_type:
-                                    # For classic types, ensure they are NOT centered (left-aligned)
-                                    paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                                    self.logger.debug(f"Fixed classic type alignment: set to LEFT for '{paragraph_text[:30]}...'")
-                                else:
-                                    # For non-classic types, center the brand content
-                                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                                    self.logger.debug(f"Applied brand centering for non-classic type: '{paragraph_text[:30]}...'")
-                            elif is_brand_content and paragraph.alignment == WD_ALIGN_PARAGRAPH.CENTER:
-                                # Paragraph is already centered, preserve it
-                                self.logger.debug(f"Preserved existing centering for brand: '{paragraph_text[:30]}...'")
-            
-        except Exception as e:
-            self.logger.error(f"Error applying brand centering for double template: {e}")
 
     def _ensure_lineage_centering_for_nonclassic_types(self, doc):
         """
