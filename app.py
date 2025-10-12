@@ -6397,12 +6397,11 @@ def database_schema():
 @app.route('/api/database-vendor-stats', methods=['GET'])
 def database_vendor_stats():
     """Get detailed vendor and brand statistics from the product database."""
+    start_time = time.time()
     try:
         import sqlite3
-        import time
         import pandas as pd
         
-        start_time = time.time()
         logging.info("🔍 Database vendor stats request started")
         
         # Try to get any available database (don't hardcode store name)
@@ -6410,13 +6409,15 @@ def database_vendor_stats():
             product_db = get_product_database()
         except Exception as e:
             logging.error(f"Failed to get product database: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
             return jsonify({
                 'error': 'Database not available',
                 'vendors': [],
                 'brands': [],
                 'total_vendors': 0,
                 'total_brands': 0
-            }), 500
+            }), 200  # Return 200 with empty data instead of 500
         
         # Ensure database is initialized
         if not product_db._initialized:
@@ -6454,79 +6455,106 @@ def database_vendor_stats():
             logging.error(f"Database connection test failed: {test_error}")
             return jsonify({'error': f'Database connection failed: {test_error}'}), 500
         
-        with sqlite3.connect(product_db.db_path) as conn:
-            # Get all vendors with their product counts
-            vendors_df = pd.read_sql_query('''
-                SELECT "Vendor/Supplier*" as vendor, COUNT(*) as product_count, 
-                       COUNT(DISTINCT "Product Brand") as unique_brands,
-                       COUNT(DISTINCT "Product Type*") as unique_product_types
-                FROM products 
-                WHERE "Vendor/Supplier*" IS NOT NULL AND "Vendor/Supplier*" != ''
-                GROUP BY "Vendor/Supplier*"
-                ORDER BY product_count DESC
-            ''', conn)
-            
-            # Get all brands with their product counts
-            brands_df = pd.read_sql_query('''
-                SELECT "Product Brand" as brand, COUNT(*) as product_count,
-                       COUNT(DISTINCT "Vendor/Supplier*") as unique_vendors,
-                       COUNT(DISTINCT "Product Type*") as unique_product_types
-                FROM products 
-                WHERE "Product Brand" IS NOT NULL AND "Product Brand" != ''
-                GROUP BY "Product Brand"
-                ORDER BY product_count DESC
-            ''', conn)
-            
-            # Get all product types with their counts
-            product_types_df = pd.read_sql_query('''
-                SELECT "Product Type*" as product_type, COUNT(*) as product_count,
-                       COUNT(DISTINCT "Vendor/Supplier*") as unique_vendors,
-                       COUNT(DISTINCT "Product Brand") as unique_brands
-                FROM products 
-                WHERE "Product Type*" IS NOT NULL AND "Product Type*" != ''
-                GROUP BY "Product Type*"
-                ORDER BY product_count DESC
-            ''', conn)
-            
-            # Get vendor-brand combinations
-            vendor_brands_df = pd.read_sql_query('''
-                SELECT "Vendor/Supplier*" as vendor, "Product Brand" as brand, COUNT(*) as product_count,
-                       COUNT(DISTINCT "Product Type*") as unique_product_types
-                FROM products 
-                WHERE "Vendor/Supplier*" IS NOT NULL AND "Vendor/Supplier*" != '' 
-                  AND "Product Brand" IS NOT NULL AND "Product Brand" != ''
-                GROUP BY "Vendor/Supplier*", "Product Brand"
-                ORDER BY product_count DESC
-            ''', conn)
-            
-            elapsed = (time.time() - start_time) * 1000
-            logging.info(f"✅ Database vendor stats completed ({elapsed:.1f}ms)")
-            
+        try:
+            with sqlite3.connect(product_db.db_path) as conn:
+                # Get all vendors with their product counts
+                vendors_df = pd.read_sql_query('''
+                    SELECT "Vendor/Supplier*" as vendor, COUNT(*) as product_count, 
+                           COUNT(DISTINCT "Product Brand") as unique_brands,
+                           COUNT(DISTINCT "Product Type*") as unique_product_types
+                    FROM products 
+                    WHERE "Vendor/Supplier*" IS NOT NULL AND "Vendor/Supplier*" != ''
+                    GROUP BY "Vendor/Supplier*"
+                    ORDER BY product_count DESC
+                ''', conn)
+                
+                # Get all brands with their product counts
+                brands_df = pd.read_sql_query('''
+                    SELECT "Product Brand" as brand, COUNT(*) as product_count,
+                           COUNT(DISTINCT "Vendor/Supplier*") as unique_vendors,
+                           COUNT(DISTINCT "Product Type*") as unique_product_types
+                    FROM products 
+                    WHERE "Product Brand" IS NOT NULL AND "Product Brand" != ''
+                    GROUP BY "Product Brand"
+                    ORDER BY product_count DESC
+                ''', conn)
+                
+                # Get all product types with their counts
+                product_types_df = pd.read_sql_query('''
+                    SELECT "Product Type*" as product_type, COUNT(*) as product_count,
+                           COUNT(DISTINCT "Vendor/Supplier*") as unique_vendors,
+                           COUNT(DISTINCT "Product Brand") as unique_brands
+                    FROM products 
+                    WHERE "Product Type*" IS NOT NULL AND "Product Type*" != ''
+                    GROUP BY "Product Type*"
+                    ORDER BY product_count DESC
+                ''', conn)
+                
+                # Get vendor-brand combinations
+                vendor_brands_df = pd.read_sql_query('''
+                    SELECT "Vendor/Supplier*" as vendor, "Product Brand" as brand, COUNT(*) as product_count,
+                           COUNT(DISTINCT "Product Type*") as unique_product_types
+                    FROM products 
+                    WHERE "Vendor/Supplier*" IS NOT NULL AND "Vendor/Supplier*" != '' 
+                      AND "Product Brand" IS NOT NULL AND "Product Brand" != ''
+                    GROUP BY "Vendor/Supplier*", "Product Brand"
+                    ORDER BY product_count DESC
+                ''', conn)
+                
+                elapsed = (time.time() - start_time) * 1000
+                logging.info(f"✅ Database vendor stats completed ({elapsed:.1f}ms)")
+                
+                return jsonify({
+                    'vendors': vendors_df.to_dict('records'),
+                    'brands': brands_df.to_dict('records'),
+                    'product_types': product_types_df.to_dict('records'),
+                    'vendor_brands': vendor_brands_df.to_dict('records'),
+                    'summary': {
+                        'total_vendors': len(vendors_df),
+                        'total_brands': len(brands_df),
+                        'total_product_types': len(product_types_df),
+                        'total_vendor_brand_combinations': len(vendor_brands_df)
+                    }
+                })
+        except Exception as query_error:
+            logging.error(f"Error executing vendor stats queries: {query_error}")
+            import traceback
+            logging.error(traceback.format_exc())
+            # Return empty data instead of error
             return jsonify({
-                'vendors': vendors_df.to_dict('records'),
-                'brands': brands_df.to_dict('records'),
-                'product_types': product_types_df.to_dict('records'),
-                'vendor_brands': vendor_brands_df.to_dict('records'),
+                'vendors': [],
+                'brands': [],
+                'product_types': [],
+                'vendor_brands': [],
                 'summary': {
-                    'total_vendors': len(vendors_df),
-                    'total_brands': len(brands_df),
-                    'total_product_types': len(product_types_df),
-                    'total_vendor_brand_combinations': len(vendor_brands_df)
+                    'total_vendors': 0,
+                    'total_brands': 0,
+                    'total_product_types': 0,
+                    'total_vendor_brand_combinations': 0
                 }
             })
             
     except sqlite3.Error as db_error:
-        elapsed = (time.time() - start_time) * 1000 if 'start_time' in locals() else 0
+        elapsed = (time.time() - start_time) * 1000
         logging.error(f"❌ Database error in vendor stats after {elapsed:.1f}ms: {db_error}")
+        import traceback
+        logging.error(traceback.format_exc())
         return jsonify({
             'error': 'Database query failed',
             'vendors': [],
             'brands': [],
-            'summary': {'total_vendors': 0, 'total_brands': 0}
-        }), 500
+            'product_types': [],
+            'vendor_brands': [],
+            'summary': {
+                'total_vendors': 0,
+                'total_brands': 0,
+                'total_product_types': 0,
+                'total_vendor_brand_combinations': 0
+            }
+        }), 200  # Return 200 with empty data for graceful degradation
         
     except Exception as e:
-        elapsed = (time.time() - start_time) * 1000 if 'start_time' in locals() else 0
+        elapsed = (time.time() - start_time) * 1000
         logging.error(f"❌ Error in vendor stats after {elapsed:.1f}ms: {str(e)}")
         import traceback
         logging.error(traceback.format_exc())
@@ -6534,8 +6562,15 @@ def database_vendor_stats():
             'error': 'Internal server error',
             'vendors': [],
             'brands': [],
-            'summary': {'total_vendors': 0, 'total_brands': 0}
-        }), 500
+            'product_types': [],
+            'vendor_brands': [],
+            'summary': {
+                'total_vendors': 0,
+                'total_brands': 0,
+                'total_product_types': 0,
+                'total_vendor_brand_combinations': 0
+            }
+        }), 200  # Return 200 with empty data for graceful degradation
 @app.route('/api/products/search', methods=['GET'])
 def search_products():
     """Search for unique strains by brand within a vendor using Excel data."""
