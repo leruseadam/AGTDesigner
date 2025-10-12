@@ -4703,7 +4703,11 @@ class TemplateProcessor:
                                 
                                 # Use unified font sizing for lineage instead of hardcoded 12pt
                                 from src.core.generation.unified_font_sizing import get_font_size_by_marker
-                                lineage_font_size = get_font_size_by_marker(cleaned_text, 'LINEAGE', self.template_type, self.scale_factor)
+                                # For vertical templates, use 'brand' field type since brand info is stored in Lineage field
+                                if self.template_type == 'vertical':
+                                    lineage_font_size = get_font_size_by_marker(cleaned_text, 'PRODUCTBRAND_CENTER', self.template_type, self.scale_factor)
+                                else:
+                                    lineage_font_size = get_font_size_by_marker(cleaned_text, 'LINEAGE', self.template_type, self.scale_factor)
                                 run.font.size = lineage_font_size
                                 
                                 run.font.color.rgb = RGBColor(255, 255, 255)  # Set text to white
