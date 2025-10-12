@@ -9806,6 +9806,84 @@ def health_check():
             'timestamp': datetime.now().isoformat()
         }), 500
 
+@app.route('/api/diagnostic', methods=['GET'])
+def diagnostic_check():
+    """Diagnostic endpoint to check what's working on the server."""
+    try:
+        import os
+        import sys
+        
+        diagnostic_info = {
+            'status': 'running',
+            'timestamp': datetime.now().isoformat(),
+            'python_version': sys.version,
+            'working_directory': os.getcwd(),
+            'git_commit': 'unknown'
+        }
+        
+        # Try to get git commit info
+        try:
+            import subprocess
+            result = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], 
+                                  capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                diagnostic_info['git_commit'] = result.stdout.strip()
+        except:
+            pass
+        
+        # Test basic imports
+        try:
+            from src.core.data.excel_processor import ExcelProcessor
+            diagnostic_info['excel_processor_import'] = 'OK'
+        except Exception as e:
+            diagnostic_info['excel_processor_import'] = f'ERROR: {str(e)}'
+        
+        # Test database connection
+        try:
+            product_db = get_product_database()
+            if product_db:
+                diagnostic_info['database_connection'] = 'OK'
+                diagnostic_info['database_path'] = product_db.db_path
+                diagnostic_info['database_exists'] = os.path.exists(product_db.db_path)
+            else:
+                diagnostic_info['database_connection'] = 'No database instance'
+        except Exception as e:
+            diagnostic_info['database_connection'] = f'ERROR: {str(e)}'
+        
+        # Test Excel processor
+        try:
+            excel_processor = get_excel_processor()
+            if excel_processor:
+                diagnostic_info['excel_processor_status'] = 'Available'
+                if hasattr(excel_processor, 'df') and excel_processor.df is not None:
+                    diagnostic_info['excel_data_loaded'] = f'{len(excel_processor.df)} rows'
+                else:
+                    diagnostic_info['excel_data_loaded'] = 'No data'
+            else:
+                diagnostic_info['excel_processor_status'] = 'Not available'
+        except Exception as e:
+            diagnostic_info['excel_processor_status'] = f'ERROR: {str(e)}'
+        
+        # Test available-tags endpoint logic (minimal version)
+        try:
+            cache_key = get_session_cache_key('available_tags')
+            cached_tags = cache.get(cache_key)
+            if cached_tags:
+                diagnostic_info['available_tags_cache'] = f'{len(cached_tags)} cached tags'
+            else:
+                diagnostic_info['available_tags_cache'] = 'No cache'
+        except Exception as e:
+            diagnostic_info['available_tags_cache'] = f'ERROR: {str(e)}'
+        
+        return jsonify(diagnostic_info)
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
 def check_rate_limit(ip_address):
     """Check if IP address is within rate limits."""
     current_time = time.time()
