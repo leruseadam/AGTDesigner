@@ -1407,9 +1407,13 @@ class TemplateProcessor:
         # Use DescAndWeight from record if it exists, otherwise construct it
         if 'DescAndWeight' in label_context and label_context['DescAndWeight']:
             # DescAndWeight is already set correctly in the record, use it as-is
-            # Just ensure it's wrapped with the DESC marker if not already wrapped
+            # For double templates, don't wrap with markers to prevent duplication
             desc_and_weight = label_context['DescAndWeight']
-            if not is_already_wrapped(desc_and_weight, 'DESC'):
+            if self.template_type == 'double':
+                # Double template uses simple placeholders, no markers needed
+                label_context['DescAndWeight'] = desc_and_weight
+                self.logger.info(f"🎯 DOUBLE TEMPLATE DESC FIX: Using DescAndWeight as-is: '{desc_and_weight}'")
+            elif not is_already_wrapped(desc_and_weight, 'DESC'):
                 label_context['DescAndWeight'] = wrap_with_marker(desc_and_weight, 'DESC')
         else:
             # Fallback: construct DescAndWeight from Description and WeightUnits
@@ -1750,8 +1754,14 @@ class TemplateProcessor:
         # Lineage logic is now handled earlier in the method for both classic and non-classic types
 
         # Fast wrapping for remaining fields
-        if label_context.get('DescAndWeight'):
-            label_context['DescAndWeight'] = wrap_with_marker(unwrap_marker(label_context['DescAndWeight'], 'DESC'), 'DESC')
+        # For double templates, don't wrap with markers to prevent duplication
+        if self.template_type == 'double':
+            # Double template uses simple placeholders, no markers needed
+            self.logger.info(f"🎯 DOUBLE TEMPLATE MARKER FIX: Skipping marker wrapping for double template")
+        else:
+            # For other templates, wrap with markers as usual
+            if label_context.get('DescAndWeight'):
+                label_context['DescAndWeight'] = wrap_with_marker(unwrap_marker(label_context['DescAndWeight'], 'DESC'), 'DESC')
         
         if 'ProductType' not in label_context:
             label_context['ProductType'] = record.get('ProductType', '')
@@ -1789,24 +1799,52 @@ class TemplateProcessor:
         label_context['ProductStrain_START'] = 'PRODUCTSTRAIN_START'
         label_context['ProductStrain_END'] = 'PRODUCTSTRAIN_END'
         # Add Lineage markers back for post-processing system to work
-        label_context['Lineage_START'] = 'LINEAGE_START'
-        label_context['Lineage_END'] = 'LINEAGE_END'
-        label_context['ProductBrand_START'] = 'PRODUCTBRAND_START'
-        label_context['ProductBrand_END'] = 'PRODUCTBRAND_END'
-        label_context['ProductVendor_START'] = 'PRODUCTVENDOR_START'
-        label_context['ProductVendor_END'] = 'PRODUCTVENDOR_END'
-        label_context['DescAndWeight_START'] = 'DESC_START'
-        label_context['DescAndWeight_END'] = 'DESC_END'
-        label_context['Ratio_or_THC_CBD_START'] = 'THC_CBD_START'
-        label_context['Ratio_or_THC_CBD_END'] = 'THC_CBD_END'
-        label_context['Price_START'] = 'PRICE_START'
-        label_context['Price_END'] = 'PRICE_END'
+        # For double templates, don't add marker fields to prevent duplication
+        if self.template_type != 'double':
+            label_context['Lineage_START'] = 'LINEAGE_START'
+            label_context['Lineage_END'] = 'LINEAGE_END'
+            label_context['ProductBrand_START'] = 'PRODUCTBRAND_START'
+            label_context['ProductBrand_END'] = 'PRODUCTBRAND_END'
+            label_context['ProductVendor_START'] = 'PRODUCTVENDOR_START'
+            label_context['ProductVendor_END'] = 'PRODUCTVENDOR_END'
+            label_context['DescAndWeight_START'] = 'DESC_START'
+            label_context['DescAndWeight_END'] = 'DESC_END'
+            label_context['Ratio_or_THC_CBD_START'] = 'THC_CBD_START'
+            label_context['Ratio_or_THC_CBD_END'] = 'THC_CBD_END'
+            label_context['Price_START'] = 'PRICE_START'
+            label_context['Price_END'] = 'PRICE_END'
+        else:
+            # For double templates, set marker fields to empty to prevent duplication
+            label_context['Lineage_START'] = ''
+            label_context['Lineage_END'] = ''
+            label_context['ProductBrand_START'] = ''
+            label_context['ProductBrand_END'] = ''
+            label_context['ProductVendor_START'] = ''
+            label_context['ProductVendor_END'] = ''
+            label_context['DescAndWeight_START'] = ''
+            label_context['DescAndWeight_END'] = ''
+            label_context['Ratio_or_THC_CBD_START'] = ''
+            label_context['Ratio_or_THC_CBD_END'] = ''
+            label_context['Price_START'] = ''
+            label_context['Price_END'] = ''
+            self.logger.info(f"🎯 DOUBLE TEMPLATE MARKER FIELDS FIX: Set all marker fields to empty for double template")
         
         # Wrap WeightUnits with markers if it exists
-        if label_context.get('WeightUnits'):
-            label_context['WeightUnits'] = wrap_with_marker(label_context['WeightUnits'], 'WEIGHTUNITS')
-        label_context['WeightUnits_START'] = 'WEIGHTUNITS_START'
-        label_context['WeightUnits_END'] = 'WEIGHTUNITS_END'
+        # For double templates, don't wrap with markers to prevent duplication
+        if self.template_type == 'double':
+            # Double template uses simple placeholders, no markers needed
+            if label_context.get('WeightUnits'):
+                # Keep WeightUnits as-is without markers
+                pass
+            label_context['WeightUnits_START'] = ''
+            label_context['WeightUnits_END'] = ''
+            self.logger.info(f"🎯 DOUBLE TEMPLATE WEIGHT FIX: Skipping WeightUnits marker wrapping for double template")
+        else:
+            # For other templates, wrap with markers as usual
+            if label_context.get('WeightUnits'):
+                label_context['WeightUnits'] = wrap_with_marker(label_context['WeightUnits'], 'WEIGHTUNITS')
+            label_context['WeightUnits_START'] = 'WEIGHTUNITS_START'
+            label_context['WeightUnits_END'] = 'WEIGHTUNITS_END'
         label_context['Ratio_START'] = 'RATIO_START'
         label_context['Ratio_END'] = 'RATIO_END'
         label_context['JointRatio_START'] = 'JOINT_RATIO_START'
