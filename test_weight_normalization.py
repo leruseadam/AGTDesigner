@@ -104,34 +104,34 @@ def test_weight_normalization():
         },
         
         # New rules based on database analysis
-        # Vape Cartridge (non-classic) - should be in grams
+        # Vape Cartridge (non-classic) - should be in oz
         {
             'name': 'Blue Dream Vape Cartridge',
             'brand': 'Brand',
             'type': 'Vape Cartridge',
-            'weight': '0.5',
-            'unit': 'oz',
-            'expected': ('14.17', 'g')
+            'weight': '28',
+            'unit': 'g',
+            'expected': ('0.99', 'oz')
         },
         
-        # Small oz Topical - should be in grams
+        # Topical (non-classic) - should be in oz
         {
             'name': 'CBD Cream',
             'brand': 'Brand',
             'type': 'Topical',
-            'weight': '0.05',
-            'unit': 'oz',
-            'expected': ('1.42', 'g')
+            'weight': '50',
+            'unit': 'g',
+            'expected': ('1.76', 'oz')
         },
         
-        # Capsule (non-classic) - should be in grams
+        # Capsule (non-classic) - should be in oz
         {
             'name': 'CBD Capsules',
             'brand': 'Brand',
             'type': 'Capsule',
-            'weight': '0.35',
-            'unit': 'oz',
-            'expected': ('9.92', 'g')
+            'weight': '10',
+            'unit': 'g',
+            'expected': ('0.35', 'oz')
         },
         
         # Large Edible Solid - should be in oz

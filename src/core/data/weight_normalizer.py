@@ -94,41 +94,28 @@ class WeightNormalizer:
                     logger.info(f"Converting concentrate to grams: {product_name} {current_weight}{current_unit} -> {weight_g}g")
                     return str(weight_g), 'g'
             
-            # Rule 7: Vape Cartridges should be in grams (non-classic)
-            if self._is_vape_cartridge(product_type) and current_unit.lower() == 'oz':
-                weight_g = self._convert_oz_to_grams(current_weight, current_unit)
-                if weight_g is not None:
-                    logger.info(f"Converting vape cartridge to grams: {product_name} {current_weight}{current_unit} -> {weight_g}g")
-                    return str(weight_g), 'g'
+            # Rule 7: Non-classic types should be in oz
+            if self._is_non_classic_type(product_type) and current_unit.lower() == 'g':
+                # Convert grams to oz for non-classic types
+                weight_oz = self._convert_grams_to_oz(current_weight, current_unit)
+                if weight_oz is not None:
+                    logger.info(f"Converting non-classic to oz: {product_name} {current_weight}{current_unit} -> {weight_oz}oz")
+                    return str(weight_oz), 'oz'
             
-            # Rule 8: Small oz topicals should be in grams
-            if self._is_small_oz_topical(product_data):
-                weight_g = self._convert_oz_to_grams(current_weight, current_unit)
-                if weight_g is not None:
-                    logger.info(f"Converting small oz topical to grams: {product_name} {current_weight}{current_unit} -> {weight_g}g")
-                    return str(weight_g), 'g'
-            
-            # Rule 9: Capsules should be in grams (non-classic)
-            if self._is_capsule(product_type) and current_unit.lower() == 'oz':
-                weight_g = self._convert_oz_to_grams(current_weight, current_unit)
-                if weight_g is not None:
-                    logger.info(f"Converting capsule to grams: {product_name} {current_weight}{current_unit} -> {weight_g}g")
-                    return str(weight_g), 'g'
-            
-            # Rule 10: Paraphernalia with "each" units should be standardized
+            # Rule 8: Paraphernalia with "each" units should be standardized
             if self._is_paraphernalia(product_type) and current_unit.lower() == 'each':
                 # Keep as "each" but standardize weight
                 if current_weight in ['0', '0.0', '0.00']:
                     return '1', 'each'
             
-            # Rule 11: Edible Solids with mixed units - convert large grams to oz
+            # Rule 9: Edible Solids with mixed units - convert large grams to oz
             if self._is_edible_solid(product_type) and self._should_edible_solid_be_oz(product_data):
                 weight_oz = self._convert_grams_to_oz(current_weight, current_unit)
                 if weight_oz is not None:
                     logger.info(f"Converting edible solid to oz: {product_name} {current_weight}{current_unit} -> {weight_oz}oz")
                     return str(weight_oz), 'oz'
             
-            # Rule 12: Pre-rolls and Infused Pre-rolls should be in grams
+            # Rule 10: Pre-rolls and Infused Pre-rolls should be in grams (classic)
             if self._is_pre_roll(product_type) and current_unit.lower() == 'oz':
                 weight_g = self._convert_oz_to_grams(current_weight, current_unit)
                 if weight_g is not None:
@@ -211,14 +198,6 @@ class WeightNormalizer:
         concentrate_types = ['concentrate', 'wax', 'shatter', 'hash', 'rosin', 'solventless concentrate']
         return any(ctype in product_type.lower() for ctype in concentrate_types)
     
-    def _is_vape_cartridge(self, product_type: str) -> bool:
-        """Check if product is a vape cartridge (non-classic)."""
-        return 'vape cartridge' in product_type.lower()
-    
-    def _is_capsule(self, product_type: str) -> bool:
-        """Check if product is a capsule (non-classic)."""
-        return 'capsule' in product_type.lower()
-    
     def _is_paraphernalia(self, product_type: str) -> bool:
         """Check if product is paraphernalia (non-classic)."""
         return 'paraphernalia' in product_type.lower()
@@ -230,6 +209,15 @@ class WeightNormalizer:
     def _is_pre_roll(self, product_type: str) -> bool:
         """Check if product is a pre-roll (classic)."""
         return 'pre-roll' in product_type.lower() or 'infused pre-roll' in product_type.lower()
+    
+    def _is_non_classic_type(self, product_type: str) -> bool:
+        """Check if product is a non-classic type (should be in oz)."""
+        non_classic_types = [
+            'vape cartridge', 'capsule', 'topical', 'tincture', 
+            'paraphernalia', 'rso/co2 tankers', 'trade sample', 
+            'alcohol/ethanol extract'
+        ]
+        return any(nc_type in product_type.lower() for nc_type in non_classic_types)
     
     def _convert_grams_to_oz(self, weight: str, unit: str) -> Optional[float]:
         """Convert grams to ounces."""
@@ -253,22 +241,6 @@ class WeightNormalizer:
             pass
         return None
     
-    def _is_small_oz_topical(self, product_data: Dict[str, Any]) -> bool:
-        """Check if product is a topical with small oz weight that should be grams."""
-        product_type = str(product_data.get('Product Type*', '')).strip()
-        current_weight = str(product_data.get('Weight*', '')).strip()
-        current_unit = str(product_data.get('Units', '')).strip()
-        
-        # Check if it's a topical
-        if 'topical' not in product_type.lower():
-            return False
-        
-        try:
-            weight_val = float(current_weight)
-            # Small oz weights (< 0.1oz) should be in grams
-            return (current_unit.lower() == 'oz' and weight_val < 0.1)
-        except ValueError:
-            return False
     
     def _should_edible_solid_be_oz(self, product_data: Dict[str, Any]) -> bool:
         """Check if edible solid should be converted to oz."""
