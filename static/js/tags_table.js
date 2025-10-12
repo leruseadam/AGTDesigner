@@ -1,9 +1,3 @@
-// Classic types that should show "Lineage" instead of "Brand"
-const CLASSIC_TYPES = [
-    "flower", "pre-roll", "concentrate", "infused pre-roll", 
-    "solventless concentrate", "vape cartridge", "rso/co2 tankers"
-];
-
 // Lineage abbreviation mapping (matching Python version)
 const ABBREVIATED_LINEAGE = {
     "SATIVA": "S",
