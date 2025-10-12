@@ -2094,7 +2094,9 @@ class TemplateProcessor:
                 self._ensure_mini_template_brand_centering(doc)
                 
                 # Clear blank cells that don't have meaningful content
-                self._clear_blank_cells_in_mini_template(doc)
+                # DISABLED: This was too aggressive and cleared template placeholders
+                # self._clear_blank_cells_in_mini_template(doc)
+                self.logger.info("Skipping blank cell clearing to preserve template placeholders")
                 
                 # CRITICAL: Enforce fixed cell dimensions to maintain 1.5" x 1.5" cells
                 for table in doc.tables:
@@ -2935,13 +2937,17 @@ class TemplateProcessor:
                         # Check if cell is essentially empty
                         cell_text = cell.text.strip()
                         
-                        # Consider a cell blank if it has no text or only contains template placeholders
+                        # Consider a cell blank if it has no text or only contains empty template placeholders
+                        # Don't clear cells that contain actual template placeholders - only clear truly empty ones
                         is_blank = (
                             not cell_text or 
                             cell_text == '' or
-                            # Check for empty template placeholders like {{LabelX.Description}}
-                            (cell_text.startswith('{{Label') and cell_text.endswith('}}') and 
-                             any(field in cell_text for field in ['.Description}}', '.Price}}', '.Lineage}}', '.ProductBrand}}', '.Ratio_or_THC_CBD}}', '.DOH}}', '.ProductStrain}}']))
+                            # Only clear cells that contain empty template placeholders (no data rendered)
+                            # This should NOT clear template placeholders that will be populated with data
+                            cell_text in ['{{}}', '{{ }}'] or
+                            # Clear cells that contain only whitespace and empty placeholders
+                            (cell_text.startswith('{{') and cell_text.endswith('}}') and 
+                             cell_text.strip() in ['{{}}', '{{ }}', '{{  }}'])
                         )
                         
                         if is_blank:
