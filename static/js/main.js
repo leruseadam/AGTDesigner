@@ -4079,6 +4079,14 @@ const TagManager = {
         try {
             console.log('=== fetchAndUpdateAvailableTags START ===');
             
+            // Rate limiting: prevent rapid successive calls
+            const now = Date.now();
+            if (this._lastFetchTime && (now - this._lastFetchTime) < 2000) {
+                console.log('Rate limiting: skipping fetch (too soon after last fetch)');
+                return false;
+            }
+            this._lastFetchTime = now;
+            
             // Check if we're in JSON matching mode and have JSON matched tags
             const hasJsonMatchedTags = this.state.persistentSelectedTags && this.state.persistentSelectedTags.length > 0;
             const hasJsonMatchedData = this.state.tags && this.state.tags.length > 0 && 

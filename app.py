@@ -5187,6 +5187,39 @@ def process_database_product_for_api(db_product):
 @app.route('/api/available-tags', methods=['GET'])
 def get_available_tags():
     try:
+        # Rate limiting: prevent rapid successive requests
+        client_ip = request.remote_addr
+        current_time = time.time()
+        
+        # Clean old entries (older than 10 seconds)
+        if hasattr(get_available_tags, '_rate_limit_data'):
+            get_available_tags._rate_limit_data = {
+                ip: times for ip, times in get_available_tags._rate_limit_data.items()
+                if any(t > current_time - 10 for t in times)
+            }
+        else:
+            get_available_tags._rate_limit_data = {}
+        
+        # Check rate limit (max 5 requests per 10 seconds per IP)
+        if client_ip in get_available_tags._rate_limit_data:
+            recent_requests = [t for t in get_available_tags._rate_limit_data[client_ip] if t > current_time - 10]
+            if len(recent_requests) >= 5:
+                logging.warning(f"Rate limit exceeded for {client_ip}, returning cached data")
+                # Return cached data instead of 429 error
+                cache_key = get_session_cache_key('available_tags')
+                cached_tags = cache.get(cache_key)
+                if cached_tags:
+                    return jsonify({
+                        'tags': cached_tags,
+                        'total_count': len(cached_tags),
+                        'source': 'rate-limited-cache'
+                    })
+        
+        # Record this request
+        if client_ip not in get_available_tags._rate_limit_data:
+            get_available_tags._rate_limit_data[client_ip] = []
+        get_available_tags._rate_limit_data[client_ip].append(current_time)
+        
         logging.info("=== AVAILABLE TAGS REQUEST START ===")
         start_time = time.time()
         
