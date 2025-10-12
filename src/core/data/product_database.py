@@ -1398,6 +1398,14 @@ class ProductDatabase:
                     # Track this product to prevent duplicates within the same upload
                     self._current_upload_products.add(duplicate_key)
                     
+                    # Normalize weights before storing in database
+                    try:
+                        from src.core.data.weight_normalizer import weight_normalizer
+                        product_data = weight_normalizer.normalize_product_data(product_data)
+                        logger.info(f"Normalized weights for product: {product_name}")
+                    except Exception as e:
+                        logger.warning(f"Failed to normalize weights for {product_name}: {e}")
+                    
                     # Store the product in database
                     product_id = self.add_or_update_product(product_data)
                     if product_id:
