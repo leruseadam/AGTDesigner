@@ -223,15 +223,32 @@ except ImportError:
 
 # Import performance optimization modules
 try:
+    # Try lightweight performance optimizations first (for PythonAnywhere)
+    from src.core.utils.lightweight_performance import (
+        get_lightweight_stats, clear_lightweight_cache, 
+        lightweight_cached, performance_timer_lightweight
+    )
+    LIGHTWEIGHT_PERFORMANCE_AVAILABLE = True
+    logging.info("Lightweight performance optimizations loaded")
+except ImportError as e:
+    LIGHTWEIGHT_PERFORMANCE_AVAILABLE = False
+    logging.warning(f"Lightweight performance optimizations not available: {e}")
+
+try:
+    # Try full performance optimizations (for local development)
     from src.core.utils.performance_cache import cache_manager, get_cache_stats
     from src.core.utils.performance_monitor import get_performance_monitor, start_performance_monitoring
     from src.core.utils.lazy_loader import preload_all, get_lazy_stats
     from src.core.data.ultra_fast_database import get_ultra_fast_database
     from src.core.data.ultra_fast_excel_processor import get_ultra_fast_processor
-    PERFORMANCE_OPTIMIZATIONS_AVAILABLE = True
+    FULL_PERFORMANCE_OPTIMIZATIONS_AVAILABLE = True
+    logging.info("Full performance optimizations loaded")
 except ImportError as e:
-    logger.warning(f"Performance optimizations not available: {e}")
-    PERFORMANCE_OPTIMIZATIONS_AVAILABLE = False
+    FULL_PERFORMANCE_OPTIMIZATIONS_AVAILABLE = False
+    logging.warning(f"Full performance optimizations not available: {e}")
+
+# Use lightweight optimizations if full ones aren't available
+PERFORMANCE_OPTIMIZATIONS_AVAILABLE = FULL_PERFORMANCE_OPTIMIZATIONS_AVAILABLE or LIGHTWEIGHT_PERFORMANCE_AVAILABLE
 import hashlib
 import glob
 import subprocess
@@ -837,13 +854,19 @@ if Compress is not None:
 
 # Initialize performance optimizations
 if PERFORMANCE_OPTIMIZATIONS_AVAILABLE:
-    # Start performance monitoring
-    start_performance_monitoring()
-    
-    # Preload critical components
-    preload_all()
-    
-    logger.info("Performance optimizations initialized")
+    try:
+        if FULL_PERFORMANCE_OPTIMIZATIONS_AVAILABLE:
+            # Full performance optimizations (local development)
+            start_performance_monitoring()
+            preload_all()
+            logging.info("Full performance optimizations initialized")
+        elif LIGHTWEIGHT_PERFORMANCE_AVAILABLE:
+            # Lightweight optimizations only (PythonAnywhere)
+            logging.info("Lightweight performance optimizations initialized")
+        
+    except Exception as e:
+        logging.warning(f"Failed to initialize performance optimizations: {e}")
+        # Continue without performance optimizations to prevent app crash
 # Global function to check session size
 def check_session_size():
     """Check if session is too large and clear it if necessary."""
@@ -13414,44 +13437,63 @@ def performance_stats():
         return jsonify({'error': 'Performance optimizations not available'}), 503
     
     try:
-        from src.core.utils.performance_monitor import get_performance_summary
-        stats = get_performance_summary()
+        if FULL_PERFORMANCE_OPTIMIZATIONS_AVAILABLE:
+            from src.core.utils.performance_monitor import get_performance_summary
+            stats = get_performance_summary()
+        elif LIGHTWEIGHT_PERFORMANCE_AVAILABLE:
+            stats = get_lightweight_stats()
+        else:
+            stats = {'error': 'No performance stats available'}
+        
         return jsonify(stats)
     except Exception as e:
-        logger.error(f"Failed to get performance stats: {e}")
+        logging.error(f"Failed to get performance stats: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/performance/cache/stats')
-def cache_stats():
+def cache_stats_route():
     """Get cache statistics."""
     if not PERFORMANCE_OPTIMIZATIONS_AVAILABLE:
         return jsonify({'error': 'Performance optimizations not available'}), 503
     
     try:
-        cache_stats = get_cache_stats()
+        if FULL_PERFORMANCE_OPTIMIZATIONS_AVAILABLE:
+            cache_stats = get_cache_stats()
+        elif LIGHTWEIGHT_PERFORMANCE_AVAILABLE:
+            cache_stats = get_lightweight_stats()['cache']
+        else:
+            cache_stats = {'error': 'No cache stats available'}
+        
         return jsonify(cache_stats)
     except Exception as e:
-        logger.error(f"Failed to get cache stats: {e}")
+        logging.error(f"Failed to get cache stats: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/performance/cache/clear', methods=['POST'])
-def clear_cache():
+def clear_cache_route():
     """Clear all caches."""
     if not PERFORMANCE_OPTIMIZATIONS_AVAILABLE:
         return jsonify({'error': 'Performance optimizations not available'}), 503
     
     try:
-        from src.core.utils.performance_cache import clear_cache
-        from src.core.data.ultra_fast_excel_processor import clear_excel_cache
-        from src.core.data.ultra_fast_database import clear_database_cache
+        if FULL_PERFORMANCE_OPTIMIZATIONS_AVAILABLE:
+            from src.core.utils.performance_cache import clear_cache
+            from src.core.data.ultra_fast_excel_processor import clear_excel_cache
+            from src.core.data.ultra_fast_database import clear_database_cache
+            
+            clear_cache()
+            clear_excel_cache()
+            clear_database_cache()
+        elif LIGHTWEIGHT_PERFORMANCE_AVAILABLE:
+            clear_lightweight_cache()
         
-        clear_cache()
-        clear_excel_cache()
-        clear_database_cache()
+        # Clear Flask cache too
+        if hasattr(cache, 'clear'):
+            cache.clear()
         
         return jsonify({'message': 'All caches cleared successfully'})
     except Exception as e:
-        logger.error(f"Failed to clear caches: {e}")
+        logging.error(f"Failed to clear caches: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/performance/optimize', methods=['POST'])
@@ -13462,13 +13504,16 @@ def optimize_performance():
     
     try:
         # Clear caches
-        from src.core.utils.performance_cache import clear_cache
-        clear_cache()
-        
-        # Optimize database
-        from src.core.data.ultra_fast_database import get_ultra_fast_database
-        db = get_ultra_fast_database()
-        db.optimize_database()
+        if FULL_PERFORMANCE_OPTIMIZATIONS_AVAILABLE:
+            from src.core.utils.performance_cache import clear_cache
+            clear_cache()
+            
+            # Optimize database
+            from src.core.data.ultra_fast_database import get_ultra_fast_database
+            db = get_ultra_fast_database()
+            db.optimize_database()
+        elif LIGHTWEIGHT_PERFORMANCE_AVAILABLE:
+            clear_lightweight_cache()
         
         # Garbage collection
         import gc
@@ -13476,7 +13521,7 @@ def optimize_performance():
         
         return jsonify({'message': 'Performance optimization completed'})
     except Exception as e:
-        logger.error(f"Failed to optimize performance: {e}")
+        logging.error(f"Failed to optimize performance: {e}")
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
