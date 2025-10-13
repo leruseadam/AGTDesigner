@@ -4764,6 +4764,23 @@ const TagManager = {
 
             console.log('Generation request - persistentSelectedTags:', checkedTags);
             console.log('Generation request - persistentSelectedTags count:', checkedTags.length);
+            
+            // CRITICAL FIX: Collect full tag data with updated lineage for generation
+            const selectedTagObjects = [];
+            for (const tagName of checkedTags) {
+                // Find the tag in the current state with updated lineage
+                const tagWithUpdatedLineage = this.state.tags.find(t => 
+                    (t['Product Name*'] === tagName) || (t.ProductName === tagName)
+                );
+                if (tagWithUpdatedLineage) {
+                    selectedTagObjects.push(tagWithUpdatedLineage);
+                    console.log(`📝 Using tag with updated lineage: ${tagName} -> ${tagWithUpdatedLineage.lineage || tagWithUpdatedLineage.Lineage}`);
+                } else {
+                    // Fallback: create a basic tag object with just the name
+                    selectedTagObjects.push({ 'Product Name*': tagName, ProductName: tagName });
+                    console.log(`⚠️ Tag not found in state, using fallback: ${tagName}`);
+                }
+            }
 
             if (checkedTags.length === 0) {
                 console.error('Please select at least one tag to generate');
@@ -4787,7 +4804,7 @@ const TagManager = {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    selected_tags: checkedTags,
+                    selected_tags: selectedTagObjects,  // CRITICAL FIX: Send full tag objects with updated lineage
                     template_type: templateType,
                     scale_factor: scaleFactor
                 })

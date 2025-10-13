@@ -4383,8 +4383,43 @@ def generate_labels():
         # Use cached dropdowns for UI (if needed elsewhere)
         dropdowns = excel_processor.dropdown_cache
 
-        # Use selected tags from request body or session, this updates the processor's internal state
+        # CRITICAL FIX: Handle both tag names (strings) and full tag objects with updated lineage
         selected_tags_to_use = selected_tags_from_request
+        
+        # If selected_tags contains full tag objects (new format), extract tag names and update lineage
+        if selected_tags_to_use and isinstance(selected_tags_to_use[0], dict):
+            logging.info("LINEAGE FIX: Processing full tag objects with updated lineage data")
+            tag_names = []
+            lineage_updates = {}
+            
+            for tag_obj in selected_tags_to_use:
+                # Extract tag name
+                tag_name = tag_obj.get('Product Name*') or tag_obj.get('ProductName', '')
+                if tag_name:
+                    tag_names.append(tag_name)
+                    
+                    # Extract updated lineage
+                    updated_lineage = tag_obj.get('lineage') or tag_obj.get('Lineage', '')
+                    if updated_lineage:
+                        lineage_updates[tag_name] = updated_lineage
+                        logging.info(f"LINEAGE FIX: Tag '{tag_name}' has updated lineage: '{updated_lineage}'")
+            
+            selected_tags_to_use = tag_names
+            
+            # Update Excel processor lineage data with manual changes
+            if lineage_updates and has_excel_data and excel_processor.df is not None and 'Lineage' in excel_processor.df.columns:
+                logging.info("LINEAGE FIX: Applying manual lineage updates to Excel processor data")
+                for tag_name, new_lineage in lineage_updates.items():
+                    # Try different column names for product names
+                    product_name_columns = ['ProductName', 'Product Name*', 'Product Name']
+                    for col in product_name_columns:
+                        if col in excel_processor.df.columns:
+                            mask = excel_processor.df[col] == tag_name
+                            if mask.any():
+                                old_lineage = excel_processor.df.loc[mask, 'Lineage'].iloc[0]
+                                excel_processor.df.loc[mask, 'Lineage'] = new_lineage
+                                logging.info(f"LINEAGE FIX: Updated '{tag_name}' lineage from '{old_lineage}' to '{new_lineage}'")
+                                break
         
                 # If no selected tags in request body, check session for JSON-matched tags
         if not selected_tags_to_use:

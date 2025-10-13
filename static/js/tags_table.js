@@ -394,6 +394,8 @@ class TagsTable {
             if (lineageSelect) {
               lineageSelect.value = newLineage;
             }
+            // CRITICAL FIX: Update the data-lineage attribute
+            tagElement.dataset.lineage = newLineage;
             console.log(`✅ Updated lineage in selected tag UI for ${tagName}`);
           }
         });
