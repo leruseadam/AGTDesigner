@@ -54,8 +54,10 @@ if (fileInput) {
 }
 
 async function handleFiles(files) {
+  console.log('handleFiles called with:', files);
   if (files.length > 0) {
     const file = files[0];
+    console.log('Processing file:', file.name, 'Size:', file.size, 'Type:', file.type);
     if (currentFile) currentFile.textContent = file.name;
     if (currentFileInfo) currentFileInfo.style.display = 'block';
     
@@ -83,6 +85,7 @@ async function handleFiles(files) {
     // Handle file upload
     const formData = new FormData();
     formData.append('file', file);
+    console.log('FormData created, starting upload to /upload endpoint...');
     
     try {
       TagManager.setLoading(true);
@@ -92,11 +95,14 @@ async function handleFiles(files) {
         TagManager.clearUIStateForNewFile(true); // Preserve filters during upload
       }
       
-      const response = await fetch('/upload', {
+      console.log('Sending upload request...');
+      const response = await fetch('/upload-optimized', {
         method: 'POST',
         body: formData
       });
+      console.log('Upload response received. Status:', response.status, response.statusText);
       const data = await response.json();
+      console.log('Upload response data:', data);
       
       if (response.ok) {
         // File uploaded successfully, now poll for processing status

@@ -5850,7 +5850,7 @@ const TagManager = {
             
             console.log('🚀 Sending lightning upload request...');
             
-            const uploadResponse = await fetch('/upload-lightning', {
+            const uploadResponse = await fetch('/upload-optimized', {
                 method: 'POST',
                 body: formData
             });
