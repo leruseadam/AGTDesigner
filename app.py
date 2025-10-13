@@ -786,7 +786,11 @@ def create_app():
         'http://127.0.0.1:5001',
         'https://adamcordova.pythonanywhere.com'  # PythonAnywhere domain
     ]
-    CORS(app, resources={r"/api/*": {"origins": allowed_origins}})
+    # Enable CORS for both API routes and upload routes
+    CORS(app, resources={
+        r"/api/*": {"origins": allowed_origins},
+        r"/upload*": {"origins": allowed_origins}  # Add upload routes
+    })
     
     # Check if we're in development mode
     development_mode = app.config.get('DEVELOPMENT_MODE', False)
