@@ -1719,6 +1719,7 @@ def upload_file():
             
             return jsonify({
                 'success': True,
+                'status': 'processing',
                 'message': 'File uploaded, processing in background',
                 'filename': file.filename,
                 'processing': True
@@ -1762,6 +1763,7 @@ def upload_file():
             
             return jsonify({
                 'success': True,
+                'status': 'ready',
                 'message': 'File uploaded and processed',
                 'filename': file.filename,
                 'rows': row_count
