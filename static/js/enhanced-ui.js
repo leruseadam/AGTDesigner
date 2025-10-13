@@ -96,7 +96,7 @@ async function handleFiles(files) {
       }
       
       console.log('Sending upload request...');
-      const response = await fetch('/upload-optimized', {
+        const response = await fetch('/upload-ultra-reliable', {
         method: 'POST',
         body: formData
       });
