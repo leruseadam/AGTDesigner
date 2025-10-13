@@ -158,20 +158,27 @@ def optimized_lineage_assignment(df, product_types, lineages, classic_types):
     classic_default_mask = classic_mask & empty_lineage_mask
     result[classic_default_mask] = 'HYBRID'
     
-    # Use Product Strain to determine lineage for ALL non-classic types (override existing lineage)
+    # Use Product Strain to determine lineage for ALL types (override existing lineage)
     if 'Product Strain' in df.columns:
         product_strain = df['Product Strain'].astype(str)
         
         # CBD Blend products -> CBD lineage (yellow) - override existing lineage
-        # But be more conservative with edibles
-        cbd_blend_mask = nonclassic_mask & (product_strain.str.contains('CBD Blend', case=False, na=False))
+        # CRITICAL FIX: Apply to ALL types, not just non-classic types
+        # CBD flower and CBD pre-rolls are still classic types that should show CBD lineage
+        cbd_blend_mask = product_strain.str.contains('CBD Blend', case=False, na=False)
         
         # Define edible types for more conservative CBD assignment
         edible_types = {"edible (solid)", "edible (liquid)", "high cbd edible liquid", "tincture", "topical", "capsule"}
         edible_mask = product_types.str.strip().str.lower().isin(edible_types)
         
-        # For non-edibles with CBD Blend, assign CBD lineage
-        non_edible_cbd_blend = cbd_blend_mask & ~edible_mask
+        # CRITICAL FIX: Handle CBD Blend for both classic and non-classic types
+        
+        # For classic types with CBD Blend (like CBD flower, CBD pre-rolls), always assign CBD lineage
+        classic_cbd_blend = cbd_blend_mask & classic_mask
+        result[classic_cbd_blend] = 'CBD'
+        
+        # For non-classic, non-edibles with CBD Blend, assign CBD lineage
+        non_edible_cbd_blend = cbd_blend_mask & nonclassic_mask & ~edible_mask
         result[non_edible_cbd_blend] = 'CBD'
         
         # For edibles with CBD Blend, be more conservative - only assign CBD if explicitly high-CBD
@@ -2225,8 +2232,14 @@ class ExcelProcessor:
                 # If Product Strain is 'CBD Blend', set Lineage to 'CBD' (but be more conservative with edibles)
                 if "Product Strain" in self.df.columns and "Lineage" in self.df.columns:
                     cbd_blend_mask = self.df["Product Strain"].astype(str).str.lower().str.strip() == "cbd blend"
-                    # Only apply to non-edibles - edibles with CBD Blend should typically be MIXED unless explicitly CBD-focused
-                    non_edible_cbd_blend = cbd_blend_mask & ~edible_mask
+                    
+                    # CRITICAL FIX: Include classic types (like CBD flower, CBD pre-rolls) in CBD assignment
+                    # Define classic types for CBD assignment
+                    classic_types_set = {"flower", "pre-roll", "infused pre-roll", "concentrate", "solventless concentrate", "vape cartridge", "rso/co2 tankers"}
+                    classic_mask = self.df["Product Type*"].str.strip().str.lower().isin(classic_types_set)
+                    
+                    # Apply CBD lineage to: classic types with CBD Blend OR non-classic, non-edibles with CBD Blend
+                    cbd_eligible_mask = cbd_blend_mask & (classic_mask | ~edible_mask)
                     
                     # For edibles, only assign CBD lineage if they are explicitly high-CBD products
                     edible_cbd_blend_explicit = cbd_blend_mask & edible_mask & (
@@ -2234,7 +2247,7 @@ class ExcelProcessor:
                         (self.df[product_name_col].str.contains(r"\bCBD\b", case=False, na=False) if product_name_col else False)
                     )
                     
-                    combined_cbd_blend_mask = non_edible_cbd_blend | edible_cbd_blend_explicit
+                    combined_cbd_blend_mask = cbd_eligible_mask | edible_cbd_blend_explicit
                     
                     if combined_cbd_blend_mask.any() and "Lineage" in self.df.columns:
                         if "CBD" not in self.df["Lineage"].cat.categories:
