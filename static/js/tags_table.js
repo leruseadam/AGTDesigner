@@ -17,7 +17,7 @@ if (typeof ABBREVIATED_LINEAGE === 'undefined') {
 
 // Use full lineage names for all dropdowns
 const getUniqueLineages = () => {
-  return ['SATIVA','INDICA','HYBRID','HYBRID/SATIVA','HYBRID/INDICA','CBD','MIXED','PARA'];
+  return ['HYBRID/SATIVA','HYBRID/INDICA','SATIVA','INDICA','HYBRID','CBD','MIXED','PARA'];
 };
 
 function createTagRow(tag) {

@@ -1587,7 +1587,7 @@ class TemplateProcessor:
                 self.logger.debug(f"DEBUG: Cleaned lineage_val: '{repr(cleaned_lineage_val)}'")
                 
                 # CRITICAL FIX: If lineage contains brand name, extract only the lineage part
-                classic_lineages = ["SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", "CBD", "MIXED"]
+                classic_lineages = ["HYBRID/SATIVA", "HYBRID/INDICA", "SATIVA", "INDICA", "HYBRID", "CBD", "MIXED"]
                 for classic_lineage in classic_lineages:
                     if cleaned_lineage_val.upper().startswith(classic_lineage.upper()):
                         # Extract only the lineage part, not the brand
@@ -4616,7 +4616,7 @@ class TemplateProcessor:
             # Starting _clean_up_lineage_brand_concatenation
 
             # Define classic lineage values
-            classic_lineages = ["SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", "CBD", "MIXED"]
+            classic_lineages = ["HYBRID/SATIVA", "HYBRID/INDICA", "SATIVA", "INDICA", "HYBRID", "CBD", "MIXED"]
 
             for table in doc.tables:
                 for row in table.rows:
@@ -5312,7 +5312,7 @@ class TemplateProcessor:
                 # CRITICAL FIX: For classic types, don't combine lineage and vendor
                 # The lineage should only contain actual lineage content (SATIVA, INDICA, HYBRID)
                 # Check if this is a classic type by looking at the lineage content
-                classic_lineages = ["SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", "CBD", "MIXED"]
+                classic_lineages = ["HYBRID/SATIVA", "HYBRID/INDICA", "SATIVA", "INDICA", "HYBRID", "CBD", "MIXED"]
                 
                 # Check if lineage content starts with a classic lineage value
                 is_classic_lineage = False

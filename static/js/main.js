@@ -873,7 +873,7 @@ const TagManager = {
             const sortedValues = Array.from(values).sort((a, b) => {
                 // Special handling for lineage to maintain logical order
                 if (filterType === 'lineage') {
-                    const lineageOrder = ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA', 'CBD', 'CBD_BLEND', 'MIXED', 'PARA'];
+                    const lineageOrder = ['HYBRID/SATIVA', 'HYBRID/INDICA', 'SATIVA', 'INDICA', 'HYBRID', 'CBD', 'CBD_BLEND', 'MIXED', 'PARA'];
                     const aIndex = lineageOrder.indexOf(a.toUpperCase());
                     const bIndex = lineageOrder.indexOf(b.toUpperCase());
                     if (aIndex !== -1 && bIndex !== -1) {
@@ -1121,7 +1121,7 @@ const TagManager = {
                 const sortedOptions = [...newOptions].sort((a, b) => {
                     // Special handling for lineage to maintain logical order
                     if (filterType === 'lineage') {
-                        const lineageOrder = ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA', 'CBD', 'CBD_BLEND', 'MIXED', 'PARA'];
+                        const lineageOrder = ['HYBRID/SATIVA', 'HYBRID/INDICA', 'SATIVA', 'INDICA', 'HYBRID', 'CBD', 'CBD_BLEND', 'MIXED', 'PARA'];
                         const aIndex = lineageOrder.indexOf(a.toUpperCase());
                         const bIndex = lineageOrder.indexOf(b.toUpperCase());
                         if (aIndex !== -1 && bIndex !== -1) {
@@ -2720,7 +2720,7 @@ const TagManager = {
         ];
         // Helper function to determine if a lineage should map to MIXED
         const shouldMapToMixed = (lineageValue) => {
-            const validLineages = ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/INDICA', 'HYBRID/SATIVA', 'CBD', 'CBD_BLEND', 'PARA', 'PARAPHERNALIA', 'MIXED'];
+            const validLineages = ['HYBRID/SATIVA', 'HYBRID/INDICA', 'SATIVA', 'INDICA', 'HYBRID', 'CBD', 'CBD_BLEND', 'PARA', 'PARAPHERNALIA', 'MIXED'];
             return !validLineages.includes((lineageValue || '').toUpperCase());
         };
         

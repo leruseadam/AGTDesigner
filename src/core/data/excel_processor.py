@@ -1658,7 +1658,11 @@ class ExcelProcessor:
                     .str.lower()
                     .replace({
                         "indica_hybrid": "HYBRID/INDICA",
+                        "indica/hybrid": "HYBRID/INDICA",  # FIX: Add forward slash format
+                        "hybrid/indica": "HYBRID/INDICA",  # FIX: Add reverse format
                         "sativa_hybrid": "HYBRID/SATIVA",
+                        "sativa/hybrid": "HYBRID/SATIVA",  # FIX: Add forward slash format
+                        "hybrid/sativa": "HYBRID/SATIVA",  # FIX: Add reverse format
                         "sativa": "SATIVA",
                         "hybrid": "HYBRID",
                         "indica": "INDICA",
