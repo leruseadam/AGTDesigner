@@ -115,8 +115,28 @@ async function handleFiles(files) {
           TagManager.updateExcelLoadingStatus('Processing file...');
         }
         
-        // Start polling for upload status
-        pollUploadStatus(filename);
+        // FIX: Handle both immediate and background processing
+        if (data.processing) {
+          // Background processing - start polling
+          console.log('🔄 File processing in background, starting polling...');
+          pollUploadStatus(filename);
+        } else {
+          // Immediate processing - refresh data right away
+          console.log('✅ File processed immediately, refreshing data...');
+          
+          // Hide loading splash
+          if (typeof TagManager !== 'undefined' && TagManager.hideExcelLoadingSplash) {
+            TagManager.hideExcelLoadingSplash();
+          }
+          
+          // Refresh application data immediately
+          setTimeout(() => {
+            if (typeof TagManager !== 'undefined' && TagManager.checkForExistingData) {
+              console.log('🔄 Refreshing application data...');
+              TagManager.checkForExistingData();
+            }
+          }, 1000);
+        }
         
         // Add animation class to file path container
         if (filePathContainer) {

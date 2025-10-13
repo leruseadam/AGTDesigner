@@ -5986,13 +5986,26 @@ const TagManager = {
                         console.warn('Failed to clear cache:', cacheError);
                     }
                     
-                    console.log(`[UPLOAD DEBUG] Loading available tags...`);
-                    const availableTagsLoaded = await this.fetchAndUpdateAvailableTags();
-                    console.log(`[UPLOAD DEBUG] Available tags loaded: ${availableTagsLoaded}`);
+                    // FIX: Force complete data refresh after upload
+                    console.log(`[UPLOAD DEBUG] Forcing complete data refresh...`);
                     
-                    console.log(`[UPLOAD DEBUG] Loading selected tags...`);
-                    const selectedTagsLoaded = await this.fetchAndUpdateSelectedTags();
-                    console.log(`[UPLOAD DEBUG] Selected tags loaded: ${selectedTagsLoaded}`);
+                    // Method 1: Use checkForExistingData for comprehensive refresh
+                    try {
+                        console.log(`[UPLOAD DEBUG] Calling checkForExistingData for complete refresh...`);
+                        await this.checkForExistingData();
+                        console.log(`[UPLOAD DEBUG] checkForExistingData completed successfully`);
+                    } catch (refreshError) {
+                        console.warn(`[UPLOAD DEBUG] checkForExistingData failed, trying individual refreshes:`, refreshError);
+                        
+                        // Fallback: Individual data refreshes
+                        console.log(`[UPLOAD DEBUG] Loading available tags...`);
+                        const availableTagsLoaded = await this.fetchAndUpdateAvailableTags();
+                        console.log(`[UPLOAD DEBUG] Available tags loaded: ${availableTagsLoaded}`);
+                        
+                        console.log(`[UPLOAD DEBUG] Loading selected tags...`);
+                        const selectedTagsLoaded = await this.fetchAndUpdateSelectedTags();
+                        console.log(`[UPLOAD DEBUG] Selected tags loaded: ${selectedTagsLoaded}`);
+                    }
                     
                     console.log(`[UPLOAD DEBUG] Loading filter options...`);
                     await this.fetchAndPopulateFilters();
