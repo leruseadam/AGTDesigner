@@ -6536,7 +6536,16 @@ def database_stats():
                     logging.warning(f"Could not get Excel count: {excel_error}")
                 
                 # Use the best available count (Excel data if available, otherwise database)
-                final_total = total_products if total_products > 0 else excel_total
+                # PRIORITY: Excel data first, then database count, then 0
+                if excel_total > 0:
+                    final_total = excel_total
+                    logging.info(f"✅ Using Excel count: {final_total}")
+                elif total_products > 0:
+                    final_total = total_products
+                    logging.info(f"✅ Using database count: {final_total}")
+                else:
+                    final_total = 0
+                    logging.warning("⚠️ No valid count found, using 0")
                 
                 stats = {
                     'total_products': final_total,  # Use the best available count
