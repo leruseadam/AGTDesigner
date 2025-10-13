@@ -1550,24 +1550,30 @@ class TemplateProcessor:
             # For classic types, Lineage should show strain lineage and ProductVendor should show brand
             self.logger.debug(f"Processing classic type '{product_type}' for Lineage and ProductVendor")
             
-            # Try to get lineage from database first, then fall back to Excel
+            # PRIORITY FIX: Use Excel lineage first (includes manual dropdown changes), then database fallback
             lineage_val = ""
-            if product_strain:
+            
+            # PRIORITY 1: Use Excel lineage (includes manual dropdown changes from user)
+            if lineage_text and lineage_text.strip():
+                lineage_val = lineage_text.upper()
+                self.logger.debug(f"Using Excel lineage (includes manual changes): '{lineage_val}'")
+            elif product_strain:
+                # PRIORITY 2: Fallback to database lineage if no Excel lineage
                 try:
                     from src.core.data.product_database import get_product_database
                     product_db = get_product_database()
                     strain_info = product_db.get_strain_info(product_strain)
                     if strain_info and strain_info.get('canonical_lineage'):
                         lineage_val = strain_info['canonical_lineage'].upper()
-                        self.logger.debug(f"Using database lineage: '{lineage_val}'")
+                        self.logger.debug(f"Using database lineage fallback: '{lineage_val}'")
                     else:
-                        # Fallback to Excel lineage
-                        lineage_val = lineage_text.upper() if lineage_text else ""
-                        self.logger.debug(f"Using Excel lineage fallback: '{lineage_val}'")
+                        # PRIORITY 3: Default fallback
+                        lineage_val = ""
+                        self.logger.debug(f"No lineage found in Excel or database")
                 except Exception as e:
-                    # Fallback to Excel lineage if database lookup fails
-                    lineage_val = lineage_text.upper() if lineage_text else ""
-                    self.logger.debug(f"Using Excel lineage due to error: '{lineage_val}' (error: {e})")
+                    # PRIORITY 3: Default fallback if database lookup fails
+                    lineage_val = ""
+                    self.logger.debug(f"Using default fallback due to error: '{lineage_val}' (error: {e})")
             else:
                 # No strain available, try Excel lineage
                 lineage_val = lineage_text.upper() if lineage_text else ""

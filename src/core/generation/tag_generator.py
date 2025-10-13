@@ -437,25 +437,32 @@ def process_chunk(args):
             is_edible = product_type in edible_types
             is_horizontal_or_double_or_vertical = orientation in {"horizontal", "double", "vertical"}
             
-            # For classic types, try to get the strain's canonical lineage from the database
+            # PRIORITY FIX: Use Excel lineage first (includes manual dropdown changes), then database fallback
             if is_classic_type and product_strain:
                 # DEBUG: Processing classic type '{product_type}' with strain '{product_strain}'
-                try:
-                    from src.core.data.product_database import get_product_database
-                    product_db = get_product_database()
-                    strain_info = product_db.get_strain_info(product_strain)
-                    # DEBUG: Strain info: {strain_info}
-                    if strain_info and strain_info.get('canonical_lineage'):
-                        lineage_val = strain_info['canonical_lineage'].upper()
-                        # DEBUG: Using database lineage: '{lineage_val}'
-                    else:
-                        # Fallback to Excel lineage if no database lineage found
-                        lineage_val = lineage_text.upper() if lineage_text else ""
-                        # DEBUG: Using Excel lineage fallback: '{lineage_val}'
-                except Exception as e:
-                    # Fallback to Excel lineage if database lookup fails
-                    lineage_val = lineage_text.upper() if lineage_text else ""
-                    # DEBUG: Using Excel lineage due to error: '{lineage_val}' (error: {e})
+                
+                # PRIORITY 1: Use Excel lineage (includes manual dropdown changes from user)
+                if lineage_text and lineage_text.strip():
+                    lineage_val = lineage_text.upper()
+                    # DEBUG: Using Excel lineage (includes manual changes): '{lineage_val}'
+                else:
+                    # PRIORITY 2: Fallback to database lineage if no Excel lineage
+                    try:
+                        from src.core.data.product_database import get_product_database
+                        product_db = get_product_database()
+                        strain_info = product_db.get_strain_info(product_strain)
+                        # DEBUG: Strain info: {strain_info}
+                        if strain_info and strain_info.get('canonical_lineage'):
+                            lineage_val = strain_info['canonical_lineage'].upper()
+                            # DEBUG: Using database lineage fallback: '{lineage_val}'
+                        else:
+                            # PRIORITY 3: Default fallback
+                            lineage_val = ""
+                            # DEBUG: No lineage found in Excel or database
+                    except Exception as e:
+                        # PRIORITY 3: Default fallback if database lookup fails
+                        lineage_val = ""
+                        # DEBUG: Using default fallback due to error: (error: {e})
             elif is_edible:
                 lineage_val = product_brand.upper() if product_brand else lineage_text
             else:
