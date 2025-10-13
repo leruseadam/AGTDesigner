@@ -523,8 +523,17 @@
           const availableTags = availableTagsResult.value || [];
           
           // FIXED: Get product count from multiple sources for reliability
-          const totalProducts = Array.isArray(availableTags) ? availableTags.length : 
-                               (stats.total_products || stats.total_records || 0);
+          const totalProducts = Array.isArray(availableTags) && availableTags.length > 0 ? availableTags.length : 
+                               (stats.total_records || stats.total_products || 0);
+          
+          // DEBUG: Log the values to help troubleshoot
+          console.log('Product count sources:', {
+            availableTagsLength: Array.isArray(availableTags) ? availableTags.length : 'not array',
+            statsTotalProducts: stats.total_products,
+            statsTotalRecords: stats.total_records,
+            finalTotalProducts: totalProducts
+          });
+          
           const totalStrains = stats.total_strains || 0;
           
           console.log('Analytics data loaded:', { 
@@ -7434,8 +7443,16 @@
       ])
       .then(([stats, view, vendorStats, availableTags]) => {
         // FIXED: Get product count from multiple sources for reliability
-        const totalProducts = Array.isArray(availableTags) ? availableTags.length : 
-                             (stats.total_products || stats.total_records || 0);
+        const totalProducts = Array.isArray(availableTags) && availableTags.length > 0 ? availableTags.length : 
+                             (stats.total_records || stats.total_products || 0);
+        
+        // DEBUG: Log the values to help troubleshoot
+        console.log('Product count sources:', {
+          availableTagsLength: Array.isArray(availableTags) ? availableTags.length : 'not array',
+          statsTotalProducts: stats.total_products,
+          statsTotalRecords: stats.total_records,
+          finalTotalProducts: totalProducts
+        });
         const totalStrains = stats.total_strains;
         
         const infoHtml = `
@@ -9392,8 +9409,17 @@
         ])
         .then(([stats, vendorStats, analytics, availableTags]) => {
           // FIXED: Get product count from multiple sources for reliability
-          const totalProducts = Array.isArray(availableTags) ? availableTags.length : 
-                               (stats.total_products || stats.total_records || 0);
+          const totalProducts = Array.isArray(availableTags) && availableTags.length > 0 ? availableTags.length : 
+                               (stats.total_records || stats.total_products || 0);
+          
+          // DEBUG: Log the values to help troubleshoot
+          console.log('Product count sources:', {
+            availableTagsLength: Array.isArray(availableTags) ? availableTags.length : 'not array',
+            statsTotalProducts: stats.total_products,
+            statsTotalRecords: stats.total_records,
+            finalTotalProducts: totalProducts
+          });
+          
           const totalStrains = stats.total_strains || 0;
         
         const analyticsHtml = `
