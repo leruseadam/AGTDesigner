@@ -6535,9 +6535,12 @@ def database_stats():
                 except Exception as excel_error:
                     logging.warning(f"Could not get Excel count: {excel_error}")
                 
+                # Use the best available count (Excel data if available, otherwise database)
+                final_total = total_products if total_products > 0 else excel_total
+                
                 stats = {
-                    'total_products': total_products if total_products > 0 else excel_total,  # Use total_products or Excel fallback
-                    'total_records': total_products if total_products > 0 else excel_total,  # Add this for frontend compatibility
+                    'total_products': final_total,  # Use the best available count
+                    'total_records': final_total,   # Same value for compatibility
                     'unique_vendors': unique_vendors,
                     'unique_brands': unique_brands,
                     'unique_product_types': unique_product_types,
