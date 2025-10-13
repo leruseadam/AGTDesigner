@@ -12,8 +12,8 @@ COLORS = {
     'SATIVA': 'ED4123',
     'INDICA': '9900FF',
     'HYBRID': '009900',
-    'HYBRID_INDICA': '9900FF',
-    'HYBRID_SATIVA': 'ED4123',
+    'HYBRID/INDICA': '9900FF',  # FIX: Use forward slash to match actual lineage values
+    'HYBRID/SATIVA': 'ED4123',  # FIX: Use forward slash to match actual lineage values
     'CBD': 'F1C232',
     'CBD_BLEND': 'F1C232',  # Same color as CBD
     'MIXED': '0021F5',
@@ -38,9 +38,9 @@ def apply_lineage_colors(doc):
                     if "PARAPHERNALIA" in text:
                         color_hex = COLORS['PARA']
                     elif "HYBRID/INDICA" in text or "HYBRID INDICA" in text:
-                        color_hex = COLORS['HYBRID_INDICA']
+                        color_hex = COLORS['HYBRID/INDICA']  # FIX: Use correct key with forward slash
                     elif "HYBRID/SATIVA" in text or "HYBRID SATIVA" in text:
-                        color_hex = COLORS['HYBRID_SATIVA']
+                        color_hex = COLORS['HYBRID/SATIVA']  # FIX: Use correct key with forward slash
                     elif "SATIVA" in text:
                         color_hex = COLORS['SATIVA']
                     elif "INDICA" in text:
