@@ -1,7 +1,8 @@
 // Lineage abbreviation mapping (matching Python version)
 // Check if already defined in main.js to avoid redeclaration
+// ABBREVIATED_LINEAGE moved to main.js to prevent redeclaration
 if (typeof ABBREVIATED_LINEAGE === 'undefined') {
-  var ABBREVIATED_LINEAGE = {
+  window.ABBREVIATED_LINEAGE = {
     "SATIVA": "S",
     "INDICA": "I", 
     "HYBRID": "H",

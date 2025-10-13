@@ -4363,8 +4363,8 @@ const TagManager = {
         // Update table header if TagsTable is available
         setTimeout(() => {
             // Also update table header if TagsTable is available
-            if (typeof TagsTable !== 'undefined' && TagsTable.updateTableHeader) {
-                TagsTable.updateTableHeader();
+            if (typeof window.TagsTable !== 'undefined' && window.TagsTable.updateTableHeader) {
+                window.TagsTable.updateTableHeader();
             }
         }, 100);
 
@@ -6120,7 +6120,9 @@ const TagManager = {
     },
 
     onTagsLoaded: function(tags) {
-        TagsTable.updateTagsList('availableTags', tags);
+        if (typeof window.TagsTable !== 'undefined' && window.TagsTable.updateTagsList) {
+            window.TagsTable.updateTagsList('availableTags', tags);
+        }
         // Auto check all available tags call removed
     },
 
@@ -6136,8 +6138,8 @@ const TagManager = {
             console.log('Filter changed:', filterType, value);
             
             // Update table header if TagsTable is available
-            if (filterType === 'productType' && typeof TagsTable !== 'undefined' && TagsTable.updateTableHeader) {
-                TagsTable.updateTableHeader();
+            if (filterType === 'productType' && typeof window.TagsTable !== 'undefined' && window.TagsTable.updateTableHeader) {
+                window.TagsTable.updateTableHeader();
             }
             
             // Update filter options for cascading behavior
@@ -6875,7 +6877,9 @@ if (addSelectedTagsBtn) {
 
 // Only update if filteredTags is defined
 if (typeof filteredTags !== 'undefined' && filteredTags) {
-    TagsTable.updateTagsList('availableTags', filteredTags);
+    if (typeof window.TagsTable !== 'undefined' && window.TagsTable.updateTagsList) {
+        window.TagsTable.updateTagsList('availableTags', filteredTags);
+    }
 }
 // Auto check all available tags call removed
 
