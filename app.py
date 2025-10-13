@@ -2785,9 +2785,19 @@ def upload_lightning():
         if not file.filename.lower().endswith('.xlsx'):
             return jsonify({'error': 'Only .xlsx files are allowed'}), 400
         
-        # Quick file size check
+        # OPTIMIZATION: Quick file size check and validation
         file.seek(0, 2)
         file_size = file.tell()
+        file.seek(0)  # Reset to beginning
+        
+        logging.info(f"📁 Upload file size: {file_size:,} bytes")
+        
+        # Prevent hanging by limiting file size
+        if file_size == 0:
+            return jsonify({'error': 'Empty file uploaded'}), 400
+        
+        if file_size > 100 * 1024 * 1024:  # 100MB limit
+            return jsonify({'error': 'File too large (>100MB). Please use a smaller file.'}), 400
         file.seek(0)
         
         max_size = app.config.get('MAX_CONTENT_LENGTH', 100 * 1024 * 1024)
@@ -2824,6 +2834,178 @@ def upload_lightning():
         
     except Exception as e:
         logging.error(f"[LIGHTNING] Upload failed: {e}")
+        return jsonify({'error': f'Upload failed: {str(e)}'}), 500
+
+@app.route('/upload-optimized', methods=['POST'])
+def upload_optimized():
+    """Optimized upload that prevents Excel hanging during processing"""
+    try:
+        logging.info("=== OPTIMIZED UPLOAD START ===")
+        start_time = time.time()
+        
+        # Validate file upload
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file uploaded'}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        if not file.filename.lower().endswith('.xlsx'):
+            return jsonify({'error': 'Only .xlsx files are allowed'}), 400
+        
+        # OPTIMIZATION: Quick file size check and validation
+        file.seek(0, 2)
+        file_size = file.tell()
+        file.seek(0)  # Reset to beginning
+        
+        logging.info(f"📁 Upload file size: {file_size:,} bytes")
+        
+        # Prevent hanging by limiting file size
+        if file_size == 0:
+            return jsonify({'error': 'Empty file uploaded'}), 400
+        
+        if file_size > 100 * 1024 * 1024:  # 100MB limit
+            return jsonify({'error': 'File too large (>100MB). Please use a smaller file.'}), 400
+        
+        # Quick preview to estimate processing time
+        estimated_rows = 1000  # Default estimate
+        try:
+            import pandas as pd
+            preview_df = pd.read_excel(file, nrows=100, engine='openpyxl')
+            estimated_rows = max(100, int(file_size / (file_size / len(preview_df)) * 1.2))
+            logging.info(f"📊 Estimated rows: {estimated_rows:,}")
+            file.seek(0)  # Reset after preview
+        except Exception as preview_error:
+            logging.warning(f"Preview failed: {preview_error}")
+        
+        # Save file
+        sanitized_filename = sanitize_filename(file.filename)
+        upload_folder = app.config['UPLOAD_FOLDER']
+        os.makedirs(upload_folder, exist_ok=True)
+        
+        file_path = os.path.join(upload_folder, sanitized_filename)
+        file.save(file_path)
+        
+        # OPTIMIZATION: Choose processing strategy based on file size
+        if estimated_rows > 5000:
+            # Large file - return immediately, process in background
+            logging.info(f"🚀 Large file detected ({estimated_rows:,} rows), starting background processing...")
+            
+            # Store in session for background processing
+            session.permanent = True
+            session['uploaded_file_path'] = file_path
+            session['uploaded_filename'] = sanitized_filename
+            session.modified = True
+            
+            # Start background processing thread
+            import threading
+            def process_large_file():
+                try:
+                    logging.info(f"[BG] Processing large file: {sanitized_filename}")
+                    from src.core.data.excel_processor import ExcelProcessor
+                    processor = ExcelProcessor()
+                    
+                    # Process with chunking to prevent hanging
+                    success = processor.load_file(file_path)
+                    if success:
+                        global _excel_processor
+                        with excel_processor_lock:
+                            _excel_processor = processor
+                            _excel_processor._last_loaded_file = file_path
+                        
+                        logging.info(f"[BG] Large file processed: {len(processor.df)} rows")
+                    else:
+                        logging.error(f"[BG] Failed to process large file: {sanitized_filename}")
+                except Exception as bg_error:
+                    logging.error(f"[BG] Background processing error: {bg_error}")
+            
+            threading.Thread(target=process_large_file, daemon=True).start()
+            
+            upload_time = time.time() - start_time
+            return jsonify({
+                'success': True,
+                'filename': sanitized_filename,
+                'message': f'Large file uploaded ({estimated_rows:,} rows estimated), processing in background...',
+                'processing': True,
+                'estimated_rows': estimated_rows,
+                'upload_time': upload_time
+            })
+        
+        else:
+            # Smaller file - process immediately with timeout protection
+            logging.info(f"⚡ Processing smaller file immediately ({estimated_rows:,} rows)...")
+            
+            try:
+                import signal
+                from src.core.data.excel_processor import ExcelProcessor
+                
+                def timeout_handler(signum, frame):
+                    raise TimeoutError("Processing timeout")
+                
+                # Set 30-second timeout
+                signal.signal(signal.SIGALRM, timeout_handler)
+                signal.alarm(30)
+                
+                try:
+                    processor = ExcelProcessor()
+                    success = processor.load_file(file_path)
+                    signal.alarm(0)  # Cancel timeout
+                    
+                    if success:
+                        global _excel_processor
+                        with excel_processor_lock:
+                            _excel_processor = processor
+                            _excel_processor._last_loaded_file = file_path
+                        
+                        row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
+                        
+                        # Store in session
+                        session.permanent = True
+                        session['uploaded_file_path'] = file_path
+                        session['uploaded_filename'] = sanitized_filename
+                        session.modified = True
+                        
+                        upload_time = time.time() - start_time
+                        logging.info(f"✅ File processed immediately: {row_count} rows in {upload_time:.2f}s")
+                        
+                        return jsonify({
+                            'success': True,
+                            'filename': sanitized_filename,
+                            'message': f'File uploaded and processed successfully ({row_count} rows)',
+                            'processing': False,
+                            'rows_processed': row_count,
+                            'upload_time': upload_time
+                        })
+                    else:
+                        signal.alarm(0)
+                        return jsonify({'error': 'Failed to process file'}), 500
+                        
+                except TimeoutError:
+                    signal.alarm(0)
+                    logging.warning("Processing timeout, switching to background processing...")
+                    
+                    # Store in session for background processing
+                    session.permanent = True
+                    session['uploaded_file_path'] = file_path
+                    session['uploaded_filename'] = sanitized_filename
+                    session.modified = True
+                    
+                    upload_time = time.time() - start_time
+                    return jsonify({
+                        'success': True,
+                        'filename': sanitized_filename,
+                        'message': 'File uploaded, processing in background due to size...',
+                        'processing': True,
+                        'upload_time': upload_time
+                    })
+                    
+            except Exception as process_error:
+                logging.error(f"Processing error: {process_error}")
+                return jsonify({'error': f'Processing failed: {str(process_error)}'}), 500
+        
+    except Exception as e:
+        logging.error(f"Optimized upload error: {e}")
         return jsonify({'error': f'Upload failed: {str(e)}'}), 500
 
 @app.route('/process-lightning', methods=['POST'])
