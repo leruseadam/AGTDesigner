@@ -5235,9 +5235,30 @@ def get_available_tags():
         excel_processor = get_excel_processor()
         if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
             try:
+                # OPTIMIZATION: Limit initial tag load for faster response
                 excel_tags = excel_processor.get_available_tags()
-                all_tags.extend(excel_tags)
-                logging.info(f"✅ Excel processor returned {len(excel_tags)} tags")
+                
+                # For large datasets, return first 500 tags immediately
+                if len(excel_tags) > 500:
+                    initial_tags = excel_tags[:500]
+                    logging.info(f"✅ Excel processor returned {len(excel_tags)} tags, sending first {len(initial_tags)} for fast loading")
+                    
+                    # Cache the results for faster subsequent requests
+                    cache.set(cache_key, excel_tags, timeout=300)  # Cache full dataset
+                    
+                    elapsed = (time.time() - start_time) * 1000
+                    logging.info(f"✅ Available tags (Excel-optimized) completed ({elapsed:.1f}ms)")
+                    
+                    return jsonify({
+                        'tags': initial_tags,
+                        'total_count': len(excel_tags),  # Return actual total
+                        'source': 'excel-optimized',
+                        'has_more': len(excel_tags) > 500,
+                        'remaining_count': len(excel_tags) - 500
+                    })
+                else:
+                    all_tags.extend(excel_tags)
+                    logging.info(f"✅ Excel processor returned {len(excel_tags)} tags")
             except Exception as e:
                 logging.warning(f"Excel processor error: {e}")
         
@@ -10148,6 +10169,75 @@ def get_available_tags_lite():
             'total_count': 0,
             'source': 'error-fallback'
         }), 200  # Return 200 instead of 500 to prevent frontend errors
+
+@app.route('/api/available-tags-remaining', methods=['GET'])
+def get_available_tags_remaining():
+    """Load remaining tags after initial batch for progressive loading."""
+    try:
+        start_time = time.time()
+        offset = request.args.get('offset', 500, type=int)
+        limit = request.args.get('limit', 500, type=int)
+        
+        logging.info(f"🔄 Loading remaining tags: offset={offset}, limit={limit}")
+        
+        # Get cached full dataset
+        cache_key = get_session_cache_key('available_tags')
+        cached_tags = cache.get(cache_key)
+        
+        if cached_tags:
+            remaining_tags = cached_tags[offset:offset + limit]
+            elapsed = (time.time() - start_time) * 1000
+            logging.info(f"✅ Remaining tags loaded: {len(remaining_tags)} tags ({elapsed:.1f}ms)")
+            
+            return jsonify({
+                'tags': remaining_tags,
+                'offset': offset,
+                'limit': limit,
+                'has_more': offset + limit < len(cached_tags),
+                'total_count': len(cached_tags),
+                'source': 'cached-remaining'
+            })
+        
+        # Fallback: get from Excel processor
+        excel_processor = get_excel_processor()
+        if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
+            try:
+                excel_tags = excel_processor.get_available_tags()
+                remaining_tags = excel_tags[offset:offset + limit]
+                
+                elapsed = (time.time() - start_time) * 1000
+                logging.info(f"✅ Remaining tags from Excel: {len(remaining_tags)} tags ({elapsed:.1f}ms)")
+                
+                return jsonify({
+                    'tags': remaining_tags,
+                    'offset': offset,
+                    'limit': limit,
+                    'has_more': offset + limit < len(excel_tags),
+                    'total_count': len(excel_tags),
+                    'source': 'excel-remaining'
+                })
+            except Exception as e:
+                logging.error(f"Excel processor error for remaining tags: {e}")
+        
+        return jsonify({
+            'tags': [],
+            'offset': offset,
+            'limit': limit,
+            'has_more': False,
+            'total_count': 0,
+            'source': 'empty-fallback'
+        })
+        
+    except Exception as e:
+        logging.error(f"Remaining tags error: {e}")
+        return jsonify({
+            'tags': [],
+            'offset': 0,
+            'limit': 0,
+            'has_more': False,
+            'total_count': 0,
+            'source': 'error-fallback'
+        }), 200
 
 def check_rate_limit(ip_address):
     """Check if IP address is within rate limits."""
