@@ -6500,20 +6500,44 @@ def database_stats():
                 product_types = cursor.fetchall()
                 product_type_distribution = {pt[0]: pt[1] for pt in product_types}
                 
-                # FALLBACK: If database is empty but Excel processor has data, use Excel count
+                # PRIORITY: Use Excel processor data if available (more reliable)
                 excel_total = 0
-                if total_products == 0:
-                    try:
-                        excel_processor = get_excel_processor()
-                        if excel_processor and hasattr(excel_processor, 'df') and excel_processor.df is not None:
-                            excel_total = len(excel_processor.df)
-                            logging.info(f"Database empty ({total_products}), using Excel count: {excel_total}")
-                    except Exception as excel_error:
-                        logging.warning(f"Could not get Excel count: {excel_error}")
+                excel_vendors = 0
+                excel_brands = 0
+                excel_product_types = 0
+                excel_distribution = {}
+                
+                try:
+                    excel_processor = get_excel_processor()
+                    if excel_processor and hasattr(excel_processor, 'df') and excel_processor.df is not None and not excel_processor.df.empty:
+                        excel_total = len(excel_processor.df)
+                        logging.info(f"📊 Excel processor has {excel_total} products, using Excel data instead of database")
+                        
+                        # Get Excel stats
+                        df = excel_processor.df
+                        if 'Vendor/Supplier*' in df.columns:
+                            excel_vendors = df['Vendor/Supplier*'].nunique()
+                        if 'Product Brand' in df.columns:
+                            excel_brands = df['Product Brand'].nunique()
+                        if 'Product Type*' in df.columns:
+                            excel_product_types = df['Product Type*'].nunique()
+                            excel_distribution = df['Product Type*'].value_counts().head(10).to_dict()
+                        
+                        # Use Excel data if it's better than database
+                        if excel_total > total_products:
+                            total_products = excel_total
+                            unique_vendors = excel_vendors
+                            unique_brands = excel_brands
+                            unique_product_types = excel_product_types
+                            product_type_distribution = excel_distribution
+                            logging.info(f"✅ Using Excel data: {total_products} products, {unique_vendors} vendors, {unique_brands} brands")
+                        
+                except Exception as excel_error:
+                    logging.warning(f"Could not get Excel count: {excel_error}")
                 
                 stats = {
-                    'total_products': total_records if total_records > 0 else excel_total,  # FIX: Use total_records instead of total_products
-                    'total_records': total_records if total_records > 0 else excel_total,  # Add this for frontend compatibility
+                    'total_products': total_products if total_products > 0 else excel_total,  # Use total_products or Excel fallback
+                    'total_records': total_products if total_products > 0 else excel_total,  # Add this for frontend compatibility
                     'unique_vendors': unique_vendors,
                     'unique_brands': unique_brands,
                     'unique_product_types': unique_product_types,
