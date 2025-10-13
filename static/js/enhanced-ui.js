@@ -115,27 +115,25 @@ async function handleFiles(files) {
           TagManager.updateExcelLoadingStatus('Processing file...');
         }
         
-        // FIX: Handle both immediate and background processing
+        // AGGRESSIVE FIX: Force page refresh after upload
         if (data.processing) {
           // Background processing - start polling
           console.log('🔄 File processing in background, starting polling...');
           pollUploadStatus(filename);
         } else {
-          // Immediate processing - refresh data right away
-          console.log('✅ File processed immediately, refreshing data...');
+          // Immediate processing - FORCE PAGE REFRESH
+          console.log('✅ File processed immediately, forcing page refresh...');
           
           // Hide loading splash
           if (typeof TagManager !== 'undefined' && TagManager.hideExcelLoadingSplash) {
             TagManager.hideExcelLoadingSplash();
           }
           
-          // Refresh application data immediately
+          // AGGRESSIVE FIX: Force page refresh after 2 seconds
           setTimeout(() => {
-            if (typeof TagManager !== 'undefined' && TagManager.checkForExistingData) {
-              console.log('🔄 Refreshing application data...');
-              TagManager.checkForExistingData();
-            }
-          }, 1000);
+            console.log('🔄 FORCING PAGE REFRESH to show updated data...');
+            window.location.reload();
+          }, 2000);
         }
         
         // Add animation class to file path container
@@ -325,40 +323,19 @@ function pollUploadStatus(filename) {
       console.log('Upload status response:', data);
       
       if (data.status === 'ready') {
-        // File processing is complete, fetch updated data
-        console.log(`File processing complete for ${filename}, fetching updated data...`);
+        // File processing is complete - FORCE PAGE REFRESH
+        console.log(`✅ File processing complete for ${filename}, forcing page refresh...`);
         
-        // Clear any existing UI state to ensure fresh start
-        if (typeof TagManager !== 'undefined') {
-          // Use the new comprehensive UI clearing function
-          TagManager.clearUIStateForNewFile(true); // Preserve filters during UI refresh
+        // Hide splash screen first
+        if (typeof TagManager !== 'undefined' && TagManager.hideExcelLoadingSplash) {
+          TagManager.hideExcelLoadingSplash();
         }
         
-        console.log('File processing complete, updating UI...');
-
-        // Fetch all updated data in parallel to avoid serial bottlenecks
-        console.time('post-ready-data-fetch');
-        await Promise.all([
-          // Available tags
-          (async () => {
-            console.log('Fetching available tags...');
-            const res = await TagManager.fetchAndUpdateAvailableTags();
-            console.log('Available tags result:', res);
-          })(),
-          // Selected tags
-          (async () => {
-            console.log('Fetching selected tags...');
-            const res = await TagManager.fetchAndUpdateSelectedTags();
-            console.log('Selected tags result:', res);
-          })(),
-          // Filter options
-          (async () => {
-            console.log('Fetching filter options...');
-            await TagManager.fetchAndPopulateFilters();
-            console.log('Filter options updated');
-          })()
-        ]);
-        console.timeEnd('post-ready-data-fetch');
+        // AGGRESSIVE FIX: Force page refresh to show updated data
+        setTimeout(() => {
+          console.log('🔄 FORCING PAGE REFRESH to show updated data...');
+          window.location.reload();
+        }, 2000);
         
         // Hide splash screen on success
         if (typeof TagManager !== 'undefined' && TagManager.hideExcelLoadingSplash) {
