@@ -3128,14 +3128,16 @@ const TagManager = {
             const originalTag = this.state.originalTags.find(t => t['Product Name*'] === tagName);
             if (originalTag) {
                 originalTag.lineage = newLineage;
-                console.log(`📝 Updated tag in originalTags`);
+                originalTag.Lineage = newLineage;  // CRITICAL FIX: Update both lineage and Lineage properties
+                console.log(`📝 Updated tag in originalTags: ${tagName} -> ${newLineage}`);
             }
 
             // Update the tag in current tags list
             const currentTag = this.state.tags.find(t => t['Product Name*'] === tagName);
             if (currentTag) {
                 currentTag.lineage = newLineage;
-                console.log(`📝 Updated tag in current tags`);
+                currentTag.Lineage = newLineage;  // CRITICAL FIX: Update both lineage and Lineage properties
+                console.log(`📝 Updated tag in current tags: ${tagName} -> ${newLineage}`);
             }
 
             // Optimized: Only update the specific tag elements instead of rebuilding everything

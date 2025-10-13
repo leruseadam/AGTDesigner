@@ -371,14 +371,16 @@ class TagsTable {
       const tag = TagManager.state.tags.find(t => t['Product Name*'] === tagName);
       if (tag) {
         tag.lineage = newLineage;
-        console.log(`📝 Updated tag in TagManager.state.tags`);
+        tag.Lineage = newLineage;  // CRITICAL FIX: Update both lineage and Lineage properties
+        console.log(`📝 Updated tag in TagManager.state.tags: ${tagName} -> ${newLineage}`);
       }
       
       // Update the tag in original tags as well
       const originalTag = TagManager.state.originalTags.find(t => t['Product Name*'] === tagName);
       if (originalTag) {
         originalTag.lineage = newLineage;
-        console.log(`📝 Updated tag in TagManager.state.originalTags`);
+        originalTag.Lineage = newLineage;  // CRITICAL FIX: Update both lineage and Lineage properties
+        console.log(`📝 Updated tag in TagManager.state.originalTags: ${tagName} -> ${newLineage}`);
       }
       
       // CRITICAL FIX: Don't fetch from backend - just update the local selected tag if it exists
