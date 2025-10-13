@@ -1033,7 +1033,12 @@ def initialize_excel_processor():
                 success = excel_processor.load_file(default_file)
                 if success:
                     excel_processor._last_loaded_file = default_file
-                    logging.info(f"Default file loaded successfully with {len(excel_processor.df)} records")
+                    row_count = len(excel_processor.df) if hasattr(excel_processor, 'df') and excel_processor.df is not None else 0
+                    logging.info(f"Default file loaded successfully with {row_count} records")
+                    
+                    # Database storage disabled on startup to avoid lock conflicts
+                    # The database already has persisted data
+                    logging.info(f"Database storage skipped on startup (using existing persisted data)")
                 else:
                     logging.warning("Failed to load default file")
             except Exception as load_error:
@@ -2941,68 +2946,39 @@ def upload_optimized():
             logging.info(f"⚡ Processing smaller file immediately ({estimated_rows:,} rows)...")
             
             try:
-                import signal
                 from src.core.data.excel_processor import ExcelProcessor
                 
-                def timeout_handler(signum, frame):
-                    raise TimeoutError("Processing timeout")
+                # Process without signal handling (signals don't work in threads)
+                processor = ExcelProcessor()
+                success = processor.load_file(file_path)
                 
-                # Set 30-second timeout
-                signal.signal(signal.SIGALRM, timeout_handler)
-                signal.alarm(30)
-                
-                try:
-                    processor = ExcelProcessor()
-                    success = processor.load_file(file_path)
-                    signal.alarm(0)  # Cancel timeout
+                if success:
+                    global _excel_processor
+                    with excel_processor_lock:
+                        _excel_processor = processor
+                        _excel_processor._last_loaded_file = file_path
                     
-                    if success:
-                        global _excel_processor
-                        with excel_processor_lock:
-                            _excel_processor = processor
-                            _excel_processor._last_loaded_file = file_path
-                        
-                        row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
-                        
-                        # Store in session
-                        session.permanent = True
-                        session['uploaded_file_path'] = file_path
-                        session['uploaded_filename'] = sanitized_filename
-                        session.modified = True
-                        
-                        upload_time = time.time() - start_time
-                        logging.info(f"✅ File processed immediately: {row_count} rows in {upload_time:.2f}s")
-                        
-                        return jsonify({
-                            'success': True,
-                            'filename': sanitized_filename,
-                            'message': f'File uploaded and processed successfully ({row_count} rows)',
-                            'processing': False,
-                            'rows_processed': row_count,
-                            'upload_time': upload_time
-                        })
-                    else:
-                        signal.alarm(0)
-                        return jsonify({'error': 'Failed to process file'}), 500
-                        
-                except TimeoutError:
-                    signal.alarm(0)
-                    logging.warning("Processing timeout, switching to background processing...")
+                    row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
                     
-                    # Store in session for background processing
+                    # Store in session
                     session.permanent = True
                     session['uploaded_file_path'] = file_path
                     session['uploaded_filename'] = sanitized_filename
                     session.modified = True
                     
                     upload_time = time.time() - start_time
+                    logging.info(f"✅ File processed immediately: {row_count} rows in {upload_time:.2f}s")
+                    
                     return jsonify({
                         'success': True,
                         'filename': sanitized_filename,
-                        'message': 'File uploaded, processing in background due to size...',
-                        'processing': True,
+                        'message': f'File uploaded and processed successfully ({row_count} rows)',
+                        'processing': False,
+                        'rows_processed': row_count,
                         'upload_time': upload_time
                     })
+                else:
+                    return jsonify({'error': 'Failed to process file'}), 500
                     
             except Exception as process_error:
                 logging.error(f"Processing error: {process_error}")
@@ -11918,165 +11894,7 @@ def serve_undo_selections_test():
     """Serve the undo selections test page."""
     return send_from_directory('.', 'test_undo_selections.html')
 
-@app.route('/upload-optimized', methods=['POST'])
-def upload_file_optimized():
-    """Highly optimized file upload with streaming and minimal processing"""
-    try:
-        # Quick validation
-        if not check_disk_space()[0]:
-            return jsonify({'error': 'Insufficient disk space'}), 507
-        
-        if not check_rate_limit(request.remote_addr):
-            return jsonify({'error': 'Rate limit exceeded'}), 429
-        
-        # Rate limiting for uploads (more restrictive)
-        client_ip = request.remote_addr
-        if not check_rate_limit(client_ip):
-            return jsonify({'error': 'Rate limit exceeded. Please wait before uploading another file.'}), 429
-        
-        logging.info("=== ULTRA-FAST UPLOAD REQUEST START ===")
-        start_time = time.time()
-        
-        # Log request details
-        logging.info(f"Request method: {request.method}")
-        logging.info(f"Request headers: {dict(request.headers)}")
-        logging.info(f"Request files: {list(request.files.keys()) if request.files else 'None'}")
-        
-        if 'file' not in request.files:
-            logging.error("No file uploaded - 'file' not in request.files")
-            return jsonify({'error': 'No file uploaded'}), 400
-        
-        file = request.files['file']
-        logging.info(f"File received: {file.filename}, Content-Type: {file.content_type}")
-        
-        if file.filename == '':
-            logging.error("No file selected - filename is empty")
-            return jsonify({'error': 'No file selected'}), 400
-        
-        if not file.filename.lower().endswith('.xlsx'):
-            logging.error(f"Invalid file type: {file.filename}")
-            return jsonify({'error': 'Only .xlsx files are allowed'}), 400
-        
-        # Sanitize filename to prevent path traversal (security fix)
-        sanitized_filename = sanitize_filename(file.filename)
-        if not sanitized_filename:
-            logging.error(f"Invalid filename after sanitization: {file.filename}")
-            return jsonify({'error': 'Invalid filename'}), 400
-        
-        # Check file size
-        file.seek(0, 2)  # Seek to end
-        file_size = file.tell()
-        file.seek(0)  # Reset to beginning
-        logging.info(f"File size: {file_size} bytes ({file_size / (1024*1024):.2f} MB)")
-        
-        if file_size > app.config['MAX_CONTENT_LENGTH']:
-            logging.error(f"File too large: {file_size} bytes (max: {app.config['MAX_CONTENT_LENGTH']})")
-            return jsonify({'error': f'File too large. Maximum size is {app.config["MAX_CONTENT_LENGTH"] / (1024*1024):.1f} MB'}), 400
-        
-        # Ensure upload folder exists
-        upload_folder = app.config['UPLOAD_FOLDER']
-        os.makedirs(upload_folder, exist_ok=True)
-        logging.info(f"Upload folder: {upload_folder}")
-        
-        # Use sanitized filename (security fix)
-        temp_path = os.path.join(upload_folder, sanitized_filename)
-        logging.info(f"Saving file to: {temp_path}")
-        
-        save_start = time.time()
-        try:
-            file.save(temp_path)
-            save_time = time.time() - save_start
-            logging.info(f"File saved successfully to {temp_path} in {save_time:.2f}s")
-        except Exception as save_error:
-            logging.error(f"Error saving file: {save_error}")
-            return jsonify({'error': f'Failed to save file: {str(save_error)}'}), 500
-        
-        # Clear any existing status for this filename and mark as processing
-        logging.info(f"[ULTRA-FAST] Setting processing status for: {file.filename}")
-        update_processing_status(file.filename, 'processing')
-        logging.info(f"[ULTRA-FAST] Processing status set. Current statuses: {dict(processing_status)}")
-        
-        # ULTRA-FAST UPLOAD OPTIMIZATION - Minimal cache clearing
-        logging.info(f"[ULTRA-FAST] Performing ultra-fast upload optimization for: {sanitized_filename}")
-        
-        # Only clear the most critical caches (preserve everything else)
-        try:
-            # Clear only the most essential file-related caches
-            critical_cache_keys = [
-                'full_excel_cache_key', 'json_matched_cache_key', 'file_path'
-            ]
-            cleared_count = 0
-            for key in critical_cache_keys:
-                if cache.has(key):
-                    cache.delete(key)
-                    cleared_count += 1
-            logging.info(f"[ULTRA-FAST] Cleared {cleared_count} critical cache entries")
-        except Exception as cache_error:
-            logging.warning(f"[ULTRA-FAST] Error clearing critical caches: {cache_error}")
-        
-        # Preserve ALL user session data for instant UI response
-        # Only clear the absolute minimum required for new file
-        if 'file_path' in session:
-            del session['file_path']
-            logging.info(f"[ULTRA-FAST] Cleared session key: file_path")
-        
-        # Clear global Excel processor to force complete replacement
-        logging.info(f"[ULTRA-FAST] Resetting Excel processor before loading new file: {sanitized_filename}")
-        reset_excel_processor()
-        
-        # Clear any existing g context for this request
-        if hasattr(g, 'excel_processor'):
-            delattr(g, 'excel_processor')
-            logging.info("[ULTRA-FAST] Cleared g.excel_processor context")
-        
-        # Start background thread with error handling
-        try:
-            logging.info(f"[ULTRA-FAST] Starting background processing thread for {file.filename}")
-            thread = threading.Thread(target=process_excel_background, args=(file.filename, temp_path))
-            thread.daemon = True  # Make thread daemon so it doesn't block app shutdown
-            thread.start()
-            logging.info(f"[ULTRA-FAST] Background processing thread started successfully for {file.filename}")
-            
-            # Log current processing status
-            logging.info(f"[ULTRA-FAST] Current processing status after thread start: {dict(processing_status)}")
-        except Exception as thread_error:
-            logging.error(f"[ULTRA-FAST] Failed to start background thread: {thread_error}")
-            update_processing_status(file.filename, f'error: Failed to start processing')
-            return jsonify({'error': 'Failed to start file processing'}), 500
-        
-        upload_time = time.time() - start_time
-        logging.info(f"=== ULTRA-FAST UPLOAD REQUEST COMPLETE === Time: {upload_time:.2f}s")
-        
-        # Store uploaded file path in session with persistence
-        session.permanent = True
-        session['file_path'] = temp_path
-        session['uploaded_filename'] = sanitized_filename
-        session.modified = True
-        
-        # Clear selected tags in session to ensure fresh start
-        session['selected_tags'] = []
-        
-        # ULTRA-FAST RESPONSE - Return immediately for instant user feedback
-        upload_response_time = time.time() - start_time
-        logging.info(f"[ULTRA-FAST] Ultra-fast upload completed in {upload_response_time:.3f}s")
-        
-        return jsonify({
-            'message': 'File uploaded, processing in background', 
-            'filename': sanitized_filename,
-            'upload_time': f"{upload_response_time:.3f}s",
-            'processing_status': 'background',
-            'performance': 'ultra_fast'
-        })
-    except Exception as e:
-        logging.error(f"=== ULTRA-FAST UPLOAD REQUEST FAILED ===")
-        logging.error(f"Upload error: {str(e)}")
-        logging.error(f"Traceback: {traceback.format_exc()}")
-        
-        # Don't expose internal errors to client (security fix)
-        if app.config.get('DEBUG', False):
-            return jsonify({'error': f'Upload failed: {str(e)}'}), 500
-        else:
-            return jsonify({'error': 'Upload failed. Please try again.'}), 500
+# REMOVED: Duplicate upload-optimized endpoint (caused conflicts)
 
 @app.route('/upload-fast', methods=['POST'])
 def upload_file_fast():
