@@ -6297,8 +6297,20 @@ def database_stats():
                 product_types = cursor.fetchall()
                 product_type_distribution = {pt[0]: pt[1] for pt in product_types}
                 
+                # FALLBACK: If database is empty but Excel processor has data, use Excel count
+                excel_total = 0
+                if total_products == 0:
+                    try:
+                        excel_processor = get_excel_processor()
+                        if excel_processor and hasattr(excel_processor, 'df') and excel_processor.df is not None:
+                            excel_total = len(excel_processor.df)
+                            logging.info(f"Database empty ({total_products}), using Excel count: {excel_total}")
+                    except Exception as excel_error:
+                        logging.warning(f"Could not get Excel count: {excel_error}")
+                
                 stats = {
-                    'total_products': total_products,
+                    'total_products': total_products if total_products > 0 else excel_total,
+                    'total_records': total_products if total_products > 0 else excel_total,  # Add this for frontend compatibility
                     'unique_vendors': unique_vendors,
                     'unique_brands': unique_brands,
                     'unique_product_types': unique_product_types,

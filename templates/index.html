@@ -522,7 +522,9 @@
           const analytics = analyticsResult.value || analyticsResult.reason || {};
           const availableTags = availableTagsResult.value || [];
           
-          const totalProducts = Array.isArray(availableTags) ? availableTags.length : 0;
+          // FIXED: Get product count from multiple sources for reliability
+          const totalProducts = Array.isArray(availableTags) ? availableTags.length : 
+                               (stats.total_products || stats.total_records || 0);
           const totalStrains = stats.total_strains || 0;
           
           console.log('Analytics data loaded:', { 
@@ -4364,7 +4366,7 @@
                 </svg>
                 <span class="fw-bold">Upload</span>
               </button>
-              <input type="file" id="fileInput" accept=".xlsx" style="display:none;" onchange="console.log('File input changed:', this.files[0]);">
+              <input type="file" id="fileInput" accept=".xlsx" style="display:none;">
               <span class="file-info-modern d-flex align-items-center gap-1 ms-2" id="currentFileInfo" style="min-width:200px; max-width:none; font-size:0.82rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;">
                   <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
@@ -7431,7 +7433,9 @@
         fetch('/api/available-tags').then(r => r.json())
       ])
       .then(([stats, view, vendorStats, availableTags]) => {
-        const totalProducts = availableTags.length;
+        // FIXED: Get product count from multiple sources for reliability
+        const totalProducts = Array.isArray(availableTags) ? availableTags.length : 
+                             (stats.total_products || stats.total_records || 0);
         const totalStrains = stats.total_strains;
         
         const infoHtml = `
@@ -9387,7 +9391,9 @@
           fetch('/api/available-tags').then(r => r.json())
         ])
         .then(([stats, vendorStats, analytics, availableTags]) => {
-          const totalProducts = availableTags.length;
+          // FIXED: Get product count from multiple sources for reliability
+          const totalProducts = Array.isArray(availableTags) ? availableTags.length : 
+                               (stats.total_products || stats.total_records || 0);
           const totalStrains = stats.total_strains || 0;
         
         const analyticsHtml = `
