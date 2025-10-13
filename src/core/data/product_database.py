@@ -2842,9 +2842,13 @@ class ProductDatabase:
         lineage_mapping = {
             'hybrid': 'HYBRID',
             'indica_hybrid': 'HYBRID/INDICA',
+            'indica/hybrid': 'HYBRID/INDICA',  # FIX: Handle forward slash format
+            'hybrid/indica': 'HYBRID/INDICA',  # FIX: Handle reverse format
             'indica': 'INDICA',
             'sativa': 'SATIVA',
             'sativa_hybrid': 'HYBRID/SATIVA',
+            'sativa/hybrid': 'HYBRID/SATIVA',  # FIX: Handle forward slash format
+            'hybrid/sativa': 'HYBRID/SATIVA',  # FIX: Handle reverse format
             'cbd': 'CBD',
             'mixed': 'HYBRID',  # Default mixed to hybrid
             'unknown': 'HYBRID',  # Default unknown to hybrid

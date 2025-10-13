@@ -2122,7 +2122,11 @@ def apply_essential_processing(df):
             # Quick lineage fixes
             df['Lineage'] = df['Lineage'].replace({
                 'INDICA_HYBRID': 'HYBRID/INDICA',
+                'INDICA/HYBRID': 'HYBRID/INDICA',  # FIX: Handle forward slash format
+                'HYBRID/INDICA': 'HYBRID/INDICA',  # FIX: Handle correct format
                 'SATIVA_HYBRID': 'HYBRID/SATIVA',
+                'SATIVA/HYBRID': 'HYBRID/SATIVA',  # FIX: Handle forward slash format
+                'HYBRID/SATIVA': 'HYBRID/SATIVA',  # FIX: Handle correct format
                 'SATIVA': 'SATIVA',
                 'HYBRID': 'HYBRID',
                 'INDICA': 'INDICA',
