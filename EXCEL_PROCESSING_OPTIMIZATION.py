@@ -11,6 +11,7 @@ import logging
 from typing import Optional, Dict, Any, List
 import threading
 from pathlib import Path
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,12 @@ class OptimizedExcelProcessor:
             'file_size': 0,
             'method_used': 'unknown'
         }
+        
+        # Add compatibility attributes for ExcelProcessor interface
+        self._last_loaded_file = None
+        self.dropdown_cache = {}
+        self.selected_tags = []
+        self.logger = logging.getLogger(__name__)
         
     def determine_processing_strategy(self, file_path: str) -> Dict[str, Any]:
         """Analyze file and determine optimal processing strategy."""
@@ -90,6 +97,7 @@ class OptimizedExcelProcessor:
         """Main optimized processing method with intelligent strategy selection."""
         try:
             self.processing_stats['start_time'] = time.time()
+            self._last_loaded_file = file_path  # Track loaded file
             
             logger.info(f"🚀 OPTIMIZED PROCESSING: {os.path.basename(file_path)}")
             
@@ -296,6 +304,39 @@ class OptimizedExcelProcessor:
             'status': self.processing_status,
             'progress': self.progress
         }
+    
+    # Compatibility methods for ExcelProcessor interface
+    def get_filtered_dataframe(self, filters: Optional[Dict] = None) -> pd.DataFrame:
+        """Return the DataFrame with optional filters applied."""
+        if self.df is None or self.df.empty:
+            return pd.DataFrame()
+        
+        filtered_df = self.df.copy()
+        
+        if filters:
+            for column, value in filters.items():
+                if column in filtered_df.columns:
+                    filtered_df = filtered_df[filtered_df[column] == value]
+        
+        return filtered_df
+    
+    def get_available_columns(self) -> List[str]:
+        """Get list of available columns in the DataFrame."""
+        if self.df is None or self.df.empty:
+            return []
+        return list(self.df.columns)
+    
+    def get_unique_values(self, column: str) -> List[str]:
+        """Get unique values for a specific column."""
+        if self.df is None or self.df.empty or column not in self.df.columns:
+            return []
+        return sorted(self.df[column].dropna().unique().tolist())
+    
+    def get_row_count(self) -> int:
+        """Get total row count."""
+        if self.df is None or self.df.empty:
+            return 0
+        return len(self.df)
 
 # Integration function to replace the slow processor
 def get_optimized_excel_processor():
