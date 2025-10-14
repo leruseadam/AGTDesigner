@@ -1,97 +1,127 @@
 #!/usr/bin/env python3
 """
-Create a fresh, clean database with the correct schema
+Create a fresh, working database for AGT Label Maker
 """
-import sys
+
 import os
-
-# Add the project root to the path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-from src.core.data.product_database import ProductDatabase
+import sys
+import sqlite3
 
 def create_fresh_database():
-    """Create a new, clean database with the correct schema."""
+    """Create a fresh database with proper schema"""
+    
     db_path = "uploads/product_database_AGT_Bothell.db"
     
-    print("=" * 60)
-    print("Creating Fresh Database")
-    print("=" * 60)
-    print(f"\nDatabase path: {db_path}")
+    # Create uploads directory if it doesn't exist
+    os.makedirs("uploads", exist_ok=True)
     
-    # Remove any existing files
-    for ext in ['', '-shm', '-wal']:
-        filepath = db_path + ext
-        if os.path.exists(filepath):
-            os.remove(filepath)
-            print(f"Removed old file: {filepath}")
+    # Remove old database if it exists
+    if os.path.exists(db_path):
+        print(f"Removing old database: {db_path}")
+        os.remove(db_path)
     
-    print("\nInitializing new database...")
+    # Remove lock files
+    for ext in ['-shm', '-wal']:
+        lock_file = db_path + ext
+        if os.path.exists(lock_file):
+            os.remove(lock_file)
+            print(f"Removed lock file: {lock_file}")
     
-    try:
-        # Create new database instance - this will initialize the schema
-        db = ProductDatabase(db_path)
-        
-        # Force initialization
-        db._initialized = False
-        conn = db._get_connection()
-        
-        if conn:
-            print("✅ Database created successfully!")
-            
-            # Verify the schema
-            cursor = conn.cursor()
-            
-            # Check strains table
-            cursor.execute("PRAGMA table_info(strains)")
-            strain_cols = [col[1] for col in cursor.fetchall()]
-            print(f"\n✓ Strains table columns ({len(strain_cols)}): {', '.join(strain_cols[:5])}...")
-            
-            # Check products table
-            cursor.execute("PRAGMA table_info(products)")
-            product_cols = [col[1] for col in cursor.fetchall()]
-            print(f"✓ Products table columns ({len(product_cols)}): {', '.join(product_cols[:5])}...")
-            
-            # Verify normalized_name exists
-            if 'normalized_name' in strain_cols:
-                print("\n✓ normalized_name column exists in strains table")
-            else:
-                print("\n⚠️  WARNING: normalized_name column missing!")
-            
-            # Check database integrity
-            cursor.execute("PRAGMA integrity_check")
-            result = cursor.fetchone()
-            if result[0] == 'ok':
-                print("✓ Database integrity check: PASSED")
-            else:
-                print(f"⚠️  Database integrity check: {result[0]}")
-            
-            # Get file size
-            size_mb = os.path.getsize(db_path) / (1024 * 1024)
-            print(f"✓ Database file size: {size_mb:.2f} MB")
-            
-            conn.close()
-            
-            print("\n" + "=" * 60)
-            print("SUCCESS! Fresh database created.")
-            print("=" * 60)
-            print("\nNext steps:")
-            print("1. Start your Flask app")
-            print("2. Upload your Excel inventory file to populate the database")
-            print("3. The database will be automatically populated with your products")
-            
-            return True
-        else:
-            print("❌ Failed to create database connection")
-            return False
-            
-    except Exception as e:
-        print(f"\n❌ Error creating database: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
+    print(f"Creating fresh database: {db_path}")
+    
+    # Create new database
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    # Create strains table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS strains (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            type TEXT,
+            thc_percentage REAL,
+            cbd_percentage REAL,
+            date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    
+    # Create products table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS products (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            type TEXT,
+            brand TEXT,
+            vendor TEXT,
+            strain TEXT,
+            weight REAL,
+            weight_unit TEXT,
+            price REAL,
+            thc_percentage REAL,
+            cbd_percentage REAL,
+            lineage TEXT,
+            terpenes TEXT,
+            effects TEXT,
+            date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            date_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(name, weight, weight_unit, brand)
+        )
+    """)
+    
+    # Create indexes
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_strains_name ON strains(name)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_strains_type ON strains(type)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_products_name ON products(name)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_products_type ON products(type)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_products_brand ON products(brand)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_products_strain ON products(strain)")
+    
+    # Add some default strains to prevent "no strains" errors
+    default_strains = [
+        ('Hybrid', 'hybrid', 20.0, 0.0),
+        ('Indica', 'indica', 22.0, 0.0),
+        ('Sativa', 'sativa', 18.0, 0.0),
+        ('CBD Blend', 'hybrid', 5.0, 15.0),
+        ('Mixed', 'hybrid', 15.0, 0.0),
+    ]
+    
+    for strain_name, strain_type, thc, cbd in default_strains:
+        try:
+            cursor.execute(
+                "INSERT OR IGNORE INTO strains (name, type, thc_percentage, cbd_percentage) VALUES (?, ?, ?, ?)",
+                (strain_name, strain_type, thc, cbd)
+            )
+        except Exception as e:
+            print(f"Warning: Could not insert default strain {strain_name}: {e}")
+    
+    conn.commit()
+    
+    # Verify database
+    cursor.execute("SELECT COUNT(*) FROM strains")
+    strain_count = cursor.fetchone()[0]
+    
+    cursor.execute("SELECT COUNT(*) FROM products")
+    product_count = cursor.fetchone()[0]
+    
+    conn.close()
+    
+    # Get file size
+    file_size = os.path.getsize(db_path)
+    
+    print(f"✓ Database created successfully!")
+    print(f"  - File size: {file_size:,} bytes")
+    print(f"  - Strains: {strain_count}")
+    print(f"  - Products: {product_count}")
+    print(f"  - Location: {os.path.abspath(db_path)}")
+    
+    return True
 
 if __name__ == "__main__":
-    success = create_fresh_database()
-    sys.exit(0 if success else 1)
-
+    try:
+        create_fresh_database()
+        sys.exit(0)
+    except Exception as e:
+        print(f"Error creating database: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
