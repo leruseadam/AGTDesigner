@@ -1602,8 +1602,19 @@ class TemplateProcessor:
                     label_context['Lineage'] = f"LINEAGE_START{cleaned_lineage_val}LINEAGE_END"
                 self.logger.debug(f"Set Lineage to strain lineage: '{cleaned_lineage_val}' for classic type '{product_type}'")
             else:
-                label_context['Lineage'] = ""
-                self.logger.debug(f"No lineage available for classic type '{product_type}', Lineage set to empty")
+                # CRITICAL FIX: For CBD Blend products, set lineage to "CBD" if no lineage is available
+                if product_type and 'CBD' in str(product_type).upper() and 'BLEND' in str(product_type).upper():
+                    cleaned_lineage_val = "CBD"
+                    self.logger.info(f"CBD BLEND FIX: Setting lineage to 'CBD' for product type '{product_type}'")
+                    
+                    # For vertical template, don't wrap with markers since it uses simple placeholders
+                    if self.template_type == 'vertical':
+                        label_context['Lineage'] = cleaned_lineage_val
+                    else:
+                        label_context['Lineage'] = f"LINEAGE_START{cleaned_lineage_val}LINEAGE_END"
+                else:
+                    label_context['Lineage'] = ""
+                    self.logger.debug(f"No lineage available for classic type '{product_type}', Lineage set to empty")
             
             # Set ProductVendor to actual vendor/supplier for classic types
             # Get vendor from record, not from product_brand
@@ -1677,16 +1688,35 @@ class TemplateProcessor:
                 self.logger.debug(f"Set Lineage/ProductBrand to '{product_brand}' and ProductStrain to '{product_strain}' for non-classic type '{product_type}'")
             else:
                 # No brand available for non-classic type
-                if self.template_type == 'vertical':
-                    # For vertical template, still set empty values but don't prevent data population
-                    label_context['Lineage'] = ""
-                    label_context['ProductBrand'] = ""
-                    label_context['ProductBrand_Center'] = ""
-                    self.logger.debug(f"VERTICAL BRAND FIX: Set empty brand values for vertical template (no brand available)")
+                # CRITICAL FIX: For CBD Blend products, set lineage to "CBD" if no brand is available
+                if product_type and 'CBD' in str(product_type).upper() and 'BLEND' in str(product_type).upper():
+                    cleaned_lineage_val = "CBD"
+                    self.logger.info(f"CBD BLEND FIX (non-classic): Setting lineage to 'CBD' for product type '{product_type}'")
+                    
+                    if self.template_type == 'vertical':
+                        # For vertical template, set lineage to CBD
+                        label_context['Lineage'] = cleaned_lineage_val
+                        label_context['ProductBrand'] = ""
+                        label_context['ProductBrand_Center'] = ""
+                        self.logger.debug(f"VERTICAL CBD BLEND FIX: Set Lineage to 'CBD' for vertical template")
+                    else:
+                        # For other templates, use marker-based formatting
+                        label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{cleaned_lineage_val}PRODUCTBRAND_CENTER_END"
+                        label_context['ProductBrand'] = ""
+                        label_context['ProductBrand_Center'] = ""
+                        self.logger.debug(f"NON-VERTICAL CBD BLEND FIX: Set Lineage to 'CBD' with markers")
                 else:
-                    label_context['Lineage'] = ""
-                    label_context['ProductBrand'] = ""
-                    label_context['ProductBrand_Center'] = ""
+                    # No brand available and not CBD Blend
+                    if self.template_type == 'vertical':
+                        # For vertical template, still set empty values but don't prevent data population
+                        label_context['Lineage'] = ""
+                        label_context['ProductBrand'] = ""
+                        label_context['ProductBrand_Center'] = ""
+                        self.logger.debug(f"VERTICAL BRAND FIX: Set empty brand values for vertical template (no brand available)")
+                    else:
+                        label_context['Lineage'] = ""
+                        label_context['ProductBrand'] = ""
+                        label_context['ProductBrand_Center'] = ""
                 self.logger.debug(f"Lineage, ProductBrand, and ProductBrand_Center set to empty for non-classic type '{product_type}'")
             
             # Always set ProductStrain for nonclassic types, regardless of whether there's a product brand
