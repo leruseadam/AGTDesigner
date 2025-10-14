@@ -1686,31 +1686,61 @@ def upload_file():
             
             def process_in_background():
                 try:
-                    logging.info(f"[BACKGROUND] Processing file: {file_path}")
-                    processor = get_excel_processor()
-                    success = processor.load_file(file_path)
+                    logging.info(f"[BACKGROUND] Processing file with OPTIMIZED PROCESSOR: {file_path}")
                     
-                    if success:
-                        row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
-                        logging.info(f"[BACKGROUND] File loaded: {row_count} rows")
+                    # Use optimized processor for background processing too
+                    try:
+                        from EXCEL_PROCESSING_OPTIMIZATION import get_optimized_excel_processor
+                        processor = get_optimized_excel_processor()
                         
-                        # Store in database
-                        try:
-                            from src.core.data.product_database import get_product_database
-                            product_db = get_product_database()
+                        # Use optimized processing
+                        result = processor.process_excel_optimized(file_path)
+                        
+                        if result['success']:
+                            row_count = result.get('rows_processed', 0)
+                            processing_time = result.get('processing_time', 0)
+                            strategy = result.get('strategy_used', 'unknown')
                             
-                            if product_db and hasattr(product_db, 'store_excel_data'):
-                                logging.info(f"[BACKGROUND] Storing {row_count} products in database...")
-                                result = product_db.store_excel_data(processor.df, file_path)
-                                logging.info(f"[BACKGROUND] Database storage result: {result}")
-                        except Exception as db_error:
-                            logging.warning(f"[BACKGROUND] Database storage failed: {db_error}")
+                            logging.info(f"[BACKGROUND] ✅ OPTIMIZED SUCCESS: {row_count:,} rows in {processing_time:.2f}s using {strategy} strategy")
+                            
+                            # Update global processor for compatibility
+                            global _excel_processor
+                            with excel_processor_lock:
+                                _excel_processor = processor
+                                _excel_processor._last_loaded_file = file_path
+                            
+                            # Store in database
+                            try:
+                                from src.core.data.product_database import get_product_database
+                                product_db = get_product_database()
+                                
+                                if product_db and hasattr(product_db, 'store_excel_data') and processor.df is not None:
+                                    logging.info(f"[BACKGROUND] Storing {row_count} products in database...")
+                                    db_result = product_db.store_excel_data(processor.df, file_path)
+                                    logging.info(f"[BACKGROUND] Database storage result: {db_result}")
+                            except Exception as db_error:
+                                logging.warning(f"[BACKGROUND] Database storage failed: {db_error}")
+                            
+                            update_processing_status(original_filename, 'ready')
+                            logging.info(f"[BACKGROUND] Optimized processing complete for {original_filename}")
+                        else:
+                            error_msg = result.get('error', 'Processing failed')
+                            logging.error(f"[BACKGROUND] ❌ OPTIMIZED PROCESSING FAILED: {error_msg}")
+                            update_processing_status(original_filename, f'error: {error_msg}')
+                            
+                    except ImportError as import_error:
+                        # Fallback to original processor
+                        logging.warning(f"[BACKGROUND] Optimized processor import failed, using fallback: {import_error}")
+                        processor = get_excel_processor()
+                        success = processor.load_file(file_path)
                         
-                        update_processing_status(original_filename, 'ready')
-                        logging.info(f"[BACKGROUND] Processing complete for {original_filename}")
-                    else:
-                        logging.error("[BACKGROUND] File load returned False")
-                        update_processing_status(original_filename, 'error: File load failed')
+                        if success:
+                            row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
+                            logging.info(f"[BACKGROUND] Fallback processing: {row_count} rows")
+                            update_processing_status(original_filename, 'ready')
+                        else:
+                            logging.error("[BACKGROUND] Fallback processing failed")
+                            update_processing_status(original_filename, 'error: File load failed')
                         
                 except Exception as e:
                     logging.error(f"[BACKGROUND] Processing error: {e}")
@@ -1735,37 +1765,83 @@ def upload_file():
             })
             
         else:
-            # Local development: Process synchronously for immediate feedback
-            logging.info("[LOCAL] Processing file synchronously")
-            processor = get_excel_processor()
+            # Local development: Process synchronously with optimized processor
+            logging.info("[LOCAL] Processing file synchronously with OPTIMIZED PROCESSOR")
             
-            success = processor.load_file(file_path)
-            if success:
-                row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
-                logging.info(f"File loaded successfully: {row_count} rows")
+            # Import the optimized processor
+            try:
+                from EXCEL_PROCESSING_OPTIMIZATION import get_optimized_excel_processor
+                processor = get_optimized_excel_processor()
                 
-                # Store in database for persistence
-                try:
-                    from src.core.data.product_database import get_product_database
-                    # Store context removed - using single database
-                    product_db = get_product_database()
+                # Use optimized processing
+                result = processor.process_excel_optimized(file_path)
+                
+                if result['success']:
+                    row_count = result.get('rows_processed', 0)
+                    processing_time = result.get('processing_time', 0)
+                    strategy = result.get('strategy_used', 'unknown')
                     
-                    if product_db and hasattr(product_db, 'store_excel_data'):
-                        logging.info(f"Storing {row_count} products in database...")
-                        result = product_db.store_excel_data(processor.df, file_path)
-                        logging.info(f"Database storage result: {result}")
-                    else:
-                        logging.warning("Database storage not available")
+                    logging.info(f"✅ OPTIMIZED SUCCESS: {row_count:,} rows in {processing_time:.2f}s using {strategy} strategy")
+                    
+                    # Update global processor for compatibility
+                    global _excel_processor
+                    with excel_processor_lock:
+                        _excel_processor = processor
+                        _excel_processor._last_loaded_file = file_path
+                    
+                    # Store in database for persistence
+                    try:
+                        from src.core.data.product_database import get_product_database
+                        product_db = get_product_database()
                         
-                except Exception as db_error:
-                    logging.warning(f"Database storage failed (non-fatal): {db_error}")
-                    # Continue anyway - file is still loaded in processor
+                        if product_db and hasattr(product_db, 'store_excel_data') and processor.df is not None:
+                            logging.info(f"Storing {row_count} products in database...")
+                            db_result = product_db.store_excel_data(processor.df, file_path)
+                            logging.info(f"Database storage result: {db_result}")
+                        else:
+                            logging.warning("Database storage not available or no data")
+                            
+                    except Exception as db_error:
+                        logging.warning(f"Database storage failed (non-fatal): {db_error}")
+                        # Continue anyway - file is still loaded in processor
+                    
+                    update_processing_status(file.filename, 'ready')
+                    
+                    # Return success with optimization details
+                    upload_time = time.time() - start_time
+                    return jsonify({
+                        'success': True,
+                        'status': 'ready',
+                        'message': f'File processed successfully using {strategy} method',
+                        'filename': file.filename,
+                        'processing': False,
+                        'rows_processed': row_count,
+                        'processing_time': processing_time,
+                        'upload_time': upload_time,
+                        'optimization_used': True,
+                        'strategy': strategy
+                    })
+                    
+                else:
+                    error_msg = result.get('error', 'Processing failed')
+                    logging.error(f"❌ OPTIMIZED PROCESSING FAILED: {error_msg}")
+                    update_processing_status(file.filename, f'error: {error_msg}')
+                    return jsonify({'error': f'Failed to process file: {error_msg}'}), 500
+                    
+            except ImportError as import_error:
+                # Fallback to original processor if optimization fails to import
+                logging.warning(f"Optimized processor import failed, using fallback: {import_error}")
+                processor = get_excel_processor()
                 
-                update_processing_status(file.filename, 'ready')
-            else:
-                logging.error("File load returned False")
-                update_processing_status(file.filename, 'error: File load failed')
-                return jsonify({'error': 'Failed to process file'}), 500
+                success = processor.load_file(file_path)
+                if success:
+                    row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
+                    logging.info(f"Fallback processing: {row_count} rows")
+                    update_processing_status(file.filename, 'ready')
+                else:
+                    logging.error("Fallback processing failed")
+                    update_processing_status(file.filename, 'error: File load failed')
+                    return jsonify({'error': 'Failed to process file'}), 500
             
             upload_time = time.time() - start_time
             logging.info(f"=== UPLOAD COMPLETE: {upload_time:.3f}s ===")
@@ -2775,6 +2851,130 @@ def upload_status():
         logging.error(f"/api/upload-status error for '{request.args.get('filename')}': {e}\n{tb}")
         # Never return HTML; always JSON for the polling loop
         return jsonify({'error': str(e), 'trace': tb, 'status': 'processing'}), 500
+
+@app.route('/api/processing-progress', methods=['GET'])
+def get_processing_progress():
+    """Get detailed processing progress information with real-time updates."""
+    try:
+        filename = request.args.get('filename')
+        if not filename:
+            return jsonify({'error': 'No filename provided'}), 400
+        
+        # Sanitize filename
+        filename = sanitize_filename(filename)
+        
+        # Base progress info
+        progress_info = {
+            'filename': filename,
+            'status': 'idle',
+            'progress': 0,
+            'stage': 'idle',
+            'estimated_time_remaining': None,
+            'rows_processed': 0,
+            'strategy': 'unknown',
+            'processing_time': 0,
+            'file_size_mb': 0,
+            'optimization_active': False,
+            'stage_description': 'Waiting to start'
+        }
+        
+        # Get basic status from processing_status tracking
+        with processing_lock:
+            status = processing_status.get(filename, 'not_found')
+            timestamp = processing_timestamps.get(filename)
+        
+        progress_info['status'] = status
+        
+        if timestamp:
+            age = time.time() - timestamp
+            progress_info['processing_time'] = age
+        
+        # Try to get enhanced status from optimized processor
+        try:
+            global _excel_processor
+            if _excel_processor and hasattr(_excel_processor, 'get_processing_stats'):
+                stats = _excel_processor.get_processing_stats()
+                
+                # Update with detailed stats
+                progress_info.update({
+                    'progress': min(100, max(0, stats.get('progress', 0))),
+                    'rows_processed': stats.get('current_row_count', 0),
+                    'has_data': stats.get('has_data', False),
+                    'optimization_active': True
+                })
+                
+                # Map processing status to more detailed stages
+                if status == 'processing':
+                    progress = stats.get('progress', 0)
+                    if progress == 0:
+                        progress_info['stage'] = 'analyzing'
+                        progress_info['stage_description'] = 'Analyzing file structure...'
+                        progress_info['progress'] = 5
+                    elif progress < 20:
+                        progress_info['stage'] = 'reading'
+                        progress_info['stage_description'] = 'Reading Excel data...'
+                    elif progress < 60:
+                        progress_info['stage'] = 'processing'
+                        progress_info['stage_description'] = 'Processing and cleaning data...'
+                    elif progress < 90:
+                        progress_info['stage'] = 'optimizing'
+                        progress_info['stage_description'] = 'Optimizing data structures...'
+                    else:
+                        progress_info['stage'] = 'finalizing'
+                        progress_info['stage_description'] = 'Finalizing and storing data...'
+                        
+                    # Estimate time remaining based on progress
+                    if progress > 10 and progress_info['processing_time'] > 0:
+                        estimated_total = progress_info['processing_time'] / (progress / 100)
+                        remaining = max(0, estimated_total - progress_info['processing_time'])
+                        progress_info['estimated_time_remaining'] = round(remaining, 1)
+                
+                elif status == 'ready':
+                    progress_info.update({
+                        'stage': 'complete',
+                        'stage_description': f'Processing complete - {progress_info["rows_processed"]:,} rows loaded',
+                        'progress': 100,
+                        'estimated_time_remaining': 0
+                    })
+                elif status.startswith('error'):
+                    progress_info.update({
+                        'stage': 'error',
+                        'stage_description': f'Processing failed: {status}',
+                        'progress': 0
+                    })
+                    
+        except Exception as stats_error:
+            logging.debug(f"Could not get enhanced stats: {stats_error}")
+            
+            # Provide basic progress estimation based on time for fallback
+            if status == 'processing' and progress_info['processing_time'] > 0:
+                # Simple time-based progress estimation (very rough)
+                elapsed = progress_info['processing_time']
+                if elapsed < 5:
+                    progress_info['progress'] = min(20, elapsed * 4)
+                    progress_info['stage_description'] = 'Starting file processing...'
+                elif elapsed < 15:
+                    progress_info['progress'] = min(60, 20 + (elapsed - 5) * 4)
+                    progress_info['stage_description'] = 'Processing Excel data...'
+                elif elapsed < 30:
+                    progress_info['progress'] = min(90, 60 + (elapsed - 15) * 2)
+                    progress_info['stage_description'] = 'Finalizing data processing...'
+                else:
+                    progress_info['progress'] = 95
+                    progress_info['stage_description'] = 'Completing processing...'
+        
+        return jsonify(progress_info)
+        
+    except Exception as e:
+        logging.error(f"Processing progress error: {e}")
+        return jsonify({
+            'error': str(e),
+            'filename': filename,
+            'status': 'error',
+            'progress': 0,
+            'stage': 'error',
+            'stage_description': f'Error getting progress: {str(e)}'
+        }), 500
 
 @app.route('/upload-lightning', methods=['POST'])
 def upload_lightning():
