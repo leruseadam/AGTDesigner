@@ -1709,17 +1709,21 @@ def upload_file():
                                 _excel_processor = processor
                                 _excel_processor._last_loaded_file = file_path
                             
-                            # Store in database
+                            # Store in database (OPTIMIZED - SKIP FOR SPEED)
                             try:
-                                from src.core.data.product_database import get_product_database
-                                product_db = get_product_database()
+                                # PERFORMANCE FIX: Skip database storage to prevent hanging
+                                logging.info(f"[BACKGROUND] ⚡ PERFORMANCE MODE: Skipping database storage for faster processing")
+                                logging.info(f"[BACKGROUND] ✅ {row_count} products loaded in Excel processor and ready for use")
                                 
-                                if product_db and hasattr(product_db, 'store_excel_data') and processor.df is not None:
-                                    logging.info(f"[BACKGROUND] Storing {row_count} products in database...")
-                                    db_result = product_db.store_excel_data(processor.df, file_path)
-                                    logging.info(f"[BACKGROUND] Database storage result: {db_result}")
+                                # Uncomment below if you need database persistence:
+                                # from src.core.data.product_database import get_product_database
+                                # product_db = get_product_database()
+                                # if product_db and hasattr(product_db, 'store_excel_data') and processor.df is not None:
+                                #     logging.info(f"[BACKGROUND] Storing {row_count} products in database...")
+                                #     db_result = product_db.store_excel_data(processor.df, file_path)
+                                #     logging.info(f"[BACKGROUND] Database storage result: {db_result}")
                             except Exception as db_error:
-                                logging.warning(f"[BACKGROUND] Database storage failed: {db_error}")
+                                logging.warning(f"[BACKGROUND] Database storage skipped: {db_error}")
                             
                             update_processing_status(original_filename, 'ready')
                             logging.info(f"[BACKGROUND] Optimized processing complete for {original_filename}")
@@ -1789,20 +1793,26 @@ def upload_file():
                         _excel_processor = processor
                         _excel_processor._last_loaded_file = file_path
                     
-                    # Store in database for persistence
+                    # Store in database for persistence (OPTIMIZED - SKIP FOR SPEED)
                     try:
-                        from src.core.data.product_database import get_product_database
-                        product_db = get_product_database()
+                        # PERFORMANCE FIX: Skip database storage to prevent hanging
+                        # Database storage takes 20-30 seconds for large files (row-by-row processing)
+                        # Excel processor already has the data loaded and working
+                        # Database storage is optional for tag generation
                         
-                        if product_db and hasattr(product_db, 'store_excel_data') and processor.df is not None:
-                            logging.info(f"Storing {row_count} products in database...")
-                            db_result = product_db.store_excel_data(processor.df, file_path)
-                            logging.info(f"Database storage result: {db_result}")
-                        else:
-                            logging.warning("Database storage not available or no data")
+                        logging.info(f"⚡ PERFORMANCE MODE: Skipping database storage for faster processing")
+                        logging.info(f"✅ {row_count} products loaded in Excel processor and ready for use")
+                        
+                        # Uncomment below if you need database persistence:
+                        # from src.core.data.product_database import get_product_database
+                        # product_db = get_product_database()
+                        # if product_db and hasattr(product_db, 'store_excel_data') and processor.df is not None:
+                        #     logging.info(f"Storing {row_count} products in database...")
+                        #     db_result = product_db.store_excel_data(processor.df, file_path)
+                        #     logging.info(f"Database storage result: {db_result}")
                             
                     except Exception as db_error:
-                        logging.warning(f"Database storage failed (non-fatal): {db_error}")
+                        logging.warning(f"Database storage skipped: {db_error}")
                         # Continue anyway - file is still loaded in processor
                     
                     update_processing_status(file.filename, 'ready')
