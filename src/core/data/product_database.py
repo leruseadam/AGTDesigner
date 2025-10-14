@@ -87,20 +87,34 @@ class ProductDatabase:
         # Initialize reliability manager
         self._reliability = get_reliability_manager(self.db_path)
         
-        # Automatic backup tracking
+        # Automatic backup tracking - DISABLED FOR PYTHONANYWHERE
         self._last_backup_time = None
         self._writes_since_backup = 0
-        self._backup_interval_seconds = 3600  # Backup every hour
-        self._backup_interval_writes = 100  # Or every 100 writes
+        self._backup_interval_seconds = 999999  # Effectively disable backups
+        self._backup_interval_writes = 999999  # Effectively disable backups
+        
+        # Check if running on PythonAnywhere
+        self._is_pythonanywhere = os.environ.get('PYTHONANYWHERE_DOMAIN') is not None
+        if self._is_pythonanywhere:
+            self._backup_interval_seconds = 999999  # Disable on PythonAnywhere
+            self._backup_interval_writes = 999999   # Disable on PythonAnywhere
         
         # Connection pooling limits to prevent over-connection
-        self._max_connections = 5  # Limit concurrent connections
+        # Optimized for concurrent users
+        if self._is_pythonanywhere:
+            self._max_connections = 5  # PythonAnywhere limit
+        else:
+            self._max_connections = 10  # Increased for concurrent users
         self._connection_semaphore = threading.Semaphore(self._max_connections)
         
         # Write batching for bulk operations
         self._batch_writes = []
         self._batch_lock = threading.Lock()
-        self._batch_size = 50  # Commit every 50 writes
+        # Optimized batch size for concurrent users
+        if self._is_pythonanywhere:
+            self._batch_size = 25  # Smaller batches for PythonAnywhere
+        else:
+            self._batch_size = 25  # Smaller batches for better concurrency
         self._last_batch_commit = time.time()
         self._batch_timeout = 5.0  # Force commit after 5 seconds
         
@@ -2675,6 +2689,11 @@ class ProductDatabase:
     
     def _try_automatic_backup(self):
         """Try to create an automatic backup if needed."""
+        # DISABLED FOR PYTHONANYWHERE TO PREVENT DISK QUOTA ISSUES
+        if self._is_pythonanywhere:
+            logger.debug("Automatic backups disabled on PythonAnywhere")
+            return
+            
         try:
             if self._should_create_backup():
                 logger.info("Creating automatic backup...")

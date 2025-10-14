@@ -65,11 +65,12 @@ temp/
 tmp/
 
 # Uploads and outputs (keep structure but exclude large files)
-uploads/*.db
-uploads/*.db-shm  
-uploads/*.db-wal
-uploads/*.db.gz
-uploads/*.xlsx
+uploads/**/*.db
+uploads/**/*.db-shm  
+uploads/**/*.db-wal
+uploads/**/*.db.gz
+uploads/**/*.xlsx
+uploads/**/
 output/
 cache/
 

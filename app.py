@@ -769,7 +769,7 @@ def create_app():
         app.config['SESSION_FILE_DIR'] = sessions_dir
         app.config['SESSION_PERMANENT'] = True  # Make sessions persistent
         app.config['SESSION_USE_SIGNER'] = True  # Sign session cookies for security
-        app.config['SESSION_FILE_THRESHOLD'] = 500  # Max number of sessions before cleanup
+        app.config['SESSION_FILE_THRESHOLD'] = 1000  # Increased for concurrent users
         
         Session(app)
         logging.info(f"Flask-Session initialized with filesystem storage at: {sessions_dir}")
@@ -14625,7 +14625,15 @@ if __name__ == '__main__':
     print("App is ready to serve requests...")
     
     try:
-        app.run(host='0.0.0.0', port=port, debug=True, use_reloader=False, use_debugger=True)
+        # Optimized for concurrent users
+        app.run(
+            host='0.0.0.0', 
+            port=port, 
+            debug=True, 
+            use_reloader=False, 
+            use_debugger=True,
+            threaded=True  # Enable threading for concurrent users
+        )
     except Exception as e:
         print(f"Error starting Flask app: {e}")
         import traceback

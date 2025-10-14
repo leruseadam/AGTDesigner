@@ -33,8 +33,17 @@ class DatabaseReliability:
         self.db_path = db_path
         self.backup_dir = backup_dir or os.path.join(os.path.dirname(db_path), 'backups')
         self.health_check_interval = 60  # Check health every 60 seconds
-        self.max_backup_age_hours = 24  # Keep backups for 24 hours
-        self.max_backups = 10  # Maximum number of rolling backups
+        
+        # Check if running on PythonAnywhere
+        self._is_pythonanywhere = os.environ.get('PYTHONANYWHERE_DOMAIN') is not None
+        
+        if self._is_pythonanywhere:
+            # DISABLED FOR PYTHONANYWHERE TO PREVENT DISK QUOTA ISSUES
+            self.max_backup_age_hours = 0  # No backups on PythonAnywhere
+            self.max_backups = 0  # No backups on PythonAnywhere
+        else:
+            self.max_backup_age_hours = 6  # Keep backups for 6 hours (reduced from 24)
+            self.max_backups = 3  # Maximum number of rolling backups (reduced from 10)
         
         # Create backup directory
         os.makedirs(self.backup_dir, exist_ok=True)
@@ -118,6 +127,11 @@ class DatabaseReliability:
         Returns:
             Tuple of (success, backup_path or error_message)
         """
+        # DISABLED FOR PYTHONANYWHERE TO PREVENT DISK QUOTA ISSUES
+        if self._is_pythonanywhere:
+            logger.debug("Database backups disabled on PythonAnywhere")
+            return True, "Backups disabled on PythonAnywhere"
+            
         with self._backup_lock:
             try:
                 # Verify source database first

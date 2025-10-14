@@ -67,7 +67,7 @@ ENABLE_FAST_LOADING = True
 ENABLE_LAZY_PROCESSING = False  # DISABLED: Ensure consistent processing
 ENABLE_MINIMAL_PROCESSING = True  # ENABLED: For ultra-fast uploads
 ENABLE_BATCH_OPERATIONS = False  # DISABLED: Ensure consistent processing
-ENABLE_VECTORIZED_OPERATIONS = False  # DISABLED: Ensure consistent processing
+ENABLE_VECTORIZED_OPERATIONS = True  # ENABLED: For CBD classic type detection
 ENABLE_LINEAGE_PERSISTENCE = True  # ENABLED: Enhanced lineage persistence with product name fallback
 
 # Performance constants - STANDARDIZED
@@ -167,37 +167,46 @@ def optimized_lineage_assignment(df, product_types, lineages, classic_types):
         # CBD flower and CBD pre-rolls are still classic types that should show CBD lineage
         cbd_blend_mask = product_strain.str.contains('CBD Blend', case=False, na=False)
         
+        # CRITICAL FIX: Also detect CBD from product names for classic types
+        # This ensures "CBD Huckleberry Web" gets CBD lineage instead of HYBRID
+        cbd_from_name_mask = pd.Series([False] * len(df), index=df.index)
+        if 'Product Name*' in df.columns:
+            product_names = df['Product Name*'].astype(str)
+            cbd_from_name_mask = product_names.str.contains(r'\bCBD\b', case=False, na=False)
+        
+        # Combine CBD detection from both strain and product name
+        cbd_detection_mask = cbd_blend_mask | cbd_from_name_mask
+        
         # Define edible types for more conservative CBD assignment
         edible_types = {"edible (solid)", "edible (liquid)", "high cbd edible liquid", "tincture", "topical", "capsule"}
         edible_mask = product_types.str.strip().str.lower().isin(edible_types)
         
-        # CRITICAL FIX: Handle CBD Blend for both classic and non-classic types
+        # CRITICAL FIX: Handle CBD detection for both classic and non-classic types
         
-        # For classic types with CBD Blend (like CBD flower, CBD pre-rolls), always assign CBD lineage
-        classic_cbd_blend = cbd_blend_mask & classic_mask
-        result[classic_cbd_blend] = 'CBD'
+        # For classic types with CBD (like CBD flower, CBD pre-rolls), always assign CBD lineage
+        classic_cbd = cbd_detection_mask & classic_mask
+        result[classic_cbd] = 'CBD'
         
-        # For non-classic, non-edibles with CBD Blend, assign CBD lineage
-        non_edible_cbd_blend = cbd_blend_mask & nonclassic_mask & ~edible_mask
-        result[non_edible_cbd_blend] = 'CBD'
+        # For non-classic, non-edibles with CBD, assign CBD lineage
+        non_edible_cbd = cbd_detection_mask & nonclassic_mask & ~edible_mask
+        result[non_edible_cbd] = 'CBD'
         
-        # For edibles with CBD Blend, be more conservative - only assign CBD if explicitly high-CBD
-        edible_cbd_blend = cbd_blend_mask & edible_mask
+        # For edibles with CBD, be more conservative - only assign CBD if explicitly high-CBD
+        edible_cbd = cbd_detection_mask & edible_mask
         # Check if product names contain explicit CBD indicators
         if 'Product Name*' in df.columns:
             product_names = df['Product Name*'].astype(str)
             explicit_cbd_mask = product_names.str.contains(r'\bCBD\b', case=False, na=False)
-            high_cbd_edible_mask = edible_cbd_blend & (
-                (product_types.str.strip().str.lower() == "high cbd edible liquid") |
-                explicit_cbd_mask
+            high_cbd_edible_mask = edible_cbd & (
+                (product_types.str.strip().str.lower() == "high cbd edible liquid")
             )
             result[high_cbd_edible_mask] = 'CBD'
-            # Set remaining edibles with CBD Blend to MIXED
-            remaining_edible_cbd = edible_cbd_blend & ~high_cbd_edible_mask
+            # Set remaining edibles with CBD to MIXED
+            remaining_edible_cbd = edible_cbd & ~high_cbd_edible_mask
             result[remaining_edible_cbd] = 'MIXED'
         else:
-            # If no product name column, default edibles with CBD Blend to MIXED
-            result[edible_cbd_blend] = 'MIXED'
+            # If no product name column, default edibles with CBD to MIXED
+            result[edible_cbd] = 'MIXED'
         
         # Paraphernalia products -> PARAPHERNALIA lineage (pink) - override existing lineage
         paraphernalia_mask = nonclassic_mask & (product_strain.str.contains('Paraphernalia', case=False, na=False))
@@ -208,7 +217,7 @@ def optimized_lineage_assignment(df, product_types, lineages, classic_types):
         result[mixed_mask] = 'MIXED'
         
         # Default fallback for any remaining non-classic types
-        remaining_nonclassic_mask = nonclassic_mask & ~(cbd_blend_mask | paraphernalia_mask | mixed_mask)
+        remaining_nonclassic_mask = nonclassic_mask & ~(cbd_detection_mask | paraphernalia_mask | mixed_mask)
         
         # Only set default for empty lineages in remaining non-classic types
         remaining_empty_mask = remaining_nonclassic_mask & empty_lineage_mask
@@ -5573,7 +5582,7 @@ class ExcelProcessor:
                     'ProductBrand': brand or "Unknown",
                     'Product Strain': self._infer_strain_from_name(product_name) or "Unknown",
                     'Strain Name': self._infer_strain_from_name(product_name) or "Unknown",
-                    'Lineage': self._infer_lineage_from_name(product_name, product_type) or "HYBRID",
+                    'Lineage': self._infer_lineage_from_name(product_name, self._infer_product_type_from_name(product_name)) or "HYBRID",
                     'Weight*': self._infer_weight_from_name(product_name)['weight'],
                     'Weight': self._infer_weight_from_name(product_name)['weight'],
                     'Quantity*': '1',
