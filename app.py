@@ -6439,32 +6439,22 @@ def database_stats():
         # Test database connection
         try:
             import sqlite3
-            test_conn = sqlite3.connect(product_db.db_path)
+            test_conn = sqlite3.connect(product_db.db_path, timeout=10.0)
             test_cursor = test_conn.cursor()
             test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
             if not test_cursor.fetchone():
                 logging.error(f"Products table not found in database at {product_db.db_path}")
-                # If store-specific database doesn't have products table, fall back to main database
-                logging.info(f"Falling back to main database")
-                # Create main database instance directly (don't clear the global variable!)
-                from src.core.data.product_database import ProductDatabase
-                main_db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
-                product_db = ProductDatabase(main_db_path)
-                if not product_db._initialized:
-                    product_db.init_database()
-                # Update the global reference to use the main database
-                global _product_database
-                _product_database = product_db
-                # Test main database
-                test_conn = sqlite3.connect(product_db.db_path)
-                test_cursor = test_conn.cursor()
-                test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
-                if not test_cursor.fetchone():
-                    logging.error("Products table not found in main database either")
-                    return jsonify({'error': 'Products table not found in any database'}), 500
                 test_conn.close()
-                logging.info(f"Successfully fell back to main database: {product_db.db_path}")
-            # Products table exists, proceed
+                # Return empty stats instead of error
+                return jsonify({
+                    'total_products': 0,
+                    'total_records': 0,
+                    'unique_vendors': 0,
+                    'unique_brands': 0,
+                    'unique_product_types': 0,
+                    'product_type_distribution': {},
+                    'vendor_stats': {'vendors': [], 'brands': []}
+                }), 200
             test_conn.close()
         except Exception as test_error:
             logging.error(f"Database connection test failed: {test_error}")
@@ -6474,7 +6464,7 @@ def database_stats():
         vendor_stats = {}
         try:
             import sqlite3
-            with sqlite3.connect(product_db.db_path) as conn:
+            with sqlite3.connect(product_db.db_path, timeout=30.0) as conn:
                 # Get basic counts
                 cursor = conn.cursor()
                 
@@ -6703,7 +6693,7 @@ def database_vendor_stats():
         
         # Test database connection and fallback if needed
         try:
-            test_conn = sqlite3.connect(product_db.db_path)
+            test_conn = sqlite3.connect(product_db.db_path, timeout=10.0)
             test_cursor = test_conn.cursor()
             test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
             if not test_cursor.fetchone():
@@ -6734,7 +6724,7 @@ def database_vendor_stats():
             return jsonify({'error': f'Database connection failed: {test_error}'}), 500
         
         try:
-            with sqlite3.connect(product_db.db_path) as conn:
+            with sqlite3.connect(product_db.db_path, timeout=30.0) as conn:
                 # Get all vendors with their product counts
                 vendors_df = pd.read_sql_query('''
                     SELECT "Vendor/Supplier*" as vendor, COUNT(*) as product_count, 
