@@ -12192,29 +12192,32 @@ def upload_ultra_reliable():
         # Clear processing status
         update_processing_status(file.filename, 'processing')
         
-        # 6. PROCESSING STRATEGY EXECUTION
+        # 6. PROCESSING STRATEGY EXECUTION WITH OPTIMIZED PROCESSOR
         if processing_strategy == "immediate":
-            # Small files - process immediately with timeout protection
-            logging.info(f"⚡ Processing immediately (small file: {estimated_rows:,} rows)")
+            # Small files - process immediately with OPTIMIZED processor
+            logging.info(f"⚡ Processing immediately with OPTIMIZED processor (small file: {estimated_rows:,} rows)")
             
             try:
-                from src.core.data.excel_processor import ExcelProcessor
-                processor = ExcelProcessor()
+                from EXCEL_PROCESSING_OPTIMIZATION import get_optimized_excel_processor
+                processor = get_optimized_excel_processor()
                 
-                # Use fast loading for small files
-                success = processor.fast_load_file(file_path) if hasattr(processor, 'fast_load_file') else processor.load_file(file_path)
+                # Use optimized processing
+                result = processor.process_excel_optimized(file_path)
                 
-                if success:
+                if result['success']:
+                    row_count = result.get('rows_processed', 0)
+                    processing_time = result.get('processing_time', 0)
+                    strategy = result.get('strategy_used', 'instant')
+                    
+                    logging.info(f"✅ OPTIMIZED SUCCESS: {row_count:,} rows in {processing_time:.2f}s using {strategy} strategy")
+                    
                     global _excel_processor
                     with excel_processor_lock:
                         _excel_processor = processor
                         _excel_processor._last_loaded_file = file_path
                     
-                    row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
                     upload_time = time.time() - start_time
-                    
                     update_processing_status(file.filename, 'ready')
-                    logging.info(f"✅ Immediate processing complete: {row_count} rows in {upload_time:.2f}s")
                     
                     return jsonify({
                         'success': True,
@@ -12223,10 +12226,47 @@ def upload_ultra_reliable():
                         'processing': False,
                         'rows_processed': row_count,
                         'upload_time': upload_time,
-                        'strategy': 'immediate'
+                        'processing_time': processing_time,
+                        'strategy': strategy,
+                        'optimization_used': True
                     })
                 else:
-                    return jsonify({'error': 'Failed to process file'}), 500
+                    error_msg = result.get('error', 'Processing failed')
+                    logging.error(f"❌ OPTIMIZED PROCESSING FAILED: {error_msg}")
+                    return jsonify({'error': f'Failed to process file: {error_msg}'}), 500
+                    
+            except ImportError as import_error:
+                # Fallback to old processor if optimization fails
+                logging.warning(f"Optimized processor import failed, using fallback: {import_error}")
+                try:
+                    from src.core.data.excel_processor import ExcelProcessor
+                    processor = ExcelProcessor()
+                    success = processor.fast_load_file(file_path) if hasattr(processor, 'fast_load_file') else processor.load_file(file_path)
+                    
+                    if success:
+                        global _excel_processor
+                        with excel_processor_lock:
+                            _excel_processor = processor
+                            _excel_processor._last_loaded_file = file_path
+                        
+                        row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
+                        upload_time = time.time() - start_time
+                        update_processing_status(file.filename, 'ready')
+                        
+                        return jsonify({
+                            'success': True,
+                            'filename': sanitized_filename,
+                            'message': f'File processed successfully ({row_count:,} rows)',
+                            'processing': False,
+                            'rows_processed': row_count,
+                            'upload_time': upload_time,
+                            'strategy': 'fallback'
+                        })
+                    else:
+                        return jsonify({'error': 'Failed to process file'}), 500
+                except Exception as fallback_error:
+                    logging.error(f"Fallback processing also failed: {fallback_error}")
+                    processing_strategy = "background_simple"
                     
             except Exception as process_error:
                 logging.error(f"Immediate processing failed: {process_error}")
@@ -12242,31 +12282,56 @@ def upload_ultra_reliable():
             
             def background_excel_processing():
                 try:
-                    logging.info(f"[BG] Starting {processing_strategy} for {sanitized_filename}")
+                    logging.info(f"[BG] Starting {processing_strategy} with OPTIMIZED processor for {sanitized_filename}")
                     
-                    from src.core.data.excel_processor import ExcelProcessor
-                    processor = ExcelProcessor()
-                    
-                    # Choose processing method based on strategy
-                    if processing_strategy == "background_chunked":
-                        # Use minimal processing for very large files
-                        success = processor.minimal_load_file(file_path) if hasattr(processor, 'minimal_load_file') else processor.load_file(file_path)
-                    else:
-                        # Use regular processing for medium files
-                        success = processor.load_file(file_path)
-                    
-                    if success:
-                        global _excel_processor
-                        with excel_processor_lock:
-                            _excel_processor = processor
-                            _excel_processor._last_loaded_file = file_path
+                    try:
+                        from EXCEL_PROCESSING_OPTIMIZATION import get_optimized_excel_processor
+                        processor = get_optimized_excel_processor()
                         
-                        row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
-                        update_processing_status(file.filename, 'ready')
-                        logging.info(f"[BG] Background processing complete: {row_count} rows")
-                    else:
-                        update_processing_status(file.filename, 'error: Processing failed')
-                        logging.error(f"[BG] Background processing failed for {sanitized_filename}")
+                        # Use optimized processing
+                        result = processor.process_excel_optimized(file_path)
+                        
+                        if result['success']:
+                            row_count = result.get('rows_processed', 0)
+                            processing_time = result.get('processing_time', 0)
+                            strategy = result.get('strategy_used', 'unknown')
+                            
+                            logging.info(f"[BG] ✅ OPTIMIZED SUCCESS: {row_count:,} rows in {processing_time:.2f}s using {strategy} strategy")
+                            
+                            global _excel_processor
+                            with excel_processor_lock:
+                                _excel_processor = processor
+                                _excel_processor._last_loaded_file = file_path
+                            
+                            update_processing_status(file.filename, 'ready')
+                        else:
+                            error_msg = result.get('error', 'Processing failed')
+                            logging.error(f"[BG] ❌ OPTIMIZED PROCESSING FAILED: {error_msg}")
+                            update_processing_status(file.filename, f'error: {error_msg}')
+                    
+                    except ImportError as import_error:
+                        # Fallback to original processor
+                        logging.warning(f"[BG] Optimized processor import failed, using fallback: {import_error}")
+                        from src.core.data.excel_processor import ExcelProcessor
+                        processor = ExcelProcessor()
+                        
+                        if processing_strategy == "background_chunked":
+                            success = processor.minimal_load_file(file_path) if hasattr(processor, 'minimal_load_file') else processor.load_file(file_path)
+                        else:
+                            success = processor.load_file(file_path)
+                        
+                        if success:
+                            global _excel_processor
+                            with excel_processor_lock:
+                                _excel_processor = processor
+                                _excel_processor._last_loaded_file = file_path
+                            
+                            row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
+                            update_processing_status(file.filename, 'ready')
+                            logging.info(f"[BG] Fallback processing complete: {row_count} rows")
+                        else:
+                            update_processing_status(file.filename, 'error: Processing failed')
+                            logging.error(f"[BG] Fallback processing failed for {sanitized_filename}")
                         
                 except Exception as bg_error:
                     logging.error(f"[BG] Background processing error: {bg_error}")
