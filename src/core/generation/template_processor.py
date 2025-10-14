@@ -1592,6 +1592,9 @@ class TemplateProcessor:
                 ('CBD BLEND' in str(product_strain).upper())
             )
             
+            # DEBUG: Log all product details for CBD detection
+            self.logger.info(f"CBD DETECTION DEBUG (classic): product_name='{product_name}', product_type='{product_type}', product_strain='{product_strain}', is_cbd_product={is_cbd_product}")
+            
             if is_cbd_product:
                 cleaned_lineage_val = "CBD"
                 self.logger.info(f"CBD PRODUCT FIX: Overriding lineage to 'CBD' for product '{product_name}' (type: '{product_type}', strain: '{product_strain}', was: '{lineage_val}')")
@@ -1655,6 +1658,9 @@ class TemplateProcessor:
                 ('CBD' in str(product_strain).upper()) or
                 ('CBD BLEND' in str(product_strain).upper())
             )
+            
+            # DEBUG: Log all product details for CBD detection
+            self.logger.info(f"CBD DETECTION DEBUG (non-classic): product_name='{product_name}', product_type='{product_type}', product_strain='{product_strain}', is_cbd_product={is_cbd_product}")
             
             if is_cbd_product:
                 cleaned_lineage_val = "CBD"
