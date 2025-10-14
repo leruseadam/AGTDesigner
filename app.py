@@ -12097,6 +12097,7 @@ def serve_undo_selections_test():
 @app.route('/upload-ultra-reliable', methods=['POST'])
 def upload_ultra_reliable():
     """Ultra-reliable Excel upload with comprehensive error handling and optimization."""
+    global _excel_processor
     try:
         logging.info("=== ULTRA-RELIABLE UPLOAD START ===")
         start_time = time.time()
@@ -12211,7 +12212,6 @@ def upload_ultra_reliable():
                     
                     logging.info(f"✅ OPTIMIZED SUCCESS: {row_count:,} rows in {processing_time:.2f}s using {strategy} strategy")
                     
-                    global _excel_processor
                     with excel_processor_lock:
                         _excel_processor = processor
                         _excel_processor._last_loaded_file = file_path
@@ -12244,7 +12244,6 @@ def upload_ultra_reliable():
                     success = processor.fast_load_file(file_path) if hasattr(processor, 'fast_load_file') else processor.load_file(file_path)
                     
                     if success:
-                        global _excel_processor
                         with excel_processor_lock:
                             _excel_processor = processor
                             _excel_processor._last_loaded_file = file_path
@@ -12281,6 +12280,7 @@ def upload_ultra_reliable():
             import threading
             
             def background_excel_processing():
+                global _excel_processor
                 try:
                     logging.info(f"[BG] Starting {processing_strategy} with OPTIMIZED processor for {sanitized_filename}")
                     
@@ -12298,7 +12298,6 @@ def upload_ultra_reliable():
                             
                             logging.info(f"[BG] ✅ OPTIMIZED SUCCESS: {row_count:,} rows in {processing_time:.2f}s using {strategy} strategy")
                             
-                            global _excel_processor
                             with excel_processor_lock:
                                 _excel_processor = processor
                                 _excel_processor._last_loaded_file = file_path
@@ -12321,7 +12320,6 @@ def upload_ultra_reliable():
                             success = processor.load_file(file_path)
                         
                         if success:
-                            global _excel_processor
                             with excel_processor_lock:
                                 _excel_processor = processor
                                 _excel_processor._last_loaded_file = file_path
