@@ -1580,10 +1580,21 @@ class TemplateProcessor:
                 self.logger.debug(f"No strain available, using Excel lineage: '{lineage_val}'")
             
             # Set Lineage to strain lineage for classic types
-            # CRITICAL FIX: For CBD Blend products, ALWAYS override lineage to "CBD" regardless of existing lineage
-            if product_type and 'CBD' in str(product_type).upper() and 'BLEND' in str(product_type).upper():
+            # CRITICAL FIX: For CBD products, ALWAYS override lineage to "CBD" regardless of existing lineage
+            # Check product name, strain, and type for CBD indicators
+            product_name = record.get('Product Name*', '') or record.get('ProductName', '') or ''
+            product_strain = record.get('Product Strain', '') or record.get('ProductStrain', '') or ''
+            
+            is_cbd_product = (
+                ('CBD' in str(product_type).upper() and 'BLEND' in str(product_type).upper()) or
+                ('CBD' in str(product_name).upper()) or
+                ('CBD' in str(product_strain).upper()) or
+                ('CBD BLEND' in str(product_strain).upper())
+            )
+            
+            if is_cbd_product:
                 cleaned_lineage_val = "CBD"
-                self.logger.info(f"CBD BLEND FIX: Overriding lineage to 'CBD' for product type '{product_type}' (was: '{lineage_val}')")
+                self.logger.info(f"CBD PRODUCT FIX: Overriding lineage to 'CBD' for product '{product_name}' (type: '{product_type}', strain: '{product_strain}', was: '{lineage_val}')")
                 
                 # For vertical template, don't wrap with markers since it uses simple placeholders
                 if self.template_type == 'vertical':
@@ -1633,23 +1644,34 @@ class TemplateProcessor:
             # Color is determined by Product Strain (CBD Blend = yellow, Mixed = blue)
             self.logger.debug(f"Processing non-classic type '{product_type}' for Lineage and ProductVendor")
             
-            # CRITICAL FIX: For CBD Blend products, ALWAYS override lineage to "CBD" regardless of brand
-            if product_type and 'CBD' in str(product_type).upper() and 'BLEND' in str(product_type).upper():
+            # CRITICAL FIX: For CBD products, ALWAYS override lineage to "CBD" regardless of brand
+            # Check product name, strain, and type for CBD indicators
+            product_name = record.get('Product Name*', '') or record.get('ProductName', '') or ''
+            product_strain = record.get('Product Strain', '') or record.get('ProductStrain', '') or ''
+            
+            is_cbd_product = (
+                ('CBD' in str(product_type).upper() and 'BLEND' in str(product_type).upper()) or
+                ('CBD' in str(product_name).upper()) or
+                ('CBD' in str(product_strain).upper()) or
+                ('CBD BLEND' in str(product_strain).upper())
+            )
+            
+            if is_cbd_product:
                 cleaned_lineage_val = "CBD"
-                self.logger.info(f"CBD BLEND FIX (non-classic): Overriding lineage to 'CBD' for product type '{product_type}' (was: '{product_brand}')")
+                self.logger.info(f"CBD PRODUCT FIX (non-classic): Overriding lineage to 'CBD' for product '{product_name}' (type: '{product_type}', strain: '{product_strain}', was: '{product_brand}')")
                 
                 if self.template_type == 'vertical':
                     # For vertical template, set lineage to CBD
                     label_context['Lineage'] = cleaned_lineage_val
                     label_context['ProductBrand'] = ""
                     label_context['ProductBrand_Center'] = ""
-                    self.logger.debug(f"VERTICAL CBD BLEND FIX: Set Lineage to 'CBD' for vertical template")
+                    self.logger.debug(f"VERTICAL CBD PRODUCT FIX: Set Lineage to 'CBD' for vertical template")
                 else:
                     # For other templates, use marker-based formatting
                     label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{cleaned_lineage_val}PRODUCTBRAND_CENTER_END"
                     label_context['ProductBrand'] = ""
                     label_context['ProductBrand_Center'] = ""
-                    self.logger.debug(f"NON-VERTICAL CBD BLEND FIX: Set Lineage to 'CBD' with markers")
+                    self.logger.debug(f"NON-VERTICAL CBD PRODUCT FIX: Set Lineage to 'CBD' with markers")
             elif product_brand:
                 self.logger.info(f"BRAND PROCESSING: Non-classic type '{product_type}' with brand '{product_brand}', template_type='{self.template_type}'")
                 # For non-classic types, separate Product Strain and Product Brand for different font sizing
