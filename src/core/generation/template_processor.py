@@ -1274,8 +1274,15 @@ class TemplateProcessor:
         """Ultra-optimized label context building for maximum performance."""
         # CRITICAL FIX: Log lineage value received in template processor
         lineage_value = record.get('Lineage', 'NOT_FOUND')
-        product_name = record.get('ProductName', 'Unknown')
-        self.logger.info(f"LINEAGE TEMPLATE DEBUG: Building context for '{product_name}' with lineage: '{lineage_value}'")
+        product_name = record.get('ProductName', 'Unknown') or record.get('Product Name*', 'Unknown')
+        product_type = record.get('Product Type*', '') or record.get('ProductType', '')
+        product_strain = record.get('Product Strain', '') or record.get('ProductStrain', '')
+        
+        # Enhanced logging to diagnose CBD lineage issues
+        self.logger.info(f"🔍 LINEAGE FLOW DEBUG: Product '{product_name}'")
+        self.logger.info(f"   📋 Lineage from record: '{lineage_value}'")
+        self.logger.info(f"   🏷️  Product Type: '{product_type}'")
+        self.logger.info(f"   🌿 Product Strain: '{product_strain}'")
         
         # Fast dictionary copy
         label_context = dict(record)
@@ -1546,32 +1553,42 @@ class TemplateProcessor:
         # Check if it's a classic type
         is_classic_type = product_type in classic_types
         
+        # Check if this record came from the database (has Source field indicating database origin)
+        # This needs to be available for both classic and non-classic type processing
+        record_source = record.get('Source', '')
+        is_from_database = 'Database' in str(record_source) or 'JSON Match' in str(record_source)
+        
         if is_classic_type:
             # For classic types, Lineage should show strain lineage and ProductVendor should show brand
             self.logger.debug(f"Processing classic type '{product_type}' for Lineage and ProductVendor")
             
-            # PRIORITY FIX: Use Excel lineage first (includes manual dropdown changes), then database fallback
+            # CRITICAL FIX: Database lineage takes priority over Excel lineage
+            # This ensures that when products come from the database with CBD lineage, it's preserved
             lineage_val = ""
             
-            # PRIORITY 1: Use Excel lineage (includes manual dropdown changes from user)
-            if lineage_text and lineage_text.strip():
+            # PRIORITY 1: If lineage exists in the record AND it's from database, use it directly
+            if is_from_database and lineage_text and lineage_text.strip():
                 lineage_val = lineage_text.upper()
-                self.logger.debug(f"Using Excel lineage (includes manual changes): '{lineage_val}'")
+                self.logger.info(f"✅ Using DATABASE lineage (priority): '{lineage_val}' for '{product_name}'")
+            # PRIORITY 2: Use Excel lineage (includes manual dropdown changes from user)
+            elif lineage_text and lineage_text.strip() and not is_from_database:
+                lineage_val = lineage_text.upper()
+                self.logger.debug(f"Using Excel lineage (manual changes): '{lineage_val}'")
+            # PRIORITY 3: Fallback to database lineage lookup by strain
             elif product_strain:
-                # PRIORITY 2: Fallback to database lineage if no Excel lineage
                 try:
                     from src.core.data.product_database import get_product_database
                     product_db = get_product_database()
                     strain_info = product_db.get_strain_info(product_strain)
                     if strain_info and strain_info.get('canonical_lineage'):
                         lineage_val = strain_info['canonical_lineage'].upper()
-                        self.logger.debug(f"Using database lineage fallback: '{lineage_val}'")
+                        self.logger.debug(f"Using database lineage lookup: '{lineage_val}'")
                     else:
-                        # PRIORITY 3: Default fallback
+                        # PRIORITY 4: Default fallback
                         lineage_val = ""
-                        self.logger.debug(f"No lineage found in Excel or database")
+                        self.logger.debug(f"No lineage found in database lookup")
                 except Exception as e:
-                    # PRIORITY 3: Default fallback if database lookup fails
+                    # PRIORITY 4: Default fallback if database lookup fails
                     lineage_val = ""
                     self.logger.debug(f"Using default fallback due to error: '{lineage_val}' (error: {e})")
             else:
@@ -1662,7 +1679,27 @@ class TemplateProcessor:
             # DEBUG: Log all product details for CBD detection
             self.logger.info(f"CBD DETECTION DEBUG (non-classic): product_name='{product_name}', product_type='{product_type}', product_strain='{product_strain}', is_cbd_product={is_cbd_product}")
             
-            if is_cbd_product:
+            # CRITICAL FIX: Check if record has database lineage (takes priority)
+            # Database lineage should be preserved for products from database
+            # Also preserve explicit CBD lineage even if source is uncertain
+            lineage_upper = lineage_text.upper() if lineage_text else ''
+            is_valid_lineage = lineage_upper in ['CBD', 'SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA']
+            has_database_lineage = lineage_text and lineage_text.strip() and (is_from_database or is_valid_lineage)
+            
+            if has_database_lineage and lineage_upper != 'MIXED':
+                # Use the database lineage directly
+                cleaned_lineage_val = lineage_text.upper()
+                self.logger.info(f"✅ Using DATABASE lineage for non-classic product '{product_name}': '{cleaned_lineage_val}'")
+                
+                if self.template_type == 'vertical':
+                    label_context['Lineage'] = cleaned_lineage_val
+                    label_context['ProductBrand'] = ""
+                    label_context['ProductBrand_Center'] = ""
+                else:
+                    label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{cleaned_lineage_val}PRODUCTBRAND_CENTER_END"
+                    label_context['ProductBrand'] = ""
+                    label_context['ProductBrand_Center'] = ""
+            elif is_cbd_product:
                 cleaned_lineage_val = "CBD"
                 self.logger.info(f"CBD PRODUCT FIX (non-classic): Overriding lineage to 'CBD' for product '{product_name}' (type: '{product_type}', strain: '{product_strain}', was: '{product_brand}')")
                 

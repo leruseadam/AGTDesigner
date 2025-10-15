@@ -3198,15 +3198,22 @@ class ExcelProcessor:
                             for product in json_matched_products:
                                 if isinstance(product, dict):
                                     # DATABASE PRIORITY: Ensure all fields come from database with safe defaults
+                                    product_name = product.get('Product Name*', product.get('ProductName', ''))
+                                    lineage_value = product.get('Lineage', 'MIXED')
+                                    
+                                    # Diagnostic logging for CBD lineage tracking
+                                    if 'CBD' in str(product_name).upper() or lineage_value == 'CBD':
+                                        logger.info(f"🔍 CACHED PRODUCT LINEAGE DEBUG: Product '{product_name}' has lineage='{lineage_value}' in cached JSON products")
+                                    
                                     record = {
-                                        'ProductName': product.get('Product Name*', product.get('ProductName', '')),
-                                        'Product Name*': product.get('Product Name*', product.get('ProductName', '')),
-                                        'Description': product.get('Description', product.get('Product Name*', product.get('ProductName', ''))),
-                                        'DescAndWeight': self._process_description_from_product_name(product.get('Product Name*', product.get('ProductName', ''))),  # Use Excel processor formula
+                                        'ProductName': product_name,
+                                        'Product Name*': product_name,
+                                        'Description': product.get('Description', product_name),
+                                        'DescAndWeight': self._process_description_from_product_name(product_name),  # Use Excel processor formula
                                         'Product Type*': product.get('Product Type*', 'Edible (Solid)'),  # Database default
                                         'Product Brand': product.get('Product Brand', 'CERES'),  # Database default
                                         'Product Strain': product.get('Product Strain', 'Mixed'),  # Database default
-                                        'Lineage': product.get('Lineage', 'MIXED'),  # Database default
+                                        'Lineage': lineage_value,  # Database default
                                         'Vendor': product.get('Vendor/Supplier*', product.get('Vendor', 'A Greener Today')),  # Database default
                                         'Price': product.get('Price', '25.00'),  # Database default price
                                         'Weight*': product.get('Weight*', '1'),  # Database default weight
@@ -3249,6 +3256,13 @@ class ExcelProcessor:
             records = filtered_df.to_dict('records')
             logger.debug(f"Converted to {len(records)} records")
             
+            # Diagnostic logging for CBD lineage tracking from DataFrame
+            for record in records:
+                product_name = record.get('ProductName', record.get('Product Name*', ''))
+                lineage_value = record.get('Lineage', 'NOT_FOUND')
+                if 'CBD' in str(product_name).upper() or lineage_value == 'CBD':
+                    logger.info(f"🔍 DATAFRAME LINEAGE DEBUG: Product '{product_name}' has lineage='{lineage_value}' in DataFrame records")
+            
             # Sort records by lineage order, then by the order they appear in selected_tags
             lineage_order = [
                 'SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA',
@@ -3287,9 +3301,11 @@ class ExcelProcessor:
                         description = product_name or record.get(product_name_col, '')
                     product_type = record.get('Product Type*', '').strip().lower()
                     
-                    # Look up database weight and units as fallback
+                    # CRITICAL FIX: Look up database lineage and update record if found
+                    # This ensures database lineage is preserved even for Excel records
                     db_weight = ''
                     db_units = ''
+                    db_lineage = None
                     try:
                         from src.core.data.product_database import get_product_database
                         product_db = get_product_database()
@@ -3299,9 +3315,18 @@ class ExcelProcessor:
                                 db_product = db_products[0]
                                 db_weight = db_product.get('Weight*', '')
                                 db_units = db_product.get('Units', '')
+                                db_lineage = db_product.get('Lineage', '')
+                                
+                                # CRITICAL: Update record with database lineage if it exists and is valid
+                                if db_lineage and db_lineage.strip() and db_lineage.upper() != 'MIXED':
+                                    old_lineage = record.get('Lineage', '')
+                                    record['Lineage'] = db_lineage
+                                    record['Source'] = 'Database Priority'
+                                    logger.info(f"🔄 LINEAGE UPDATE: '{product_name}' lineage updated from '{old_lineage}' to '{db_lineage}' (from database)")
+                                
                                 logger.debug(f"Found database weight/units for '{product_name}': {db_weight}/{db_units}")
                     except Exception as e:
-                        logger.debug(f"Could not lookup database weight/units for '{product_name}': {e}")
+                        logger.debug(f"Could not lookup database info for '{product_name}': {e}")
                     
                     # Add database weight and units to record for _format_weight_units
                     record['db_weight'] = db_weight

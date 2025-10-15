@@ -4368,6 +4368,11 @@ class ProductDatabase:
                     # Use the first result for each product (or could implement logic to choose best match)
                     result = products_map[normalized_name][0]
                     
+                    # Diagnostic logging for CBD lineage tracking
+                    lineage_from_db = result[6] or 'MIXED'
+                    if 'CBD' in str(result[1]).upper() or lineage_from_db == 'CBD':
+                        logger.info(f"🔍 DATABASE LINEAGE DEBUG: Product '{result[1]}' has lineage='{lineage_from_db}' in database")
+                    
                     product_info = {
                         'id': result[0],
                         'ProductName': result[1],  # product_name
@@ -4377,7 +4382,7 @@ class ProductDatabase:
                         'Vendor': result[4],  # vendor
                         'Vendor/Supplier*': result[4],  # Excel column name compatibility
                         'Product Brand': result[5],  # brand
-                        'Lineage': result[6] or 'MIXED',  # lineage
+                        'Lineage': lineage_from_db,  # lineage
                         'Product Strain': result[7],  # strain_name from Product Strain column
                         'strain_name': result[7],  # strain_name from Product Strain column
                         'canonical_lineage': result[8],  # canonical_lineage from Lineage column
