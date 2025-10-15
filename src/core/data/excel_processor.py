@@ -162,20 +162,34 @@ def optimized_lineage_assignment(df, product_types, lineages, classic_types):
     if 'Product Strain' in df.columns:
         product_strain = df['Product Strain'].astype(str)
         
+        # COMPREHENSIVE CBD DETECTION - Catch ALL CBD products from multiple sources
         # CBD Blend products -> CBD lineage (yellow) - override existing lineage
         # CRITICAL FIX: Apply to ALL types, not just non-classic types
         # CBD flower and CBD pre-rolls are still classic types that should show CBD lineage
-        cbd_blend_mask = product_strain.str.contains('CBD Blend', case=False, na=False)
         
-        # CRITICAL FIX: Also detect CBD from product names for classic types
-        # This ensures "CBD Huckleberry Web" gets CBD lineage instead of HYBRID
+        # Source 1: Product Strain contains "CBD Blend" or just "CBD"
+        cbd_blend_mask = product_strain.str.contains('CBD Blend', case=False, na=False)
+        cbd_strain_mask = product_strain.str.contains(r'\bCBD\b', case=False, na=False)
+        
+        # Source 2: Product Name contains "CBD"
         cbd_from_name_mask = pd.Series([False] * len(df), index=df.index)
         if 'Product Name*' in df.columns:
             product_names = df['Product Name*'].astype(str)
             cbd_from_name_mask = product_names.str.contains(r'\bCBD\b', case=False, na=False)
         
-        # Combine CBD detection from both strain and product name
-        cbd_detection_mask = cbd_blend_mask | cbd_from_name_mask
+        # Source 3: Product Type contains "CBD" (like "High CBD Edible Liquid")
+        cbd_from_type_mask = product_types.astype(str).str.contains(r'\bCBD\b', case=False, na=False)
+        
+        # Source 4: Existing lineage is already "CBD" (preserve it)
+        cbd_from_lineage_mask = lineages.astype(str).str.upper().str.strip() == 'CBD'
+        
+        # Combine ALL CBD detection sources
+        cbd_detection_mask = cbd_blend_mask | cbd_strain_mask | cbd_from_name_mask | cbd_from_type_mask | cbd_from_lineage_mask
+        
+        # Log CBD detection for debugging
+        if cbd_detection_mask.any():
+            cbd_count = cbd_detection_mask.sum()
+            logger.info(f"🌿 CBD DETECTION: Found {cbd_count} products with CBD indicators")
         
         # Define edible types for more conservative CBD assignment
         edible_types = {"edible (solid)", "edible (liquid)", "high cbd edible liquid", "tincture", "topical", "capsule"}
@@ -191,22 +205,11 @@ def optimized_lineage_assignment(df, product_types, lineages, classic_types):
         non_edible_cbd = cbd_detection_mask & nonclassic_mask & ~edible_mask
         result[non_edible_cbd] = 'CBD'
         
-        # For edibles with CBD, be more conservative - only assign CBD if explicitly high-CBD
+        # SIMPLIFIED: For edibles with CBD, assign CBD lineage
+        # If a product has CBD in its name, type, or strain, it should show CBD lineage
         edible_cbd = cbd_detection_mask & edible_mask
-        # Check if product names contain explicit CBD indicators
-        if 'Product Name*' in df.columns:
-            product_names = df['Product Name*'].astype(str)
-            explicit_cbd_mask = product_names.str.contains(r'\bCBD\b', case=False, na=False)
-            high_cbd_edible_mask = edible_cbd & (
-                (product_types.str.strip().str.lower() == "high cbd edible liquid")
-            )
-            result[high_cbd_edible_mask] = 'CBD'
-            # Set remaining edibles with CBD to MIXED
-            remaining_edible_cbd = edible_cbd & ~high_cbd_edible_mask
-            result[remaining_edible_cbd] = 'MIXED'
-        else:
-            # If no product name column, default edibles with CBD to MIXED
-            result[edible_cbd] = 'MIXED'
+        result[edible_cbd] = 'CBD'
+        logger.info(f"🌿 CBD EDIBLES: Assigned CBD lineage to {edible_cbd.sum()} CBD edible products")
         
         # Paraphernalia products -> PARAPHERNALIA lineage (pink) - override existing lineage
         paraphernalia_mask = nonclassic_mask & (product_strain.str.contains('Paraphernalia', case=False, na=False))
