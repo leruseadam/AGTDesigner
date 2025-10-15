@@ -49,8 +49,8 @@ def timed_operation(operation_name):
         return wrapper
     return decorator
 
-def retry_on_lock(max_retries=3, delay=0.5):
-    """Decorator to retry database operations on locking errors."""
+def retry_on_lock(max_retries=5, delay=1.0):
+    """Decorator to retry database operations on locking errors with exponential backoff."""
     def decorator(func):
         def wrapper(self, *args, **kwargs):
             current_delay = delay  # Use a local variable to avoid scope issues
@@ -58,10 +58,19 @@ def retry_on_lock(max_retries=3, delay=0.5):
                 try:
                     return func(self, *args, **kwargs)
                 except Exception as e:
-                    if "database is locked" in str(e).lower() and attempt < max_retries - 1:
-                        logger.warning(f"Database locked for {func.__name__}, retrying in {current_delay}s (attempt {attempt + 1}/{max_retries})")
-                        time.sleep(current_delay)
-                        current_delay *= 2  # Exponential backoff
+                    if "database is locked" in str(e).lower():
+                        if attempt < max_retries - 1:
+                            logger.warning(f"Database locked for {func.__name__}, retrying in {current_delay:.1f}s (attempt {attempt + 1}/{max_retries})")
+                            time.sleep(current_delay)
+                            current_delay *= 2  # Exponential backoff: 1s, 2s, 4s, 8s, 16s
+                        else:
+                            # For strain operations, fail gracefully (non-critical)
+                            if 'strain' in func.__name__.lower():
+                                logger.warning(f"⚠️  Skipping {func.__name__} after {max_retries} attempts - database locked (non-critical operation)")
+                                return None
+                            else:
+                                logger.error(f"❌ Failed {func.__name__} after {max_retries} attempts: {e}")
+                                raise e
                     else:
                         raise e
             return None
@@ -187,6 +196,10 @@ class ProductDatabase:
                 
                 # Common optimizations for all environments
                 conn.execute("PRAGMA busy_timeout=60000")  # 60s timeout for locks
+                
+                # Ensure proper row factory for result access
+                conn.row_factory = sqlite3.Row
+                
                 self._connection_pool[thread_id] = conn
                 
             except sqlite3.DatabaseError as e:
@@ -2808,6 +2821,17 @@ class ProductDatabase:
                         conn.close()
                 except Exception as e:
                     logger.warning(f"Error closing stale connection {thread_id}: {e}")
+    
+    def release_connection(self):
+        """Release the current thread's connection to prevent locks."""
+        thread_id = threading.get_ident()
+        if thread_id in self._connection_pool:
+            try:
+                conn = self._connection_pool[thread_id]
+                conn.commit()  # Commit any pending transactions
+                logger.debug(f"Released connection for thread {thread_id}")
+            except Exception as e:
+                logger.warning(f"Error releasing connection: {e}")
     
     def close_connections(self):
         """Close all database connections safely."""
