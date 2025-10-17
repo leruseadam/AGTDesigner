@@ -387,6 +387,10 @@ def process_chunk(args):
                 # The template processor will handle the proper formatting for each template type
                 label_data["ProductBrand"] = brand_content
                 label_data["ProductBrand_Center"] = brand_content
+                
+                # CRITICAL FIX: Also set Lineage field for double template compatibility
+                # The double template uses Lineage field, not ProductBrand field
+                label_data["Lineage"] = brand_content
             
             # Add other fields to label_data
             # Get product name and apply non-breaking hyphens to prevent "Pre-Roll" splitting
@@ -479,9 +483,17 @@ def process_chunk(args):
                         label_data["ProductBrand"] = ""
                         label_data["ProductBrand_Center"] = ""
             else:
-                # Non-classic types already have brand data set in the first processing section above
-                # No need to override it here - this was causing brand data to be lost
-                pass
+                # CRITICAL FIX: For vertical template, ensure brand goes to Lineage field only
+                # and ProductStrain field is cleared to prevent 1pt font issue
+                if orientation == 'vertical':
+                    # For vertical template, clear ProductStrain to prevent brand from appearing in 1pt font
+                    # The brand should only appear in Lineage field with proper font size
+                    label_data["ProductStrain"] = ""
+                    print(f"DEBUG VERTICAL FIX: Cleared ProductStrain for vertical template to prevent 1pt font issue")
+                else:
+                    # Non-classic types already have brand data set in the first processing section above
+                    # No need to override it here - this was causing brand data to be lost
+                    pass
             label_data["Ratio_or_THC_CBD"] = str(row.get("Ratio", ""))  # Don't wrap with markers for template rendering
             # ProductStrain is now handled by the template processor to ensure proper conversion
             # of non-classic types to "Mixed" or "CBD Blend"
