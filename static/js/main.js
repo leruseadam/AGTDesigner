@@ -7326,40 +7326,39 @@ async function clearStuckUploads() {
 function initializeStickyFilterBar() {
     const stickyFilterBar = document.querySelector('.sticky-filter-bar');
     const tagList = document.getElementById('availableTags');
+    const cardHeader = document.querySelector('.card-header');
     
-    if (stickyFilterBar && tagList) {
-        // Add scroll event listener to the tag list
-        tagList.addEventListener('scroll', function() {
-            const rect = stickyFilterBar.getBoundingClientRect();
-            const cardHeader = document.querySelector('.card-header');
-            
-            if (cardHeader) {
-                const headerRect = cardHeader.getBoundingClientRect();
-                
-                // Check if the filter bar should be sticky
-                if (headerRect.bottom <= 0) {
-                    stickyFilterBar.classList.add('is-sticky');
-                } else {
-                    stickyFilterBar.classList.remove('is-sticky');
-                }
-            }
-        });
+    if (stickyFilterBar && tagList && cardHeader) {
+        let ticking = false;
         
-        // Also listen for window scroll for better cross-browser compatibility
-        window.addEventListener('scroll', function() {
-            const rect = stickyFilterBar.getBoundingClientRect();
-            const cardHeader = document.querySelector('.card-header');
+        // Cache DOM queries outside the scroll handler
+        const checkStickyPosition = () => {
+            const headerRect = cardHeader.getBoundingClientRect();
             
-            if (cardHeader) {
-                const headerRect = cardHeader.getBoundingClientRect();
-                
-                if (headerRect.bottom <= 0) {
+            // Batch DOM reads and writes using requestAnimationFrame
+            if (headerRect.bottom <= 0) {
+                if (!stickyFilterBar.classList.contains('is-sticky')) {
                     stickyFilterBar.classList.add('is-sticky');
-                } else {
+                }
+            } else {
+                if (stickyFilterBar.classList.contains('is-sticky')) {
                     stickyFilterBar.classList.remove('is-sticky');
                 }
             }
-        });
+            ticking = false;
+        };
+        
+        // Throttled scroll handler using requestAnimationFrame for optimal performance
+        const handleScroll = () => {
+            if (!ticking) {
+                window.requestAnimationFrame(checkStickyPosition);
+                ticking = true;
+            }
+        };
+        
+        // Add passive scroll listeners for better performance
+        tagList.addEventListener('scroll', handleScroll, { passive: true });
+        window.addEventListener('scroll', handleScroll, { passive: true });
     }
 }
 

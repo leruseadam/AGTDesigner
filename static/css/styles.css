@@ -83,6 +83,17 @@
    PERFORMANCE OPTIMIZATIONS
    ======================================== */
 
+/* Enable hardware acceleration for better performance on all platforms */
+* {
+  /* Optimize scrolling performance on PC browsers */
+  -ms-overflow-style: -ms-autohiding-scrollbar;
+}
+
+/* Smooth scrolling with hardware acceleration */
+html {
+  scroll-behavior: smooth;
+}
+
 /* Performance optimizations to prevent GUI glitchiness and flashing */
 .tag-item, .tag-row, .vendor-section, .brand-section, .product-type-section, .weight-section {
   /* Prevent layout shifts during rapid updates */
@@ -94,8 +105,23 @@
   -moz-user-select: none;
   -ms-user-select: none;
   user-select: none;
-  /* Optimize rendering */
+  /* Enable hardware acceleration - only use will-change when actively animating */
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+/* When animating, optimize with will-change */
+.tag-item:hover, .tag-row:hover, 
+.vendor-section:hover, .brand-section:hover, 
+.product-type-section:hover, .weight-section:hover {
   will-change: opacity, transform;
+}
+
+/* Remove will-change after animation completes for better performance */
+.tag-item:not(:hover), .tag-row:not(:hover),
+.vendor-section:not(:hover), .brand-section:not(:hover),
+.product-type-section:not(:hover), .weight-section:not(:hover) {
+  will-change: auto;
 }
 
 /* Disable transitions during rapid updates to prevent flashing */
@@ -112,7 +138,13 @@
   contain: layout style;
   /* Smooth state changes */
   transition: all 0.1s ease;
-  /* Optimize rendering */
+  /* Use hardware acceleration */
+  transform: translateZ(0);
+}
+
+/* Only use will-change during active interaction */
+.tag-checkbox:active,
+.tag-checkbox:focus {
   will-change: transform, opacity;
 }
 
@@ -120,6 +152,17 @@
 .tag-item[style*="display: none"],
 .tag-item[style*="display: block"] {
   transition: opacity 0.1s ease;
+}
+
+/* Optimize scrollable containers for PC performance */
+.tag-list-container, .modal-body, [style*="overflow-y: auto"] {
+  /* Enable smooth scrolling */
+  scroll-behavior: smooth;
+  /* Optimize scrolling performance */
+  -webkit-overflow-scrolling: touch;
+  /* Use GPU acceleration for scrolling */
+  transform: translateZ(0);
+  will-change: scroll-position;
 }
 
 /* Increase spacing between the Database / Lineage Editor / Match JSON buttons */
@@ -1700,9 +1743,9 @@ img, video, canvas, svg {
     position: relative !important;
     display: block !important;
     line-height: 1.4;
-    /* Ensure proper layout recalculation */
+    /* Ensure proper layout recalculation with hardware acceleration */
     transform: translateZ(0);
-    will-change: height;
+    backface-visibility: hidden;
   }
   
   /* Ensure glass-card containers can expand properly */
@@ -7500,9 +7543,9 @@ img, video, canvas, svg {
   .tag-list-container:has(.collapsible-content:not(.collapsed)) {
     height: auto !important;
     overflow-y: auto !important;
-    /* Force layout recalculation */
+    /* Force layout recalculation with hardware acceleration */
     transform: translateZ(0);
-    will-change: height;
+    backface-visibility: hidden;
   }
   
   /* Ensure vendor sections maintain proper flow */
@@ -7512,9 +7555,9 @@ img, video, canvas, svg {
     clear: both !important;
     width: 100% !important;
     margin-bottom: 8px !important;
-    /* Force layout recalculation */
+    /* Force layout recalculation with hardware acceleration */
     transform: translateZ(0);
-    will-change: height;
+    backface-visibility: hidden;
   }
   
   /* Ensure brand sections maintain proper flow */
@@ -7524,9 +7567,9 @@ img, video, canvas, svg {
     clear: both !important;
     width: 100% !important;
     margin-bottom: 8px !important;
-    /* Force layout recalculation */
+    /* Force layout recalculation with hardware acceleration */
     transform: translateZ(0);
-    will-change: height;
+    backface-visibility: hidden;
   }
   
   /* Ensure product type sections maintain proper flow */
@@ -7536,9 +7579,9 @@ img, video, canvas, svg {
     clear: both !important;
     width: 100% !important;
     margin-bottom: 8px !important;
-    /* Force layout recalculation */
+    /* Force layout recalculation with hardware acceleration */
     transform: translateZ(0);
-    will-change: height;
+    backface-visibility: hidden;
   }
   
   /* Ensure weight sections maintain proper flow */
@@ -7548,9 +7591,9 @@ img, video, canvas, svg {
     clear: both !important;
     width: 100% !important;
     margin-bottom: 8px !important;
-    /* Force layout recalculation */
+    /* Force layout recalculation with hardware acceleration */
     transform: translateZ(0);
-    will-change: height;
+    backface-visibility: hidden;
   }
   
      /* Force vendor headers to stay on top */

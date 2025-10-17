@@ -11055,6 +11055,9 @@
   <!-- Tags Table JavaScript -->
   <script src="{{ url_for('static', filename='js/tags_table.js') }}?v={{ cache_bust }}"></script>
   
+  <!-- PC Performance Optimizer - Load early for better performance on Windows/Linux -->
+  <script src="{{ url_for('static', filename='js/pc-performance-optimizer.js') }}"></script>
+  
   <!-- Database Modal -->
   <div class="modal fade" id="databaseModal" tabindex="-1" aria-labelledby="databaseModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-xl">

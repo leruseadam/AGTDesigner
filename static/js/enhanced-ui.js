@@ -147,12 +147,22 @@ async function handleFiles(files) {
   }
 }
 
-// Add smooth scrolling
-document.querySelectorAll('.tag-list-container').forEach(container => {
-  container.addEventListener('wheel', (e) => {
-    e.preventDefault();
-    container.scrollTop += e.deltaY * 0.5;
+// Enhanced smooth scrolling for better PC performance
+// Only apply custom scrolling if browser doesn't support smooth scroll behavior
+if (!CSS.supports('scroll-behavior', 'smooth')) {
+  document.querySelectorAll('.tag-list-container').forEach(container => {
+    // Use passive listener and don't prevent default for better performance
+    container.addEventListener('wheel', (e) => {
+      // Let browser handle native scrolling for better performance on PC
+      // Only add smooth behavior via CSS
+      container.style.scrollBehavior = 'smooth';
+    }, { passive: true });
   });
+}
+
+// Apply CSS smooth scrolling to all scrollable containers
+document.querySelectorAll('.tag-list-container, .modal-body, [style*="overflow"]').forEach(container => {
+  container.style.scrollBehavior = 'smooth';
 });
 
 // Add keyboard shortcuts
