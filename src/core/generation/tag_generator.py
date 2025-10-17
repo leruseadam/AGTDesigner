@@ -478,6 +478,10 @@ def process_chunk(args):
                         # No lineage available, set to empty
                         label_data["ProductBrand"] = ""
                         label_data["ProductBrand_Center"] = ""
+            else:
+                # Non-classic types already have brand data set in the first processing section above
+                # No need to override it here - this was causing brand data to be lost
+                pass
             label_data["Ratio_or_THC_CBD"] = str(row.get("Ratio", ""))  # Don't wrap with markers for template rendering
             # ProductStrain is now handled by the template processor to ensure proper conversion
             # of non-classic types to "Mixed" or "CBD Blend"
