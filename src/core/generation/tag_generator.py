@@ -457,7 +457,7 @@ def process_chunk(args):
                 # This prevents "CBD" from appearing in non-classic type labels
                 # If no brand is available, leave Lineage empty - DO NOT fall back to Excel lineage
                 lineage_val = product_brand.upper() if product_brand else ""
-                print(f"DEBUG NON-CLASSIC: product_type='{product_type}', product_brand='{product_brand}', lineage_val='{lineage_val}'")
+                print(f"DEBUG NON-CLASSIC: product_type='{product_type}', product_brand='{product_brand}', lineage_val='{lineage_val}', orientation='{orientation}'")
                 
             # No extra space before Lineage in the output
             label_data["Lineage"] = lineage_val  # Don't wrap with markers for template rendering
