@@ -1,8 +1,11 @@
+// Classic types that should show "Lineage" instead of "Brand"
+const CLASSIC_TYPES = [
+    "flower", "pre-roll", "concentrate", "infused pre-roll", 
+    "solventless concentrate", "vape cartridge", "rso/co2 tankers"
+];
+
 // Lineage abbreviation mapping (matching Python version)
-// Check if already defined in main.js to avoid redeclaration
-// ABBREVIATED_LINEAGE moved to main.js to prevent redeclaration
-if (typeof ABBREVIATED_LINEAGE === 'undefined') {
-  window.ABBREVIATED_LINEAGE = {
+const ABBREVIATED_LINEAGE = {
     "SATIVA": "S",
     "INDICA": "I", 
     "HYBRID": "H",
@@ -12,12 +15,11 @@ if (typeof ABBREVIATED_LINEAGE === 'undefined') {
     "CBD_BLEND": "CBD",
     "MIXED": "THC",
     "PARA": "P"
-  };
-}
+};
 
 // Use full lineage names for all dropdowns
 const getUniqueLineages = () => {
-  return ['HYBRID/SATIVA','HYBRID/INDICA','SATIVA','INDICA','HYBRID','CBD','MIXED','PARA'];
+  return ['SATIVA','INDICA','HYBRID','HYBRID/SATIVA','HYBRID/INDICA','CBD','MIXED','PARA'];
 };
 
 function createTagRow(tag) {
@@ -371,16 +373,14 @@ class TagsTable {
       const tag = TagManager.state.tags.find(t => t['Product Name*'] === tagName);
       if (tag) {
         tag.lineage = newLineage;
-        tag.Lineage = newLineage;  // CRITICAL FIX: Update both lineage and Lineage properties
-        console.log(`📝 Updated tag in TagManager.state.tags: ${tagName} -> ${newLineage}`);
+        console.log(`📝 Updated tag in TagManager.state.tags`);
       }
       
       // Update the tag in original tags as well
       const originalTag = TagManager.state.originalTags.find(t => t['Product Name*'] === tagName);
       if (originalTag) {
         originalTag.lineage = newLineage;
-        originalTag.Lineage = newLineage;  // CRITICAL FIX: Update both lineage and Lineage properties
-        console.log(`📝 Updated tag in TagManager.state.originalTags: ${tagName} -> ${newLineage}`);
+        console.log(`📝 Updated tag in TagManager.state.originalTags`);
       }
       
       // CRITICAL FIX: Don't fetch from backend - just update the local selected tag if it exists
@@ -396,8 +396,6 @@ class TagsTable {
             if (lineageSelect) {
               lineageSelect.value = newLineage;
             }
-            // CRITICAL FIX: Update the data-lineage attribute
-            tagElement.dataset.lineage = newLineage;
             console.log(`✅ Updated lineage in selected tag UI for ${tagName}`);
           }
         });
@@ -766,19 +764,11 @@ document.addEventListener('DOMContentLoaded', () => {
     };
   }
 
-  // Safe event listener for addSelectedTagsBtn
-  const addSelectedTagsBtn = document.getElementById('addSelectedTagsBtn');
-  if (addSelectedTagsBtn) {
-    addSelectedTagsBtn.addEventListener('click', function() {
-      const checked = document.querySelectorAll('#availableTags .tag-checkbox:checked');
-      const tagsToMove = Array.from(checked).map(cb => cb.value);
-      if (TagManager && TagManager.moveToSelected) {
-        TagManager.moveToSelected(tagsToMove);
-      }
-    });
-  } else {
-    console.log('addSelectedTagsBtn element not found, skipping event listener');
-  }
+  document.getElementById('addSelectedTagsBtn').addEventListener('click', function() {
+    const checked = document.querySelectorAll('#availableTags .tag-checkbox:checked');
+    const tagsToMove = Array.from(checked).map(cb => cb.value);
+    TagManager.moveToSelected(tagsToMove);
+  });
 
   document.querySelectorAll('select').forEach(sel => {
     // REMOVE all JS that sets style.width, style.minWidth, style.maxWidth, style.fontSize, style.paddingLeft, style.paddingRight for lineage dropdowns

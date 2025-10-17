@@ -1274,15 +1274,8 @@ class TemplateProcessor:
         """Ultra-optimized label context building for maximum performance."""
         # CRITICAL FIX: Log lineage value received in template processor
         lineage_value = record.get('Lineage', 'NOT_FOUND')
-        product_name = record.get('ProductName', 'Unknown') or record.get('Product Name*', 'Unknown')
-        product_type = record.get('Product Type*', '') or record.get('ProductType', '')
-        product_strain = record.get('Product Strain', '') or record.get('ProductStrain', '')
-        
-        # Enhanced logging to diagnose CBD lineage issues
-        self.logger.info(f"🔍 LINEAGE FLOW DEBUG: Product '{product_name}'")
-        self.logger.info(f"   📋 Lineage from record: '{lineage_value}'")
-        self.logger.info(f"   🏷️  Product Type: '{product_type}'")
-        self.logger.info(f"   🌿 Product Strain: '{product_strain}'")
+        product_name = record.get('ProductName', 'Unknown')
+        self.logger.info(f"LINEAGE TEMPLATE DEBUG: Building context for '{product_name}' with lineage: '{lineage_value}'")
         
         # Fast dictionary copy
         label_context = dict(record)
@@ -1547,48 +1540,41 @@ class TemplateProcessor:
             # Update the brand field if enrichment was successful
             if enriched_brand:
                 product_brand = enriched_brand
+                # CRITICAL FIX: Update label_context with enriched brand so subsequent processing uses it
+                label_context['Product Brand'] = enriched_brand
+                label_context['ProductBrand'] = enriched_brand
                 # Don't set ProductBrand fields here - they will be set later based on template type
-                self.logger.info(f"✅ BRAND UPDATED: Product '{product_name}' brand set to '{enriched_brand}'")
+                self.logger.info(f"✅ BRAND UPDATED: Product '{product_name}' brand set to '{enriched_brand}' in context")
         
         # Check if it's a classic type
         is_classic_type = product_type in classic_types
-        
-        # Check if this record came from the database (has Source field indicating database origin)
-        # This needs to be available for both classic and non-classic type processing
-        record_source = record.get('Source', '')
-        is_from_database = 'Database' in str(record_source) or 'JSON Match' in str(record_source)
         
         if is_classic_type:
             # For classic types, Lineage should show strain lineage and ProductVendor should show brand
             self.logger.debug(f"Processing classic type '{product_type}' for Lineage and ProductVendor")
             
-            # CRITICAL FIX: Database lineage takes priority over Excel lineage
-            # This ensures that when products come from the database with CBD lineage, it's preserved
+            # PRIORITY FIX: Use Excel lineage first (includes manual dropdown changes), then database fallback
             lineage_val = ""
             
-            # PRIORITY 1: If lineage exists in the record AND it's from database, use it directly
-            if is_from_database and lineage_text and lineage_text.strip():
+            # PRIORITY 1: Use Excel lineage (includes manual dropdown changes from user)
+            if lineage_text and lineage_text.strip():
                 lineage_val = lineage_text.upper()
-                self.logger.info(f"✅ Using DATABASE lineage (priority): '{lineage_val}' for '{product_name}'")
-            # PRIORITY 2: Use Excel lineage (includes manual dropdown changes from user)
-            elif lineage_text and lineage_text.strip() and not is_from_database:
-                lineage_val = lineage_text.upper()
-                self.logger.debug(f"Using Excel lineage (manual changes): '{lineage_val}'")
-            # PRIORITY 3: Fallback to database lineage lookup by strain
+                self.logger.debug(f"Using Excel lineage (includes manual changes): '{lineage_val}'")
             elif product_strain:
+                # PRIORITY 2: Fallback to database lineage if no Excel lineage
                 try:
                     from src.core.data.product_database import get_product_database
                     product_db = get_product_database()
                     strain_info = product_db.get_strain_info(product_strain)
                     if strain_info and strain_info.get('canonical_lineage'):
                         lineage_val = strain_info['canonical_lineage'].upper()
-                        self.logger.debug(f"Using database lineage lookup: '{lineage_val}'")
+                        self.logger.debug(f"Using database lineage fallback: '{lineage_val}'")
                     else:
-                        # PRIORITY 4: Default fallback
+                        # PRIORITY 3: Default fallback
                         lineage_val = ""
-                        self.logger.debug(f"No lineage found in database lookup")
+                        self.logger.debug(f"No lineage found in Excel or database")
                 except Exception as e:
-                    # PRIORITY 4: Default fallback if database lookup fails
+                    # PRIORITY 3: Default fallback if database lookup fails
                     lineage_val = ""
                     self.logger.debug(f"Using default fallback due to error: '{lineage_val}' (error: {e})")
             else:
@@ -1597,31 +1583,7 @@ class TemplateProcessor:
                 self.logger.debug(f"No strain available, using Excel lineage: '{lineage_val}'")
             
             # Set Lineage to strain lineage for classic types
-            # CRITICAL FIX: For CBD products, ALWAYS override lineage to "CBD" regardless of existing lineage
-            # Check product name, strain, and type for CBD indicators
-            product_name = record.get('Product Name*', '') or record.get('ProductName', '') or ''
-            product_strain = record.get('Product Strain', '') or record.get('ProductStrain', '') or ''
-            
-            is_cbd_product = (
-                ('CBD' in str(product_type).upper() and 'BLEND' in str(product_type).upper()) or
-                ('CBD' in str(product_name).upper()) or
-                ('CBD' in str(product_strain).upper()) or
-                ('CBD BLEND' in str(product_strain).upper())
-            )
-            
-            # DEBUG: Log all product details for CBD detection
-            self.logger.info(f"CBD DETECTION DEBUG (classic): product_name='{product_name}', product_type='{product_type}', product_strain='{product_strain}', is_cbd_product={is_cbd_product}")
-            
-            if is_cbd_product:
-                cleaned_lineage_val = "CBD"
-                self.logger.info(f"CBD PRODUCT FIX: Overriding lineage to 'CBD' for product '{product_name}' (type: '{product_type}', strain: '{product_strain}', was: '{lineage_val}')")
-                
-                # For vertical template, don't wrap with markers since it uses simple placeholders
-                if self.template_type == 'vertical':
-                    label_context['Lineage'] = cleaned_lineage_val
-                else:
-                    label_context['Lineage'] = f"LINEAGE_START{cleaned_lineage_val}LINEAGE_END"
-            elif lineage_val:
+            if lineage_val:
                 # Debug: Log the lineage value to see if it has leading spaces
                 self.logger.debug(f"DEBUG: Original lineage_val: '{repr(lineage_val)}'")
                 cleaned_lineage_val = lineage_val.strip()
@@ -1636,8 +1598,8 @@ class TemplateProcessor:
                         self.logger.debug(f"DEBUG: Extracted lineage only: '{cleaned_lineage_val}' from '{lineage_val}'")
                         break
                 
-                # For vertical template, don't wrap with markers since it uses simple placeholders
-                if self.template_type == 'vertical':
+                # For vertical and double templates, don't wrap with markers since they use simple placeholders
+                if self.template_type in ['vertical', 'double']:
                     label_context['Lineage'] = cleaned_lineage_val
                 else:
                     label_context['Lineage'] = f"LINEAGE_START{cleaned_lineage_val}LINEAGE_END"
@@ -1663,72 +1625,19 @@ class TemplateProcessor:
             # For ALL non-classic types (including tinctures), Lineage shows brand and ProductVendor is empty
             # Color is determined by Product Strain (CBD Blend = yellow, Mixed = blue)
             self.logger.debug(f"Processing non-classic type '{product_type}' for Lineage and ProductVendor")
-            
-            # CRITICAL FIX: For CBD products, ALWAYS override lineage to "CBD" regardless of brand
-            # Check product name, strain, and type for CBD indicators
-            product_name = record.get('Product Name*', '') or record.get('ProductName', '') or ''
-            product_strain = record.get('Product Strain', '') or record.get('ProductStrain', '') or ''
-            
-            is_cbd_product = (
-                ('CBD' in str(product_type).upper() and 'BLEND' in str(product_type).upper()) or
-                ('CBD' in str(product_name).upper()) or
-                ('CBD' in str(product_strain).upper()) or
-                ('CBD BLEND' in str(product_strain).upper())
-            )
-            
-            # DEBUG: Log all product details for CBD detection
-            self.logger.info(f"CBD DETECTION DEBUG (non-classic): product_name='{product_name}', product_type='{product_type}', product_strain='{product_strain}', is_cbd_product={is_cbd_product}")
-            
-            # CRITICAL FIX: Check if record has database lineage (takes priority)
-            # Database lineage should be preserved for products from database
-            # Also preserve explicit CBD lineage even if source is uncertain
-            lineage_upper = lineage_text.upper() if lineage_text else ''
-            is_valid_lineage = lineage_upper in ['CBD', 'SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA']
-            has_database_lineage = lineage_text and lineage_text.strip() and (is_from_database or is_valid_lineage)
-            
-            if has_database_lineage and lineage_upper != 'MIXED':
-                # Use the database lineage directly
-                cleaned_lineage_val = lineage_text.upper()
-                self.logger.info(f"✅ Using DATABASE lineage for non-classic product '{product_name}': '{cleaned_lineage_val}'")
-                
-                if self.template_type == 'vertical':
-                    label_context['Lineage'] = cleaned_lineage_val
-                    label_context['ProductBrand'] = ""
-                    label_context['ProductBrand_Center'] = ""
-                else:
-                    label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{cleaned_lineage_val}PRODUCTBRAND_CENTER_END"
-                    label_context['ProductBrand'] = ""
-                    label_context['ProductBrand_Center'] = ""
-            elif is_cbd_product:
-                cleaned_lineage_val = "CBD"
-                self.logger.info(f"CBD PRODUCT FIX (non-classic): Overriding lineage to 'CBD' for product '{product_name}' (type: '{product_type}', strain: '{product_strain}', was: '{product_brand}')")
-                
-                if self.template_type == 'vertical':
-                    # For vertical template, set lineage to CBD
-                    label_context['Lineage'] = cleaned_lineage_val
-                    label_context['ProductBrand'] = ""
-                    label_context['ProductBrand_Center'] = ""
-                    self.logger.debug(f"VERTICAL CBD PRODUCT FIX: Set Lineage to 'CBD' for vertical template")
-                else:
-                    # For other templates, use marker-based formatting
-                    label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{cleaned_lineage_val}PRODUCTBRAND_CENTER_END"
-                    label_context['ProductBrand'] = ""
-                    label_context['ProductBrand_Center'] = ""
-                    self.logger.debug(f"NON-VERTICAL CBD PRODUCT FIX: Set Lineage to 'CBD' with markers")
-            elif product_brand:
-                self.logger.info(f"BRAND PROCESSING: Non-classic type '{product_type}' with brand '{product_brand}', template_type='{self.template_type}'")
+            if product_brand:
+                self.logger.info(f"BRAND PROCESSING: Non-classic type '{product_type}' with brand '{product_brand}' (len={len(product_brand)}), template_type='{self.template_type}'")
                 # For non-classic types, separate Product Strain and Product Brand for different font sizing
                 # Lineage shows Product Brand only (centered) - this is the primary field
                 # For vertical template, don't wrap with markers since it uses simple placeholders
                 # Center brand should always be ALL CAPS
                 brand_center_text = str(product_brand).upper()
                 if self.template_type == 'vertical':
-                    # For vertical template, only set Lineage to prevent brand duplication
-                    # The vertical template uses Lineage placeholder, not ProductBrand
+                    # For vertical template, set only Lineage to brand and clear ProductBrand to prevent duplication.
                     label_context['Lineage'] = brand_center_text
                     label_context['ProductBrand'] = ""
                     label_context['ProductBrand_Center'] = ""
-                    self.logger.info(f"🎯 VERTICAL BRAND FIX: Set only Lineage to '{brand_center_text}' for vertical template (no ProductBrand duplication)")
+                    self.logger.info(f"🎯 VERTICAL BRAND FIX: Set Lineage to '{brand_center_text}' and cleared ProductBrand for vertical template")
                 elif self.template_type == 'mini':
                     # For mini template, set both Lineage and ProductBrand for maximum compatibility
                     # Mini templates need brand information in multiple fields
@@ -1736,6 +1645,37 @@ class TemplateProcessor:
                     label_context['ProductBrand'] = brand_center_text
                     label_context['ProductBrand_Center'] = brand_center_text
                     self.logger.info(f"🎯 MINI TEMPLATE BRAND FIX: Set Lineage, ProductBrand, and ProductBrand_Center to '{brand_center_text}' for mini template")
+                elif self.template_type == 'double':
+                    # For double template, use marker-based formatting like other templates for proper font sizing
+                    # CRITICAL FIX: Clean brand_center_text to prevent corruption while preserving the brand
+                    clean_brand_text = str(brand_center_text).strip().upper()
+                    
+                    # Only remove corrupted marker patterns if they exist, but preserve the actual brand name
+                    import re
+                    # Remove corrupted patterns but keep the actual brand content
+                    if 'PRODUCTSTRR_STARTCONSTELL' in clean_brand_text:
+                        clean_brand_text = re.sub(r'PRODUCTSTRR_STARTCONSTELL.*?', '', clean_brand_text)
+                    if 'PRODUCTBRAND_CENTER_START' in clean_brand_text:
+                        clean_brand_text = re.sub(r'PRODUCTBRAND_CENTER_START.*?PRODUCTBRAND_CENTER_END', '', clean_brand_text)
+                    if 'CONSTELLATION\$' in clean_brand_text:
+                        clean_brand_text = re.sub(r'CONSTELLATION\$.*', '', clean_brand_text)
+                    
+                    clean_brand_text = clean_brand_text.strip()
+                    
+                    # CRITICAL FIX: Always use the brand text, even if it's short
+                    # This prevents brands from disappearing due to over-aggressive cleaning
+                    if clean_brand_text:
+                        final_brand_text = clean_brand_text
+                    else:
+                        # Fallback to original brand text if cleaning removed everything
+                        final_brand_text = str(brand_center_text).strip().upper()
+                    
+                    label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{final_brand_text}PRODUCTBRAND_CENTER_END"
+                    # Also populate ProductBrand fields for templates that reference ProductBrand instead of Lineage
+                    label_context['ProductBrand'] = final_brand_text
+                    label_context['ProductBrand_Center'] = final_brand_text
+                    
+                    self.logger.info(f"🎯 DOUBLE TEMPLATE BRAND FIX: Set Lineage to '{final_brand_text}' for double template (with markers)")
                 else:
                     # For other templates (horizontal, etc.), use marker-based formatting
                     # CRITICAL FIX: Clean brand_center_text to prevent corruption
@@ -1770,35 +1710,16 @@ class TemplateProcessor:
                 self.logger.debug(f"Set Lineage/ProductBrand to '{product_brand}' and ProductStrain to '{product_strain}' for non-classic type '{product_type}'")
             else:
                 # No brand available for non-classic type
-                # CRITICAL FIX: For CBD Blend products, set lineage to "CBD" if no brand is available
-                if product_type and 'CBD' in str(product_type).upper() and 'BLEND' in str(product_type).upper():
-                    cleaned_lineage_val = "CBD"
-                    self.logger.info(f"CBD BLEND FIX (non-classic): Setting lineage to 'CBD' for product type '{product_type}'")
-                    
-                    if self.template_type == 'vertical':
-                        # For vertical template, set lineage to CBD
-                        label_context['Lineage'] = cleaned_lineage_val
-                        label_context['ProductBrand'] = ""
-                        label_context['ProductBrand_Center'] = ""
-                        self.logger.debug(f"VERTICAL CBD BLEND FIX: Set Lineage to 'CBD' for vertical template")
-                    else:
-                        # For other templates, use marker-based formatting
-                        label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{cleaned_lineage_val}PRODUCTBRAND_CENTER_END"
-                        label_context['ProductBrand'] = ""
-                        label_context['ProductBrand_Center'] = ""
-                        self.logger.debug(f"NON-VERTICAL CBD BLEND FIX: Set Lineage to 'CBD' with markers")
+                if self.template_type == 'vertical':
+                    # For vertical template, still set empty values but don't prevent data population
+                    label_context['Lineage'] = ""
+                    label_context['ProductBrand'] = ""
+                    label_context['ProductBrand_Center'] = ""
+                    self.logger.debug(f"VERTICAL BRAND FIX: Set empty brand values for vertical template (no brand available)")
                 else:
-                    # No brand available and not CBD Blend
-                    if self.template_type == 'vertical':
-                        # For vertical template, still set empty values but don't prevent data population
-                        label_context['Lineage'] = ""
-                        label_context['ProductBrand'] = ""
-                        label_context['ProductBrand_Center'] = ""
-                        self.logger.debug(f"VERTICAL BRAND FIX: Set empty brand values for vertical template (no brand available)")
-                    else:
-                        label_context['Lineage'] = ""
-                        label_context['ProductBrand'] = ""
-                        label_context['ProductBrand_Center'] = ""
+                    label_context['Lineage'] = ""
+                    label_context['ProductBrand'] = ""
+                    label_context['ProductBrand_Center'] = ""
                 self.logger.debug(f"Lineage, ProductBrand, and ProductBrand_Center set to empty for non-classic type '{product_type}'")
             
             # Always set ProductStrain for nonclassic types, regardless of whether there's a product brand
@@ -3126,7 +3047,9 @@ class TemplateProcessor:
                                     
                                     # Apply unified font sizing
                                     font_size = get_font_size(run.text, field_type, 'vertical', self.scale_factor)
-                                    run.font.size = font_size
+                                    # Apply at run and XML level to prevent Word from overriding
+                                    from src.core.generation.unified_font_sizing import set_run_font_size
+                                    set_run_font_size(run, font_size)
                                     
                                     self.logger.debug(f"Applied unified font sizing to vertical template text: '{run.text}' -> {field_type} -> {font_size}")
                                     
@@ -3136,31 +3059,44 @@ class TemplateProcessor:
     def _determine_field_type_for_vertical_template(self, text, paragraph, cell):
         """
         Determine the field type for vertical template text based on content and context.
+        CRITICAL: Default to 'strain' (1pt) for most text to prevent unwanted visible text in vertical templates.
         """
         text_lower = text.lower().strip()
+        text_stripped = text.strip()
+        is_all_caps = (text_stripped.isupper() and any(c.isalpha() for c in text_stripped))
+        is_short_wordy = (len(text_stripped) <= 14 and all(ch.isalpha() or ch.isspace() or ch in ['&','-','/'] for ch in text_stripped))
         
-        # Check for brand names (typically in lineage field)
-        if any(keyword in text_lower for keyword in ['constellation', 'mary jones', 'skagit', 'artizen', 'sitka']):
-            return 'brand'
-        
-        # Check for prices (contain $ or numbers with decimal)
-        if '$' in text or (any(c.isdigit() for c in text) and '.' in text):
+        # Check for prices (contain $ symbol)
+        if '$' in text:
             return 'price'
         
-        # Check for THC/CBD content
-        if any(keyword in text_lower for keyword in ['thc', 'cbd', 'cbn', 'cbg']):
+        # Check for THC/CBD percentage content (contains % sign)
+        if '%' in text or any(keyword in text_lower for keyword in ['thc:', 'cbd:', 'total thc', 'total cbd']):
             return 'thc_cbd'
         
-        # Check for weight/ratio content
-        if any(keyword in text_lower for keyword in ['oz', 'g', 'mg', ':', 'ratio']):
+        # Check for weight/ratio content (contains oz, g, mg, or : for ratios)
+        if any(keyword in text_lower for keyword in ['oz', 'gram', 'mg', 'ml']) or ':' in text:
             return 'ratio'
         
-        # Check for strain names (typically longer descriptive text)
-        if len(text) > 20 and any(keyword in text_lower for keyword in ['kush', 'dream', 'cookies', 'runtz', 'gelato']):
-            return 'strain'
+        # Check for well-known brand names that should be visible
+        # Only classify as 'brand' if we're CERTAIN it's a brand name that should be visible
+        well_known_brands = ['constellation', 'mary jones', 'skagit organics', 'artizen', 'sitka', 'raven', 'grassroots', 'pruf cultivar']
+        if any(brand in text_lower for brand in well_known_brands):
+            return 'brand'
         
-        # Default to brand for vertical template (most text is brand-related)
-        return 'brand'
+        # Heuristic: Non-classic vertical brands are typically ALL CAPS, short, letters-only
+        # Classify these as brand so they render visibly (not 1pt).
+        # CRITICAL FIX: Allow brand names as short as 1 character to be visible
+        if is_all_caps and is_short_wordy and len(text_stripped.split()) <= 3 and 1 <= len(text_stripped) <= 14:
+            self.logger.debug(f"🎯 SHORT BRAND CLASSIFIED: '{text_stripped}' (len={len(text_stripped)}) classified as brand")
+            return 'brand'
+        
+        # CRITICAL: Default everything else to 'strain' (1pt font)
+        # This includes: strain codes, product types (like "mixed"), vendor codes, etc.
+        # Since strain is 1pt (invisible), this is the safest default for vertical templates
+        # where most text should be hidden/minimal
+        self.logger.debug(f"⚠️ TEXT CLASSIFIED AS STRAIN: '{text_stripped}' (len={len(text_stripped)}) - will be invisible")
+        return 'strain'
 
     def _optimize_vertical_template_spacing(self, doc):
         """
@@ -3314,8 +3250,11 @@ class TemplateProcessor:
                         run = paragraph.add_run(text_before)
                         run.font.name = "Arial"
                         run.font.bold = True
-                        run.font.size = Pt(12)  # Default size for non-marker text
-                        self.logger.debug(f"Added text before '{marker_name}': '{text_before}' -> 12pt")
+                        # Use unified font sizing for non-marker text
+                        from src.core.generation.unified_font_sizing import get_font_size
+                        font_size = get_font_size(text_before, 'default', self.template_type, self.scale_factor)
+                        run.font.size = font_size
+                        self.logger.debug(f"Added text before '{marker_name}': '{text_before}' -> {font_size.pt}pt")
                 # Add the processed marker content (use the potentially modified content)
                 display_content = marker_data.get('display_content', marker_data['content'])
                 # --- BULLETPROOF: Only one run for the entire marker content, preserving line breaks ---
@@ -3344,8 +3283,11 @@ class TemplateProcessor:
                     run = paragraph.add_run(text_after)
                     run.font.name = "Arial"
                     run.font.bold = True
-                    run.font.size = Pt(12)  # Default size for non-marker text
-                    self.logger.debug(f"Added text after: '{text_after}' -> 12pt")
+                    # Use unified font sizing for non-marker text
+                    from src.core.generation.unified_font_sizing import get_font_size
+                    font_size = get_font_size(text_after, 'default', self.template_type, self.scale_factor)
+                    run.font.size = font_size
+                    self.logger.debug(f"Added text after: '{text_after}' -> {font_size.pt}pt")
             
             # Convert |BR| markers to actual line breaks after marker processing
             self._convert_br_markers_to_line_breaks(paragraph)
@@ -3389,8 +3331,13 @@ class TemplateProcessor:
                     
                     # Use unified LINEAGE font sizing for all templates including double
                     for run in paragraph.runs:
-                        # Use get_font_size_by_marker for proper LINEAGE sizing
-                        font_size = get_font_size_by_marker(self.template_type, 'LINEAGE')
+                        # Use get_font_size_by_marker for proper LINEAGE sizing, passing product_type for nonclassic rule
+                        product_type = None
+                        if hasattr(self, 'current_product_type') and self.current_product_type:
+                            product_type = self.current_product_type
+                        elif hasattr(self, 'label_context') and 'ProductType' in self.label_context:
+                            product_type = self.label_context['ProductType']
+                        font_size = get_font_size_by_marker(run.text, 'LINEAGE', self.template_type, self.scale_factor, product_type)
                         set_run_font_size(run, font_size)
                     
                     # Handle alignment based on PRODUCT TYPE, not just lineage content
@@ -3469,7 +3416,7 @@ class TemplateProcessor:
                         if (marker_data['content'] in run.text and 
                             any(marker in run.text for marker in ['PRODUCTSTRAIN_START', 'STRAIN_START'])):
                             # Use unified font sizing system for ProductStrain markers (1pt font size)
-                            strain_font_size = get_font_size_by_marker(self.template_type, 'PRODUCTSTRAIN')
+                            strain_font_size = get_font_size_by_marker(marker_data['content'], 'PRODUCTSTRAIN', self.template_type, self.scale_factor)
                             set_run_font_size(run, strain_font_size)
                     continue
                 
@@ -3481,7 +3428,7 @@ class TemplateProcessor:
                             len(marker_data['content'].strip()) <= 3 and  # Short cannabinoid names only
                             marker_data['content'].strip().upper() in ['CBD', 'THC', 'CBC', 'CBG', 'CBN']):
                             # Use unified font sizing system for standalone cannabinoid text (1pt font size)
-                            strain_font_size = get_font_size_by_marker(self.template_type, 'PRODUCTSTRAIN')
+                            strain_font_size = get_font_size_by_marker(marker_data['content'], 'PRODUCTSTRAIN', self.template_type, self.scale_factor)
                             set_run_font_size(run, strain_font_size)
                     continue
                 
@@ -3493,7 +3440,7 @@ class TemplateProcessor:
                         marker_data['content'].strip().upper() in ['CBD', 'THC', 'CBC', 'CBG', 'CBN'] and
                         not any(marker in run.text for marker in ['CBD_START', 'THC_START', 'CBC_START', 'CBG_START', 'CBN_START'])):
                         # This is standalone cannabinoid text - use strain font sizing (1pt)
-                        strain_font_size = get_font_size_by_marker(self.template_type, 'PRODUCTSTRAIN')
+                        strain_font_size = get_font_size_by_marker(marker_data['content'], 'PRODUCTSTRAIN', self.template_type, self.scale_factor)
                         set_run_font_size(run, strain_font_size)
                     else:
                         set_run_font_size(run, get_font_size_by_marker(marker_data['content'], marker_name, self.template_type, self.scale_factor, product_type))
@@ -3512,12 +3459,9 @@ class TemplateProcessor:
                     end_marker = f'{marker_name}_END'
                     run.text = run.text.replace(start_marker, "").replace(end_marker, "")
                 # Use appropriate default size based on template type
-                if self.template_type == 'mini':
-                    default_size = Pt(8 * self.scale_factor)
-                elif self.template_type == 'vertical':
-                    default_size = Pt(10 * self.scale_factor)
-                else:  # horizontal
-                    default_size = Pt(12 * self.scale_factor)
+                # Use unified font sizing system for default size
+                from src.core.generation.unified_font_sizing import get_font_size
+                default_size = get_font_size(run.text, 'default', self.template_type, self.scale_factor)
                 run.font.size = default_size
         finally:
             # Always check for |BR| markers regardless of success/failure
@@ -3673,6 +3617,10 @@ class TemplateProcessor:
                         brand_end = content.find('PRODUCTBRAND_CENTER_END')
                         brand_content = content[brand_start:brand_end]
                         
+                        # Calculate proper font size for brand content using 'brand' field type
+                        from src.core.generation.unified_font_sizing import get_font_size
+                        font_size = get_font_size(brand_content, 'brand', self.template_type, self.scale_factor)
+                        
                         # Clear paragraph and recreate with brand content
                         paragraph.clear()
                         run = paragraph.add_run()
@@ -3771,12 +3719,9 @@ class TemplateProcessor:
                 for run in paragraph.runs:
                     run.text = run.text.replace(start_marker, "").replace(end_marker, "")
                     # Use appropriate default size based on template type
-                    if self.template_type == 'mini':
-                        default_size = Pt(8 * self.scale_factor)
-                    elif self.template_type == 'vertical':
-                        default_size = Pt(10 * self.scale_factor)
-                    else:  # horizontal
-                        default_size = Pt(12 * self.scale_factor)
+                    # Use unified font sizing system for default size
+                    from src.core.generation.unified_font_sizing import get_font_size
+                    default_size = get_font_size(run.text, 'default', self.template_type, self.scale_factor)
                     run.font.size = default_size
         elif start_marker in full_text or end_marker in full_text:
             # Log partial markers for debugging
@@ -3855,8 +3800,10 @@ class TemplateProcessor:
                     if consistent_font_size:
                         run.font.size = consistent_font_size
                     else:
-                        # Use a default size only if no existing size is available
-                        run.font.size = Pt(12)
+                        # Use unified font sizing for default size
+                        from src.core.generation.unified_font_sizing import get_font_size
+                        default_font_size = get_font_size(stripped_part, 'default', self.template_type, self.scale_factor)
+                        run.font.size = default_font_size
                     
                     # Add a line break after this part only if the next part is not empty
                     if i < len(parts) - 1 and parts[i + 1].strip():
@@ -4506,7 +4453,10 @@ class TemplateProcessor:
                                     run.text = f"RATIO_START{run_text}RATIO_END"
                                     run.font.name = "Arial"
                                     run.font.bold = True
-                                    run.font.size = Pt(12)  # Default size, will be adjusted by post-processing
+                                    # Use unified font sizing for ratio text
+                                    from src.core.generation.unified_font_sizing import get_font_size
+                                    ratio_font_size = get_font_size(run_text, 'ratio', self.template_type, self.scale_factor)
+                                    run.font.size = ratio_font_size
                                     
                                     # Check for non-breaking hyphens after processing
                                     if '\u2011' in run.text:
@@ -4592,7 +4542,10 @@ class TemplateProcessor:
                                     run.text = f"PRODUCTBRAND_CENTER_START{run_text}PRODUCTBRAND_CENTER_END"
                                     run.font.name = "Arial"
                                     run.font.bold = True
-                                    run.font.size = Pt(12)  # Default size, will be adjusted by post-processing
+                                    # Use unified font sizing for brand text
+                                    from src.core.generation.unified_font_sizing import get_font_size
+                                    brand_font_size = get_font_size(run_text, 'brand', self.template_type, self.scale_factor)
+                                    run.font.size = brand_font_size
                                     
                                     # Check for non-breaking hyphens after processing
                                     if '\u2011' in run.text:
@@ -5201,8 +5154,9 @@ class TemplateProcessor:
                 lineage_run.font.name = "Arial"
                 lineage_run.font.bold = True
                 
-                # Use proper lineage font sizing
-                lineage_font_size = get_font_size_by_marker(lineage_content, 'LINEAGE', self.template_type, self.scale_factor)
+                # Use proper lineage font sizing - CRITICAL FIX: Ensure lineage always uses lineage field type
+                from src.core.generation.unified_font_sizing import get_font_size
+                lineage_font_size = get_font_size(lineage_content, 'lineage', self.template_type, self.scale_factor)
                 set_run_font_size(lineage_run, lineage_font_size)
             
             # Add tab character to push vendor to the right (only if vendor content exists)
@@ -5315,8 +5269,9 @@ class TemplateProcessor:
                 lineage_run.font.name = "Arial"
                 lineage_run.font.bold = True
                 
-                # Use proper lineage font sizing
-                lineage_font_size = get_font_size_by_marker(lineage_content, 'LINEAGE', self.template_type, self.scale_factor)
+                # Use proper lineage font sizing - CRITICAL FIX: Ensure lineage always uses lineage field type
+                from src.core.generation.unified_font_sizing import get_font_size
+                lineage_font_size = get_font_size(lineage_content, 'lineage', self.template_type, self.scale_factor)
                 set_run_font_size(lineage_run, lineage_font_size)
             
             # Add line break
@@ -5331,7 +5286,10 @@ class TemplateProcessor:
                 tab_run = paragraph.add_run("\t")
                 tab_run.font.name = "Arial"
                 tab_run.font.bold = True
-                tab_run.font.size = Pt(12)  # Default size for tab
+                # Use unified font sizing for tab
+                from src.core.generation.unified_font_sizing import get_font_size
+                tab_font_size = get_font_size(" ", 'default', self.template_type, self.scale_factor)
+                tab_run.font.size = tab_font_size
                 
                 vendor_run = paragraph.add_run(vendor_content.strip())
                 vendor_run.font.name = "Arial"
@@ -5460,7 +5418,8 @@ class TemplateProcessor:
                     elif hasattr(self, 'label_context') and 'ProductType' in self.label_context:
                         product_type = self.label_context['ProductType']
                     
-                    lineage_font_size = get_font_size_by_marker(lineage_content, 'LINEAGE', self.template_type, self.scale_factor, product_type)
+                    from src.core.generation.unified_font_sizing import get_font_size
+                    lineage_font_size = get_font_size(lineage_content, 'lineage', self.template_type, self.scale_factor)
                     set_run_font_size(run, lineage_font_size)
                     
                     run.text = lineage_content  # Use assignment instead of add_text to avoid duplication
@@ -6090,7 +6049,7 @@ class TemplateProcessor:
                                                     'Price': 'price',
                                                     'Ratio_or_THC_CBD': 'thc_cbd',
                                                     'ProductBrand': 'brand',
-                                                    'Lineage': 'lineage',
+                                                    'Lineage': 'brand',  # CRITICAL FIX: Lineage field contains PRODUCTBRAND_CENTER content, use 'brand' sizing
                                                     'ProductStrain': 'strain',
                                                     'ProductVendor': 'vendor',
                                                     'DOH': 'doh',
@@ -6216,7 +6175,7 @@ class TemplateProcessor:
                                                 'Price': 'price',
                                                 'Ratio_or_THC_CBD': 'thc_cbd',
                                                 'ProductBrand': 'brand',
-                                                'Lineage': 'lineage',
+                                                'Lineage': 'brand',  # CRITICAL FIX: Lineage field contains PRODUCTBRAND_CENTER content, use 'brand' sizing
                                                 'ProductStrain': 'strain',
                                                 'ProductVendor': 'vendor',
                                                 'DOH': 'doh',

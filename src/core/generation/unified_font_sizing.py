@@ -29,7 +29,7 @@ def _load_font_sizing_config():
         return {
             'standard': {
                 'mini': {
-                    'description': [(5, 18), (20, 16), (40, 14), (60, 12), (80, 11), (100, 10.5), (float('inf'), 10)],
+                    'description': [(5, 18), (20, 16), (40, 14), (60, 12), (80, 10), (100, 9), (float('inf'), 8)],
                     'brand': [(5, 12), (20, 10), (30, 8), (40, 7), (float('inf'), 6.5)],
                     'price': [(1, 18), (2, 16), (float('inf'), 14)],
                     'lineage': [(5, 12), (10, 11), (15, 10), (20, 9), (float('inf'), 8)],
@@ -43,28 +43,28 @@ def _load_font_sizing_config():
                     'default': [(10, 12), (20, 11), (float('inf'), 10)]
                 },
                 'double': {
-                    'description': [(10, 24), (20, 22), (30, 21), (40, 20), (50, 16), (60, 15), (70, 14), (float('inf'), 10)],
+                    'description': [(10, 24), (20, 22), (30, 21), (40, 20), (50, 19), (60, 18), (70, 17), (80, 16), (90, 15), (100, 14), (110, 12), (float('inf'), 10)],
                     'brand': [(1, 10), (2, 9), (5, 8), (10, 8), (float('inf'), 6.5)],
-                    'price': [(10, 26), (15, 20), (float('inf'), 14)],
+                    'price': [(10, 22), (15, 20), (float('inf'), 14)],
                     'lineage': [(15, 13), (25, 12), (35, 10), (45, 9), (float('inf'), 9)],
                     'ratio': [(10, 9), (20, 8), (30, 7), (float('inf'), 6.5)],
                     'thc_cbd': [(20, 7),(float('inf'), 6.5)],
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
                     'weight': [(15, 16), (25, 14), (35, 12), (float('inf'), 9)],
                     'doh': [(15, 20), (25, 16), (float('inf'), 13)],
-                    'vendor': [(10, 1), (20, 1), (40, 1), (70, 1),(float('inf'), 1)],
+                    'vendor': [(10, 5), (20, 4), (40, 3), (70, 2),(float('inf'), 1)],
                     'qr': [(float('inf'), 36)],  # QR codes: Medium size for double template
                     'default': [(20, 16), (40, 14), (60, 12), (float('inf'), 10)]
                 },
                 'vertical': {
-                    'description': [(5, 34), (10, 32), (20, 28), (30, 27), (40, 26), (50, 25), (60, 24), (70, 22), (80, 20), (float('inf'), 18)],
-                    'brand': [(10, 18), (20, 16), (25, 14), (30, 11), (35, 10), (40, 9), (float('inf'), 8)],
-                    'price': [(2, 36), (3, 30), (15, 28), (float('inf'), 26)],  # Updated: complexity-based thresholds for better vertical price sizing
+                    'description': [(5, 34), (20, 32), (30, 28), (40, 26), (60, 24), (70, 22), (80, 20), (90, 18), (float('inf'), 16)],
+                    'brand': [(10, 16), (15, 14), (25, 12), (35, 11), (float('inf'), 10)],
+                    'price': [(2, 36), (3, 30), (float('inf'), 26)],  # $1/$11 = 36pt, $111+ = 30pt
                     'lineage': [(20, 20), (40, 18), (60, 16), (float('inf'), 12)],
                     'ratio': [(10, 14), (20, 12), (30, 9), (float('inf'), 9)],
                     'thc_cbd': [(10, 12), (float('inf'), 12)],
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
-                    'vendor': [(10, 1), (20, 1), (40, 1), (70, 1),(float('inf'), 1)],
+                    'vendor': [(10, 6), (20, 5), (40, 4), (70, 3),(float('inf'), 2)],
                     'qr': [(float('inf'), 45)],  # QR codes: Large size for vertical template
                     'default': [(30, 16), (60, 14), (100, 12), (float('inf'), 10)]
                 },
@@ -117,6 +117,21 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
             logger.debug(f"Mini template price rule: '{text}' has {num_digits} digits, using 15pt font")
             return Pt(final_size)
     
+    # Special rule: Vertical template prices based on number of digits
+    if field_type.lower() == 'price' and orientation.lower() == 'vertical':
+        # Remove $ and any non-digit characters, then count digits
+        clean_text = ''.join(char for char in str(text) if char.isdigit())
+        num_digits = len(clean_text)
+        
+        if num_digits <= 2:  # $1 or $11 - use 36pt font
+            final_size = 36 * scale_factor
+            logger.debug(f"Vertical template price rule: '{text}' has {num_digits} digits, using 36pt font")
+            return Pt(final_size)
+        else:  # $111 or more - use 30pt font
+            final_size = 30 * scale_factor
+            logger.debug(f"Vertical template price rule: '{text}' has {num_digits} digits, using 30pt font")
+            return Pt(final_size)
+    
     if not text:
         # For empty text, use the appropriate field configuration instead of default
         config = FONT_SIZING_CONFIG.get('standard', {}).get(orientation.lower(), {}).get(field_type.lower(), [])
@@ -140,14 +155,33 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
                 elif max_word_length <= 18:
                     font_size = 16
                 else:
-                    font_size = 12
+                    font_size = 11
                 
                 final_size = font_size * scale_factor
                 logger.debug(f"Special vertical description rule: text='{text}', max_word_length={max_word_length}, using {font_size}pt font")
                 return Pt(final_size)
     
     
-    # Use standard font sizing for all templates - no special cases
+    # Special rule: Handle double template brand consistency
+    if field_type.lower() == 'brand' and orientation.lower() == 'double':
+        # Never allow brand on double to scale below 1.0; it becomes unreadably small otherwise
+        if scale_factor < 1.0:
+            scale_factor = 1.0
+        
+        # CRITICAL FIX: Use consistent font size for all double template brands
+        # This ensures all brand names appear at the same size for visual consistency
+        final_size = 8 * scale_factor
+        logger.debug(f"Double template brand consistency rule: text='{text}' -> {final_size}pt font")
+        return Pt(final_size)
+    
+    # Special rule: If double template description has multiple words with 9+ characters each, automatically reduce to 18pt
+    if orientation.lower() == 'double' and field_type.lower() == 'description':
+        words = str(text).split()
+        long_words = [word for word in words if len(word) >= 9]
+        if len(long_words) >= 2:  # Multiple words with 9+ characters each
+            final_size = 18 * scale_factor
+            logger.debug(f"Double template description word length rule: text='{text}' has {len(long_words)} words with 9+ chars each: {long_words}, forcing 18pt font")
+            return Pt(final_size)
     
     # Get the appropriate configuration
     config = FONT_SIZING_CONFIG.get(complexity_type, {}).get(orientation.lower(), {}).get(field_type.lower(), [])
@@ -158,7 +192,7 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
     
     if not config:
         # Ultimate fallback
-        fallback_size = 12 * scale_factor
+        fallback_size = 11 * scale_factor
         logger.warning(f"No font configuration found for {field_type} in {orientation} template, using {fallback_size}pt")
         return Pt(fallback_size)
     
@@ -169,6 +203,11 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
     if field_type.lower() == 'price':
         logger.info(f"PRICE DEBUG: '{text}' -> complexity: {comp}, orientation: {orientation}")
         logger.info(f"PRICE DEBUG: Config: {config}")
+    
+    # Special debugging for brand field with CONSTELLATION
+    if field_type.lower() == 'brand' and 'CONSTELLATION' in text.upper():
+        logger.info(f"🔍 CONSTELLATION FONT DEBUG: '{text}' -> complexity: {comp}, orientation: {orientation}")
+        logger.info(f"🔍 CONSTELLATION FONT DEBUG: Config: {config}")
     
     logger.debug(f"Font sizing for '{text}' (field_type: {field_type}, orientation: {orientation}, complexity: {comp})")
     logger.debug(f"Config: {config}")
@@ -183,14 +222,17 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
             logger.debug(f"Selected size {size}pt (final: {final_size}pt)")
             if field_type.lower() == 'price':
                 logger.info(f"PRICE DEBUG: SELECTED {size}pt for '{text}'")
+            if field_type.lower() == 'brand' and 'CONSTELLATION' in text.upper():
+                logger.info(f"🔍 CONSTELLATION FONT DEBUG: SELECTED {size}pt for '{text}' (complexity: {comp}, threshold: {threshold})")
             return Pt(final_size)
     
-    # Fallback to smallest configured size for the field type
-    if config:
-        # Use the last (smallest) size from the configuration
-        fallback_size = config[-1][1] * scale_factor
+    # Fallback to smallest size - ensure price gets proper fallback
+    if field_type.lower() == 'price':
+        fallback_size = 12 * scale_factor  # Price should never go below 12pt
+    elif field_type.lower() == 'thc_cbd':
+        # Use the configured fallback size for THC_CBD instead of hardcoded 8pt
+        fallback_size = 6.5 * scale_factor  # Use the configured size from the config
     else:
-        # Ultimate fallback if no config at all
         fallback_size = 8 * scale_factor
     return Pt(fallback_size)
 
@@ -293,7 +335,8 @@ def get_font_size_by_marker(text, marker_type, template_type='vertical', scale_f
         'PRIC': 'price',
         'BRAND': 'brand',
         'PRODUCTBRAND': 'brand',
-        'PRODUCTBRAND_CENTER': 'brand',
+        'PRODUCTBRAND_CENTER': 'brand',  # PRODUCTBRAND_CENTER markers should use brand field type
+        # Dynamic handling for LINEAGE based on template type: double behaves like brand center; others use lineage
         'LINEAGE': 'lineage',
         'LINEAGE_CENTER': 'lineage',
         'RATIO': 'ratio',
@@ -308,7 +351,22 @@ def get_font_size_by_marker(text, marker_type, template_type='vertical', scale_f
         'PRODUCTVENDOR': 'vendor',
         'QR': 'qr'  # QR code placeholders
     }
+    # Determine base field type
     field_type = marker_to_field.get(base_marker, 'default')
+
+    # Non-classic rule: Lineage content represents center-brand; size as brand
+    if base_marker in ('LINEAGE', 'LINEAGE_CENTER'):
+        try:
+            template_lower = str(template_type).lower()
+            if template_lower in ('double', 'mini'):
+                field_type = 'brand'
+            else:
+                # Use product_type when available
+                if product_type is not None and not is_classic_type(product_type):
+                    field_type = 'brand'
+        except Exception:
+            # If any issue determining classic/nonclassic, keep existing mapping
+            pass
     return get_font_size(text, field_type, template_type, scale_factor, 'standard')
 
 def get_line_spacing_by_marker(marker_type, template_type='vertical'):

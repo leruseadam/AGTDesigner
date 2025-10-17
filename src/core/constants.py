@@ -3,11 +3,11 @@ import copy
 
 # Lineage color mapping - SYNCHRONIZED WITH FRONTEND CSS
 LINEAGE_COLOR_MAP: Dict[str, str] = {
-    "HYBRID/SATIVA": "#ED4123",
-    "HYBRID/INDICA": "#9900FF",
     "SATIVA": "#ED4123",
     "INDICA": "#9900FF",
     "HYBRID": "#009900",
+    "HYBRID/SATIVA": "#ED4123",
+    "HYBRID/INDICA": "#9900FF",
     "CBD": "#F1C232",
     "MIXED": "#0021F5",
     "PARAPHERNALIA": "#FFC0CB",

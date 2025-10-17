@@ -1,11 +1,9 @@
 from .field_mapping import get_canonical_field
-from .database_reliability import get_reliability_manager, DatabaseReliability
 import sqlite3
 import json
 import logging
 import time
-import random
-from typing import Dict, List, Optional, Tuple, Any, Set, Callable
+from typing import Dict, List, Optional, Tuple, Any, Set
 from datetime import datetime
 import pandas as pd
 from pathlib import Path
@@ -49,8 +47,8 @@ def timed_operation(operation_name):
         return wrapper
     return decorator
 
-def retry_on_lock(max_retries=5, delay=1.0):
-    """Decorator to retry database operations on locking errors with exponential backoff."""
+def retry_on_lock(max_retries=3, delay=0.5):
+    """Decorator to retry database operations on locking errors."""
     def decorator(func):
         def wrapper(self, *args, **kwargs):
             current_delay = delay  # Use a local variable to avoid scope issues
@@ -58,19 +56,10 @@ def retry_on_lock(max_retries=5, delay=1.0):
                 try:
                     return func(self, *args, **kwargs)
                 except Exception as e:
-                    if "database is locked" in str(e).lower():
-                        if attempt < max_retries - 1:
-                            logger.warning(f"Database locked for {func.__name__}, retrying in {current_delay:.1f}s (attempt {attempt + 1}/{max_retries})")
-                            time.sleep(current_delay)
-                            current_delay *= 2  # Exponential backoff: 1s, 2s, 4s, 8s, 16s
-                        else:
-                            # For strain operations, fail gracefully (non-critical)
-                            if 'strain' in func.__name__.lower():
-                                logger.warning(f"⚠️  Skipping {func.__name__} after {max_retries} attempts - database locked (non-critical operation)")
-                                return None
-                            else:
-                                logger.error(f"❌ Failed {func.__name__} after {max_retries} attempts: {e}")
-                                raise e
+                    if "database is locked" in str(e).lower() and attempt < max_retries - 1:
+                        logger.warning(f"Database locked for {func.__name__}, retrying in {current_delay}s (attempt {attempt + 1}/{max_retries})")
+                        time.sleep(current_delay)
+                        current_delay *= 2  # Exponential backoff
                     else:
                         raise e
             return None
@@ -93,199 +82,34 @@ class ProductDatabase:
         # Serialize writers to avoid 'database is locked' under concurrent writes
         self._write_lock = threading.RLock()
         
-        # Initialize reliability manager
-        self._reliability = get_reliability_manager(self.db_path)
-        
-        # Automatic backup tracking - DISABLED FOR PYTHONANYWHERE
-        self._last_backup_time = None
-        self._writes_since_backup = 0
-        self._backup_interval_seconds = 999999  # Effectively disable backups
-        self._backup_interval_writes = 999999  # Effectively disable backups
-        
-        # Check if running on PythonAnywhere
-        self._is_pythonanywhere = os.environ.get('PYTHONANYWHERE_DOMAIN') is not None
-        if self._is_pythonanywhere:
-            self._backup_interval_seconds = 999999  # Disable on PythonAnywhere
-            self._backup_interval_writes = 999999   # Disable on PythonAnywhere
-        
-        # Connection pooling limits to prevent over-connection
-        # Optimized for concurrent users
-        if self._is_pythonanywhere:
-            self._max_connections = 5  # PythonAnywhere limit
-        else:
-            self._max_connections = 10  # Increased for concurrent users
-        self._connection_semaphore = threading.Semaphore(self._max_connections)
-        
-        # Write batching for bulk operations
-        self._batch_writes = []
-        self._batch_lock = threading.Lock()
-        # Optimized batch size for concurrent users
-        if self._is_pythonanywhere:
-            self._batch_size = 25  # Smaller batches for PythonAnywhere
-        else:
-            self._batch_size = 25  # Smaller batches for better concurrency
-        self._last_batch_commit = time.time()
-        self._batch_timeout = 5.0  # Force commit after 5 seconds
-        
         # Performance timing
         self._timing_stats = {
             'queries': 0,
             'total_time': 0.0,
             'cache_hits': 0,
-            'cache_misses': 0,
-            'write_retries': 0,
-            'batch_commits': 0
+            'cache_misses': 0
         }
     
     def _get_connection(self):
-        """Get a database connection with automatic health checking and recovery."""
+        """Get a database connection, reusing if possible."""
         thread_id = threading.get_ident()
-        
-        # Check if we need to verify health (periodically)
         if thread_id not in self._connection_pool:
-            # Check database health before creating connection
-            health = self._reliability.check_health()
-            
-            if not health['healthy']:
-                logger.error(f"Database corrupted: {health.get('message')}")
-                # Attempt automatic recovery
-                logger.warning("Attempting automatic database recovery...")
-                success, recovery_msg = self._reliability.restore_from_backup()
-                
-                if not success:
-                    # Emergency recovery
-                    success, recovery_msg = self._reliability.emergency_recovery()
-                    if not success:
-                        raise sqlite3.DatabaseError(
-                            f"Database is corrupted and cannot be recovered: {recovery_msg}"
-                        )
-                
-                logger.info(f"Database recovered: {recovery_msg}")
-                # Clear initialization flag to reinitialize after recovery
-                self._initialized = False
-            
-            try:
-                # Configure connection for better concurrency
-                conn = sqlite3.connect(
-                    self.db_path,
-                    timeout=30.0,  # 30 second timeout for database operations
-                    check_same_thread=False  # Allow connection sharing across threads
-                )
-                
-                # Configure journal mode based on environment
-                # WAL mode is great for local development but can cause issues on PythonAnywhere
-                is_pythonanywhere = os.environ.get('PYTHONANYWHERE_DOMAIN') or os.environ.get('PYTHONANYWHERE_SITE')
-                
-                if is_pythonanywhere:
-                    # Use DELETE mode for PythonAnywhere (more compatible with their filesystem)
-                    conn.execute("PRAGMA journal_mode=DELETE")
-                    # Additional optimizations for PythonAnywhere to compensate for DELETE mode
-                    conn.execute("PRAGMA page_size=4096")  # Optimize page size
-                    conn.execute("PRAGMA cache_size=-10000")  # 10MB cache (negative = KB)
-                    conn.execute("PRAGMA temp_store=MEMORY")  # Use memory for temp storage
-                    conn.execute("PRAGMA mmap_size=268435456")  # 256MB memory-mapped I/O
-                    conn.execute("PRAGMA synchronous=NORMAL")  # Balance safety/speed
-                    logger.info("Using DELETE journal mode with performance optimizations (PythonAnywhere)")
-                else:
-                    # Use WAL mode for better concurrency in local/standard deployments
-                    conn.execute("PRAGMA journal_mode=WAL")
-                    conn.execute("PRAGMA synchronous=NORMAL")
-                    conn.execute("PRAGMA cache_size=10000")
-                    conn.execute("PRAGMA temp_store=MEMORY")
-                    logger.info("Using WAL journal mode (local/standard environment)")
-                
-                # Common optimizations for all environments
-                conn.execute("PRAGMA busy_timeout=60000")  # 60s timeout for locks
-                
-                # Ensure proper row factory for result access
-                conn.row_factory = sqlite3.Row
-                
-                self._connection_pool[thread_id] = conn
-                
-            except sqlite3.DatabaseError as e:
-                if 'file is not a database' in str(e).lower():
-                    logger.error(f"Database corruption detected during connection: {e}")
-                    # Attempt recovery one more time
-                    success, recovery_msg = self._reliability.emergency_recovery()
-                    if success:
-                        # Retry connection with same optimizations
-                        conn = sqlite3.connect(self.db_path, timeout=30.0, check_same_thread=False)
-                        
-                        # Use same journal mode logic and optimizations
-                        is_pythonanywhere = os.environ.get('PYTHONANYWHERE_DOMAIN') or os.environ.get('PYTHONANYWHERE_SITE')
-                        if is_pythonanywhere:
-                            conn.execute("PRAGMA journal_mode=DELETE")
-                            conn.execute("PRAGMA page_size=4096")
-                            conn.execute("PRAGMA cache_size=-10000")
-                            conn.execute("PRAGMA temp_store=MEMORY")
-                            conn.execute("PRAGMA mmap_size=268435456")
-                            conn.execute("PRAGMA synchronous=NORMAL")
-                        else:
-                            conn.execute("PRAGMA journal_mode=WAL")
-                            conn.execute("PRAGMA synchronous=NORMAL")
-                            conn.execute("PRAGMA cache_size=10000")
-                            conn.execute("PRAGMA temp_store=MEMORY")
-                        
-                        conn.execute("PRAGMA busy_timeout=60000")
-                        self._connection_pool[thread_id] = conn
-                    else:
-                        raise sqlite3.DatabaseError(f"Cannot recover database: {recovery_msg}")
-                else:
-                    raise
-                    
+            # Configure connection for better concurrency
+            conn = sqlite3.connect(
+                self.db_path,
+                timeout=30.0,  # 30 second timeout for database operations
+                check_same_thread=False  # Allow connection sharing across threads
+            )
+            # Enable WAL mode for better concurrency
+            conn.execute("PRAGMA journal_mode=WAL")
+            # Set busy timeout (60s) to ride out background batches
+            conn.execute("PRAGMA busy_timeout=60000")
+            # Optimize for concurrent access
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("PRAGMA cache_size=10000")
+            conn.execute("PRAGMA temp_store=MEMORY")
+            self._connection_pool[thread_id] = conn
         return self._connection_pool[thread_id]
-    
-    def _migrate_schema(self, cursor):
-        """Migrate old database schemas to current schema."""
-        try:
-            # Check if strains table exists
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='strains'")
-            strains_exists = cursor.fetchone() is not None
-            
-            if strains_exists:
-                # Get existing columns in strains table
-                cursor.execute("PRAGMA table_info(strains)")
-                existing_columns = {row[1] for row in cursor.fetchall()}
-                
-                # Add missing normalized_name column if it doesn't exist
-                if 'normalized_name' not in existing_columns:
-                    logger.info("Migrating strains table: adding normalized_name column")
-                    cursor.execute('ALTER TABLE strains ADD COLUMN normalized_name TEXT')
-                    # Populate normalized_name from strain_name for existing rows
-                    cursor.execute('''
-                        UPDATE strains 
-                        SET normalized_name = LOWER(REPLACE(REPLACE(REPLACE(strain_name, ' ', ''), '-', ''), '_', ''))
-                        WHERE normalized_name IS NULL OR normalized_name = ''
-                    ''')
-                    logger.info("Migrated strains table successfully")
-            
-            # Check if products table exists
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
-            products_exists = cursor.fetchone() is not None
-            
-            if products_exists:
-                # Get existing columns in products table
-                cursor.execute("PRAGMA table_info(products)")
-                existing_columns = {row[1] for row in cursor.fetchall()}
-                
-                # Add missing normalized_name column if it doesn't exist
-                if 'normalized_name' not in existing_columns:
-                    logger.info("Migrating products table: adding normalized_name column")
-                    cursor.execute('ALTER TABLE products ADD COLUMN normalized_name TEXT')
-                    # Populate normalized_name from Product Name* for existing rows
-                    cursor.execute('''
-                        UPDATE products 
-                        SET normalized_name = LOWER(REPLACE(REPLACE(REPLACE("Product Name*", ' ', ''), '-', ''), '_', ''))
-                        WHERE normalized_name IS NULL OR normalized_name = ''
-                    ''')
-                    logger.info("Migrated products table successfully")
-            
-            cursor.connection.commit()
-            
-        except Exception as e:
-            logger.error(f"Error during schema migration: {e}")
-            # Don't fail initialization if migration fails - table might already be correct
-            pass
     
     def init_database(self):
         """Initialize the database with required tables (lazy initialization)."""
@@ -308,22 +132,13 @@ class ProductDatabase:
                 products_exists = cursor.fetchone() is not None
                 
                 if products_exists:
-                    # Migrate schema if needed before checking data
-                    self._migrate_schema(cursor)
-                    
                     # Check if table has data
                     cursor.execute("SELECT COUNT(*) FROM products")
                     count = cursor.fetchone()[0]
                     if count > 0:
-                        logger.info(f"Database already initialized with {count} products (schema migrated if needed)")
+                        logger.info(f"Database already initialized with {count} products")
                         self._initialized = True
                         return
-                    else:
-                        # Tables exist but empty - still need to ensure indexes exist
-                        logger.info("Database tables exist but are empty, ensuring indexes...")
-                else:
-                    # Tables don't exist - will be created below
-                    pass
                 
                 # Create strains table
                 cursor.execute('''
@@ -1061,9 +876,6 @@ class ProductDatabase:
         try:
             self.init_database()  # Ensure DB is initialized
             
-            # Periodic automatic backup
-            self._try_automatic_backup()
-            
             # Handle both 'ProductName' and 'Product Name*' column names
             product_name = product_data.get(get_canonical_field('Product Name*'), product_data.get(get_canonical_field('ProductName'), ''))
             normalized_name = self._normalize_product_name(product_name)
@@ -1076,9 +888,6 @@ class ProductDatabase:
                 # Normalize lineage before storing
                 normalized_lineage = self._normalize_lineage(product_data.get('Lineage'))
                 strain_id = self.add_or_update_strain(strain_name, normalized_lineage)
-            
-            # Track write operation
-            self._writes_since_backup += 1
             
             # Serialize write operations
             with self._write_lock:
@@ -1329,6 +1138,35 @@ class ProductDatabase:
                             row_dict[col] = str(value).strip() if isinstance(value, str) else value
                     
                     # Map to database columns correctly
+                    # CRITICAL FIX: Preserve actual Excel weight values, don't use fallbacks
+                    excel_weight = row_dict.get('Weight*', row_dict.get('Weight', ''))
+                    excel_units = row_dict.get('Units', row_dict.get('Weight Unit*', row_dict.get('Weight Unit* (grams/gm or ounces/oz)', '')))
+                    
+                    # Log first few weight extractions for debugging
+                    if index < 5:  # Log first 5 products
+                        product_name_for_log = row_dict.get('Product Name*', 'Unknown')
+                        logger.info(f"[WEIGHT DEBUG] Product: '{product_name_for_log}' | Excel Weight: '{excel_weight}' | Excel Units: '{excel_units}'")
+                    
+                    # CRITICAL: Use explicit None check instead of truthiness to handle '0' values correctly
+                    # Only use fallback if weight is None, empty string, or invalid (not when it's '0')
+                    if excel_weight is not None and str(excel_weight).strip() not in ['', 'nan', 'none', 'null', 'NaN', 'None']:
+                        weight_value = str(excel_weight).strip()
+                    else:
+                        weight_value = '1'  # Numeric value only as fallback
+                        if index < 5:
+                            logger.warning(f"[WEIGHT DEBUG] Using fallback weight '1' for product '{row_dict.get('Product Name*', 'Unknown')}' (original: '{excel_weight}')")
+                    
+                    if excel_units is not None and str(excel_units).strip() not in ['', 'nan', 'none', 'null', 'NaN', 'None']:
+                        units_value = str(excel_units).strip()
+                    else:
+                        units_value = 'g'  # Default unit as fallback
+                        if index < 5:
+                            logger.warning(f"[WEIGHT DEBUG] Using fallback units 'g' for product '{row_dict.get('Product Name*', 'Unknown')}' (original: '{excel_units}')")
+                    
+                    # Final debug log
+                    if index < 5:
+                        logger.info(f"[WEIGHT DEBUG] Final values - Weight: '{weight_value}' | Units: '{units_value}'")
+                    
                     product_data = {
                         'Product Name*': row_dict.get('Product Name*', ''),
                         'Product Type*': self._ensure_crucial_value(row_dict.get('Product Type*', ''), 'Unknown', 'Product Type'),
@@ -1340,12 +1178,8 @@ class ProductDatabase:
                             row_dict.get('Product Name*', ''), 
                             row_dict.get('Description', '')
                         ),
-                        'Weight*': self._ensure_crucial_value(row_dict.get('Weight*', ''), '1g', 'Weight'),
-                        'Units': self._ensure_crucial_value(
-                            row_dict.get('Units', row_dict.get('Weight Unit* (grams/gm or ounces/oz)', '')), 
-                            'each', 
-                            'Units'
-                        ),
+                        'Weight*': weight_value,
+                        'Units': units_value,
                         'Price': self._ensure_crucial_value(row_dict.get('Price*', row_dict.get('Price', '')), '0.00', 'Price'),
                         'Product Strain': row_dict.get('Product Strain', ''),
                         'Quantity*': row_dict.get('Quantity*', ''),
@@ -2567,294 +2401,11 @@ class ProductDatabase:
         self._timing_stats['cache_hits'] = 0
         self._timing_stats['cache_misses'] = 0
     
-    def _safe_transaction(self, operation: Callable, max_retries: int = 5) -> Tuple[bool, Any]:
-        """
-        Execute a database operation safely with automatic retry and error handling.
-        
-        Args:
-            operation: Callable that performs the database operation
-            max_retries: Maximum number of retry attempts
-            
-        Returns:
-            Tuple of (success, result)
-        """
-        last_error = None
-        
-        for attempt in range(max_retries):
-            try:
-                # Acquire connection semaphore to limit concurrent connections
-                with self._connection_semaphore:
-                    with self._write_lock:
-                        result = operation()
-                        return True, result
-                        
-            except sqlite3.OperationalError as e:
-                error_msg = str(e).lower()
-                last_error = e
-                
-                # Handle specific SQLite errors
-                if 'database is locked' in error_msg:
-                    # Database is locked - wait and retry with exponential backoff
-                    wait_time = (0.1 * (2 ** attempt)) + (0.1 * random.random())
-                    logger.warning(f"Database locked, retry {attempt + 1}/{max_retries} after {wait_time:.2f}s")
-                    time.sleep(wait_time)
-                    self._timing_stats['write_retries'] += 1
-                    continue
-                    
-                elif 'file is not a database' in error_msg or 'database disk image is malformed' in error_msg:
-                    # Database corruption - trigger recovery
-                    logger.error(f"Database corruption detected: {e}")
-                    success, recovery_msg = self._reliability.restore_from_backup()
-                    if success:
-                        logger.info(f"Database recovered, retrying operation...")
-                        # Close and recreate connections
-                        self.close_connections()
-                        self._initialized = False
-                        continue
-                    else:
-                        logger.error(f"Failed to recover database: {recovery_msg}")
-                        return False, None
-                else:
-                    # Other operational error
-                    if attempt < max_retries - 1:
-                        time.sleep(0.5 * (attempt + 1))
-                        continue
-                    else:
-                        raise
-                        
-            except Exception as e:
-                last_error = e
-                logger.error(f"Unexpected error in transaction (attempt {attempt + 1}): {e}")
-                if attempt < max_retries - 1:
-                    time.sleep(0.5 * (attempt + 1))
-                    continue
-                else:
-                    raise
-        
-        # All retries exhausted
-        logger.error(f"Transaction failed after {max_retries} attempts: {last_error}")
-        return False, None
-    
-    def _flush_batch_writes(self):
-        """Flush pending batch writes to database."""
-        with self._batch_lock:
-            if not self._batch_writes:
-                return
-            
-            batch_size = len(self._batch_writes)
-            logger.info(f"Flushing {batch_size} batched writes...")
-            
-            def batch_commit():
-                conn = self._get_connection()
-                cursor = conn.cursor()
-                
-                try:
-                    cursor.execute("BEGIN IMMEDIATE")
-                    
-                    # Execute all batched operations
-                    for operation in self._batch_writes:
-                        operation(cursor)
-                    
-                    conn.commit()
-                    logger.info(f"✅ Batch commit successful: {batch_size} operations")
-                    self._timing_stats['batch_commits'] += 1
-                    return True
-                    
-                except Exception as e:
-                    conn.rollback()
-                    logger.error(f"Batch commit failed: {e}")
-                    raise
-            
-            success, _ = self._safe_transaction(batch_commit, max_retries=3)
-            
-            if success:
-                self._batch_writes.clear()
-                self._last_batch_commit = time.time()
-            
-            return success
-    
-    def _should_flush_batch(self) -> bool:
-        """Check if batch should be flushed."""
-        if len(self._batch_writes) >= self._batch_size:
-            return True
-        
-        time_since_last = time.time() - self._last_batch_commit
-        if time_since_last >= self._batch_timeout and self._batch_writes:
-            return True
-        
-        return False
-    
-    def _should_create_backup(self) -> bool:
-        """Check if we should create an automatic backup."""
-        # Check time-based backup
-        if self._last_backup_time is None:
-            return True
-        
-        time_elapsed = time.time() - self._last_backup_time
-        if time_elapsed >= self._backup_interval_seconds:
-            return True
-        
-        # Check writes-based backup
-        if self._writes_since_backup >= self._backup_interval_writes:
-            return True
-        
-        return False
-    
-    def _try_automatic_backup(self):
-        """Try to create an automatic backup if needed."""
-        # DISABLED FOR PYTHONANYWHERE TO PREVENT DISK QUOTA ISSUES
-        if self._is_pythonanywhere:
-            logger.debug("Automatic backups disabled on PythonAnywhere")
-            return
-            
-        try:
-            if self._should_create_backup():
-                logger.info("Creating automatic backup...")
-                success, backup_path = self._reliability.create_backup("auto")
-                if success:
-                    logger.info(f"✅ Automatic backup created: {os.path.basename(backup_path)}")
-                    self._last_backup_time = time.time()
-                    self._writes_since_backup = 0
-                else:
-                    logger.warning(f"⚠️ Automatic backup failed: {backup_path}")
-        except Exception as e:
-            logger.warning(f"Error creating automatic backup: {e}")
-        
-        # Periodic connection cleanup (every 10 backups)
-        if self._writes_since_backup % 1000 == 0:
-            self.cleanup_stale_connections()
-    
-    def get_health_status(self) -> Dict[str, Any]:
-        """
-        Get comprehensive database health status.
-        
-        Returns:
-            Dictionary with health information including:
-            - healthy: bool indicating if database is healthy
-            - message: status message
-            - last_check: timestamp of last check
-            - db_size_mb: database size in MB
-            - backup_count: number of available backups
-        """
-        health = self._reliability.check_health(force=True)
-        
-        # Add backup information
-        backup_dir = self._reliability.backup_dir
-        backup_count = 0
-        if os.path.exists(backup_dir):
-            backup_files = [f for f in os.listdir(backup_dir) 
-                          if f.startswith('db_backup_') and f.endswith('.db')]
-            backup_count = len(backup_files)
-        
-        health['backup_count'] = backup_count
-        health['backup_dir'] = backup_dir
-        
-        return health
-    
-    def create_backup(self, label: str = "manual") -> Tuple[bool, str]:
-        """
-        Create a manual backup of the database.
-        
-        Args:
-            label: Label for the backup (default: "manual")
-            
-        Returns:
-            Tuple of (success, backup_path or error_message)
-        """
-        return self._reliability.create_backup(label)
-    
-    def restore_from_backup(self, backup_path: str = None) -> Tuple[bool, str]:
-        """
-        Restore database from a backup.
-        
-        Args:
-            backup_path: Optional path to specific backup file
-            
-        Returns:
-            Tuple of (success, message)
-        """
-        # Close all connections before restoring
-        self.close_connections()
-        self._initialized = False
-        
-        success, message = self._reliability.restore_from_backup(backup_path)
-        
-        # Force reinitialization on next operation
-        if success:
-            self._cache.clear()
-        
-        return success, message
-    
-    def emergency_recovery(self) -> Tuple[bool, str]:
-        """
-        Perform emergency database recovery.
-        
-        Returns:
-            Tuple of (success, message)
-        """
-        self.close_connections()
-        self._initialized = False
-        
-        success, message = self._reliability.emergency_recovery()
-        
-        if success:
-            self._cache.clear()
-            
-        return success, message
-    
-    def cleanup_stale_connections(self):
-        """Clean up stale database connections to prevent leaks."""
-        active_threads = {threading.get_ident() for _ in [threading.current_thread()]}
-        active_threads.update({t.ident for t in threading.enumerate()})
-        
-        stale_connections = []
-        for thread_id in list(self._connection_pool.keys()):
-            if thread_id not in active_threads:
-                stale_connections.append(thread_id)
-        
-        if stale_connections:
-            logger.info(f"Cleaning up {len(stale_connections)} stale connections...")
-            for thread_id in stale_connections:
-                try:
-                    conn = self._connection_pool.pop(thread_id, None)
-                    if conn:
-                        conn.close()
-                except Exception as e:
-                    logger.warning(f"Error closing stale connection {thread_id}: {e}")
-    
-    def release_connection(self):
-        """Release the current thread's connection to prevent locks."""
-        thread_id = threading.get_ident()
-        if thread_id in self._connection_pool:
-            try:
-                conn = self._connection_pool[thread_id]
-                conn.commit()  # Commit any pending transactions
-                logger.debug(f"Released connection for thread {thread_id}")
-            except Exception as e:
-                logger.warning(f"Error releasing connection: {e}")
-    
     def close_connections(self):
-        """Close all database connections safely."""
-        # Flush any pending batch writes before closing
-        try:
-            if self._batch_writes:
-                logger.info(f"Flushing {len(self._batch_writes)} pending writes before closing connections...")
-                self._flush_batch_writes()
-        except Exception as e:
-            logger.warning(f"Error flushing batch writes on close: {e}")
-        
-        # Close all connections
-        for thread_id, conn in list(self._connection_pool.items()):
-            try:
-                # Ensure any uncommitted transactions are handled
-                conn.commit()
-                conn.close()
-                logger.debug(f"Closed connection for thread {thread_id}")
-            except Exception as e:
-                logger.warning(f"Error closing connection for thread {thread_id}: {e}")
-        
+        """Close all database connections."""
+        for conn in self._connection_pool.values():
+            conn.close()
         self._connection_pool.clear()
-        logger.info("All database connections closed")
     
     def _normalize_strain_name(self, strain_name: str) -> str:
         """Normalize strain name for consistent matching."""
@@ -2885,13 +2436,9 @@ class ProductDatabase:
         lineage_mapping = {
             'hybrid': 'HYBRID',
             'indica_hybrid': 'HYBRID/INDICA',
-            'indica/hybrid': 'HYBRID/INDICA',  # FIX: Handle forward slash format
-            'hybrid/indica': 'HYBRID/INDICA',  # FIX: Handle reverse format
             'indica': 'INDICA',
             'sativa': 'SATIVA',
             'sativa_hybrid': 'HYBRID/SATIVA',
-            'sativa/hybrid': 'HYBRID/SATIVA',  # FIX: Handle forward slash format
-            'hybrid/sativa': 'HYBRID/SATIVA',  # FIX: Handle reverse format
             'cbd': 'CBD',
             'mixed': 'HYBRID',  # Default mixed to hybrid
             'unknown': 'HYBRID',  # Default unknown to hybrid
@@ -4392,11 +3939,6 @@ class ProductDatabase:
                     # Use the first result for each product (or could implement logic to choose best match)
                     result = products_map[normalized_name][0]
                     
-                    # Diagnostic logging for CBD lineage tracking
-                    lineage_from_db = result[6] or 'MIXED'
-                    if 'CBD' in str(result[1]).upper() or lineage_from_db == 'CBD':
-                        logger.info(f"🔍 DATABASE LINEAGE DEBUG: Product '{result[1]}' has lineage='{lineage_from_db}' in database")
-                    
                     product_info = {
                         'id': result[0],
                         'ProductName': result[1],  # product_name
@@ -4406,7 +3948,7 @@ class ProductDatabase:
                         'Vendor': result[4],  # vendor
                         'Vendor/Supplier*': result[4],  # Excel column name compatibility
                         'Product Brand': result[5],  # brand
-                        'Lineage': lineage_from_db,  # lineage
+                        'Lineage': result[6] or 'MIXED',  # lineage
                         'Product Strain': result[7],  # strain_name from Product Strain column
                         'strain_name': result[7],  # strain_name from Product Strain column
                         'canonical_lineage': result[8],  # canonical_lineage from Lineage column
@@ -6053,30 +5595,9 @@ class ProductDatabase:
             print(f"Error in _calculate_product_strain: {e}")
             return 'Mixed'
 
-# Global database instance for singleton pattern
-_product_database_instance = None
-_product_database_lock = threading.Lock()
-
 def get_product_database(store_name=None):
-    """Get a ProductDatabase instance for the specified store (singleton pattern)."""
-    global _product_database_instance
-    
-    # If no store_name specified, use AGT_Bothell as the default store
-    if store_name is None:
-        store_name = 'AGT_Bothell'
-    
-    # If no store_name specified, use the global instance
-    if store_name == 'AGT_Bothell':
-        with _product_database_lock:
-            if _product_database_instance is None:
-                _product_database_instance = ProductDatabase(store_name=store_name)
-                # Initialize the database
-                if not _product_database_instance._initialized:
-                    _product_database_instance.init_database()
-            return _product_database_instance
-    else:
-        # For other store-specific databases, create a new instance
-        return ProductDatabase(store_name=store_name) 
+    """Get a ProductDatabase instance for the specified store."""
+    return ProductDatabase(store_name=store_name) 
 
 if __name__ == "__main__":
     import argparse

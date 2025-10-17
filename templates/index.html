@@ -522,44 +522,7 @@
           const analytics = analyticsResult.value || analyticsResult.reason || {};
           const availableTags = availableTagsResult.value || [];
           
-          // PERMANENT FIX: Robust product count with multiple fallbacks
-          let totalProducts = 0;
-          
-          console.log('🔍 Debugging product count sources:', {
-            availableTags: Array.isArray(availableTags) ? availableTags.length : 'not array',
-            statsTotalRecords: stats.total_records,
-            statsTotalProducts: stats.total_products,
-            vendorStatsSummary: vendorStats.summary
-          });
-          
-          // PRIORITY 1: Try available tags first (most reliable)
-          if (Array.isArray(availableTags) && availableTags.length > 0) {
-            totalProducts = availableTags.length;
-            console.log(`✅ Using availableTags count: ${totalProducts}`);
-          }
-          // PRIORITY 2: Try database stats total_records
-          else if (stats && stats.total_records && stats.total_records > 0) {
-            totalProducts = stats.total_records;
-            console.log(`✅ Using stats.total_records: ${totalProducts}`);
-          }
-          // PRIORITY 3: Try database stats total_products
-          else if (stats && stats.total_products && stats.total_products > 0) {
-            totalProducts = stats.total_products;
-            console.log(`✅ Using stats.total_products: ${totalProducts}`);
-          }
-          // PRIORITY 4: Estimate from vendor stats
-          else if (vendorStats && vendorStats.summary && vendorStats.summary.total_brands > 0) {
-            totalProducts = Math.max(100, vendorStats.summary.total_brands * 10);
-            console.log(`✅ Using vendor estimate: ${totalProducts}`);
-          }
-          // PRIORITY 5: Force a reasonable minimum if we have any data
-          else if (vendorStats && vendorStats.summary && vendorStats.summary.total_brands > 0) {
-            totalProducts = 1000; // Force minimum if we know there are brands
-            console.log(`✅ Using forced minimum: ${totalProducts}`);
-          }
-          
-          console.log(`🎯 Final product count: ${totalProducts}`);
-          
+          const totalProducts = Array.isArray(availableTags) ? availableTags.length : 0;
           const totalStrains = stats.total_strains || 0;
           
           console.log('Analytics data loaded:', { 
@@ -2236,32 +2199,6 @@
               const link = document.createElement('a');
               link.href = '/api/database-export';
               link.download = `AGT_Product_Database_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.xlsx`;
-              
-              // Trigger download
-              document.body.appendChild(link);
-              link.click();
-              document.body.removeChild(link);
-              
-              // Reset button state after a short delay
-              setTimeout(() => {
-                exportBtn.innerHTML = originalBtnText;
-                exportBtn.disabled = false;
-              }, 1000);
-            };
-            
-            // Export Inventory Function
-            window.exportInventory = function() {
-              const exportBtn = document.querySelector('button[onclick="exportInventory()"]');
-              
-              // Show loading state
-              const originalBtnText = exportBtn.innerHTML;
-              exportBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Exporting...';
-              exportBtn.disabled = true;
-              
-              // Create a temporary link to trigger download
-              const link = document.createElement('a');
-              link.href = '/api/inventory-export';
-              link.download = `AGT_Inventory_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.xlsx`;
               
               // Trigger download
               document.body.appendChild(link);
@@ -4401,7 +4338,7 @@
                 </svg>
                 <span class="fw-bold">Upload</span>
               </button>
-              <input type="file" id="fileInput" accept=".xlsx" style="display:none;">
+              <input type="file" id="fileInput" accept=".xlsx" style="display:none;" onchange="console.log('File input changed:', this.files[0]);">
               <span class="file-info-modern d-flex align-items-center gap-1 ms-2" id="currentFileInfo" style="min-width:200px; max-width:none; font-size:0.82rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;">
                   <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
@@ -7468,51 +7405,7 @@
         fetch('/api/available-tags').then(r => r.json())
       ])
       .then(([stats, view, vendorStats, availableTags]) => {
-        // PERMANENT FIX: Robust product count with multiple fallbacks
-        let totalProducts = 0;
-        
-        console.log('🔍 Debugging product count sources:', {
-          availableTags: Array.isArray(availableTags) ? availableTags.length : 'not array',
-          statsTotalRecords: stats.total_records,
-          statsTotalProducts: stats.total_products,
-          vendorStatsSummary: vendorStats.summary
-        });
-        
-        // PRIORITY 1: Try available tags first (most reliable)
-        if (Array.isArray(availableTags) && availableTags.length > 0) {
-          totalProducts = availableTags.length;
-          console.log(`✅ Using availableTags count: ${totalProducts}`);
-        }
-        // PRIORITY 2: Try database stats total_records
-        else if (stats && stats.total_records && stats.total_records > 0) {
-          totalProducts = stats.total_records;
-          console.log(`✅ Using stats.total_records: ${totalProducts}`);
-        }
-        // PRIORITY 3: Try database stats total_products
-        else if (stats && stats.total_products && stats.total_products > 0) {
-          totalProducts = stats.total_products;
-          console.log(`✅ Using stats.total_products: ${totalProducts}`);
-        }
-        // PRIORITY 4: Estimate from vendor stats
-        else if (vendorStats && vendorStats.summary && vendorStats.summary.total_brands > 0) {
-          totalProducts = Math.max(100, vendorStats.summary.total_brands * 10);
-          console.log(`✅ Using vendor estimate: ${totalProducts}`);
-        }
-        // PRIORITY 5: Force a reasonable minimum if we have any data
-        else if (vendorStats && vendorStats.summary && vendorStats.summary.total_brands > 0) {
-          totalProducts = 1000; // Force minimum if we know there are brands
-          console.log(`✅ Using forced minimum: ${totalProducts}`);
-        }
-        
-        console.log(`🎯 Final product count: ${totalProducts}`);
-        
-        // DEBUG: Log the values to help troubleshoot
-        console.log('Product count sources:', {
-          availableTagsLength: Array.isArray(availableTags) ? availableTags.length : 'not array',
-          statsTotalProducts: stats.total_products,
-          statsTotalRecords: stats.total_records,
-          finalTotalProducts: totalProducts
-        });
+        const totalProducts = availableTags.length;
         const totalStrains = stats.total_strains;
         
         const infoHtml = `
@@ -9468,44 +9361,7 @@
           fetch('/api/available-tags').then(r => r.json())
         ])
         .then(([stats, vendorStats, analytics, availableTags]) => {
-          // PERMANENT FIX: Robust product count with multiple fallbacks
-          let totalProducts = 0;
-          
-          console.log('🔍 Debugging product count sources:', {
-            availableTags: Array.isArray(availableTags) ? availableTags.length : 'not array',
-            statsTotalRecords: stats.total_records,
-            statsTotalProducts: stats.total_products,
-            vendorStatsSummary: vendorStats.summary
-          });
-          
-          // PRIORITY 1: Try available tags first (most reliable)
-          if (Array.isArray(availableTags) && availableTags.length > 0) {
-            totalProducts = availableTags.length;
-            console.log(`✅ Using availableTags count: ${totalProducts}`);
-          }
-          // PRIORITY 2: Try database stats total_records
-          else if (stats && stats.total_records && stats.total_records > 0) {
-            totalProducts = stats.total_records;
-            console.log(`✅ Using stats.total_records: ${totalProducts}`);
-          }
-          // PRIORITY 3: Try database stats total_products
-          else if (stats && stats.total_products && stats.total_products > 0) {
-            totalProducts = stats.total_products;
-            console.log(`✅ Using stats.total_products: ${totalProducts}`);
-          }
-          // PRIORITY 4: Estimate from vendor stats
-          else if (vendorStats && vendorStats.summary && vendorStats.summary.total_brands > 0) {
-            totalProducts = Math.max(100, vendorStats.summary.total_brands * 10);
-            console.log(`✅ Using vendor estimate: ${totalProducts}`);
-          }
-          // PRIORITY 5: Force a reasonable minimum if we have any data
-          else if (vendorStats && vendorStats.summary && vendorStats.summary.total_brands > 0) {
-            totalProducts = 1000; // Force minimum if we know there are brands
-            console.log(`✅ Using forced minimum: ${totalProducts}`);
-          }
-          
-          console.log(`🎯 Final product count: ${totalProducts}`);
-          
+          const totalProducts = availableTags.length;
           const totalStrains = stats.total_strains || 0;
         
         const analyticsHtml = `
@@ -9628,10 +9484,6 @@
         `;
         showDatabaseModal('Database Analytics Dashboard', errorHtml);
       });
-      } catch (error) {
-        console.error('Error in openDatabaseAnalytics:', error);
-        alert('Failed to open analytics dashboard. Please try again.');
-      }
     }
 
     // Product Similarity Finder
@@ -11200,14 +11052,7 @@
   <!-- Database Sync JavaScript -->
   <script src="{{ url_for('static', filename='js/database-sync.js') }}"></script>
   
-  <!-- Advanced Features JavaScript -->
-  <script src="{{ url_for('static', filename='js/advanced-features.js') }}"></script>
-  
-  <!-- Database Health Monitoring JavaScript -->
-  <script src="{{ url_for('static', filename='js/database-health.js') }}"></script>
-  
   <!-- Tags Table JavaScript -->
-  <script src="{{ url_for('static', filename='js/tags_table_stub.js') }}?v={{ cache_bust }}"></script>
   <script src="{{ url_for('static', filename='js/tags_table.js') }}?v={{ cache_bust }}"></script>
   
   <!-- Database Modal -->

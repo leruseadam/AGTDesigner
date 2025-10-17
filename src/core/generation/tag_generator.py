@@ -117,8 +117,7 @@ PLACEHOLDER_MARKERS = {
     "THC_CBD": ("THC_CBD_START", "THC_CBD_END"),
     "ProductName": ("PRODUCTNAME_START", "PRODUCTNAME_END"),
     "ProductStrain": ("PRODUCTSTRAIN_START", "PRODUCTSTRAIN_END"),
-    "ProductType": ("PRODUCTTYPE_START", "PRODUCTTYPE_END"),
-    "ProductVendor": ("PRODUCTVENDOR_START", "PRODUCTVENDOR_END")
+    "ProductType": ("PRODUCTTYPE_START", "PRODUCTTYPE_END")
 }
 
 # Import colors from docx_formatting to avoid duplication
@@ -380,18 +379,14 @@ def process_chunk(args):
                 # They will be set to lineage later if lineage is available
                 pass
             else:
-                # For non-classic types, add brand with centering markers
-                # Include Product Strain info for color determination
-                product_strain = str(row.get("Product Strain", "")).strip()
-                if product_strain:
-                    brand_content = f"{product_strain} {product_brand.upper()}"
-                else:
-                    brand_content = product_brand.upper()
+                # For non-classic types, preserve brand data for template processor
+                # The template processor will handle the proper formatting based on template type
+                brand_content = product_brand.upper()
                 
-                # For non-vertical templates, don't set ProductBrand fields to prevent duplication
-                # The brand content will be handled by the Lineage field with PRODUCTBRAND_CENTER markers
-                label_data["ProductBrand"] = ""
-                label_data["ProductBrand_Center"] = ""
+                # CRITICAL FIX: Pass brand data to template processor instead of clearing it
+                # The template processor will handle the proper formatting for each template type
+                label_data["ProductBrand"] = brand_content
+                label_data["ProductBrand_Center"] = brand_content
             
             # Add other fields to label_data
             # Get product name and apply non-breaking hyphens to prevent "Pre-Roll" splitting
@@ -437,36 +432,32 @@ def process_chunk(args):
             is_edible = product_type in edible_types
             is_horizontal_or_double_or_vertical = orientation in {"horizontal", "double", "vertical"}
             
-            # PRIORITY FIX: Use Excel lineage first (includes manual dropdown changes), then database fallback
+            # For classic types, try to get the strain's canonical lineage from the database
             if is_classic_type and product_strain:
                 # DEBUG: Processing classic type '{product_type}' with strain '{product_strain}'
-                
-                # PRIORITY 1: Use Excel lineage (includes manual dropdown changes from user)
-                if lineage_text and lineage_text.strip():
-                    lineage_val = lineage_text.upper()
-                    # DEBUG: Using Excel lineage (includes manual changes): '{lineage_val}'
-                else:
-                    # PRIORITY 2: Fallback to database lineage if no Excel lineage
-                    try:
-                        from src.core.data.product_database import get_product_database
-                        product_db = get_product_database()
-                        strain_info = product_db.get_strain_info(product_strain)
-                        # DEBUG: Strain info: {strain_info}
-                        if strain_info and strain_info.get('canonical_lineage'):
-                            lineage_val = strain_info['canonical_lineage'].upper()
-                            # DEBUG: Using database lineage fallback: '{lineage_val}'
-                        else:
-                            # PRIORITY 3: Default fallback
-                            lineage_val = ""
-                            # DEBUG: No lineage found in Excel or database
-                    except Exception as e:
-                        # PRIORITY 3: Default fallback if database lookup fails
-                        lineage_val = ""
-                        # DEBUG: Using default fallback due to error: (error: {e})
-            elif is_edible:
-                lineage_val = product_brand.upper() if product_brand else lineage_text
+                try:
+                    from src.core.data.product_database import get_product_database
+                    product_db = get_product_database()
+                    strain_info = product_db.get_strain_info(product_strain)
+                    # DEBUG: Strain info: {strain_info}
+                    if strain_info and strain_info.get('canonical_lineage'):
+                        lineage_val = strain_info['canonical_lineage'].upper()
+                        # DEBUG: Using database lineage: '{lineage_val}'
+                    else:
+                        # Fallback to Excel lineage if no database lineage found
+                        lineage_val = lineage_text.upper() if lineage_text else ""
+                        # DEBUG: Using Excel lineage fallback: '{lineage_val}'
+                except Exception as e:
+                    # Fallback to Excel lineage if database lookup fails
+                    lineage_val = lineage_text.upper() if lineage_text else ""
+                    # DEBUG: Using Excel lineage due to error: '{lineage_val}' (error: {e})
             else:
-                lineage_val = lineage_text.upper() if lineage_text else ""
+                # CRITICAL FIX: For ALL non-classic types (edibles, tinctures, gummies, etc.), 
+                # use brand name for Lineage, not the raw Excel lineage value
+                # This prevents "CBD" from appearing in non-classic type labels
+                # If no brand is available, leave Lineage empty - DO NOT fall back to Excel lineage
+                lineage_val = product_brand.upper() if product_brand else ""
+                print(f"DEBUG NON-CLASSIC: product_type='{product_type}', product_brand='{product_brand}', lineage_val='{lineage_val}'")
                 
             # No extra space before Lineage in the output
             label_data["Lineage"] = lineage_val  # Don't wrap with markers for template rendering
@@ -516,7 +507,11 @@ def process_chunk(args):
                 desc = re.sub(r'[-\s]+$', '', desc)
             product_type = str(row.get("Product Type*", "")).strip().lower()
             
-            # Standard processing for all templates - no special cases
+            # For edibles in double template, use Product Brand instead of Description
+            edible_types = {"edible (solid)", "edible (liquid)", "high cbd edible liquid", "tincture", "topical", "capsule"}
+            if product_type in edible_types and orientation == "double":
+                # Use Product Brand instead of Description for edibles in double template
+                desc = product_brand if product_brand else desc
             
             # DescAndWeight should only contain the description text, not description + weight
             # This field is mapped to the DESC marker in templates
@@ -528,8 +523,7 @@ def process_chunk(args):
             if DEBUG_ENABLED:
                 logger.debug(f"Created label data for Label{i+1}")
         else:
-            # Create empty contexts for all templates consistently
-            # Empty label data for unused slots
+            # Empty label data for unused slots (consistent for all templates)
             context[f"Label{i+1}"] = {
                 "Description": "",
                 "WeightUnits": "",
@@ -540,9 +534,7 @@ def process_chunk(args):
                 "Ratio_or_THC_CBD": "",
                 # ProductStrain handled by template processor
                 "DescAndWeight": "",
-                "JointRatio": "",
-                "ProductStrain": "",
-                "QR": ""
+                "JointRatio": ""
             }
             if DEBUG_ENABLED:
                 logger.debug(f"Created empty label data for Label{i+1}")
@@ -825,7 +817,7 @@ def generate_multiple_label_tables(records, template_path):
         raise
 
 def set_table_borders(table):
-    """Apply consistent border formatting matching main application style."""
+    """Remove all table borders to eliminate white lines."""
     tblPr = table._element.find(qn('w:tblPr'))
     old = tblPr.find(qn('w:tblBorders'))
     if old is not None:
@@ -833,19 +825,10 @@ def set_table_borders(table):
         
     tblBorders = OxmlElement('w:tblBorders')
     
-    # Remove outer borders
-    for side in ("top", "left", "bottom", "right"):
+    # Remove ALL borders (outer and interior)
+    for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
         bd = OxmlElement(f"w:{side}")
         bd.set(qn('w:val'), "nil")
-        tblBorders.append(bd)
-        
-    # Add light gray interior lines
-    for side in ("insideH", "insideV"):
-        bd = OxmlElement(f"w:{side}")
-        bd.set(qn('w:val'), "single")
-        bd.set(qn('w:sz'), "4")
-        bd.set(qn('w:color'), "D3D3D3")
-        bd.set(qn('w:space'), "0")
         tblBorders.append(bd)
         
     tblPr.append(tblBorders)

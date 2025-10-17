@@ -873,7 +873,7 @@ const TagManager = {
             const sortedValues = Array.from(values).sort((a, b) => {
                 // Special handling for lineage to maintain logical order
                 if (filterType === 'lineage') {
-                    const lineageOrder = ['HYBRID/SATIVA', 'HYBRID/INDICA', 'SATIVA', 'INDICA', 'HYBRID', 'CBD', 'CBD_BLEND', 'MIXED', 'PARA'];
+                    const lineageOrder = ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA', 'CBD', 'CBD_BLEND', 'MIXED', 'PARA'];
                     const aIndex = lineageOrder.indexOf(a.toUpperCase());
                     const bIndex = lineageOrder.indexOf(b.toUpperCase());
                     if (aIndex !== -1 && bIndex !== -1) {
@@ -1121,7 +1121,7 @@ const TagManager = {
                 const sortedOptions = [...newOptions].sort((a, b) => {
                     // Special handling for lineage to maintain logical order
                     if (filterType === 'lineage') {
-                        const lineageOrder = ['HYBRID/SATIVA', 'HYBRID/INDICA', 'SATIVA', 'INDICA', 'HYBRID', 'CBD', 'CBD_BLEND', 'MIXED', 'PARA'];
+                        const lineageOrder = ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA', 'CBD', 'CBD_BLEND', 'MIXED', 'PARA'];
                         const aIndex = lineageOrder.indexOf(a.toUpperCase());
                         const bIndex = lineageOrder.indexOf(b.toUpperCase());
                         if (aIndex !== -1 && bIndex !== -1) {
@@ -2720,7 +2720,7 @@ const TagManager = {
         ];
         // Helper function to determine if a lineage should map to MIXED
         const shouldMapToMixed = (lineageValue) => {
-            const validLineages = ['HYBRID/SATIVA', 'HYBRID/INDICA', 'SATIVA', 'INDICA', 'HYBRID', 'CBD', 'CBD_BLEND', 'PARA', 'PARAPHERNALIA', 'MIXED'];
+            const validLineages = ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/INDICA', 'HYBRID/SATIVA', 'CBD', 'CBD_BLEND', 'PARA', 'PARAPHERNALIA', 'MIXED'];
             return !validLineages.includes((lineageValue || '').toUpperCase());
         };
         
@@ -3128,16 +3128,14 @@ const TagManager = {
             const originalTag = this.state.originalTags.find(t => t['Product Name*'] === tagName);
             if (originalTag) {
                 originalTag.lineage = newLineage;
-                originalTag.Lineage = newLineage;  // CRITICAL FIX: Update both lineage and Lineage properties
-                console.log(`📝 Updated tag in originalTags: ${tagName} -> ${newLineage}`);
+                console.log(`📝 Updated tag in originalTags`);
             }
 
             // Update the tag in current tags list
             const currentTag = this.state.tags.find(t => t['Product Name*'] === tagName);
             if (currentTag) {
                 currentTag.lineage = newLineage;
-                currentTag.Lineage = newLineage;  // CRITICAL FIX: Update both lineage and Lineage properties
-                console.log(`📝 Updated tag in current tags: ${tagName} -> ${newLineage}`);
+                console.log(`📝 Updated tag in current tags`);
             }
 
             // Optimized: Only update the specific tag elements instead of rebuilding everything
@@ -4365,8 +4363,8 @@ const TagManager = {
         // Update table header if TagsTable is available
         setTimeout(() => {
             // Also update table header if TagsTable is available
-            if (typeof window.TagsTable !== 'undefined' && window.TagsTable.updateTableHeader) {
-                window.TagsTable.updateTableHeader();
+            if (typeof TagsTable !== 'undefined' && TagsTable.updateTableHeader) {
+                TagsTable.updateTableHeader();
             }
         }, 100);
 
@@ -4766,23 +4764,6 @@ const TagManager = {
 
             console.log('Generation request - persistentSelectedTags:', checkedTags);
             console.log('Generation request - persistentSelectedTags count:', checkedTags.length);
-            
-            // CRITICAL FIX: Collect full tag data with updated lineage for generation
-            const selectedTagObjects = [];
-            for (const tagName of checkedTags) {
-                // Find the tag in the current state with updated lineage
-                const tagWithUpdatedLineage = this.state.tags.find(t => 
-                    (t['Product Name*'] === tagName) || (t.ProductName === tagName)
-                );
-                if (tagWithUpdatedLineage) {
-                    selectedTagObjects.push(tagWithUpdatedLineage);
-                    console.log(`📝 Using tag with updated lineage: ${tagName} -> ${tagWithUpdatedLineage.lineage || tagWithUpdatedLineage.Lineage}`);
-                } else {
-                    // Fallback: create a basic tag object with just the name
-                    selectedTagObjects.push({ 'Product Name*': tagName, ProductName: tagName });
-                    console.log(`⚠️ Tag not found in state, using fallback: ${tagName}`);
-                }
-            }
 
             if (checkedTags.length === 0) {
                 console.error('Please select at least one tag to generate');
@@ -4806,7 +4787,7 @@ const TagManager = {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    selected_tags: selectedTagObjects,  // CRITICAL FIX: Send full tag objects with updated lineage
+                    selected_tags: checkedTags,
                     template_type: templateType,
                     scale_factor: scaleFactor
                 })
@@ -5869,7 +5850,7 @@ const TagManager = {
             
             console.log('🚀 Sending lightning upload request...');
             
-            const uploadResponse = await fetch('/upload-ultra-reliable', {
+            const uploadResponse = await fetch('/upload-lightning', {
                 method: 'POST',
                 body: formData
             });
@@ -6005,26 +5986,13 @@ const TagManager = {
                         console.warn('Failed to clear cache:', cacheError);
                     }
                     
-                    // FIX: Force complete data refresh after upload
-                    console.log(`[UPLOAD DEBUG] Forcing complete data refresh...`);
+                    console.log(`[UPLOAD DEBUG] Loading available tags...`);
+                    const availableTagsLoaded = await this.fetchAndUpdateAvailableTags();
+                    console.log(`[UPLOAD DEBUG] Available tags loaded: ${availableTagsLoaded}`);
                     
-                    // Method 1: Use checkForExistingData for comprehensive refresh
-                    try {
-                        console.log(`[UPLOAD DEBUG] Calling checkForExistingData for complete refresh...`);
-                        await this.checkForExistingData();
-                        console.log(`[UPLOAD DEBUG] checkForExistingData completed successfully`);
-                    } catch (refreshError) {
-                        console.warn(`[UPLOAD DEBUG] checkForExistingData failed, trying individual refreshes:`, refreshError);
-                        
-                        // Fallback: Individual data refreshes
-                        console.log(`[UPLOAD DEBUG] Loading available tags...`);
-                        const availableTagsLoaded = await this.fetchAndUpdateAvailableTags();
-                        console.log(`[UPLOAD DEBUG] Available tags loaded: ${availableTagsLoaded}`);
-                        
-                        console.log(`[UPLOAD DEBUG] Loading selected tags...`);
-                        const selectedTagsLoaded = await this.fetchAndUpdateSelectedTags();
-                        console.log(`[UPLOAD DEBUG] Selected tags loaded: ${selectedTagsLoaded}`);
-                    }
+                    console.log(`[UPLOAD DEBUG] Loading selected tags...`);
+                    const selectedTagsLoaded = await this.fetchAndUpdateSelectedTags();
+                    console.log(`[UPLOAD DEBUG] Selected tags loaded: ${selectedTagsLoaded}`);
                     
                     console.log(`[UPLOAD DEBUG] Loading filter options...`);
                     await this.fetchAndPopulateFilters();
@@ -6152,9 +6120,7 @@ const TagManager = {
     },
 
     onTagsLoaded: function(tags) {
-        if (typeof window.TagsTable !== 'undefined' && window.TagsTable.updateTagsList) {
-            window.TagsTable.updateTagsList('availableTags', tags);
-        }
+        TagsTable.updateTagsList('availableTags', tags);
         // Auto check all available tags call removed
     },
 
@@ -6170,8 +6136,8 @@ const TagManager = {
             console.log('Filter changed:', filterType, value);
             
             // Update table header if TagsTable is available
-            if (filterType === 'productType' && typeof window.TagsTable !== 'undefined' && window.TagsTable.updateTableHeader) {
-                window.TagsTable.updateTableHeader();
+            if (filterType === 'productType' && typeof TagsTable !== 'undefined' && TagsTable.updateTableHeader) {
+                TagsTable.updateTableHeader();
             }
             
             // Update filter options for cascading behavior
@@ -6909,9 +6875,7 @@ if (addSelectedTagsBtn) {
 
 // Only update if filteredTags is defined
 if (typeof filteredTags !== 'undefined' && filteredTags) {
-    if (typeof window.TagsTable !== 'undefined' && window.TagsTable.updateTagsList) {
-        window.TagsTable.updateTagsList('availableTags', filteredTags);
-    }
+    TagsTable.updateTagsList('availableTags', filteredTags);
 }
 // Auto check all available tags call removed
 

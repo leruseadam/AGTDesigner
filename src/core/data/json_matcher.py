@@ -1690,9 +1690,6 @@ class JSONMatcher:
             processed_product_names = set()  # Track processed product names to prevent duplicates
             print(f"🔍 DEBUG: Starting to process {len(unique_items)} unique items from JSON")
             for i, item in enumerate(unique_items):
-                # Add unique identifier to each JSON item for deduplication tracking
-                item["Original JSON Item ID"] = f"json_item_{i}_{hash(str(item))}"
-                
                 # CRITICAL FIX: Don't skip items with missing product names - create fallback names
                 if not item.get("product_name"):
                     # Try to create a fallback product name from other available fields
@@ -1725,7 +1722,9 @@ class JSONMatcher:
                 
                 vendor = global_vendor if global_vendor else str(item.get("vendor", ""))
                 brand = str(item.get("brand", "")).strip()
-                product_type = str(item.get("inventory_type", "")).strip()
+                inventory_type = str(item.get("inventory_type", "")).strip()
+                inventory_category = str(item.get("inventory_category", "")).strip()
+                product_type = map_inventory_type_to_product_type(inventory_type, inventory_category, product_name)
                 weight = str(item.get("unit_weight", item.get("weight", ""))).strip()
                 strain = str(item.get("strain_name", item.get("strain", ""))).strip()
                 
@@ -2158,27 +2157,20 @@ class JSONMatcher:
                         return float(v)
                 return 0.0
 
-            # CRITICAL FIX: Don't deduplicate by product name - preserve all JSON items
-            # Each JSON item should generate its own label, even if they map to the same product name
-            # Only deduplicate true duplicates (same JSON item processed multiple times)
-            seen_json_items = set()
-            unique_matched_products = []
-            
+            # Group products by their final product name and keep only the best match
+            product_groups = {}
             for p in matched_products:
-                # Create a unique identifier for each JSON item based on original data
-                json_item_id = p.get('Original JSON Item ID', '')
-                if json_item_id and json_item_id in seen_json_items:
-                    # Skip true duplicates (same JSON item processed multiple times)
-                    logging.info(f"⚠️  Skipped duplicate JSON item: {json_item_id}")
-                    continue
-                
-                if json_item_id:
-                    seen_json_items.add(json_item_id)
-                
-                unique_matched_products.append(p)
+                product_name = str(p.get('Product Name*', '') or '').strip()
+                if product_name:
+                    if product_name not in product_groups or _score_of(p) > _score_of(product_groups[product_name]):
+                        product_groups[product_name] = p
+                        logging.info(f"✅ Kept best match for '{product_name}' (score: {_score_of(p):.1f})")
+                    else:
+                        existing_score = _score_of(product_groups[product_name])
+                        logging.info(f"⚠️  Skipped duplicate '{product_name}' (score: {_score_of(p):.1f} <= {existing_score:.1f})")
             
-            matched_products = unique_matched_products
-            logging.info(f"CRITICAL FIX: Preserved all unique JSON items: {len(matched_products)} products (no deduplication by product name)")
+            matched_products = list(product_groups.values())
+            logging.info(f"CRITICAL FIX: Deduplicated to {len(matched_products)} unique products from {len(matched_products) + sum(1 for _ in product_groups if len(product_groups) > 1)} total matches")
                 
             logging.info(f"CRITICAL FIX: After deduplication: {len(matched_products)} unique products")
             logging.info(f"CRITICAL FIX: Input items: {len(items)}, Processed items: {len(unique_items)}, Final products: {len(matched_products)}")
@@ -2325,8 +2317,7 @@ class JSONMatcher:
                 'Test result unit (% or mg)': safe_get_value(safe_row_get(excel_row, 'Test result unit (% or mg)', '')),
                 'THC test result': safe_get_value(safe_row_get(excel_row, 'THC test result', '')),
                 'CBD test result': safe_get_value(safe_row_get(excel_row, 'CBD test result', '')),
-                'Source': "JSON Match",  # Mark as JSON matched item
-                'Original JSON Item ID': json_item.get('Original JSON Item ID', '')  # Preserve unique identifier
+                'Source': "JSON Match"  # Mark as JSON matched item
             }
             
             # Add any additional fields from JSON that might be useful
@@ -2625,8 +2616,7 @@ class JSONMatcher:
                 'Medical Only (Yes/No)': 'No',
                 'DOH': 'YES',  # JSON matched products should show DOH compliance stamp
                 'DOH Compliant (Yes/No)': 'Yes',
-                'Source': 'JSON Match',  # Mark as JSON matched item
-                'Original JSON Item ID': json_item.get('Original JSON Item ID', '')  # Preserve unique identifier
+                'Source': 'JSON Match'  # Mark as JSON matched item
             }
             
             # Extract cannabinoid data from lab_result_data if available
@@ -3906,6 +3896,14 @@ class JSONMatcher:
                     # Use global vendor from document metadata (already set above)
                     vendor = global_vendor if global_vendor else str(item.get("vendor", "")).strip()
                     
+                    # Extract essential product information BEFORE matching
+                    brand = str(item.get("brand", "")).strip()
+                    inventory_type = str(item.get("inventory_type", "")).strip()
+                    inventory_category = str(item.get("inventory_category", "")).strip()
+                    product_type = map_inventory_type_to_product_type(inventory_type, inventory_category, product_name)
+                    weight = str(item.get("unit_weight", item.get("weight", ""))).strip()
+                    strain = str(item.get("strain_name", item.get("strain", ""))).strip()
+                    
                     # PRIORITY 1: Use comprehensive matching logic (same as Excel) with AI tools
                     try:
                         # Use the same comprehensive matching logic that was working in the debug output
@@ -4053,22 +4051,7 @@ class JSONMatcher:
                         except Exception as guess_error:
                             logging.warning(f"Educated guess error for '{product_name}': {guess_error}")
                     
-                    # PRIORITY 4: Try main matching logic (database + Excel) if no educated guess
-                    if not educated_guess:
-                        # Try the main matching logic that was working in the debug output
-                        try:
-                            # Call the main matching function that was working
-                            matched_products = self._process_item_with_main_matching(item, product_name, vendor, product_type, strain, global_vendor)
-                            if matched_products:
-                                for product in matched_products:
-                                    tag = self._create_tag_from_product(product, item, global_vendor)
-                                    all_tags.append(tag)
-                                    matched_count += 1
-                                continue  # Skip the JSON processing below
-                        except Exception as main_match_error:
-                            logging.warning(f"Error in main matching logic: {main_match_error}")
-                    
-                    # PRIORITY 5: If no match found, proceed with JSON processing
+                    # PRIORITY 4: If no match found, proceed with JSON processing
                     new_product_count += 1
                     logging.debug(f"Creating new product from JSON data: {product_name}")
                     
@@ -4183,12 +4166,8 @@ class JSONMatcher:
                     
                     logging.debug(f"Final brand for '{product_name}': {brand}")
                     
-                    # Extract product type with intelligent mapping from inventory_type
-                    inventory_type = str(item.get("inventory_type", "")).strip()
-                    inventory_category = str(item.get("inventory_category", "")).strip()
-                    
-                    # Use the mapping function to get proper product type
-                    product_type = map_inventory_type_to_product_type(inventory_type, inventory_category, product_name)
+                    # Product type and other variables were already extracted earlier at line 3897-3903
+                    # No need to re-extract them here
                     
                     if not product_type or product_type == "Unknown":
                         # Fallback to inference if mapping didn't work
@@ -4246,8 +4225,8 @@ class JSONMatcher:
                     logging.debug(f"Final product type for '{product_name}': {product_type} (mapped from inventory_type: {inventory_type})")
                     logging.debug(f"Product type for '{product_name}': '{product_type}'")
                     
-                    # Enhanced weight and quantity extraction
-                    weight = str(item.get("unit_weight", "")).strip()  # Fix: use unit_weight for Cultivera JSON
+                    # Weight was already extracted earlier at line 3902 with fallback logic
+                    # Just extract quantity and units here
                     quantity = str(item.get("qty", "1")).strip()  # Fix: use qty for Cultivera JSON
                     units = str(item.get("unit_weight_uom", "g")).strip()  # Fix: use unit_weight_uom for Cultivera JSON
                     
@@ -4333,7 +4312,7 @@ class JSONMatcher:
                             price = ""  # No default price
                     
                     # Enhanced strain information extraction
-                    strain = str(item.get("strain_name", "")).strip()
+                    # Strain was already extracted earlier at line 3903, but if it's empty we can try to infer it
                     if not strain:
                         # First try to extract strain from product name
                         extracted_strain = self._extract_strain_from_product_name(product_name)
@@ -6880,16 +6859,13 @@ class JSONMatcher:
                     if match_source == 'Product Database Match':
                         product = best_match.copy()
                         product['Original JSON Product Name'] = str(item.get("product_name", ""))
-                        product['Original JSON Item ID'] = str(item.get("Original JSON Item ID", ""))
                     elif match_source == 'Advanced Match':
                         # Convert advanced match to product format
                         product = self._create_product_from_advanced_match(best_match, item, global_vendor)
                         product['Original JSON Product Name'] = str(item.get("product_name", ""))
-                        product['Original JSON Item ID'] = str(item.get("Original JSON Item ID", ""))
                     else:  # Excel Match
                         product = self._create_product_from_excel_match(best_match, item, global_vendor)
                         product['Original JSON Product Name'] = str(item.get("product_name", ""))
-                        product['Original JSON Item ID'] = str(item.get("Original JSON Item ID", ""))
                     
                     return [product]
                     
@@ -6934,9 +6910,7 @@ class JSONMatcher:
                 'CBD test result': cbd,
                 'Product Strain': strain,
                 'Lineage': lineage,
-                'Quantity*': '1',
-                'Source': 'JSON Match',
-                'Original JSON Item ID': item.get('Original JSON Item ID', '')  # Preserve unique identifier
+                'Quantity*': '1'
             }
             
             return product

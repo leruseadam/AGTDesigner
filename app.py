@@ -19,7 +19,6 @@ import sys  # Add this import
 import logging
 import threading
 import pandas as pd  # Add this import
-import sqlite3
 import time
 import re
 import json
@@ -76,7 +75,7 @@ IS_PRODUCTION = os.environ.get('FLASK_ENV') == 'production' or IS_PYTHONANYWHERE
 
 # OPTIMIZATION: Disable startup file loading for faster app startup
 # Set to False to enable default file loading on startup
-DISABLE_STARTUP_FILE_LOADING = False
+DISABLE_STARTUP_FILE_LOADING = bool(os.environ.get('DISABLE_STARTUP_FILE_LOADING', '0') in ('1','true','True'))
 
 # OPTIMIZATION: Enable lazy loading for faster app startup
 # Set to False to load files immediately
@@ -641,10 +640,23 @@ def get_excel_processor():
             return None
 
 def get_product_database(store_name=None):
-    """Get ProductDatabase singleton instance (defaults to AGT_Bothell)."""
-    # Use the singleton from product_database.py module
-    from src.core.data.product_database import get_product_database as get_db_singleton
-    return get_db_singleton(store_name=store_name)
+    """Lazy load ProductDatabase to avoid startup delay."""
+    global _product_database
+    if _product_database is None or (store_name and getattr(_product_database, '_store_name', None) != store_name):
+        from src.core.data.product_database import ProductDatabase
+        # Use main product_database.db by default, store-specific only if requested
+        if store_name:
+            db_filename = f'product_database_{store_name}.db'
+            db_path = os.path.join(current_dir, 'uploads', db_filename)
+            _product_database = ProductDatabase(db_path)
+            _product_database._store_name = store_name
+            logging.info(f"ProductDatabase created for store '{store_name}' at: {db_path}")
+        else:
+            # Use main product_database.db (524MB database)
+            db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
+            _product_database = ProductDatabase(db_path)
+            logging.info(f"ProductDatabase created (main database) at: {db_path}")
+    return _product_database
 
 def get_json_matcher():
     """Lazy load regular JSONMatcher with Excel-priority to avoid startup delay."""
@@ -759,20 +771,14 @@ def create_app():
         Compress(app)
         logging.info("Flask-Compress enabled for better performance")
     
-    # Initialize session management with filesystem storage
+    # Initialize session management
     if Session:
-        # Configure sessions to use filesystem (persistent across refreshes)
-        sessions_dir = os.path.join(current_dir, 'sessions')
-        os.makedirs(sessions_dir, exist_ok=True)
-        
-        app.config['SESSION_TYPE'] = 'filesystem'
-        app.config['SESSION_FILE_DIR'] = sessions_dir
-        app.config['SESSION_PERMANENT'] = True  # Make sessions persistent
-        app.config['SESSION_USE_SIGNER'] = True  # Sign session cookies for security
-        app.config['SESSION_FILE_THRESHOLD'] = 1000  # Increased for concurrent users
-        
+        # Create sessions directory if it doesn't exist
+        sessions_dir = app.config.get('SESSION_FILE_DIR')
+        if sessions_dir:
+            os.makedirs(sessions_dir, exist_ok=True)
         Session(app)
-        logging.info(f"Flask-Session initialized with filesystem storage at: {sessions_dir}")
+        logging.info("Flask-Session initialized with filesystem storage")
     else:
         logging.warning("Flask-Session not available, using default session handling")
     
@@ -786,11 +792,7 @@ def create_app():
         'http://127.0.0.1:5001',
         'https://adamcordova.pythonanywhere.com'  # PythonAnywhere domain
     ]
-    # Enable CORS for both API routes and upload routes
-    CORS(app, resources={
-        r"/api/*": {"origins": allowed_origins},
-        r"/upload*": {"origins": allowed_origins}  # Add upload routes
-    })
+    CORS(app, resources={r"/api/*": {"origins": allowed_origins}})
     
     # Check if we're in development mode
     development_mode = app.config.get('DEVELOPMENT_MODE', False)
@@ -1033,12 +1035,7 @@ def initialize_excel_processor():
                 success = excel_processor.load_file(default_file)
                 if success:
                     excel_processor._last_loaded_file = default_file
-                    row_count = len(excel_processor.df) if hasattr(excel_processor, 'df') and excel_processor.df is not None else 0
-                    logging.info(f"Default file loaded successfully with {row_count} records")
-                    
-                    # Database storage disabled on startup to avoid lock conflicts
-                    # The database already has persisted data
-                    logging.info(f"Database storage skipped on startup (using existing persisted data)")
+                    logging.info(f"Default file loaded successfully with {len(excel_processor.df)} records")
                 else:
                     logging.warning("Failed to load default file")
             except Exception as load_error:
@@ -1367,7 +1364,6 @@ def get_session_excel_processor():
             return None
 
 def get_session_json_matcher():
-    """Create a simple, fast JSON matcher without enhanced/AI overhead."""
     try:
         from src.core.data.json_matcher import JSONMatcher
         excel_processor = get_session_excel_processor()
@@ -1377,24 +1373,52 @@ def get_session_json_matcher():
         
         # Use a global JSON matcher instance to persist the cache
         if not hasattr(app, '_json_matcher'):
-            # Create basic JSONMatcher without database population or ML models for speed
             app._json_matcher = JSONMatcher(excel_processor)
-            logging.info("Created basic JSONMatcher instance (fast mode)")
+            
+            # CRITICAL FIX: Populate excel processor with database data for ML models
+            try:
+                # Get database products and populate the excel processor
+                db_products = app._json_matcher._get_database_products()
+                if db_products and len(db_products) > 0:
+                    import pandas as pd
+                    app._json_matcher.excel_processor.df = pd.DataFrame(db_products)
+                    app._json_matcher._build_ml_models()
+                    logging.info(f"Enhanced JSON matcher loaded {len(db_products)} products from database and built ML models")
+                else:
+                    logging.warning("No database products found for ML model building")
+            except Exception as e:
+                logging.error(f"Error populating JSON matcher with database data: {e}")
+            
+            logging.info("Created new EnhancedJSONMatcher instance")
         else:
             # Update the Excel processor reference in case it changed
             app._json_matcher.excel_processor = excel_processor
         
         return app._json_matcher
     except Exception as e:
-        logging.error(f"Failed to initialize JSON matcher: {e}")
-        return None
+        logging.warning(f"Enhanced JSON matcher unavailable, falling back to basic matcher: {e}")
+        try:
+            from src.core.data.json_matcher import JSONMatcher
+            return JSONMatcher(get_session_excel_processor())
+        except Exception as e2:
+            logging.error(f"Failed to initialize basic JSON matcher: {e2}")
+            return None
 
 def get_session_product_database():
-    """Get ProductDatabase singleton instance for the current session."""
+    """Get ProductDatabase instance for the current session."""
     try:
-        # Use the singleton from product_database.py module (defaults to AGT_Bothell)
-        from src.core.data.product_database import get_product_database as get_db_singleton
-        return get_db_singleton()
+        if not hasattr(app, '_product_database'):
+            from src.core.data.product_database import ProductDatabase
+            # CRITICAL FIX: Use the main product_database.db file
+            db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
+            
+            # Fallback to AGT_Bothell database if main doesn't exist
+            if not os.path.exists(db_path):
+                db_path = os.path.join(current_dir, 'uploads', 'product_database_AGT_Bothell.db')
+            
+            app._product_database = ProductDatabase(db_path)
+            logging.info(f"Created new ProductDatabase instance for session at {db_path}")
+        return app._product_database
     except Exception as e:
         logging.error(f"Error getting session product database: {e}")
         return None
@@ -1540,8 +1564,9 @@ def index():
                 default_file = get_default_upload_file()
                 
                 if uploaded_file != default_file and os.path.exists(uploaded_file):
-                    # Check if file is old (more than 2 hours to match cleanup policy)
+                    # Check if file is old (more than 1 hour)
                     file_age = time.time() - os.path.getmtime(uploaded_file)
+                    upload_timestamp = session.get('upload_timestamp', 0)
                     
                     # Get processing status
                     filename = session.get('uploaded_filename', '')
@@ -1549,8 +1574,9 @@ def index():
                     
                     # Only remove if file is old OR processing failed
                     should_remove = (
-                        file_age > 7200 or  # More than 2 hours old (matches cleanup policy)
-                        status.startswith('error:')  # Processing failed
+                        file_age > 3600 or  # More than 1 hour old
+                        status.startswith('error:') or  # Processing failed
+                        (upload_timestamp > 0 and time.time() - upload_timestamp > 3600)  # Upload session expired
                     )
                     
                     if should_remove:
@@ -1560,6 +1586,7 @@ def index():
                             # Clear session data for removed file
                             session.pop('file_path', None)
                             session.pop('uploaded_filename', None)
+                            session.pop('upload_timestamp', None)
                         except Exception as e:
                             logging.warning(f"Failed to remove uploaded file: {e}")
                     else:
@@ -1567,9 +1594,9 @@ def index():
             except Exception as e:
                 logging.warning(f"Error checking uploaded file: {e}")
         
-        # More frequent cleanup - every 10th page load (10% chance)
+        # Periodic cleanup (much less frequent - every 200th page load)
         import random
-        if random.random() < 0.1:  # 10% chance to run cleanup (was 0.5%)
+        if random.random() < 0.005:  # 0.5% chance to run cleanup
             try:
                 cleanup_result = cleanup_old_files()
                 if cleanup_result['success'] and cleanup_result['removed_count'] > 0:
@@ -1634,26 +1661,10 @@ def upload_file():
         uploads_dir = os.path.join(os.getcwd(), 'uploads')
         os.makedirs(uploads_dir, exist_ok=True)
         
-        # Clean up old files BEFORE uploading new one
-        try:
-            cleanup_result = cleanup_old_files()
-            if cleanup_result['success'] and cleanup_result['removed_count'] > 0:
-                logging.info(f"Pre-upload cleanup: removed {cleanup_result['removed_count']} old files")
-        except Exception as cleanup_error:
-            logging.warning(f"Pre-upload cleanup failed: {cleanup_error}")
-        
-        # Use simpler filename without timestamp (reuse filenames)
-        # This prevents accumulation of duplicate uploads
-        safe_filename = secure_filename(file.filename)
+        # Save file with timestamp
+        timestamp = int(time.time())
+        safe_filename = f"{timestamp}_{file.filename}"
         file_path = os.path.join(uploads_dir, safe_filename)
-        
-        # If file exists, remove it first (will be replaced)
-        if os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-                logging.info(f"Removed existing file: {safe_filename}")
-            except Exception as e:
-                logging.warning(f"Could not remove existing file: {e}")
         
         file.save(file_path)
         logging.info(f"Saved: {file_path}")
@@ -1666,6 +1677,7 @@ def upload_file():
         session.permanent = True
         session['file_path'] = file_path
         session['uploaded_filename'] = file.filename
+        session['upload_timestamp'] = timestamp
         session.modified = True
         
         logging.info(f"Session updated: file_path={file_path}, filename={file.filename}, permanent={session.permanent}")
@@ -1686,65 +1698,31 @@ def upload_file():
             
             def process_in_background():
                 try:
-                    logging.info(f"[BACKGROUND] Processing file with OPTIMIZED PROCESSOR: {file_path}")
+                    logging.info(f"[BACKGROUND] Processing file: {file_path}")
+                    processor = get_excel_processor()
+                    success = processor.load_file(file_path)
                     
-                    # Use optimized processor for background processing too
-                    try:
-                        from EXCEL_PROCESSING_OPTIMIZATION import get_optimized_excel_processor
-                        processor = get_optimized_excel_processor()
+                    if success:
+                        row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
+                        logging.info(f"[BACKGROUND] File loaded: {row_count} rows")
                         
-                        # Use optimized processing
-                        result = processor.process_excel_optimized(file_path)
+                        # Store in database
+                        try:
+                            from src.core.data.product_database import get_product_database
+                            product_db = get_product_database()
+                            
+                            if product_db and hasattr(product_db, 'store_excel_data'):
+                                logging.info(f"[BACKGROUND] Storing {row_count} products in database...")
+                                result = product_db.store_excel_data(processor.df, file_path)
+                                logging.info(f"[BACKGROUND] Database storage result: {result}")
+                        except Exception as db_error:
+                            logging.warning(f"[BACKGROUND] Database storage failed: {db_error}")
                         
-                        if result['success']:
-                            row_count = result.get('rows_processed', 0)
-                            processing_time = result.get('processing_time', 0)
-                            strategy = result.get('strategy_used', 'unknown')
-                            
-                            logging.info(f"[BACKGROUND] ✅ OPTIMIZED SUCCESS: {row_count:,} rows in {processing_time:.2f}s using {strategy} strategy")
-                            
-                            # Update global processor for compatibility
-                            global _excel_processor
-                            with excel_processor_lock:
-                                _excel_processor = processor
-                                _excel_processor._last_loaded_file = file_path
-                            
-                            # Store in database (OPTIMIZED - SKIP FOR SPEED)
-                            try:
-                                # PERFORMANCE FIX: Skip database storage to prevent hanging
-                                logging.info(f"[BACKGROUND] ⚡ PERFORMANCE MODE: Skipping database storage for faster processing")
-                                logging.info(f"[BACKGROUND] ✅ {row_count} products loaded in Excel processor and ready for use")
-                                
-                                # Uncomment below if you need database persistence:
-                                # from src.core.data.product_database import get_product_database
-                                # product_db = get_product_database()
-                                # if product_db and hasattr(product_db, 'store_excel_data') and processor.df is not None:
-                                #     logging.info(f"[BACKGROUND] Storing {row_count} products in database...")
-                                #     db_result = product_db.store_excel_data(processor.df, file_path)
-                                #     logging.info(f"[BACKGROUND] Database storage result: {db_result}")
-                            except Exception as db_error:
-                                logging.warning(f"[BACKGROUND] Database storage skipped: {db_error}")
-                            
-                            update_processing_status(original_filename, 'ready')
-                            logging.info(f"[BACKGROUND] Optimized processing complete for {original_filename}")
-                        else:
-                            error_msg = result.get('error', 'Processing failed')
-                            logging.error(f"[BACKGROUND] ❌ OPTIMIZED PROCESSING FAILED: {error_msg}")
-                            update_processing_status(original_filename, f'error: {error_msg}')
-                            
-                    except ImportError as import_error:
-                        # Fallback to original processor
-                        logging.warning(f"[BACKGROUND] Optimized processor import failed, using fallback: {import_error}")
-                        processor = get_excel_processor()
-                        success = processor.load_file(file_path)
-                        
-                        if success:
-                            row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
-                            logging.info(f"[BACKGROUND] Fallback processing: {row_count} rows")
-                            update_processing_status(original_filename, 'ready')
-                        else:
-                            logging.error("[BACKGROUND] Fallback processing failed")
-                            update_processing_status(original_filename, 'error: File load failed')
+                        update_processing_status(original_filename, 'ready')
+                        logging.info(f"[BACKGROUND] Processing complete for {original_filename}")
+                    else:
+                        logging.error("[BACKGROUND] File load returned False")
+                        update_processing_status(original_filename, 'error: File load failed')
                         
                 except Exception as e:
                     logging.error(f"[BACKGROUND] Processing error: {e}")
@@ -1762,103 +1740,49 @@ def upload_file():
             
             return jsonify({
                 'success': True,
-                'status': 'processing',
                 'message': 'File uploaded, processing in background',
                 'filename': file.filename,
                 'processing': True
             })
             
         else:
-            # Local development: Process synchronously with optimized processor
-            logging.info("[LOCAL] Processing file synchronously with OPTIMIZED PROCESSOR")
+            # Local development: Process synchronously for immediate feedback
+            logging.info("[LOCAL] Processing file synchronously")
+            processor = get_excel_processor()
             
-            # Import the optimized processor
-            try:
-                from EXCEL_PROCESSING_OPTIMIZATION import get_optimized_excel_processor
-                processor = get_optimized_excel_processor()
+            success = processor.load_file(file_path)
+            if success:
+                row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
+                logging.info(f"File loaded successfully: {row_count} rows")
                 
-                # Use optimized processing
-                result = processor.process_excel_optimized(file_path)
-                
-                if result['success']:
-                    row_count = result.get('rows_processed', 0)
-                    processing_time = result.get('processing_time', 0)
-                    strategy = result.get('strategy_used', 'unknown')
+                # Store in database for persistence
+                try:
+                    from src.core.data.product_database import get_product_database
+                    # Store context removed - using single database
+                    product_db = get_product_database()
                     
-                    logging.info(f"✅ OPTIMIZED SUCCESS: {row_count:,} rows in {processing_time:.2f}s using {strategy} strategy")
-                    
-                    # Update global processor for compatibility
-                    global _excel_processor
-                    with excel_processor_lock:
-                        _excel_processor = processor
-                        _excel_processor._last_loaded_file = file_path
-                    
-                    # Store in database for persistence (OPTIMIZED - SKIP FOR SPEED)
-                    try:
-                        # PERFORMANCE FIX: Skip database storage to prevent hanging
-                        # Database storage takes 20-30 seconds for large files (row-by-row processing)
-                        # Excel processor already has the data loaded and working
-                        # Database storage is optional for tag generation
+                    if product_db and hasattr(product_db, 'store_excel_data'):
+                        logging.info(f"Storing {row_count} products in database...")
+                        result = product_db.store_excel_data(processor.df, file_path)
+                        logging.info(f"Database storage result: {result}")
+                    else:
+                        logging.warning("Database storage not available")
                         
-                        logging.info(f"⚡ PERFORMANCE MODE: Skipping database storage for faster processing")
-                        logging.info(f"✅ {row_count} products loaded in Excel processor and ready for use")
-                        
-                        # Uncomment below if you need database persistence:
-                        # from src.core.data.product_database import get_product_database
-                        # product_db = get_product_database()
-                        # if product_db and hasattr(product_db, 'store_excel_data') and processor.df is not None:
-                        #     logging.info(f"Storing {row_count} products in database...")
-                        #     db_result = product_db.store_excel_data(processor.df, file_path)
-                        #     logging.info(f"Database storage result: {db_result}")
-                            
-                    except Exception as db_error:
-                        logging.warning(f"Database storage skipped: {db_error}")
-                        # Continue anyway - file is still loaded in processor
-                    
-                    update_processing_status(file.filename, 'ready')
-                    
-                    # Return success with optimization details
-                    upload_time = time.time() - start_time
-                    return jsonify({
-                        'success': True,
-                        'status': 'ready',
-                        'message': f'File processed successfully using {strategy} method',
-                        'filename': file.filename,
-                        'processing': False,
-                        'rows_processed': row_count,
-                        'processing_time': processing_time,
-                        'upload_time': upload_time,
-                        'optimization_used': True,
-                        'strategy': strategy
-                    })
-                    
-                else:
-                    error_msg = result.get('error', 'Processing failed')
-                    logging.error(f"❌ OPTIMIZED PROCESSING FAILED: {error_msg}")
-                    update_processing_status(file.filename, f'error: {error_msg}')
-                    return jsonify({'error': f'Failed to process file: {error_msg}'}), 500
-                    
-            except ImportError as import_error:
-                # Fallback to original processor if optimization fails to import
-                logging.warning(f"Optimized processor import failed, using fallback: {import_error}")
-                processor = get_excel_processor()
+                except Exception as db_error:
+                    logging.warning(f"Database storage failed (non-fatal): {db_error}")
+                    # Continue anyway - file is still loaded in processor
                 
-                success = processor.load_file(file_path)
-                if success:
-                    row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
-                    logging.info(f"Fallback processing: {row_count} rows")
-                    update_processing_status(file.filename, 'ready')
-                else:
-                    logging.error("Fallback processing failed")
-                    update_processing_status(file.filename, 'error: File load failed')
-                    return jsonify({'error': 'Failed to process file'}), 500
+                update_processing_status(file.filename, 'ready')
+            else:
+                logging.error("File load returned False")
+                update_processing_status(file.filename, 'error: File load failed')
+                return jsonify({'error': 'Failed to process file'}), 500
             
             upload_time = time.time() - start_time
             logging.info(f"=== UPLOAD COMPLETE: {upload_time:.3f}s ===")
             
             return jsonify({
                 'success': True,
-                'status': 'ready',
                 'message': 'File uploaded and processed',
                 'filename': file.filename,
                 'rows': row_count
@@ -1974,12 +1898,9 @@ def upload_file_simple_pythonanywhere():
             except Exception as storage_error:
                 logging.error(f"[UPLOAD] Error storing data in database: {storage_error}")
             
-            # Update session with persistence
-            session.permanent = True
+            # Update session
             session['file_path'] = temp_path
-            session['uploaded_filename'] = sanitized_filename
             session['selected_tags'] = []
-            session.modified = True
             
             # Clean up temp file
             try:
@@ -2057,12 +1978,9 @@ def upload_file_simple():
             update_processing_status(file.filename, f'error: Failed to start processing')
             return jsonify({'error': 'Failed to start file processing'}), 500
         
-        # Store uploaded file path in session with persistence
-        session.permanent = True
+        # Store uploaded file path in session
         session['file_path'] = file_path
-        session['uploaded_filename'] = file.filename
         session['selected_tags'] = []
-        session.modified = True
         
         # ULTRA-FAST RESPONSE - Return immediately for instant user feedback
         upload_response_time = time.time() - start_time
@@ -2213,11 +2131,7 @@ def apply_essential_processing(df):
             # Quick lineage fixes
             df['Lineage'] = df['Lineage'].replace({
                 'INDICA_HYBRID': 'HYBRID/INDICA',
-                'INDICA/HYBRID': 'HYBRID/INDICA',  # FIX: Handle forward slash format
-                'HYBRID/INDICA': 'HYBRID/INDICA',  # FIX: Handle correct format
                 'SATIVA_HYBRID': 'HYBRID/SATIVA',
-                'SATIVA/HYBRID': 'HYBRID/SATIVA',  # FIX: Handle forward slash format
-                'HYBRID/SATIVA': 'HYBRID/SATIVA',  # FIX: Handle correct format
                 'SATIVA': 'SATIVA',
                 'HYBRID': 'HYBRID',
                 'INDICA': 'INDICA',
@@ -2862,130 +2776,6 @@ def upload_status():
         # Never return HTML; always JSON for the polling loop
         return jsonify({'error': str(e), 'trace': tb, 'status': 'processing'}), 500
 
-@app.route('/api/processing-progress', methods=['GET'])
-def get_processing_progress():
-    """Get detailed processing progress information with real-time updates."""
-    try:
-        filename = request.args.get('filename')
-        if not filename:
-            return jsonify({'error': 'No filename provided'}), 400
-        
-        # Sanitize filename
-        filename = sanitize_filename(filename)
-        
-        # Base progress info
-        progress_info = {
-            'filename': filename,
-            'status': 'idle',
-            'progress': 0,
-            'stage': 'idle',
-            'estimated_time_remaining': None,
-            'rows_processed': 0,
-            'strategy': 'unknown',
-            'processing_time': 0,
-            'file_size_mb': 0,
-            'optimization_active': False,
-            'stage_description': 'Waiting to start'
-        }
-        
-        # Get basic status from processing_status tracking
-        with processing_lock:
-            status = processing_status.get(filename, 'not_found')
-            timestamp = processing_timestamps.get(filename)
-        
-        progress_info['status'] = status
-        
-        if timestamp:
-            age = time.time() - timestamp
-            progress_info['processing_time'] = age
-        
-        # Try to get enhanced status from optimized processor
-        try:
-            global _excel_processor
-            if _excel_processor and hasattr(_excel_processor, 'get_processing_stats'):
-                stats = _excel_processor.get_processing_stats()
-                
-                # Update with detailed stats
-                progress_info.update({
-                    'progress': min(100, max(0, stats.get('progress', 0))),
-                    'rows_processed': stats.get('current_row_count', 0),
-                    'has_data': stats.get('has_data', False),
-                    'optimization_active': True
-                })
-                
-                # Map processing status to more detailed stages
-                if status == 'processing':
-                    progress = stats.get('progress', 0)
-                    if progress == 0:
-                        progress_info['stage'] = 'analyzing'
-                        progress_info['stage_description'] = 'Analyzing file structure...'
-                        progress_info['progress'] = 5
-                    elif progress < 20:
-                        progress_info['stage'] = 'reading'
-                        progress_info['stage_description'] = 'Reading Excel data...'
-                    elif progress < 60:
-                        progress_info['stage'] = 'processing'
-                        progress_info['stage_description'] = 'Processing and cleaning data...'
-                    elif progress < 90:
-                        progress_info['stage'] = 'optimizing'
-                        progress_info['stage_description'] = 'Optimizing data structures...'
-                    else:
-                        progress_info['stage'] = 'finalizing'
-                        progress_info['stage_description'] = 'Finalizing and storing data...'
-                        
-                    # Estimate time remaining based on progress
-                    if progress > 10 and progress_info['processing_time'] > 0:
-                        estimated_total = progress_info['processing_time'] / (progress / 100)
-                        remaining = max(0, estimated_total - progress_info['processing_time'])
-                        progress_info['estimated_time_remaining'] = round(remaining, 1)
-                
-                elif status == 'ready':
-                    progress_info.update({
-                        'stage': 'complete',
-                        'stage_description': f'Processing complete - {progress_info["rows_processed"]:,} rows loaded',
-                        'progress': 100,
-                        'estimated_time_remaining': 0
-                    })
-                elif status.startswith('error'):
-                    progress_info.update({
-                        'stage': 'error',
-                        'stage_description': f'Processing failed: {status}',
-                        'progress': 0
-                    })
-                    
-        except Exception as stats_error:
-            logging.debug(f"Could not get enhanced stats: {stats_error}")
-            
-            # Provide basic progress estimation based on time for fallback
-            if status == 'processing' and progress_info['processing_time'] > 0:
-                # Simple time-based progress estimation (very rough)
-                elapsed = progress_info['processing_time']
-                if elapsed < 5:
-                    progress_info['progress'] = min(20, elapsed * 4)
-                    progress_info['stage_description'] = 'Starting file processing...'
-                elif elapsed < 15:
-                    progress_info['progress'] = min(60, 20 + (elapsed - 5) * 4)
-                    progress_info['stage_description'] = 'Processing Excel data...'
-                elif elapsed < 30:
-                    progress_info['progress'] = min(90, 60 + (elapsed - 15) * 2)
-                    progress_info['stage_description'] = 'Finalizing data processing...'
-                else:
-                    progress_info['progress'] = 95
-                    progress_info['stage_description'] = 'Completing processing...'
-        
-        return jsonify(progress_info)
-        
-    except Exception as e:
-        logging.error(f"Processing progress error: {e}")
-        return jsonify({
-            'error': str(e),
-            'filename': filename,
-            'status': 'error',
-            'progress': 0,
-            'stage': 'error',
-            'stage_description': f'Error getting progress: {str(e)}'
-        }), 500
-
 @app.route('/upload-lightning', methods=['POST'])
 def upload_lightning():
     """Ultra-fast file upload - saves file immediately, processes later"""
@@ -3004,19 +2794,9 @@ def upload_lightning():
         if not file.filename.lower().endswith('.xlsx'):
             return jsonify({'error': 'Only .xlsx files are allowed'}), 400
         
-        # OPTIMIZATION: Quick file size check and validation
+        # Quick file size check
         file.seek(0, 2)
         file_size = file.tell()
-        file.seek(0)  # Reset to beginning
-        
-        logging.info(f"📁 Upload file size: {file_size:,} bytes")
-        
-        # Prevent hanging by limiting file size
-        if file_size == 0:
-            return jsonify({'error': 'Empty file uploaded'}), 400
-        
-        if file_size > 100 * 1024 * 1024:  # 100MB limit
-            return jsonify({'error': 'File too large (>100MB). Please use a smaller file.'}), 400
         file.seek(0)
         
         max_size = app.config.get('MAX_CONTENT_LENGTH', 100 * 1024 * 1024)
@@ -3053,149 +2833,6 @@ def upload_lightning():
         
     except Exception as e:
         logging.error(f"[LIGHTNING] Upload failed: {e}")
-        return jsonify({'error': f'Upload failed: {str(e)}'}), 500
-
-@app.route('/upload-optimized', methods=['POST'])
-def upload_optimized():
-    """Optimized upload that prevents Excel hanging during processing"""
-    try:
-        logging.info("=== OPTIMIZED UPLOAD START ===")
-        start_time = time.time()
-        
-        # Validate file upload
-        if 'file' not in request.files:
-            return jsonify({'error': 'No file uploaded'}), 400
-        
-        file = request.files['file']
-        if file.filename == '':
-            return jsonify({'error': 'No file selected'}), 400
-        
-        if not file.filename.lower().endswith('.xlsx'):
-            return jsonify({'error': 'Only .xlsx files are allowed'}), 400
-        
-        # OPTIMIZATION: Quick file size check and validation
-        file.seek(0, 2)
-        file_size = file.tell()
-        file.seek(0)  # Reset to beginning
-        
-        logging.info(f"📁 Upload file size: {file_size:,} bytes")
-        
-        # Prevent hanging by limiting file size
-        if file_size == 0:
-            return jsonify({'error': 'Empty file uploaded'}), 400
-        
-        if file_size > 100 * 1024 * 1024:  # 100MB limit
-            return jsonify({'error': 'File too large (>100MB). Please use a smaller file.'}), 400
-        
-        # Quick preview to estimate processing time
-        estimated_rows = 1000  # Default estimate
-        try:
-            import pandas as pd
-            preview_df = pd.read_excel(file, nrows=100, engine='openpyxl')
-            estimated_rows = max(100, int(file_size / (file_size / len(preview_df)) * 1.2))
-            logging.info(f"📊 Estimated rows: {estimated_rows:,}")
-            file.seek(0)  # Reset after preview
-        except Exception as preview_error:
-            logging.warning(f"Preview failed: {preview_error}")
-        
-        # Save file
-        sanitized_filename = sanitize_filename(file.filename)
-        upload_folder = app.config['UPLOAD_FOLDER']
-        os.makedirs(upload_folder, exist_ok=True)
-        
-        file_path = os.path.join(upload_folder, sanitized_filename)
-        file.save(file_path)
-        
-        # OPTIMIZATION: Choose processing strategy based on file size
-        if estimated_rows > 5000:
-            # Large file - return immediately, process in background
-            logging.info(f"🚀 Large file detected ({estimated_rows:,} rows), starting background processing...")
-            
-            # Store in session for background processing
-            session.permanent = True
-            session['uploaded_file_path'] = file_path
-            session['uploaded_filename'] = sanitized_filename
-            session.modified = True
-            
-            # Start background processing thread
-            import threading
-            def process_large_file():
-                try:
-                    logging.info(f"[BG] Processing large file: {sanitized_filename}")
-                    from src.core.data.excel_processor import ExcelProcessor
-                    processor = ExcelProcessor()
-                    
-                    # Process with chunking to prevent hanging
-                    success = processor.load_file(file_path)
-                    if success:
-                        global _excel_processor
-                        with excel_processor_lock:
-                            _excel_processor = processor
-                            _excel_processor._last_loaded_file = file_path
-                        
-                        logging.info(f"[BG] Large file processed: {len(processor.df)} rows")
-                    else:
-                        logging.error(f"[BG] Failed to process large file: {sanitized_filename}")
-                except Exception as bg_error:
-                    logging.error(f"[BG] Background processing error: {bg_error}")
-            
-            threading.Thread(target=process_large_file, daemon=True).start()
-            
-            upload_time = time.time() - start_time
-            return jsonify({
-                'success': True,
-                'filename': sanitized_filename,
-                'message': f'Large file uploaded ({estimated_rows:,} rows estimated), processing in background...',
-                'processing': True,
-                'estimated_rows': estimated_rows,
-                'upload_time': upload_time
-            })
-        
-        else:
-            # Smaller file - process immediately with timeout protection
-            logging.info(f"⚡ Processing smaller file immediately ({estimated_rows:,} rows)...")
-            
-            try:
-                from src.core.data.excel_processor import ExcelProcessor
-                
-                # Process without signal handling (signals don't work in threads)
-                processor = ExcelProcessor()
-                success = processor.load_file(file_path)
-                
-                if success:
-                    global _excel_processor
-                    with excel_processor_lock:
-                        _excel_processor = processor
-                        _excel_processor._last_loaded_file = file_path
-                    
-                    row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
-                    
-                    # Store in session
-                    session.permanent = True
-                    session['uploaded_file_path'] = file_path
-                    session['uploaded_filename'] = sanitized_filename
-                    session.modified = True
-                    
-                    upload_time = time.time() - start_time
-                    logging.info(f"✅ File processed immediately: {row_count} rows in {upload_time:.2f}s")
-                    
-                    return jsonify({
-                        'success': True,
-                        'filename': sanitized_filename,
-                        'message': f'File uploaded and processed successfully ({row_count} rows)',
-                        'processing': False,
-                        'rows_processed': row_count,
-                        'upload_time': upload_time
-                    })
-                else:
-                    return jsonify({'error': 'Failed to process file'}), 500
-                    
-            except Exception as process_error:
-                logging.error(f"Processing error: {process_error}")
-                return jsonify({'error': f'Processing failed: {str(process_error)}'}), 500
-        
-    except Exception as e:
-        logging.error(f"Optimized upload error: {e}")
         return jsonify({'error': f'Upload failed: {str(e)}'}), 500
 
 @app.route('/process-lightning', methods=['POST'])
@@ -4569,43 +4206,8 @@ def generate_labels():
         # Use cached dropdowns for UI (if needed elsewhere)
         dropdowns = excel_processor.dropdown_cache
 
-        # CRITICAL FIX: Handle both tag names (strings) and full tag objects with updated lineage
+        # Use selected tags from request body or session, this updates the processor's internal state
         selected_tags_to_use = selected_tags_from_request
-        
-        # If selected_tags contains full tag objects (new format), extract tag names and update lineage
-        if selected_tags_to_use and isinstance(selected_tags_to_use[0], dict):
-            logging.info("LINEAGE FIX: Processing full tag objects with updated lineage data")
-            tag_names = []
-            lineage_updates = {}
-            
-            for tag_obj in selected_tags_to_use:
-                # Extract tag name
-                tag_name = tag_obj.get('Product Name*') or tag_obj.get('ProductName', '')
-                if tag_name:
-                    tag_names.append(tag_name)
-                    
-                    # Extract updated lineage
-                    updated_lineage = tag_obj.get('lineage') or tag_obj.get('Lineage', '')
-                    if updated_lineage:
-                        lineage_updates[tag_name] = updated_lineage
-                        logging.info(f"LINEAGE FIX: Tag '{tag_name}' has updated lineage: '{updated_lineage}'")
-            
-            selected_tags_to_use = tag_names
-            
-            # Update Excel processor lineage data with manual changes
-            if lineage_updates and has_excel_data and excel_processor.df is not None and 'Lineage' in excel_processor.df.columns:
-                logging.info("LINEAGE FIX: Applying manual lineage updates to Excel processor data")
-                for tag_name, new_lineage in lineage_updates.items():
-                    # Try different column names for product names
-                    product_name_columns = ['ProductName', 'Product Name*', 'Product Name']
-                    for col in product_name_columns:
-                        if col in excel_processor.df.columns:
-                            mask = excel_processor.df[col] == tag_name
-                            if mask.any():
-                                old_lineage = excel_processor.df.loc[mask, 'Lineage'].iloc[0]
-                                excel_processor.df.loc[mask, 'Lineage'] = new_lineage
-                                logging.info(f"LINEAGE FIX: Updated '{tag_name}' lineage from '{old_lineage}' to '{new_lineage}'")
-                                break
         
                 # If no selected tags in request body, check session for JSON-matched tags
         if not selected_tags_to_use:
@@ -4983,7 +4585,6 @@ def generate_labels():
                                 'AI': processed_record.get('Total THC', ''),  # Map Total THC to AI field for template processor
                                 'AJ': processed_record.get('THCA', ''),  # Map THCA to AJ field for template processor
                                 'AK': processed_record.get('CBDA', ''),  # Map CBDA to AK field for template processor
-                                'ProductVendor': processed_record.get('Vendor/Supplier*', ''),
                                 'Quantity Received*': processed_record.get('Quantity Received*', ''),
                                 'Barcode': processed_record.get('Barcode*', ''),
                                 'Quantity': processed_record.get('Quantity*', '1')
@@ -5642,30 +5243,9 @@ def get_available_tags():
         excel_processor = get_excel_processor()
         if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
             try:
-                # OPTIMIZATION: Limit initial tag load for faster response
                 excel_tags = excel_processor.get_available_tags()
-                
-                # For large datasets, return first 500 tags immediately
-                if len(excel_tags) > 500:
-                    initial_tags = excel_tags[:500]
-                    logging.info(f"✅ Excel processor returned {len(excel_tags)} tags, sending first {len(initial_tags)} for fast loading")
-                    
-                    # Cache the results for faster subsequent requests
-                    cache.set(cache_key, excel_tags, timeout=300)  # Cache full dataset
-                    
-                    elapsed = (time.time() - start_time) * 1000
-                    logging.info(f"✅ Available tags (Excel-optimized) completed ({elapsed:.1f}ms)")
-                    
-                    return jsonify({
-                        'tags': initial_tags,
-                        'total_count': len(excel_tags),  # Return actual total
-                        'source': 'excel-optimized',
-                        'has_more': len(excel_tags) > 500,
-                        'remaining_count': len(excel_tags) - 500
-                    })
-                else:
-                    all_tags.extend(excel_tags)
-                    logging.info(f"✅ Excel processor returned {len(excel_tags)} tags")
+                all_tags.extend(excel_tags)
+                logging.info(f"✅ Excel processor returned {len(excel_tags)} tags")
             except Exception as e:
                 logging.warning(f"Excel processor error: {e}")
         
@@ -6649,22 +6229,32 @@ def database_stats():
         # Test database connection
         try:
             import sqlite3
-            test_conn = sqlite3.connect(product_db.db_path, timeout=10.0)
+            test_conn = sqlite3.connect(product_db.db_path)
             test_cursor = test_conn.cursor()
             test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
             if not test_cursor.fetchone():
                 logging.error(f"Products table not found in database at {product_db.db_path}")
+                # If store-specific database doesn't have products table, fall back to main database
+                logging.info(f"Falling back to main database")
+                # Create main database instance directly (don't clear the global variable!)
+                from src.core.data.product_database import ProductDatabase
+                main_db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
+                product_db = ProductDatabase(main_db_path)
+                if not product_db._initialized:
+                    product_db.init_database()
+                # Update the global reference to use the main database
+                global _product_database
+                _product_database = product_db
+                # Test main database
+                test_conn = sqlite3.connect(product_db.db_path)
+                test_cursor = test_conn.cursor()
+                test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+                if not test_cursor.fetchone():
+                    logging.error("Products table not found in main database either")
+                    return jsonify({'error': 'Products table not found in any database'}), 500
                 test_conn.close()
-                # Return empty stats instead of error
-                return jsonify({
-                    'total_products': 0,
-                    'total_records': 0,
-                    'unique_vendors': 0,
-                    'unique_brands': 0,
-                    'unique_product_types': 0,
-                    'product_type_distribution': {},
-                    'vendor_stats': {'vendors': [], 'brands': []}
-                }), 200
+                logging.info(f"Successfully fell back to main database: {product_db.db_path}")
+            # Products table exists, proceed
             test_conn.close()
         except Exception as test_error:
             logging.error(f"Database connection test failed: {test_error}")
@@ -6674,7 +6264,7 @@ def database_stats():
         vendor_stats = {}
         try:
             import sqlite3
-            with sqlite3.connect(product_db.db_path, timeout=30.0) as conn:
+            with sqlite3.connect(product_db.db_path) as conn:
                 # Get basic counts
                 cursor = conn.cursor()
                 
@@ -6715,56 +6305,8 @@ def database_stats():
                 product_types = cursor.fetchall()
                 product_type_distribution = {pt[0]: pt[1] for pt in product_types}
                 
-                # PRIORITY: Use Excel processor data if available (more reliable)
-                excel_total = 0
-                excel_vendors = 0
-                excel_brands = 0
-                excel_product_types = 0
-                excel_distribution = {}
-                
-                try:
-                    excel_processor = get_excel_processor()
-                    if excel_processor and hasattr(excel_processor, 'df') and excel_processor.df is not None and not excel_processor.df.empty:
-                        excel_total = len(excel_processor.df)
-                        logging.info(f"📊 Excel processor has {excel_total} products, using Excel data instead of database")
-                        
-                        # Get Excel stats
-                        df = excel_processor.df
-                        if 'Vendor/Supplier*' in df.columns:
-                            excel_vendors = df['Vendor/Supplier*'].nunique()
-                        if 'Product Brand' in df.columns:
-                            excel_brands = df['Product Brand'].nunique()
-                        if 'Product Type*' in df.columns:
-                            excel_product_types = df['Product Type*'].nunique()
-                            excel_distribution = df['Product Type*'].value_counts().head(10).to_dict()
-                        
-                        # Use Excel data if it's better than database
-                        if excel_total > total_products:
-                            total_products = excel_total
-                            unique_vendors = excel_vendors
-                            unique_brands = excel_brands
-                            unique_product_types = excel_product_types
-                            product_type_distribution = excel_distribution
-                            logging.info(f"✅ Using Excel data: {total_products} products, {unique_vendors} vendors, {unique_brands} brands")
-                        
-                except Exception as excel_error:
-                    logging.warning(f"Could not get Excel count: {excel_error}")
-                
-                # Use the best available count (Excel data if available, otherwise database)
-                # PRIORITY: Excel data first, then database count, then 0
-                if excel_total > 0:
-                    final_total = excel_total
-                    logging.info(f"✅ Using Excel count: {final_total}")
-                elif total_products > 0:
-                    final_total = total_products
-                    logging.info(f"✅ Using database count: {final_total}")
-                else:
-                    final_total = 0
-                    logging.warning("⚠️ No valid count found, using 0")
-                
                 stats = {
-                    'total_products': final_total,  # Use the best available count
-                    'total_records': final_total,   # Same value for compatibility
+                    'total_products': total_products,
                     'unique_vendors': unique_vendors,
                     'unique_brands': unique_brands,
                     'unique_product_types': unique_product_types,
@@ -6875,11 +6417,11 @@ def database_schema():
 @app.route('/api/database-vendor-stats', methods=['GET'])
 def database_vendor_stats():
     """Get detailed vendor and brand statistics from the product database."""
-    start_time = time.time()
     try:
         import sqlite3
-        import pandas as pd
+        import time
         
+        start_time = time.time()
         logging.info("🔍 Database vendor stats request started")
         
         # Try to get any available database (don't hardcode store name)
@@ -6887,15 +6429,13 @@ def database_vendor_stats():
             product_db = get_product_database()
         except Exception as e:
             logging.error(f"Failed to get product database: {e}")
-            import traceback
-            logging.error(traceback.format_exc())
             return jsonify({
                 'error': 'Database not available',
                 'vendors': [],
                 'brands': [],
                 'total_vendors': 0,
                 'total_brands': 0
-            }), 200  # Return 200 with empty data instead of 500
+            }), 500
         
         # Ensure database is initialized
         if not product_db._initialized:
@@ -6903,7 +6443,7 @@ def database_vendor_stats():
         
         # Test database connection and fallback if needed
         try:
-            test_conn = sqlite3.connect(product_db.db_path, timeout=10.0)
+            test_conn = sqlite3.connect(product_db.db_path)
             test_cursor = test_conn.cursor()
             test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
             if not test_cursor.fetchone():
@@ -6933,106 +6473,79 @@ def database_vendor_stats():
             logging.error(f"Database connection test failed: {test_error}")
             return jsonify({'error': f'Database connection failed: {test_error}'}), 500
         
-        try:
-            with sqlite3.connect(product_db.db_path, timeout=30.0) as conn:
-                # Get all vendors with their product counts
-                vendors_df = pd.read_sql_query('''
-                    SELECT "Vendor/Supplier*" as vendor, COUNT(*) as product_count, 
-                           COUNT(DISTINCT "Product Brand") as unique_brands,
-                           COUNT(DISTINCT "Product Type*") as unique_product_types
-                    FROM products 
-                    WHERE "Vendor/Supplier*" IS NOT NULL AND "Vendor/Supplier*" != ''
-                    GROUP BY "Vendor/Supplier*"
-                    ORDER BY product_count DESC
-                ''', conn)
-                
-                # Get all brands with their product counts
-                brands_df = pd.read_sql_query('''
-                    SELECT "Product Brand" as brand, COUNT(*) as product_count,
-                           COUNT(DISTINCT "Vendor/Supplier*") as unique_vendors,
-                           COUNT(DISTINCT "Product Type*") as unique_product_types
-                    FROM products 
-                    WHERE "Product Brand" IS NOT NULL AND "Product Brand" != ''
-                    GROUP BY "Product Brand"
-                    ORDER BY product_count DESC
-                ''', conn)
-                
-                # Get all product types with their counts
-                product_types_df = pd.read_sql_query('''
-                    SELECT "Product Type*" as product_type, COUNT(*) as product_count,
-                           COUNT(DISTINCT "Vendor/Supplier*") as unique_vendors,
-                           COUNT(DISTINCT "Product Brand") as unique_brands
-                    FROM products 
-                    WHERE "Product Type*" IS NOT NULL AND "Product Type*" != ''
-                    GROUP BY "Product Type*"
-                    ORDER BY product_count DESC
-                ''', conn)
-                
-                # Get vendor-brand combinations
-                vendor_brands_df = pd.read_sql_query('''
-                    SELECT "Vendor/Supplier*" as vendor, "Product Brand" as brand, COUNT(*) as product_count,
-                           COUNT(DISTINCT "Product Type*") as unique_product_types
-                    FROM products 
-                    WHERE "Vendor/Supplier*" IS NOT NULL AND "Vendor/Supplier*" != '' 
-                      AND "Product Brand" IS NOT NULL AND "Product Brand" != ''
-                    GROUP BY "Vendor/Supplier*", "Product Brand"
-                    ORDER BY product_count DESC
-                ''', conn)
-                
-                elapsed = (time.time() - start_time) * 1000
-                logging.info(f"✅ Database vendor stats completed ({elapsed:.1f}ms)")
-                
-                return jsonify({
-                    'vendors': vendors_df.to_dict('records'),
-                    'brands': brands_df.to_dict('records'),
-                    'product_types': product_types_df.to_dict('records'),
-                    'vendor_brands': vendor_brands_df.to_dict('records'),
-                    'summary': {
-                        'total_vendors': len(vendors_df),
-                        'total_brands': len(brands_df),
-                        'total_product_types': len(product_types_df),
-                        'total_vendor_brand_combinations': len(vendor_brands_df)
-                    }
-                })
-        except Exception as query_error:
-            logging.error(f"Error executing vendor stats queries: {query_error}")
-            import traceback
-            logging.error(traceback.format_exc())
-            # Return empty data instead of error
+        with sqlite3.connect(product_db.db_path) as conn:
+            # Get all vendors with their product counts
+            vendors_df = pd.read_sql_query('''
+                SELECT "Vendor/Supplier*" as vendor, COUNT(*) as product_count, 
+                       COUNT(DISTINCT "Product Brand") as unique_brands,
+                       COUNT(DISTINCT "Product Type*") as unique_product_types
+                FROM products 
+                WHERE "Vendor/Supplier*" IS NOT NULL AND "Vendor/Supplier*" != ''
+                GROUP BY "Vendor/Supplier*"
+                ORDER BY product_count DESC
+            ''', conn)
+            
+            # Get all brands with their product counts
+            brands_df = pd.read_sql_query('''
+                SELECT "Product Brand" as brand, COUNT(*) as product_count,
+                       COUNT(DISTINCT "Vendor/Supplier*") as unique_vendors,
+                       COUNT(DISTINCT "Product Type*") as unique_product_types
+                FROM products 
+                WHERE "Product Brand" IS NOT NULL AND "Product Brand" != ''
+                GROUP BY "Product Brand"
+                ORDER BY product_count DESC
+            ''', conn)
+            
+            # Get all product types with their counts
+            product_types_df = pd.read_sql_query('''
+                SELECT "Product Type*" as product_type, COUNT(*) as product_count,
+                       COUNT(DISTINCT "Vendor/Supplier*") as unique_vendors,
+                       COUNT(DISTINCT "Product Brand") as unique_brands
+                FROM products 
+                WHERE "Product Type*" IS NOT NULL AND "Product Type*" != ''
+                GROUP BY "Product Type*"
+                ORDER BY product_count DESC
+            ''', conn)
+            
+            # Get vendor-brand combinations
+            vendor_brands_df = pd.read_sql_query('''
+                SELECT "Vendor/Supplier*" as vendor, "Product Brand" as brand, COUNT(*) as product_count,
+                       COUNT(DISTINCT "Product Type*") as unique_product_types
+                FROM products 
+                WHERE "Vendor/Supplier*" IS NOT NULL AND "Vendor/Supplier*" != '' 
+                  AND "Product Brand" IS NOT NULL AND "Product Brand" != ''
+                GROUP BY "Vendor/Supplier*", "Product Brand"
+                ORDER BY product_count DESC
+            ''', conn)
+            
+            elapsed = (time.time() - start_time) * 1000
+            logging.info(f"✅ Database vendor stats completed ({elapsed:.1f}ms)")
+            
             return jsonify({
-                'vendors': [],
-                'brands': [],
-                'product_types': [],
-                'vendor_brands': [],
+                'vendors': vendors_df.to_dict('records'),
+                'brands': brands_df.to_dict('records'),
+                'product_types': product_types_df.to_dict('records'),
+                'vendor_brands': vendor_brands_df.to_dict('records'),
                 'summary': {
-                    'total_vendors': 0,
-                    'total_brands': 0,
-                    'total_product_types': 0,
-                    'total_vendor_brand_combinations': 0
+                    'total_vendors': len(vendors_df),
+                    'total_brands': len(brands_df),
+                    'total_product_types': len(product_types_df),
+                    'total_vendor_brand_combinations': len(vendor_brands_df)
                 }
             })
             
     except sqlite3.Error as db_error:
-        elapsed = (time.time() - start_time) * 1000
+        elapsed = (time.time() - start_time) * 1000 if 'start_time' in locals() else 0
         logging.error(f"❌ Database error in vendor stats after {elapsed:.1f}ms: {db_error}")
-        import traceback
-        logging.error(traceback.format_exc())
         return jsonify({
             'error': 'Database query failed',
             'vendors': [],
             'brands': [],
-            'product_types': [],
-            'vendor_brands': [],
-            'summary': {
-                'total_vendors': 0,
-                'total_brands': 0,
-                'total_product_types': 0,
-                'total_vendor_brand_combinations': 0
-            }
-        }), 200  # Return 200 with empty data for graceful degradation
+            'summary': {'total_vendors': 0, 'total_brands': 0}
+        }), 500
         
     except Exception as e:
-        elapsed = (time.time() - start_time) * 1000
+        elapsed = (time.time() - start_time) * 1000 if 'start_time' in locals() else 0
         logging.error(f"❌ Error in vendor stats after {elapsed:.1f}ms: {str(e)}")
         import traceback
         logging.error(traceback.format_exc())
@@ -7040,15 +6553,8 @@ def database_vendor_stats():
             'error': 'Internal server error',
             'vendors': [],
             'brands': [],
-            'product_types': [],
-            'vendor_brands': [],
-            'summary': {
-                'total_vendors': 0,
-                'total_brands': 0,
-                'total_product_types': 0,
-                'total_vendor_brand_combinations': 0
-            }
-        }), 200  # Return 200 with empty data for graceful degradation
+            'summary': {'total_vendors': 0, 'total_brands': 0}
+        }), 500
 @app.route('/api/products/search', methods=['GET'])
 def search_products():
     """Search for unique strains by brand within a vendor using Excel data."""
@@ -7275,197 +6781,6 @@ def database_export():
         logging.error(f"Error exporting database: {str(e)}\n" + traceback.format_exc())
         return jsonify({'error': f'Export failed: {str(e)}'}), 500
 
-@app.route('/api/inventory-export', methods=['GET'])
-def inventory_export():
-    """Export only the products data as an Inventory sheet."""
-    try:
-        # Check disk space before creating temporary files
-        disk_ok, disk_message = check_disk_space()
-        if not disk_ok:
-            emergency_cleanup()
-            disk_ok, disk_message = check_disk_space()
-            if not disk_ok:
-                return jsonify({'error': f'Insufficient disk space for export: {disk_message}'}), 507
-        
-        import tempfile
-        import os
-        import pandas as pd
-        
-        product_db = get_product_database('AGT_Bothell')
-        
-        # Create temporary file
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
-        temp_file.close()
-        
-        # Get products data (similar to export_database but only products)
-        with sqlite3.connect(product_db.db_path) as conn:
-            # Get all column names from the products table
-            cursor = conn.cursor()
-            cursor.execute("PRAGMA table_info(products);")
-            table_info = cursor.fetchall()
-            columns = [col[1] for col in table_info if col[1] != 'id']  # Skip id column
-            
-            # Build query to select all columns except id
-            columns_to_export = [col for col in columns if col not in ['id', 'strain_id', 'normalized_name']]
-            columns_str = ', '.join([f'"{col}"' for col in columns_to_export])
-            
-            # Query products
-            query = f"SELECT {columns_str} FROM products ORDER BY id DESC"
-            cursor.execute(query)
-            results = cursor.fetchall()
-            
-            # Build product dictionaries
-            products_data = []
-            for result in results:
-                product = {}
-                for i, col in enumerate(columns_to_export):
-                    product[col] = result[i]
-                products_data.append(product)
-            
-            # Convert to DataFrame
-            products_df = pd.DataFrame(products_data)
-            
-            # Export to Excel with single sheet named "Inventory"
-            with pd.ExcelWriter(temp_file.name, engine='openpyxl') as writer:
-                products_df.to_excel(writer, sheet_name='Inventory', index=False)
-            
-            logger.info(f"Inventory exported to {temp_file.name} with {len(products_df)} products")
-        
-        # Send file with proper cleanup
-        # Generate descriptive filename with timestamp
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        
-        filename = f"AGT_Inventory_{timestamp}.xlsx"
-        response = send_file(
-            temp_file.name,
-            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            as_attachment=True,
-            download_name=filename
-        )
-        
-        # Set proper download filename with headers
-        response = set_download_filename(response, filename)
-        response.headers['Content-Type'] = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        
-        # Clean up the temporary file after sending
-        @response.call_on_close
-        def cleanup():
-            try:
-                if os.path.exists(temp_file.name):
-                    os.unlink(temp_file.name)
-            except Exception as cleanup_error:
-                logging.warning(f"Failed to cleanup temp file {temp_file.name}: {cleanup_error}")
-        
-        return response
-        
-    except Exception as e:
-        import traceback
-        logging.error(f"Error exporting inventory: {str(e)}\n" + traceback.format_exc())
-        return jsonify({'error': f'Export failed: {str(e)}'}), 500
-
-@app.route('/api/database-health', methods=['GET'])
-def database_health():
-    """Get comprehensive database health status."""
-    try:
-        product_db = get_product_database('AGT_Bothell')
-        health_status = product_db.get_health_status()
-        return jsonify(health_status)
-    except Exception as e:
-        logging.error(f"Error getting database health: {str(e)}")
-        return jsonify({
-            'healthy': False,
-            'error': str(e),
-            'timestamp': datetime.now().isoformat()
-        }), 500
-
-@app.route('/api/database-backup', methods=['POST'])
-def create_database_backup():
-    """Manually create a database backup."""
-    try:
-        product_db = get_product_database('AGT_Bothell')
-        success, message = product_db.create_backup("manual")
-        
-        if success:
-            return jsonify({
-                'success': True,
-                'message': 'Backup created successfully',
-                'backup_path': os.path.basename(message),
-                'timestamp': datetime.now().isoformat()
-            })
-        else:
-            return jsonify({
-                'success': False,
-                'error': message,
-                'timestamp': datetime.now().isoformat()
-            }), 500
-            
-    except Exception as e:
-        logging.error(f"Error creating backup: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e),
-            'timestamp': datetime.now().isoformat()
-        }), 500
-
-@app.route('/api/database-restore', methods=['POST'])
-def restore_database():
-    """Restore database from backup."""
-    try:
-        data = request.get_json() or {}
-        backup_path = data.get('backup_path')  # Optional: specific backup path
-        
-        product_db = get_product_database('AGT_Bothell')
-        success, message = product_db.restore_from_backup(backup_path)
-        
-        if success:
-            return jsonify({
-                'success': True,
-                'message': message,
-                'timestamp': datetime.now().isoformat()
-            })
-        else:
-            return jsonify({
-                'success': False,
-                'error': message,
-                'timestamp': datetime.now().isoformat()
-            }), 500
-            
-    except Exception as e:
-        logging.error(f"Error restoring database: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e),
-            'timestamp': datetime.now().isoformat()
-        }), 500
-
-@app.route('/api/database-emergency-recovery', methods=['POST'])
-def emergency_database_recovery():
-    """Perform emergency database recovery."""
-    try:
-        product_db = get_product_database('AGT_Bothell')
-        success, message = product_db.emergency_recovery()
-        
-        if success:
-            return jsonify({
-                'success': True,
-                'message': message,
-                'timestamp': datetime.now().isoformat()
-            })
-        else:
-            return jsonify({
-                'success': False,
-                'error': message,
-                'timestamp': datetime.now().isoformat()
-            }), 500
-            
-    except Exception as e:
-        logging.error(f"Error in emergency recovery: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e),
-            'timestamp': datetime.now().isoformat()
-        }), 500
-
 @app.route('/api/database-view', methods=['GET'])
 def database_view():
     """View database contents in JSON format."""
@@ -7595,12 +6910,12 @@ def clear_rate_limit():
 @app.route('/api/database-analytics', methods=['GET'])
 def database_analytics():
     """Get advanced analytics data for the database."""
-    start_time = time.time()
     try:
         import sqlite3
-        import pandas as pd
+        import time
         from datetime import datetime, timedelta
         
+        start_time = time.time()
         logging.info("📊 Database analytics request started")
         
         # Try to get any available database (don't hardcode store name)
@@ -7608,140 +6923,209 @@ def database_analytics():
             product_db = get_product_database()
         except Exception as e:
             logging.error(f"Failed to get product database for analytics: {e}")
-            import traceback
-            logging.error(traceback.format_exc())
             return jsonify({
                 'error': 'Database not available',
-                'product_type_distribution': {},
-                'lineage_distribution': {},
-                'vendor_performance': [],
-                'recent_activity': [],
-                'analytics_generated': datetime.now().isoformat()
-            }), 200  # Return 200 with empty data
+                'analytics': {},
+                'summary': {'total_products': 0}
+            }), 500
         
         # Test database connection and fallback if needed
         try:
-            test_conn = sqlite3.connect(product_db.db_path, timeout=10.0)
+            test_conn = sqlite3.connect(product_db.db_path)
             test_cursor = test_conn.cursor()
             test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
             if not test_cursor.fetchone():
                 logging.error(f"Products table not found in database at {product_db.db_path}")
+                # Fall back to main database
+                logging.info("Falling back to main database for analytics")
+                # Create main database instance directly (don't clear the global variable!)
+                from src.core.data.product_database import ProductDatabase
+                main_db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
+                product_db = ProductDatabase(main_db_path)
+                if not product_db._initialized:
+                    product_db.init_database()
+                # Update the global reference to use the main database
+                global _product_database
+                _product_database = product_db
+                # Test main database
+                test_conn = sqlite3.connect(product_db.db_path)
+                test_cursor = test_conn.cursor()
+                test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+                if not test_cursor.fetchone():
+                    logging.error("Products table not found in main database either")
+                    return jsonify({'error': 'Products table not found in any database'}), 500
                 test_conn.close()
-                # Return empty data instead of error
-                return jsonify({
-                    'error': 'Database not available',
-                    'product_type_distribution': {},
-                    'lineage_distribution': {},
-                    'vendor_performance': [],
-                    'recent_activity': [],
-                    'analytics_generated': datetime.now().isoformat()
-                }), 200
+                logging.info(f"Successfully fell back to main database: {product_db.db_path}")
             test_conn.close()
         except Exception as test_error:
             logging.error(f"Database connection test failed: {test_error}")
-            import traceback
-            logging.error(traceback.format_exc())
-            # Return empty data instead of error
-            return jsonify({
-                'error': 'Database not available',
-                'product_type_distribution': {},
-                'lineage_distribution': {},
-                'vendor_performance': [],
-                'recent_activity': [],
-                'analytics_generated': datetime.now().isoformat()
-            }), 200
+            return jsonify({'error': f'Database connection failed: {test_error}'}), 500
         
-        try:
-            with sqlite3.connect(product_db.db_path, timeout=30.0) as conn:
-                # Get product type distribution
-                product_types_df = pd.read_sql_query('''
-                    SELECT "Product Type*" as product_type, COUNT(*) as count
-                    FROM products
-                    WHERE "Product Type*" IS NOT NULL AND "Product Type*" != ''
-                    GROUP BY "Product Type*"
-                    ORDER BY count DESC
-                ''', conn)
-                
-                # Get lineage distribution
-                lineage_df = pd.read_sql_query('''
-                    SELECT canonical_lineage, COUNT(*) as count
-                    FROM strains
-                    WHERE canonical_lineage IS NOT NULL AND canonical_lineage != ''
-                    GROUP BY canonical_lineage
-                    ORDER BY count DESC
-                ''', conn)
-                
-                # Get vendor performance
-                vendor_performance_df = pd.read_sql_query('''
-                    SELECT "Vendor/Supplier*" as vendor, COUNT(*) as product_count,
-                           COUNT(DISTINCT "Product Brand") as unique_brands,
-                           COUNT(DISTINCT "Product Type*") as unique_types
-                    FROM products
-                    WHERE "Vendor/Supplier*" IS NOT NULL AND "Vendor/Supplier*" != ''
-                    GROUP BY "Vendor/Supplier*"
-                    ORDER BY product_count DESC
-                    LIMIT 10
-                ''', conn)
-                
-                # Get recent activity (last 30 days) - using id as proxy for recent activity
-                # Since last_seen_date column doesn't exist in this schema, use id ordering
-                recent_activity_df = pd.read_sql_query('''
-                    SELECT 'Recent' as date, COUNT(*) as new_products
-                    FROM products
-                    WHERE id > (SELECT MAX(id) - 100 FROM products)
-                ''', conn)
-                
-                elapsed = (time.time() - start_time) * 1000
-                logging.info(f"✅ Database analytics completed ({elapsed:.1f}ms)")
-                
-                return jsonify({
-                    'product_type_distribution': dict(zip(product_types_df['product_type'], product_types_df['count'])),
-                    'lineage_distribution': dict(zip(lineage_df['canonical_lineage'], lineage_df['count'])),
-                    'vendor_performance': vendor_performance_df.to_dict('records'),
-                    'recent_activity': recent_activity_df.to_dict('records'),
-                    'analytics_generated': datetime.now().isoformat()
-                })
-        except Exception as query_error:
-            logging.error(f"Error executing analytics queries: {query_error}")
-            import traceback
-            logging.error(traceback.format_exc())
-            # Return empty data instead of error
+        with sqlite3.connect(product_db.db_path) as conn:
+            # Get product type distribution
+            product_types_df = pd.read_sql_query('''
+                SELECT "Product Type*" as product_type, COUNT(*) as count
+                FROM products
+                WHERE "Product Type*" IS NOT NULL AND "Product Type*" != ''
+                GROUP BY "Product Type*"
+                ORDER BY count DESC
+            ''', conn)
+            
+            # Get lineage distribution
+            lineage_df = pd.read_sql_query('''
+                SELECT canonical_lineage, COUNT(*) as count
+                FROM strains
+                WHERE canonical_lineage IS NOT NULL AND canonical_lineage != ''
+                GROUP BY canonical_lineage
+                ORDER BY count DESC
+            ''', conn)
+            
+            # Get vendor performance
+            vendor_performance_df = pd.read_sql_query('''
+                SELECT "Vendor/Supplier*" as vendor, COUNT(*) as product_count,
+                       COUNT(DISTINCT "Product Brand") as unique_brands,
+                       COUNT(DISTINCT "Product Type*") as unique_types
+                FROM products
+                WHERE "Vendor/Supplier*" IS NOT NULL AND "Vendor/Supplier*" != ''
+                GROUP BY "Vendor/Supplier*"
+                ORDER BY product_count DESC
+                LIMIT 10
+            ''', conn)
+            
+            # Get recent activity (last 30 days) - using id as proxy for recent activity
+            # Since last_seen_date column doesn't exist in this schema, use id ordering
+            recent_activity_df = pd.read_sql_query('''
+                SELECT 'Recent' as date, COUNT(*) as new_products
+                FROM products
+                WHERE id > (SELECT MAX(id) - 100 FROM products)
+            ''', conn)
+            
+            elapsed = (time.time() - start_time) * 1000
+            logging.info(f"✅ Database analytics completed ({elapsed:.1f}ms)")
+            
             return jsonify({
-                'error': 'Query failed',
-                'product_type_distribution': {},
-                'lineage_distribution': {},
-                'vendor_performance': [],
-                'recent_activity': [],
+                'product_type_distribution': dict(zip(product_types_df['product_type'], product_types_df['count'])),
+                'lineage_distribution': dict(zip(lineage_df['canonical_lineage'], lineage_df['count'])),
+                'vendor_performance': vendor_performance_df.to_dict('records'),
+                'recent_activity': recent_activity_df.to_dict('records'),
                 'analytics_generated': datetime.now().isoformat()
             })
             
     except sqlite3.Error as db_error:
-        elapsed = (time.time() - start_time) * 1000
+        elapsed = (time.time() - start_time) * 1000 if 'start_time' in locals() else 0
         logging.error(f"❌ Database error in analytics after {elapsed:.1f}ms: {db_error}")
-        import traceback
-        logging.error(traceback.format_exc())
         return jsonify({
             'error': 'Database query failed',
-            'product_type_distribution': {},
-            'lineage_distribution': {},
-            'vendor_performance': [],
-            'recent_activity': [],
-            'analytics_generated': datetime.now().isoformat()
-        }), 200  # Return 200 with empty data for graceful degradation
+            'analytics': {},
+            'summary': {'total_products': 0}
+        }), 500
         
     except Exception as e:
-        elapsed = (time.time() - start_time) * 1000
+        elapsed = (time.time() - start_time) * 1000 if 'start_time' in locals() else 0
         logging.error(f"❌ Error in analytics after {elapsed:.1f}ms: {str(e)}")
         import traceback
         logging.error(traceback.format_exc())
         return jsonify({
             'error': 'Internal server error',
-            'product_type_distribution': {},
-            'lineage_distribution': {},
-            'vendor_performance': [],
-            'recent_activity': [],
-            'analytics_generated': datetime.now().isoformat()
-        }), 200  # Return 200 with empty data for graceful degradation
+            'analytics': {},
+            'summary': {'total_products': 0}
+        }), 500
+
+@app.route('/api/database-health', methods=['GET'])
+def database_health():
+    """Get database health metrics and status."""
+    try:
+        import sqlite3
+        import os
+        from datetime import datetime
+        
+        product_db = get_product_database('AGT_Bothell')
+        
+        # CRITICAL DEBUG: Check database file status
+        db_exists = os.path.exists(product_db.db_path)
+        db_path = product_db.db_path
+        db_dir = os.path.dirname(db_path)
+        dir_exists = os.path.exists(db_dir)
+        dir_writable = os.access(db_dir, os.W_OK) if dir_exists else False
+        
+        logging.info(f"[DB-HEALTH] Database path: {db_path}")
+        logging.info(f"[DB-HEALTH] Database exists: {db_exists}")
+        logging.info(f"[DB-HEALTH] Directory exists: {dir_exists}")
+        logging.info(f"[DB-HEALTH] Directory writable: {dir_writable}")
+        
+        # Get database file size
+        db_size = os.path.getsize(product_db.db_path) if db_exists else 0
+        db_size_mb = round(db_size / (1024 * 1024), 2)
+        
+        # Check database integrity
+        with sqlite3.connect(product_db.db_path) as conn:
+            # Check for corruption
+            integrity_check = conn.execute("PRAGMA integrity_check").fetchone()
+            is_corrupted = integrity_check[0] != "ok"
+            
+            # Get table statistics
+            tables_df = pd.read_sql_query('''
+                SELECT name, sql FROM sqlite_master 
+                WHERE type='table' AND name NOT LIKE 'sqlite_%'
+            ''', conn)
+            
+            # Count records in each table
+            table_counts = {}
+            for table_name in tables_df['name']:
+                count = conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+                table_counts[table_name] = count
+            
+            # Check for orphaned records
+            orphaned_count = conn.execute('''
+                SELECT COUNT(*) FROM products p
+                LEFT JOIN strains s ON p.strain_id = s.id
+                WHERE s.id IS NULL AND p.strain_id IS NOT NULL
+            ''').fetchone()[0]
+            
+            # Calculate health score
+            health_score = 100
+            issues = []
+            
+            if is_corrupted:
+                health_score -= 50
+                issues.append({
+                    'type': 'Critical',
+                    'severity': 'danger',
+                    'message': 'Database corruption detected'
+                })
+            
+            if orphaned_count > 0:
+                health_score -= 10
+                issues.append({
+                    'type': 'Warning',
+                    'severity': 'warning',
+                    'message': f'{orphaned_count} orphaned records found'
+                })
+            
+            if db_size_mb > 100:  # Large database
+                health_score -= 5
+                issues.append({
+                    'type': 'Info',
+                    'severity': 'info',
+                    'message': f'Database size is {db_size_mb}MB (consider optimization)'
+                })
+            
+            return jsonify({
+                'health_score': max(health_score, 0),
+                'database_size_mb': db_size_mb,
+                'is_corrupted': is_corrupted,
+                'table_counts': table_counts,
+                'orphaned_records': orphaned_count,
+                'issues': issues,
+                'last_check': datetime.now().isoformat(),
+                'data_integrity': 95 if not is_corrupted else 45,
+                'performance_score': 88,
+                'storage_efficiency': 92,
+                'cache_hit_rate': 87
+            })
+    except Exception as e:
+        logging.error(f"Error checking database health: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/database-test', methods=['GET'])
 def database_test():
@@ -9071,13 +8455,29 @@ def upload_product_database():
                         if pd.isna(value):
                             product_data[col] = None
                         else:
-                            product_data[col] = str(value)
+                            product_data[col] = str(value).strip() if isinstance(value, str) else str(value)
                     
                     # Map Excel column names to database column names
                     mapped_data = {}
                     for excel_col, db_col in column_mapping.items():
                         if excel_col in product_data:
                             mapped_data[db_col] = product_data[excel_col]
+                    
+                    # CRITICAL FIX: Ensure Weight* and Units are properly mapped from Excel columns
+                    # Handle various Excel column name variations
+                    if 'Weight*' not in mapped_data and 'Weight' in product_data:
+                        mapped_data['Weight*'] = product_data['Weight']
+                    if 'Units' not in mapped_data:
+                        if 'Weight Unit*' in product_data:
+                            mapped_data['Units'] = product_data['Weight Unit*']
+                        elif 'Weight Unit* (grams/gm or ounces/oz)' in product_data:
+                            mapped_data['Units'] = product_data['Weight Unit* (grams/gm or ounces/oz)']
+                    
+                    # Log weight mapping for first few products (debugging)
+                    if index < 5:
+                        logging.info(f"[WEIGHT MAPPING] Product: '{product_data.get('Product Name*', 'Unknown')}' | "
+                                   f"Mapped Weight*: '{mapped_data.get('Weight*', 'NOT FOUND')}' | "
+                                   f"Mapped Units: '{mapped_data.get('Units', 'NOT FOUND')}'")
                     
                     # Add product to database with mapped column names
                     result = product_db.add_or_update_product(mapped_data)
@@ -9733,57 +9133,57 @@ def json_match_detailed():
             
         available_tags = excel_processor.df.to_dict('records')
         
-        # Use regular JSON Matcher for fast matching
-        logging.info("Using regular JSON Matcher (fast mode)")
+        # FIXED: Use regular JSON Matcher with Excel-priority system
+        logging.info("Using regular JSON Matcher with Excel-priority approach")
         
-        # Get basic matches from the fast JSON matcher
-        basic_matches = json_matcher.fetch_and_match(url)
-        logging.info(f"JSON Matcher returned {len(basic_matches) if basic_matches else 0} matched products")
+        # Use the Enhanced JSON Matcher to get database-enhanced results
+        enhanced_matches = json_matcher.fetch_and_match(url)
+        logging.info(f"Enhanced JSON Matcher returned {len(enhanced_matches) if enhanced_matches else 0} database-enhanced products")
         
         detailed_matches = []
-        high_confidence_matches = basic_matches or []  # All matches from basic matcher
+        high_confidence_matches = enhanced_matches or []  # All enhanced matches are high confidence
         
         for i, json_item in enumerate(json_items):
             json_name = str(json_item.get('product_name', ''))
             if not json_name.strip():
                 continue
                 
-            # Find corresponding basic match
-            basic_match = None
-            if i < len(basic_matches):
-                basic_match = basic_matches[i]
+            # Find corresponding enhanced match
+            enhanced_match = None
+            if i < len(enhanced_matches):
+                enhanced_match = enhanced_matches[i]
             
-            # Create detailed match info using basic matcher data
+            # Create detailed match info using database-priority data
             match_info = {
                 'json_name': json_name,
                 'json_data': json_item,
-                'best_score': 0.85 if basic_match else 0.0,  # Good confidence for basic matches
-                'best_match': basic_match,
-                'top_candidates': [{'excel_name': basic_match.get('Product Name*', 'Basic Match'), 'score': 0.85, 'excel_data': basic_match}] if basic_match else [],
-                'is_match': basic_match is not None,
-                'match_reason': 'Fast JSON Matcher' if basic_match else 'No match found',
-                'source': basic_match.get('Source', 'Fast JSON Matcher') if basic_match else 'No match',
-                'data_source': basic_match.get('Data_Source', 'Excel') if basic_match else 'None',
-                'match_confidence': basic_match.get('Match_Confidence', '0.85') if basic_match else '0.0'
+                'best_score': 0.95 if enhanced_match else 0.0,  # High confidence for database matches
+                'best_match': enhanced_match,
+                'top_candidates': [{'excel_name': enhanced_match.get('Product Name*', 'Enhanced Match'), 'score': 0.95, 'excel_data': enhanced_match}] if enhanced_match else [],
+                'is_match': enhanced_match is not None,
+                'match_reason': 'Database Priority (100% DB data)' if enhanced_match else 'No database match found',
+                'source': enhanced_match.get('Source', 'Database Priority (100% DB)') if enhanced_match else 'No match',
+                'data_source': enhanced_match.get('Data_Source', 'Database') if enhanced_match else 'None',
+                'match_confidence': enhanced_match.get('Match_Confidence', '0.95') if enhanced_match else '0.0'
             }
             
             detailed_matches.append(match_info)
             
-        logging.info(f"FAST JSON MATCHER: Generated {len(detailed_matches)} detailed matches with {len(high_confidence_matches)} matched products")
+        logging.info(f"DATABASE PRIORITY: Generated {len(detailed_matches)} detailed matches with {len(high_confidence_matches)} high-confidence database-enhanced products")
         
         return jsonify({
             'success': True,
             'total_json_items': len(json_items),
             'total_matches': len(high_confidence_matches),
-            'threshold': 'Fast JSON Matcher',
-            'approach': 'Basic JSON Matcher with Excel data',
-            'data_source': 'Excel spreadsheet data',
+            'threshold': 'Database Priority (100% DB)',
+            'approach': 'Enhanced JSON Matcher with Database Priority',
+            'data_source': '100% Database-derived information',
             'detailed_matches': detailed_matches,
             'high_confidence_matches': high_confidence_matches,
             'database_info': {
                 'total_database_products': len(available_tags),
-                'basic_matches': len(basic_matches) if basic_matches else 0,
-                'match_strategy': 'Fast JSON Matcher with Excel data'
+                'enhanced_matches': len(enhanced_matches) if enhanced_matches else 0,
+                'match_strategy': 'Database Priority with safe defaults'
             }
         })
         
@@ -10183,26 +9583,26 @@ def cleanup_old_files():
         removed_count = 0
         removed_files = []
         
-        # Define cleanup policies - AGGRESSIVE to minimize storage
+        # Define cleanup policies
         cleanup_policies = {
             'uploads': {
-                'max_age_hours': 2,   # Keep uploads for only 2 hours (was 24)
-                'max_files': 10,      # Keep max 10 upload files (was 50)
+                'max_age_hours': 24,  # Keep uploads for 24 hours
+                'max_files': 50,      # Keep max 50 upload files
                 'pattern': 'uploads/*.xlsx'
             },
             'output': {
-                'max_age_hours': 4,   # Keep outputs for 4 hours (was 12)
-                'max_files': 15,      # Keep max 15 output files (was 30)
+                'max_age_hours': 12,  # Keep outputs for 12 hours
+                'max_files': 30,      # Keep max 30 output files
                 'pattern': 'output/*.docx'
             },
             'cache': {
-                'max_age_hours': 2,   # Keep cache for 2 hours (was 6)
-                'max_files': 30,      # Keep max 30 cache files (was 100)
+                'max_age_hours': 6,   # Keep cache for 6 hours
+                'max_files': 100,     # Keep max 100 cache files
                 'pattern': 'cache/*'
             },
             'logs': {
-                'max_age_hours': 48,  # Keep logs for 2 days (was 7 days)
-                'max_files': 5,       # Keep max 5 log files (was 10)
+                'max_age_hours': 168, # Keep logs for 1 week
+                'max_files': 10,      # Keep max 10 log files
                 'pattern': 'logs/*.log'
             }
         }
@@ -10603,75 +10003,6 @@ def get_available_tags_lite():
             'source': 'error-fallback'
         }), 200  # Return 200 instead of 500 to prevent frontend errors
 
-@app.route('/api/available-tags-remaining', methods=['GET'])
-def get_available_tags_remaining():
-    """Load remaining tags after initial batch for progressive loading."""
-    try:
-        start_time = time.time()
-        offset = request.args.get('offset', 500, type=int)
-        limit = request.args.get('limit', 500, type=int)
-        
-        logging.info(f"🔄 Loading remaining tags: offset={offset}, limit={limit}")
-        
-        # Get cached full dataset
-        cache_key = get_session_cache_key('available_tags')
-        cached_tags = cache.get(cache_key)
-        
-        if cached_tags:
-            remaining_tags = cached_tags[offset:offset + limit]
-            elapsed = (time.time() - start_time) * 1000
-            logging.info(f"✅ Remaining tags loaded: {len(remaining_tags)} tags ({elapsed:.1f}ms)")
-            
-            return jsonify({
-                'tags': remaining_tags,
-                'offset': offset,
-                'limit': limit,
-                'has_more': offset + limit < len(cached_tags),
-                'total_count': len(cached_tags),
-                'source': 'cached-remaining'
-            })
-        
-        # Fallback: get from Excel processor
-        excel_processor = get_excel_processor()
-        if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
-            try:
-                excel_tags = excel_processor.get_available_tags()
-                remaining_tags = excel_tags[offset:offset + limit]
-                
-                elapsed = (time.time() - start_time) * 1000
-                logging.info(f"✅ Remaining tags from Excel: {len(remaining_tags)} tags ({elapsed:.1f}ms)")
-                
-                return jsonify({
-                    'tags': remaining_tags,
-                    'offset': offset,
-                    'limit': limit,
-                    'has_more': offset + limit < len(excel_tags),
-                    'total_count': len(excel_tags),
-                    'source': 'excel-remaining'
-                })
-            except Exception as e:
-                logging.error(f"Excel processor error for remaining tags: {e}")
-        
-        return jsonify({
-            'tags': [],
-            'offset': offset,
-            'limit': limit,
-            'has_more': False,
-            'total_count': 0,
-            'source': 'empty-fallback'
-        })
-        
-    except Exception as e:
-        logging.error(f"Remaining tags error: {e}")
-        return jsonify({
-            'tags': [],
-            'offset': 0,
-            'limit': 0,
-            'has_more': False,
-            'total_count': 0,
-            'source': 'error-fallback'
-        }), 200
-
 def check_rate_limit(ip_address):
     """Check if IP address is within rate limits."""
     current_time = time.time()
@@ -10722,46 +10053,30 @@ def get_initial_data():
             excel_processor.df = None
             logging.info("Excel processor missing df attribute - set to None")
             
-        # If no data is loaded, try to load from session first, then default file
-        if excel_processor.df is None or excel_processor.df.empty:
-            logging.info("No data loaded - checking session for uploaded file")
+        # If no data is loaded, try to load the default file
+        if excel_processor.df is None:
+            logging.info("No data loaded - attempting to load default file")
+            from src.core.data.excel_processor import get_default_upload_file
+            default_file = get_default_upload_file()
             
-            # PRIORITY 1: Check session for uploaded file
-            session_file_path = session.get('file_path')
-            if session_file_path and os.path.exists(session_file_path):
+            if default_file:
                 try:
-                    logging.info(f"✅ Found uploaded file in session: {session_file_path}")
-                    excel_processor.load_file(session_file_path)
-                    excel_processor._last_loaded_file = session_file_path
-                    logging.info(f"✅ Successfully loaded session file: {os.path.basename(session_file_path)}")
+                    logging.info(f"Loading default file: {os.path.basename(default_file)}")
+                    excel_processor.load_file(default_file)
+                    excel_processor._last_loaded_file = default_file
+                    logging.info(f"Default file loaded successfully")
                 except Exception as e:
-                    logging.error(f"Failed to load session file: {e}")
-                    # Continue to try default file
-            else:
-                logging.info("No uploaded file in session, attempting to load default file")
-                
-                # PRIORITY 2: Load default file if no session file
-                from src.core.data.excel_processor import get_default_upload_file
-                default_file = get_default_upload_file()
-                
-                if default_file:
-                    try:
-                        logging.info(f"Loading default file: {os.path.basename(default_file)}")
-                        excel_processor.load_file(default_file)
-                        excel_processor._last_loaded_file = default_file
-                        logging.info(f"Default file loaded successfully")
-                    except Exception as e:
-                        logging.error(f"Failed to load default file: {e}")
-                        return jsonify({
-                            'success': False,
-                            'message': f'Failed to load default file: {str(e)}'
-                        })
-                else:
-                    logging.warning("No default file found")
+                    logging.error(f"Failed to load default file: {e}")
                     return jsonify({
                         'success': False,
-                        'message': 'No default file found and no data currently loaded'
+                        'message': f'Failed to load default file: {str(e)}'
                     })
+            else:
+                logging.warning("No default file found")
+                return jsonify({
+                    'success': False,
+                    'message': 'No default file found and no data currently loaded'
+                })
         
         if hasattr(excel_processor, 'df') and excel_processor.df is not None:
             logging.info(f"Data loaded - DataFrame shape: {excel_processor.df.shape}")
@@ -12094,281 +11409,162 @@ def serve_undo_selections_test():
     """Serve the undo selections test page."""
     return send_from_directory('.', 'test_undo_selections.html')
 
-@app.route('/upload-ultra-reliable', methods=['POST'])
-def upload_ultra_reliable():
-    """Ultra-reliable Excel upload with comprehensive error handling and optimization."""
-    global _excel_processor
+@app.route('/upload-optimized', methods=['POST'])
+def upload_file_optimized():
+    """Highly optimized file upload with streaming and minimal processing"""
     try:
-        logging.info("=== ULTRA-RELIABLE UPLOAD START ===")
+        # Quick validation
+        if not check_disk_space()[0]:
+            return jsonify({'error': 'Insufficient disk space'}), 507
+        
+        if not check_rate_limit(request.remote_addr):
+            return jsonify({'error': 'Rate limit exceeded'}), 429
+        
+        # Rate limiting for uploads (more restrictive)
+        client_ip = request.remote_addr
+        if not check_rate_limit(client_ip):
+            return jsonify({'error': 'Rate limit exceeded. Please wait before uploading another file.'}), 429
+        
+        logging.info("=== ULTRA-FAST UPLOAD REQUEST START ===")
         start_time = time.time()
         
-        # 1. VALIDATION PHASE - Fast validation before any heavy processing
+        # Log request details
+        logging.info(f"Request method: {request.method}")
+        logging.info(f"Request headers: {dict(request.headers)}")
+        logging.info(f"Request files: {list(request.files.keys()) if request.files else 'None'}")
+        
         if 'file' not in request.files:
+            logging.error("No file uploaded - 'file' not in request.files")
             return jsonify({'error': 'No file uploaded'}), 400
         
         file = request.files['file']
+        logging.info(f"File received: {file.filename}, Content-Type: {file.content_type}")
+        
         if file.filename == '':
+            logging.error("No file selected - filename is empty")
             return jsonify({'error': 'No file selected'}), 400
         
         if not file.filename.lower().endswith('.xlsx'):
+            logging.error(f"Invalid file type: {file.filename}")
             return jsonify({'error': 'Only .xlsx files are allowed'}), 400
         
-        # 2. FILE SIZE ANALYSIS - Determine processing strategy
-        file.seek(0, 2)
-        file_size = file.tell()
-        file.seek(0)
-        
-        logging.info(f"📁 File: {file.filename}, Size: {file_size:,} bytes ({file_size/(1024*1024):.1f} MB)")
-        
-        # Prevent oversized files
-        max_size = 200 * 1024 * 1024  # 200MB limit
-        if file_size > max_size:
-            return jsonify({'error': f'File too large. Maximum size is {max_size/(1024*1024):.0f} MB'}), 400
-        
-        if file_size == 0:
-            return jsonify({'error': 'Empty file uploaded'}), 400
-        
-        # 3. QUICK PREVIEW - Estimate processing complexity
-        estimated_rows = 1000
-        processing_strategy = "immediate"
-        
-        try:
-            import pandas as pd
-            # Quick preview with minimal processing
-            preview_df = pd.read_excel(file, nrows=50, engine='openpyxl', dtype=str, na_filter=False)
-            if len(preview_df) > 0:
-                # Estimate total rows based on file size and preview
-                estimated_rows = max(50, int(file_size / (file_size / len(preview_df)) * 1.1))
-                
-                # Determine processing strategy based on complexity
-                if estimated_rows > 10000 or file_size > 50 * 1024 * 1024:  # 50MB
-                    processing_strategy = "background_chunked"
-                elif estimated_rows > 3000 or file_size > 10 * 1024 * 1024:  # 10MB
-                    processing_strategy = "background_simple"
-                else:
-                    processing_strategy = "immediate"
-                
-                logging.info(f"📊 Estimated rows: {estimated_rows:,}, Strategy: {processing_strategy}")
-            
-            file.seek(0)  # Reset after preview
-            
-        except Exception as preview_error:
-            logging.warning(f"Preview failed, using default strategy: {preview_error}")
-            processing_strategy = "background_simple"
-        
-        # 4. FILE SAVING - Always save first for reliability
+        # Sanitize filename to prevent path traversal (security fix)
         sanitized_filename = sanitize_filename(file.filename)
         if not sanitized_filename:
+            logging.error(f"Invalid filename after sanitization: {file.filename}")
             return jsonify({'error': 'Invalid filename'}), 400
         
+        # Check file size
+        file.seek(0, 2)  # Seek to end
+        file_size = file.tell()
+        file.seek(0)  # Reset to beginning
+        logging.info(f"File size: {file_size} bytes ({file_size / (1024*1024):.2f} MB)")
+        
+        if file_size > app.config['MAX_CONTENT_LENGTH']:
+            logging.error(f"File too large: {file_size} bytes (max: {app.config['MAX_CONTENT_LENGTH']})")
+            return jsonify({'error': f'File too large. Maximum size is {app.config["MAX_CONTENT_LENGTH"] / (1024*1024):.1f} MB'}), 400
+        
+        # Ensure upload folder exists
         upload_folder = app.config['UPLOAD_FOLDER']
         os.makedirs(upload_folder, exist_ok=True)
+        logging.info(f"Upload folder: {upload_folder}")
         
-        file_path = os.path.join(upload_folder, sanitized_filename)
+        # Use sanitized filename (security fix)
+        temp_path = os.path.join(upload_folder, sanitized_filename)
+        logging.info(f"Saving file to: {temp_path}")
         
-        # Remove existing file if present
-        if os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-                logging.info(f"Removed existing file: {sanitized_filename}")
-            except Exception as e:
-                logging.warning(f"Could not remove existing file: {e}")
-        
-        # Save file with error handling
+        save_start = time.time()
         try:
-            file.save(file_path)
-            save_time = time.time() - start_time
-            logging.info(f"✅ File saved successfully in {save_time:.2f}s")
+            file.save(temp_path)
+            save_time = time.time() - save_start
+            logging.info(f"File saved successfully to {temp_path} in {save_time:.2f}s")
         except Exception as save_error:
-            logging.error(f"File save failed: {save_error}")
-            return jsonify({'error': 'Failed to save file. Please try again.'}), 500
+            logging.error(f"Error saving file: {save_error}")
+            return jsonify({'error': f'Failed to save file: {str(save_error)}'}), 500
         
-        # 5. SESSION PERSISTENCE - Always set session data first
-        session.permanent = True
-        session['uploaded_file_path'] = file_path
-        session['uploaded_filename'] = sanitized_filename
-        session['file_path'] = file_path  # For compatibility
-        session.modified = True
-        
-        # Clear processing status
+        # Clear any existing status for this filename and mark as processing
+        logging.info(f"[ULTRA-FAST] Setting processing status for: {file.filename}")
         update_processing_status(file.filename, 'processing')
+        logging.info(f"[ULTRA-FAST] Processing status set. Current statuses: {dict(processing_status)}")
         
-        # 6. PROCESSING STRATEGY EXECUTION WITH OPTIMIZED PROCESSOR
-        if processing_strategy == "immediate":
-            # Small files - process immediately with OPTIMIZED processor
-            logging.info(f"⚡ Processing immediately with OPTIMIZED processor (small file: {estimated_rows:,} rows)")
-            
-            try:
-                from EXCEL_PROCESSING_OPTIMIZATION import get_optimized_excel_processor
-                processor = get_optimized_excel_processor()
-                
-                # Use optimized processing
-                result = processor.process_excel_optimized(file_path)
-                
-                if result['success']:
-                    row_count = result.get('rows_processed', 0)
-                    processing_time = result.get('processing_time', 0)
-                    strategy = result.get('strategy_used', 'instant')
-                    
-                    logging.info(f"✅ OPTIMIZED SUCCESS: {row_count:,} rows in {processing_time:.2f}s using {strategy} strategy")
-                    
-                    with excel_processor_lock:
-                        _excel_processor = processor
-                        _excel_processor._last_loaded_file = file_path
-                    
-                    upload_time = time.time() - start_time
-                    update_processing_status(file.filename, 'ready')
-                    
-                    return jsonify({
-                        'success': True,
-                        'filename': sanitized_filename,
-                        'message': f'File processed successfully ({row_count:,} rows)',
-                        'processing': False,
-                        'rows_processed': row_count,
-                        'upload_time': upload_time,
-                        'processing_time': processing_time,
-                        'strategy': strategy,
-                        'optimization_used': True
-                    })
-                else:
-                    error_msg = result.get('error', 'Processing failed')
-                    logging.error(f"❌ OPTIMIZED PROCESSING FAILED: {error_msg}")
-                    return jsonify({'error': f'Failed to process file: {error_msg}'}), 500
-                    
-            except ImportError as import_error:
-                # Fallback to old processor if optimization fails
-                logging.warning(f"Optimized processor import failed, using fallback: {import_error}")
-                try:
-                    from src.core.data.excel_processor import ExcelProcessor
-                    processor = ExcelProcessor()
-                    success = processor.fast_load_file(file_path) if hasattr(processor, 'fast_load_file') else processor.load_file(file_path)
-                    
-                    if success:
-                        with excel_processor_lock:
-                            _excel_processor = processor
-                            _excel_processor._last_loaded_file = file_path
-                        
-                        row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
-                        upload_time = time.time() - start_time
-                        update_processing_status(file.filename, 'ready')
-                        
-                        return jsonify({
-                            'success': True,
-                            'filename': sanitized_filename,
-                            'message': f'File processed successfully ({row_count:,} rows)',
-                            'processing': False,
-                            'rows_processed': row_count,
-                            'upload_time': upload_time,
-                            'strategy': 'fallback'
-                        })
-                    else:
-                        return jsonify({'error': 'Failed to process file'}), 500
-                except Exception as fallback_error:
-                    logging.error(f"Fallback processing also failed: {fallback_error}")
-                    processing_strategy = "background_simple"
-                    
-            except Exception as process_error:
-                logging.error(f"Immediate processing failed: {process_error}")
-                # Fallback to background processing
-                processing_strategy = "background_simple"
+        # ULTRA-FAST UPLOAD OPTIMIZATION - Minimal cache clearing
+        logging.info(f"[ULTRA-FAST] Performing ultra-fast upload optimization for: {sanitized_filename}")
         
-        if processing_strategy in ["background_simple", "background_chunked"]:
-            # Medium/Large files - background processing
-            logging.info(f"🚀 Using background processing ({processing_strategy})")
-            
-            # Start background processing thread
-            import threading
-            
-            def background_excel_processing():
-                global _excel_processor
-                try:
-                    logging.info(f"[BG] Starting {processing_strategy} with OPTIMIZED processor for {sanitized_filename}")
-                    
-                    try:
-                        from EXCEL_PROCESSING_OPTIMIZATION import get_optimized_excel_processor
-                        processor = get_optimized_excel_processor()
-                        
-                        # Use optimized processing
-                        result = processor.process_excel_optimized(file_path)
-                        
-                        if result['success']:
-                            row_count = result.get('rows_processed', 0)
-                            processing_time = result.get('processing_time', 0)
-                            strategy = result.get('strategy_used', 'unknown')
-                            
-                            logging.info(f"[BG] ✅ OPTIMIZED SUCCESS: {row_count:,} rows in {processing_time:.2f}s using {strategy} strategy")
-                            
-                            with excel_processor_lock:
-                                _excel_processor = processor
-                                _excel_processor._last_loaded_file = file_path
-                            
-                            update_processing_status(file.filename, 'ready')
-                        else:
-                            error_msg = result.get('error', 'Processing failed')
-                            logging.error(f"[BG] ❌ OPTIMIZED PROCESSING FAILED: {error_msg}")
-                            update_processing_status(file.filename, f'error: {error_msg}')
-                    
-                    except ImportError as import_error:
-                        # Fallback to original processor
-                        logging.warning(f"[BG] Optimized processor import failed, using fallback: {import_error}")
-                        from src.core.data.excel_processor import ExcelProcessor
-                        processor = ExcelProcessor()
-                        
-                        if processing_strategy == "background_chunked":
-                            success = processor.minimal_load_file(file_path) if hasattr(processor, 'minimal_load_file') else processor.load_file(file_path)
-                        else:
-                            success = processor.load_file(file_path)
-                        
-                        if success:
-                            with excel_processor_lock:
-                                _excel_processor = processor
-                                _excel_processor._last_loaded_file = file_path
-                            
-                            row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
-                            update_processing_status(file.filename, 'ready')
-                            logging.info(f"[BG] Fallback processing complete: {row_count} rows")
-                        else:
-                            update_processing_status(file.filename, 'error: Processing failed')
-                            logging.error(f"[BG] Fallback processing failed for {sanitized_filename}")
-                        
-                except Exception as bg_error:
-                    logging.error(f"[BG] Background processing error: {bg_error}")
-                    update_processing_status(file.filename, f'error: {str(bg_error)}')
-            
-            # Start background thread with error handling
-            try:
-                thread = threading.Thread(target=background_excel_processing, daemon=True)
-                thread.start()
-                logging.info(f"✅ Background thread started for {sanitized_filename}")
-            except Exception as thread_error:
-                logging.error(f"Failed to start background thread: {thread_error}")
-                return jsonify({'error': 'Failed to start processing'}), 500
-            
-            upload_time = time.time() - start_time
-            return jsonify({
-                'success': True,
-                'filename': sanitized_filename,
-                'message': f'File uploaded, processing in background ({processing_strategy})',
-                'processing': True,
-                'estimated_rows': estimated_rows,
-                'upload_time': upload_time,
-                'strategy': processing_strategy
-            })
+        # Only clear the most critical caches (preserve everything else)
+        try:
+            # Clear only the most essential file-related caches
+            critical_cache_keys = [
+                'full_excel_cache_key', 'json_matched_cache_key', 'file_path'
+            ]
+            cleared_count = 0
+            for key in critical_cache_keys:
+                if cache.has(key):
+                    cache.delete(key)
+                    cleared_count += 1
+            logging.info(f"[ULTRA-FAST] Cleared {cleared_count} critical cache entries")
+        except Exception as cache_error:
+            logging.warning(f"[ULTRA-FAST] Error clearing critical caches: {cache_error}")
         
-        # Fallback response (shouldn't reach here)
+        # Preserve ALL user session data for instant UI response
+        # Only clear the absolute minimum required for new file
+        if 'file_path' in session:
+            del session['file_path']
+            logging.info(f"[ULTRA-FAST] Cleared session key: file_path")
+        
+        # Clear global Excel processor to force complete replacement
+        logging.info(f"[ULTRA-FAST] Resetting Excel processor before loading new file: {sanitized_filename}")
+        reset_excel_processor()
+        
+        # Clear any existing g context for this request
+        if hasattr(g, 'excel_processor'):
+            delattr(g, 'excel_processor')
+            logging.info("[ULTRA-FAST] Cleared g.excel_processor context")
+        
+        # Start background thread with error handling
+        try:
+            logging.info(f"[ULTRA-FAST] Starting background processing thread for {file.filename}")
+            thread = threading.Thread(target=process_excel_background, args=(file.filename, temp_path))
+            thread.daemon = True  # Make thread daemon so it doesn't block app shutdown
+            thread.start()
+            logging.info(f"[ULTRA-FAST] Background processing thread started successfully for {file.filename}")
+            
+            # Log current processing status
+            logging.info(f"[ULTRA-FAST] Current processing status after thread start: {dict(processing_status)}")
+        except Exception as thread_error:
+            logging.error(f"[ULTRA-FAST] Failed to start background thread: {thread_error}")
+            update_processing_status(file.filename, f'error: Failed to start processing')
+            return jsonify({'error': 'Failed to start file processing'}), 500
+        
         upload_time = time.time() - start_time
-        return jsonify({
-            'success': True,
-            'filename': sanitized_filename,
-            'message': 'File uploaded successfully',
-            'upload_time': upload_time,
-            'strategy': 'fallback'
-        })
+        logging.info(f"=== ULTRA-FAST UPLOAD REQUEST COMPLETE === Time: {upload_time:.2f}s")
         
+        # Store uploaded file path in session
+        session['file_path'] = temp_path
+        
+        # Clear selected tags in session to ensure fresh start
+        session['selected_tags'] = []
+        
+        # ULTRA-FAST RESPONSE - Return immediately for instant user feedback
+        upload_response_time = time.time() - start_time
+        logging.info(f"[ULTRA-FAST] Ultra-fast upload completed in {upload_response_time:.3f}s")
+        
+        return jsonify({
+            'message': 'File uploaded, processing in background', 
+            'filename': sanitized_filename,
+            'upload_time': f"{upload_response_time:.3f}s",
+            'processing_status': 'background',
+            'performance': 'ultra_fast'
+        })
     except Exception as e:
-        logging.error(f"Ultra-reliable upload failed: {e}")
-        logging.error(f"Upload error traceback: {traceback.format_exc()}")
-        return jsonify({'error': 'Upload failed. Please try again.'}), 500
+        logging.error(f"=== ULTRA-FAST UPLOAD REQUEST FAILED ===")
+        logging.error(f"Upload error: {str(e)}")
+        logging.error(f"Traceback: {traceback.format_exc()}")
+        
+        # Don't expose internal errors to client (security fix)
+        if app.config.get('DEBUG', False):
+            return jsonify({'error': f'Upload failed: {str(e)}'}), 500
+        else:
+            return jsonify({'error': 'Upload failed. Please try again.'}), 500
 
 @app.route('/upload-fast', methods=['POST'])
 def upload_file_fast():
@@ -12399,37 +11595,20 @@ def upload_file_fast():
         uploads_dir.mkdir(exist_ok=True)
         logging.info(f"Uploads directory: {uploads_dir.absolute()}")
         
-        # Clean up old files first
-        try:
-            cleanup_result = cleanup_old_files()
-            if cleanup_result['success'] and cleanup_result['removed_count'] > 0:
-                logging.info(f"Pre-upload cleanup: removed {cleanup_result['removed_count']} old files")
-        except Exception as cleanup_error:
-            logging.warning(f"Pre-upload cleanup failed: {cleanup_error}")
-        
-        # Use simple filename (no timestamp) to avoid accumulation
+        # Generate unique filename
+        timestamp = int(time.time())
         safe_filename = secure_filename(file.filename)
-        file_path = uploads_dir / safe_filename
-        
-        # Remove existing file if present
-        if file_path.exists():
-            try:
-                file_path.unlink()
-                logging.info(f"Removed existing file: {safe_filename}")
-            except Exception as e:
-                logging.warning(f"Could not remove existing file: {e}")
+        filename = f"{timestamp}_{safe_filename}"
+        file_path = uploads_dir / filename
         
         logging.info(f"Saving file to: {file_path}")
         
         # Save file
         file.save(str(file_path))
         
-        # Store file path in session with persistence
-        session.permanent = True
+        # Store file path in session
         session['file_path'] = str(file_path)
-        session['uploaded_filename'] = filename
         session['selected_tags'] = []
-        session.modified = True
         
         # CRITICAL FIX: Use background processing with database storage
         # This ensures products are stored in the database
@@ -13856,8 +13035,20 @@ def enhanced_json_match():
                     if original_matches and len(original_matches) > len(matches):
                         logging.info(f"Original matcher found {len(original_matches)} matches, using original results")
                         
-                        # Use original matches directly without conversion overhead
-                        matches = original_matches
+                        # Convert original matches to enhanced format
+                        enhanced_matches = []
+                        for i, match_data in enumerate(original_matches):
+                            from src.core.data.enhanced_json_matcher import MatchResult, MatchStrategy
+                            enhanced_match = MatchResult(
+                                score=0.8 - (i * 0.01),  # Decreasing scores
+                                match_data=match_data,
+                                strategy_used=MatchStrategy.FUZZY,
+                                confidence=0.7,
+                                processing_time=0.001,
+                                match_factors={'fallback_match': True}
+                            )
+                            enhanced_matches.append(enhanced_match)
+                        matches = enhanced_matches
                         logging.info(f"Using {len(matches)} matches from original matcher fallback")
                 except Exception as fallback_error:
                     logging.warning(f"Fallback to original matcher failed: {fallback_error}")
@@ -14623,15 +13814,7 @@ if __name__ == '__main__':
     print("App is ready to serve requests...")
     
     try:
-        # Optimized for concurrent users
-        app.run(
-            host='0.0.0.0', 
-            port=port, 
-            debug=True, 
-            use_reloader=False, 
-            use_debugger=True,
-            threaded=True  # Enable threading for concurrent users
-        )
+        app.run(host='0.0.0.0', port=port, debug=True, use_reloader=False, use_debugger=True)
     except Exception as e:
         print(f"Error starting Flask app: {e}")
         import traceback

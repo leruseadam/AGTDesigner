@@ -45,13 +45,9 @@ def normalize_lineage(lineage: str) -> str:
     lineage_mapping = {
         'hybrid': 'HYBRID',
         'indica_hybrid': 'HYBRID/INDICA',
-        'indica/hybrid': 'HYBRID/INDICA',  # FIX: Handle forward slash format
-        'hybrid/indica': 'HYBRID/INDICA',  # FIX: Handle reverse format
         'indica': 'INDICA',
         'sativa': 'SATIVA',
         'sativa_hybrid': 'HYBRID/SATIVA',
-        'sativa/hybrid': 'HYBRID/SATIVA',  # FIX: Handle forward slash format
-        'hybrid/sativa': 'HYBRID/SATIVA',  # FIX: Handle reverse format
         'cbd': 'CBD',
         'mixed': 'HYBRID',  # Default mixed to hybrid
         'unknown': 'HYBRID',  # Default unknown to hybrid
@@ -67,7 +63,7 @@ ENABLE_FAST_LOADING = True
 ENABLE_LAZY_PROCESSING = False  # DISABLED: Ensure consistent processing
 ENABLE_MINIMAL_PROCESSING = True  # ENABLED: For ultra-fast uploads
 ENABLE_BATCH_OPERATIONS = False  # DISABLED: Ensure consistent processing
-ENABLE_VECTORIZED_OPERATIONS = True  # ENABLED: For CBD classic type detection
+ENABLE_VECTORIZED_OPERATIONS = True  # ENABLED: For CBD classic type detection and enhanced lineage assignment
 ENABLE_LINEAGE_PERSISTENCE = True  # ENABLED: Enhanced lineage persistence with product name fallback
 
 # Performance constants - STANDARDIZED
@@ -154,62 +150,57 @@ def optimized_lineage_assignment(df, product_types, lineages, classic_types):
     classic_mask = product_types.isin(classic_types)
     nonclassic_mask = ~classic_mask
     
-    # Set default lineage for classic types with empty lineage (HYBRID)
-    classic_default_mask = classic_mask & empty_lineage_mask
+    # CRITICAL FIX: Enhanced CBD detection for classic types
+    cbd_from_name_mask = pd.Series([False] * len(df), index=df.index)
+    if 'Product Name*' in df.columns:
+        product_names = df['Product Name*'].astype(str)
+        cbd_from_name_mask = product_names.str.contains(r'\bCBD\b', case=False, na=False)
+    
+    # For classic types with CBD in product name AND empty lineage, assign CBD lineage
+    # FIXED: Only assign CBD if lineage is empty, don't overwrite existing lineages
+    classic_cbd_mask = classic_mask & cbd_from_name_mask & empty_lineage_mask
+    result[classic_cbd_mask] = 'CBD'
+    
+    # Set default lineage for classic types with empty lineage (HYBRID) - but only if not CBD
+    classic_default_mask = classic_mask & empty_lineage_mask & ~cbd_from_name_mask
     result[classic_default_mask] = 'HYBRID'
     
-    # Use Product Strain to determine lineage for ALL types (override existing lineage)
+    # Use Product Strain to determine lineage for ALL non-classic types (override existing lineage)
     if 'Product Strain' in df.columns:
         product_strain = df['Product Strain'].astype(str)
         
-        # COMPREHENSIVE CBD DETECTION - Catch ALL CBD products from multiple sources
         # CBD Blend products -> CBD lineage (yellow) - override existing lineage
-        # CRITICAL FIX: Apply to ALL types, not just non-classic types
-        # CBD flower and CBD pre-rolls are still classic types that should show CBD lineage
+        # But be more conservative with edibles
+        cbd_blend_mask = nonclassic_mask & (product_strain.str.contains('CBD Blend', case=False, na=False))
         
-        # Source 1: Product Strain contains "CBD Blend" or just "CBD"
-        cbd_blend_mask = product_strain.str.contains('CBD Blend', case=False, na=False)
-        cbd_strain_mask = product_strain.str.contains(r'\bCBD\b', case=False, na=False)
+        # CRITICAL FIX: Also detect CBD from product names for non-classic types
+        nonclassic_cbd_from_name = nonclassic_mask & cbd_from_name_mask
         
-        # Source 2: Product Name contains "CBD"
-        cbd_from_name_mask = pd.Series([False] * len(df), index=df.index)
-        if 'Product Name*' in df.columns:
-            product_names = df['Product Name*'].astype(str)
-            cbd_from_name_mask = product_names.str.contains(r'\bCBD\b', case=False, na=False)
-        
-        # Source 3: Product Type contains "CBD" (like "High CBD Edible Liquid")
-        cbd_from_type_mask = product_types.astype(str).str.contains(r'\bCBD\b', case=False, na=False)
-        
-        # Source 4: Existing lineage is already "CBD" (preserve it)
-        cbd_from_lineage_mask = lineages.astype(str).str.upper().str.strip() == 'CBD'
-        
-        # Combine ALL CBD detection sources
-        cbd_detection_mask = cbd_blend_mask | cbd_strain_mask | cbd_from_name_mask | cbd_from_type_mask | cbd_from_lineage_mask
-        
-        # Log CBD detection for debugging
-        if cbd_detection_mask.any():
-            cbd_count = cbd_detection_mask.sum()
-            logger.info(f"🌿 CBD DETECTION: Found {cbd_count} products with CBD indicators")
+        # Combine CBD detection from both strain and product name for non-classic types
+        cbd_detection_mask = cbd_blend_mask | nonclassic_cbd_from_name
         
         # Define edible types for more conservative CBD assignment
         edible_types = {"edible (solid)", "edible (liquid)", "high cbd edible liquid", "tincture", "topical", "capsule"}
         edible_mask = product_types.str.strip().str.lower().isin(edible_types)
         
-        # CRITICAL FIX: Handle CBD detection for both classic and non-classic types
-        
-        # For classic types with CBD (like CBD flower, CBD pre-rolls), always assign CBD lineage
-        classic_cbd = cbd_detection_mask & classic_mask
-        result[classic_cbd] = 'CBD'
-        
-        # For non-classic, non-edibles with CBD, assign CBD lineage
-        non_edible_cbd = cbd_detection_mask & nonclassic_mask & ~edible_mask
+        # For non-edibles with CBD, assign CBD lineage
+        non_edible_cbd = cbd_detection_mask & ~edible_mask
         result[non_edible_cbd] = 'CBD'
         
-        # SIMPLIFIED: For edibles with CBD, assign CBD lineage
-        # If a product has CBD in its name, type, or strain, it should show CBD lineage
+        # For edibles with CBD, be more conservative - only assign CBD if explicitly high-CBD
         edible_cbd = cbd_detection_mask & edible_mask
-        result[edible_cbd] = 'CBD'
-        logger.info(f"🌿 CBD EDIBLES: Assigned CBD lineage to {edible_cbd.sum()} CBD edible products")
+        if 'Product Name*' in df.columns:
+            high_cbd_edible_mask = edible_cbd & (
+                (product_types.str.strip().str.lower() == "high cbd edible liquid") |
+                cbd_from_name_mask
+            )
+            result[high_cbd_edible_mask] = 'CBD'
+            # Set remaining edibles with CBD to MIXED
+            remaining_edible_cbd = edible_cbd & ~high_cbd_edible_mask
+            result[remaining_edible_cbd] = 'MIXED'
+        else:
+            # If no product name column, default edibles with CBD to MIXED
+            result[edible_cbd] = 'MIXED'
         
         # Paraphernalia products -> PARAPHERNALIA lineage (pink) - override existing lineage
         paraphernalia_mask = nonclassic_mask & (product_strain.str.contains('Paraphernalia', case=False, na=False))
@@ -1281,7 +1272,13 @@ class ExcelProcessor:
                 for col in ["Product Type*", "Lineage", "Product Brand", "Vendor", "Product Strain"]:
                     if col in df.columns:
                         df[col] = df[col].fillna("Unknown")
-                        df[col] = df[col].astype("category")
+                        # Special handling for Lineage column to include all valid lineage values
+                        if col == "Lineage":
+                            # Ensure all valid lineage values are included in categories
+                            all_lineage_values = ["SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", "CBD", "MIXED", "PARAPHERNALIA", "Unknown"]
+                            df[col] = pd.Categorical(df[col], categories=all_lineage_values)
+                        else:
+                            df[col] = df[col].astype("category")
                 
                 self.logger.debug("Minimal processing complete")
             else:
@@ -1677,11 +1674,7 @@ class ExcelProcessor:
                     .str.lower()
                     .replace({
                         "indica_hybrid": "HYBRID/INDICA",
-                        "indica/hybrid": "HYBRID/INDICA",  # FIX: Add forward slash format
-                        "hybrid/indica": "HYBRID/INDICA",  # FIX: Add reverse format
                         "sativa_hybrid": "HYBRID/SATIVA",
-                        "sativa/hybrid": "HYBRID/SATIVA",  # FIX: Add forward slash format
-                        "hybrid/sativa": "HYBRID/SATIVA",  # FIX: Add reverse format
                         "sativa": "SATIVA",
                         "hybrid": "HYBRID",
                         "indica": "INDICA",
@@ -1691,7 +1684,7 @@ class ExcelProcessor:
                 )
                 
                 # Fix invalid lineage assignments for classic types
-                # Classic types should never have "MIXED" lineage
+                # Classic types should never have "MIXED" lineage - but preserve CBD lineage
                 from src.core.constants import CLASSIC_TYPES
                 
                 classic_mask = self.df["Product Type*"].str.strip().str.lower().isin(CLASSIC_TYPES)
@@ -1702,7 +1695,7 @@ class ExcelProcessor:
                     self.df.loc[classic_with_mixed_mask, "Lineage"] = "HYBRID"
                     self.logger.info(f"Fixed {classic_with_mixed_mask.sum()} classic products with invalid MIXED lineage, changed to HYBRID")
                 
-                # For classic types, set empty lineage to HYBRID
+                # For classic types, set empty lineage to HYBRID (but preserve CBD lineage)
                 # For non-classic types, set empty lineage to MIXED or CBD based on content
                 
                 # Create mask for classic types
@@ -1711,11 +1704,21 @@ class ExcelProcessor:
                 # Set empty lineage values based on product type
                 empty_lineage_mask = self.df["Lineage"].isnull() | (self.df["Lineage"].astype(str).str.strip() == "")
                 
-                # For classic types, set to HYBRID (never MIXED)
+                # For classic types, set to HYBRID (never MIXED) - but preserve existing CBD lineage
                 classic_empty_mask = classic_mask & empty_lineage_mask
                 if classic_empty_mask.any():
-                    self.df.loc[classic_empty_mask, "Lineage"] = "HYBRID"
-                    self.logger.info(f"Assigned HYBRID lineage to {classic_empty_mask.sum()} classic products with empty lineage")
+                    # CRITICAL FIX: Don't override CBD lineage for classic types
+                    cbd_lineage_mask = self.df["Lineage"] == "CBD"
+                    classic_non_cbd_empty_mask = classic_empty_mask & ~cbd_lineage_mask
+                    
+                    if classic_non_cbd_empty_mask.any():
+                        self.df.loc[classic_non_cbd_empty_mask, "Lineage"] = "HYBRID"
+                        self.logger.info(f"Assigned HYBRID lineage to {classic_non_cbd_empty_mask.sum()} classic products with empty lineage (preserved CBD lineage)")
+                    
+                    # Log CBD lineage preservation
+                    preserved_cbd_count = (classic_mask & cbd_lineage_mask).sum()
+                    if preserved_cbd_count > 0:
+                        self.logger.info(f"Preserved CBD lineage for {preserved_cbd_count} classic products")
                 
                 # For non-classic types, check for CBD content first
                 non_classic_empty_mask = ~classic_mask & empty_lineage_mask
@@ -2233,7 +2236,13 @@ class ExcelProcessor:
                 if col in self.df.columns:
                     # Fill null values before converting to categorical
                     self.df[col] = self.df[col].fillna("Unknown")
-                    self.df[col] = self.df[col].astype("category")
+                    # Special handling for Lineage column to include all valid lineage values
+                    if col == "Lineage":
+                        # Ensure all valid lineage values are included in categories
+                        all_lineage_values = ["SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", "CBD", "MIXED", "PARAPHERNALIA", "Unknown"]
+                        self.df[col] = pd.Categorical(self.df[col], categories=all_lineage_values)
+                    else:
+                        self.df[col] = self.df[col].astype("category")
 
             # 10) CBD and Mixed overrides (with edible lineage protection)
             if "Lineage" in self.df.columns:
@@ -2244,14 +2253,8 @@ class ExcelProcessor:
                 # If Product Strain is 'CBD Blend', set Lineage to 'CBD' (but be more conservative with edibles)
                 if "Product Strain" in self.df.columns and "Lineage" in self.df.columns:
                     cbd_blend_mask = self.df["Product Strain"].astype(str).str.lower().str.strip() == "cbd blend"
-                    
-                    # CRITICAL FIX: Include classic types (like CBD flower, CBD pre-rolls) in CBD assignment
-                    # Define classic types for CBD assignment
-                    classic_types_set = {"flower", "pre-roll", "infused pre-roll", "concentrate", "solventless concentrate", "vape cartridge", "rso/co2 tankers"}
-                    classic_mask = self.df["Product Type*"].str.strip().str.lower().isin(classic_types_set)
-                    
-                    # Apply CBD lineage to: classic types with CBD Blend OR non-classic, non-edibles with CBD Blend
-                    cbd_eligible_mask = cbd_blend_mask & (classic_mask | ~edible_mask)
+                    # Only apply to non-edibles - edibles with CBD Blend should typically be MIXED unless explicitly CBD-focused
+                    non_edible_cbd_blend = cbd_blend_mask & ~edible_mask
                     
                     # For edibles, only assign CBD lineage if they are explicitly high-CBD products
                     edible_cbd_blend_explicit = cbd_blend_mask & edible_mask & (
@@ -2259,7 +2262,7 @@ class ExcelProcessor:
                         (self.df[product_name_col].str.contains(r"\bCBD\b", case=False, na=False) if product_name_col else False)
                     )
                     
-                    combined_cbd_blend_mask = cbd_eligible_mask | edible_cbd_blend_explicit
+                    combined_cbd_blend_mask = non_edible_cbd_blend | edible_cbd_blend_explicit
                     
                     if combined_cbd_blend_mask.any() and "Lineage" in self.df.columns:
                         if "CBD" not in self.df["Lineage"].cat.categories:
@@ -2299,6 +2302,9 @@ class ExcelProcessor:
                 
                 # Use .any() to avoid Series boolean ambiguity
                 if combined_cbd_mask.any() and "Lineage" in self.df.columns:
+                    # Add CBD category if it doesn't exist
+                    if "CBD" not in self.df["Lineage"].cat.categories:
+                        self.df["Lineage"] = self.df["Lineage"].cat.add_categories(["CBD"])
                     self.df.loc[combined_cbd_mask, "Lineage"] = "CBD"
                     self.logger.info(f"Assigned CBD lineage to {combined_cbd_mask.sum()} products with cannabinoid content")
                 
@@ -2694,11 +2700,17 @@ class ExcelProcessor:
                 if "MIXED" not in self.df["Lineage"].cat.categories:
                     self.df["Lineage"] = self.df["Lineage"].cat.add_categories(["MIXED"])
                 
-                # Set default lineage for classic types (HYBRID)
-                set_hybrid_mask = classic_mask & empty_lineage_mask
+                # Set default lineage for classic types (HYBRID) - but preserve CBD lineage
+                classic_cbd_mask = classic_mask & (self.df["Lineage"] == "CBD")
+                set_hybrid_mask = classic_mask & empty_lineage_mask & ~classic_cbd_mask
                 if set_hybrid_mask.any():
                     self.df.loc[set_hybrid_mask, "Lineage"] = "HYBRID"
-                    self.logger.info(f"Set HYBRID lineage for {set_hybrid_mask.sum()} classic products with missing lineage")
+                    self.logger.info(f"Set HYBRID lineage for {set_hybrid_mask.sum()} classic products with missing lineage (preserved CBD lineage)")
+                
+                # Log CBD lineage preservation for classic types
+                preserved_cbd_classic_count = classic_cbd_mask.sum()
+                if preserved_cbd_classic_count > 0:
+                    self.logger.info(f"Preserved CBD lineage for {preserved_cbd_classic_count} classic products in default lineage assignment")
                 
                 # Set default lineage for non-classic types (MIXED)
                 set_mixed_mask = nonclassic_mask & empty_lineage_mask
@@ -3201,22 +3213,15 @@ class ExcelProcessor:
                             for product in json_matched_products:
                                 if isinstance(product, dict):
                                     # DATABASE PRIORITY: Ensure all fields come from database with safe defaults
-                                    product_name = product.get('Product Name*', product.get('ProductName', ''))
-                                    lineage_value = product.get('Lineage', 'MIXED')
-                                    
-                                    # Diagnostic logging for CBD lineage tracking
-                                    if 'CBD' in str(product_name).upper() or lineage_value == 'CBD':
-                                        logger.info(f"🔍 CACHED PRODUCT LINEAGE DEBUG: Product '{product_name}' has lineage='{lineage_value}' in cached JSON products")
-                                    
                                     record = {
-                                        'ProductName': product_name,
-                                        'Product Name*': product_name,
-                                        'Description': product.get('Description', product_name),
-                                        'DescAndWeight': self._process_description_from_product_name(product_name),  # Use Excel processor formula
+                                        'ProductName': product.get('Product Name*', product.get('ProductName', '')),
+                                        'Product Name*': product.get('Product Name*', product.get('ProductName', '')),
+                                        'Description': product.get('Description', product.get('Product Name*', product.get('ProductName', ''))),
+                                        'DescAndWeight': self._process_description_from_product_name(product.get('Product Name*', product.get('ProductName', ''))),  # Use Excel processor formula
                                         'Product Type*': product.get('Product Type*', 'Edible (Solid)'),  # Database default
                                         'Product Brand': product.get('Product Brand', 'CERES'),  # Database default
                                         'Product Strain': product.get('Product Strain', 'Mixed'),  # Database default
-                                        'Lineage': lineage_value,  # Database default
+                                        'Lineage': product.get('Lineage', 'MIXED'),  # Database default
                                         'Vendor': product.get('Vendor/Supplier*', product.get('Vendor', 'A Greener Today')),  # Database default
                                         'Price': product.get('Price', '25.00'),  # Database default price
                                         'Weight*': product.get('Weight*', '1'),  # Database default weight
@@ -3259,13 +3264,6 @@ class ExcelProcessor:
             records = filtered_df.to_dict('records')
             logger.debug(f"Converted to {len(records)} records")
             
-            # Diagnostic logging for CBD lineage tracking from DataFrame
-            for record in records:
-                product_name = record.get('ProductName', record.get('Product Name*', ''))
-                lineage_value = record.get('Lineage', 'NOT_FOUND')
-                if 'CBD' in str(product_name).upper() or lineage_value == 'CBD':
-                    logger.info(f"🔍 DATAFRAME LINEAGE DEBUG: Product '{product_name}' has lineage='{lineage_value}' in DataFrame records")
-            
             # Sort records by lineage order, then by the order they appear in selected_tags
             lineage_order = [
                 'SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA',
@@ -3304,11 +3302,9 @@ class ExcelProcessor:
                         description = product_name or record.get(product_name_col, '')
                     product_type = record.get('Product Type*', '').strip().lower()
                     
-                    # CRITICAL FIX: Look up database lineage and update record if found
-                    # This ensures database lineage is preserved even for Excel records
+                    # Look up database weight and units as fallback
                     db_weight = ''
                     db_units = ''
-                    db_lineage = None
                     try:
                         from src.core.data.product_database import get_product_database
                         product_db = get_product_database()
@@ -3318,18 +3314,9 @@ class ExcelProcessor:
                                 db_product = db_products[0]
                                 db_weight = db_product.get('Weight*', '')
                                 db_units = db_product.get('Units', '')
-                                db_lineage = db_product.get('Lineage', '')
-                                
-                                # CRITICAL: Update record with database lineage if it exists and is valid
-                                if db_lineage and db_lineage.strip() and db_lineage.upper() != 'MIXED':
-                                    old_lineage = record.get('Lineage', '')
-                                    record['Lineage'] = db_lineage
-                                    record['Source'] = 'Database Priority'
-                                    logger.info(f"🔄 LINEAGE UPDATE: '{product_name}' lineage updated from '{old_lineage}' to '{db_lineage}' (from database)")
-                                
                                 logger.debug(f"Found database weight/units for '{product_name}': {db_weight}/{db_units}")
                     except Exception as e:
-                        logger.debug(f"Could not lookup database info for '{product_name}': {e}")
+                        logger.debug(f"Could not lookup database weight/units for '{product_name}': {e}")
                     
                     # Add database weight and units to record for _format_weight_units
                     record['db_weight'] = db_weight

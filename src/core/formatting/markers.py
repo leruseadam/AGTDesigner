@@ -25,7 +25,6 @@ MARKER_MAP = {
     'ProductBrand_Center': 'PRODUCTBRAND_CENTER',
     'ProductStrain': 'PRODUCTSTRAIN',
     'ProductType': 'PRODUCTTYPE',
-    'ProductVendor': 'PRODUCTVENDOR',
     'Lineage': 'LINEAGE',
     'WeightUnits': 'WEIGHTUNITS',
     'Price': 'PRICE',

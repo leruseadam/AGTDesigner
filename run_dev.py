@@ -11,6 +11,8 @@ import sys
 os.environ['FLASK_ENV'] = 'development'
 os.environ['FLASK_DEBUG'] = '1'
 os.environ['DEVELOPMENT_MODE'] = 'true'
+# Speed up reloads: disable heavy startup work
+os.environ['DISABLE_STARTUP_FILE_LOADING'] = '1'
 
 # Add current directory to Python path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -27,6 +29,7 @@ if __name__ == '__main__':
     
     try:
         app = LabelMakerApp()
+        # Bind a fast port if you run multiple servers
         app.run()
     except KeyboardInterrupt:
         print("\n👋 Development server stopped by user")

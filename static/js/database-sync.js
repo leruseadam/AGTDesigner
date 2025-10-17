@@ -162,15 +162,12 @@ async function openDatabaseAnalytics() {
       </div>
     `;
 
-    // Add export buttons
+    // Add export button
     const exportButtonHtml = `
       <div class="row mt-4">
         <div class="col-12 text-end">
-          <button class="btn btn-success me-2" onclick="exportInventory()">
-            <i class="bi bi-table"></i> Export Inventory Only
-          </button>
           <button class="btn btn-primary" onclick="exportDatabase()">
-            <i class="bi bi-download"></i> Export Full Database
+            <i class="bi bi-download"></i> Export Database
           </button>
         </div>
       </div>
@@ -322,50 +319,7 @@ async function exportDatabase() {
   }
 }
 
-async function exportInventory() {
-  // Show splash screen with inventory-specific message
-  showExportSplash('Exporting Inventory', 'Preparing your inventory export...');
-  
-  try {
-    const response = await fetch('/api/inventory-export');
-    if (!response.ok) {
-      throw new Error(`Export failed: ${response.statusText}`);
-    }
-    
-    // Get the filename from the Content-Disposition header
-    const contentDisposition = response.headers.get('Content-Disposition');
-    const filenameMatch = contentDisposition && contentDisposition.match(/filename="(.+)"/);
-    const filename = filenameMatch ? filenameMatch[1] : 'inventory_export.xlsx';
-    
-    // Create a blob from the response
-    const blob = await response.blob();
-    
-    // Create a download link and trigger it
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    window.URL.revokeObjectURL(url);
-    a.remove();
-    
-    // Hide splash screen and show success message
-    hideExportSplash();
-    const successToast = new bootstrap.Toast(document.getElementById('successToast'));
-    document.getElementById('successToastMessage').textContent = 'Inventory exported successfully';
-    successToast.show();
-    
-  } catch (error) {
-    console.error('Error exporting inventory:', error);
-    hideExportSplash();
-    const errorToast = new bootstrap.Toast(document.getElementById('errorToast'));
-    document.getElementById('errorToastMessage').textContent = `Failed to export inventory: ${error.message}`;
-    errorToast.show();
-  }
-}
-
-function showExportSplash(title = 'Exporting Database', message = 'Preparing your database export...') {
+function showExportSplash() {
   // Create splash screen HTML
   const splashHtml = `
     <div id="exportSplash" class="export-splash-overlay">
@@ -375,8 +329,8 @@ function showExportSplash(title = 'Exporting Database', message = 'Preparing you
             <span class="visually-hidden">Loading...</span>
           </div>
         </div>
-        <h4 class="export-splash-title">${title}</h4>
-        <p class="export-splash-message">${message}</p>
+        <h4 class="export-splash-title">Exporting Database</h4>
+        <p class="export-splash-message">Preparing your database export...</p>
         <div class="export-splash-progress">
           <div class="progress">
             <div class="progress-bar progress-bar-striped progress-bar-animated" 

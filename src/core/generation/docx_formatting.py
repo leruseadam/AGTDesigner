@@ -4,6 +4,7 @@ from docx.oxml.ns import qn
 from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT, WD_CELL_VERTICAL_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -12,8 +13,8 @@ COLORS = {
     'SATIVA': 'ED4123',
     'INDICA': '9900FF',
     'HYBRID': '009900',
-    'HYBRID/INDICA': '9900FF',  # FIX: Use forward slash to match actual lineage values
-    'HYBRID/SATIVA': 'ED4123',  # FIX: Use forward slash to match actual lineage values
+    'HYBRID_INDICA': '9900FF',
+    'HYBRID_SATIVA': 'ED4123',
     'CBD': 'F1C232',
     'CBD_BLEND': 'F1C232',  # Same color as CBD
     'MIXED': '0021F5',
@@ -26,21 +27,40 @@ def apply_lineage_colors(doc):
         for table in doc.tables:
             for row in table.rows:
                 for cell in row.cells:
-                    text = cell.text.upper()
+                    original_text = cell.text.upper()  # Keep original text to check for markers
                     color_hex = None
+                    
+                    # Check if ProductStrain is CBD Blend (before marker removal)
+                    is_product_strain_cbd_blend = False
+                    strain_matches = re.findall(r"PRODUCTSTRAIN_START(.*?)PRODUCTSTRAIN_END", original_text)
+                    for strain_content in strain_matches:
+                        if "CBD BLEND" in strain_content:
+                            is_product_strain_cbd_blend = True
+                            break
                     
                     # Remove marker wrappers for robust matching
                     for marker in ["LINEAGE_START", "LINEAGE_END", "PRODUCTSTRAIN_START", "PRODUCTSTRAIN_END", "PRODUCTBRAND_CENTER_START", "PRODUCTBRAND_CENTER_END"]:
-                        text = text.replace(marker, "")
+                        original_text = original_text.replace(marker, "")
+                    text = original_text.strip()
+                    
+                    # Remove ProductStrain content from text to prevent it from triggering lineage colors
+                    # ProductStrain should only affect coloring through the is_product_strain_cbd_blend flag
+                    strain_matches = re.findall(r"PRODUCTSTRAIN_START(.*?)PRODUCTSTRAIN_END", original_text)
+                    for strain_content in strain_matches:
+                        text = text.replace(strain_content, "")
                     text = text.strip()
+                    
+                    # Check if this is a classic type by looking for classic lineage indicators
+                    # Classic types have actual lineage (SATIVA, INDICA, HYBRID, CBD) in their content
+                    is_classic_type = any(lineage in text for lineage in ["SATIVA", "INDICA", "HYBRID", "CBD"])
                     
                     # Apply lineage coloring logic based on clean text
                     if "PARAPHERNALIA" in text:
                         color_hex = COLORS['PARA']
                     elif "HYBRID/INDICA" in text or "HYBRID INDICA" in text:
-                        color_hex = COLORS['HYBRID/INDICA']  # FIX: Use correct key with forward slash
+                        color_hex = COLORS['HYBRID_INDICA']
                     elif "HYBRID/SATIVA" in text or "HYBRID SATIVA" in text:
-                        color_hex = COLORS['HYBRID/SATIVA']  # FIX: Use correct key with forward slash
+                        color_hex = COLORS['HYBRID_SATIVA']
                     elif "SATIVA" in text:
                         color_hex = COLORS['SATIVA']
                     elif "INDICA" in text:
@@ -48,19 +68,18 @@ def apply_lineage_colors(doc):
                     elif "HYBRID" in text:
                         color_hex = COLORS['HYBRID']
                     elif "CBD" in text or "CBD_BLEND" in text:
-                        color_hex = COLORS['CBD']
+                        # Apply CBD lineage colors if it's a classic type OR if ProductStrain is CBD Blend
+                        if is_classic_type or is_product_strain_cbd_blend:
+                            color_hex = COLORS['CBD']
                     elif "CBD BLEND" in text:
-                        color_hex = COLORS['CBD_BLEND']
+                        # Apply CBD BLEND lineage colors if it's a classic type OR if ProductStrain is CBD Blend
+                        if is_classic_type or is_product_strain_cbd_blend:
+                            color_hex = COLORS['CBD_BLEND']
                     elif "MIXED" in text:
                         # MIXED lineage always gets blue bars (this covers non-classic types like edibles)
                         color_hex = COLORS['MIXED']  # Blue for Mixed
-                    elif any(brand in text.upper() for brand in ["MOONSHOT", "PLATINUM", "PREMIUM", "GOLD", "SILVER", "ELITE", "SELECT", "RESERVE", "CRAFT", "ARTISAN", "BOUTIQUE", "SIGNATURE", "LIMITED", "EXCLUSIVE", "PRIVATE", "CUSTOM", "SPECIAL", "DELUXE", "ULTRA", "SUPER", "MEGA", "MAX", "PRO", "PLUS", "X", "CONSTELLATION"]):
-                        # Only apply brand-based blue coloring if the text doesn't contain classic lineage indicators
-                        # This prevents classic types (like infused prerolls) from getting blue bars when they should show lineage colors
-                        has_classic_lineage = any(lineage in text for lineage in ["SATIVA", "INDICA", "HYBRID", "CBD"])
-                        if not has_classic_lineage:
-                            # Product Brand values get blue bars for non-classic types only
-                            color_hex = COLORS['MIXED']  # Blue for Product Brand
+                    # REMOVED: Brand-based lineage coloring for non-classic types
+                    # Non-classic types should not get lineage colors unless they have specific ProductStrain values
                     
                     if color_hex:
                         # Set cell background color
@@ -75,9 +94,14 @@ def apply_lineage_colors(doc):
                         tcPr.append(shd)
                         for paragraph in cell.paragraphs:
                             for run in paragraph.runs:
+                                # Preserve existing font size to maintain ProductStrain 1pt sizing
+                                existing_font_size = run.font.size
                                 run.font.color.rgb = RGBColor(255, 255, 255)
                                 run.font.bold = True
                                 run.font.name = "Arial"
+                                # Restore the original font size if it was set
+                                if existing_font_size is not None:
+                                    run.font.size = existing_font_size
         # FINAL LINEAGE CLEANUP: Remove any leading spaces from lineage content after coloring
         _final_lineage_cleanup_after_coloring(doc)
         
@@ -479,10 +503,12 @@ def enforce_ratio_formatting(doc):
                 sz.set(qn('w:val'), str(int(font_size.pt * 2)))  # Word uses half-points
                 rPr.append(sz)
             else:
-                # Use default size (12pt)
-                run.font.size = Pt(12)
+                # Use unified font sizing system for default size
+                from src.core.generation.unified_font_sizing import get_font_size
+                default_size = get_font_size(run.text, 'default', 'vertical', 1.0)
+                run.font.size = default_size
                 sz = OxmlElement('w:sz')
-                sz.set(qn('w:val'), str(int(12 * 2)))  # Word uses half-points
+                sz.set(qn('w:val'), str(int(default_size.pt * 2)))  # Word uses half-points
                 rPr.append(sz)
 
     # Process all tables
@@ -658,8 +684,10 @@ def enforce_thc_cbd_bold_formatting(doc):
                 run.font.name = "Arial"
                 run.font.bold = True
                 
-                # Set font size
-                run.font.size = Pt(10)
+                # Use unified font sizing system
+                from src.core.generation.unified_font_sizing import get_font_size
+                font_size = get_font_size(line, 'default', 'vertical', 1.0)
+                run.font.size = font_size
                 
                 # Add line break if not the last line
                 if i < len(lines) - 1:
@@ -699,10 +727,12 @@ def cleanup_all_price_markers(doc):
         paragraph.clear()
         if text.strip():
             run = paragraph.add_run(text.strip())
-            # Apply price formatting
+            # Apply price formatting using unified font sizing system
+            from src.core.generation.unified_font_sizing import get_font_size
             run.font.name = 'Arial'
             run.font.bold = True
-            run.font.size = Pt(14)  # Standard price font size
+            price_font_size = get_font_size(text.strip(), 'price', 'vertical', 1.0)
+            run.font.size = price_font_size
 
     # Process all tables
     for table in doc.tables:
@@ -781,7 +811,10 @@ def apply_type_formatting(doc, product_type, template_type='vertical'):
             for run in paragraph.runs:
                 if run.font.size:
                     current_size = run.font.size.pt
-                    run.font.size = Pt(max(6, current_size * 0.8))  # Reduce size by 20%
+                    # Use unified font sizing system with reduced scale
+                    from src.core.generation.unified_font_sizing import get_font_size
+                    reduced_size = get_font_size(run.text, 'default', 'vertical', 0.8)
+                    run.font.size = reduced_size
                 run.font.color.rgb = RGBColor(128, 128, 128)  # Gray color
         elif product_type.lower() in ['concentrate', 'wax', 'shatter', 'rosin']:
             # Make concentrate text bold and prominent
@@ -789,7 +822,10 @@ def apply_type_formatting(doc, product_type, template_type='vertical'):
                 run.font.bold = True
                 if run.font.size:
                     current_size = run.font.size.pt
-                    run.font.size = Pt(min(24, current_size * 1.1))  # Increase size by 10%
+                    # Use unified font sizing system with increased scale
+                    from src.core.generation.unified_font_sizing import get_font_size
+                    increased_size = get_font_size(run.text, 'default', 'vertical', 1.1)
+                    run.font.size = increased_size
 
     # Process all tables
     for table in doc.tables:
@@ -1169,7 +1205,10 @@ def enforce_fixed_cell_dimensions(table, template_type=None):
                                     
                                     # Set font properties to prevent text expansion
                                     if not run.font.size:
-                                        run.font.size = Pt(12)  # Set default size if none
+                                        # Use unified font sizing system for default size
+                                        from src.core.generation.unified_font_sizing import get_font_size
+                                        default_size = get_font_size(run.text, 'default', 'vertical', 1.0)
+                                        run.font.size = default_size
                                     
                                     # CRITICAL: Force text to wrap within cell boundaries
                                     rPr = run._element.get_or_add_rPr()
@@ -1185,7 +1224,10 @@ def enforce_fixed_cell_dimensions(table, template_type=None):
                                     for run in paragraph.runs:
                                         # Set font properties to prevent text expansion
                                         if not run.font.size:
-                                            run.font.size = Pt(12)  # Set default size if none
+                                            # Use unified font sizing system for default size
+                                            from src.core.generation.unified_font_sizing import get_font_size
+                                            default_size = get_font_size(run.text, 'default', 'vertical', 1.0)
+                                            run.font.size = default_size
                                         
                                         # CRITICAL: Force text to wrap within cell boundaries
                                         rPr = run._element.get_or_add_rPr()
@@ -1413,7 +1455,10 @@ def apply_custom_formatting(doc, template_settings):
                     if run.font.size and run.font.size.pt > 6:
                         # Reduce font size if text is too long
                         if len(run.text) > 50:
-                            run.font.size = Pt(max(6, run.font.size.pt - 2))
+                            # Use unified font sizing system with reduced size
+                            from src.core.generation.unified_font_sizing import get_font_size
+                            reduced_size = get_font_size(run.text, 'default', 'vertical', 0.85)
+                            run.font.size = reduced_size
         
         # Apply smart truncation if enabled
         if smart_truncation:
@@ -1844,7 +1889,10 @@ def prevent_table_expansion_enhanced(doc, template_type=None):
                                 
                                 # Set font properties to prevent expansion
                                 if not run.font.size:
-                                    run.font.size = Pt(12)
+                                    # Use unified font sizing system for default size
+                                    from src.core.generation.unified_font_sizing import get_font_size
+                                    default_size = get_font_size(run.text, 'default', 'vertical', 1.0)
+                                    run.font.size = default_size
                                 
                                 # Add text wrapping control to run level
                                 rPr = run._element.get_or_add_rPr()
