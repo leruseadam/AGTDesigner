@@ -44,7 +44,7 @@ def _load_font_sizing_config():
                 },
                 'double': {
                     'description': [(10, 24), (20, 22), (30, 21), (40, 20), (50, 19), (60, 18), (70, 17), (80, 16), (90, 15), (100, 14), (110, 12), (float('inf'), 10)],
-                    'brand': [(1, 10), (2, 9), (5, 8), (10, 8), (float('inf'), 6.5)],
+                    'brand': [(10, 14), (20, 12), (30, 11), (40, 10), (float('inf'), 9)],
                     'price': [(10, 22), (15, 20), (float('inf'), 14)],
                     'lineage': [(15, 13), (25, 12), (35, 10), (45, 9), (float('inf'), 9)],
                     'ratio': [(10, 9), (20, 8), (30, 7), (float('inf'), 6.5)],
@@ -60,7 +60,7 @@ def _load_font_sizing_config():
                     'description': [(5, 34), (20, 32), (30, 28), (40, 26), (60, 24), (70, 22), (80, 20), (90, 18), (float('inf'), 16)],
                     'brand': [(10, 16), (15, 14), (25, 12), (35, 11), (float('inf'), 10)],
                     'price': [(2, 36), (3, 30), (float('inf'), 26)],  # $1/$11 = 36pt, $111+ = 30pt
-                    'lineage': [(20, 20), (40, 18), (60, 16), (float('inf'), 12)],
+                    'lineage': [(20, 20), (40, 18), (80, 16), (float('inf'), 12)],
                     'ratio': [(10, 14), (20, 12), (30, 9), (float('inf'), 9)],
                     'thc_cbd': [(10, 12), (float('inf'), 12)],
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
@@ -168,11 +168,11 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
         if scale_factor < 1.0:
             scale_factor = 1.0
         
-        # CRITICAL FIX: Use consistent font size for all double template brands
-        # This ensures all brand names appear at the same size for visual consistency
-        final_size = 8 * scale_factor
-        logger.debug(f"Double template brand consistency rule: text='{text}' -> {final_size}pt font")
-        return Pt(final_size)
+        # CRITICAL FIX: Use proper font sizing for double template brands instead of forcing 8pt
+        # This allows brands to scale properly based on length while maintaining readability
+        # Use the normal font sizing logic instead of forcing a fixed size
+        logger.debug(f"Double template brand rule: using normal font sizing for text='{text}'")
+        # Fall through to normal font sizing logic
     
     # Special rule: If double template description has multiple words with 9+ characters each, automatically reduce to 18pt
     if orientation.lower() == 'double' and field_type.lower() == 'description':
@@ -358,7 +358,7 @@ def get_font_size_by_marker(text, marker_type, template_type='vertical', scale_f
     if base_marker in ('LINEAGE', 'LINEAGE_CENTER'):
         try:
             template_lower = str(template_type).lower()
-            if template_lower in ('double', 'mini'):
+            if template_lower in ('double', 'mini', 'vertical'):
                 field_type = 'brand'
             else:
                 # Use product_type when available

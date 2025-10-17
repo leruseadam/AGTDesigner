@@ -956,7 +956,14 @@ class TemplateProcessor:
             self.chunk_count = 0
             
             # Debug: Log the overall order of records
-            overall_order = [record.get('ProductName', 'Unknown') for record in records]
+            # CRITICAL FIX: Handle different field names for product name
+            overall_order = []
+            for record in records:
+                product_name = (record.get('ProductName') or 
+                              record.get('Product Name*') or 
+                              record.get('ProductName*') or 
+                              'Unknown')
+                overall_order.append(product_name)
             self.logger.info(f"Processing {len(records)} records in overall order: {overall_order}")
             
             # CRITICAL FIX: JSON matched products are already unique by design - no deduplication needed
@@ -972,7 +979,11 @@ class TemplateProcessor:
                 seen_products = set()
                 unique_records = []
                 for record in records:
-                    product_name = record.get('ProductName', 'Unknown')
+                    # CRITICAL FIX: Handle different field names for product name
+                    product_name = (record.get('ProductName') or 
+                                  record.get('Product Name*') or 
+                                  record.get('ProductName*') or 
+                                  'Unknown')
                     if product_name not in seen_products:
                         seen_products.add(product_name)
                         unique_records.append(record)
@@ -1633,11 +1644,12 @@ class TemplateProcessor:
                 # Center brand should always be ALL CAPS
                 brand_center_text = str(product_brand).upper()
                 if self.template_type == 'vertical':
-                    # For vertical template, set only Lineage to brand and clear ProductBrand to prevent duplication.
-                    label_context['Lineage'] = brand_center_text
+                    # For vertical template, use marker-based formatting like horizontal for proper font sizing
+                    # CRITICAL FIX: Use markers instead of plain text to enable proper font sizing
+                    label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{brand_center_text}PRODUCTBRAND_CENTER_END"
                     label_context['ProductBrand'] = ""
                     label_context['ProductBrand_Center'] = ""
-                    self.logger.info(f"🎯 VERTICAL BRAND FIX: Set Lineage to '{brand_center_text}' and cleared ProductBrand for vertical template")
+                    self.logger.info(f"🎯 VERTICAL BRAND FIX: Set Lineage to '{brand_center_text}' with markers for proper font sizing")
                 elif self.template_type == 'mini':
                     # For mini template, set both Lineage and ProductBrand for maximum compatibility
                     # Mini templates need brand information in multiple fields
@@ -1698,9 +1710,18 @@ class TemplateProcessor:
                     label_context['ProductBrand_Center'] = ""
                 
                 # Product Strain gets its own field with small font size
-                if product_strain:
-                    # For vertical and mini templates, don't wrap with markers since they use simple placeholders
-                    if self.template_type in ['vertical', 'mini']:
+                # CRITICAL FIX: For vertical template, allow ProductStrain but use proper font sizing
+                # Instead of clearing it, use marker-based formatting for proper font sizing
+                if self.template_type == 'vertical':
+                    if product_strain:
+                        label_context['ProductStrain'] = f"PRODUCTSTRAIN_START{product_strain}PRODUCTSTRAIN_END"
+                        self.logger.debug(f"VERTICAL FIX: Set ProductStrain to '{product_strain}' with markers for proper font sizing")
+                    else:
+                        label_context['ProductStrain'] = ""
+                        self.logger.debug(f"VERTICAL FIX: No ProductStrain available")
+                elif product_strain:
+                    # For mini templates, don't wrap with markers since they use simple placeholders
+                    if self.template_type == 'mini':
                         label_context['ProductStrain'] = product_strain
                     else:
                         label_context['ProductStrain'] = f"PRODUCTSTRAIN_START{product_strain}PRODUCTSTRAIN_END"
@@ -1723,7 +1744,16 @@ class TemplateProcessor:
                 self.logger.debug(f"Lineage, ProductBrand, and ProductBrand_Center set to empty for non-classic type '{product_type}'")
             
             # Always set ProductStrain for nonclassic types, regardless of whether there's a product brand
-            if product_strain:
+            # CRITICAL FIX: For vertical template, use marker-based formatting for proper font sizing
+            if self.template_type == 'vertical':
+                # Don't override the ProductStrain we set above for vertical template
+                if 'ProductStrain' not in label_context:
+                    if product_strain:
+                        label_context['ProductStrain'] = f"PRODUCTSTRAIN_START{product_strain}PRODUCTSTRAIN_END"
+                    else:
+                        label_context['ProductStrain'] = ""
+                self.logger.debug(f"VERTICAL FIX: Keeping ProductStrain with markers for vertical template")
+            elif product_strain:
                 # All templates use wrapped format for consistent processing by manual_docx_replace()
                 label_context['ProductStrain'] = f"PRODUCTSTRAIN_START{product_strain}PRODUCTSTRAIN_END"
                 self.logger.debug(f"DEBUG: Set ProductStrain to '{label_context['ProductStrain']}' for {self.template_type} template")

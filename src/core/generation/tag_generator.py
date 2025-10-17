@@ -299,6 +299,98 @@ def expand_template_to_4x5_fixed_scaled(template_path, scale_factor=1.0):
     buf.seek(0)
     return buf
 
+def expand_template_to_4x3_fixed_double(template_path, scale_factor=1.0):
+    """Expand template to 4x3 grid for double templates (4 columns, 3 rows = 12 labels)."""
+    from docx import Document
+    from docx.shared import Pt
+    from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from io import BytesIO
+    from copy import deepcopy
+
+    num_cols, num_rows = 4, 3  # 4 columns, 3 rows for 12 labels total
+    
+    # Equal width columns: 1.125 inches each for a total of 4.5 inches
+    col_width_twips = str(int(1.125 * 1440))  # 1.125 inches per column
+    row_height_pts = Pt(2.5 * 72)  # 2.5 inches per row for equal height
+
+    doc = Document(template_path)
+    if not doc.tables:
+        raise RuntimeError("Template must contain at least one table.")
+    old = doc.tables[0]
+    src_tc = deepcopy(old.cell(0,0)._tc)
+    old._element.getparent().remove(old._element)
+
+    # Remove empty paragraphs
+    while doc.paragraphs and not doc.paragraphs[0].text.strip():
+        doc.paragraphs[0]._element.getparent().remove(doc.paragraphs[0]._element)
+
+    tbl = doc.add_table(rows=num_rows, cols=num_cols)
+    tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
+    
+    # Set table properties
+    tblPr = tbl._element.find(qn('w:tblPr')) or OxmlElement('w:tblPr')
+    shd = OxmlElement('w:shd')
+    shd.set(qn('w:val'), 'clear')
+    shd.set(qn('w:color'), 'auto')
+    shd.set(qn('w:fill'), 'D3D3D3')
+    tblPr.insert(0, shd)
+    layout = OxmlElement('w:tblLayout')
+    layout.set(qn('w:type'), 'fixed')
+    tblPr.append(layout)
+    tbl._element.insert(0, tblPr)
+    
+    # Set column widths
+    grid = OxmlElement('w:tblGrid')
+    for _ in range(num_cols):
+        gc = OxmlElement('w:gridCol')
+        gc.set(qn('w:w'), col_width_twips)
+        grid.append(gc)
+    tbl._element.insert(0, grid)
+    
+    # Set row heights
+    for row in tbl.rows:
+        row.height = row_height_pts
+        row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+    
+    # Set borders
+    borders = OxmlElement('w:tblBorders')
+    for side in ('insideH','insideV'):
+        b = OxmlElement(f"w:{side}")
+        b.set(qn('w:val'), "single")
+        b.set(qn('w:sz'), "4")
+        b.set(qn('w:color'), "D3D3D3")
+        b.set(qn('w:space'), "0")
+        borders.append(b)
+    tblPr.append(borders)
+    
+    # Fill each cell with the template content
+    cnt = 1
+    for r in range(num_rows):
+        for c in range(num_cols):
+            cell = tbl.cell(r,c)
+            cell._tc.clear_content()
+            tc = deepcopy(src_tc)
+            for t in tc.iter(qn('w:t')):
+                if t.text and 'Label1' in t.text:
+                    t.text = t.text.replace('Label1', f'Label{cnt}')
+            for el in tc.xpath('./*'):
+                cell._tc.append(deepcopy(el))
+            cnt += 1
+    
+    from docx.oxml.shared import OxmlElement as OE
+    tblPr2 = tbl._element.find(qn('w:tblPr'))
+    spacing = OxmlElement('w:tblCellSpacing')
+    spacing.set(qn('w:w'), str(int(0.001 * 1440)))
+    spacing.set(qn('w:type'), 'dxa')
+    tblPr2.append(spacing)
+    
+    buf = BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf
+
 def process_chunk(args):
     """Process a chunk of records to generate labels."""
     chunk, base_template, font_scheme, orientation, scale_factor = args
@@ -307,7 +399,7 @@ def process_chunk(args):
         local_template_buffer = expand_template_to_4x5_fixed_scaled(base_template, scale_factor=scale_factor)
         num_labels = 20  # Fixed: 4x5 grid = 20 labels per page
     elif orientation == "double":
-        local_template_buffer = base_template
+        local_template_buffer = expand_template_to_4x3_fixed_double(base_template, scale_factor=scale_factor)
         num_labels = 12  # Fixed: 4x3 grid = 12 labels per page
     else:
         local_template_buffer = base_template
