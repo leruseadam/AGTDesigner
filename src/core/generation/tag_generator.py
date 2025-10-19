@@ -435,9 +435,8 @@ def create_dynamic_3x3_template(template_path, num_products, scale_factor=1.0):
                 # This saves printer ink by not showing empty template placeholders
                 cell = tbl.cell(r, c)
                 cell._tc.clear_content()
-                # Add a single empty paragraph to maintain cell structure but with no visible content
-                paragraph = cell.add_paragraph()
-                paragraph.clear()
+                # Don't add any paragraphs - keep the cell completely empty
+                # This prevents any placeholder text from showing up
             cnt += 1
     
     # Add spacing
@@ -568,6 +567,13 @@ def create_dynamic_double_template(template_path, num_products, scale_factor=1.0
                         t.text = t.text.replace('Label1', f'Label{cnt}')
                 for el in tc.xpath('./*'):
                     cell._tc.append(deepcopy(el))
+            else:
+                # CRITICAL FIX: For empty cells, completely remove them to prevent blank placeholders
+                # This saves printer ink by not showing empty template placeholders
+                cell = tbl.cell(r, c)
+                cell._tc.clear_content()
+                # Don't add any paragraphs - keep the cell completely empty
+                # This prevents any placeholder text from showing up
             cnt += 1
     
     # Add spacing

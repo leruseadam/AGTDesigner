@@ -176,7 +176,8 @@ class TemplateProcessor:
             unique_labels = set(matches)
             
             if len(unique_labels) < required_labels or force_expand:
-                # Templates need expansion to create proper grid layouts
+                # CRITICAL FIX: Use standard expansion methods for now
+                # Dynamic templates will be created later in _process_chunk based on actual product count
                 if self.template_type == 'mini':
                     self.logger.info("Calling 4x5 expansion method")
                     return self._expand_template_to_4x5_fixed_scaled()
