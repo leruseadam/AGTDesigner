@@ -431,9 +431,13 @@ def create_dynamic_3x3_template(template_path, num_products, scale_factor=1.0):
                 for el in src_tc.xpath('./*'):
                     cell._tc.append(deepcopy(el))
             else:
-                # For empty cells, just clear them but don't remove them
+                # CRITICAL FIX: For empty cells, completely remove them to prevent blank placeholders
+                # This saves printer ink by not showing empty template placeholders
                 cell = tbl.cell(r, c)
                 cell._tc.clear_content()
+                # Add a single empty paragraph to maintain cell structure but with no visible content
+                paragraph = cell.add_paragraph()
+                paragraph.clear()
             cnt += 1
     
     # Add spacing

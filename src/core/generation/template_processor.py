@@ -545,6 +545,13 @@ class TemplateProcessor:
                 self._dynamic_template_created = True
                 self.logger.info(f"🔧 DYNAMIC DOUBLE TEMPLATE: Created dynamic template for {num_products} products")
                 return True
+            elif self.template_type in ['horizontal', 'vertical'] and num_products <= 9:
+                # Use the dynamic 3x3 template creation for horizontal/vertical templates
+                from src.core.generation.tag_generator import create_dynamic_3x3_template
+                self._expanded_template_buffer = create_dynamic_3x3_template(self._template_path, num_products, self.scale_factor)
+                self._dynamic_template_created = True
+                self.logger.info(f"🔧 DYNAMIC {self.template_type.upper()} TEMPLATE: Created dynamic template for {num_products} products")
+                return True
             else:
                 self.logger.info(f"🔧 DYNAMIC TEMPLATE: Not creating dynamic template for {self.template_type} with {num_products} products")
                 return False
