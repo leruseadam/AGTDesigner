@@ -147,23 +147,19 @@ async function handleFiles(files) {
   }
 }
 
-// Enhanced smooth scrolling for better PC performance
-// Only apply custom scrolling if browser doesn't support smooth scroll behavior
-if (!CSS.supports('scroll-behavior', 'smooth')) {
+// Add smooth scrolling (but ONLY on Mac - Windows handles native scrolling better)
+const isWindows = /Windows|Win32|Win64/.test(navigator.userAgent);
+if (!isWindows) {
   document.querySelectorAll('.tag-list-container').forEach(container => {
-    // Use passive listener and don't prevent default for better performance
     container.addEventListener('wheel', (e) => {
-      // Let browser handle native scrolling for better performance on PC
-      // Only add smooth behavior via CSS
-      container.style.scrollBehavior = 'smooth';
-    }, { passive: true });
+      e.preventDefault();
+      container.scrollTop += e.deltaY * 0.5;
+    });
   });
+  console.log('🍎 Mac detected - using custom smooth scrolling');
+} else {
+  console.log('🪟 Windows detected - using native scrolling for better performance');
 }
-
-// Apply CSS smooth scrolling to all scrollable containers
-document.querySelectorAll('.tag-list-container, .modal-body, [style*="overflow"]').forEach(container => {
-  container.style.scrollBehavior = 'smooth';
-});
 
 // Add keyboard shortcuts
 document.addEventListener('keydown', (e) => {

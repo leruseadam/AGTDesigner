@@ -39,6 +39,8 @@
     <!-- Custom CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}?v={{ cache_bust if cache_bust else '1.0' }}">
+    <!-- Windows Performance Optimizations CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/windows-performance.css') }}?v={{ cache_bust if cache_bust else '1.0' }}">
     
     <!-- Bootstrap Icons -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css">
@@ -52,6 +54,8 @@
 </head>
 <body>
     {% block content %}{% endblock %}
+    <!-- Windows Performance Optimization - Load first for best results -->
+    <script src="{{ url_for('static', filename='js/windows-performance-optimization.js') }}"></script>
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
     <script src="{{ url_for('static', filename='js/enhanced-ui.js') }}"></script>
     <script src="{{ url_for('static', filename='js/generation-splash.js') }}"></script>

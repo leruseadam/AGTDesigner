@@ -1,0 +1,243 @@
+/**
+ * Windows PC Performance Optimizations
+ * 
+ * This CSS file contains optimizations specifically for Windows browsers
+ * to improve scrolling, rendering, and general UI responsiveness.
+ * 
+ * Key optimizations:
+ * 1. Disable expensive CSS effects
+ * 2. Simplify transitions and animations
+ * 3. Optimize scrollbar rendering
+ * 4. Reduce repaints and reflows
+ * 5. Use CSS containment
+ */
+
+/* Detect Windows and apply optimizations */
+@media (pointer: fine) {
+    /* Fine pointer typically indicates desktop, including Windows */
+    
+    /* Disable smooth scrolling - use instant scrolling for better performance */
+    html {
+        scroll-behavior: auto !important;
+    }
+    
+    /* Optimize all scrollable containers */
+    .tag-list-container,
+    #availableTags,
+    #selectedTags,
+    .modal-body,
+    .scrollable-container {
+        /* Use CSS containment for better performance */
+        contain: layout style paint;
+        
+        /* Disable GPU compositing that can cause lag */
+        transform: none !important;
+        will-change: auto !important;
+        
+        /* Optimize font rendering */
+        -webkit-font-smoothing: subpixel-antialiased;
+        -moz-osx-font-smoothing: auto;
+        text-rendering: optimizeSpeed;
+    }
+    
+    /* Simplify transitions - faster animations */
+    * {
+        transition-duration: 0.05s !important;
+        animation-duration: 0.2s !important;
+    }
+    
+    /* Disable expensive hover effects */
+    .tag-item:hover,
+    .btn:hover,
+    .card:hover {
+        transform: none !important;
+    }
+    
+    /* Reduce shadow complexity */
+    .card,
+    .modal-content,
+    .dropdown-menu,
+    .shadow,
+    .shadow-sm,
+    .shadow-lg {
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12) !important;
+    }
+    
+    /* During scrolling, remove all shadows and transitions */
+    .scrolling,
+    .scrolling * {
+        box-shadow: none !important;
+        transition: none !important;
+        animation: none !important;
+    }
+    
+    /* Optimize table rendering */
+    table {
+        table-layout: fixed;
+    }
+    
+    /* Simplify scrollbars for better performance */
+    ::-webkit-scrollbar {
+        width: 14px;
+        height: 14px;
+    }
+    
+    ::-webkit-scrollbar-track {
+        background: rgba(0, 0, 0, 0.05);
+        border-radius: 0;
+    }
+    
+    ::-webkit-scrollbar-thumb {
+        background: rgba(0, 0, 0, 0.3);
+        border-radius: 7px;
+        border: 2px solid transparent;
+        background-clip: padding-box;
+    }
+    
+    ::-webkit-scrollbar-thumb:hover {
+        background: rgba(0, 0, 0, 0.5);
+        background-clip: padding-box;
+    }
+    
+    ::-webkit-scrollbar-thumb:active {
+        background: rgba(0, 0, 0, 0.6);
+        background-clip: padding-box;
+    }
+    
+    /* Optimize form controls */
+    select.form-select,
+    input.form-control,
+    textarea.form-control {
+        /* Use native rendering */
+        appearance: auto;
+        -webkit-appearance: auto;
+    }
+    
+    /* Reduce backdrop blur effects */
+    .modal-backdrop {
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+    }
+    
+    /* Optimize gradient rendering */
+    .gradient,
+    .bg-gradient {
+        background-image: none !important;
+        background-color: var(--bs-primary, #0d6efd) !important;
+    }
+    
+    /* Simplify borders */
+    * {
+        border-radius: min(var(--bs-border-radius, 0.25rem), 4px) !important;
+    }
+    
+    /* Optimize image rendering */
+    img {
+        image-rendering: auto;
+        image-rendering: crisp-edges;
+        image-rendering: -webkit-optimize-contrast;
+    }
+    
+    /* Prevent layout shifts */
+    .tag-item,
+    .tag-row,
+    .product-card {
+        contain: layout;
+    }
+    
+    /* Optimize vendor/brand sections */
+    .vendor-section,
+    .brand-section,
+    .product-type-section,
+    .weight-section {
+        contain: layout style;
+    }
+    
+    /* Reduce paint areas for better performance */
+    .btn,
+    .card,
+    .modal-content {
+        contain: layout style paint;
+    }
+    
+    /* Disable expensive filters */
+    .blur,
+    .brightness,
+    .contrast {
+        filter: none !important;
+        -webkit-filter: none !important;
+    }
+    
+    /* Optimize modal animations */
+    .modal.fade .modal-dialog {
+        transition: transform 0.1s ease-out !important;
+    }
+    
+    /* Disable parallax and 3D effects */
+    .parallax,
+    .transform-3d {
+        transform: none !important;
+        perspective: none !important;
+    }
+    
+    /* Optimize dropdown menus */
+    .dropdown-menu {
+        will-change: auto !important;
+        contain: layout style paint;
+    }
+    
+    /* Better performance for large lists */
+    ul, ol {
+        contain: layout style;
+    }
+    
+    /* Optimize grid/flex layouts */
+    .row,
+    .d-flex,
+    .grid {
+        contain: layout;
+    }
+}
+
+/* Additional optimizations for Windows 10/11 */
+@supports (scrollbar-gutter: stable) {
+    * {
+        scrollbar-gutter: stable;
+    }
+}
+
+/* Reduce motion for users who prefer it */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+
+/* High contrast mode optimizations */
+@media (prefers-contrast: high) {
+    * {
+        box-shadow: none !important;
+        text-shadow: none !important;
+    }
+}
+
+/* Performance optimizations for lower-end Windows PCs */
+@media (max-device-pixel-ratio: 1.5) {
+    /* Simplify rendering for lower DPI displays */
+    * {
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+    }
+    
+    /* Disable sub-pixel rendering */
+    body {
+        transform: translateZ(0);
+        -webkit-transform: translateZ(0);
+    }
+}
+

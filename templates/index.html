@@ -34,6 +34,8 @@
   <!-- Stylesheets -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}?v={{ cache_bust }}">
+  <!-- Windows Performance Optimizations CSS -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/windows-performance.css') }}?v={{ cache_bust }}">
   <link rel="icon" type="image/x-icon" href="/favicon.ico">
   <link rel="alternate icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css">
@@ -47,6 +49,8 @@
   
   <!-- Performance Optimizations -->
   <script src="{{ url_for('static', filename='js/performance.js') }}?v={{ cache_bust }}"></script>
+  <!-- Windows-specific performance optimizations - Load early for best results -->
+  <script src="{{ url_for('static', filename='js/windows-performance-optimization.js') }}?v={{ cache_bust }}"></script>
   
   <!-- Preload critical resources -->
   <link rel="preload" href="{{ url_for('static', filename='css/styles.css') }}" as="style">
@@ -11054,9 +11058,6 @@
   
   <!-- Tags Table JavaScript -->
   <script src="{{ url_for('static', filename='js/tags_table.js') }}?v={{ cache_bust }}"></script>
-  
-  <!-- PC Performance Optimizer - Load early for better performance on Windows/Linux -->
-  <script src="{{ url_for('static', filename='js/pc-performance-optimizer.js') }}"></script>
   
   <!-- Database Modal -->
   <div class="modal fade" id="databaseModal" tabindex="-1" aria-labelledby="databaseModalLabel" aria-hidden="true">
