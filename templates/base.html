@@ -54,7 +54,8 @@
 </head>
 <body>
     {% block content %}{% endblock %}
-    <!-- Windows Performance Optimization - Load first for best results -->
+    <!-- PC Performance Optimizations - Load first for best results -->
+    <script src="{{ url_for('static', filename='js/pc-performance-boost.js') }}"></script>
     <script src="{{ url_for('static', filename='js/windows-performance-optimization.js') }}"></script>
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
     <script src="{{ url_for('static', filename='js/enhanced-ui.js') }}"></script>

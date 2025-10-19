@@ -7326,39 +7326,36 @@ async function clearStuckUploads() {
 function initializeStickyFilterBar() {
     const stickyFilterBar = document.querySelector('.sticky-filter-bar');
     const tagList = document.getElementById('availableTags');
-    const cardHeader = document.querySelector('.card-header');
     
-    if (stickyFilterBar && tagList && cardHeader) {
-        let ticking = false;
+    if (stickyFilterBar && tagList) {
+        // Cache DOM queries
+        const cardHeader = document.querySelector('.card-header');
+        if (!cardHeader) return;
         
-        // Cache DOM queries outside the scroll handler
-        const checkStickyPosition = () => {
+        // Single optimized handler with requestAnimationFrame
+        let rafId = null;
+        const updateStickyState = () => {
             const headerRect = cardHeader.getBoundingClientRect();
             
-            // Batch DOM reads and writes using requestAnimationFrame
             if (headerRect.bottom <= 0) {
-                if (!stickyFilterBar.classList.contains('is-sticky')) {
-                    stickyFilterBar.classList.add('is-sticky');
-                }
+                stickyFilterBar.classList.add('is-sticky');
             } else {
-                if (stickyFilterBar.classList.contains('is-sticky')) {
-                    stickyFilterBar.classList.remove('is-sticky');
-                }
+                stickyFilterBar.classList.remove('is-sticky');
             }
-            ticking = false;
+            
+            rafId = null;
         };
         
-        // Throttled scroll handler using requestAnimationFrame for optimal performance
+        // Throttled scroll handler
         const handleScroll = () => {
-            if (!ticking) {
-                window.requestAnimationFrame(checkStickyPosition);
-                ticking = true;
+            if (!rafId) {
+                rafId = requestAnimationFrame(updateStickyState);
             }
         };
         
-        // Add passive scroll listeners for better performance
-        tagList.addEventListener('scroll', handleScroll, { passive: true });
+        // Use single scroll listener with passive flag for better performance
         window.addEventListener('scroll', handleScroll, { passive: true });
+        tagList.addEventListener('scroll', handleScroll, { passive: true });
     }
 }
 
