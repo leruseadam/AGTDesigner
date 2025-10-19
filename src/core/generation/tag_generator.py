@@ -330,6 +330,156 @@ def create_dynamic_mini_template(template_path, num_products, scale_factor=1.0):
     buf.seek(0)
     return buf
 
+def create_dynamic_3x3_template(template_path, num_products, scale_factor=1.0):
+    """Create a dynamic 3x3 template with only the cells needed for the number of products."""
+    from docx import Document
+    from docx.shared import Pt, Inches
+    from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from io import BytesIO
+    from copy import deepcopy
+    
+    # Calculate grid dimensions based on number of products
+    # Use 3 columns, calculate rows needed
+    num_cols = 3
+    num_rows = (num_products + num_cols - 1) // num_cols  # Ceiling division
+    
+    col_width_twips = str(int(3.4 * 1440))  # 3.4 inches per column for horizontal template
+    row_height_pts = Pt(2.4 * 72)  # 2.4 inches per row for horizontal template
+    cut_line_twips = int(0.001 * 1440)
+    
+    doc = Document(template_path)
+    if not doc.tables:
+        raise RuntimeError("Template must contain at least one table.")
+    
+    old = doc.tables[0]
+    src_tc = deepcopy(old.cell(0,0)._tc)
+    old._element.getparent().remove(old._element)
+    
+    # Only remove empty paragraphs, preserve content paragraphs
+    doc_paragraphs = list(doc.paragraphs)
+    for paragraph in doc_paragraphs:
+        if not paragraph.text.strip():
+            paragraph._element.getparent().remove(paragraph._element)
+    
+    tbl = doc.add_table(rows=num_rows, cols=num_cols)
+    tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
+    
+    # Copy the original table properties and styling from the source template
+    old_tbl = Document(template_path).tables[0]
+    for prop in old_tbl._element.xpath('./w:tblPr/*'):
+        tbl._element.append(deepcopy(prop))
+    
+    # Set table properties
+    tblPr = tbl._element.find(qn('w:tblPr'))
+    if tblPr is None:
+        tblPr = OxmlElement('w:tblPr')
+        tbl._element.insert(0, tblPr)
+    
+    # Set table width
+    tblW = tblPr.find(qn('w:tblW'))
+    if tblW is None:
+        tblW = OxmlElement('w:tblW')
+        tblPr.append(tblW)
+    tblW.set(qn('w:w'), str(int(3.4 * num_cols * 1440)))  # Total width
+    tblW.set(qn('w:type'), 'dxa')
+    
+    # Set table layout
+    tblLayout = tblPr.find(qn('w:tblLayout'))
+    if tblLayout is None:
+        tblLayout = OxmlElement('w:tblLayout')
+        tblPr.append(tblLayout)
+    tblLayout.set(qn('w:type'), 'fixed')
+    
+    # Set cell spacing
+    tblCellSpacing = tblPr.find(qn('w:tblCellSpacing'))
+    if tblCellSpacing is None:
+        tblCellSpacing = OxmlElement('w:tblCellSpacing')
+        tblPr.append(tblCellSpacing)
+    tblCellSpacing.set(qn('w:w'), str(cut_line_twips))
+    tblCellSpacing.set(qn('w:type'), 'dxa')
+    
+    # Set table grid
+    tblGrid = tbl._element.find(qn('w:tblGrid'))
+    if tblGrid is not None:
+        tblGrid.getparent().remove(tblGrid)
+    tblGrid = OxmlElement('w:tblGrid')
+    tbl._element.insert(1, tblGrid)
+    
+    for _ in range(num_cols):
+        gc = OxmlElement('w:gridCol')
+        gc.set(qn('w:w'), col_width_twips)
+        tblGrid.append(gc)
+    
+    # Copy cell content and styling
+    cnt = 1
+    for r in range(num_rows):
+        for c in range(num_cols):
+            if cnt <= num_products:
+                cell = tbl.cell(r, c)
+                cell._tc.clear_content()
+                
+                # Copy all elements from source cell
+                for el in src_tc.xpath('./*'):
+                    cell._tc.append(deepcopy(el))
+                
+                # Update Label1 to Label{cnt} in the copied content
+                for t in cell.xpath('.//w:t'):
+                    if t.text and 'Label1' in t.text:
+                        t.text = t.text.replace('Label1', f'Label{cnt}')
+                for el in src_tc.xpath('./*'):
+                    cell._tc.append(deepcopy(el))
+            else:
+                # For empty cells, just clear them but don't remove them
+                cell = tbl.cell(r, c)
+                cell._tc.clear_content()
+            cnt += 1
+    
+    # Add spacing
+    tblPr2 = tbl._element.find(qn('w:tblPr'))
+    spacing = OxmlElement('w:tblCellSpacing')
+    spacing.set(qn('w:w'), str(cut_line_twips))
+    spacing.set(qn('w:type'), 'dxa')
+    tblPr2.append(spacing)
+    
+    # Set row heights
+    for row in tbl.rows:
+        row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+        row.height = row_height_pts
+        
+        for cell in row.cells:
+            # Set cell properties
+            tc = cell._tc
+            tcPr = tc.get_or_add_tcPr()
+            
+            # Set cell width
+            tcW = tcPr.find(qn('w:tcW'))
+            if tcW is None:
+                tcW = OxmlElement('w:tcW')
+                tcPr.append(tcW)
+            tcW.set(qn('w:w'), col_width_twips)
+            tcW.set(qn('w:type'), 'dxa')
+            
+            # Set cell margins
+            tcMar = tcPr.find(qn('w:tcMar'))
+            if tcMar is None:
+                tcMar = OxmlElement('w:tcMar')
+                tcPr.append(tcMar)
+            
+            for margin in ['top', 'left', 'bottom', 'right']:
+                margin_el = tcMar.find(qn(f'w:{margin}'))
+                if margin_el is None:
+                    margin_el = OxmlElement(f'w:{margin}')
+                    tcMar.append(margin_el)
+                margin_el.set(qn('w:w'), '0')
+                margin_el.set(qn('w:type'), 'dxa')
+    
+    buf = BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf
+
 def create_dynamic_double_template(template_path, num_products, scale_factor=1.0):
     """Create a dynamic double template with only as many cells as products."""
     from docx import Document
@@ -531,8 +681,17 @@ def process_chunk(args):
             local_template_buffer = base_template
             num_labels = 9  # Use standard 3x3 grid for multiple pages
     else:
-        local_template_buffer = base_template
-        num_labels = 9
+        # CRITICAL FIX: For horizontal/vertical templates, also create dynamic templates to prevent blank tags
+        actual_products = len(chunk)
+        if actual_products <= 9:
+            # Create a dynamic template that only has as many cells as products
+            local_template_buffer = create_dynamic_3x3_template(base_template, actual_products, scale_factor)
+            num_labels = actual_products  # Only create labels for products we have
+            logger.info(f"🔧 {orientation.upper()} TEMPLATE EXPANSION: Using dynamic template with {num_labels} labels")
+        else:
+            # If we have more than 9 products, use the base template and let it handle multiple pages
+            local_template_buffer = base_template
+            num_labels = 9  # Use standard 3x3 grid for multiple pages
     tpl = DocxTemplate(local_template_buffer)
     context = {}
     image_width = Mm(8) if orientation == "mini" else Mm(9 if orientation == 'vertical' else 12)

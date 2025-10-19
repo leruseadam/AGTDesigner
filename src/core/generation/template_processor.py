@@ -1099,21 +1099,9 @@ class TemplateProcessor:
                 # Debug logging to check field values and order
                 product_name = record.get('ProductName', 'Unknown')
                 self.logger.debug(f"Label{i+1} -> {product_name} - ProductBrand: '{label_context.get('ProductBrand', 'NOT_FOUND')}', Price: '{label_context.get('Price', 'NOT_FOUND')}', THC: '{label_context.get('THC', 'NOT_FOUND')}', CBD: '{label_context.get('CBD', 'NOT_FOUND')}'")
-            # Leave remaining labels blank instead of duplicating data
-            # Create empty contexts for all remaining slots consistently for all templates
-            for i in range(len(chunk), self.chunk_size):
-                # Create empty context for unfilled labels with all expected fields
-                context[f'Label{i+1}'] = {
-                    'ProductBrand': '',
-                    'DescAndWeight': '',
-                    'Price': '',
-                    'DOH': '',
-                    'Ratio_or_THC_CBD': '',
-                    'Lineage': '',
-                    'ProductStrain': '',
-                    'QR': ''
-                }
-                self.logger.debug(f"Label{i+1} left blank (no data duplication)")
+            # CRITICAL FIX: Only create contexts for actual products to prevent blank tags on last sheet
+            # This saves printer ink by not generating empty cells
+            self.logger.info(f"🔧 BLANK TAG PREVENTION: Only creating {len(chunk)} labels instead of {self.chunk_size} to prevent blank tags on last sheet")
 
             # DOH images are already created in _build_label_context, no need for redundant creation here
             
