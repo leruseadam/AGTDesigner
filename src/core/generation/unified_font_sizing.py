@@ -38,21 +38,21 @@ def _load_font_sizing_config():
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
                     'weight': [(5, 14), (10, 12), (15, 10), (float('inf'), 8)],
                     'doh': [(5, 12), (10, 11), (float('inf'), 10)],
-                    'vendor': [(5, 1), (10, 1), (15, 1), (20, 1), (float('inf'), 1)],
+                    'vendor': [(5, 6), (10, 5), (15, 4), (20, 3), (float('inf'), 2)],
                     'qr': [(float('inf'), 24)],  # QR codes: Small size for mini template
                     'default': [(10, 12), (20, 11), (float('inf'), 10)]
                 },
                 'double': {
-                    'description': [(10, 24), (20, 22), (30, 21), (40, 20), (50, 19), (60, 18), (70, 17), (80, 16), (90, 15), (100, 14), (110, 12), (float('inf'), 10)],
-                    'brand': [(10, 14), (20, 12), (30, 11), (40, 10), (float('inf'), 9)],
-                    'price': [(10, 22), (15, 20), (float('inf'), 14)],
+                    'description': [(10, 28), (20, 26), (30, 24), (40, 22), (50, 20), (60, 18), (70, 17), (80, 16), (90, 15), (100, 14), (110, 12), (float('inf'), 10)],
+                    'brand': [(5, 16), (10, 15), (15, 14), (20, 8), (float('inf'), 7)],
+                    'price': [(10, 26), (15, 20), (float('inf'), 14)],
                     'lineage': [(15, 13), (25, 12), (35, 10), (45, 9), (float('inf'), 9)],
                     'ratio': [(10, 9), (20, 8), (30, 7), (float('inf'), 6.5)],
                     'thc_cbd': [(20, 7),(float('inf'), 6.5)],
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
                     'weight': [(15, 16), (25, 14), (35, 12), (float('inf'), 9)],
                     'doh': [(15, 20), (25, 16), (float('inf'), 13)],
-                    'vendor': [(10, 5), (20, 4), (40, 3), (70, 2),(float('inf'), 1)],
+                    'vendor': [(10, 8), (20, 7), (40, 6), (70, 5), (float('inf'), 4)],
                     'qr': [(float('inf'), 36)],  # QR codes: Medium size for double template
                     'default': [(20, 16), (40, 14), (60, 12), (float('inf'), 10)]
                 },
@@ -60,11 +60,11 @@ def _load_font_sizing_config():
                     'description': [(5, 34), (20, 32), (30, 28), (40, 26), (60, 24), (70, 22), (80, 20), (90, 18), (float('inf'), 16)],
                     'brand': [(10, 16), (15, 14), (25, 12), (35, 11), (float('inf'), 10)],
                     'price': [(2, 36), (3, 30), (float('inf'), 26)],  # $1/$11 = 36pt, $111+ = 30pt
-                    'lineage': [(20, 20), (40, 18), (80, 16), (float('inf'), 12)],
+                    'lineage': [(20, 20), (40, 18), (60, 16), (float('inf'), 12)],
                     'ratio': [(10, 14), (20, 12), (30, 9), (float('inf'), 9)],
                     'thc_cbd': [(10, 12), (float('inf'), 12)],
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
-                    'vendor': [(10, 6), (20, 5), (40, 4), (70, 3),(float('inf'), 2)],
+                    'vendor': [(10, 10), (20, 9), (40, 8), (70, 7), (float('inf'), 6)],
                     'qr': [(float('inf'), 45)],  # QR codes: Large size for vertical template
                     'default': [(30, 16), (60, 14), (100, 12), (float('inf'), 10)]
                 },
@@ -76,7 +76,7 @@ def _load_font_sizing_config():
                     'ratio': [(10, 14), (20, 12), (30, 10), (40, 9), (50, 8), (60, 7), (70, 6), (float('inf'), 5)],
                     'thc_cbd': [(10, 14), (float('inf'), 14)],
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
-                    'vendor': [(10, 6), (20, 5), (40, 4), (70, 3),(float('inf'), 2)],
+                    'vendor': [(10, 10), (20, 9), (40, 8), (70, 7), (float('inf'), 6)],
                     'qr': [(float('inf'), 45)],  # QR codes: Large size for horizontal template  
                     'default': [(20, 18), (40, 16), (60, 14), (float('inf'), 12)]
                 }
@@ -115,6 +115,25 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
         else:  # Three or more digits (e.g., $100, $1000+) - use 15pt font
             final_size = 15 * scale_factor
             logger.debug(f"Mini template price rule: '{text}' has {num_digits} digits, using 15pt font")
+            return Pt(final_size)
+    
+    # Special rule: Double template prices based on number of digits
+    if field_type.lower() == 'price' and orientation.lower() == 'double':
+        # Remove $ and any non-digit characters, then count digits
+        clean_text = ''.join(char for char in str(text) if char.isdigit())
+        num_digits = len(clean_text)
+        
+        if num_digits <= 2:  # Two digit prices (e.g., $12, $30, $55)
+            final_size = 28 * scale_factor
+            logger.debug(f"Double template price rule: '{text}' has {num_digits} digits, using 26pt font")
+            return Pt(final_size)
+        elif num_digits == 3:  # Three digit prices (e.g., $100, $128, $250)
+            final_size = 20 * scale_factor
+            logger.debug(f"Double template price rule: '{text}' has {num_digits} digits, using 20pt font")
+            return Pt(final_size)
+        else:  # Four or more digits (e.g., $1000+)
+            final_size = 16 * scale_factor
+            logger.debug(f"Double template price rule: '{text}' has {num_digits} digits, using 16pt font")
             return Pt(final_size)
     
     # Special rule: Vertical template prices based on number of digits
@@ -162,17 +181,38 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
                 return Pt(final_size)
     
     
-    # Special rule: Handle double template brand consistency
+    # Special rule: Handle double template brand consistency with special rules for long brands
     if field_type.lower() == 'brand' and orientation.lower() == 'double':
-        # Never allow brand on double to scale below 1.0; it becomes unreadably small otherwise
-        if scale_factor < 1.0:
-            scale_factor = 1.0
+        # CRITICAL FIX: Use consistent font sizing for double template brands based on character count only
+        # This prevents inconsistent sizing due to special characters and complexity penalties
+        text_length = len(str(text).strip())
         
-        # CRITICAL FIX: Use proper font sizing for double template brands instead of forcing 8pt
-        # This allows brands to scale properly based on length while maintaining readability
-        # Use the normal font sizing logic instead of forcing a fixed size
-        logger.debug(f"Double template brand rule: using normal font sizing for text='{text}'")
-        # Fall through to normal font sizing logic
+        # Use simplified font sizing based on character count for consistency
+        # Special rules for very long brands to ensure they fit in 1.75" width cells
+        if text_length <= 5:
+            final_size = 16 * scale_factor
+        elif text_length <= 10:
+            final_size = 15 * scale_factor
+        elif text_length <= 15:
+            final_size = 14 * scale_factor
+        elif text_length <= 20:
+            final_size = 13 * scale_factor
+        elif text_length <= 25:
+            final_size = 8 * scale_factor
+        elif text_length <= 30:
+            final_size = 8 * scale_factor
+        elif text_length <= 35:
+            final_size = 10 * scale_factor
+        elif text_length <= 40:
+            final_size = 9 * scale_factor
+        elif text_length <= 45:
+            final_size = 8 * scale_factor
+        else:
+            # For extremely long brands (45+ characters), use minimum readable size
+            final_size = 7 * scale_factor
+        
+        logger.debug(f"Double template brand rule: text='{text}' (length={text_length}) -> {final_size}pt font for consistency")
+        return Pt(final_size)
     
     # Special rule: If double template description has multiple words with 9+ characters each, automatically reduce to 18pt
     if orientation.lower() == 'double' and field_type.lower() == 'description':

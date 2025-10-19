@@ -3091,55 +3091,57 @@ class ExcelProcessor:
             
             logger.debug(f"Selected tag names: {selected_tag_names}")
             
-            # TEMPORARY FIX: Skip database lookup and use Excel data directly
-            # This ensures we get the correct price and THC/CBD values
-            logger.info("Using Excel data directly for template generation (bypassing database)")
+            # CRITICAL FIX: Use Excel data first, but allow database fallback for missing products
+            logger.info("Using Excel data for selected records with database fallback")
             
-            # Fallback to Excel data if database lookup fails or returns no results
-            logger.info("Using Excel data for selected records")
-            
-            # Build a mapping from normalized product names to canonical names
-            product_name_col = 'ProductName'  # The actual column name in the DataFrame
-            if product_name_col not in self.df.columns:
-                possible_cols = ['Product Name*', 'Product Name', 'Description']
-                product_name_col = next((col for col in possible_cols if col in self.df.columns), None)
-                if not product_name_col:
-                    logger.error(f"Product name column not found. Available columns: {list(self.df.columns)}")
-                    return []
-            
-            # CRITICAL FIX: Log column information for debugging
-            logger.info(f"CRITICAL FIX: Using product name column: '{product_name_col}'")
-            logger.info(f"CRITICAL FIX: Available columns: {list(self.df.columns)}")
-            logger.info(f"CRITICAL FIX: DataFrame shape: {self.df.shape}")
-            
-            # Check if we have JSON matched products
-            if 'Source' in self.df.columns:
-                json_matched_count = (self.df['Source'] == 'JSON Match').sum()
-                logger.info(f"CRITICAL FIX: Found {json_matched_count} JSON matched products in DataFrame")
-            
-            canonical_map = {normalize_name(name): name for name in self.df[product_name_col]}
-            logger.debug(f"Canonical map sample: {dict(list(canonical_map.items())[:5])}")
-            
-            # Map incoming selected tags to canonical names
-            # CRITICAL FIX: Preserve all selected tags, not just the first match
-            canonical_selected = []
-            for tag in selected_tag_names:
-                normalized_tag = normalize_name(tag)
-                if normalized_tag in canonical_map:
-                    canonical_selected.append(canonical_map[normalized_tag])
-                    logger.debug(f"CRITICAL FIX: Mapped '{tag}' -> '{canonical_map[normalized_tag]}'")
+            # Check if DataFrame is available
+            if self.df is None or self.df.empty:
+                logger.warning("CRITICAL FIX: No Excel DataFrame available, trying database fallback...")
+                # Skip Excel processing and go directly to database fallback
+                canonical_selected = []  # Force database fallback
+            else:
+                # Build a mapping from normalized product names to canonical names
+                product_name_col = 'ProductName'  # The actual column name in the DataFrame
+                if product_name_col not in self.df.columns:
+                    possible_cols = ['Product Name*', 'Product Name', 'Description']
+                    product_name_col = next((col for col in possible_cols if col in self.df.columns), None)
+                    if not product_name_col:
+                        logger.error(f"Product name column not found. Available columns: {list(self.df.columns)}")
+                        canonical_selected = []  # Force database fallback
+                    else:
+                        # Continue with Excel processing
+                        canonical_map = {normalize_name(name): name for name in self.df[product_name_col]}
+                        logger.debug(f"Canonical map sample: {dict(list(canonical_map.items())[:5])}")
+                        
+                        # Map incoming selected tags to canonical names
+                        canonical_selected = []
+                        for tag in selected_tag_names:
+                            normalized_tag = normalize_name(tag)
+                            if normalized_tag in canonical_map:
+                                canonical_selected.append(canonical_map[normalized_tag])
+                                logger.debug(f"CRITICAL FIX: Mapped '{tag}' -> '{canonical_map[normalized_tag]}'")
+                            else:
+                                logger.warning(f"CRITICAL FIX: No canonical match for '{tag}' (normalized: '{normalized_tag}')")
                 else:
-                    logger.warning(f"CRITICAL FIX: No canonical match for '{tag}' (normalized: '{normalized_tag}')")
+                    # Continue with Excel processing
+                    canonical_map = {normalize_name(name): name for name in self.df[product_name_col]}
+                    logger.debug(f"Canonical map sample: {dict(list(canonical_map.items())[:5])}")
+                    
+                    # Map incoming selected tags to canonical names
+                    canonical_selected = []
+                    for tag in selected_tag_names:
+                        normalized_tag = normalize_name(tag)
+                        if normalized_tag in canonical_map:
+                            canonical_selected.append(canonical_map[normalized_tag])
+                            logger.debug(f"CRITICAL FIX: Mapped '{tag}' -> '{canonical_map[normalized_tag]}'")
+                        else:
+                            logger.warning(f"CRITICAL FIX: No canonical match for '{tag}' (normalized: '{normalized_tag}')")
             
-            logger.debug(f"Selected tag names: {selected_tag_names}")
-            logger.debug(f"Canonical selected tags: {canonical_selected}")
-            
-            # CRITICAL FIX: Log which tags were matched and which were not
+            # Log which tags were matched and which were not
             matched_tags = []
             unmatched_tags = []
             for tag in selected_tag_names:
-                normalized_tag = normalize_name(tag)
-                if normalized_tag in canonical_map:
+                if tag in canonical_selected:
                     matched_tags.append(tag)
                 else:
                     unmatched_tags.append(tag)
@@ -3147,10 +3149,41 @@ class ExcelProcessor:
             logger.info(f"CRITICAL FIX: Matched {len(matched_tags)} tags: {matched_tags}")
             if unmatched_tags:
                 logger.warning(f"CRITICAL FIX: Unmatched {len(unmatched_tags)} tags: {unmatched_tags}")
-                logger.warning(f"CRITICAL FIX: Available product names (sample): {list(self.df[product_name_col])[:10]}")
+                if self.df is not None and not self.df.empty:
+                    logger.warning(f"CRITICAL FIX: Available product names (sample): {list(self.df[product_name_col])[:10]}")
+            
+            # FUZZY MATCHING: Try to find close matches for unmatched tags
+            if unmatched_tags and self.df is not None and not self.df.empty:
+                logger.info(f"FUZZY MATCHING: Attempting to find close matches for {len(unmatched_tags)} unmatched tags...")
+                available_names = list(self.df[product_name_col])
+                
+                for tag in unmatched_tags:
+                    logger.debug(f"FUZZY MATCHING: Processing tag '{tag}'")
+                    # Extract the core product name and weight
+                    # Example: "G Markers - 3.5g" -> look for products containing "G Markers" and "3.5g"
+                    tag_parts = tag.split(' - ')
+                    if len(tag_parts) >= 2:
+                        product_base = tag_parts[0].strip()  # e.g., "G Markers"
+                        weight = tag_parts[-1].strip()  # e.g., "3.5g"
+                        logger.debug(f"FUZZY MATCHING: Looking for base='{product_base}' weight='{weight}'")
+                        
+                        # Find products that contain the base name and weight
+                        for name in available_names:
+                            name_lower = name.lower()
+                            product_base_lower = product_base.lower()
+                            weight_lower = weight.lower()
+                            
+                            # Check if the product contains both the base name and weight
+                            if product_base_lower in name_lower and weight_lower in name_lower:
+                                canonical_selected.append(name)
+                                logger.info(f"✅ FUZZY MATCH: '{tag}' -> '{name}'")
+                                break
+                        else:
+                            # If no fuzzy match found, log it
+                            logger.warning(f"❌ FUZZY MATCH: No close match found for '{tag}'")
             
             # Fallback: try case-insensitive and whitespace-insensitive matching if no canonical matches
-            if not canonical_selected:
+            if not canonical_selected and self.df is not None and not self.df.empty:
                 logger.warning("No canonical matches for selected tags, trying fallback matching...")
                 available_names = list(self.df[product_name_col])
                 fallback_selected = []
@@ -3168,7 +3201,7 @@ class ExcelProcessor:
                 logger.debug(f"Fallback canonical selected tags: {canonical_selected}")
             
             # CRITICAL FIX: If still no matches and we have JSON matched products, try direct matching
-            if not canonical_selected and 'Source' in self.df.columns:
+            if not canonical_selected and self.df is not None and not self.df.empty and 'Source' in self.df.columns:
                 logger.warning("CRITICAL FIX: No matches found, trying direct matching for JSON products...")
                 json_matched_products = self.df[self.df['Source'] == 'JSON Match']
                 if not json_matched_products.empty:
@@ -3197,9 +3230,64 @@ class ExcelProcessor:
                     else:
                         logger.warning(f"CRITICAL FIX: No direct matches found for any of the {len(selected_tag_names)} selected tags")
             
-            # CRITICAL FIX: If still no matches, try to get JSON matched products from cache/session
+            # CRITICAL FIX: If still no matches, try to get products from database directly
             if not canonical_selected:
-                logger.warning("CRITICAL FIX: No matches found in DataFrame, trying to get JSON matched products from cache...")
+                logger.warning("CRITICAL FIX: No matches found in DataFrame, trying to get products from database...")
+                try:
+                    from src.core.data.product_database import get_product_database
+                    product_db = get_product_database()
+                    if product_db:
+                        logger.info("CRITICAL FIX: Attempting to get selected products from database...")
+                        # Get products from database by name
+                        db_products = product_db.get_products_by_names(selected_tag_names)
+                        if db_products:
+                            logger.info(f"CRITICAL FIX: Found {len(db_products)} products in database")
+                            # Create records from database products
+                            records = []
+                            for product in db_products:
+                                if isinstance(product, dict):
+                                    product_name = product.get('Product Name*', product.get('ProductName', ''))
+                                    if product_name in selected_tag_names:
+                                        record = {
+                                            'ProductName': product_name,
+                                            'Product Name*': product_name,
+                                            'Description': product.get('Description', product_name),
+                                            'DescAndWeight': self._process_description_from_product_name(product_name),
+                                            'Product Type*': product.get('Product Type*', 'flower'),  # Default to flower for new products
+                                            'Product Brand': product.get('Product Brand', ''),
+                                            'Product Strain': product.get('Product Strain', ''),
+                                            'Lineage': product.get('Lineage', 'HYBRID'),  # Default to HYBRID
+                                            'Vendor': product.get('Vendor/Supplier*', product.get('Vendor', '')),
+                                            'Price': product.get('Price', ''),  # Database uses 'Price' field
+                                            'Price*': product.get('Price', ''),  # Also set Price* for compatibility
+                                            'Weight*': product.get('Weight*', ''),
+                                            'Quantity*': product.get('Quantity*', '1'),
+                                            'Units': product.get('Units', 'g'),
+                                            'THC test result': product.get('THC test result', ''),
+                                            'CBD test result': product.get('CBD test result', ''),
+                                            'Test result unit (% or mg)': product.get('Test result unit (% or mg)', '%'),
+                                            'DOH': product.get('DOH', ''),
+                                            'Source': 'Database'
+                                        }
+                                        records.append(record)
+                                        logger.info(f"CRITICAL FIX: Created database record for '{product_name}'")
+                            
+                            if records:
+                                logger.info(f"CRITICAL FIX: Created {len(records)} records from database")
+                                return records
+                            else:
+                                logger.warning("CRITICAL FIX: No valid records created from database products")
+                        else:
+                            logger.warning("CRITICAL FIX: No products found in database for selected tags")
+                    else:
+                        logger.warning("CRITICAL FIX: No product database available")
+                except Exception as e:
+                    logger.warning(f"CRITICAL FIX: Error getting products from database: {e}")
+                    import traceback
+                    traceback.print_exc()
+                
+                # Fallback: try to get JSON matched products from cache/session
+                logger.warning("CRITICAL FIX: Trying to get JSON matched products from cache...")
                 try:
                     from flask import session, cache
                     # Try to get JSON matched products from session cache
@@ -3212,39 +3300,46 @@ class ExcelProcessor:
                             records = []
                             for product in json_matched_products:
                                 if isinstance(product, dict):
-                                    # DATABASE PRIORITY: Ensure all fields come from database with safe defaults
-                                    record = {
-                                        'ProductName': product.get('Product Name*', product.get('ProductName', '')),
-                                        'Product Name*': product.get('Product Name*', product.get('ProductName', '')),
-                                        'Description': product.get('Description', product.get('Product Name*', product.get('ProductName', ''))),
-                                        'DescAndWeight': self._process_description_from_product_name(product.get('Product Name*', product.get('ProductName', ''))),  # Use Excel processor formula
-                                        'Product Type*': product.get('Product Type*', 'Edible (Solid)'),  # Database default
-                                        'Product Brand': product.get('Product Brand', 'CERES'),  # Database default
-                                        'Product Strain': product.get('Product Strain', 'Mixed'),  # Database default
-                                        'Lineage': product.get('Lineage', 'MIXED'),  # Database default
-                                        'Vendor': product.get('Vendor/Supplier*', product.get('Vendor', 'A Greener Today')),  # Database default
-                                        'Price': product.get('Price', '25.00'),  # Database default price
-                                        'Weight*': product.get('Weight*', '1'),  # Database default weight
-                                        'Quantity*': product.get('Quantity*', '1'),  # Database default quantity
-                                        'Units': product.get('Units', 'g'),  # Database default units
-                                        'THC test result': product.get('THC test result', '0.00'),  # Database default
-                                        'CBD test result': product.get('CBD test result', '0.00'),  # Database default
-                                        'Test result unit (% or mg)': product.get('Test result unit (% or mg)', '%'),  # Database default
-                                        'Source': product.get('Source', 'Database Priority (100% DB)')  # Updated source
-                                    }
-                                    records.append(record)
+                                    product_name = product.get('Product Name*', product.get('ProductName', ''))
+                                    if product_name in selected_tag_names:
+                                        # DATABASE PRIORITY: Ensure all fields come from database with safe defaults
+                                        record = {
+                                            'ProductName': product_name,
+                                            'Product Name*': product_name,
+                                            'Description': product.get('Description', product_name),
+                                            'DescAndWeight': self._process_description_from_product_name(product_name),  # Use Excel processor formula
+                                            'Product Type*': product.get('Product Type*', 'flower'),  # Default to flower for new products
+                                            'Product Brand': product.get('Product Brand', ''),
+                                            'Product Strain': product.get('Product Strain', ''),
+                                            'Lineage': product.get('Lineage', 'HYBRID'),  # Default to HYBRID
+                                            'Vendor': product.get('Vendor/Supplier*', product.get('Vendor', '')),
+                                            'Price': product.get('Price', ''),  # Database uses 'Price' field
+                                            'Price*': product.get('Price', ''),  # Also set Price* for compatibility
+                                            'Weight*': product.get('Weight*', ''),
+                                            'Quantity*': product.get('Quantity*', '1'),
+                                            'Units': product.get('Units', 'g'),
+                                            'THC test result': product.get('THC test result', ''),
+                                            'CBD test result': product.get('CBD test result', ''),
+                                            'Test result unit (% or mg)': product.get('Test result unit (% or mg)', '%'),
+                                            'DOH': product.get('DOH', ''),
+                                            'Source': product.get('Source', 'JSON Cache')
+                                        }
+                                        records.append(record)
+                                        logger.info(f"CRITICAL FIX: Created cache record for '{product_name}'")
                             
                             if records:
-                                logger.info(f"DATABASE PRIORITY: Created {len(records)} records from cached database-priority products")
+                                logger.info(f"CRITICAL FIX: Created {len(records)} records from cached products")
                                 return records
                             else:
-                                logger.warning("DATABASE PRIORITY: No valid records created from cached database-priority products")
+                                logger.warning("CRITICAL FIX: No valid records created from cached products")
                         else:
                             logger.warning("CRITICAL FIX: No JSON matched products found in cache")
                     else:
                         logger.warning("CRITICAL FIX: No JSON matched cache key found in session")
                 except Exception as e:
                     logger.warning(f"CRITICAL FIX: Error getting JSON matched products from cache: {e}")
+                    import traceback
+                    traceback.print_exc()
             
             if not canonical_selected:
                 logger.warning("No canonical matches for selected tags after fallback")

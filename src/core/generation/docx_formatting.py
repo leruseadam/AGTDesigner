@@ -30,12 +30,12 @@ def apply_lineage_colors(doc):
                     original_text = cell.text.upper()  # Keep original text to check for markers
                     color_hex = None
                     
-                    # Check if ProductStrain is CBD Blend (before marker removal)
-                    is_product_strain_cbd_blend = False
+                    # Check if ProductStrain is CBD or CBD Blend (before marker removal)
+                    is_product_strain_cbd = False
                     strain_matches = re.findall(r"PRODUCTSTRAIN_START(.*?)PRODUCTSTRAIN_END", original_text)
                     for strain_content in strain_matches:
-                        if "CBD BLEND" in strain_content:
-                            is_product_strain_cbd_blend = True
+                        if "CBD" in strain_content.upper():
+                            is_product_strain_cbd = True
                             break
                     
                     # Remove marker wrappers for robust matching
@@ -68,18 +68,25 @@ def apply_lineage_colors(doc):
                     elif "HYBRID" in text:
                         color_hex = COLORS['HYBRID']
                     elif "CBD" in text or "CBD_BLEND" in text:
-                        # Apply CBD lineage colors if it's a classic type OR if ProductStrain is CBD Blend
-                        if is_classic_type or is_product_strain_cbd_blend:
+                        # Apply CBD lineage colors if it's a classic type OR if ProductStrain is CBD
+                        if is_classic_type or is_product_strain_cbd:
                             color_hex = COLORS['CBD']
+                    elif text == "CBD":
+                        # Handle cases where lineage is set to "CBD" but text doesn't contain "CBD" keyword
+                        color_hex = COLORS['CBD']
                     elif "CBD BLEND" in text:
-                        # Apply CBD BLEND lineage colors if it's a classic type OR if ProductStrain is CBD Blend
-                        if is_classic_type or is_product_strain_cbd_blend:
+                        # Apply CBD BLEND lineage colors if it's a classic type OR if ProductStrain is CBD
+                        if is_classic_type or is_product_strain_cbd:
                             color_hex = COLORS['CBD_BLEND']
                     elif "MIXED" in text:
                         # MIXED lineage always gets blue bars (this covers non-classic types like edibles)
                         color_hex = COLORS['MIXED']  # Blue for Mixed
-                    # REMOVED: Brand-based lineage coloring for non-classic types
-                    # Non-classic types should not get lineage colors unless they have specific ProductStrain values
+                    elif not is_classic_type and is_product_strain_cbd:
+                        # For non-classic types with CBD strain, use yellow color
+                        color_hex = COLORS['CBD']
+                    elif not is_classic_type:
+                        # For non-classic types without specific strain, use blue color (MIXED)
+                        color_hex = COLORS['MIXED']
                     
                     if color_hex:
                         # Set cell background color
@@ -1150,7 +1157,7 @@ def enforce_fixed_cell_dimensions(table, template_type=None):
                             if tcW is None:
                                 tcW = OxmlElement('w:tcW')
                                 tcPr.append(tcW)
-                            tcW.set(qn('w:w'), '1440')  # Fixed width in twips
+                            tcW.set(qn('w:w'), '2880')  # Fixed width in twips (2.0 inches = 2880 twips)
                             tcW.set(qn('w:type'), 'dxa')  # Fixed width type
                             
                             # Disable cell auto-sizing

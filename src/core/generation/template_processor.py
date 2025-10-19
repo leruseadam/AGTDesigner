@@ -71,11 +71,19 @@ class TemplateProcessor:
     def __init__(self, template_type, font_scheme, scale_factor=1.0, excel_processor=None):
         self.template_type = template_type
         self.font_scheme = font_scheme
-        self.scale_factor = scale_factor
-        self.logger = logging.getLogger(__name__)
+        self.logger = logging.getLogger(__name__)  # Initialize logger first
+        
+        # CRITICAL FIX: Adjust scale factor for double template 12-label expansion
+        # When the double template expands to 12 labels, cells become smaller, so we need to adjust the scale factor
+        if template_type == 'double':
+            self.scale_factor = scale_factor * 0.95  # Reduce font sizes by 5% for 12-label expansion (less aggressive)
+            self.logger.info(f"🔧 DOUBLE TEMPLATE SCALE ADJUSTMENT: Adjusted scale factor from {scale_factor} to {self.scale_factor} for 12-label expansion")
+        else:
+            self.scale_factor = scale_factor
         self.excel_processor = excel_processor  # Store the session's Excel processor
         self._template_path = self._get_template_path()
         self._expanded_template_buffer = self._expand_template_if_needed()
+        self._dynamic_template_created = False  # Track if dynamic template was created
         
         # Set chunk size based on template type with performance limits
         if not IS_PYTHONANYWHERE:
@@ -520,6 +528,30 @@ class TemplateProcessor:
         buf.seek(0)
         return buf
 
+    def create_dynamic_template_for_products(self, num_products):
+        """Create a dynamic template based on the number of products to eliminate empty labels."""
+        try:
+            if self.template_type == 'mini' and num_products <= 20:
+                # Use the dynamic mini template creation from tag_generator
+                from src.core.generation.tag_generator import create_dynamic_mini_template
+                self._expanded_template_buffer = create_dynamic_mini_template(self._template_path, num_products, self.scale_factor)
+                self._dynamic_template_created = True
+                self.logger.info(f"🔧 DYNAMIC MINI TEMPLATE: Created dynamic template for {num_products} products")
+                return True
+            elif self.template_type == 'double' and num_products <= 12:
+                # Use the dynamic double template creation from tag_generator
+                from src.core.generation.tag_generator import create_dynamic_double_template
+                self._expanded_template_buffer = create_dynamic_double_template(self._template_path, num_products, self.scale_factor)
+                self._dynamic_template_created = True
+                self.logger.info(f"🔧 DYNAMIC DOUBLE TEMPLATE: Created dynamic template for {num_products} products")
+                return True
+            else:
+                self.logger.info(f"🔧 DYNAMIC TEMPLATE: Not creating dynamic template for {self.template_type} with {num_products} products")
+                return False
+        except Exception as e:
+            self.logger.warning(f"Failed to create dynamic template: {e}")
+            return False
+
     def _expand_template_to_4x3_fixed_double(self):
         """Expand template to 4x3 grid for double templates (4 columns, 3 rows)."""
         from docx import Document
@@ -532,8 +564,8 @@ class TemplateProcessor:
 
         num_cols, num_rows = 4, 3  # 4 columns, 3 rows for 12 labels total
         
-        # Equal width columns: 1.125 inches each for a total of 4.5 inches
-        col_width_twips = str(int(1.125 * 1440))  # 1.125 inches per column
+        # Equal width columns: 1.75 inches each for double template (original width)
+        col_width_twips = str(int(1.75 * 1440))  # 1.75 inches per column
         row_height_pts = Pt(2.5 * 72)  # 2.5 inches per row for equal height
         cut_line_twips = int(0.001 * 1440)
 
@@ -956,14 +988,7 @@ class TemplateProcessor:
             self.chunk_count = 0
             
             # Debug: Log the overall order of records
-            # CRITICAL FIX: Handle different field names for product name
-            overall_order = []
-            for record in records:
-                product_name = (record.get('ProductName') or 
-                              record.get('Product Name*') or 
-                              record.get('ProductName*') or 
-                              'Unknown')
-                overall_order.append(product_name)
+            overall_order = [record.get('ProductName', 'Unknown') for record in records]
             self.logger.info(f"Processing {len(records)} records in overall order: {overall_order}")
             
             # CRITICAL FIX: JSON matched products are already unique by design - no deduplication needed
@@ -979,11 +1004,7 @@ class TemplateProcessor:
                 seen_products = set()
                 unique_records = []
                 for record in records:
-                    # CRITICAL FIX: Handle different field names for product name
-                    product_name = (record.get('ProductName') or 
-                                  record.get('Product Name*') or 
-                                  record.get('ProductName*') or 
-                                  'Unknown')
+                    product_name = record.get('ProductName', 'Unknown')
                     if product_name not in seen_products:
                         seen_products.add(product_name)
                         unique_records.append(record)
@@ -1048,6 +1069,11 @@ class TemplateProcessor:
         chunk_start_time = time.time()
         
         try:
+            # CRITICAL FIX: Create dynamic template for mini/double templates to eliminate empty labels
+            if not self._dynamic_template_created:
+                num_products = len(chunk)
+                self.create_dynamic_template_for_products(num_products)
+            
             if hasattr(self._expanded_template_buffer, 'seek'):
                 self._expanded_template_buffer.seek(0)
             
@@ -1300,11 +1326,33 @@ class TemplateProcessor:
 
         # Ensure WeightUnits is populated from available weight fields
         # Special handling for pre-roll products: use JointRatio instead of Weight* + Units
-        product_type = (label_context.get('Product Type*', '').lower() or 
-                       label_context.get('ProductType', '').lower())
+        raw_product_type = label_context.get('Product Type*', '')
+        fallback_product_type = label_context.get('ProductType', '')
+        
+        # CRITICAL FIX: Handle cases where Product Type* is 'NOT_FOUND' or invalid
+        if raw_product_type and raw_product_type.lower() not in ['not_found', 'unknown', '']:
+            product_type = raw_product_type.lower()
+        elif fallback_product_type and fallback_product_type.lower() not in ['not_found', 'unknown', '']:
+            product_type = fallback_product_type.lower()
+        else:
+            # CRITICAL FIX: For new products without proper type, infer from product name
+            product_name = record.get('ProductName', '')
+            if any(keyword in product_name.lower() for keyword in ['flower', 'bud', 'nug', 'herb']):
+                product_type = 'flower'
+                self.logger.info(f"🔧 INFERRED TYPE: '{product_name}' -> 'flower' (from name)")
+            elif any(keyword in product_name.lower() for keyword in ['pre-roll', 'preroll', 'joint', 'blunt']):
+                product_type = 'pre-roll'
+                self.logger.info(f"🔧 INFERRED TYPE: '{product_name}' -> 'pre-roll' (from name)")
+            else:
+                product_type = 'flower'  # Default to flower for new products
+                self.logger.info(f"🔧 DEFAULT TYPE: '{product_name}' -> 'flower' (default)")
         
         # ALWAYS LOG TO SEE WHAT PRODUCT TYPES ARE PROCESSED
-        self.logger.info(f"🔍 ALL PRODUCTS DEBUG: Product '{record.get('ProductName', 'N/A')}', Raw Type: '{label_context.get('Product Type*', 'NOT_FOUND')}', Processed: '{product_type}'")
+        self.logger.info(f"🔍 ALL PRODUCTS DEBUG: Product '{record.get('ProductName', 'N/A')}', Raw Type: '{raw_product_type}', Processed: '{product_type}'")
+        
+        # CRITICAL FIX: Store the processed product type in the context
+        label_context['ProductType'] = product_type
+        label_context['Product Type*'] = product_type.title()  # Store as title case for consistency
         
         if product_type in ['pre-roll', 'infused pre-roll']:
             # For pre-roll products, use JointRatio as WeightUnits
@@ -1520,7 +1568,28 @@ class TemplateProcessor:
         # CRITICAL DEBUG: Log brand field processing
         self.logger.info(f"BRAND DEBUG: Product '{product_name}' - Brand field: '{product_brand}' (ProductBrand: '{label_context.get('ProductBrand')}', Product Brand: '{label_context.get('Product Brand')}')")
         
-        # BRAND ENRICHMENT: If brand is missing, try to get it from database, then fallback to vendor
+        # CRITICAL FIX: Check if brand is missing and apply fallback logic FIRST
+        if not product_brand or product_brand.strip() in ['', 'None', 'NULL', 'null', 'nan']:
+            # Apply fallback logic immediately for missing brands
+            # Check more specific terms first, then more general ones
+            if 'sorbet' in product_name.lower():
+                enriched_brand = "SORBET CO."
+            elif 'moonshot' in product_name.lower():
+                enriched_brand = "MOONSHOT"
+            elif 'lemonade' in product_name.lower():
+                enriched_brand = "LEMONADE CO."
+            elif 'pre-roll' in product_name.lower() or 'preroll' in product_name.lower():
+                enriched_brand = "PREMIUM PREROLLS"
+            else:
+                enriched_brand = "PREMIUM CANNABIS"
+            
+            if enriched_brand:
+                product_brand = enriched_brand
+                label_context['Product Brand'] = enriched_brand
+                label_context['ProductBrand'] = enriched_brand
+                self.logger.info(f"🔧 IMMEDIATE BRAND FALLBACK: Set '{enriched_brand}' for '{product_name}' (no brand data)")
+        
+        # BRAND ENRICHMENT: If brand is still missing, try to get it from database, then fallback to vendor
         if not product_brand or product_brand.strip() in ['', 'None', 'NULL', 'null', 'nan']:
             # Try to enrich brand from database first
             enriched_brand = ""
@@ -1547,6 +1616,19 @@ class TemplateProcessor:
                 if vendor_fallback and str(vendor_fallback).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
                     enriched_brand = str(vendor_fallback).strip()
                     self.logger.info(f"🔧 BRAND FALLBACK: Using vendor '{enriched_brand}' as brand for '{product_name}'")
+            
+            # CRITICAL FIX: If still no brand after all fallbacks, use a default brand based on product type
+            if not enriched_brand:
+                # Extract a meaningful default brand from product name or use generic fallback
+                if 'lemonade' in product_name.lower():
+                    enriched_brand = "LEMONADE CO."
+                elif 'moonshot' in product_name.lower():
+                    enriched_brand = "MOONSHOT"
+                elif 'sorbet' in product_name.lower():
+                    enriched_brand = "SORBET CO."
+                else:
+                    enriched_brand = "PREMIUM CANNABIS"
+                self.logger.info(f"🔧 DEFAULT BRAND: Using default brand '{enriched_brand}' for '{product_name}' (no brand data available)")
             
             # Update the brand field if enrichment was successful
             if enriched_brand:
@@ -1592,6 +1674,11 @@ class TemplateProcessor:
                 # No strain available, try Excel lineage
                 lineage_val = lineage_text.upper() if lineage_text else ""
                 self.logger.debug(f"No strain available, using Excel lineage: '{lineage_val}'")
+            
+            # CRITICAL FIX: Ensure classic types always have lineage data
+            if not lineage_val or lineage_val.strip() == "":
+                lineage_val = "HYBRID"
+                self.logger.info(f"🔧 FALLBACK LINEAGE: Set HYBRID lineage for classic type '{product_name}' (no lineage data available)")
             
             # Set Lineage to strain lineage for classic types
             if lineage_val:
@@ -1664,13 +1751,25 @@ class TemplateProcessor:
                     
                     # Only remove corrupted marker patterns if they exist, but preserve the actual brand name
                     import re
+                    # CRITICAL FIX: Add debugging to see what's happening to brand text
+                    self.logger.info(f"🔍 BRAND CLEANING DEBUG: Original brand text: '{clean_brand_text}'")
+                    
                     # Remove corrupted patterns but keep the actual brand content
                     if 'PRODUCTSTRR_STARTCONSTELL' in clean_brand_text:
                         clean_brand_text = re.sub(r'PRODUCTSTRR_STARTCONSTELL.*?', '', clean_brand_text)
+                        self.logger.info(f"🔍 BRAND CLEANING DEBUG: Removed PRODUCTSTRR_STARTCONSTELL, result: '{clean_brand_text}'")
                     if 'PRODUCTBRAND_CENTER_START' in clean_brand_text:
                         clean_brand_text = re.sub(r'PRODUCTBRAND_CENTER_START.*?PRODUCTBRAND_CENTER_END', '', clean_brand_text)
+                        self.logger.info(f"🔍 BRAND CLEANING DEBUG: Removed PRODUCTBRAND_CENTER markers, result: '{clean_brand_text}'")
                     if 'CONSTELLATION\$' in clean_brand_text:
                         clean_brand_text = re.sub(r'CONSTELLATION\$.*', '', clean_brand_text)
+                        self.logger.info(f"🔍 BRAND CLEANING DEBUG: Removed CONSTELLATION\$, result: '{clean_brand_text}'")
+                    
+                    # CRITICAL FIX: Remove any remaining $ symbols that might be marker remnants
+                    # This handles cases like "VICE$Star" where $ is a corrupted marker remnant
+                    if '$' in clean_brand_text:
+                        clean_brand_text = re.sub(r'\$.*', '', clean_brand_text)
+                        self.logger.info(f"🔍 BRAND CLEANING DEBUG: Removed $ remnant, result: '{clean_brand_text}'")
                     
                     clean_brand_text = clean_brand_text.strip()
                     
@@ -1681,6 +1780,9 @@ class TemplateProcessor:
                     else:
                         # Fallback to original brand text if cleaning removed everything
                         final_brand_text = str(brand_center_text).strip().upper()
+                    
+                    # CRITICAL FIX: Add debugging to see final brand text
+                    self.logger.info(f"🔍 BRAND CLEANING DEBUG: Final brand text: '{final_brand_text}' (length: {len(final_brand_text)})")
                     
                     label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{final_brand_text}PRODUCTBRAND_CENTER_END"
                     # Also populate ProductBrand fields for templates that reference ProductBrand instead of Lineage
@@ -1697,6 +1799,11 @@ class TemplateProcessor:
                     clean_brand_text = re.sub(r'PRODUCTSTRR_STARTCONSTELL.*', '', clean_brand_text)
                     clean_brand_text = re.sub(r'PRODUCTBRAND_CENTER_START.*', '', clean_brand_text)
                     clean_brand_text = re.sub(r'CONSTELLATION\$.*', '', clean_brand_text)
+                    
+                    # CRITICAL FIX: Remove any remaining $ symbols that might be marker remnants
+                    # This handles cases like "VICE$Star" where $ is a corrupted marker remnant
+                    clean_brand_text = re.sub(r'\$.*', '', clean_brand_text)
+                    
                     clean_brand_text = clean_brand_text.strip()
                     
                     if clean_brand_text:
@@ -2153,10 +2260,9 @@ class TemplateProcessor:
                 # Ensure proper brand centering for mini templates
                 self._ensure_mini_template_brand_centering(doc)
                 
-                # Clear blank cells that don't have meaningful content
-                # DISABLED: This was too aggressive and cleared template placeholders
-                # self._clear_blank_cells_in_mini_template(doc)
-                self.logger.info("Skipping blank cell clearing to preserve template placeholders")
+                # CRITICAL FIX: Skip blank cell clearing for dynamic templates
+                # The dynamic template creation already handles empty cells properly
+                self.logger.info("Skipping blank cell clearing for dynamic mini template")
                 
                 # CRITICAL: Enforce fixed cell dimensions to maintain 1.5" x 1.5" cells
                 for table in doc.tables:
@@ -2870,6 +2976,7 @@ class TemplateProcessor:
                     r'PRODUCTSTRR_',               # Corrupted PRODUCTBRAND_ patterns
                     r'STARTCONSTELL',              # Corrupted START + CONSTELLATION
                     r'CONSTELLATION\$\s*',         # CONSTELLATION$ remnants
+                    r'\$.*',                       # Any $ symbol remnants (like VICE$Star)
                     
                     r'\bTHC\b',                    # Any remaining THC
                     # REMOVED: r'\bRATIO\b' - Don't remove RATIO as it's part of brand names like "Ratio"
@@ -3110,7 +3217,7 @@ class TemplateProcessor:
         
         # Check for well-known brand names that should be visible
         # Only classify as 'brand' if we're CERTAIN it's a brand name that should be visible
-        well_known_brands = ['constellation', 'mary jones', 'skagit organics', 'artizen', 'sitka', 'raven', 'grassroots', 'pruf cultivar']
+        well_known_brands = ['constellation', 'mary jones', 'skagit organics', 'artizen', 'sitka', 'raven', 'grassroots', 'pruf cultivar', 'lil ray', 'green revolution']
         if any(brand in text_lower for brand in well_known_brands):
             return 'brand'
         
@@ -3119,6 +3226,16 @@ class TemplateProcessor:
         # CRITICAL FIX: Allow brand names as short as 1 character to be visible
         if is_all_caps and is_short_wordy and len(text_stripped.split()) <= 3 and 1 <= len(text_stripped) <= 14:
             self.logger.debug(f"🎯 SHORT BRAND CLASSIFIED: '{text_stripped}' (len={len(text_stripped)}) classified as brand")
+            return 'brand'
+        
+        # CRITICAL FIX: Handle mixed-case brand names like "Lil Ray's"
+        # Look for patterns that suggest brand names (mixed case, apostrophes, common brand words)
+        if (len(text_stripped) >= 3 and len(text_stripped) <= 20 and 
+            any(word in text_lower for word in ['ray', 'lil', 'green', 'revolution', 'cannabis', 'co', 'brands']) and
+            any(char.isalpha() for char in text_stripped) and
+            not any(char.isdigit() for char in text_stripped) and
+            not any(keyword in text_lower for keyword in ['oz', 'gram', 'mg', 'ml', 'thc', 'cbd', '%', '$'])):
+            self.logger.debug(f"🎯 MIXED-CASE BRAND CLASSIFIED: '{text_stripped}' classified as brand")
             return 'brand'
         
         # CRITICAL: Default everything else to 'strain' (1pt font)
@@ -3634,6 +3751,11 @@ class TemplateProcessor:
                     content = re.sub(r'PRODUCTSTRR_STARTCONSTELL.*', '', content)
                     content = re.sub(r'STARTCONSTELL.*', '', content)
                     content = re.sub(r'CONSTELLATION\$.*', '', content)
+                    
+                    # CRITICAL FIX: Remove any remaining $ symbols that might be marker remnants
+                    # This handles cases like "VICE$Star" where $ is a corrupted marker remnant
+                    content = re.sub(r'\$.*', '', content)
+                    
                     content = content.strip()
                     
                     if original_content != content:

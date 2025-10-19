@@ -227,6 +227,207 @@ def flatten_tags(records):
             flat_tags.append(description.strip())
     return flat_tags
 
+def create_dynamic_mini_template(template_path, num_products, scale_factor=1.0):
+    """Create a dynamic mini template with only as many cells as products."""
+    from docx import Document
+    from docx.shared import Pt
+    from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from io import BytesIO
+    from copy import deepcopy
+
+    # Calculate grid dimensions based on number of products
+    # Always use 4 columns, calculate rows needed
+    num_cols = 4
+    num_rows = (num_products + num_cols - 1) // num_cols  # Ceiling division
+    
+    col_width_twips = str(int(1.5 * 1440))   # 1.5 inches per column
+    row_height_pts = Pt(1.5 * 72)           # 1.5 inches per row
+    cut_line_twips = int(0.001 * 1440)
+
+    doc = Document(template_path)
+    if not doc.tables:
+        raise RuntimeError("Template must contain at least one table.")
+    old = doc.tables[0]
+    src_tc = deepcopy(old.cell(0,0)._tc)
+    old._element.getparent().remove(old._element)
+
+    # Remove empty paragraphs
+    while doc.paragraphs and not doc.paragraphs[0].text.strip():
+        doc.paragraphs[0]._element.getparent().remove(doc.paragraphs[0]._element)
+
+    # CRITICAL FIX: Create table with exact number of rows needed, no more
+    tbl = doc.add_table(rows=num_rows, cols=num_cols)
+    tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
+    tblPr = tbl._element.find(qn('w:tblPr')) or OxmlElement('w:tblPr')
+    
+    # Set table properties
+    shd = OxmlElement('w:shd')
+    shd.set(qn('w:val'), 'clear')
+    shd.set(qn('w:color'), 'auto')
+    shd.set(qn('w:fill'), 'D3D3D3')
+    tblPr.insert(0, shd)
+    
+    layout = OxmlElement('w:tblLayout')
+    layout.set(qn('w:type'), 'fixed')
+    tblPr.append(layout)
+    tbl._element.insert(0, tblPr)
+    
+    # Set grid columns
+    grid = OxmlElement('w:tblGrid')
+    for _ in range(num_cols):
+        gc = OxmlElement('w:gridCol')
+        gc.set(qn('w:w'), col_width_twips)
+        grid.append(gc)
+    tbl._element.insert(0, grid)
+    
+    # Set row heights
+    for row in tbl.rows:
+        row.height = row_height_pts
+        row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+    
+    # Set borders
+    borders = OxmlElement('w:tblBorders')
+    for side in ('insideH','insideV'):
+        b = OxmlElement(f"w:{side}")
+        b.set(qn('w:val'), "single")
+        b.set(qn('w:sz'), "4")
+        b.set(qn('w:color'), "D3D3D3")
+        b.set(qn('w:space'), "0")
+        borders.append(b)
+    tblPr.append(borders)
+    
+    # CRITICAL FIX: Only populate cells for products we have
+    cnt = 1
+    for r in range(num_rows):
+        for c in range(num_cols):
+            if cnt <= num_products:  # Only populate cells for products we have
+                cell = tbl.cell(r,c)
+                cell._tc.clear_content()
+                tc = deepcopy(src_tc)
+                for t in tc.iter(qn('w:t')):
+                    if t.text and 'Label1' in t.text:
+                        t.text = t.text.replace('Label1', f'Label{cnt}')
+                for el in tc.xpath('./*'):
+                    cell._tc.append(deepcopy(el))
+            else:
+                # CRITICAL FIX: For empty cells, just clear them but don't remove them
+                # This prevents the table structure from breaking
+                cell = tbl.cell(r,c)
+                cell._tc.clear_content()
+            cnt += 1
+    
+    # Add spacing
+    tblPr2 = tbl._element.find(qn('w:tblPr'))
+    spacing = OxmlElement('w:tblCellSpacing')
+    spacing.set(qn('w:w'), str(cut_line_twips))
+    spacing.set(qn('w:type'), 'dxa')
+    tblPr2.append(spacing)
+    
+    buf = BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf
+
+def create_dynamic_double_template(template_path, num_products, scale_factor=1.0):
+    """Create a dynamic double template with only as many cells as products."""
+    from docx import Document
+    from docx.shared import Pt
+    from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from io import BytesIO
+    from copy import deepcopy
+
+    # Calculate grid dimensions based on number of products
+    # Always use 4 columns, calculate rows needed
+    num_cols = 4
+    num_rows = (num_products + num_cols - 1) // num_cols  # Ceiling division
+    
+    col_width_twips = str(int(1.75 * 1440))  # 1.75 inches per column for double template (original width)
+    row_height_pts = Pt(2.5 * 72)  # 2.5 inches per row for double template
+    cut_line_twips = int(0.001 * 1440)
+
+    doc = Document(template_path)
+    if not doc.tables:
+        raise RuntimeError("Template must contain at least one table.")
+    old = doc.tables[0]
+    src_tc = deepcopy(old.cell(0,0)._tc)
+    old._element.getparent().remove(old._element)
+
+    # Remove empty paragraphs
+    while doc.paragraphs and not doc.paragraphs[0].text.strip():
+        doc.paragraphs[0]._element.getparent().remove(doc.paragraphs[0]._element)
+
+    # Create table with dynamic dimensions
+    tbl = doc.add_table(rows=num_rows, cols=num_cols)
+    tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
+    tblPr = tbl._element.find(qn('w:tblPr')) or OxmlElement('w:tblPr')
+    
+    # Set table properties
+    shd = OxmlElement('w:shd')
+    shd.set(qn('w:val'), 'clear')
+    shd.set(qn('w:color'), 'auto')
+    shd.set(qn('w:fill'), 'D3D3D3')
+    tblPr.insert(0, shd)
+    
+    layout = OxmlElement('w:tblLayout')
+    layout.set(qn('w:type'), 'fixed')
+    tblPr.append(layout)
+    tbl._element.insert(0, tblPr)
+    
+    # Set grid columns
+    grid = OxmlElement('w:tblGrid')
+    for _ in range(num_cols):
+        gc = OxmlElement('w:gridCol')
+        gc.set(qn('w:w'), col_width_twips)
+        grid.append(gc)
+    tbl._element.insert(0, grid)
+    
+    # Set row heights
+    for row in tbl.rows:
+        row.height = row_height_pts
+        row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+    
+    # Set borders
+    borders = OxmlElement('w:tblBorders')
+    for side in ('insideH','insideV'):
+        b = OxmlElement(f"w:{side}")
+        b.set(qn('w:val'), "single")
+        b.set(qn('w:sz'), "4")
+        b.set(qn('w:color'), "D3D3D3")
+        b.set(qn('w:space'), "0")
+        borders.append(b)
+    tblPr.append(borders)
+    
+    # Populate cells
+    cnt = 1
+    for r in range(num_rows):
+        for c in range(num_cols):
+            if cnt <= num_products:  # Only populate cells for products we have
+                cell = tbl.cell(r,c)
+                cell._tc.clear_content()
+                tc = deepcopy(src_tc)
+                for t in tc.iter(qn('w:t')):
+                    if t.text and 'Label1' in t.text:
+                        t.text = t.text.replace('Label1', f'Label{cnt}')
+                for el in tc.xpath('./*'):
+                    cell._tc.append(deepcopy(el))
+            cnt += 1
+    
+    # Add spacing
+    tblPr2 = tbl._element.find(qn('w:tblPr'))
+    spacing = OxmlElement('w:tblCellSpacing')
+    spacing.set(qn('w:w'), str(cut_line_twips))
+    spacing.set(qn('w:type'), 'dxa')
+    tblPr2.append(spacing)
+    
+    buf = BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf
+
 def expand_template_to_4x5_fixed_scaled(template_path, scale_factor=1.0):
     from docx import Document
     from docx.shared import Pt
@@ -299,108 +500,36 @@ def expand_template_to_4x5_fixed_scaled(template_path, scale_factor=1.0):
     buf.seek(0)
     return buf
 
-def expand_template_to_4x3_fixed_double(template_path, scale_factor=1.0):
-    """Expand template to 4x3 grid for double templates (4 columns, 3 rows = 12 labels)."""
-    from docx import Document
-    from docx.shared import Pt
-    from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT
-    from docx.oxml import OxmlElement
-    from docx.oxml.ns import qn
-    from io import BytesIO
-    from copy import deepcopy
-
-    num_cols, num_rows = 4, 3  # 4 columns, 3 rows for 12 labels total
-    
-    # Equal width columns: 1.125 inches each for a total of 4.5 inches
-    col_width_twips = str(int(1.125 * 1440))  # 1.125 inches per column
-    row_height_pts = Pt(2.5 * 72)  # 2.5 inches per row for equal height
-
-    doc = Document(template_path)
-    if not doc.tables:
-        raise RuntimeError("Template must contain at least one table.")
-    old = doc.tables[0]
-    src_tc = deepcopy(old.cell(0,0)._tc)
-    old._element.getparent().remove(old._element)
-
-    # Remove empty paragraphs
-    while doc.paragraphs and not doc.paragraphs[0].text.strip():
-        doc.paragraphs[0]._element.getparent().remove(doc.paragraphs[0]._element)
-
-    tbl = doc.add_table(rows=num_rows, cols=num_cols)
-    tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
-    
-    # Set table properties
-    tblPr = tbl._element.find(qn('w:tblPr')) or OxmlElement('w:tblPr')
-    shd = OxmlElement('w:shd')
-    shd.set(qn('w:val'), 'clear')
-    shd.set(qn('w:color'), 'auto')
-    shd.set(qn('w:fill'), 'D3D3D3')
-    tblPr.insert(0, shd)
-    layout = OxmlElement('w:tblLayout')
-    layout.set(qn('w:type'), 'fixed')
-    tblPr.append(layout)
-    tbl._element.insert(0, tblPr)
-    
-    # Set column widths
-    grid = OxmlElement('w:tblGrid')
-    for _ in range(num_cols):
-        gc = OxmlElement('w:gridCol')
-        gc.set(qn('w:w'), col_width_twips)
-        grid.append(gc)
-    tbl._element.insert(0, grid)
-    
-    # Set row heights
-    for row in tbl.rows:
-        row.height = row_height_pts
-        row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
-    
-    # Set borders
-    borders = OxmlElement('w:tblBorders')
-    for side in ('insideH','insideV'):
-        b = OxmlElement(f"w:{side}")
-        b.set(qn('w:val'), "single")
-        b.set(qn('w:sz'), "4")
-        b.set(qn('w:color'), "D3D3D3")
-        b.set(qn('w:space'), "0")
-        borders.append(b)
-    tblPr.append(borders)
-    
-    # Fill each cell with the template content
-    cnt = 1
-    for r in range(num_rows):
-        for c in range(num_cols):
-            cell = tbl.cell(r,c)
-            cell._tc.clear_content()
-            tc = deepcopy(src_tc)
-            for t in tc.iter(qn('w:t')):
-                if t.text and 'Label1' in t.text:
-                    t.text = t.text.replace('Label1', f'Label{cnt}')
-            for el in tc.xpath('./*'):
-                cell._tc.append(deepcopy(el))
-            cnt += 1
-    
-    from docx.oxml.shared import OxmlElement as OE
-    tblPr2 = tbl._element.find(qn('w:tblPr'))
-    spacing = OxmlElement('w:tblCellSpacing')
-    spacing.set(qn('w:w'), str(int(0.001 * 1440)))
-    spacing.set(qn('w:type'), 'dxa')
-    tblPr2.append(spacing)
-    
-    buf = BytesIO()
-    doc.save(buf)
-    buf.seek(0)
-    return buf
-
 def process_chunk(args):
     """Process a chunk of records to generate labels."""
     chunk, base_template, font_scheme, orientation, scale_factor = args
+    logger = logging.getLogger(__name__)
     # Mini template expands to 4x5 grid
     if orientation == "mini":
-        local_template_buffer = expand_template_to_4x5_fixed_scaled(base_template, scale_factor=scale_factor)
-        num_labels = 20  # Fixed: 4x5 grid = 20 labels per page
+        actual_products = len(chunk)
+        # CRITICAL FIX: Create dynamic template based on number of products
+        if actual_products <= 20:
+            # Create a dynamic template that only has as many cells as products
+            local_template_buffer = create_dynamic_mini_template(base_template, actual_products, scale_factor)
+            num_labels = actual_products  # Only create labels for products we have
+        else:
+            # If we have more than 20 products, use the base template and let it handle multiple pages
+            local_template_buffer = base_template
+            num_labels = 9  # Use standard 3x3 grid for multiple pages
     elif orientation == "double":
-        local_template_buffer = expand_template_to_4x3_fixed_double(base_template, scale_factor=scale_factor)
-        num_labels = 12  # Fixed: 4x3 grid = 12 labels per page
+        actual_products = len(chunk)
+        # CRITICAL FIX: Create dynamic template based on number of products, similar to mini template
+        if actual_products <= 12:
+            # Create a dynamic template that only has as many cells as products
+            from src.core.generation.template_processor import TemplateProcessor
+            temp_processor = TemplateProcessor('double', font_scheme, scale_factor)
+            local_template_buffer = create_dynamic_double_template(base_template, actual_products, scale_factor)
+            num_labels = actual_products  # Only create labels for products we have
+            logger.info(f"🔧 DOUBLE TEMPLATE EXPANSION: Using dynamic template with {num_labels} labels")
+        else:
+            # If we have more than 12 products, use the base template and let it handle multiple pages
+            local_template_buffer = base_template
+            num_labels = 9  # Use standard 3x3 grid for multiple pages
     else:
         local_template_buffer = base_template
         num_labels = 9
@@ -411,7 +540,10 @@ def process_chunk(args):
     if DEBUG_ENABLED:
         logger.debug(f"DOH image path: {doh_image_path}")
     
-    for i in range(num_labels):
+    # CRITICAL FIX: Only create labels for the products we have, not empty slots
+    actual_num_labels = min(len(chunk), num_labels)
+    
+    for i in range(actual_num_labels):
         label_data = {}
         if i < len(chunk):
             row = chunk[i]
@@ -442,15 +574,45 @@ def process_chunk(args):
                     logger.debug("Skipping DOH image - value is not 'YES'")
                 
             # --- Wrap all fields with markers ---
-            # Updated price mapping to use correct Excel field name
-            # CRITICAL FIX: Use Excel-first price logic (same as excel_processor.py)
-            price_val = str(row.get('Price*', '')).strip() if row.get('Price*') and str(row.get('Price*', '')).strip() else str(row.get('Price', '')).strip()
+            # Updated price mapping to use correct field names
+            # CRITICAL FIX: Handle both Price and Price* fields from database/Excel
+            price_val = ''
+            if row.get('Price*') and str(row.get('Price*', '')).strip():
+                price_val = str(row.get('Price*', '')).strip()
+            elif row.get('Price') and str(row.get('Price', '')).strip():
+                price_val = str(row.get('Price', '')).strip()
+            
             label_data["Price"] = wrap_with_marker(price_val, "PRICE")  # Fixed: Use "PRICE" marker to match markers.py definition
             
             lineage_text   = str(row.get("Lineage", "")).strip()
             product_brand  = str(row.get("Product Brand", "")).strip()
-            product_type   = str(row.get("Product Type*", "")).strip().lower()
+            
+            # CRITICAL FIX: Handle cases where Product Type* is 'NOT_FOUND' or invalid
+            raw_product_type = str(row.get("Product Type*", "")).strip()
+            fallback_product_type = str(row.get("ProductType", "")).strip()
+            
+            if raw_product_type and raw_product_type.lower() not in ['not_found', 'unknown', '']:
+                product_type = raw_product_type.lower()
+            elif fallback_product_type and fallback_product_type.lower() not in ['not_found', 'unknown', '']:
+                product_type = fallback_product_type.lower()
+            else:
+                # CRITICAL FIX: For new products without proper type, infer from product name
+                product_name = str(row.get("ProductName", ""))
+                if any(keyword in product_name.lower() for keyword in ['flower', 'bud', 'nug', 'herb']):
+                    product_type = 'flower'
+                    logger.info(f"🔧 TAG_GENERATOR INFERRED TYPE: '{product_name}' -> 'flower' (from name)")
+                elif any(keyword in product_name.lower() for keyword in ['pre-roll', 'preroll', 'joint', 'blunt']):
+                    product_type = 'pre-roll'
+                    logger.info(f"🔧 TAG_GENERATOR INFERRED TYPE: '{product_name}' -> 'pre-roll' (from name)")
+                else:
+                    product_type = 'flower'  # Default to flower for new products
+                    logger.info(f"🔧 TAG_GENERATOR DEFAULT TYPE: '{product_name}' -> 'flower' (default)")
+            
             product_strain = str(row.get("Product Strain", "")).strip()
+            
+            # CRITICAL FIX: Store the processed product type in the label data
+            label_data['ProductType'] = product_type
+            label_data['Product Type*'] = product_type.title()  # Store as title case for consistency
             
             # Fix brand name for paraphernalia products
             if product_brand == "Paraphernalia" and product_type == "paraphernalia":
@@ -467,9 +629,16 @@ def process_chunk(args):
             is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES]
             
             if is_classic_type:
-                # For classic types, don't add brand markers initially
-                # They will be set to lineage later if lineage is available
-                pass
+                # For classic types, ensure lineage data is available
+                # CRITICAL FIX: Set default lineage for classic types if missing
+                lineage_val = str(row.get("Lineage", "")).strip()
+                if not lineage_val or lineage_val.lower() in ['', 'nan', 'none', 'null']:
+                    # Set default HYBRID lineage for classic types with missing lineage
+                    lineage_val = "HYBRID"
+                    logger.info(f"🔧 SET DEFAULT LINEAGE: Set HYBRID lineage for classic type '{product_name}' (missing lineage)")
+                
+                # Set lineage data for classic types
+                label_data["Lineage"] = lineage_val
             else:
                 # For non-classic types, preserve brand data for template processor
                 # The template processor will handle the proper formatting based on template type
@@ -480,9 +649,13 @@ def process_chunk(args):
                 label_data["ProductBrand"] = brand_content
                 label_data["ProductBrand_Center"] = brand_content
                 
-                # CRITICAL FIX: Also set Lineage field for double template compatibility
-                # The double template uses Lineage field, not ProductBrand field
-                label_data["Lineage"] = brand_content
+                # CRITICAL FIX: Set Lineage field with proper markers for double template compatibility
+                # The double template uses Lineage field with PRODUCTBRAND_CENTER markers
+                if orientation == 'double':
+                    label_data["Lineage"] = f"PRODUCTBRAND_CENTER_START{brand_content}PRODUCTBRAND_CENTER_END"
+                    logger.info(f"🔧 DOUBLE TEMPLATE BRAND DATA: Label{i+1} - Set Lineage to '{brand_content}' with markers")
+                else:
+                    label_data["Lineage"] = brand_content
             
             # Add other fields to label_data
             # Get product name and apply non-breaking hyphens to prevent "Pre-Roll" splitting
@@ -630,22 +803,6 @@ def process_chunk(args):
             context[f"Label{i+1}"] = label_data
             if DEBUG_ENABLED:
                 logger.debug(f"Created label data for Label{i+1}")
-        else:
-            # Empty label data for unused slots (consistent for all templates)
-            context[f"Label{i+1}"] = {
-                "Description": "",
-                "WeightUnits": "",
-                "ProductBrand": "",
-                "Price": "",
-                "Lineage": "",
-                "DOH": "",
-                "Ratio_or_THC_CBD": "",
-                # ProductStrain handled by template processor
-                "DescAndWeight": "",
-                "JointRatio": ""
-            }
-            if DEBUG_ENABLED:
-                logger.debug(f"Created empty label data for Label{i+1}")
 
     # Render template
     if DEBUG_ENABLED:

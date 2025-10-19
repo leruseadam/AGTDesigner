@@ -4724,7 +4724,8 @@ class ProductDatabase:
             'ceres', 'harmony farms', "farmer's daughter", 'greasy runtz', 'kelloggz koffee',
             'trop banana', 'velvet koffee', 'trigonal industries', 'peak supply', 'fk it',
             'conscious cannabis', 'honey tree', 'bodhi high', 'skagit organics', 'super fog',
-            'seattle bubble works', 'blue sky farms', 'green and gold brands', 'seatown'
+            'seattle bubble works', 'blue sky farms', 'green and gold brands', 'seatown',
+            'lil ray', 'lil ray\'s', 'green revolution'
         ]
         
         for brand_name in common_brands:

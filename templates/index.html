@@ -4137,6 +4137,70 @@
       }
     }
 
+    /* Header Button Styling - Fix text wrapping issues */
+    .btn-header-action {
+      background: linear-gradient(135deg, rgba(108, 117, 125, 0.8), rgba(73, 80, 87, 0.9));
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: white;
+      font-weight: 500;
+      font-size: 0.85rem;
+      padding: 8px 12px;
+      border-radius: 8px;
+      transition: all 0.3s ease;
+      white-space: nowrap;
+      min-width: fit-content;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      text-decoration: none;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    }
+
+    .btn-header-action:hover {
+      background: linear-gradient(135deg, rgba(73, 80, 87, 0.9), rgba(52, 58, 64, 0.95));
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+      color: white;
+    }
+
+    .btn-header-action svg {
+      flex-shrink: 0;
+      width: 16px;
+      height: 16px;
+    }
+
+    /* Ensure button container doesn't wrap */
+    .header-buttons-container {
+      flex-wrap: nowrap !important;
+      gap: 0.75rem !important;
+    }
+
+    /* Responsive adjustments for smaller screens */
+    @media (max-width: 768px) {
+      .btn-header-action {
+        font-size: 0.75rem;
+        padding: 6px 10px;
+        gap: 4px;
+      }
+      
+      .header-buttons-container {
+        gap: 0.5rem !important;
+      }
+    }
+
+    @media (max-width: 576px) {
+      .btn-header-action {
+        font-size: 0.7rem;
+        padding: 5px 8px;
+      }
+      
+      .header-buttons-container {
+        flex-wrap: wrap !important;
+        justify-content: center !important;
+        gap: 0.4rem !important;
+      }
+    }
+
 
   </style>
 </head>
