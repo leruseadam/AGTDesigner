@@ -873,6 +873,10 @@ def process_chunk(args):
     """Process a chunk of records to generate labels."""
     chunk, base_template, font_scheme, orientation, scale_factor = args
     logger = logging.getLogger(__name__)
+    
+    # Debug lineage data
+    from .docx_formatting import debug_lineage_data
+    debug_lineage_data(chunk)
     # CRITICAL FIX: Disable ALL dynamic templates to prevent XML corruption
     # Use standard template expansion with post-processing cleanup instead
     if orientation == "mini":

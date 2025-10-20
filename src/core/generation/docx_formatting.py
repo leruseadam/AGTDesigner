@@ -21,15 +21,30 @@ COLORS = {
     'PARA': 'FFC0CB'
 }
 
+def debug_lineage_data(records):
+    """Debug function to log lineage data being processed."""
+    logger.info("DEBUG: Lineage data in records:")
+    for i, record in enumerate(records[:5]):  # Log first 5 records
+        product_name = record.get('ProductName', record.get('Product Name*', 'Unknown'))
+        lineage = record.get('Lineage', record.get('lineage', ''))
+        product_type = record.get('Product Type*', record.get('product_type', ''))
+        strain = record.get('Product Strain', record.get('strain', ''))
+        logger.info(f"  Record {i+1}: '{product_name}' | Lineage: '{lineage}' | Type: '{product_type}' | Strain: '{strain}'")
+
 def apply_lineage_colors(doc):
     """Apply lineage colors to all cells based on keywords in cell text."""
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
     
     try:
+        logger.info("Starting lineage color application...")
+        cells_processed = 0
+        colors_applied = 0
+        
         for table in doc.tables:
             for row in table.rows:
                 for cell in row.cells:
+                    cells_processed += 1
                     original_text = cell.text.upper()  # Keep original text to check for markers
                     
                     # CRITICAL FIX: Skip blank cells - don't apply any background color
@@ -108,36 +123,57 @@ def apply_lineage_colors(doc):
                     is_classic_type = any(lineage in text for lineage in ["SATIVA", "INDICA", "HYBRID", "CBD"])
                     
                     # Apply lineage coloring logic based on clean text
+                    color_hex = None
+                    lineage_matched = None
+                    
                     if "PARAPHERNALIA" in text:
                         color_hex = COLORS['PARA']
+                        lineage_matched = "PARAPHERNALIA"
                     elif "HYBRID/INDICA" in text or "HYBRID INDICA" in text:
                         color_hex = COLORS['HYBRID_INDICA']
+                        lineage_matched = "HYBRID/INDICA"
                     elif "HYBRID/SATIVA" in text or "HYBRID SATIVA" in text:
                         color_hex = COLORS['HYBRID_SATIVA']
+                        lineage_matched = "HYBRID/SATIVA"
                     elif "SATIVA" in text:
                         color_hex = COLORS['SATIVA']
+                        lineage_matched = "SATIVA"
                     elif "INDICA" in text:
                         color_hex = COLORS['INDICA']
+                        lineage_matched = "INDICA"
                     elif "HYBRID" in text:
                         color_hex = COLORS['HYBRID']
+                        lineage_matched = "HYBRID"
                     elif "CBD" in text or "CBD_BLEND" in text:
                         # Apply CBD lineage colors if it's a classic type OR if ProductStrain is CBD
                         if is_classic_type or is_product_strain_cbd:
                             color_hex = COLORS['CBD']
+                            lineage_matched = "CBD"
                     elif "CBD BLEND" in text:
                         # Apply CBD BLEND lineage colors if it's a classic type OR if ProductStrain is CBD
                         if is_classic_type or is_product_strain_cbd:
                             color_hex = COLORS['CBD_BLEND']
+                            lineage_matched = "CBD BLEND"
                     elif "MIXED" in text:
                         # MIXED lineage always gets blue bars (this covers non-classic types like edibles)
                         color_hex = COLORS['MIXED']  # Blue for Mixed
+                        lineage_matched = "MIXED"
                     elif not is_classic_type and is_product_strain_cbd:
                         # For non-classic types with CBD strain, use yellow color
                         color_hex = COLORS['CBD']
+                        lineage_matched = "CBD (non-classic)"
                     elif not is_classic_type and text.strip():
                         # For non-classic types without specific strain, use blue color (MIXED)
                         # BUT ONLY if there's actual content (not empty after marker removal)
                         color_hex = COLORS['MIXED']
+                        lineage_matched = "MIXED (non-classic)"
+                    
+                    # Log lineage color application
+                    if color_hex:
+                        logger.info(f"LINEAGE COLOR: '{text}' -> {lineage_matched} -> #{color_hex}")
+                        colors_applied += 1
+                    else:
+                        logger.debug(f"NO LINEAGE MATCH: '{text}' (classic: {is_classic_type}, strain_cbd: {is_product_strain_cbd})")
                     
                     if color_hex and text.strip():
                         # Final safety check: only apply color if there's actual content
@@ -183,6 +219,7 @@ def apply_lineage_colors(doc):
         # FINAL LINEAGE CLEANUP: Remove any leading spaces from lineage content after coloring
         _final_lineage_cleanup_after_coloring(doc)
         
+        logger.info(f"LINEAGE COLOR SUMMARY: Processed {cells_processed} cells, applied colors to {colors_applied} cells")
         logger.debug("Applied lineage colors to document")
         return doc
     except Exception as e:
