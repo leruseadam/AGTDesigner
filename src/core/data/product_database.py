@@ -3497,6 +3497,33 @@ class ProductDatabase:
             logger.error(f"Error updating product lineage for '{product_name}': {e}")
             return False 
 
+    def get_product_lineage(self, product_name: str) -> Optional[str]:
+        """Get the lineage for a specific product by name."""
+        try:
+            self.init_database()
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Try to get lineage by product name
+            cursor.execute('''
+                SELECT "Lineage" FROM products 
+                WHERE "Product Name*" = ? OR "ProductName" = ? OR name = ?
+                ORDER BY id DESC
+                LIMIT 1
+            ''', (product_name, product_name, product_name))
+            
+            result = cursor.fetchone()
+            if result and result[0]:
+                logger.debug(f"Found product lineage for '{product_name}': {result[0]}")
+                return result[0]
+            
+            logger.debug(f"No lineage found for product '{product_name}'")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting product lineage for '{product_name}': {e}")
+            return None
+
     def get_vendor_strain_lineage(self, strain_name: str, vendor: str = None, brand: str = None) -> Optional[str]:
         """Get vendor-specific lineage for a strain, with fallback to canonical lineage."""
         try:

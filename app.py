@@ -4618,9 +4618,39 @@ def generate_labels():
                             records.append(record)
                         logging.info(f"✅ Generated {len(records)} records from database")
                         
-                        # CRITICAL FIX: Override lineage from Excel processor if it has been updated
+                        # CRITICAL FIX: Override lineage from database if it has been updated
+                        logging.info("LINEAGE OVERRIDE: Checking for updated lineage in database...")
+                        for record in records:
+                            product_name = record.get('Product Name*', '')
+                            if product_name:
+                                try:
+                                    # Get the most up-to-date lineage from the database
+                                    product_db = get_product_database()
+                                    if product_db:
+                                        # Try to get lineage by product name first
+                                        db_lineage = product_db.get_product_lineage(product_name)
+                                        if db_lineage:
+                                            original_lineage = record.get('Lineage', '')
+                                            if str(db_lineage).strip() != str(original_lineage).strip():
+                                                logging.info(f"LINEAGE OVERRIDE: '{product_name}' - Record: '{original_lineage}' -> Database: '{db_lineage}'")
+                                                record['Lineage'] = str(db_lineage).strip()
+                                        else:
+                                            # Try to get lineage by strain name
+                                            product_strain = record.get('Product Strain', '')
+                                            if product_strain:
+                                                strain_info = product_db.get_strain_info(product_strain)
+                                                if strain_info and strain_info.get('canonical_lineage'):
+                                                    db_lineage = strain_info['canonical_lineage']
+                                                    original_lineage = record.get('Lineage', '')
+                                                    if str(db_lineage).strip() != str(original_lineage).strip():
+                                                        logging.info(f"LINEAGE OVERRIDE: '{product_name}' (strain: '{product_strain}') - Record: '{original_lineage}' -> Database: '{db_lineage}'")
+                                                        record['Lineage'] = str(db_lineage).strip()
+                                except Exception as e:
+                                    logging.warning(f"Error checking lineage override for '{product_name}': {e}")
+                        
+                        # FALLBACK: Override lineage from Excel processor if it has been updated
                         if has_excel_data and excel_processor.df is not None and 'Lineage' in excel_processor.df.columns:
-                            logging.info("LINEAGE OVERRIDE: Checking for updated lineage in Excel processor...")
+                            logging.info("LINEAGE OVERRIDE: Checking for updated lineage in Excel processor as fallback...")
                             for record in records:
                                 product_name = record.get('Product Name*', '')
                                 if product_name:
@@ -5809,6 +5839,17 @@ def update_lineage():
                     logging.info(f"Successfully persisted lineage change for {key_type} '{database_key}' to '{new_lineage}' in database")
                 else:
                     logging.warning(f"Failed to persist lineage change for '{database_key}' in database")
+                
+                # CRITICAL FIX: Also update the product directly in the database
+                product_db = get_product_database()
+                if product_db:
+                    # Update the product lineage directly
+                    product_success = product_db.update_product_lineage(tag_name, new_lineage)
+                    if product_success:
+                        logging.info(f"Successfully updated product lineage for '{tag_name}' to '{new_lineage}' in database")
+                    else:
+                        logging.warning(f"Failed to update product lineage for '{tag_name}' in database")
+                        
             except Exception as db_error:
                 logging.error(f"Error persisting lineage to database: {db_error}")
             
