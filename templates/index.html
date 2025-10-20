@@ -4295,67 +4295,23 @@
       <!-- Title and Subtitle centered above tag panels -->
 
       <div class="centerframe" style="width:100%; margin:0 auto; text-align:center; position:relative;">
-        <div style="display: flex; justify-content: center; align-items: center; margin-bottom: 1rem;">
-          <div style="text-align: center; background: rgba(45, 34, 58, 0.95); backdrop-filter: blur(15px); -webkit-backdrop-filter: blur(15px); border: 2px solid rgba(160, 132, 232, 0.3); border-radius: 18px; padding: 2rem; box-shadow: 0 4px 24px rgba(80, 40, 160, 0.18); max-width: 600px;">
-            <div class="d-flex align-items-center justify-content-center gap-2 mb-1">
-              <h1 class="vibrant-title mb-0" data-text="AGT Designer">
+        <div style="display: flex; justify-content: center; align-items: center; margin-bottom: 4rem;">
+          <div style="text-align: center; background: linear-gradient(135deg, rgba(45, 34, 58, 0.95) 0%, rgba(60, 45, 75, 0.9) 50%, rgba(45, 34, 58, 0.95) 100%); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 2px solid rgba(160, 132, 232, 0.4); border-radius: 20px; padding: 3rem 5rem; box-shadow: 0 8px 32px rgba(80, 40, 160, 0.25), 0 0 0 1px rgba(160, 132, 232, 0.1); max-width: 700px; position: relative; overflow: hidden;">
+            <div style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: radial-gradient(circle at 30% 20%, rgba(160, 132, 232, 0.1) 0%, transparent 50%), radial-gradient(circle at 70% 80%, rgba(139, 92, 246, 0.08) 0%, transparent 50%); pointer-events: none;"></div>
+            <div style="position: relative; z-index: 2;">
+              <h1 class="vibrant-title">
                 AGT Designer
               </h1>
+              <p class="vibrant-subtitle">
+                Auto-Generating Tag Designer
+              </p>
+              <p class="copyright-text">
+                ©2025 Created by Adam Cordova for A Greener Today
+              </p>
             </div>
-            <p class="vibrant-subtitle">
-              <span class="larger-letter">A</span>uto-<span class="larger-letter">G</span>enerating <span class="larger-letter">T</span>ag Designer
-            </p>
-            <p class="copyright-text">
-              ©2025 Created by Adam Cordova for A Greener Today
-            </p>
-
-            <!-- Store Selection -->
-            <div class="store-selection-container mt-3 mb-3 d-flex align-items-center justify-content-between">
-              <div class="d-flex align-items-center gap-2">
-                <span class="store-label">Store:</span>
-                <span class="current-store-display" id="currentStoreDisplay">No store selected</span>
-                <button class="btn btn-sm btn-outline-primary" onclick="showStoreSelectionModal()" title="Change store">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                    <polyline points="7 10 12 15 17 10"></polyline>
-                    <line x1="12" y1="15" x2="12" y2="3"></line>
-                  </svg>
-                  Change
-                </button>
-              </div>
-              <button class="big-glow-help-btn p-0" id="help-btn" title="Click for help with downloading LOTs data and using the application" data-bs-toggle="modal" data-bs-target="#helpModal">
-                <span style="font-size: 16px; font-weight: bold; color: white;">?</span>
-              </button>
-            </div>
-            <div class="store-status text-center" id="storeStatus"></div>
-
-            <!-- IMMEDIATE STORE SETTING SCRIPT -->
-            <script>
-              // Set Bothell as default store IMMEDIATELY after elements are created
-              (function() {
-                console.log('INLINE: Setting Bothell as default store immediately...');
-                const displayElement = document.getElementById('currentStoreDisplay');
-                const statusElement = document.getElementById('storeStatus');
-                
-                if (displayElement) {
-                  displayElement.textContent = 'AGT Bothell';
-                  displayElement.style.color = '#4ade80';
-                  console.log('INLINE: Set display to AGT Bothell');
-                }
-                
-                if (statusElement) {
-                  statusElement.textContent = 'Store: AGT Bothell';
-                  statusElement.className = 'store-status active';
-                  console.log('INLINE: Set status to AGT Bothell');
-                }
-                
-                // Also set localStorage
-                localStorage.setItem('selectedStore', 'AGT_Bothell');
-              })();
-            </script>
 
             <!-- Database and Lineage Management Buttons -->
-            <div class="header-buttons-container mt-3 d-flex justify-content-center gap-3">
+            <div class="header-buttons-container mt-3 d-flex justify-content-center gap-3 flex-wrap">
               <button class="btn btn-header-action" onclick="showProductDatabaseManager()" title="Open Data & Analytics">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
@@ -4388,6 +4344,53 @@
                 Match JSON
               </button>
             </div>
+
+            <!-- Store Selection -->
+            <div class="store-selection-container">
+              <div class="d-flex align-items-center justify-content-center gap-3">
+                <div class="d-flex align-items-center gap-3">
+                  <span class="store-label">Store:</span>
+                  <span class="current-store-display" id="currentStoreDisplay">No store selected</span>
+                  <button class="btn btn-sm btn-outline-primary" onclick="showStoreSelectionModal()" title="Change store">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                      <polyline points="7 10 12 15 17 10"></polyline>
+                      <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                    Change
+                  </button>
+                </div>
+                <button class="big-glow-help-btn" id="help-btn" title="Click for help with downloading LOTs data and using the application" data-bs-toggle="modal" data-bs-target="#helpModal">
+                  <span style="font-size: 16px; font-weight: bold; color: white;">?</span>
+                </button>
+              </div>
+              <div class="store-status text-center" id="storeStatus"></div>
+            </div>
+
+            <!-- IMMEDIATE STORE SETTING SCRIPT -->
+            <script>
+              // Set Bothell as default store IMMEDIATELY after elements are created
+              (function() {
+                console.log('INLINE: Setting Bothell as default store immediately...');
+                const displayElement = document.getElementById('currentStoreDisplay');
+                const statusElement = document.getElementById('storeStatus');
+                
+                if (displayElement) {
+                  displayElement.textContent = 'AGT Bothell';
+                  displayElement.style.color = '#4ade80';
+                  console.log('INLINE: Set display to AGT Bothell');
+                }
+                
+                if (statusElement) {
+                  statusElement.textContent = 'Store: AGT Bothell';
+                  statusElement.className = 'store-status active';
+                  console.log('INLINE: Set status to AGT Bothell');
+                }
+                
+                // Also set localStorage
+                localStorage.setItem('selectedStore', 'AGT_Bothell');
+              })();
+            </script>
           </div>
         </div>
       </div>
@@ -4442,12 +4445,12 @@
                                               <div class="d-flex flex-row gap-3" style="height: 100%; align-items: center;">
                   <!-- Clear Filters Button -->
                   <div class="mt-3">
-                    <button id="clearFiltersBtn" class="btn btn-sm w-100" onclick="TagManager.clearAllFilters()" title="Clear all filters" style="background: linear-gradient(135deg, rgba(220, 53, 69, 0.8), rgba(220, 53, 69, 0.6)); border: 1.5px solid rgba(220, 53, 69, 0.8); color: #fff; border-radius: 8px; font-size: 0.8rem; font-weight: 600; padding: 0.4rem 0.6rem; transition: all 0.3s ease; box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3);">
+                    <button id="clearFiltersBtn" class="btn btn-sm w-100" onclick="TagManager.clearAllFilters()" title="Clear all filters and reset app" style="background: linear-gradient(135deg, rgba(220, 53, 69, 0.8), rgba(220, 53, 69, 0.6)); border: 1.5px solid rgba(220, 53, 69, 0.8); color: #fff; border-radius: 8px; font-size: 0.8rem; font-weight: 600; padding: 0.4rem 0.6rem; transition: all 0.3s ease; box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3);">
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-1">
                         <polyline points="3 6 5 6 21 6"></polyline>
                         <path d="M19 6v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
                       </svg>
-                      Clear Filters
+                      Clear & Reset
                     </button>
                   </div>
                   <div>
@@ -4540,7 +4543,7 @@
           </div>
           
           <!-- Center Column with Controls -->
-          <div class="mb-1 mt-0 d-flex flex-column justify-content-start align-items-center" style="flex: 1; margin-right: 0.5rem; padding-top: 0; margin-top: 0; padding-left: 0.25rem; padding-right: 0.25rem;" data-container-type="center">
+          <div class="mb-1 mt-0 d-flex flex-column justify-content-start align-items-center" style="flex: 1.3; margin-right: 0.5rem; padding-top: 0; margin-top: 0; padding-left: 0.5rem; padding-right: 0.5rem;" data-container-type="center">
             <!-- Controls -->
             <div class="control-panel">
               <!-- Controls Header -->
@@ -4582,15 +4585,15 @@
                     Undo
                   </span>
                 </button>
-                <button id="clear-filters-btn" class="btn btn-glass btn-sm" title="Clear selected tags">
-                  <span class="icon-btn">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <polyline points="3 6 5 6 21 6"></polyline>
-                      <path d="M19 6v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                    </svg>
-                    Clear
-                  </span>
-                </button>
+                    <button id="clear-filters-btn" class="btn btn-glass btn-sm" title="Clear selected tags and reset app">
+                      <span class="icon-btn">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <polyline points="3 6 5 6 21 6"></polyline>
+                          <path d="M19 6v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        </svg>
+                        Clear & Reset
+                      </span>
+                    </button>
                 <button class="btn btn-glass btn-sm" onclick="TagManager.downloadExcel()" title="Download selected tags as Excel file">
                   <span class="icon-btn">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -5207,8 +5210,8 @@
   </div>
   
   <!-- Generation Splash Modal Overlay -->
-  <div id="generationSplashModal" class="generation-splash-modal" style="display:none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 9999; justify-content: center; align-items: center; backdrop-filter: blur(2px);">
-    <div class="generation-splash-popup" style="background: rgba(22, 33, 62, 0.95); border-radius: 24px; padding: 20px; box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(0, 212, 170, 0.1); border: 1px solid rgba(0, 212, 170, 0.2); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);">
+  <div id="generationSplashModal" class="generation-splash-modal" style="display:none;">
+    <div class="generation-splash-popup">
       <canvas class="inner-canvas" id="generation-splash-canvas" style="width: 500px; height: 350px; border-radius: 10px; display: block;"></canvas>
     </div>
   </div>

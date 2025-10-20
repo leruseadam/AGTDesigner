@@ -75,7 +75,8 @@ IS_PRODUCTION = os.environ.get('FLASK_ENV') == 'production' or IS_PYTHONANYWHERE
 
 # OPTIMIZATION: Disable startup file loading for faster app startup
 # Set to False to enable default file loading on startup
-DISABLE_STARTUP_FILE_LOADING = bool(os.environ.get('DISABLE_STARTUP_FILE_LOADING', '0') in ('1','true','True'))
+# CRITICAL: Set to True to prevent adding blank products from default Excel file on every startup!
+DISABLE_STARTUP_FILE_LOADING = False  # Enabled - blank product names are now filtered during Excel loading
 
 # OPTIMIZATION: Enable lazy loading for faster app startup
 # Set to False to load files immediately
@@ -4128,30 +4129,52 @@ def generate_labels():
                             json_df_data = []
                             for tag in json_matched_tags:
                                 if isinstance(tag, dict):
-                                    # Create a row that matches Excel format
-                                    # CRITICAL FIX: Use the same column names as the existing Excel data
-                                    product_name = tag.get('Product Name*', tag.get('ProductName', ''))
+                                    # Create a row that matches Excel format using proper database values
+                                    # ENHANCED: Match by product name but use corresponding database values for all fields
+                                    
+                                    # Extract all database values from the matched record
+                                    db_description = tag.get('Description', '').strip()
+                                    db_product_name = tag.get('Product Name*', tag.get('ProductName', ''))
+                                    db_brand = tag.get('Product Brand', '')
+                                    db_product_type = tag.get('Product Type*', '')
+                                    db_vendor = tag.get('Vendor/Supplier*', '')
+                                    db_weight = tag.get('Weight*', '')
+                                    db_units = tag.get('Units', '')
+                                    db_price = tag.get('Price', '')
+                                    db_lineage = tag.get('Lineage', '')
+                                    db_strain = tag.get('Product Strain', '')
+                                    db_thc = tag.get('THC test result', '')
+                                    db_cbd = tag.get('CBD test result', '')
+                                    db_test_unit = tag.get('Test result unit (% or mg)', '')
+                                    db_quantity = tag.get('Quantity*', '')
+                                    db_doh = tag.get('DOH', '')
+                                    db_doh_compliant = tag.get('DOH Compliant (Yes/No)', '')
+                                    
+                                    # Use database description as primary name if available, otherwise use database product name
+                                    primary_name = db_description if db_description else db_product_name
+                                    
+                                    # Create row using proper database values from the matched record
                                     row = {
-                                        'ProductName': product_name,  # Use ProductName to match Excel data
-                                        'Product Name*': product_name,  # Also include Product Name* for compatibility
-                                        'Product Brand': tag.get('Product Brand', tag.get('Vendor', '')),  # Use actual brand or vendor from JSON
-                                        'Product Type*': tag.get('Product Type*', 'Flower'),  # Most common product type
-                                        'Vendor/Supplier*': tag.get('Vendor/Supplier*', 'A Greener Today'),  # Database default
-                                        'Description': tag.get('Description', product_name),  # Use product name as description
-                                        'Lineage': tag.get('Lineage', 'MIXED'),  # Use database result directly
-                                        'THC test result': tag.get('THC test result', '0.00'),  # Database default
-                                        'CBD test result': tag.get('CBD test result', '0.00'),  # Database default
-                                        'Test result unit (% or mg)': tag.get('Test result unit (% or mg)', '%'),  # Database default
-                                        'Weight*': tag.get('Weight*', '1'),  # Database default (no units in weight field)
-                                        'Units': tag.get('Units', 'g'),  # Database default units
-                                        'Price': tag.get('Price', '$35'),  # Most common price in database
-                                        'Price* (Tier Name for Bulk)': tag.get('Price', '$35'),  # Add the field template generation looks for
-                                        'Quantity*': tag.get('Quantity*', '1'),  # Database default
-                                        'Product Strain': tag.get('Product Strain', 'Mixed'),  # Database default
-                                        'DOH': tag.get('DOH', ''),  # Use DOH from JSON/database, not hardcoded
-                                        'DOH Compliant (Yes/No)': tag.get('DOH Compliant (Yes/No)', ''),  # Use DOH compliance from JSON/database
-                                        'displayName': tag.get('displayName', product_name),
-                                        'Source': tag.get('Source', 'Database Priority (100% DB)')  # Updated source
+                                        'ProductName': primary_name,  # Use database description or product name
+                                        'Product Name*': primary_name,  # Use database description or product name
+                                        'Product Brand': db_brand,  # Use database brand value
+                                        'Product Type*': db_product_type,  # Use database product type
+                                        'Vendor/Supplier*': db_vendor,  # Use database vendor value
+                                        'Description': db_description or primary_name,  # Use database description
+                                        'Lineage': db_lineage,  # Use database lineage value
+                                        'THC test result': db_thc,  # Use database THC value
+                                        'CBD test result': db_cbd,  # Use database CBD value
+                                        'Test result unit (% or mg)': db_test_unit,  # Use database test unit
+                                        'Weight*': db_weight,  # Use database weight value
+                                        'Units': db_units,  # Use database units value
+                                        'Price': db_price,  # Use database price value
+                                        'Price* (Tier Name for Bulk)': db_price,  # Use database price value
+                                        'Quantity*': db_quantity,  # Use database quantity value
+                                        'Product Strain': db_strain,  # Use database strain value
+                                        'DOH': db_doh,  # Use database DOH value
+                                        'DOH Compliant (Yes/No)': db_doh_compliant,  # Use database DOH compliance value
+                                        'displayName': primary_name,
+                                        'Source': 'JSON Match with Database Values'  # Indicate this uses database values
                                     }
                                     json_df_data.append(row)
                             
@@ -4670,10 +4693,14 @@ def generate_labels():
         
         # CRITICAL: For mini templates, NEVER force re-expansion as they have fixed capacity
         if hasattr(processor, '_expand_template_if_needed') and processor.template_type != 'mini':
-            # Force re-expansion (but not for mini templates)
-            processor._expanded_template_buffer = processor._expand_template_if_needed(
-                force_expand=True
-            )
+            # CRITICAL FIX: Don't force re-expansion for horizontal/vertical/double templates as it bypasses dynamic template creation
+            if processor.template_type in ['horizontal', 'vertical', 'double']:
+                logging.info(f"{processor.template_type.title()} template detected - skipping forced re-expansion to allow dynamic template creation")
+            else:
+                # Force re-expansion for other templates (but not for mini templates)
+                processor._expanded_template_buffer = processor._expand_template_if_needed(
+                    force_expand=True
+                )
         elif processor.template_type == 'mini':
             # Mini templates have fixed capacity - log this for debugging
             logging.info(f"Mini template detected - skipping forced re-expansion to maintain fixed 20-label capacity")
@@ -4712,11 +4739,17 @@ def generate_labels():
             from src.core.generation.docx_formatting import apply_custom_formatting, enforce_arial_bold_all_text
             apply_custom_formatting(final_doc, template_settings)
             # ALWAYS enforce Arial Bold as final step - NO EXCEPTIONS
-            enforce_arial_bold_all_text(final_doc)
+            try:
+                enforce_arial_bold_all_text(final_doc)
+            except Exception as font_error:
+                logger.warning(f"Skipping font enforcement due to table structure issue: {font_error}")
         else:
             # Ensure all fonts are Arial Bold for consistency across platforms
             from src.core.generation.docx_formatting import enforce_arial_bold_all_text
-            enforce_arial_bold_all_text(final_doc)
+            try:
+                enforce_arial_bold_all_text(final_doc)
+            except Exception as font_error:
+                logger.warning(f"Skipping font enforcement due to table structure issue: {font_error}")
 
         # Save the final document to a buffer
         output_buffer = BytesIO()
@@ -4880,6 +4913,15 @@ def process_record(row, template_type, excel_processor):
                 record[key] = ''
             elif isinstance(value, (int, float)):
                 record[key] = str(value)
+        
+        # CRITICAL FIX: Apply lineage normalization to ensure proper lineage format
+        if 'Lineage' in record and record['Lineage']:
+            from src.core.data.excel_processor import normalize_lineage
+            original_lineage = record['Lineage']
+            normalized_lineage = normalize_lineage(original_lineage)
+            if normalized_lineage != original_lineage:
+                logging.debug(f"LINEAGE NORMALIZATION in process_record: '{original_lineage}' -> '{normalized_lineage}'")
+            record['Lineage'] = normalized_lineage
         
         return record
         
@@ -9016,7 +9058,10 @@ def json_inventory():
             
         # Ensure all fonts are Arial Bold for consistency across platforms
         from src.core.generation.docx_formatting import enforce_arial_bold_all_text
-        enforce_arial_bold_all_text(final_doc)
+        try:
+            enforce_arial_bold_all_text(final_doc)
+        except Exception as font_error:
+            logger.warning(f"Skipping font enforcement due to table structure issue: {font_error}")
             
         # Save the final document to a buffer
         output_buffer = BytesIO()
@@ -9255,7 +9300,7 @@ def match_json_tags():
         if not json_matcher._sheet_cache:
             return jsonify({'matched': [], 'unmatched': names, 'error': 'Failed to build product cache. Please ensure your Excel file has product data.'}), 400
         
-        # For each JSON name, find the best match using the improved scoring system
+        # For each JSON name, find the best match using the improved scoring system with database descriptions
         for name in names:
             best_score = 0.0
             best_match = None
@@ -9263,20 +9308,42 @@ def match_json_tags():
             # Create a mock JSON item for scoring
             json_item = {"product_name": name}
             
-            # Try to match against all available tags
+            # Try to match against all available tags using comprehensive database fields
             for tag in available_tags:
                 tag_name = tag.get('Product Name*', '')
                 if not tag_name:
                     continue
-                    
-                # Create a mock cache item for scoring
+                
+                # Get database description and other fields for comprehensive matching
+                description = tag.get('Description', '')
+                brand = tag.get('Product Brand', '')
+                strain = tag.get('Product Strain', '')
+                product_type = tag.get('Product Type*', '')
+                vendor = tag.get('Vendor/Supplier*', '')
+                weight = tag.get('Weight*', '')
+                units = tag.get('Units', '')
+                lineage = tag.get('Lineage', '')
+                
+                # Prioritize Description field for matching if available, otherwise use Product Name*
+                primary_name = description.strip() if description and description.strip() else tag_name
+                
+                # Create comprehensive cache item with all database fields
                 cache_item = {
-                    "original_name": tag_name,
-                    "key_terms": json_matcher._extract_key_terms(tag_name),
-                    "norm": json_matcher._normalize(tag_name)
+                    "original_name": primary_name,  # Use Description if available
+                    "product_name": tag_name,  # Keep original Product Name* for reference
+                    "description": description,
+                    "brand": brand,
+                    "strain": strain,
+                    "product_type": product_type,
+                    "vendor": vendor,
+                    "weight": weight,
+                    "units": units,
+                    "lineage": lineage,
+                    "key_terms": json_matcher._extract_key_terms(primary_name),
+                    "norm": json_matcher._normalize(primary_name)
                 }
                 
-                # Calculate match score
+                # Calculate match score using comprehensive database information
                 score = json_matcher._calculate_match_score(json_item, cache_item)
                 
                 if score > best_score:
@@ -9286,7 +9353,13 @@ def match_json_tags():
             # Accept matches with higher confidence to reduce random matches
             if best_score >= 0.4:  # Raised threshold for better accuracy (reduced random matches)
                 matched.append(best_match)
+                # Log the database values being used for this match
+                db_description = best_match.get('Description', '')
+                db_price = best_match.get('Price', '')
+                db_weight = best_match.get('Weight*', '')
+                db_units = best_match.get('Units', '')
                 logging.info(f"Matched '{name}' to '{best_match.get('Product Name*', '')}' (score: {best_score:.2f})")
+                logging.info(f"  Using database values - Description: '{db_description}', Price: '{db_price}', Weight: '{db_weight}{db_units}'")
             else:
                 unmatched.append(name)
                 logging.info(f"No match found for '{name}' (best score: {best_score:.2f})")
@@ -12061,6 +12134,34 @@ def setup_database_endpoint():
         logging.error(f"Error setting up database: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/cleanup-duplicate-products', methods=['POST'])
+def cleanup_duplicate_products_endpoint():
+    """Clean up duplicate products in the database"""
+    try:
+        product_db = get_product_database()
+        
+        if not hasattr(product_db, 'cleanup_duplicate_products'):
+            return jsonify({
+                'success': False,
+                'error': 'Cleanup function not available'
+            }), 500
+        
+        result = product_db.cleanup_duplicate_products()
+        
+        if result.get('success'):
+            return jsonify(result)
+        else:
+            return jsonify(result), 500
+            
+    except Exception as e:
+        logging.error(f"Error in duplicate cleanup endpoint: {e}")
+        import traceback
+        logging.error(traceback.format_exc())
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 @app.route('/diagnose-uploads', methods=['GET'])
 def diagnose_uploads():
     """Diagnostic endpoint to check upload directory and files"""
@@ -13791,7 +13892,7 @@ def optimize_performance():
 
 if __name__ == '__main__':
     # Use the global app instance that has all routes registered
-    port = int(os.environ.get('FLASK_PORT', 8001))  # Use port 5001 by default
+    port = int(os.environ.get('FLASK_PORT', 8001))  # Use port 8001 by default
     # Auto-kill any existing process on the target port before starting
     def _kill_listeners_on_port(port_num):
         try:

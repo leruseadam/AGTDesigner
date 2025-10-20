@@ -5348,6 +5348,11 @@ const TagManager = {
 
     async clearSelected() {
         try {
+            console.log('🔄 Clearing selected tags and performing full app reset...');
+            
+            // Perform full app reset first
+            await performFullAppReset();
+            
             // Call the backend API to clear selected tags
             const response = await fetch('/api/clear-filters', {
                 method: 'POST',
@@ -5362,18 +5367,24 @@ const TagManager = {
                 this.state.selectedTags.clear();
                 
                 // Update the selected tags display immediately
-                this.updateSelectedTags([]);
+                if (this.updateSelectedTags) {
+                    this.updateSelectedTags([]);
+                }
                 
                 // Clear all checkboxes in available tags section
                 const availableCheckboxes = document.querySelectorAll('#availableTags input[type="checkbox"]');
                 availableCheckboxes.forEach(checkbox => {
                     checkbox.checked = false;
+                    // Trigger change event to update listeners
+                    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
                 });
                 
                 // Clear all checkboxes in selected tags section
                 const selectedCheckboxes = document.querySelectorAll('#selectedTags input[type="checkbox"]');
                 selectedCheckboxes.forEach(checkbox => {
                     checkbox.checked = false;
+                    // Trigger change event to update listeners
+                    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
                 });
                 
                 // Show all available tags (in case some were hidden)
@@ -5386,12 +5397,16 @@ const TagManager = {
                 this.state.filterCache = null;
                 
                 // Update available tags display to reflect cleared state
-                this.efficientlyUpdateAvailableTagsDisplay();
+                if (this.efficientlyUpdateAvailableTagsDisplay) {
+                    this.efficientlyUpdateAvailableTagsDisplay();
+                }
                 
                 // Update select all checkboxes to unchecked state
-                this.updateSelectAllCheckboxes();
+                if (this.updateSelectAllCheckboxes) {
+                    this.updateSelectAllCheckboxes();
+                }
                 
-                console.log('Cleared all selected tags and checkboxes');
+                console.log('✅ Selected tags cleared and app reset completed successfully');
             } else {
                 console.error('Failed to clear selected tags on server');
             }
@@ -6329,41 +6344,56 @@ const TagManager = {
         });
     },
 
-    // Add function to clear all filters at once
-    clearAllFilters() {
-        console.log('Clearing all filters...');
+    // Enhanced function to clear all filters and perform full app reset
+    async clearAllFilters() {
+        console.log('🔄 Clearing all filters and performing full app reset...');
         
-        const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
-        
-        // Clear each filter dropdown
-        filterIds.forEach(filterId => {
-            const filterElement = document.getElementById(filterId);
-            if (filterElement) {
-                filterElement.value = '';
+        try {
+            // Perform full app reset
+            await performFullAppReset();
+            
+            // Additional filter-specific clearing
+            const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
+            
+            // Clear each filter dropdown
+            filterIds.forEach(filterId => {
+                const filterElement = document.getElementById(filterId);
+                if (filterElement) {
+                    filterElement.value = '';
+                    // Trigger change event to update listeners
+                    filterElement.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            });
+            
+            // Apply the cleared filters
+            if (this.applyFilters) {
+                this.applyFilters();
             }
-        });
-        
-        // Apply the cleared filters
-        this.applyFilters();
-        this.renderActiveFilters();
-        
-        // Also update the filter dropdowns to reflect the cleared state
-        if (this.state.originalFilterOptions.vendor) {
-            this.updateFilters(this.state.originalFilterOptions, false); // Don't preserve values when clearing
+            if (this.renderActiveFilters) {
+                this.renderActiveFilters();
+            }
+            
+            // Also update the filter dropdowns to reflect the cleared state
+            if (this.state.originalFilterOptions && this.state.originalFilterOptions.vendor) {
+                if (this.updateFilters) {
+                    this.updateFilters(this.state.originalFilterOptions, false); // Don't preserve values when clearing
+                }
+            }
+            
+            // Add visual feedback to the button
+            const clearBtn = document.getElementById('clearFiltersBtn');
+            if (clearBtn) {
+                clearBtn.style.transform = 'scale(0.95)';
+                setTimeout(() => {
+                    clearBtn.style.transform = 'scale(1)';
+                }, 150);
+            }
+            
+            console.log('✅ All filters cleared and app reset completed successfully');
+            
+        } catch (error) {
+            console.error('❌ Error during clear all filters:', error);
         }
-        
-        // Success message removed to prevent popup
-        
-        // Add visual feedback to the button
-        const clearBtn = document.getElementById('clearFiltersBtn');
-        if (clearBtn) {
-            clearBtn.style.transform = 'scale(0.95)';
-            setTimeout(() => {
-                clearBtn.style.transform = 'scale(1)';
-            }, 150);
-        }
-        
-        console.log('All filters cleared successfully');
     },
 
     // Function to reset all other filters when vendor changes (but keep vendor filter)
@@ -7371,6 +7401,180 @@ function clearUIState() {
     // Clear localStorage/sessionStorage
     if (window.localStorage) localStorage.clear();
     if (window.sessionStorage) sessionStorage.clear();
+}
+
+// Comprehensive app reset function
+async function performFullAppReset() {
+    console.log('🔄 Performing full app reset...');
+    
+    try {
+        // 1. Clear all filters first
+        if (window.TagManager && TagManager.clearAllFilters) {
+            TagManager.clearAllFilters();
+        }
+        
+        // 2. Clear all selected tags
+        if (window.TagManager && TagManager.clearSelected) {
+            await TagManager.clearSelected();
+        }
+        
+        // 3. Clear all search fields
+        document.querySelectorAll('input[type="text"]').forEach(el => {
+            el.value = '';
+            // Trigger input events to update any listeners
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        
+        // 4. Reset all filter dropdowns
+        document.querySelectorAll('select').forEach(el => {
+            el.selectedIndex = 0;
+            // Trigger change events to update any listeners
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+        
+        // 5. Clear all checkboxes
+        document.querySelectorAll('input[type="checkbox"]').forEach(el => {
+            el.checked = false;
+            // Trigger change events to update any listeners
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+        
+        // 6. Clear all textareas
+        document.querySelectorAll('textarea').forEach(el => {
+            el.value = '';
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        
+        // 7. Reset TagManager state completely
+        if (window.TagManager) {
+            // Clear all internal state
+            TagManager.state.selectedTags.clear();
+            TagManager.state.persistentSelectedTags = [];
+            TagManager.state.filterCache = null;
+            TagManager.state.originalFilterOptions = {};
+            TagManager.state.lastFilterState = {};
+            
+            // Reset available tags display
+            if (TagManager.efficientlyUpdateAvailableTagsDisplay) {
+                TagManager.efficientlyUpdateAvailableTagsDisplay();
+            }
+            
+            // Reset selected tags display
+            if (TagManager.updateSelectedTags) {
+                TagManager.updateSelectedTags([]);
+            }
+            
+            // Update select all checkboxes
+            if (TagManager.updateSelectAllCheckboxes) {
+                TagManager.updateSelectAllCheckboxes();
+            }
+        }
+        
+        // 8. Clear browser storage
+        if (window.localStorage) {
+            localStorage.clear();
+        }
+        if (window.sessionStorage) {
+            sessionStorage.clear();
+        }
+        
+        // 9. Clear any cached data
+        if (window.cache) {
+            cache.clear();
+        }
+        
+        // 10. Reset any global variables
+        if (window.currentFile) {
+            window.currentFile = null;
+        }
+        if (window.jsonMatchedTags) {
+            window.jsonMatchedTags = [];
+        }
+        
+        // 11. Clear any pending requests
+        if (window.abortController) {
+            window.abortController.abort();
+        }
+        window.abortController = new AbortController();
+        
+        // 12. Reset UI elements to initial state
+        const availableTagsContainer = document.getElementById('availableTags');
+        if (availableTagsContainer) {
+            availableTagsContainer.innerHTML = '';
+        }
+        
+        const selectedTagsContainer = document.getElementById('selectedTags');
+        if (selectedTagsContainer) {
+            selectedTagsContainer.innerHTML = '';
+        }
+        
+        // 13. Clear any file info displays
+        const fileInfoElements = document.querySelectorAll('.file-info, .upload-info, .data-info');
+        fileInfoElements.forEach(el => {
+            el.textContent = '';
+            el.style.display = 'none';
+        });
+        
+        // 14. Reset any progress indicators
+        const progressBars = document.querySelectorAll('.progress-bar, .loading-bar');
+        progressBars.forEach(el => {
+            el.style.width = '0%';
+            el.style.display = 'none';
+        });
+        
+        // 15. Clear any error messages
+        const errorElements = document.querySelectorAll('.alert-danger, .error-message, .warning-message');
+        errorElements.forEach(el => {
+            el.style.display = 'none';
+            el.textContent = '';
+        });
+        
+        // 16. Reset any success messages
+        const successElements = document.querySelectorAll('.alert-success, .success-message');
+        successElements.forEach(el => {
+            el.style.display = 'none';
+            el.textContent = '';
+        });
+        
+        // 17. Clear any modal states
+        const modals = document.querySelectorAll('.modal');
+        modals.forEach(modal => {
+            modal.classList.remove('show');
+            modal.style.display = 'none';
+            modal.setAttribute('aria-hidden', 'true');
+        });
+        
+        // 18. Reset any tooltip states
+        const tooltips = document.querySelectorAll('.tooltip');
+        tooltips.forEach(tooltip => {
+            tooltip.style.display = 'none';
+        });
+        
+        // 19. Reset any dropdown states
+        const dropdowns = document.querySelectorAll('.dropdown-menu');
+        dropdowns.forEach(dropdown => {
+            dropdown.classList.remove('show');
+            dropdown.style.display = 'none';
+        });
+        
+        // 20. Clear any JSON match data
+        if (window.jsonMatchData) {
+            window.jsonMatchData = null;
+        }
+        
+        console.log('✅ Full app reset completed successfully');
+        
+        // Show success feedback
+        if (window.showToast) {
+            showToast('App reset completed', 'success');
+        }
+        
+    } catch (error) {
+        console.error('❌ Error during full app reset:', error);
+        if (window.showToast) {
+            showToast('Error during app reset', 'error');
+        }
+    }
 }
 
 // Call clearUIState after export or upload success
