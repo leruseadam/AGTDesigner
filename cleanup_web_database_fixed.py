@@ -114,17 +114,20 @@ def cleanup_web_database_fixed():
         blank_counts = {}
         
         if product_name_col:
-            cursor.execute(f"SELECT COUNT(*) FROM products WHERE {product_name_col} IS NULL OR {product_name_col} = '';")
+            safe_col_name = f'"{product_name_col}"' if ' ' in product_name_col else product_name_col
+            cursor.execute(f"SELECT COUNT(*) FROM products WHERE {safe_col_name} IS NULL OR {safe_col_name} = '';")
             blank_counts['names'] = cursor.fetchone()[0]
             print(f"   Blank product names: {blank_counts['names']}")
         
         if description_col:
-            cursor.execute(f"SELECT COUNT(*) FROM products WHERE {description_col} IS NULL OR {description_col} = '';")
+            safe_col_name = f'"{description_col}"' if ' ' in description_col else description_col
+            cursor.execute(f"SELECT COUNT(*) FROM products WHERE {safe_col_name} IS NULL OR {safe_col_name} = '';")
             blank_counts['descriptions'] = cursor.fetchone()[0]
             print(f"   Blank descriptions: {blank_counts['descriptions']}")
         
         if brand_col:
-            cursor.execute(f"SELECT COUNT(*) FROM products WHERE {brand_col} IS NULL OR {brand_col} = '';")
+            safe_col_name = f'"{brand_col}"' if ' ' in brand_col else brand_col
+            cursor.execute(f"SELECT COUNT(*) FROM products WHERE {safe_col_name} IS NULL OR {safe_col_name} = '';")
             blank_counts['brands'] = cursor.fetchone()[0]
             print(f"   Blank brands: {blank_counts['brands']}")
         
@@ -140,17 +143,21 @@ def cleanup_web_database_fixed():
             
             # Remove entries with blank product names
             if product_name_col and blank_counts.get('names', 0) > 0:
-                cursor.execute(f"DELETE FROM products WHERE {product_name_col} IS NULL OR {product_name_col} = '';")
+                safe_col_name = f'"{product_name_col}"' if ' ' in product_name_col else product_name_col
+                cursor.execute(f"DELETE FROM products WHERE {safe_col_name} IS NULL OR {safe_col_name} = '';")
                 print(f"   Removed {blank_counts['names']} entries with blank product names")
             
             # Update entries with blank descriptions
-            if description_col and brand_col and blank_counts.get('descriptions', 0) > 0:
-                cursor.execute(f"UPDATE products SET {description_col} = {product_name_col} WHERE {description_col} IS NULL OR {description_col} = '';")
+            if description_col and product_name_col and blank_counts.get('descriptions', 0) > 0:
+                safe_desc_col = f'"{description_col}"' if ' ' in description_col else description_col
+                safe_name_col = f'"{product_name_col}"' if ' ' in product_name_col else product_name_col
+                cursor.execute(f"UPDATE products SET {safe_desc_col} = {safe_name_col} WHERE {safe_desc_col} IS NULL OR {safe_desc_col} = '';")
                 print(f"   Updated {blank_counts['descriptions']} entries with blank descriptions")
             
             # Update entries with blank brands
             if brand_col and blank_counts.get('brands', 0) > 0:
-                cursor.execute(f"UPDATE products SET {brand_col} = 'Unknown' WHERE {brand_col} IS NULL OR {brand_col} = '';")
+                safe_col_name = f'"{brand_col}"' if ' ' in brand_col else brand_col
+                cursor.execute(f"UPDATE products SET {safe_col_name} = 'Unknown' WHERE {safe_col_name} IS NULL OR {safe_col_name} = '';")
                 print(f"   Updated {blank_counts['brands']} entries with blank brands")
             
             # Commit changes

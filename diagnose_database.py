@@ -83,10 +83,15 @@ def diagnose_database():
         
         if name_cols:
             for col_name in name_cols:
-                cursor.execute(f"SELECT COUNT(*) FROM products WHERE {col_name} IS NULL OR {col_name} = '';")
-                blank_count = cursor.fetchone()[0]
-                if blank_count > 0:
-                    print(f"   ⚠️  {blank_count} blank entries in {col_name}")
+                # Handle column names with spaces by wrapping in square brackets
+                safe_col_name = f'"{col_name}"' if ' ' in col_name else col_name
+                try:
+                    cursor.execute(f"SELECT COUNT(*) FROM products WHERE {safe_col_name} IS NULL OR {safe_col_name} = '';")
+                    blank_count = cursor.fetchone()[0]
+                    if blank_count > 0:
+                        print(f"   ⚠️  {blank_count} blank entries in {col_name}")
+                except Exception as e:
+                    print(f"   ⚠️  Could not check {col_name}: {e}")
         
         # Check database integrity
         print("\n🔍 Checking database integrity...")
