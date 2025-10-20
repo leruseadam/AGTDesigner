@@ -84,6 +84,7 @@ class TemplateProcessor:
         self._template_path = self._get_template_path()
         self._expanded_template_buffer = self._expand_template_if_needed()
         self._dynamic_template_created = False  # Track if dynamic template was created
+        self._last_dynamic_count = None  # Track last product count used to build dynamic buffer
         
         # Set chunk size based on template type with performance limits
         if not IS_PYTHONANYWHERE:
@@ -391,7 +392,7 @@ class TemplateProcessor:
         buffer.seek(0)
         return buffer
 
-    def _expand_template_to_4x5_fixed_scaled(self):
+    def _expand_template_to_4x5_fixed_scaled(self, num_products=None):
         """Expand template to 4x5 grid for mini templates while preserving original design."""
         from docx import Document
         from docx.shared import Pt
@@ -497,8 +498,37 @@ class TemplateProcessor:
         
         # Populate cells with original content, updating labels
         cnt = 1
+        max_cells = num_products if num_products else (num_rows * num_cols)
+        
         for r in range(num_rows):
             for c in range(num_cols):
+                if cnt > max_cells:
+                    # Clear extra cells completely and set white background
+                    cell = tbl.cell(r, c)
+                    cell._tc.clear_content()
+                    
+                    # Set white background for extra cells
+                    tc = cell._tc
+                    tcPr = tc.find(qn('w:tcPr'))
+                    if tcPr is None:
+                        tcPr = OxmlElement('w:tcPr')
+                        tc.insert(0, tcPr)
+                    
+                    # Remove any existing background color
+                    shd = tcPr.find(qn('w:shd'))
+                    if shd is not None:
+                        tcPr.remove(shd)
+                    
+                    # Add white background
+                    shd = OxmlElement('w:shd')
+                    shd.set(qn('w:val'), 'clear')
+                    shd.set(qn('w:color'), 'auto')
+                    shd.set(qn('w:fill'), 'FFFFFF')  # White background
+                    tcPr.append(shd)
+                    
+                    cell.add_paragraph()  # Add empty paragraph to maintain structure
+                    continue
+                    
                 cell = tbl.cell(r, c)
                 cell._tc.clear_content()
                 
@@ -532,35 +562,15 @@ class TemplateProcessor:
     def create_dynamic_template_for_products(self, num_products):
         """Create a dynamic template based on the number of products to eliminate empty labels."""
         try:
-            if self.template_type == 'mini' and num_products <= 20:
-                # Use the dynamic mini template creation from tag_generator
-                from src.core.generation.tag_generator import create_dynamic_mini_template
-                self._expanded_template_buffer = create_dynamic_mini_template(self._template_path, num_products, self.scale_factor)
-                self._dynamic_template_created = True
-                self.logger.info(f"🔧 DYNAMIC MINI TEMPLATE: Created dynamic template for {num_products} products")
-                return True
-            elif self.template_type == 'double' and num_products <= 12:
-                # Use the dynamic double template creation from tag_generator
-                from src.core.generation.tag_generator import create_dynamic_double_template
-                self._expanded_template_buffer = create_dynamic_double_template(self._template_path, num_products, self.scale_factor)
-                self._dynamic_template_created = True
-                self.logger.info(f"🔧 DYNAMIC DOUBLE TEMPLATE: Created dynamic template for {num_products} products")
-                return True
-            elif self.template_type in ['horizontal', 'vertical'] and num_products <= 9:
-                # Use the dynamic 3x3 template creation for horizontal/vertical templates
-                from src.core.generation.tag_generator import create_dynamic_3x3_template
-                self._expanded_template_buffer = create_dynamic_3x3_template(self._template_path, num_products, self.scale_factor)
-                self._dynamic_template_created = True
-                self.logger.info(f"🔧 DYNAMIC {self.template_type.upper()} TEMPLATE: Created dynamic template for {num_products} products")
-                return True
-            else:
-                self.logger.info(f"🔧 DYNAMIC TEMPLATE: Not creating dynamic template for {self.template_type} with {num_products} products")
-                return False
+            # CRITICAL FIX: Disable ALL dynamic template creation to prevent XML corruption
+            # Use standard template expansion with post-processing cleanup instead
+            self.logger.info(f"🔧 DYNAMIC TEMPLATES DISABLED: Using standard expansion for {num_products} products")
+            return False
         except Exception as e:
             self.logger.warning(f"Failed to create dynamic template: {e}")
             return False
 
-    def _expand_template_to_4x3_fixed_double(self):
+    def _expand_template_to_4x3_fixed_double(self, num_products=None):
         """Expand template to 4x3 grid for double templates (4 columns, 3 rows)."""
         from docx import Document
         from docx.shared import Pt
@@ -630,168 +640,55 @@ class TemplateProcessor:
             row.height = row_height_pts
             row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
         
-        # Process all cells normally (no gutters)
+        # FIXED: Restore proper template content copying with clean placeholder addition
         cnt = 1
+        max_cells = num_products if num_products else (num_rows * num_cols)
+        
         for r in range(num_rows):
             for c in range(num_cols):
+                if cnt > max_cells:
+                    # Clear extra cells completely and set white background
+                    cell = tbl.cell(r,c)
+                    cell._tc.clear_content()
+                    
+                    # Set white background for extra cells
+                    tc = cell._tc
+                    tcPr = tc.find(qn('w:tcPr'))
+                    if tcPr is None:
+                        tcPr = OxmlElement('w:tcPr')
+                        tc.insert(0, tcPr)
+                    
+                    # Remove any existing background color
+                    shd = tcPr.find(qn('w:shd'))
+                    if shd is not None:
+                        tcPr.remove(shd)
+                    
+                    # Add white background
+                    shd = OxmlElement('w:shd')
+                    shd.set(qn('w:val'), 'clear')
+                    shd.set(qn('w:color'), 'auto')
+                    shd.set(qn('w:fill'), 'FFFFFF')  # White background
+                    tcPr.append(shd)
+                    
+                    cell.add_paragraph()  # Add empty paragraph to maintain structure
+                    continue
+                    
                 cell = tbl.cell(r,c)
                 cell._tc.clear_content()
                 tc = deepcopy(src_tc)
                 
-                # Define all required placeholders for double template
-                # Note: ProductBrand is excluded since it's empty for non-classic types
-                # and causes marker remnants when added
-                required_placeholders = [
-                    'DescAndWeight', 
-                    'Price',
-                    'Ratio_or_THC_CBD',
-                    'DOH',
-                    'QR',  # QR codes enabled
-                    'ProductStrain',
-                    'Lineage'  # CRITICAL FIX: Add Lineage to double template
-                ]
-                
-                # Keep adding missing placeholders until all are present
-                max_iterations = 10  # Prevent infinite loops
-                iteration = 0
-                
-                while iteration < max_iterations:
-                    # Get current cell text
-                    cell_text = ''
-                    for t in tc.iter(qn('w:t')):
-                        if t.text:
-                            cell_text += t.text
-                    
-                    self.logger.debug(f"Cell {cnt} iteration {iteration} current cell text: {repr(cell_text)}")
-                    
-                    # Check which placeholders are missing
-                    missing_placeholders = []
-                    for placeholder in required_placeholders:
-                        placeholder_pattern = f'{{{{Label{cnt}.{placeholder}}}}}'
-                        if placeholder_pattern not in cell_text:
-                            missing_placeholders.append(placeholder)
-                    
-                    self.logger.debug(f"Cell {cnt} iteration {iteration} checking placeholders:")
-                    for placeholder in required_placeholders:
-                        placeholder_pattern = f'{{{{Label{cnt}.{placeholder}}}}}'
-                        in_cell = placeholder_pattern in cell_text
-                        in_cell_simple = placeholder in cell_text
-                        self.logger.debug(f"  {placeholder}: pattern={placeholder_pattern}, in_cell={in_cell}, in_cell_simple={in_cell_simple}")
-                    
-                    if not missing_placeholders:
-                        # All placeholders are present, we're done
-                        self.logger.debug(f"Cell {cnt} iteration {iteration} - all placeholders present, breaking")
-                        break
-                    
-                    self.logger.debug(f"Cell {cnt} iteration {iteration} missing placeholders: {missing_placeholders}")
-                    
-                    # Add missing placeholders to the existing cell text with markers
-                    # Special handling: ProductBrand should go in a separate paragraph to avoid interfering with vendor/strain
-                    brand_placeholder = None
-                    other_placeholders = []
-                    
-                    for placeholder in missing_placeholders:
-                        if placeholder == 'ProductBrand':
-                            brand_placeholder = placeholder
-                        else:
-                            other_placeholders.append(placeholder)
-                    
-                    # Add non-brand placeholders to the current paragraph
-                    if other_placeholders:
-                        placeholder_text = ''
-                        for placeholder in other_placeholders:
-                            # CRITICAL FIX: Add simple placeholders without marker wrappers to prevent garbage text
-                            placeholder_text += f'\n{{{{Label{cnt}.{placeholder}}}}}'
-                        
-                        # Find the last text element and append the non-brand placeholders
-                        text_elements = list(tc.iter(qn('w:t')))
-                        if text_elements:
-                            last_text_element = text_elements[-1]
-                            if last_text_element.text:
-                                last_text_element.text += placeholder_text
-                            else:
-                                last_text_element.text = placeholder_text
-                    
-                    # Add ProductBrand in a separate paragraph to avoid interference
-                    if brand_placeholder:
-                        # Create a new paragraph element for ProductBrand
-                        new_para = OxmlElement('w:p')
-                        new_run = OxmlElement('w:r')
-                        new_text = OxmlElement('w:t')
-                        # CRITICAL FIX: Add simple placeholder without marker wrappers to prevent garbage text
-                        new_text.text = f'{{{{Label{cnt}.ProductBrand}}}}'
-                        new_run.append(new_text)
-                        new_para.append(new_run)
-                        tc.append(new_para)
-                        
-                        self.logger.debug(f"Added ProductBrand to separate paragraph in cell {cnt}")
-                    
-                    # CRITICAL FIX: Add ProductStrain to ALL cells for visibility
-                    # Always add ProductStrain in its own separate paragraph for ALL cells
-                    strain_para = OxmlElement('w:p')
-                    strain_run = OxmlElement('w:r')
-                    strain_text = OxmlElement('w:t')
-                    strain_text.text = f'{{{{Label{cnt}.ProductStrain}}}}'
-                    strain_run.append(strain_text)
-                    strain_para.append(strain_run)
-                    tc.append(strain_para)
-                    
-                    self.logger.debug(f"Added ProductStrain to separate paragraph in cell {cnt}")
-                    
-                    if other_placeholders:
-                        self.logger.debug(f"Added other placeholders to existing paragraph in cell {cnt}: {other_placeholders}")
-                        
-                        self.logger.debug(f"Added missing placeholders to cell {cnt}: {missing_placeholders}")
-                    
-                    iteration += 1
-                
-                # CRITICAL FIX: For Cell 1, need to clear the old concatenated placeholders
-                # and ensure all required placeholders are added with proper markers
-                if cnt == 1:
-                    # Clear any old concatenated placeholders from the first paragraph
-                    paragraphs = list(tc.iter(qn('w:p')))
-                    if paragraphs:
-                        first_para = paragraphs[0]
-                        # Remove text that contains concatenated placeholders
-                        for t in first_para.iter(qn('w:t')):
-                            if t.text and ('{{Label1.DescAndWeight}}' in t.text or '{{Label1.Price}}' in t.text):
-                                # This is the old concatenated placeholder string, clear it
-                                t.text = ''
-                                self.logger.debug(f"Cleared old concatenated placeholders from Cell 1")
-                    
-                    # Now add all required placeholders to Cell 1
-                    # Build the placeholder text with all required fields
-                    cell1_placeholder_text = ''
-                    for placeholder in ['DescAndWeight', 'Price', 'DOH', 'QR']:
-                        # CRITICAL FIX: Add simple placeholders without marker wrappers to prevent garbage text
-                        cell1_placeholder_text += f'\n{{{{Label1.{placeholder}}}}}'
-                    
-                    # Find the last text element and append the placeholders
-                    text_elements = list(tc.iter(qn('w:t')))
-                    if text_elements:
-                        last_text_element = text_elements[-1]
-                        if last_text_element.text:
-                            last_text_element.text += cell1_placeholder_text
-                        else:
-                            last_text_element.text = cell1_placeholder_text
-                        self.logger.debug(f"Added missing placeholders to Cell 1: {['DescAndWeight', 'Price', 'DOH', 'QR']}")
-                
-                # CRITICAL FIX: Replace Label1 with Label{cnt} in all placeholders
-                # Only replace exact matches to prevent creating extra labels
+                # RESTORE DOUBLE TEMPLATE: Preserve original template structure like horizontal/vertical
+                # Update Label1 references to Label{cnt} for proper grid expansion
+                cell_text = ''
                 for t in tc.iter(qn('w:t')):
-                    if t.text and 'Label1' in t.text:
-                        # Use regex to ensure we only replace Label1, not Label10, Label11, etc.
-                        import re
-                        t.text = re.sub(r'\bLabel1\b', f'Label{cnt}', t.text)
+                    if t.text:
+                        cell_text += t.text
+                        if 'Label1' in t.text:
+                            t.text = t.text.replace('Label1', f'Label{cnt}')
                 
                 # Copy the original cell content and styling exactly as it is
                 for el in tc.xpath('./*'):
                     cell._tc.append(deepcopy(el))
-                
-                # CRITICAL FIX: Check counter before incrementing to prevent exceeding 12
-                if cnt >= 12:
-                    self.logger.info(f"Reached maximum cells for double template (12), stopping at cell {cnt}")
-                    break
                 
                 cnt += 1
                 
@@ -808,7 +705,7 @@ class TemplateProcessor:
         buf.seek(0)
         return buf
 
-    def _expand_template_to_3x3_fixed(self):
+    def _expand_template_to_3x3_fixed(self, num_products=None):
         """Expand template to 3x3 grid for standard templates."""
         from docx import Document
         from docx.shared import Pt
@@ -880,8 +777,37 @@ class TemplateProcessor:
             borders.append(b)
         tblPr.append(borders)
         cnt = 1
+        max_cells = num_products if num_products else (num_rows * num_cols)
+        
         for r in range(num_rows):
             for c in range(num_cols):
+                if cnt > max_cells:
+                    # Clear extra cells completely and set white background
+                    cell = tbl.cell(r,c)
+                    cell._tc.clear_content()
+                    
+                    # Set white background for extra cells
+                    tc = cell._tc
+                    tcPr = tc.find(qn('w:tcPr'))
+                    if tcPr is None:
+                        tcPr = OxmlElement('w:tcPr')
+                        tc.insert(0, tcPr)
+                    
+                    # Remove any existing background color
+                    shd = tcPr.find(qn('w:shd'))
+                    if shd is not None:
+                        tcPr.remove(shd)
+                    
+                    # Add white background
+                    shd = OxmlElement('w:shd')
+                    shd.set(qn('w:val'), 'clear')
+                    shd.set(qn('w:color'), 'auto')
+                    shd.set(qn('w:fill'), 'FFFFFF')  # White background
+                    tcPr.append(shd)
+                    
+                    cell.add_paragraph()  # Add empty paragraph to maintain structure
+                    continue
+                    
                 cell = tbl.cell(r,c)
                 cell._tc.clear_content()
                 tc = deepcopy(src_tc)
@@ -1074,13 +1000,26 @@ class TemplateProcessor:
 
     def _process_chunk(self, chunk):
         """Process a chunk of records with timeout protection."""
+        from docxtpl import DocxTemplate
+        from docx import Document
+        from io import BytesIO
+        
         chunk_start_time = time.time()
         
         try:
-            # CRITICAL FIX: Create dynamic template for mini/double templates to eliminate empty labels
-            if not self._dynamic_template_created:
-                num_products = len(chunk)
-                self.create_dynamic_template_for_products(num_products)
+            # CRITICAL FIX: Re-expand template with correct number of products to prevent blank labels
+            num_products = len(chunk)
+            
+            # For all templates, re-expand with correct number of products
+            if self.template_type in ['horizontal', 'vertical']:
+                self.logger.info(f"🔧 RE-EXPANDING TEMPLATE: Re-expanding {self.template_type} template for {num_products} products")
+                self._expanded_template_buffer = self._expand_template_to_3x3_fixed(num_products)
+            elif self.template_type == 'double':
+                self.logger.info(f"🔧 RE-EXPANDING TEMPLATE: Re-expanding {self.template_type} template for {num_products} products")
+                self._expanded_template_buffer = self._expand_template_to_4x3_fixed_double(num_products)
+            elif self.template_type == 'mini':
+                self.logger.info(f"🔧 RE-EXPANDING TEMPLATE: Re-expanding {self.template_type} template for {num_products} products")
+                self._expanded_template_buffer = self._expand_template_to_4x5_fixed_scaled(num_products)
             
             if hasattr(self._expanded_template_buffer, 'seek'):
                 self._expanded_template_buffer.seek(0)
@@ -1117,6 +1056,14 @@ class TemplateProcessor:
             try:
                 doc.render(context)
                 self.logger.debug("DocxTemplate render completed successfully")
+                
+                # CRITICAL FIX: Remove unmerged placeholders immediately after render
+                buffer = BytesIO()
+                doc.save(buffer)
+                buffer.seek(0)
+                rendered_doc = Document(buffer)
+                self._remove_unmerged_placeholders(rendered_doc, len(chunk))
+                
             except Exception as render_error:
                 self.logger.warning(f"DocxTemplate render failed: {render_error}, using manual replacement")
                 # Only use manual replacement as a fallback when DocxTemplate fails
@@ -1127,39 +1074,28 @@ class TemplateProcessor:
                 self._manual_replace_placeholders(rendered_doc, context)
                 return rendered_doc
             
-            buffer = BytesIO()
-            doc.save(buffer)
-            buffer.seek(0)
-            rendered_doc = Document(buffer)
+            # CRITICAL FIX: Ensure all tables have proper tblGrid elements before processing
+            self._ensure_table_grids_exist(rendered_doc)
             
-            # Check timeout before post-processing
-            if time.time() - chunk_start_time > MAX_PROCESSING_TIME_PER_CHUNK:
-                self.logger.warning(f"Chunk processing timeout reached ({MAX_PROCESSING_TIME_PER_CHUNK}s), skipping post-processing")
-                return rendered_doc
-            
-            # PRE-PROCESSING TABLE VALIDATION: Validate and repair all tables before any processing begins
-            self.logger.debug("Starting pre-processing table validation")
-            for table in rendered_doc.tables:
-                try:
-                    if not self._safe_table_iteration(table, "pre-processing validation"):
-                        self.logger.error(f"Critical: Table validation failed during pre-processing, document may be corrupted")
-                        # Continue processing but log the issue
-                except Exception as e:
-                    self.logger.error(f"Critical: Error during pre-processing table validation: {e}")
-            
-            # Post-process the document to apply dynamic font sizing first
-            self._post_process_and_replace_content(rendered_doc)
-            
-            # Check timeout before lineage colors
-            if time.time() - chunk_start_time > MAX_PROCESSING_TIME_PER_CHUNK:
-                self.logger.warning(f"Chunk processing timeout reached ({MAX_PROCESSING_TIME_PER_CHUNK}s), skipping lineage colors")
-                return rendered_doc
-            
-            # Apply lineage colors last to ensure they are not overwritten
-            apply_lineage_colors(rendered_doc)
-            
-            # Apply final marker cleanup for all templates
-            self._final_marker_cleanup(rendered_doc)
+            # CRITICAL FIX: Wrap all post-processing in comprehensive error handling
+            try:
+                # Post-process the document to apply dynamic font sizing first
+                self._post_process_and_replace_content(rendered_doc)
+                
+                # Check timeout before lineage colors
+                if time.time() - chunk_start_time > MAX_PROCESSING_TIME_PER_CHUNK:
+                    self.logger.warning(f"Chunk processing timeout reached ({MAX_PROCESSING_TIME_PER_CHUNK}s), skipping lineage colors")
+                    return rendered_doc
+                
+                # Apply lineage colors last to ensure they are not overwritten
+                apply_lineage_colors(rendered_doc)
+                
+                # Apply final marker cleanup for all templates
+                self._final_marker_cleanup(rendered_doc)
+                
+            except Exception as processing_error:
+                self.logger.warning(f"Skipping post-processing due to table structure issue: {processing_error}")
+                # Continue processing without post-processing features
             
             # Final enforcement: prevent any cell/row expansion and force EXACT dimensions
             # Cell widths already standardized
@@ -1169,7 +1105,11 @@ class TemplateProcessor:
             rendered_doc = remove_all_headers_and_footers(rendered_doc)
             
             # Ensure proper table centering and document setup
-            self._ensure_proper_centering(rendered_doc)
+            try:
+                self._ensure_proper_centering(rendered_doc)
+            except Exception as centering_error:
+                self.logger.warning(f"Skipping centering due to table structure issue: {centering_error}")
+                # Continue processing without centering
 
             # All content now uses standard spacing - no special THC_CBD handling
             
@@ -1683,14 +1623,19 @@ class TemplateProcessor:
                 cleaned_lineage_val = lineage_val.strip()
                 self.logger.debug(f"DEBUG: Cleaned lineage_val: '{repr(cleaned_lineage_val)}'")
                 
-                # CRITICAL FIX: If lineage contains brand name, extract only the lineage part
-                classic_lineages = ["HYBRID/SATIVA", "HYBRID/INDICA", "SATIVA", "INDICA", "HYBRID", "CBD", "MIXED"]
-                for classic_lineage in classic_lineages:
-                    if cleaned_lineage_val.upper().startswith(classic_lineage.upper()):
-                        # Extract only the lineage part, not the brand
-                        cleaned_lineage_val = cleaned_lineage_val[:len(classic_lineage)]
-                        self.logger.debug(f"DEBUG: Extracted lineage only: '{cleaned_lineage_val}' from '{lineage_val}'")
-                        break
+                # CRITICAL FIX: For double, horizontal, and vertical templates, don't clean lineage - preserve full lineage values
+                if self.template_type not in ('double', 'horizontal', 'vertical'):
+                    # Only clean lineage for templates that use marker-wrapped lineage (e.g., standard flows)
+                    classic_lineages = ["HYBRID/SATIVA", "HYBRID/INDICA", "SATIVA", "INDICA", "HYBRID", "CBD", "MIXED"]
+                    for classic_lineage in classic_lineages:
+                        if cleaned_lineage_val.upper().startswith(classic_lineage.upper()):
+                            # Extract only the lineage part, not the brand
+                            cleaned_lineage_val = cleaned_lineage_val[:len(classic_lineage)]
+                            self.logger.debug(f"DEBUG: Extracted lineage only: '{cleaned_lineage_val}' from '{lineage_val}'")
+                            break
+                else:
+                    # For double, horizontal, and vertical templates, preserve the full lineage value without cleaning
+                    self.logger.debug(f"DEBUG: Preserving full lineage for {self.template_type} template: '{cleaned_lineage_val}'")
                 
                 # For vertical and double templates, don't wrap with markers since they use simple placeholders
                 if self.template_type in ['vertical', 'double']:
@@ -1715,6 +1660,12 @@ class TemplateProcessor:
             else:
                 label_context['ProductVendor'] = ""
                 self.logger.debug(f"ProductVendor set to empty for classic type '{product_type}' (no vendor data)")
+            
+            # CRITICAL FIX: Classic types should NOT have ProductBrand - they show lineage only
+            # Ensure ProductBrand is empty for classic types regardless of template type
+            label_context['ProductBrand'] = ""
+            label_context['ProductBrand_Center'] = ""
+            self.logger.info(f"🔧 CLASSIC TYPE FIX: Set ProductBrand to empty for classic type '{product_type}' (classic types show lineage, not brand)")
         else:
             # For ALL non-classic types (including tinctures), Lineage shows brand and ProductVendor is empty
             # Color is determined by Product Strain (CBD Blend = yellow, Mixed = blue)
@@ -3155,8 +3106,8 @@ class TemplateProcessor:
         if self.template_type in ['vertical', 'double']:
             self._optimize_vertical_template_spacing(doc)
             
-        # Apply unified font sizing to all text in vertical templates (not just markers)
-        if self.template_type == 'vertical':
+        # Apply unified font sizing to all text in vertical and double templates (not just markers)
+        if self.template_type in ['vertical', 'double']:
             self._apply_unified_font_sizing_to_all_text(doc)
 
 
@@ -4225,6 +4176,224 @@ class TemplateProcessor:
             self.logger.error(f"Error validating/repairing table structure: {e}")
             return False
 
+    def _repair_corrupted_tables(self, doc):
+        """Repair any corrupted tables by ensuring proper XML structure."""
+        try:
+            from docx.oxml import OxmlElement
+            from docx.oxml.ns import qn
+            
+            for table_idx, table in enumerate(doc.tables):
+                try:
+                    # Test if table is accessible
+                    _ = len(table.rows)
+                    _ = len(table.rows[0].cells) if table.rows else 0
+                except Exception as e:
+                    self.logger.warning(f"Table {table_idx} is corrupted: {e}")
+                    # Try to repair by recreating the table structure
+                    self._recreate_table_structure(table)
+                    
+        except Exception as e:
+            self.logger.error(f"Error repairing corrupted tables: {e}")
+    
+    def _recreate_table_structure(self, table):
+        """Recreate the basic structure of a corrupted table."""
+        try:
+            from docx.oxml import OxmlElement
+            from docx.oxml.ns import qn
+            
+            # Ensure tblPr exists
+            tbl_pr = table._element.find(qn('w:tblPr'))
+            if tbl_pr is None:
+                tbl_pr = OxmlElement('w:tblPr')
+                table._element.insert(0, tbl_pr)
+            
+            # Ensure tblGrid exists
+            tbl_grid = table._element.find(qn('w:tblGrid'))
+            if tbl_grid is None:
+                tbl_grid = OxmlElement('w:tblGrid')
+                table._element.insert(1, tbl_grid)
+                
+                # Add default grid columns
+                col_count = 3  # Default to 3 columns
+                for _ in range(col_count):
+                    gc = OxmlElement('w:gridCol')
+                    gc.set(qn('w:w'), str(int(3.4 * 1440)))
+                    tbl_grid.append(gc)
+                
+                self.logger.info(f"Recreated tblGrid with {col_count} columns")
+                
+        except Exception as e:
+            self.logger.error(f"Error recreating table structure: {e}")
+
+    def _clear_empty_cells(self, doc, num_products):
+        """Remove extra cells beyond the number of products by clearing unmerged placeholders."""
+        try:
+            import re
+            from docx.oxml import OxmlElement
+            from docx.oxml.ns import qn
+            
+            for table in doc.tables:
+                # Calculate how many cells we actually need
+                if self.template_type in ['horizontal', 'vertical']:
+                    # 3x3 grid = 9 cells max
+                    max_cells = 9
+                elif self.template_type == 'double':
+                    # 4x3 grid = 12 cells max
+                    max_cells = 12
+                elif self.template_type == 'mini':
+                    # 4x5 grid = 20 cells max
+                    max_cells = 20
+                else:
+                    max_cells = num_products
+                
+                cells_to_remove = max(0, max_cells - num_products)
+                self.logger.info(f"🔧 CLEARING EXTRA CELLS: Removing {cells_to_remove} extra cells (need {num_products}, template has {max_cells})")
+                
+                # CRITICAL FIX: For horizontal/vertical templates, try removing entire rows instead of just cells
+                if self.template_type in ['horizontal', 'vertical'] and num_products < 9:
+                    # Calculate how many rows we need
+                    rows_needed = (num_products + 2) // 3  # Round up to get number of rows needed
+                    self.logger.info(f"🔧 DEBUG: Need {rows_needed} rows for {num_products} products")
+                    
+                    # Remove extra rows
+                    if len(table.rows) > rows_needed:
+                        rows_to_remove = len(table.rows) - rows_needed
+                        self.logger.info(f"🔧 DEBUG: Removing {rows_to_remove} extra rows")
+                        for i in range(rows_to_remove):
+                            # Remove the last row
+                            last_row = table.rows[-1]
+                            last_row._element.getparent().remove(last_row._element)
+                
+                # Also clear individual cells as backup
+                cell_count = 0
+                total_cells = 0
+                for row in table.rows:
+                    total_cells += len(row.cells)
+                
+                self.logger.info(f"🔧 DEBUG: Table has {len(table.rows)} rows, {total_cells} total cells")
+                
+                for row in table.rows:
+                    for cell in row.cells:
+                        cell_count += 1
+                        self.logger.debug(f"🔧 DEBUG: Processing cell {cell_count} of {total_cells}")
+                        if cell_count > num_products:
+                            # This is an extra cell - clear it completely and remove all content
+                            cell._tc.clear_content()
+                            
+                            # CRITICAL FIX: Also remove any remaining placeholder text
+                            for paragraph in cell.paragraphs:
+                                for run in paragraph.runs:
+                                    if '{{' in run.text and '}}' in run.text:
+                                        run.text = ''
+                                        
+                            # CRITICAL FIX: Remove entire paragraphs that contain only placeholders
+                            paragraphs_to_remove = []
+                            for paragraph in cell.paragraphs:
+                                paragraph_text = ''.join([run.text for run in paragraph.runs])
+                                if '{{Label' in paragraph_text and '}}' in paragraph_text:
+                                    paragraphs_to_remove.append(paragraph)
+                            
+                            for paragraph in paragraphs_to_remove:
+                                paragraph._element.getparent().remove(paragraph._element)
+                            
+                            # Make the cell invisible by setting its width to 0
+                            try:
+                                tc = cell._tc
+                                tcPr = tc.get_or_add_tcPr()
+                                tcW = tcPr.find(qn('w:tcW'))
+                                if tcW is None:
+                                    tcW = OxmlElement('w:tcW')
+                                    tcPr.append(tcW)
+                                tcW.set(qn('w:w'), '0')
+                                tcW.set(qn('w:type'), 'dxa')
+                                self.logger.debug(f"Cleared and hid extra cell {cell_count}")
+                            except Exception as e:
+                                self.logger.warning(f"Error hiding extra cell {cell_count}: {e}")
+                            
+        except Exception as e:
+            self.logger.warning(f"Error clearing extra cells: {e}")
+
+    def _remove_unmerged_placeholders(self, doc, num_products):
+        """Remove unmerged placeholders from cells beyond the number of products."""
+        try:
+            import re
+            
+            # CRITICAL FIX: For all templates, remove entire extra tables
+            tables = doc.tables
+            if len(tables) > 1:
+                self.logger.info(f"Found {len(tables)} tables, removing extra tables")
+                # Keep only the first table, remove the rest
+                for i in range(1, len(tables)):
+                    table = tables[i]
+                    table._element.getparent().remove(table._element)
+                    self.logger.debug(f"Removed extra table {i+1}")
+            
+            # Now clear extra cells within the remaining table(s)
+            for table in doc.tables:
+                cell_count = 0
+                for row in table.rows:
+                    for cell in row.cells:
+                        cell_count += 1
+                        if cell_count > num_products:
+                            # This is an extra cell - completely clear it and set white background
+                            self.logger.debug(f"Clearing extra cell {cell_count}")
+                            
+                            # Clear all content from the cell
+                            cell._tc.clear_content()
+                            
+                            # Set white background for extra cells
+                            from docx.oxml import OxmlElement
+                            from docx.oxml.ns import qn
+                            tc = cell._tc
+                            tcPr = tc.find(qn('w:tcPr'))
+                            if tcPr is None:
+                                tcPr = OxmlElement('w:tcPr')
+                                tc.insert(0, tcPr)
+                            
+                            # Remove any existing background color
+                            shd = tcPr.find(qn('w:shd'))
+                            if shd is not None:
+                                tcPr.remove(shd)
+                            
+                            # Add white background
+                            shd = OxmlElement('w:shd')
+                            shd.set(qn('w:val'), 'clear')
+                            shd.set(qn('w:color'), 'auto')
+                            shd.set(qn('w:fill'), 'FFFFFF')  # White background
+                            tcPr.append(shd)
+                            
+                            # Add a single empty paragraph to maintain structure
+                            cell.add_paragraph()
+                            
+        except Exception as e:
+            self.logger.warning(f"Error removing unmerged placeholders: {e}")
+
+    def _ensure_table_grids_exist(self, doc):
+        """Ensure all tables have proper tblGrid elements."""
+        try:
+            from docx.oxml import OxmlElement
+            from docx.oxml.ns import qn
+            
+            for table in doc.tables:
+                tbl_grid = table._element.find(qn('w:tblGrid'))
+                if tbl_grid is None:
+                    self.logger.warning("Table missing tblGrid element, creating one")
+                    # Create tblGrid element
+                    tbl_grid = OxmlElement('w:tblGrid')
+                    table._element.insert(0, tbl_grid)
+                    
+                    # Add grid columns based on actual column count
+                    col_count = len(table.rows[0].cells) if table.rows else 3
+                    for _ in range(col_count):
+                        gc = OxmlElement('w:gridCol')
+                        gc.set(qn('w:w'), str(int(3.4 * 1440)))  # Default width
+                        tbl_grid.append(gc)
+                    
+                    self.logger.info(f"Created tblGrid with {col_count} columns for table")
+                    
+        except Exception as e:
+            self.logger.error(f"Error ensuring table grids exist: {e}")
+
     def _safe_table_iteration(self, table, operation_name="table operation"):
         """
         Safely iterate through table rows and cells with comprehensive error handling.
@@ -4826,6 +4995,11 @@ class TemplateProcessor:
         This runs at the very end to catch any concatenation that wasn't caught earlier.
         """
         try:
+            # CRITICAL FIX: Skip lineage cleaning for double, horizontal, and vertical templates to preserve HYBRID/SATIVA, HYBRID/INDICA
+            if self.template_type in ('double', 'horizontal', 'vertical'):
+                self.logger.debug("Skipping lineage cleaning for grid templates to preserve full lineage values")
+                return
+                
             # Starting _clean_up_lineage_brand_concatenation
 
             # Define classic lineage values

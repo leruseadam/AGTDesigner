@@ -343,7 +343,12 @@ def create_dynamic_3x3_template(template_path, num_products, scale_factor=1.0):
     # Calculate grid dimensions based on number of products
     # Use 3 columns, calculate rows needed
     num_cols = 3
-    num_rows = (num_products + num_cols - 1) // num_cols  # Ceiling division
+    # CRITICAL FIX: For more than 9 products, create multiple pages with 9 labels each
+    if num_products <= 9:
+        num_rows = (num_products + num_cols - 1) // num_cols  # Ceiling division
+    else:
+        # For more than 9 products, create pages with 9 labels each
+        num_rows = 3  # Always 3 rows per page
     
     col_width_twips = str(int(3.4 * 1440))  # 3.4 inches per column for horizontal template
     row_height_pts = Pt(2.4 * 72)  # 2.4 inches per row for horizontal template
@@ -371,112 +376,188 @@ def create_dynamic_3x3_template(template_path, num_products, scale_factor=1.0):
     for prop in old_tbl._element.xpath('./w:tblPr/*'):
         tbl._element.append(deepcopy(prop))
     
-    # Set table properties
-    tblPr = tbl._element.find(qn('w:tblPr'))
-    if tblPr is None:
-        tblPr = OxmlElement('w:tblPr')
-        tbl._element.insert(0, tblPr)
-    
-    # Set table width
-    tblW = tblPr.find(qn('w:tblW'))
-    if tblW is None:
-        tblW = OxmlElement('w:tblW')
-        tblPr.append(tblW)
-    tblW.set(qn('w:w'), str(int(3.4 * num_cols * 1440)))  # Total width
-    tblW.set(qn('w:type'), 'dxa')
-    
-    # Set table layout
-    tblLayout = tblPr.find(qn('w:tblLayout'))
-    if tblLayout is None:
-        tblLayout = OxmlElement('w:tblLayout')
-        tblPr.append(tblLayout)
-    tblLayout.set(qn('w:type'), 'fixed')
-    
-    # Set cell spacing
-    tblCellSpacing = tblPr.find(qn('w:tblCellSpacing'))
-    if tblCellSpacing is None:
-        tblCellSpacing = OxmlElement('w:tblCellSpacing')
-        tblPr.append(tblCellSpacing)
-    tblCellSpacing.set(qn('w:w'), str(cut_line_twips))
-    tblCellSpacing.set(qn('w:type'), 'dxa')
-    
-    # Set table grid
-    tblGrid = tbl._element.find(qn('w:tblGrid'))
-    if tblGrid is not None:
-        tblGrid.getparent().remove(tblGrid)
-    tblGrid = OxmlElement('w:tblGrid')
-    tbl._element.insert(1, tblGrid)
-    
-    for _ in range(num_cols):
-        gc = OxmlElement('w:gridCol')
-        gc.set(qn('w:w'), col_width_twips)
-        tblGrid.append(gc)
-    
-    # Copy cell content and styling
-    cnt = 1
-    for r in range(num_rows):
-        for c in range(num_cols):
-            if cnt <= num_products:
-                cell = tbl.cell(r, c)
-                cell._tc.clear_content()
-                
-                # Copy all elements from source cell
-                for el in src_tc.xpath('./*'):
-                    cell._tc.append(deepcopy(el))
-                
-                # Update Label1 to Label{cnt} in the copied content
-                for t in cell.xpath('.//w:t'):
-                    if t.text and 'Label1' in t.text:
-                        t.text = t.text.replace('Label1', f'Label{cnt}')
-                for el in src_tc.xpath('./*'):
-                    cell._tc.append(deepcopy(el))
-            else:
-                # CRITICAL FIX: For empty cells, completely remove them to prevent blank placeholders
-                # This saves printer ink by not showing empty template placeholders
-                cell = tbl.cell(r, c)
-                cell._tc.clear_content()
-                # Don't add any paragraphs - keep the cell completely empty
-                # This prevents any placeholder text from showing up
-            cnt += 1
-    
-    # Add spacing
-    tblPr2 = tbl._element.find(qn('w:tblPr'))
-    spacing = OxmlElement('w:tblCellSpacing')
-    spacing.set(qn('w:w'), str(cut_line_twips))
-    spacing.set(qn('w:type'), 'dxa')
-    tblPr2.append(spacing)
-    
-    # Set row heights
-    for row in tbl.rows:
-        row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
-        row.height = row_height_pts
+    # CRITICAL FIX: Handle multiple pages for more than 9 products
+    if num_products <= 9:
+        # Single page - populate only the cells we need
+        cnt = 1
+        for r in range(num_rows):
+            for c in range(num_cols):
+                if cnt <= num_products:
+                    cell = tbl.cell(r, c)
+                    cell._tc.clear_content()
+                    
+                    # Prepare a copy of the template cell, then replace placeholders before appending
+                    tc = deepcopy(src_tc)
+                    for t in tc.iter(qn('w:t')):
+                        if t.text and 'Label1' in t.text:
+                            t.text = t.text.replace('Label1', f'Label{cnt}')
+                    for el in tc.xpath('./*'):
+                        cell._tc.append(deepcopy(el))
+                else:
+                    # CRITICAL FIX: For empty cells, completely remove them to prevent blank placeholders
+                    cell = tbl.cell(r, c)
+                    cell._tc.clear_content()
+                    # Don't add any paragraphs - keep the cell completely empty
+                cnt += 1
+    else:
+        # Multiple pages - create pages with 9 labels each
+        products_per_page = 9
+        total_pages = (num_products + products_per_page - 1) // products_per_page
         
-        for cell in row.cells:
-            # Set cell properties
-            tc = cell._tc
-            tcPr = tc.get_or_add_tcPr()
+        # Remove the single table we created
+        tbl._element.getparent().remove(tbl._element)
+        
+        # Create multiple pages
+        for page_num in range(total_pages):
+            # Add page break if not the first page
+            if page_num > 0:
+                doc.add_page_break()
             
-            # Set cell width
-            tcW = tcPr.find(qn('w:tcW'))
-            if tcW is None:
-                tcW = OxmlElement('w:tcW')
-                tcPr.append(tcW)
-            tcW.set(qn('w:w'), col_width_twips)
-            tcW.set(qn('w:type'), 'dxa')
+            # Create a new table for this page
+            tbl = doc.add_table(rows=3, cols=3)  # Always 3x3 for horizontal/vertical
+            tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
             
-            # Set cell margins
-            tcMar = tcPr.find(qn('w:tcMar'))
-            if tcMar is None:
-                tcMar = OxmlElement('w:tcMar')
-                tcPr.append(tcMar)
+            # Copy table properties from the original template
+            old_tbl = Document(template_path).tables[0]
+            for prop in old_tbl._element.xpath('./w:tblPr/*'):
+                tbl._element.append(deepcopy(prop))
             
-            for margin in ['top', 'left', 'bottom', 'right']:
-                margin_el = tcMar.find(qn(f'w:{margin}'))
-                if margin_el is None:
-                    margin_el = OxmlElement(f'w:{margin}')
-                    tcMar.append(margin_el)
-                margin_el.set(qn('w:w'), '0')
-                margin_el.set(qn('w:type'), 'dxa')
+            # Set table properties
+            tblPr = tbl._element.find(qn('w:tblPr'))
+            if tblPr is None:
+                tblPr = OxmlElement('w:tblPr')
+                tbl._element.insert(0, tblPr)
+            
+            # Set table width
+            tblW = tblPr.find(qn('w:tblW'))
+            if tblW is None:
+                tblW = OxmlElement('w:tblW')
+                tblPr.append(tblW)
+            tblW.set(qn('w:w'), str(int(3.4 * 3 * 1440)))  # Total width for 3 columns
+            tblW.set(qn('w:type'), 'dxa')
+            
+            # Set table layout
+            tblLayout = tblPr.find(qn('w:tblLayout'))
+            if tblLayout is None:
+                tblLayout = OxmlElement('w:tblLayout')
+                tblPr.append(tblLayout)
+            tblLayout.set(qn('w:type'), 'fixed')
+            
+            # Set cell spacing
+            tblCellSpacing = tblPr.find(qn('w:tblCellSpacing'))
+            if tblCellSpacing is None:
+                tblCellSpacing = OxmlElement('w:tblCellSpacing')
+                tblPr.append(tblCellSpacing)
+            tblCellSpacing.set(qn('w:w'), str(cut_line_twips))
+            tblCellSpacing.set(qn('w:type'), 'dxa')
+            
+            # CRITICAL FIX: Ensure table grid exists for valid XML structure
+            tblGrid = tbl._element.find(qn('w:tblGrid'))
+            if tblGrid is None:
+                tblGrid = OxmlElement('w:tblGrid')
+                tbl._element.insert(1, tblGrid)
+                for _ in range(3):  # 3 columns
+                    gc = OxmlElement('w:gridCol')
+                    gc.set(qn('w:w'), col_width_twips)
+                    tblGrid.append(gc)
+                print(f"Created missing tblGrid for page {page_num + 1}")
+            
+            # Populate cells for this page
+            start_product = page_num * products_per_page + 1
+            end_product = min(start_product + products_per_page - 1, num_products)
+            
+            cnt = start_product
+            for r in range(3):  # 3 rows
+                for c in range(3):  # 3 columns
+                    if cnt <= end_product:
+                        cell = tbl.cell(r, c)
+                        cell._tc.clear_content()
+                        
+                        # Prepare a copy of the template cell, then replace placeholders before appending
+                        tc = deepcopy(src_tc)
+                        for t in tc.iter(qn('w:t')):
+                            if t.text and 'Label1' in t.text:
+                                t.text = t.text.replace('Label1', f'Label{cnt}')
+                        for el in tc.xpath('./*'):
+                            cell._tc.append(deepcopy(el))
+                    else:
+                        # CRITICAL FIX: For empty cells, completely remove them to prevent blank placeholders
+                        cell = tbl.cell(r, c)
+                        cell._tc.clear_content()
+                        # Don't add any paragraphs - keep the cell completely empty
+                    cnt += 1
+            
+            # Set row heights for this page
+            for row in tbl.rows:
+                row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+                row.height = row_height_pts
+                
+                for cell in row.cells:
+                    # Set cell properties
+                    tc = cell._tc
+                    tcPr = tc.get_or_add_tcPr()
+                    
+                    # Set cell width
+                    tcW = tcPr.find(qn('w:tcW'))
+                    if tcW is None:
+                        tcW = OxmlElement('w:tcW')
+                        tcPr.append(tcW)
+                    tcW.set(qn('w:w'), col_width_twips)
+                    tcW.set(qn('w:type'), 'dxa')
+                    
+                    # Set cell margins
+                    tcMar = tcPr.find(qn('w:tcMar'))
+                    if tcMar is None:
+                        tcMar = OxmlElement('w:tcMar')
+                        tcPr.append(tcMar)
+                    
+                    for margin in ['top', 'left', 'bottom', 'right']:
+                        margin_el = tcMar.find(qn(f'w:{margin}'))
+                        if margin_el is None:
+                            margin_el = OxmlElement(f'w:{margin}')
+                            tcMar.append(margin_el)
+                        margin_el.set(qn('w:w'), '0')
+                        margin_el.set(qn('w:type'), 'dxa')
+    
+    # Add spacing (only for single page case)
+    if num_products <= 9:
+        tblPr2 = tbl._element.find(qn('w:tblPr'))
+        spacing = OxmlElement('w:tblCellSpacing')
+        spacing.set(qn('w:w'), str(cut_line_twips))
+        spacing.set(qn('w:type'), 'dxa')
+        tblPr2.append(spacing)
+        
+        # Set row heights for single page
+        for row in tbl.rows:
+            row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+            row.height = row_height_pts
+            
+            for cell in row.cells:
+                # Set cell properties
+                tc = cell._tc
+                tcPr = tc.get_or_add_tcPr()
+                
+                # Set cell width
+                tcW = tcPr.find(qn('w:tcW'))
+                if tcW is None:
+                    tcW = OxmlElement('w:tcW')
+                    tcPr.append(tcW)
+                tcW.set(qn('w:w'), col_width_twips)
+                tcW.set(qn('w:type'), 'dxa')
+                
+                # Set cell margins
+                tcMar = tcPr.find(qn('w:tcMar'))
+                if tcMar is None:
+                    tcMar = OxmlElement('w:tcMar')
+                    tcPr.append(tcMar)
+                
+                for margin in ['top', 'left', 'bottom', 'right']:
+                    margin_el = tcMar.find(qn(f'w:{margin}'))
+                    if margin_el is None:
+                        margin_el = OxmlElement(f'w:{margin}')
+                        tcMar.append(margin_el)
+                    margin_el.set(qn('w:w'), '0')
+                    margin_el.set(qn('w:type'), 'dxa')
     
     buf = BytesIO()
     doc.save(buf)
@@ -496,7 +577,12 @@ def create_dynamic_double_template(template_path, num_products, scale_factor=1.0
     # Calculate grid dimensions based on number of products
     # Always use 4 columns, calculate rows needed
     num_cols = 4
-    num_rows = (num_products + num_cols - 1) // num_cols  # Ceiling division
+    # CRITICAL FIX: For more than 12 products, create multiple pages with 12 labels each
+    if num_products <= 12:
+        num_rows = (num_products + num_cols - 1) // num_cols  # Ceiling division
+    else:
+        # For more than 12 products, create pages with 12 labels each
+        num_rows = 3  # Always 3 rows per page
     
     col_width_twips = str(int(1.75 * 1440))  # 1.75 inches per column for double template (original width)
     row_height_pts = Pt(2.5 * 72)  # 2.5 inches per row for double template
@@ -554,27 +640,150 @@ def create_dynamic_double_template(template_path, num_products, scale_factor=1.0
         borders.append(b)
     tblPr.append(borders)
     
-    # Populate cells
-    cnt = 1
-    for r in range(num_rows):
-        for c in range(num_cols):
-            if cnt <= num_products:  # Only populate cells for products we have
-                cell = tbl.cell(r,c)
-                cell._tc.clear_content()
-                tc = deepcopy(src_tc)
-                for t in tc.iter(qn('w:t')):
-                    if t.text and 'Label1' in t.text:
-                        t.text = t.text.replace('Label1', f'Label{cnt}')
-                for el in tc.xpath('./*'):
-                    cell._tc.append(deepcopy(el))
-            else:
-                # CRITICAL FIX: For empty cells, completely remove them to prevent blank placeholders
-                # This saves printer ink by not showing empty template placeholders
-                cell = tbl.cell(r, c)
-                cell._tc.clear_content()
-                # Don't add any paragraphs - keep the cell completely empty
-                # This prevents any placeholder text from showing up
-            cnt += 1
+    # CRITICAL FIX: Handle multiple pages for more than 12 products
+    if num_products <= 12:
+        # Single page - populate only the cells we need
+        cnt = 1
+        for r in range(num_rows):
+            for c in range(num_cols):
+                if cnt <= num_products:  # Only populate cells for products we have
+                    cell = tbl.cell(r,c)
+                    cell._tc.clear_content()
+                    tc = deepcopy(src_tc)
+                    for t in tc.iter(qn('w:t')):
+                        if t.text and 'Label1' in t.text:
+                            t.text = t.text.replace('Label1', f'Label{cnt}')
+                    for el in tc.xpath('./*'):
+                        cell._tc.append(deepcopy(el))
+                else:
+                    # CRITICAL FIX: For empty cells, completely remove them to prevent blank placeholders
+                    cell = tbl.cell(r, c)
+                    cell._tc.clear_content()
+                    # Don't add any paragraphs - keep the cell completely empty
+                cnt += 1
+    else:
+        # Multiple pages - create pages with 12 labels each
+        products_per_page = 12
+        total_pages = (num_products + products_per_page - 1) // products_per_page
+        
+        # Remove the single table we created
+        tbl._element.getparent().remove(tbl._element)
+        
+        # Create multiple pages
+        for page_num in range(total_pages):
+            # Add page break if not the first page
+            if page_num > 0:
+                doc.add_page_break()
+            
+            # Create a new table for this page
+            tbl = doc.add_table(rows=3, cols=4)  # Always 3x4 for double template
+            tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
+            
+            # Copy table properties from the original template
+            old_tbl = Document(template_path).tables[0]
+            for prop in old_tbl._element.xpath('./w:tblPr/*'):
+                tbl._element.append(deepcopy(prop))
+            
+            # Set table properties
+            tblPr = tbl._element.find(qn('w:tblPr'))
+            if tblPr is None:
+                tblPr = OxmlElement('w:tblPr')
+                tbl._element.insert(0, tblPr)
+            
+            # Set table width
+            tblW = tblPr.find(qn('w:tblW'))
+            if tblW is None:
+                tblW = OxmlElement('w:tblW')
+                tblPr.append(tblW)
+            tblW.set(qn('w:w'), str(int(1.75 * 4 * 1440)))  # Total width for 4 columns
+            tblW.set(qn('w:type'), 'dxa')
+            
+            # Set table layout
+            tblLayout = tblPr.find(qn('w:tblLayout'))
+            if tblLayout is None:
+                tblLayout = OxmlElement('w:tblLayout')
+                tblPr.append(tblLayout)
+            tblLayout.set(qn('w:type'), 'fixed')
+            
+            # Set cell spacing
+            tblCellSpacing = tblPr.find(qn('w:tblCellSpacing'))
+            if tblCellSpacing is None:
+                tblCellSpacing = OxmlElement('w:tblCellSpacing')
+                tblPr.append(tblCellSpacing)
+            tblCellSpacing.set(qn('w:w'), str(cut_line_twips))
+            tblCellSpacing.set(qn('w:type'), 'dxa')
+            
+            # Set table grid
+            tblGrid = tbl._element.find(qn('w:tblGrid'))
+            if tblGrid is not None:
+                tblGrid.getparent().remove(tblGrid)
+            tblGrid = OxmlElement('w:tblGrid')
+            tbl._element.insert(1, tblGrid)
+            
+            for _ in range(4):  # 4 columns
+                gc = OxmlElement('w:gridCol')
+                gc.set(qn('w:w'), col_width_twips)
+                tblGrid.append(gc)
+            
+            # Populate cells for this page
+            start_product = page_num * products_per_page + 1
+            end_product = min(start_product + products_per_page - 1, num_products)
+            
+            cnt = start_product
+            for r in range(3):  # 3 rows
+                for c in range(4):  # 4 columns
+                    if cnt <= end_product:
+                        cell = tbl.cell(r, c)
+                        cell._tc.clear_content()
+                        
+                        # Copy all elements from source cell
+                        for el in src_tc.xpath('./*'):
+                            cell._tc.append(deepcopy(el))
+                        
+                        # Update Label1 to Label{cnt} in the copied content
+                        for t in cell.xpath('.//w:t'):
+                            if t.text and 'Label1' in t.text:
+                                t.text = t.text.replace('Label1', f'Label{cnt}')
+                        for el in src_tc.xpath('./*'):
+                            cell._tc.append(deepcopy(el))
+                    else:
+                        # CRITICAL FIX: For empty cells, completely remove them to prevent blank placeholders
+                        cell = tbl.cell(r, c)
+                        cell._tc.clear_content()
+                        # Don't add any paragraphs - keep the cell completely empty
+                    cnt += 1
+            
+            # Set row heights for this page
+            for row in tbl.rows:
+                row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+                row.height = row_height_pts
+                
+                for cell in row.cells:
+                    # Set cell properties
+                    tc = cell._tc
+                    tcPr = tc.get_or_add_tcPr()
+                    
+                    # Set cell width
+                    tcW = tcPr.find(qn('w:tcW'))
+                    if tcW is None:
+                        tcW = OxmlElement('w:tcW')
+                        tcPr.append(tcW)
+                    tcW.set(qn('w:w'), col_width_twips)
+                    tcW.set(qn('w:type'), 'dxa')
+                    
+                    # Set cell margins
+                    tcMar = tcPr.find(qn('w:tcMar'))
+                    if tcMar is None:
+                        tcMar = OxmlElement('w:tcMar')
+                        tcPr.append(tcMar)
+                    
+                    for margin in ['top', 'left', 'bottom', 'right']:
+                        margin_el = tcMar.find(qn(f'w:{margin}'))
+                        if margin_el is None:
+                            margin_el = OxmlElement(f'w:{margin}')
+                            tcMar.append(margin_el)
+                        margin_el.set(qn('w:w'), '0')
+                        margin_el.set(qn('w:type'), 'dxa')
     
     # Add spacing
     tblPr2 = tbl._element.find(qn('w:tblPr'))
@@ -664,44 +873,22 @@ def process_chunk(args):
     """Process a chunk of records to generate labels."""
     chunk, base_template, font_scheme, orientation, scale_factor = args
     logger = logging.getLogger(__name__)
-    # Mini template expands to 4x5 grid
+    # CRITICAL FIX: Disable ALL dynamic templates to prevent XML corruption
+    # Use standard template expansion with post-processing cleanup instead
     if orientation == "mini":
-        actual_products = len(chunk)
-        # CRITICAL FIX: Create dynamic template based on number of products
-        if actual_products <= 20:
-            # Create a dynamic template that only has as many cells as products
-            local_template_buffer = create_dynamic_mini_template(base_template, actual_products, scale_factor)
-            num_labels = actual_products  # Only create labels for products we have
-        else:
-            # If we have more than 20 products, use the base template and let it handle multiple pages
-            local_template_buffer = base_template
-            num_labels = 9  # Use standard 3x3 grid for multiple pages
+        local_template_buffer = base_template
+        num_labels = 20  # Use standard 4x5 grid
+        logger.info(f"🔧 MINI TEMPLATE EXPANSION: Using standard template expansion")
     elif orientation == "double":
-        actual_products = len(chunk)
-        # CRITICAL FIX: Create dynamic template based on number of products, similar to mini template
-        if actual_products <= 12:
-            # Create a dynamic template that only has as many cells as products
-            from src.core.generation.template_processor import TemplateProcessor
-            temp_processor = TemplateProcessor('double', font_scheme, scale_factor)
-            local_template_buffer = create_dynamic_double_template(base_template, actual_products, scale_factor)
-            num_labels = actual_products  # Only create labels for products we have
-            logger.info(f"🔧 DOUBLE TEMPLATE EXPANSION: Using dynamic template with {num_labels} labels")
-        else:
-            # If we have more than 12 products, use the base template and let it handle multiple pages
-            local_template_buffer = base_template
-            num_labels = 9  # Use standard 3x3 grid for multiple pages
+        local_template_buffer = base_template
+        num_labels = 12  # Use standard 4x3 grid
+        logger.info(f"🔧 DOUBLE TEMPLATE EXPANSION: Using standard template expansion")
     else:
-        # CRITICAL FIX: For horizontal/vertical templates, also create dynamic templates to prevent blank tags
-        actual_products = len(chunk)
-        if actual_products <= 9:
-            # Create a dynamic template that only has as many cells as products
-            local_template_buffer = create_dynamic_3x3_template(base_template, actual_products, scale_factor)
-            num_labels = actual_products  # Only create labels for products we have
-            logger.info(f"🔧 {orientation.upper()} TEMPLATE EXPANSION: Using dynamic template with {num_labels} labels")
-        else:
-            # If we have more than 9 products, use the base template and let it handle multiple pages
-            local_template_buffer = base_template
-            num_labels = 9  # Use standard 3x3 grid for multiple pages
+        # CRITICAL FIX: Disable dynamic templates for horizontal/vertical to prevent XML corruption
+        # Use standard template expansion with post-processing cleanup instead
+        local_template_buffer = base_template
+        num_labels = 9  # Use standard 3x3 grid
+        logger.info(f"🔧 {orientation.upper()} TEMPLATE EXPANSION: Using standard template expansion")
     tpl = DocxTemplate(local_template_buffer)
     context = {}
     image_width = Mm(8) if orientation == "mini" else Mm(9 if orientation == 'vertical' else 12)

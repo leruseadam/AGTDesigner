@@ -878,6 +878,34 @@ class ProductDatabase:
             
             # Handle both 'ProductName' and 'Product Name*' column names
             product_name = product_data.get(get_canonical_field('Product Name*'), product_data.get(get_canonical_field('ProductName'), ''))
+            
+            # CRITICAL VALIDATION: Prevent blank entries from being added to database
+            if not product_name or str(product_name).strip() == '':
+                logger.warning("❌ REJECTED: Cannot add product with blank/empty product name")
+                return None
+            
+            # Check for invalid values
+            if str(product_name).lower() in ['nan', 'none', 'null', '']:
+                logger.warning(f"❌ REJECTED: Cannot add product with invalid product name: '{product_name}'")
+                return None
+            
+            # Check for minimum length (at least 2 characters)
+            if len(str(product_name).strip()) < 2:
+                logger.warning(f"❌ REJECTED: Product name too short (must be at least 2 characters): '{product_name}'")
+                return None
+            
+            # Additional validation for essential fields
+            vendor = product_data.get('Vendor/Supplier*', '').strip() if product_data.get('Vendor/Supplier*') else ''
+            product_type = product_data.get('Product Type*', '').strip() if product_data.get('Product Type*') else ''
+            
+            if not vendor or str(vendor).lower() in ['nan', 'none', 'null', '']:
+                logger.warning(f"❌ REJECTED: Product '{product_name}' missing vendor information")
+                return None
+            
+            if not product_type or str(product_type).lower() in ['nan', 'none', 'null', '']:
+                logger.warning(f"❌ REJECTED: Product '{product_name}' missing product type")
+                return None
+            
             normalized_name = self._normalize_product_name(product_name)
             current_date = datetime.now().isoformat()
             
@@ -904,12 +932,16 @@ class ProductDatabase:
                         raise e
                 
                 # Enhanced duplicate detection: Check multiple combinations
+                # Normalize vendor and brand for better matching
+                vendor_value = product_data.get(get_canonical_field('Vendor/Supplier*'), '')
+                brand_value = product_data.get(get_canonical_field('Product Brand'), '')
+                
                 # First check exact match (name + vendor + brand)
                 cursor.execute('''
                     SELECT id, total_occurrences, "Product Name*"
                     FROM products 
                     WHERE normalized_name = ? AND "Vendor/Supplier*" = ? AND "Product Brand" = ?
-                ''', (normalized_name, product_data.get(get_canonical_field('Vendor/Supplier*')), product_data.get(get_canonical_field('Product Brand'))))
+                ''', (normalized_name, vendor_value, brand_value))
                 
                 existing = cursor.fetchone()
                 
@@ -923,6 +955,24 @@ class ProductDatabase:
                     self._update_existing_product(cursor, product_id, product_data)
                     conn.commit()
                     logger.info(f"Successfully replaced existing product '{existing_name}' with new Excel data")
+                    return product_id
+                
+                # If no exact match, check by name and vendor only (ignore brand differences)
+                cursor.execute('''
+                    SELECT id, total_occurrences, "Product Name*", "Product Brand"
+                    FROM products 
+                    WHERE normalized_name = ? AND "Vendor/Supplier*" = ?
+                    ORDER BY updated_at DESC
+                    LIMIT 1
+                ''', (normalized_name, vendor_value))
+                
+                vendor_match = cursor.fetchone()
+                if vendor_match:
+                    product_id, occurrences, existing_name, existing_brand = vendor_match
+                    logger.info(f"Found similar product by name+vendor: '{existing_name}' (Brand: {existing_brand}) - REPLACING WITH NEW DATA")
+                    self._update_existing_product(cursor, product_id, product_data)
+                    conn.commit()
+                    logger.info(f"Successfully updated product '{existing_name}' with new Excel data")
                     return product_id
                 
                 # Check for similar products (same name + vendor, different brand)
@@ -1039,8 +1089,7 @@ class ProductDatabase:
                     
                     product_id = cursor.lastrowid
                     conn.commit()
-                    if DEBUG_ENABLED:
-                        logger.debug(f"Added new product '{product_name}'")
+                    logger.info(f"✅ ADDED NEW product '{product_name}' (ID: {product_id}, Vendor: {vendor_value}, Brand: {brand_value})")
                     return product_id
                 
         except Exception as e:
@@ -1058,9 +1107,8 @@ class ProductDatabase:
                 logger.warning("No data to store - DataFrame is empty")
                 return {'stored': 0, 'updated': 0, 'errors': 0, 'message': 'No data to store'}
             
-            # TEMPORARILY DISABLE JSON match filtering to test database storage
-            # filtered_df = self._filter_json_matched_tags(df)
-            filtered_df = df.copy()  # Use all data without filtering
+            # Filter out JSON matched tags to prevent duplicate storage
+            filtered_df = self._filter_json_matched_tags(df)
 
             # CRITICAL NORMALIZATION: map common column aliases used by different upload paths
             try:
@@ -1439,9 +1487,21 @@ class ProductDatabase:
                             logger.warning(f"Fallback weight normalization also failed for {product_name}: {e2}")
                     
                     # Store the product in database
+                    # Get the count before to determine if it's new or updated
+                    cursor_temp = conn.cursor()
+                    cursor_temp.execute("SELECT COUNT(*) FROM products")
+                    count_before = cursor_temp.fetchone()[0]
+                    
                     product_id = self.add_or_update_product(product_data)
+                    
                     if product_id:
-                        stored_count += 1
+                        cursor_temp.execute("SELECT COUNT(*) FROM products")
+                        count_after = cursor_temp.fetchone()[0]
+                        
+                        if count_after > count_before:
+                            stored_count += 1
+                        else:
+                            updated_count += 1
                     elif product_id is None:
                         # Product was skipped as duplicate
                         skipped_duplicates += 1
@@ -1484,6 +1544,83 @@ class ProductDatabase:
         except Exception as e:
             logger.error(f"Error storing Excel data: {e}")
             return {'stored': 0, 'updated': 0, 'errors': 1, 'excluded_json_matches': 0, 'message': f'Storage failed: {str(e)}'}
+    
+    def cleanup_duplicate_products(self) -> Dict[str, Any]:
+        """
+        Clean up duplicate products in the database, keeping only the most recent entry.
+        Duplicates are identified by matching: normalized_name + Vendor/Supplier* + Product Brand
+        
+        Returns:
+            Dictionary with cleanup results
+        """
+        try:
+            self.init_database()
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            logger.info("Starting duplicate product cleanup...")
+            
+            # Find duplicates by grouping on normalized_name, vendor, and brand
+            cursor.execute('''
+                SELECT normalized_name, "Vendor/Supplier*", "Product Brand", COUNT(*) as count
+                FROM products
+                GROUP BY normalized_name, "Vendor/Supplier*", "Product Brand"
+                HAVING count > 1
+            ''')
+            
+            duplicate_groups = cursor.fetchall()
+            total_duplicates = len(duplicate_groups)
+            deleted_count = 0
+            
+            logger.info(f"Found {total_duplicates} duplicate product groups")
+            
+            for norm_name, vendor, brand, count in duplicate_groups:
+                # Get all entries for this duplicate group, ordered by most recent first
+                cursor.execute('''
+                    SELECT id, "Product Name*", updated_at
+                    FROM products
+                    WHERE normalized_name = ? AND "Vendor/Supplier*" = ? AND "Product Brand" = ?
+                    ORDER BY updated_at DESC
+                ''', (norm_name, vendor, brand))
+                
+                entries = cursor.fetchall()
+                
+                if len(entries) > 1:
+                    # Keep the first (most recent), delete the rest
+                    keep_id = entries[0][0]
+                    keep_name = entries[0][1]
+                    
+                    ids_to_delete = [entry[0] for entry in entries[1:]]
+                    
+                    logger.info(f"Keeping most recent '{keep_name}' (ID: {keep_id}), deleting {len(ids_to_delete)} older duplicates")
+                    
+                    # Delete older duplicates
+                    cursor.executemany('DELETE FROM products WHERE id = ?', [(id,) for id in ids_to_delete])
+                    deleted_count += len(ids_to_delete)
+            
+            conn.commit()
+            
+            # Get final product count
+            cursor.execute("SELECT COUNT(*) FROM products")
+            final_count = cursor.fetchone()[0]
+            
+            logger.info(f"Duplicate cleanup completed: Deleted {deleted_count} duplicate entries, {final_count} products remaining")
+            
+            return {
+                'success': True,
+                'duplicate_groups': total_duplicates,
+                'deleted_count': deleted_count,
+                'final_product_count': final_count,
+                'message': f'Deleted {deleted_count} duplicate products from {total_duplicates} duplicate groups. {final_count} products remaining.'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error cleaning up duplicate products: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'message': f'Cleanup failed: {str(e)}'
+            }
     
     def cleanup_blank_entries(self) -> Dict[str, Any]:
         """

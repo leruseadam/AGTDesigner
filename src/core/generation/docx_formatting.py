@@ -23,11 +23,64 @@ COLORS = {
 
 def apply_lineage_colors(doc):
     """Apply lineage colors to all cells based on keywords in cell text."""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    
     try:
         for table in doc.tables:
             for row in table.rows:
                 for cell in row.cells:
                     original_text = cell.text.upper()  # Keep original text to check for markers
+                    
+                    # CRITICAL FIX: Skip blank cells - don't apply any background color
+                    if not original_text.strip() or original_text.strip() == '':
+                        # Set white background for blank cells
+                        tc = cell._tc
+                        tcPr = tc.find(qn('w:tcPr'))
+                        if tcPr is None:
+                            tcPr = OxmlElement('w:tcPr')
+                            tc.insert(0, tcPr)
+                        
+                        # Remove any existing background color
+                        shd = tcPr.find(qn('w:shd'))
+                        if shd is not None:
+                            tcPr.remove(shd)
+                        
+                        # Add white background
+                        shd = OxmlElement('w:shd')
+                        shd.set(qn('w:val'), 'clear')
+                        shd.set(qn('w:color'), 'auto')
+                        shd.set(qn('w:fill'), 'FFFFFF')  # White background
+                        tcPr.append(shd)
+                        continue
+                    
+                    # CRITICAL FIX: Also check for cells that only contain markers (will be empty after marker removal)
+                    temp_text = original_text
+                    for marker in ["LINEAGE_START", "LINEAGE_END", "PRODUCTSTRAIN_START", "PRODUCTSTRAIN_END", "PRODUCTBRAND_CENTER_START", "PRODUCTBRAND_CENTER_END"]:
+                        temp_text = temp_text.replace(marker, "")
+                    
+                    # If after removing markers, the cell is empty, treat it as blank
+                    if not temp_text.strip():
+                        # Set white background for marker-only cells
+                        tc = cell._tc
+                        tcPr = tc.find(qn('w:tcPr'))
+                        if tcPr is None:
+                            tcPr = OxmlElement('w:tcPr')
+                            tc.insert(0, tcPr)
+                        
+                        # Remove any existing background color
+                        shd = tcPr.find(qn('w:shd'))
+                        if shd is not None:
+                            tcPr.remove(shd)
+                        
+                        # Add white background
+                        shd = OxmlElement('w:shd')
+                        shd.set(qn('w:val'), 'clear')
+                        shd.set(qn('w:color'), 'auto')
+                        shd.set(qn('w:fill'), 'FFFFFF')  # White background
+                        tcPr.append(shd)
+                        continue
+                    
                     color_hex = None
                     
                     # Check if ProductStrain is CBD or CBD Blend (before marker removal)
@@ -71,9 +124,6 @@ def apply_lineage_colors(doc):
                         # Apply CBD lineage colors if it's a classic type OR if ProductStrain is CBD
                         if is_classic_type or is_product_strain_cbd:
                             color_hex = COLORS['CBD']
-                    elif text == "CBD":
-                        # Handle cases where lineage is set to "CBD" but text doesn't contain "CBD" keyword
-                        color_hex = COLORS['CBD']
                     elif "CBD BLEND" in text:
                         # Apply CBD BLEND lineage colors if it's a classic type OR if ProductStrain is CBD
                         if is_classic_type or is_product_strain_cbd:
@@ -84,11 +134,13 @@ def apply_lineage_colors(doc):
                     elif not is_classic_type and is_product_strain_cbd:
                         # For non-classic types with CBD strain, use yellow color
                         color_hex = COLORS['CBD']
-                    elif not is_classic_type:
+                    elif not is_classic_type and text.strip():
                         # For non-classic types without specific strain, use blue color (MIXED)
+                        # BUT ONLY if there's actual content (not empty after marker removal)
                         color_hex = COLORS['MIXED']
                     
-                    if color_hex:
+                    if color_hex and text.strip():
+                        # Final safety check: only apply color if there's actual content
                         # Set cell background color
                         tc = cell._tc
                         tcPr = tc.get_or_add_tcPr()
@@ -109,6 +161,25 @@ def apply_lineage_colors(doc):
                                 # Restore the original font size if it was set
                                 if existing_font_size is not None:
                                     run.font.size = existing_font_size
+                    elif not text.strip():
+                        # Final safety: if text is empty after all processing, ensure white background
+                        tc = cell._tc
+                        tcPr = tc.find(qn('w:tcPr'))
+                        if tcPr is None:
+                            tcPr = OxmlElement('w:tcPr')
+                            tc.insert(0, tcPr)
+                        
+                        # Remove any existing background color
+                        shd = tcPr.find(qn('w:shd'))
+                        if shd is not None:
+                            tcPr.remove(shd)
+                        
+                        # Add white background
+                        shd = OxmlElement('w:shd')
+                        shd.set(qn('w:val'), 'clear')
+                        shd.set(qn('w:color'), 'auto')
+                        shd.set(qn('w:fill'), 'FFFFFF')  # White background
+                        tcPr.append(shd)
         # FINAL LINEAGE CLEANUP: Remove any leading spaces from lineage content after coloring
         _final_lineage_cleanup_after_coloring(doc)
         

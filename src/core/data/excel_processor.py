@@ -39,7 +39,30 @@ def normalize_lineage(lineage: str) -> str:
     if not lineage or pd.isna(lineage):
         return "HYBRID"  # Default to HYBRID
     
-    lineage = str(lineage).strip().lower()
+    lineage_str = str(lineage).strip()
+    
+    # First, try to extract lineage from mixed text (e.g., "Bruce Banner HYBRID/SATIVA" -> "HYBRID/SATIVA")
+    # Look for lineage patterns in the text
+    import re
+    
+    # Check for specific lineage patterns in the text
+    lineage_patterns = [
+        r'\b(HYBRID/SATIVA)\b',
+        r'\b(HYBRID/INDICA)\b', 
+        r'\b(SATIVA)\b',
+        r'\b(INDICA)\b',
+        r'\b(HYBRID)\b',
+        r'\b(CBD)\b',
+        r'\b(MIXED)\b'
+    ]
+    
+    for pattern in lineage_patterns:
+        match = re.search(pattern, lineage_str.upper())
+        if match:
+            return match.group(1)
+    
+    # If no pattern found, try lowercase mapping
+    lineage_lower = lineage_str.lower()
     
     # Map common variations to standard ALL CAPS format
     lineage_mapping = {
@@ -48,6 +71,8 @@ def normalize_lineage(lineage: str) -> str:
         'indica': 'INDICA',
         'sativa': 'SATIVA',
         'sativa_hybrid': 'HYBRID/SATIVA',
+        'hybrid/sativa': 'HYBRID/SATIVA',  # CRITICAL FIX: Handle HYBRID/SATIVA format
+        'hybrid/indica': 'HYBRID/INDICA',  # CRITICAL FIX: Handle HYBRID/INDICA format
         'cbd': 'CBD',
         'mixed': 'HYBRID',  # Default mixed to hybrid
         'unknown': 'HYBRID',  # Default unknown to hybrid
@@ -55,7 +80,7 @@ def normalize_lineage(lineage: str) -> str:
         '': 'HYBRID'  # Default empty to hybrid
     }
     
-    return lineage_mapping.get(lineage, 'HYBRID')
+    return lineage_mapping.get(lineage_lower, 'HYBRID')
 
 # Performance optimization flags - STANDARDIZED FOR BOTH LOCAL AND PYTHONANYWHERE
 ENABLE_STRAIN_SIMILARITY_PROCESSING = True  # ALWAYS ENABLED: Lineage persistence is critical
@@ -1603,6 +1628,13 @@ class ExcelProcessor:
                 self.df = self.df[~pattern_mask]
                 if len(excluded_by_pattern) > 0:
                     self.logger.info(f"Excluded {len(excluded_by_pattern)} products containing pattern '{pattern}': {excluded_by_pattern['Product Name*'].tolist()}")
+            
+            # CRITICAL FIX: Exclude rows with blank or empty product names to prevent database pollution
+            blank_name_mask = self.df["Product Name*"].isna() | (self.df["Product Name*"].astype(str).str.strip() == "")
+            excluded_blank_names = self.df[blank_name_mask]
+            if len(excluded_blank_names) > 0:
+                self.logger.info(f"Excluded {len(excluded_blank_names)} products with blank/empty product names")
+                self.df = self.df[~blank_name_mask]
             
             # Reset index after all filtering to prevent duplicate labels
             self.df.reset_index(drop=True, inplace=True)
@@ -3382,8 +3414,9 @@ class ExcelProcessor:
                             return i
                     return len(selected_tag_names)  # Put unknown tags at the end
             
-            # Sort by selected order only (respecting user's drag-and-drop order)
-            records_sorted = sorted(records, key=lambda r: get_selected_order(r))
+            # Sort by selected order, then by a secondary key to break up product grouping
+            # This ensures diverse distribution while respecting user's drag-and-drop order
+            records_sorted = sorted(records, key=lambda r: (get_selected_order(r), hash(str(r.get(product_name_col, '')))))
             
             processed_records = []
             
@@ -3502,7 +3535,11 @@ class ExcelProcessor:
                             if vendor and vendor.strip() != '':
                                 product_brand = vendor.strip().upper()
                     
-                    original_lineage = str(record.get('Lineage', '')).upper()
+                    # CRITICAL FIX: Normalize lineage to ensure proper format (HYBRID/SATIVA, etc.)
+                    original_lineage_raw = str(record.get('Lineage', ''))
+                    original_lineage = normalize_lineage(original_lineage_raw)
+                    logger.debug(f"LINEAGE NORMALIZATION: '{original_lineage_raw}' -> '{original_lineage}' for '{product_name}'")
+                    
                     original_product_strain = record.get('Product Strain', '')
                     
                     # Extract strain from product name if Product Strain contains the full product name
