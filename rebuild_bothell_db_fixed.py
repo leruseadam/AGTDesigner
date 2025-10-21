@@ -159,29 +159,121 @@ def rebuild_bothell_database():
     new_cursor.execute("PRAGMA table_info(products)")
     new_columns = [row[1] for row in new_cursor.fetchall()]
     
-    # Find common columns
+    # Check if schemas match or need mapping
     common_columns = [col for col in new_columns if col in old_columns and col != 'id']
     
-    print(f"   Found {len(common_columns)} common columns to copy")
-    
-    # Check if we have any columns to copy
+    # If no common columns, we need to map old schema to new schema
     if len(common_columns) == 0:
-        print(f"❌ Error: No common columns found between old and new schema!")
-        print(f"Old columns: {old_columns[:10]}...")
-        print(f"New columns: {new_columns[:10]}...")
-        old_conn.close()
-        new_conn.close()
-        return
-    
-    # Build SELECT and INSERT statements - quote all column names
-    select_cols = ', '.join([f'"{col}"' for col in common_columns])
-    insert_cols = ', '.join([f'"{col}"' for col in common_columns])
-    placeholders = ', '.join(['?' for _ in common_columns])
+        print(f"   Detected old schema format - creating column mapping...")
+        
+        # Column mapping from old schema to new schema
+        column_mapping = {
+            'name': 'Product Name*',
+            'type': 'Product Type*',
+            'brand': 'Product Brand',
+            'vendor': 'Vendor/Supplier*',
+            'strain': 'Product Strain',
+            'lineage': 'Lineage',
+            'description': 'Description',
+            'weight': 'Weight*',
+            'weight_unit': 'Units',
+            'price': 'Price',
+            'quantity': 'Quantity*',
+            'doh_compliant': 'DOH',
+            'concentrate_type': 'Concentrate Type',
+            'ratio': 'Ratio',
+            'joint_ratio': 'JointRatio',
+            'state': 'State',
+            'is_sample': 'Is Sample? (yes/no)',
+            'is_mj_product': 'Is MJ product?(yes/no)',
+            'discountable': 'Discountable? (yes/no)',
+            'room': 'Room*',
+            'batch_number': 'Batch Number',
+            'lot_number': 'Lot Number',
+            'barcode': 'Barcode*',
+            'medical_only': 'Medical Only (Yes/No)',
+            'med_price': 'Med Price',
+            'expiration_date': 'Expiration Date(YYYY-MM-DD)',
+            'is_archived': 'Is Archived? (yes/no)',
+            'thc_per_serving': 'THC Per Serving',
+            'allergens': 'Allergens',
+            'solvent': 'Solvent',
+            'accepted_date': 'Accepted Date',
+            'internal_product_identifier': 'Internal Product Identifier',
+            'product_tags': 'Product Tags (comma separated)',
+            'image_url': 'Image URL',
+            'ingredients': 'Ingredients',
+            'combined_weight': 'CombinedWeight',
+            'ratio_or_thc_cbd': 'Ratio_or_THC_CBD',
+            'description_complexity': 'Description_Complexity',
+            'total_thc': 'Total THC',
+            'thca': 'THCA',
+            'total_cbd': 'Total CBD',
+            'cbda': 'CBDA',
+            'cbn': 'CBN',
+            'cbga': 'CBGA',
+            'cbg': 'CBG',
+            'total_cbg': 'Total CBG',
+            'cbc': 'CBC',
+            'cbdv': 'CBDV',
+            'thcv': 'THCV',
+            'thc_test_result': 'THC test result',
+            'cbd_test_result': 'CBD test result',
+            'test_result_unit': 'Test result unit (% or mg)',
+            'source': 'Source',
+            'date_added': 'Date Added',
+            'first_seen_date': 'first_seen_date',
+            'last_seen_date': 'last_seen_date',
+            'total_occurrences': 'total_occurrences',
+            'created_at': 'created_at',
+            'updated_at': 'updated_at',
+            'normalized_name': 'normalized_name',
+            'thc_percentage': 'Total THC',
+            'cbd_percentage': 'Total CBD'
+        }
+        
+        # Find columns that exist in old database and have a mapping
+        mapped_columns = []
+        old_col_names = []
+        new_col_names = []
+        
+        for old_col, new_col in column_mapping.items():
+            if old_col in old_columns and new_col in new_columns:
+                old_col_names.append(old_col)
+                new_col_names.append(new_col)
+                mapped_columns.append((old_col, new_col))
+        
+        print(f"   Found {len(mapped_columns)} columns to map from old to new schema")
+        
+        if len(mapped_columns) == 0:
+            print(f"❌ Error: No mappable columns found!")
+            print(f"Old columns: {old_columns[:20]}")
+            print(f"New columns: {new_columns[:20]}")
+            old_conn.close()
+            new_conn.close()
+            return
+        
+        # Build SELECT and INSERT statements with mapping
+        select_cols = ', '.join([f'"{col}"' for col in old_col_names])
+        insert_cols = ', '.join([f'"{col}"' for col in new_col_names])
+        placeholders = ', '.join(['?' for _ in mapped_columns])
+        
+    else:
+        # Schemas match - use direct column copy
+        print(f"   Found {len(common_columns)} common columns to copy")
+        
+        # Build SELECT and INSERT statements - quote all column names
+        select_cols = ', '.join([f'"{col}"' for col in common_columns])
+        insert_cols = ', '.join([f'"{col}"' for col in common_columns])
+        placeholders = ', '.join(['?' for _ in common_columns])
     
     # Copy data in batches
     batch_size = 500  # Smaller batches for better reliability
     offset = 0
     total_copied = 0
+    
+    # Check if we need to generate normalized_name (not in old schema)
+    needs_normalized_name = 'normalized_name' not in [col[0] for col in mapped_columns] if len(common_columns) == 0 else 'normalized_name' not in common_columns
     
     while True:
         old_cursor.execute(f'''
@@ -194,11 +286,35 @@ def rebuild_bothell_database():
         if not rows:
             break
         
-        # Insert into new database - use INSERT OR REPLACE to handle duplicates
-        new_cursor.executemany(f'''
-            INSERT INTO products ({insert_cols})
-            VALUES ({placeholders})
-        ''', rows)
+        # Process rows to add normalized_name if needed
+        if needs_normalized_name and len(common_columns) == 0:
+            # We're using mapped columns - need to add normalized_name
+            import re
+            processed_rows = []
+            for row in rows:
+                row_list = list(row)
+                # Get the product name (first mapped column should be name -> Product Name*)
+                product_name = str(row_list[0]) if len(row_list) > 0 else ""
+                # Generate normalized name
+                normalized = re.sub(r'[^a-z0-9]+', '', product_name.lower())
+                row_list.append(normalized)
+                processed_rows.append(tuple(row_list))
+            
+            # Add normalized_name to insert columns
+            final_insert_cols = insert_cols + ', "normalized_name"'
+            final_placeholders = placeholders + ', ?'
+            
+            # Insert into new database
+            new_cursor.executemany(f'''
+                INSERT INTO products ({final_insert_cols})
+                VALUES ({final_placeholders})
+            ''', processed_rows)
+        else:
+            # Insert into new database - use INSERT OR REPLACE to handle duplicates
+            new_cursor.executemany(f'''
+                INSERT INTO products ({insert_cols})
+                VALUES ({placeholders})
+            ''', rows)
         
         # Commit after each batch to avoid large transactions
         new_conn.commit()
