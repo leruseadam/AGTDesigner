@@ -4690,6 +4690,25 @@ def generate_labels():
                     lineage = record.get('Lineage', 'NOT_FOUND')
                     logging.info(f"LINEAGE DEBUG: Record {i+1} - Product: '{product_name}', Lineage: '{lineage}'")
             logging.debug(f"Records returned from get_selected_records: {len(records) if records else 0}")
+            
+            # CRITICAL FIX: Override lineage from database for Excel records too!
+            logging.info("LINEAGE OVERRIDE: Checking for updated lineage in database for Excel records...")
+            product_db = get_product_database()
+            if product_db and records:
+                for record in records:
+                    # Try both possible product name fields
+                    product_name = record.get('Product Name*', '') or record.get('ProductName', '')
+                    if product_name:
+                        try:
+                            # Get the most up-to-date lineage from the database
+                            db_lineage = product_db.get_product_lineage(product_name)
+                            if db_lineage:
+                                original_lineage = record.get('Lineage', '')
+                                if str(db_lineage).strip() != str(original_lineage).strip():
+                                    logging.info(f"LINEAGE OVERRIDE (Excel): '{product_name}' - Record: '{original_lineage}' -> Database: '{db_lineage}'")
+                                    record['Lineage'] = str(db_lineage).strip()
+                        except Exception as e:
+                            logging.warning(f"Error checking lineage override for '{product_name}': {e}")
 
         if not records:
             logging.error("No selected tags found in the data or failed to process records.")
