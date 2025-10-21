@@ -3505,16 +3505,17 @@ class JSONMatcher:
                                 db_lookup_count += 1
                                 logging.info(f"✅ Product/Strain Database match found for: {product_name}")
                                 # Use database info to override JSON data
-                                product_name = db_info.get("product_name", product_name)
-                                vendor = db_info.get("vendor", vendor)
-                                brand = db_info.get("brand", "")
-                                product_type = db_info.get("product_type", "")
-                                strain = db_info.get("strain_name", "")
-                                lineage = db_info.get("lineage", "")
-                                price = str(db_info.get("price", ""))
-                                weight = str(db_info.get("weight", ""))
-                                units = str(db_info.get("units", ""))
-                                description = db_info.get("description", "")
+                                # CRITICAL FIX: Use correct field names from database (ProductName or Product Name*, not product_name)
+                                product_name = db_info.get("Product Name*", db_info.get("ProductName", product_name))
+                                vendor = db_info.get("Vendor/Supplier*", db_info.get("Vendor", vendor))
+                                brand = db_info.get("Product Brand", db_info.get("ProductBrand", ""))
+                                product_type = db_info.get("Product Type*", db_info.get("ProductType", ""))
+                                strain = db_info.get("Product Strain", db_info.get("ProductStrain", ""))
+                                lineage = db_info.get("Lineage", "")
+                                price = str(db_info.get("Price", ""))
+                                weight = str(db_info.get("Weight*", ""))
+                                units = str(db_info.get("Units", ""))
+                                description = db_info.get("Description", "")
                                 
                                 # Create tag using database information - prioritize description over product name
                                 tag = self._create_tag_from_database_info(db_info, vendor)
@@ -3537,16 +3538,17 @@ class JSONMatcher:
                             if educated_guess:
                                 logging.info(f"✅ Made educated guess for '{product_name}': {educated_guess}")
                                 # Use educated guess data
-                                product_name = educated_guess.get("product_name", product_name)
-                                vendor = educated_guess.get("vendor", vendor)
-                                brand = educated_guess.get("brand", brand or "")
-                                product_type = educated_guess.get("product_type", "")
-                                strain = educated_guess.get("strain_name", "")
-                                lineage = educated_guess.get("lineage", "")
-                                price = str(educated_guess.get("price", ""))
-                                weight = str(educated_guess.get("weight", ""))
-                                units = str(educated_guess.get("units", ""))
-                                description = educated_guess.get("description", "")
+                                # CRITICAL FIX: Use correct field names from database (ProductName or Product Name*, not product_name)
+                                product_name = educated_guess.get("Product Name*", educated_guess.get("ProductName", product_name))
+                                vendor = educated_guess.get("Vendor/Supplier*", educated_guess.get("Vendor", vendor))
+                                brand = educated_guess.get("Product Brand", educated_guess.get("ProductBrand", brand or ""))
+                                product_type = educated_guess.get("Product Type*", educated_guess.get("ProductType", ""))
+                                strain = educated_guess.get("Product Strain", educated_guess.get("ProductStrain", ""))
+                                lineage = educated_guess.get("Lineage", "")
+                                price = str(educated_guess.get("Price", ""))
+                                weight = str(educated_guess.get("Weight*", ""))
+                                units = str(educated_guess.get("Units", ""))
+                                description = educated_guess.get("Description", "")
                                 
                                 # Create tag using educated guess information
                                 tag = self._create_tag_from_educated_guess(educated_guess, vendor)
@@ -6032,12 +6034,21 @@ class JSONMatcher:
             ai_confidence = db_info.get("ai_confidence", "low")
             ai_match_type = db_info.get("ai_match_type", "unknown")
             
+            # CRITICAL FIX: Log which description is being used
+            if description and str(description).strip() not in ['', 'NULL', 'null', 'None']:
+                description_to_use = description
+                description_source = "from database Description column"
+            else:
+                description_to_use = primary_product_name
+                description_source = "using Product Name* as fallback"
+            
             logging.info(f"🎯 Creating tag with DATABASE MATCHED VALUES:")
+            logging.info(f"   Product Name*: {primary_product_name} (from database)")
+            logging.info(f"   Description: {description_to_use} ({description_source})")
             logging.info(f"   Strain: {strain} (from database)")
             logging.info(f"   Lineage: {lineage} (from database)")
             logging.info(f"   Product Type: {product_type} (from database)")
             logging.info(f"   Weight: {weight}{units} (from database)")
-            logging.info(f"   Description: {description} (from database)")
             logging.info(f"   AI Match Score: {ai_match_score:.3f}")
             logging.info(f"   AI Confidence: {ai_confidence}")
             logging.info(f"   AI Match Type: {ai_match_type}")
@@ -6046,7 +6057,7 @@ class JSONMatcher:
                 # Core product information - follow existing tag format
                 'Product Name*': primary_product_name,
                 'ProductName': primary_product_name,
-                'Description': description or primary_product_name,
+                'Description': description_to_use,
                 'Product Type*': product_type or "Unknown",
                 'Product Type': product_type or "Unknown",
                 'Vendor': vendor,
@@ -6055,7 +6066,7 @@ class JSONMatcher:
                 'ProductBrand': brand,
                 'Product Strain': strain,
                 'Strain Name': strain,
-                'Lineage': self._determine_lineage_for_product(product_type, lineage, product_name),
+                'Lineage': self._determine_lineage_for_product(product_type, lineage, primary_product_name),
                 'Weight*': f"{weight or '1'} {units or 'g'}",
                 'Weight': f"{weight or '1'} {units or 'g'}",
                 'Quantity*': "1",
@@ -6112,7 +6123,7 @@ class JSONMatcher:
                 # Additional fields for consistency
                 'vendor': vendor,
                 'productBrand': brand,
-                'lineage': self._determine_lineage_for_product(product_type, lineage, product_name),
+                'lineage': self._determine_lineage_for_product(product_type, lineage, primary_product_name),
                 'productType': product_type or "Unknown",
                 'weight': weight or "1",
                 'units': units or "g",
@@ -6846,19 +6857,29 @@ class JSONMatcher:
         """
         try:
             # Extract data from educated guess
-            product_name = educated_guess.get("product_name", "")
-            brand = educated_guess.get("brand", "")
-            product_type = educated_guess.get("product_type", "")
-            strain = educated_guess.get("strain_name", "")
-            lineage = educated_guess.get("lineage", "")
-            price = str(educated_guess.get("price", ""))
-            weight = str(educated_guess.get("weight", ""))
-            units = str(educated_guess.get("units", ""))
-            description = educated_guess.get("description", "")
+            # CRITICAL FIX: Use correct field names from database (ProductName or Product Name*, not product_name)
+            product_name = educated_guess.get("Product Name*", educated_guess.get("ProductName", ""))
+            brand = educated_guess.get("Product Brand", educated_guess.get("ProductBrand", ""))
+            product_type = educated_guess.get("Product Type*", educated_guess.get("ProductType", ""))
+            strain = educated_guess.get("Product Strain", educated_guess.get("ProductStrain", ""))
+            lineage = educated_guess.get("Lineage", "")
+            price = str(educated_guess.get("Price", ""))
+            weight = str(educated_guess.get("Weight*", ""))
+            units = str(educated_guess.get("Units", ""))
+            description = educated_guess.get("Description", "")
             confidence = educated_guess.get("confidence", "medium")
             
+            # CRITICAL FIX: Use description from database if available, otherwise use product_name
+            if description and str(description).strip() not in ['', 'NULL', 'null', 'None']:
+                description_to_use = description
+                description_source = "from database Description column"
+            else:
+                description_to_use = product_name
+                description_source = "using Product Name* as fallback"
+            
             logging.info(f"🎯 Creating tag with EDUCATED GUESS VALUES:")
-            logging.info(f"   Product: {product_name}")
+            logging.info(f"   Product Name*: {product_name} (inferred)")
+            logging.info(f"   Description: {description_to_use} ({description_source})")
             logging.info(f"   Strain: {strain} (inferred)")
             logging.info(f"   Lineage: {lineage} (inferred)")
             logging.info(f"   Product Type: {product_type} (inferred)")
@@ -6870,7 +6891,7 @@ class JSONMatcher:
             tag = {
                 'Product Name*': product_name,
                 'ProductName': product_name,
-                'Description': description,
+                'Description': description_to_use,
                 'Product Type*': product_type,
                 'Product Type': product_type,
                 'Vendor': vendor,

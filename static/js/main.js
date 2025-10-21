@@ -4780,10 +4780,13 @@ const TagManager = {
             // Disable button and show loading spinner
             generateBtn.disabled = true;
             generateBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Generating...';
-            // Always use DOCX generation
-            const apiEndpoint = '/api/generate';
+            // ULTRA-FAST: Try fast generation first, then fallback to regular
+            let apiEndpoint = '/api/generate-fast';
+            let generationMethod = 'ultra-fast';
+            
+            console.log(`🚀 Using ${generationMethod} generation for ${checkedTags.length} tags`);
 
-            const response = await fetch(apiEndpoint, {
+            let response = await fetch(apiEndpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -4792,6 +4795,40 @@ const TagManager = {
                     scale_factor: scaleFactor
                 })
             });
+            
+            // If fast generation fails, try parallel generation
+            if (!response.ok) {
+                console.log('⚡ Fast generation failed, trying parallel generation...');
+                apiEndpoint = '/api/generate-parallel';
+                generationMethod = 'parallel';
+                
+                response = await fetch(apiEndpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        selected_tags: checkedTags,
+                        template_type: templateType,
+                        scale_factor: scaleFactor
+                    })
+                });
+            }
+            
+            // If parallel generation also fails, fallback to regular generation
+            if (!response.ok) {
+                console.log('⚡ Parallel generation failed, using regular generation...');
+                apiEndpoint = '/api/generate';
+                generationMethod = 'regular';
+                
+                response = await fetch(apiEndpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        selected_tags: checkedTags,
+                        template_type: templateType,
+                        scale_factor: scaleFactor
+                    })
+                });
+            }
             if (!response.ok) {
                 const error = await response.json();
                 throw new Error(error.error || 'Failed to generate labels');
@@ -4817,6 +4854,11 @@ const TagManager = {
             a.click();
             document.body.removeChild(a);
             window.URL.revokeObjectURL(url);
+            
+            // Show success message with generation method
+            const methodEmoji = generationMethod === 'ultra-fast' ? '🚀' : 
+                               generationMethod === 'parallel' ? '🔄' : '⚡';
+            this.showSuccessMessage(`${methodEmoji} Labels generated successfully using ${generationMethod} method! Generated ${checkedTags.length} tags.`);
         } catch (error) {
             console.error('Error generating labels:', error);
         } finally {
@@ -5877,11 +5919,12 @@ const TagManager = {
                 throw new Error(uploadData.error || 'Lightning upload failed');
             }
             
-            // Phase 2: Background processing
+            // Phase 2: Background processing with ultra-fast fallback
             this.updateUploadUI(`🔄 Processing ${file.name}...`);
             console.log('🔄 Starting background processing...');
             
-            const processResponse = await fetch('/process-lightning', {
+            // Try ultra-fast processing first
+            let processResponse = await fetch('/process-ultra-fast', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -5891,6 +5934,23 @@ const TagManager = {
                     filename: uploadData.filename
                 })
             });
+            
+            // If ultra-fast fails, fall back to lightning processing
+            if (!processResponse.ok) {
+                console.log('⚡ Ultra-fast failed, trying lightning processing...');
+                this.updateUploadUI(`🔄 Fallback processing ${file.name}...`);
+                
+                processResponse = await fetch('/process-lightning', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        file_path: uploadData.file_path,
+                        filename: uploadData.filename
+                    })
+                });
+            }
             
             const processData = await processResponse.json();
             console.log('✅ Processing response:', processData);

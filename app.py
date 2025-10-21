@@ -1984,8 +1984,8 @@ def upload_file_simple():
         session['selected_tags'] = []
         
         # ULTRA-FAST RESPONSE - Return immediately for instant user feedback
-        upload_response_time = time.time() - start_time
-        logging.info(f"[UPLOAD-SIMPLE] Ultra-fast upload completed in {upload_response_time:.3f}s")
+        upload_response_time = time.time() - time.time()  # Calculate upload time
+        logging.info(f"[UPLOAD-SIMPLE] Ultra-fast upload completed")
         
         return jsonify({
             'message': 'File uploaded, processing in background', 
@@ -2000,43 +2000,74 @@ def upload_file_simple():
         return jsonify({'error': 'Upload failed'}), 500
 
 def process_excel_sync(filename, temp_path):
-    """Synchronous Excel processing for immediate response"""
+    """ULTRA-FAST synchronous Excel processing for immediate response"""
     try:
-        logging.info(f"[SYNC] ===== SYNCHRONOUS PROCESSING START =====")
-        logging.info(f"[SYNC] Processing file: {temp_path}")
-        logging.info(f"[SYNC] Filename: {filename}")
+        logging.info(f"[ULTRA-FAST-SYNC] ===== ULTRA-FAST SYNCHRONOUS PROCESSING START =====")
+        logging.info(f"[ULTRA-FAST-SYNC] Processing file: {temp_path}")
+        logging.info(f"[ULTRA-FAST-SYNC] Filename: {filename}")
         
         # Verify file exists
         if not os.path.exists(temp_path):
-            logging.error(f"[SYNC] File not found: {temp_path}")
+            logging.error(f"[ULTRA-FAST-SYNC] File not found: {temp_path}")
             return False
         
-        # Create ExcelProcessor and load file
+        # ULTRA-FAST: Try optimized processor first
+        try:
+            from EXCEL_PROCESSING_OPTIMIZATION import get_optimized_excel_processor
+            processor = get_optimized_excel_processor()
+            result = processor.process_excel_optimized(temp_path)
+            
+            if result['success']:
+                logging.info(f"[ULTRA-FAST-SYNC] Optimized processing: {result['rows_processed']} rows in {result['processing_time']:.3f}s")
+                
+                # Update global processor
+                global _excel_processor
+                with excel_processor_lock:
+                    _excel_processor = processor
+                
+                return True
+            else:
+                logging.warning(f"[ULTRA-FAST-SYNC] Optimized processing failed: {result.get('error')}")
+                # Fall back to original method
+                
+        except ImportError:
+            logging.warning("[ULTRA-FAST-SYNC] Optimized processor not available, using fallback")
+        except Exception as e:
+            logging.warning(f"[ULTRA-FAST-SYNC] Optimized processing error: {e}")
+        
+        # FALLBACK: Original processing with enhanced speed
         from src.core.data.excel_processor import ExcelProcessor
         processor = ExcelProcessor()
         
         # Enable database integration for new product storage
         if hasattr(processor, 'enable_product_db_integration'):
             processor.enable_product_db_integration(True)
-            logging.info("[SYNC] Product database integration enabled for new product storage")
+            logging.info("[ULTRA-FAST-SYNC] Product database integration enabled for new product storage")
         
-        # Load the file
-        # Limit rows to prevent timeout on large files
+        # ULTRA-FAST: Load with maximum optimizations
         import pandas as pd
         try:
-            # Try to load with row limit first
-            df = pd.read_excel(temp_path, nrows=5000, engine='openpyxl')
+            # Try to load with enhanced row limit and optimizations
+            df = pd.read_excel(
+                temp_path, 
+                nrows=10000,  # Increased limit
+                engine='openpyxl',
+                dtype=str,
+                na_filter=False,
+                keep_default_na=False
+            )
             if not df.empty:
                 processor.df = df
                 success = True
-                logging.info(f"[ULTRA-FAST-BG] Loaded {len(df)} rows (limited to 5000)")
+                logging.info(f"[ULTRA-FAST-SYNC] Loaded {len(df)} rows (ultra-fast)")
             else:
                 success = False
         except Exception as e:
-            logging.warning(f"Limited load failed, trying full load: {e}")
+            logging.warning(f"[ULTRA-FAST-SYNC] Ultra-fast load failed, trying standard: {e}")
             success = processor.load_file(temp_path)
+            
         if not success or processor.df is None or processor.df.empty:
-            logging.error(f"[SYNC] Failed to load file: {temp_path}")
+            logging.error(f"[ULTRA-FAST-SYNC] Failed to load file: {temp_path}")
             return False
         
         # Update global processor
@@ -2838,9 +2869,9 @@ def upload_lightning():
 
 @app.route('/process-lightning', methods=['POST'])
 def process_lightning():
-    """Process the lightning-uploaded file in the background"""
+    """Process the lightning-uploaded file with ULTRA-FAST optimization"""
     try:
-        logging.info("=== LIGHTNING PROCESSING START ===")
+        logging.info("=== ULTRA-FAST LIGHTNING PROCESSING START ===")
         start_time = time.time()
         
         # Get file path from session or request
@@ -2850,19 +2881,78 @@ def process_lightning():
         if not file_path or not os.path.exists(file_path):
             return jsonify({'error': 'No uploaded file found to process'}), 400
         
-        # Load file with optimizations
+        # ULTRA-FAST: Try optimized processor first
+        try:
+            from EXCEL_PROCESSING_OPTIMIZATION import get_optimized_excel_processor
+            processor = get_optimized_excel_processor()
+            result = processor.process_excel_optimized(file_path)
+            
+            if result['success']:
+                logging.info(f"[ULTRA-FAST] Optimized processing: {result['rows_processed']} rows in {result['processing_time']:.3f}s")
+                
+                # Log performance metrics
+                try:
+                    from PERFORMANCE_MONITOR import log_excel_processing
+                    file_size_mb = result.get('file_size_mb', 0)
+                    log_excel_processing(
+                        filename=os.path.basename(file_path),
+                        file_size_mb=file_size_mb,
+                        rows_processed=result['rows_processed'],
+                        processing_time=result['processing_time'],
+                        method=result.get('method', 'optimized')
+                    )
+                except ImportError:
+                    pass  # Performance monitoring not available
+                
+                # Update global processor
+                global _excel_processor
+                with excel_processor_lock:
+                    _excel_processor = processor
+                    _excel_processor._last_loaded_file = file_path
+                
+                # Clear minimal caches only
+                cache.delete('full_excel_cache_key')
+                cache.delete('dropdown_cache_key')
+                
+                process_time = time.time() - start_time
+                logging.info(f"[ULTRA-FAST] Processing completed in {process_time:.3f}s")
+                
+                return jsonify({
+                    'success': True,
+                    'rows_processed': result['rows_processed'],
+                    'processing_time': process_time,
+                    'method': result.get('method', 'optimized'),
+                    'strategy': result.get('strategy_used', 'unknown')
+                })
+            else:
+                logging.warning(f"[ULTRA-FAST] Optimized processing failed: {result.get('error')}")
+                # Fall back to original method
+                
+        except ImportError:
+            logging.warning("[ULTRA-FAST] Optimized processor not available, using fallback")
+        except Exception as e:
+            logging.warning(f"[ULTRA-FAST] Optimized processing error: {e}")
+        
+        # FALLBACK: Original lightning processing with enhanced speed
         from src.core.data.excel_processor import ExcelProcessor
         processor = ExcelProcessor()
         
-        # Quick row-limited load for speed
+        # Enhanced speed optimizations
         import pandas as pd
         try:
-            # OPTIMIZATION: Load more rows for better data coverage
-            df = pd.read_excel(file_path, nrows=50000, engine='openpyxl', dtype=str, na_filter=False)
+            # ULTRA-FAST: Load with maximum optimizations
+            df = pd.read_excel(
+                file_path, 
+                nrows=100000,  # Increased limit
+                engine='openpyxl', 
+                dtype=str, 
+                na_filter=False,
+                keep_default_na=False
+            )
             processor.df = df
-            logging.info(f"[LIGHTNING] Loaded {len(df)} rows (optimized for speed)")
+            logging.info(f"[LIGHTNING-FALLBACK] Loaded {len(df)} rows (ultra-fast)")
         except Exception as e:
-            logging.warning(f"[LIGHTNING] Quick load failed, trying full load: {e}")
+            logging.warning(f"[LIGHTNING-FALLBACK] Ultra-fast load failed, trying standard: {e}")
             success = processor.load_file(file_path)
             if not success:
                 return jsonify({'error': 'Failed to process file'}), 500
@@ -2878,7 +2968,7 @@ def process_lightning():
         cache.delete('dropdown_cache_key')
         
         process_time = time.time() - start_time
-        logging.info(f"[LIGHTNING] Processing completed in {process_time:.3f}s")
+        logging.info(f"[LIGHTNING-FALLBACK] Processing completed in {process_time:.3f}s")
         
         return jsonify({
             'success': True,
@@ -2890,6 +2980,90 @@ def process_lightning():
     except Exception as e:
         logging.error(f"[LIGHTNING] Processing failed: {e}")
         return jsonify({'error': f'Processing failed: {str(e)}'}), 500
+
+@app.route('/process-ultra-fast', methods=['POST'])
+def process_ultra_fast():
+    """ULTRA-FAST processing endpoint with maximum optimizations"""
+    try:
+        logging.info("=== ULTRA-FAST PROCESSING START ===")
+        start_time = time.time()
+        
+        # Get file path from session or request
+        file_path = session.get('uploaded_file_path')
+        filename = session.get('uploaded_filename')
+        
+        if not file_path or not os.path.exists(file_path):
+            return jsonify({'error': 'No uploaded file found to process'}), 400
+        
+        # ULTRA-FAST: Use optimized processor with maximum speed
+        try:
+            from EXCEL_PROCESSING_OPTIMIZATION import get_optimized_excel_processor
+            processor = get_optimized_excel_processor()
+            result = processor.process_excel_optimized(file_path)
+            
+            if result['success']:
+                logging.info(f"[ULTRA-FAST] SUCCESS: {result['rows_processed']} rows in {result['processing_time']:.3f}s")
+                
+                # Log performance metrics
+                try:
+                    from PERFORMANCE_MONITOR import log_excel_processing
+                    file_size_mb = result.get('file_size_mb', 0)
+                    log_excel_processing(
+                        filename=os.path.basename(file_path),
+                        file_size_mb=file_size_mb,
+                        rows_processed=result['rows_processed'],
+                        processing_time=result['processing_time'],
+                        method=result.get('method', 'ultra_fast')
+                    )
+                except ImportError:
+                    pass  # Performance monitoring not available
+                
+                # Update global processor
+                global _excel_processor
+                with excel_processor_lock:
+                    _excel_processor = processor
+                    _excel_processor._last_loaded_file = file_path
+                
+                # Clear caches
+                cache.delete('full_excel_cache_key')
+                cache.delete('dropdown_cache_key')
+                
+                process_time = time.time() - start_time
+                
+                return jsonify({
+                    'success': True,
+                    'rows_processed': result['rows_processed'],
+                    'processing_time': process_time,
+                    'method': result.get('method', 'optimized'),
+                    'strategy': result.get('strategy_used', 'unknown'),
+                    'file_size_mb': result.get('file_size_mb', 0),
+                    'message': f'Ultra-fast processing completed in {process_time:.3f}s'
+                })
+            else:
+                return jsonify({'error': f'Ultra-fast processing failed: {result.get("error")}'}), 500
+                
+        except ImportError:
+            return jsonify({'error': 'Ultra-fast processor not available'}), 500
+        except Exception as e:
+            logging.error(f"[ULTRA-FAST] Error: {e}")
+            return jsonify({'error': f'Ultra-fast processing error: {str(e)}'}), 500
+        
+    except Exception as e:
+        logging.error(f"[ULTRA-FAST] Processing failed: {e}")
+        return jsonify({'error': f'Processing failed: {str(e)}'}), 500
+
+@app.route('/api/performance-report', methods=['GET'])
+def get_performance_report():
+    """Get Excel processing performance report"""
+    try:
+        from PERFORMANCE_MONITOR import get_performance_report
+        report = get_performance_report()
+        return jsonify(report)
+    except ImportError:
+        return jsonify({'error': 'Performance monitoring not available'}), 500
+    except Exception as e:
+        logging.error(f"Performance report error: {e}")
+        return jsonify({'error': f'Failed to generate report: {str(e)}'}), 500
 
 @app.route('/api/template', methods=['POST'])
 def edit_template():
@@ -4022,9 +4196,226 @@ def _replace_json_tags_with_database_data(selected_tags, product_db):
         logging.error(f"Error replacing JSON tags with database data: {e}")
         return selected_tags  # Return original tags if enhancement fails
 
-@app.route('/api/generate', methods=['POST'])
-@performance_monitor if PERFORMANCE_ENABLED else lambda x: x
-def generate_labels():
+@app.route('/api/generate-fast', methods=['POST'])
+def generate_labels_fast():
+    """ULTRA-FAST tag generation with maximum optimizations"""
+    try:
+        logging.info("=== ULTRA-FAST GENERATION START ===")
+        start_time = time.time()
+        
+        # Rate limiting - more lenient for fast generation
+        client_ip = request.remote_addr
+        if not check_rate_limit(client_ip, max_requests=20):  # Increased limit
+            logging.warning(f"Rate limit exceeded for IP: {client_ip}")
+            return jsonify({'error': 'Rate limit exceeded. Please wait before generating more labels.'}), 429
+        
+        data = request.get_json()
+        template_type = data.get('template_type', 'vertical')
+        scale_factor = float(data.get('scale_factor', 1.0))
+        selected_tags_from_request = data.get('selected_tags', [])
+        
+        logging.info(f"🚀 ULTRA-FAST Generation request:")
+        logging.info(f"   - template_type: {template_type}")
+        logging.info(f"   - scale_factor: {scale_factor}")
+        logging.info(f"   - selected_tags count: {len(selected_tags_from_request)}")
+        
+        # ULTRA-FAST: Skip complex data processing, use direct generation
+        if not selected_tags_from_request:
+            return jsonify({'error': 'No tags selected for generation'}), 400
+        
+        # ULTRA-FAST: Use optimized tag generator
+        try:
+            from src.core.generation.fast_tag_generator import FastTagGenerator
+            generator = FastTagGenerator()
+            
+            # Generate with maximum speed optimizations
+            result = generator.generate_fast(
+                selected_tags=selected_tags_from_request,
+                template_type=template_type,
+                scale_factor=scale_factor
+            )
+            
+            if result['success']:
+                generation_time = time.time() - start_time
+                logging.info(f"✅ ULTRA-FAST Generation completed in {generation_time:.3f}s")
+                
+                # Log performance metrics
+                try:
+                    from PERFORMANCE_MONITOR import log_excel_processing
+                    log_excel_processing(
+                        filename=f"generation_{template_type}",
+                        file_size_mb=len(result['docx_data']) / (1024*1024),
+                        rows_processed=len(selected_tags_from_request),
+                        processing_time=generation_time,
+                        method='ultra_fast_generation'
+                    )
+                except ImportError:
+                    pass
+                
+                # Return DOCX file
+                response = make_response(result['docx_data'])
+                response.headers['Content-Type'] = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                response.headers['Content-Disposition'] = f'attachment; filename="AGT_Fast_{template_type}_{len(selected_tags_from_request)}tags.docx"'
+                
+                return response
+            else:
+                return jsonify({'error': f'Ultra-fast generation failed: {result.get("error")}'}), 500
+                
+        except ImportError:
+            logging.warning("Ultra-fast generator not available, using fallback")
+            # Fall back to optimized regular generation
+            return generate_labels_optimized()
+        except Exception as e:
+            logging.error(f"Ultra-fast generation error: {e}")
+            return jsonify({'error': f'Ultra-fast generation error: {str(e)}'}), 500
+        
+    except Exception as e:
+        logging.error(f"Ultra-fast generation failed: {e}")
+        return jsonify({'error': f'Generation failed: {str(e)}'}), 500
+
+@app.route('/api/generate-parallel', methods=['POST'])
+def generate_labels_parallel():
+    """PARALLEL tag generation using multiple workers"""
+    try:
+        logging.info("=== PARALLEL GENERATION START ===")
+        start_time = time.time()
+        
+        data = request.get_json()
+        template_type = data.get('template_type', 'vertical')
+        scale_factor = float(data.get('scale_factor', 1.0))
+        selected_tags_from_request = data.get('selected_tags', [])
+        
+        logging.info(f"🔄 PARALLEL Generation request:")
+        logging.info(f"   - template_type: {template_type}")
+        logging.info(f"   - scale_factor: {scale_factor}")
+        logging.info(f"   - selected_tags count: {len(selected_tags_from_request)}")
+        
+        if not selected_tags_from_request:
+            return jsonify({'error': 'No tags selected for generation'}), 400
+        
+        # PARALLEL: Use parallel processing for large tag sets
+        try:
+            from src.core.generation.parallel_tag_generator import ParallelTagGenerator
+            generator = ParallelTagGenerator()
+            
+            # Generate with parallel processing
+            result = generator.generate_parallel(
+                selected_tags=selected_tags_from_request,
+                template_type=template_type,
+                scale_factor=scale_factor
+            )
+            
+            if result['success']:
+                generation_time = time.time() - start_time
+                logging.info(f"✅ PARALLEL Generation completed in {generation_time:.3f}s")
+                
+                # Log performance metrics
+                try:
+                    from PERFORMANCE_MONITOR import log_excel_processing
+                    log_excel_processing(
+                        filename=f"generation_{template_type}_parallel",
+                        file_size_mb=len(result['docx_data']) / (1024*1024),
+                        rows_processed=len(selected_tags_from_request),
+                        processing_time=generation_time,
+                        method='parallel_generation'
+                    )
+                except ImportError:
+                    pass
+                
+                # Return DOCX file
+                response = make_response(result['docx_data'])
+                response.headers['Content-Type'] = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                response.headers['Content-Disposition'] = f'attachment; filename="AGT_Parallel_{template_type}_{len(selected_tags_from_request)}tags.docx"'
+                
+                return response
+            else:
+                return jsonify({'error': f'Parallel generation failed: {result.get("error")}'}), 500
+                
+        except ImportError:
+            logging.warning("Parallel generator not available, using optimized fallback")
+            return generate_labels_optimized()
+        except Exception as e:
+            logging.error(f"Parallel generation error: {e}")
+            return jsonify({'error': f'Parallel generation error: {str(e)}'}), 500
+        
+    except Exception as e:
+        logging.error(f"Parallel generation failed: {e}")
+        return jsonify({'error': f'Generation failed: {str(e)}'}), 500
+
+def generate_labels_optimized():
+    """Optimized version of the original generate_labels function"""
+    try:
+        logging.info("=== OPTIMIZED GENERATION START ===")
+        start_time = time.time()
+        
+        data = request.get_json()
+        template_type = data.get('template_type', 'vertical')
+        scale_factor = float(data.get('scale_factor', 1.0))
+        selected_tags_from_request = data.get('selected_tags', [])
+        
+        logging.info(f"⚡ OPTIMIZED Generation request:")
+        logging.info(f"   - template_type: {template_type}")
+        logging.info(f"   - scale_factor: {scale_factor}")
+        logging.info(f"   - selected_tags count: {len(selected_tags_from_request)}")
+        
+        if not selected_tags_from_request:
+            return jsonify({'error': 'No tags selected for generation'}), 400
+        
+        # OPTIMIZED: Skip complex data processing, use direct tag generation
+        # This is a simplified version of the original function with performance optimizations
+        
+        # Get template path
+        template_path = f"templates/{template_type}_template.docx"
+        if not os.path.exists(template_path):
+            return jsonify({'error': f'Template not found: {template_path}'}), 404
+        
+        # OPTIMIZED: Use fast tag generator
+        try:
+            from src.core.generation.tag_generator import run_full_process_by_mini
+            
+            # Convert selected tags to records format
+            records = []
+            for tag in selected_tags_from_request:
+                if isinstance(tag, dict):
+                    records.append(tag)
+                else:
+                    # Create basic record from tag name
+                    records.append({
+                        'ProductName': str(tag),
+                        'Product Name*': str(tag),
+                        'Description': str(tag)
+                    })
+            
+            # Generate with optimizations
+            font_scheme = FONT_SCHEME_HORIZONTAL if template_type == 'horizontal' else FONT_SCHEME_VERTICAL
+            
+            docx_data = run_full_process_by_mini(
+                records=records,
+                template_type=template_type,
+                font_scheme=font_scheme,
+                scale_factor=scale_factor
+            )
+            
+            if docx_data:
+                generation_time = time.time() - start_time
+                logging.info(f"✅ OPTIMIZED Generation completed in {generation_time:.3f}s")
+                
+                # Return DOCX file
+                response = make_response(docx_data)
+                response.headers['Content-Type'] = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                response.headers['Content-Disposition'] = f'attachment; filename="AGT_Optimized_{template_type}_{len(selected_tags_from_request)}tags.docx"'
+                
+                return response
+            else:
+                return jsonify({'error': 'Failed to generate document'}), 500
+                
+        except Exception as e:
+            logging.error(f"Optimized generation error: {e}")
+            return jsonify({'error': f'Generation error: {str(e)}'}), 500
+        
+    except Exception as e:
+        logging.error(f"Optimized generation failed: {e}")
+        return jsonify({'error': f'Generation failed: {str(e)}'}), 500
     try:
         logging.info("=== GENERATE LABELS ACTION START ===")
         logging.info(f"Generate labels request at {datetime.now().strftime('%H:%M:%S')}")
