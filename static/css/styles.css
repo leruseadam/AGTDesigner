@@ -3883,7 +3883,7 @@ img, video, canvas, svg {
     background: rgba(45, 34, 58, 0.8) !important;
     color: var(--text-primary) !important;
     border: 1px solid rgba(160, 132, 232, 0.3) !important;
-    border-radius: 0px !important;
+    border-radius: 6px !important;
     transition: all 0.3s ease !important;
     backdrop-filter: blur(10px) !important;
     -webkit-backdrop-filter: blur(10px) !important;
@@ -3925,7 +3925,7 @@ img, video, canvas, svg {
     height: auto;
     min-height: 38px;
     line-height: 1.4;
-    border-radius: 0px;
+    border-radius: 6px;
     background: rgba(45, 34, 58, 0.8);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
@@ -5018,7 +5018,7 @@ img, video, canvas, svg {
     background: rgba(34, 34, 51, 0.55) !important;
     color: #e0d6f6 !important;
     border: 1.5px solid rgba(160, 132, 232, 0.22) !important;
-    border-radius: 0px !important;
+    border-radius: 10px !important;
     padding: 10px 36px 10px 14px !important;
     font-size: 1em !important;
     box-shadow: 0 2px 12px 0 rgba(160, 132, 232, 0.10) !important;
@@ -5708,7 +5708,7 @@ img, video, canvas, svg {
   .sticky-filter-bar .compact-filter {
     background: rgba(42, 32, 64, 0.9) !important; /* Darker background for contrast */
     color: #ffffff !important;
-    border-radius: 0px !important;
+    border-radius: 8px !important;
     border: 1.5px solid rgba(160, 132, 232, 0.3) !important;
     transition: all 0.3s cubic-bezier(0.4,0,0.2,1) !important;
     padding: 0.5rem 0.75rem !important;
@@ -5951,7 +5951,7 @@ img, video, canvas, svg {
 
   /* Filter dropdowns styling */
   .sticky-filter-bar .form-select {
-    border-radius: 0px;
+    border-radius: 6px;
     border: 1px solid #dee2e6;
     transition: all 0.2s ease;
     padding: 0.5rem 0.75rem;
@@ -6043,7 +6043,7 @@ img, video, canvas, svg {
   .horizontal-filter-bar .compact-filter {
     background: #2a2040;
     color: #fff;
-    border-radius: 0px;
+    border-radius: 8px;
     border: 1.5px solid #a084e8;
     height: 36px;
     min-height: 36px;

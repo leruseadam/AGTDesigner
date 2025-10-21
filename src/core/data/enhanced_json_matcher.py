@@ -901,10 +901,8 @@ class ProductTypeSpecificMatcher:
         return fuzz.ratio(json_brand, db_brand) / 100.0
 
 # Enhanced JSON field mapping for hybrid approach
-# CRITICAL: Do NOT map "product_name" - it should ONLY come from database matches
-# JSON product names are used for MATCHING purposes only, not for final output
 ENHANCED_JSON_FIELD_MAP = {
-    # "product_name": "Product Name*",  # REMOVED: Use database names only
+    "product_name": "Product Name*",
     "description": "Description", 
     "vendor": "Vendor/Supplier*",
     "brand": "Product Brand",
@@ -1150,15 +1148,8 @@ class EnhancedJSONMatcher:
         # Create database-priority product: 100% database data
         db_priority_product = dict(product_dict)  # Start with database match - this is our complete data source
         
-        logging.info(f"💽 DATABASE PRIORITY: Using 100% database-derived information for '{product_name}'")
+        logging.info(f"� DATABASE PRIORITY: Using 100% database-derived information for '{product_name}'")
         logging.debug(f"💽 DATABASE PRIORITY: Database product contains {len(db_priority_product)} fields")
-        
-        # Log the Description field from database
-        db_description = db_priority_product.get('Description', '')
-        if db_description and str(db_description).strip() not in ['', 'NULL', 'null', 'None']:
-            logging.info(f"📝 DATABASE DESCRIPTION: '{db_description}' (from database)")
-        else:
-            logging.debug(f"📝 No Description in database for '{product_name}', will use Product Name* as fallback")
         
         # IMPORTANT: NO JSON data merging - all information comes from database
         # JSON is only used for matching purposes, not for data extraction
@@ -2189,14 +2180,11 @@ class EnhancedJSONMatcher:
                     hybrid_product['Match_Score'] = score_val
                     hybrid_product['Match_Algorithm'] = algo_val
                     
-                    # CRITICAL FIX: Preserve Description from database, use Product Name* only as last resort
-                    # Description should come from the database match, not be generated
-                    if not hybrid_product.get('Description') or str(hybrid_product.get('Description')).strip() in ['', 'NULL', 'null', 'None']:
-                        # Only use Product Name* as fallback if Description is truly missing
+                    # Ensure Description reflects the matched DB item values (not JSON codes)
+                    if not hybrid_product.get('Description'):
                         description_value = (hybrid_product.get('Product Name*') or 
                                              hybrid_product.get('ProductName') or '')
                         hybrid_product['Description'] = description_value
-                        logging.debug(f"📝 Using Product Name* as Description fallback: '{description_value}'")
                     
                     # DEBUG: Log weight data before processing
                     logging.info(f"🔍 DEBUG: Weight data for '{hybrid_product.get('Product Name*', 'Unknown')}': Weight*={hybrid_product.get('Weight*', 'None')}, Units={hybrid_product.get('Units', 'None')}")

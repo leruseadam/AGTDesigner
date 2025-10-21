@@ -4780,13 +4780,10 @@ const TagManager = {
             // Disable button and show loading spinner
             generateBtn.disabled = true;
             generateBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Generating...';
-            // ULTRA-FAST: Try fast generation first, then fallback to regular
-            let apiEndpoint = '/api/generate-fast';
-            let generationMethod = 'ultra-fast';
-            
-            console.log(`🚀 Using ${generationMethod} generation for ${checkedTags.length} tags`);
+            // Always use DOCX generation
+            const apiEndpoint = '/api/generate';
 
-            let response = await fetch(apiEndpoint, {
+            const response = await fetch(apiEndpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -4795,40 +4792,6 @@ const TagManager = {
                     scale_factor: scaleFactor
                 })
             });
-            
-            // If fast generation fails, try parallel generation
-            if (!response.ok) {
-                console.log('⚡ Fast generation failed, trying parallel generation...');
-                apiEndpoint = '/api/generate-parallel';
-                generationMethod = 'parallel';
-                
-                response = await fetch(apiEndpoint, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        selected_tags: checkedTags,
-                        template_type: templateType,
-                        scale_factor: scaleFactor
-                    })
-                });
-            }
-            
-            // If parallel generation also fails, fallback to regular generation
-            if (!response.ok) {
-                console.log('⚡ Parallel generation failed, using regular generation...');
-                apiEndpoint = '/api/generate';
-                generationMethod = 'regular';
-                
-                response = await fetch(apiEndpoint, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        selected_tags: checkedTags,
-                        template_type: templateType,
-                        scale_factor: scaleFactor
-                    })
-                });
-            }
             if (!response.ok) {
                 const error = await response.json();
                 throw new Error(error.error || 'Failed to generate labels');
@@ -4854,11 +4817,6 @@ const TagManager = {
             a.click();
             document.body.removeChild(a);
             window.URL.revokeObjectURL(url);
-            
-            // Show success message with generation method
-            const methodEmoji = generationMethod === 'ultra-fast' ? '🚀' : 
-                               generationMethod === 'parallel' ? '🔄' : '⚡';
-            this.showSuccessMessage(`${methodEmoji} Labels generated successfully using ${generationMethod} method! Generated ${checkedTags.length} tags.`);
         } catch (error) {
             console.error('Error generating labels:', error);
         } finally {
@@ -5919,12 +5877,11 @@ const TagManager = {
                 throw new Error(uploadData.error || 'Lightning upload failed');
             }
             
-            // Phase 2: Background processing with ultra-fast fallback
+            // Phase 2: Background processing
             this.updateUploadUI(`🔄 Processing ${file.name}...`);
             console.log('🔄 Starting background processing...');
             
-            // Try ultra-fast processing first
-            let processResponse = await fetch('/process-ultra-fast', {
+            const processResponse = await fetch('/process-lightning', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -5934,23 +5891,6 @@ const TagManager = {
                     filename: uploadData.filename
                 })
             });
-            
-            // If ultra-fast fails, fall back to lightning processing
-            if (!processResponse.ok) {
-                console.log('⚡ Ultra-fast failed, trying lightning processing...');
-                this.updateUploadUI(`🔄 Fallback processing ${file.name}...`);
-                
-                processResponse = await fetch('/process-lightning', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        file_path: uploadData.file_path,
-                        filename: uploadData.filename
-                    })
-                });
-            }
             
             const processData = await processResponse.json();
             console.log('✅ Processing response:', processData);
@@ -6408,13 +6348,9 @@ const TagManager = {
     async clearAllFilters() {
         console.log('🔄 Clearing all filters and performing full app reset...');
         
-        // Add timeout to prevent hanging
-        const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('Clear filters timeout')), 5000); // 5 second timeout
-        });
-        
-        const clearOperations = async () => {
-            // Clear filters directly without calling performFullAppReset to avoid recursion
+        try {
+            // Perform full app reset
+            await performFullAppReset();
             
             // Additional filter-specific clearing
             const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
@@ -6454,13 +6390,7 @@ const TagManager = {
             }
             
             console.log('✅ All filters cleared and app reset completed successfully');
-        };
-        
-        try {
-            await Promise.race([
-                clearOperations(),
-                timeoutPromise
-            ]);
+            
         } catch (error) {
             console.error('❌ Error during clear all filters:', error);
         }
@@ -7477,21 +7407,11 @@ function clearUIState() {
 async function performFullAppReset() {
     console.log('🔄 Performing full app reset...');
     
-    // Add timeout to prevent hanging
-    const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Reset timeout')), 10000); // 10 second timeout
-    });
-    
-    const resetOperations = async () => {
-        // 1. Clear all filters first (avoid recursive call)
-        const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
-        filterIds.forEach(filterId => {
-            const filterElement = document.getElementById(filterId);
-            if (filterElement) {
-                filterElement.value = '';
-                filterElement.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-        });
+    try {
+        // 1. Clear all filters first
+        if (window.TagManager && TagManager.clearAllFilters) {
+            TagManager.clearAllFilters();
+        }
         
         // 2. Clear all selected tags
         if (window.TagManager && TagManager.clearSelected) {
@@ -7648,13 +7568,7 @@ async function performFullAppReset() {
         if (window.showToast) {
             showToast('App reset completed', 'success');
         }
-    };
-    
-    try {
-        await Promise.race([
-            resetOperations(),
-            timeoutPromise
-        ]);
+        
     } catch (error) {
         console.error('❌ Error during full app reset:', error);
         if (window.showToast) {
