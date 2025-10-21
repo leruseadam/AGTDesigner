@@ -4474,8 +4474,8 @@ def generate_labels():
                             'Units': tag.get('Units', ''),
                             'CombinedWeight': tag.get('CombinedWeight', ''),
                             'WeightUnits': tag.get('WeightUnits', ''),
-                            'Price': tag.get('Price', '') or '25',  # Use default price if empty
-                            'Price* (Tier Name for Bulk)': tag.get('Price', '') or '25',  # Use default price if empty
+                            'Price': tag.get('Price', ''),
+                            'Price* (Tier Name for Bulk)': tag.get('Price', ''),
                             'Quantity*': tag.get('Quantity*', '1'),
                             'Product Strain': tag.get('Product Strain', 'Mixed'),
                             'DOH': tag.get('DOH', ''),
