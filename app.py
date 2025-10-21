@@ -2071,7 +2071,6 @@ def process_excel_sync(filename, temp_path):
             return False
         
         # Update global processor
-        global _excel_processor
         with excel_processor_lock:
             _excel_processor = processor
             _excel_processor._last_loaded_file = temp_path
@@ -2958,7 +2957,6 @@ def process_lightning():
                 return jsonify({'error': 'Failed to process file'}), 500
         
         # Update global processor
-        global _excel_processor
         with excel_processor_lock:
             _excel_processor = processor
             _excel_processor._last_loaded_file = file_path
@@ -2984,6 +2982,7 @@ def process_lightning():
 @app.route('/process-ultra-fast', methods=['POST'])
 def process_ultra_fast():
     """ULTRA-FAST processing endpoint with maximum optimizations"""
+    global _excel_processor
     try:
         logging.info("=== ULTRA-FAST PROCESSING START ===")
         start_time = time.time()
