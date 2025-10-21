@@ -6012,14 +6012,14 @@ class JSONMatcher:
             image_url = str(db_info.get("Image URL", "") or db_info.get("image_url", ""))
             ingredients = str(db_info.get("Ingredients", "") or db_info.get("ingredients", ""))
             
-            # Create tag using database information - prioritize Product Name* from database
-            # Always use Product Name* from database if available, otherwise use Description
-            primary_product_name = db_info.get("Product Name*", "") or db_info.get("ProductName", "")
-            if not primary_product_name and description and description.strip():
-                # Use Description from database as primary product name
-                primary_product_name = description.strip()
-                logging.info(f"📝 Using database Description as primary name: '{primary_product_name}'")
-            elif not primary_product_name and strain and lineage and weight and units:
+            # CRITICAL FIX: Use human-readable Product Name from database, not SKU
+            # Product Name* should contain human-readable name for UI display, not SKU code
+            primary_product_name = (db_info.get("Product Name", "") or  # Human-readable name (without asterisk)
+                                  db_info.get("Description", "") or   # Fallback to Description
+                                  db_info.get("Product Name*", "") or # Last resort: SKU
+                                  db_info.get("ProductName", ""))
+            
+            if not primary_product_name and strain and lineage and weight and units:
                 # Strain-based lookup: create formatted description
                 primary_product_name = f"{strain} - {lineage} - {weight}{units}"
                 logging.info(f"📝 Created formatted description: '{primary_product_name}'")
@@ -6028,7 +6028,7 @@ class JSONMatcher:
                 primary_product_name = db_info.get("product_name", "Unknown Product")
                 logging.info(f"📝 Using fallback product name: '{primary_product_name}'")
             else:
-                logging.info(f"📝 Using database Product Name*: '{primary_product_name}'")
+                logging.info(f"📝 Using human-readable product name: '{primary_product_name}'")
             
             # CRITICAL FIX: Log the AI match information and ensure database values are used
             ai_match_score = db_info.get("ai_match_score", 0)
