@@ -6096,36 +6096,63 @@ def update_doh():
             return jsonify({'error': 'No data loaded'}), 400
         
         # Update the DOH in the current data
-        success = excel_processor.update_doh_in_current_data(tag_name, new_doh)
+        # CRITICAL FIX: Update database FIRST, then update Excel processor from database
+        # This ensures database is the source of truth (same pattern as lineage updates)
+        product_db = get_product_database()
+        if not product_db:
+            return jsonify({'error': 'Database not available'}), 500
         
+        # Update the product DOH directly in database
+        try:
+            product_success = product_db.update_product_doh(tag_name, new_doh)
+            if product_success:
+                logging.info(f"✅ Updated product DOH in database: '{tag_name}' → '{new_doh}'")
+            else:
+                logging.warning(f"❌ Failed to update product DOH in database for '{tag_name}'")
+                return jsonify({'error': 'Failed to update DOH in database'}), 500
+                        
+        except Exception as db_error:
+            logging.error(f"Error updating DOH in database: {db_error}")
+            return jsonify({'error': f'Database update failed: {str(db_error)}'}), 500
+        
+        # Now update the Excel processor DataFrame to reflect database changes
+        success = excel_processor.update_doh_in_current_data(tag_name, new_doh) if excel_processor else False
         if success:
-            # Also persist to database
-            try:
-                success = excel_processor.update_doh_in_database(tag_name, new_doh)
-                if success:
-                    logging.info(f"Successfully persisted DOH change for product '{tag_name}' to '{new_doh}' in database")
-                else:
-                    logging.warning(f"Failed to persist DOH change for product '{tag_name}' in database")
-            except Exception as db_error:
-                logging.error(f"Error persisting DOH to database: {db_error}")
-            
-            # Invalidate caches so subsequent fetches reflect the updated DOH
-            try:
-                cache_key = get_session_cache_key('available_tags')
-                cache.delete(cache_key)
-                full_excel_cache_key = session.get('full_excel_cache_key')
-                json_matched_cache_key = session.get('json_matched_cache_key')
-                if full_excel_cache_key:
-                    cache.delete(full_excel_cache_key)
-                if json_matched_cache_key:
-                    cache.delete(json_matched_cache_key)
-                logging.info("Cleared available tags caches after DOH update")
-            except Exception as cache_error:
-                logging.warning(f"Could not clear caches after DOH update: {cache_error}")
-            
-            return jsonify({'success': True, 'message': f'DOH updated to {new_doh}'})
+            logging.info(f"✅ Updated DOH in Excel processor DataFrame")
         else:
-            return jsonify({'error': 'Failed to update DOH'}), 500
+            logging.warning(f"⚠️  Could not update Excel processor DataFrame (not critical - database is updated)")
+        
+        # CRITICAL FIX: Aggressively clear ALL caches to force fresh data
+        try:
+            # Clear session-specific caches
+            cache_key = get_session_cache_key('available_tags')
+            cache.delete(cache_key)
+            
+            full_excel_cache_key = session.get('full_excel_cache_key')
+            json_matched_cache_key = session.get('json_matched_cache_key')
+            if full_excel_cache_key:
+                cache.delete(full_excel_cache_key)
+            if json_matched_cache_key:
+                cache.delete(json_matched_cache_key)
+            
+            # Clear all potential caches that might contain stale DOH data
+            for key in ['available_tags', 'selected_records', 'filtered_tags', 'tag_list']:
+                try:
+                    cache_key_to_clear = get_session_cache_key(key)
+                    cache.delete(cache_key_to_clear)
+                except:
+                    pass
+            
+            # Update session to force refresh
+            session['excel_processor_updated'] = time.time()
+            session['doh_update_timestamp'] = time.time()
+            session.modified = True
+            logging.info(f"✅ DOH UPDATE: Cleared all caches and updated session timestamp")
+                
+        except Exception as cache_error:
+            logging.warning(f"Could not clear caches after DOH update: {cache_error}")
+        
+        return jsonify({'success': True, 'message': f'DOH updated to {new_doh}'})
             
     except Exception as e:
         logging.error(f"Error updating DOH: {e}")
