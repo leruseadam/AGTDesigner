@@ -3476,16 +3476,16 @@ class ProductDatabase:
             if vendor and brand:
                 cursor.execute('''
                     UPDATE products
-                    SET lineage = ?, updated_at = ?
-                    WHERE normalized_name = ? AND "Vendor/Supplier*" = ? AND "Product Brand" = ?
-                ''', (new_lineage, current_date, normalized_name, vendor, brand))
+                    SET "Lineage" = ?
+                    WHERE "Product Name*" = ? AND "Vendor/Supplier*" = ? AND "Product Brand" = ?
+                ''', (new_lineage, product_name, vendor, brand))
                 logger.info(f"Updated lineage for product '{product_name}' (vendor={vendor}, brand={brand}) to '{new_lineage}'")
             else:
                 cursor.execute('''
                     UPDATE products
-                    SET lineage = ?, updated_at = ?
-                    WHERE normalized_name = ?
-                ''', (new_lineage, current_date, normalized_name))
+                    SET "Lineage" = ?
+                    WHERE "Product Name*" = ?
+                ''', (new_lineage, product_name))
                 logger.info(f"Updated lineage for product '{product_name}' to '{new_lineage}'")
             
             conn.commit()
@@ -3507,10 +3507,10 @@ class ProductDatabase:
             # Try to get lineage by product name
             cursor.execute('''
                 SELECT "Lineage" FROM products 
-                WHERE "Product Name*" = ? OR "ProductName" = ? OR name = ?
+                WHERE "Product Name*" = ? OR "ProductName" = ?
                 ORDER BY id DESC
                 LIMIT 1
-            ''', (product_name, product_name, product_name))
+            ''', (product_name, product_name))
             
             result = cursor.fetchone()
             if result and result[0]:
