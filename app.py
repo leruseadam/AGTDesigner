@@ -9283,7 +9283,7 @@ def json_match():
         # Persist JSON-matched results for downstream flows (cache + session)
         try:
             total_matches = len(matched_products) if matched_products else 0
-            # Extract product names for session-selected tags
+            # Extract Product Name* for UI display (SKU codes)
             matched_names = [p.get('Product Name*', p.get('ProductName', '')) for p in matched_products if isinstance(p, dict)]
 
             # Store available_tags cache with these matched products
@@ -9373,6 +9373,7 @@ def json_match():
         response_data = {
             'success': True,
             'matched_count': len(matched_products),
+            # UI displays Product Name* (SKU codes), but Description is used for label generation
             'matched_names': [p.get('Product Name*', p.get('ProductName', '')) for p in matched_products if isinstance(p, dict)],
             'available_tags': matched_products,
             'selected_tags': matched_products,
@@ -13636,6 +13637,7 @@ def enhanced_json_match():
                 'strategy_used': strategy,
                 'matched_count': len(matched_products),
                 'total_processing_time': processing_time,
+                # UI displays Product Name* (SKU codes), but Description is used for label generation
                 'matched_names': [p.get('Product Name*', p.get('ProductName', '')) for p in matched_products],
                 'available_tags': matched_products,
                 'match_details': match_details,
@@ -13660,6 +13662,7 @@ def enhanced_json_match():
                 'success': True,
                 'enhanced': False,
                 'matched_count': len(matched_products) if matched_products else 0,
+                # UI displays Product Name* (SKU codes), but Description is used for label generation
                 'matched_names': [p.get('Product Name*', p.get('ProductName', '')) for p in (matched_products or [])],
                 'available_tags': matched_products or []
             }
@@ -13759,6 +13762,7 @@ def ai_enhanced_json_match():
             'ai_enhanced': True,
             'matched_count': len(matched_products),
             'total_processing_time': processing_time,
+            # UI displays Product Name* (SKU codes), but Description is used for label generation
             'matched_names': [p.get('Product Name*', p.get('ProductName', '')) for p in matched_products],
             'available_tags': matched_products,
             'match_analytics': match_analytics,

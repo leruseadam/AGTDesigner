@@ -381,11 +381,12 @@ def extract_products_from_manifest(manifest_json):
             else:
                 logging.info(f"🔍 DEBUG: No mapping found for key '{k}' = '{v}'")
         
-        # CRITICAL FIX: Ensure basic fields are always populated even if mapping fails
-        if not product.get('Product Name*') and not product.get('ProductName'):
-            product['Product Name*'] = item.get('product_name', '') or item.get('inventory_name', '') or item.get('name', '')
-            product['ProductName'] = product['Product Name*']
-            logging.info(f"🔍 DEBUG: Fallback product name: '{product['Product Name*']}'")
+        # CRITICAL FIX: Do NOT set Product Name* from JSON - it should ONLY come from database matches
+        # JSON product names are used for matching purposes only, not for final output
+        # Store JSON name separately for matching, but don't set Product Name* field
+        if not product.get('_json_product_name'):
+            product['_json_product_name'] = item.get('product_name', '') or item.get('inventory_name', '') or item.get('name', '')
+            logging.info(f"🔍 DEBUG: Stored JSON product name for matching: '{product['_json_product_name']}'")
         
         if not product.get('Product Brand') and not product.get('ProductBrand'):
             product['Product Brand'] = item.get('brand', '') or item.get('vendor', '') or 'CERES'
