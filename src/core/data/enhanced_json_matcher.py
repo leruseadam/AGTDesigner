@@ -1320,9 +1320,9 @@ class EnhancedJSONMatcher:
                     s = str(v).strip()
                     if s and s.lower() != 'none' and s not in ('0', '0.0', '0.00'):
                         return s
-            return '0'
+            return '25'  # Use default price instead of '0'
         except Exception:
-            return '0'
+            return '25'  # Use default price instead of '0'
 
     def _format_price(self, value: str) -> str:
         """Format price to omit trailing .00 but keep two decimals for non-whole numbers."""

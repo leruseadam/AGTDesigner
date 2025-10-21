@@ -942,6 +942,10 @@ def process_chunk(args):
             elif row.get('Price') and str(row.get('Price', '')).strip():
                 price_val = str(row.get('Price', '')).strip()
             
+            # Use default price if no price found
+            if not price_val:
+                price_val = '25'
+            
             label_data["Price"] = wrap_with_marker(price_val, "PRICE")  # Fixed: Use "PRICE" marker to match markers.py definition
             
             lineage_text   = str(row.get("Lineage", "")).strip()
