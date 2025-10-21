@@ -1747,31 +1747,21 @@ def upload_file():
             })
             
         else:
-            # Local development: Process synchronously for immediate feedback
-            logging.info("[LOCAL] Processing file synchronously")
+            # Local development: Process with FAST MODE for better performance
+            logging.info("[LOCAL] Processing file with FAST MODE (database integration disabled)")
             processor = get_excel_processor()
+            
+            # CRITICAL OPTIMIZATION: Disable database integration for fast upload
+            processor.enable_product_db_integration(False)
+            logging.info("[FAST-UPLOAD] Database integration disabled for faster processing")
             
             success = processor.load_file(file_path)
             if success:
                 row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
                 logging.info(f"File loaded successfully: {row_count} rows")
                 
-                # Store in database for persistence
-                try:
-                    from src.core.data.product_database import get_product_database
-                    # Store context removed - using single database
-                    product_db = get_product_database()
-                    
-                    if product_db and hasattr(product_db, 'store_excel_data'):
-                        logging.info(f"Storing {row_count} products in database...")
-                        result = product_db.store_excel_data(processor.df, file_path)
-                        logging.info(f"Database storage result: {result}")
-                    else:
-                        logging.warning("Database storage not available")
-                        
-                except Exception as db_error:
-                    logging.warning(f"Database storage failed (non-fatal): {db_error}")
-                    # Continue anyway - file is still loaded in processor
+                # SKIP database storage during upload for speed - can be done later if needed
+                logging.info("[FAST-UPLOAD] Skipping database storage for faster upload")
                 
                 update_processing_status(file.filename, 'ready')
             else:
@@ -1824,10 +1814,9 @@ def upload_file_simple_pythonanywhere():
             from src.core.data.excel_processor import ExcelProcessor
             processor = ExcelProcessor()
             
-            # Enable database integration for new product storage
-            if hasattr(processor, 'enable_product_db_integration'):
-                processor.enable_product_db_integration(True)
-                logging.info("[UPLOAD] Product database integration enabled for new product storage")
+            # CRITICAL OPTIMIZATION: Disable database integration for fast upload
+            processor.enable_product_db_integration(False)
+            logging.info("[FAST-UPLOAD] Database integration disabled for faster processing")
             
             # OPTIMIZATION: Try multiple loading methods with increased row limits
             import pandas as pd
@@ -1924,6 +1913,94 @@ def upload_file_simple_pythonanywhere():
     except Exception as e:
         logging.error(f"Upload error: {e}")
         return jsonify({'error': f'Upload failed: {str(e)}'}), 500
+
+@app.route('/upload-ultra-fast', methods=['POST'])
+def upload_ultra_fast():
+    """ULTRA-FAST upload endpoint - skips all database processing for maximum speed"""
+    start_time = time.time()
+    
+    try:
+        logging.info("=== ULTRA-FAST UPLOAD START ===")
+        
+        # Validate request
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file provided'}), 400
+        
+        file = request.files['file']
+        if not file or file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        # Validate extension
+        if not file.filename.lower().endswith(('.xlsx', '.xls')):
+            return jsonify({'error': 'Only Excel files allowed'}), 400
+        
+        logging.info(f"[ULTRA-FAST] Uploading: {file.filename}")
+        
+        # Create uploads directory
+        import os
+        uploads_dir = os.path.join(os.getcwd(), 'uploads')
+        os.makedirs(uploads_dir, exist_ok=True)
+        
+        # Save file with timestamp
+        timestamp = int(time.time())
+        safe_filename = f"{timestamp}_{file.filename}"
+        file_path = os.path.join(uploads_dir, safe_filename)
+        
+        file.save(file_path)
+        logging.info(f"[ULTRA-FAST] Saved: {file_path}")
+        
+        # Verify saved
+        if not os.path.exists(file_path):
+            return jsonify({'error': 'File save failed'}), 500
+        
+        # Update session
+        session.permanent = True
+        session['file_path'] = file_path
+        session['uploaded_filename'] = file.filename
+        session['upload_timestamp'] = timestamp
+        session.modified = True
+        
+        # ULTRA-FAST PROCESSING: Minimal Excel loading only
+        from src.core.data.excel_processor import ExcelProcessor
+        processor = ExcelProcessor()
+        
+        # CRITICAL: Disable ALL database integration for maximum speed
+        processor.enable_product_db_integration(False)
+        logging.info("[ULTRA-FAST] Database integration completely disabled")
+        
+        # Use minimal processing mode
+        processor.set_processing_mode('minimal')
+        
+        # Load file with minimal processing
+        success = processor.load_file(file_path)
+        
+        if success:
+            row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
+            logging.info(f"[ULTRA-FAST] File loaded: {row_count} rows")
+            
+            # Update global processor
+            global _excel_processor
+            with excel_processor_lock:
+                _excel_processor = processor
+            
+            upload_time = time.time() - start_time
+            logging.info(f"[ULTRA-FAST] Upload complete: {upload_time:.3f}s")
+            
+            return jsonify({
+                'success': True,
+                'message': 'File uploaded and processed ultra-fast',
+                'filename': file.filename,
+                'rows': row_count,
+                'upload_time': f"{upload_time:.3f}s",
+                'mode': 'ultra_fast'
+            })
+        else:
+            logging.error("[ULTRA-FAST] File load failed")
+            return jsonify({'error': 'Failed to process file'}), 500
+            
+    except Exception as e:
+        logging.error(f"[ULTRA-FAST] Upload error: {e}")
+        return jsonify({'error': 'Upload failed'}), 500
 
 @app.route('/upload-simple', methods=['POST'])
 def upload_file_simple():
@@ -4339,6 +4416,39 @@ def generate_labels_parallel():
         
     except Exception as e:
         logging.error(f"Parallel generation failed: {e}")
+        return jsonify({'error': f'Generation failed: {str(e)}'}), 500
+
+@app.route('/api/generate', methods=['POST'])
+def generate_labels():
+    """Standard tag generation (fallback for fast and parallel methods)"""
+    try:
+        logging.info("=== STANDARD GENERATION START ===")
+        start_time = time.time()
+        
+        # Rate limiting
+        client_ip = request.remote_addr
+        if not check_rate_limit(client_ip):
+            logging.warning(f"Rate limit exceeded for IP: {client_ip}")
+            return jsonify({'error': 'Rate limit exceeded. Please wait before generating more labels.'}), 429
+        
+        data = request.get_json()
+        template_type = data.get('template_type', 'vertical')
+        scale_factor = float(data.get('scale_factor', 1.0))
+        selected_tags_from_request = data.get('selected_tags', [])
+        
+        logging.info(f"⚡ STANDARD Generation request:")
+        logging.info(f"   - template_type: {template_type}")
+        logging.info(f"   - scale_factor: {scale_factor}")
+        logging.info(f"   - selected_tags count: {len(selected_tags_from_request)}")
+        
+        if not selected_tags_from_request:
+            return jsonify({'error': 'No tags selected for generation'}), 400
+        
+        # Use optimized generation
+        return generate_labels_optimized()
+        
+    except Exception as e:
+        logging.error(f"Standard generation failed: {e}")
         return jsonify({'error': f'Generation failed: {str(e)}'}), 500
 
 def generate_labels_optimized():
