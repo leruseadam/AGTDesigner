@@ -11,26 +11,35 @@ from datetime import datetime
 def rebuild_bothell_database():
     """Rebuild the Bothell database with a clean schema (without problematic UNIQUE constraint)."""
     
-    old_db_path = 'uploads/product_database_AGT_Bothell_old_bloated.db'
-    new_db_path = 'uploads/product_database_AGT_Bothell.db'
+    # Flexible path detection
+    current_db_path = 'uploads/product_database_AGT_Bothell.db'
+    old_bloated_path = 'uploads/product_database_AGT_Bothell_old_bloated.db'
+    
+    # Determine source database
+    if os.path.exists(old_bloated_path):
+        old_db_path = old_bloated_path
+        new_db_path = current_db_path
+        print(f"Starting Bothell database rebuild with FIXED schema...")
+        print(f"Source: {old_db_path} (old bloated version)")
+        print(f"Target: {new_db_path}")
+    elif os.path.exists(current_db_path):
+        # Current database exists - rebuild it in place
+        temp_path = 'uploads/product_database_AGT_Bothell_temp.db'
+        import shutil
+        shutil.copy2(current_db_path, temp_path)
+        old_db_path = temp_path
+        new_db_path = current_db_path
+        print(f"Starting Bothell database rebuild with FIXED schema...")
+        print(f"Source: {current_db_path} (copying to temp first)")
+        print(f"Target: {new_db_path}")
+    else:
+        print(f"❌ No Bothell database found!")
+        print(f"Checked:")
+        print(f"  - {current_db_path}")
+        print(f"  - {old_bloated_path}")
+        return
+    
     backup_path = f'uploads/product_database_AGT_Bothell_backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}.db'
-    
-    print(f"Starting Bothell database rebuild with FIXED schema...")
-    print(f"Old database: {old_db_path}")
-    print(f"New database: {new_db_path}")
-    
-    # Check if old database exists
-    if not os.path.exists(old_db_path):
-        print(f"❌ Error: Old database not found at {old_db_path}")
-        print(f"Looking for alternative...")
-        # Try the current one
-        if os.path.exists(new_db_path):
-            print(f"Using current database as source: {new_db_path}")
-            old_db_path = new_db_path
-            new_db_path = 'uploads/product_database_AGT_Bothell_new.db'
-        else:
-            print(f"❌ No source database found!")
-            return
     
     # Create backup first
     print(f"\n1. Creating backup...")
@@ -154,6 +163,15 @@ def rebuild_bothell_database():
     common_columns = [col for col in new_columns if col in old_columns and col != 'id']
     
     print(f"   Found {len(common_columns)} common columns to copy")
+    
+    # Check if we have any columns to copy
+    if len(common_columns) == 0:
+        print(f"❌ Error: No common columns found between old and new schema!")
+        print(f"Old columns: {old_columns[:10]}...")
+        print(f"New columns: {new_columns[:10]}...")
+        old_conn.close()
+        new_conn.close()
+        return
     
     # Build SELECT and INSERT statements - quote all column names
     select_cols = ', '.join([f'"{col}"' for col in common_columns])
