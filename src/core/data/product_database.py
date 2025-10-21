@@ -114,11 +114,11 @@ class ProductDatabase:
     def init_database(self):
         """Initialize the database with required tables (lazy initialization)."""
         if self._initialized:
-            return
+            return True
             
         with self._init_lock:
             if self._initialized:  # Double-check pattern
-                return
+                return True
                 
             start_time = time.time()
             logger.info(f"Initializing product database at {self.db_path}...")
@@ -138,7 +138,7 @@ class ProductDatabase:
                     if count > 0:
                         logger.info(f"Database already initialized with {count} products")
                         self._initialized = True
-                        return
+                        return True
                 
                 # Create strains table
                 cursor.execute('''
@@ -282,6 +282,7 @@ class ProductDatabase:
                 
                 elapsed = time.time() - start_time
                 logger.info(f"Product database initialized successfully in {elapsed:.3f}s")
+                return True
                 
             except Exception as e:
                 logger.error(f"Error initializing database: {e}")
