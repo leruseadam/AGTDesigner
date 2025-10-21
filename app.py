@@ -5823,68 +5823,68 @@ def update_lineage():
         if not excel_processor or excel_processor.df is None:
             return jsonify({'error': 'No data loaded'}), 400
         
-        # Update the lineage in the current data
-        success = excel_processor.update_lineage_in_current_data(tag_name, new_lineage)
+        # CRITICAL FIX: Update database FIRST, then update Excel processor from database
+        # This ensures database is the source of truth
+        product_db = get_product_database()
+        if not product_db:
+            return jsonify({'error': 'Database not available'}), 500
         
-        if success:
-            # Persist to database - try strain name first, fall back to product name
-            strain_name = excel_processor.get_strain_name_for_product(tag_name)
-            database_key = strain_name if (strain_name and str(strain_name).strip()) else tag_name
-            
-            try:
-                # Use enhanced database update method that handles both strain and product names
-                success = excel_processor.update_lineage_in_database_enhanced(database_key, new_lineage, is_strain=(strain_name and str(strain_name).strip()))
+        # Update the product lineage directly in database
+        try:
+            product_success = product_db.update_product_lineage(tag_name, new_lineage)
+            if product_success:
+                logging.info(f"✅ Updated product lineage in database: '{tag_name}' → '{new_lineage}'")
+            else:
+                logging.warning(f"❌ Failed to update product lineage in database for '{tag_name}'")
+                return jsonify({'error': 'Failed to update lineage in database'}), 500
+                
+            # Also update strain if available
+            strain_name = excel_processor.get_strain_name_for_product(tag_name) if excel_processor else None
+            if strain_name and str(strain_name).strip():
+                success = excel_processor.update_lineage_in_database_enhanced(strain_name, new_lineage, is_strain=True)
                 if success:
-                    key_type = "strain" if (strain_name and str(strain_name).strip()) else "product name"
-                    logging.info(f"Successfully persisted lineage change for {key_type} '{database_key}' to '{new_lineage}' in database")
-                else:
-                    logging.warning(f"Failed to persist lineage change for '{database_key}' in database")
-                
-                # CRITICAL FIX: Also update the product directly in the database
-                product_db = get_product_database()
-                if product_db:
-                    # Update the product lineage directly
-                    product_success = product_db.update_product_lineage(tag_name, new_lineage)
-                    if product_success:
-                        logging.info(f"Successfully updated product lineage for '{tag_name}' to '{new_lineage}' in database")
-                    else:
-                        logging.warning(f"Failed to update product lineage for '{tag_name}' in database")
+                    logging.info(f"✅ Updated strain lineage in database: '{strain_name}' → '{new_lineage}'")
                         
-            except Exception as db_error:
-                logging.error(f"Error persisting lineage to database: {db_error}")
+        except Exception as db_error:
+            logging.error(f"Error updating lineage in database: {db_error}")
+            return jsonify({'error': f'Database update failed: {str(db_error)}'}), 500
+        
+        # Now update the Excel processor DataFrame to reflect database changes
+        success = excel_processor.update_lineage_in_current_data(tag_name, new_lineage) if excel_processor else False
+        if success:
+            logging.info(f"✅ Updated lineage in Excel processor DataFrame")
+        else:
+            logging.warning(f"⚠️  Could not update Excel processor DataFrame (not critical - database is updated)")
             
-            # CRITICAL FIX: Force session update to persist Excel processor changes
-            try:
-                # Save the updated processor back to session
-                session['excel_processor_updated'] = time.time()
-                session.modified = True
-                logging.info(f"LINEAGE UPDATE: Marked session as modified after lineage update")
-            except Exception as session_error:
-                logging.warning(f"Could not update session after lineage update: {session_error}")
+        # CRITICAL FIX: Aggressively clear ALL caches to force fresh data
+        try:
+            # Clear session-specific caches
+            cache_key = get_session_cache_key('available_tags')
+            cache.delete(cache_key)
             
-            # Invalidate caches so subsequent fetches reflect the updated lineage
-            try:
-                cache_key = get_session_cache_key('available_tags')
-                cache.delete(cache_key)
-                full_excel_cache_key = session.get('full_excel_cache_key')
-                json_matched_cache_key = session.get('json_matched_cache_key')
-                if full_excel_cache_key:
-                    cache.delete(full_excel_cache_key)
-                if json_matched_cache_key:
-                    cache.delete(json_matched_cache_key)
+            full_excel_cache_key = session.get('full_excel_cache_key')
+            json_matched_cache_key = session.get('json_matched_cache_key')
+            if full_excel_cache_key:
+                cache.delete(full_excel_cache_key)
+            if json_matched_cache_key:
+                cache.delete(json_matched_cache_key)
+            
+            # Clear all potential caches that might contain stale lineage data
+            for key in ['available_tags', 'selected_records', 'filtered_tags', 'tag_list']:
+                try:
+                    cache_key_to_clear = get_session_cache_key(key)
+                    cache.delete(cache_key_to_clear)
+                except:
+                    pass
+            
+            # Update session to force refresh
+            session['excel_processor_updated'] = time.time()
+            session['lineage_update_timestamp'] = time.time()
+            session.modified = True
+            logging.info(f"✅ LINEAGE UPDATE: Cleared all caches and updated session timestamp")
                 
-                # CRITICAL FIX: Clear ALL potential caches that might contain stale lineage data
-                # Clear any cached records that might contain old lineage values
-                for key in ['available_tags', 'selected_records', 'filtered_tags']:
-                    try:
-                        cache_key_to_clear = get_session_cache_key(key)
-                        cache.delete(cache_key_to_clear)
-                    except:
-                        pass
-                
-                logging.info("LINEAGE UPDATE: Cleared all caches after lineage update")
-            except Exception as cache_error:
-                logging.warning(f"Could not clear caches after lineage update: {cache_error}")
+        except Exception as cache_error:
+            logging.warning(f"Could not clear caches after lineage update: {cache_error}")
             
             # Optionally refresh dropdown cache to ensure lineage filter reflects changes
             try:
