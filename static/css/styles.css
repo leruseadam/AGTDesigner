@@ -3883,7 +3883,7 @@ img, video, canvas, svg {
     background: rgba(45, 34, 58, 0.8) !important;
     color: var(--text-primary) !important;
     border: 1px solid rgba(160, 132, 232, 0.3) !important;
-    border-radius: 6px !important;
+    border-radius: 0px !important;
     transition: all 0.3s ease !important;
     backdrop-filter: blur(10px) !important;
     -webkit-backdrop-filter: blur(10px) !important;
@@ -3925,7 +3925,7 @@ img, video, canvas, svg {
     height: auto;
     min-height: 38px;
     line-height: 1.4;
-    border-radius: 6px;
+    border-radius: 0px;
     background: rgba(45, 34, 58, 0.8);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
