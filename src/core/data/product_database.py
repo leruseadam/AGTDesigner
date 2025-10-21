@@ -163,6 +163,7 @@ class ProductDatabase:
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         "Product Name*" TEXT NOT NULL,
                         normalized_name TEXT NOT NULL,
+                        name TEXT,
                         strain_id INTEGER,
                         "Product Type*" TEXT NOT NULL,
                         "Vendor/Supplier*" TEXT,
