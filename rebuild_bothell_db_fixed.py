@@ -1,30 +1,36 @@
 #!/usr/bin/env python3
 """
-Rebuild a clean, optimized product database from the existing bloated one.
-This script will:
-1. Extract all essential data from the old database
-2. Create a new database with a clean schema
-3. Import the data with proper structure
-4. Add appropriate indices for performance
+Fixed database rebuild script for Bothell database.
+This version removes the UNIQUE constraint that was causing fragmentation issues.
 """
 
 import sqlite3
 import os
 from datetime import datetime
 
-def rebuild_database(db_name='product_database.db'):
-    """Rebuild the database with a clean schema."""
+def rebuild_bothell_database():
+    """Rebuild the Bothell database with a clean schema (without problematic UNIQUE constraint)."""
     
-    old_db_path = f'uploads/{db_name}'
-    # Create clean db name
-    clean_name = db_name.replace('.db', '_clean.db')
-    new_db_path = f'uploads/{clean_name}'
-    backup_name = db_name.replace('.db', f'_backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}.db')
-    backup_path = f'uploads/{backup_name}'
+    old_db_path = 'uploads/product_database_AGT_Bothell_old_bloated.db'
+    new_db_path = 'uploads/product_database_AGT_Bothell.db'
+    backup_path = f'uploads/product_database_AGT_Bothell_backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}.db'
     
-    print(f"Starting database rebuild...")
+    print(f"Starting Bothell database rebuild with FIXED schema...")
     print(f"Old database: {old_db_path}")
     print(f"New database: {new_db_path}")
+    
+    # Check if old database exists
+    if not os.path.exists(old_db_path):
+        print(f"❌ Error: Old database not found at {old_db_path}")
+        print(f"Looking for alternative...")
+        # Try the current one
+        if os.path.exists(new_db_path):
+            print(f"Using current database as source: {new_db_path}")
+            old_db_path = new_db_path
+            new_db_path = 'uploads/product_database_AGT_Bothell_new.db'
+        else:
+            print(f"❌ No source database found!")
+            return
     
     # Create backup first
     print(f"\n1. Creating backup...")
@@ -36,13 +42,18 @@ def rebuild_database(db_name='product_database.db'):
     # Connect to both databases
     print(f"\n2. Connecting to databases...")
     old_conn = sqlite3.connect(old_db_path)
+    
+    # Remove new database if it exists
+    if os.path.exists(new_db_path) and new_db_path != old_db_path:
+        os.remove(new_db_path)
+    
     new_conn = sqlite3.connect(new_db_path)
     
     old_cursor = old_conn.cursor()
     new_cursor = new_conn.cursor()
     
-    # Create clean schema
-    print(f"\n3. Creating clean schema...")
+    # Create clean schema WITHOUT the problematic UNIQUE constraint
+    print(f"\n3. Creating clean schema (without UNIQUE constraint)...")
     new_cursor.execute('''
         CREATE TABLE IF NOT EXISTS products (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -105,8 +116,7 @@ def rebuild_database(db_name='product_database.db'):
             last_seen_date TEXT,
             total_occurrences INTEGER DEFAULT 1,
             created_at TEXT,
-            updated_at TEXT,
-            UNIQUE(normalized_name, "Vendor/Supplier*", "Product Brand")
+            updated_at TEXT
         )
     ''')
     
@@ -127,7 +137,7 @@ def rebuild_database(db_name='product_database.db'):
         )
     ''')
     
-    print(f"✅ Clean schema created")
+    print(f"✅ Clean schema created (no UNIQUE constraint on products)")
     
     # Copy data
     print(f"\n4. Copying data from old database...")
@@ -145,13 +155,13 @@ def rebuild_database(db_name='product_database.db'):
     
     print(f"   Found {len(common_columns)} common columns to copy")
     
-    # Build SELECT and INSERT statements - quote all column names to handle special characters
+    # Build SELECT and INSERT statements - quote all column names
     select_cols = ', '.join([f'"{col}"' for col in common_columns])
     insert_cols = ', '.join([f'"{col}"' for col in common_columns])
     placeholders = ', '.join(['?' for _ in common_columns])
     
     # Copy data in batches
-    batch_size = 1000
+    batch_size = 500  # Smaller batches for better reliability
     offset = 0
     total_copied = 0
     
@@ -166,11 +176,14 @@ def rebuild_database(db_name='product_database.db'):
         if not rows:
             break
         
-        # Insert into new database
+        # Insert into new database - use INSERT OR REPLACE to handle duplicates
         new_cursor.executemany(f'''
-            INSERT OR IGNORE INTO products ({insert_cols})
+            INSERT INTO products ({insert_cols})
             VALUES ({placeholders})
         ''', rows)
+        
+        # Commit after each batch to avoid large transactions
+        new_conn.commit()
         
         total_copied += len(rows)
         offset += batch_size
@@ -199,28 +212,45 @@ def rebuild_database(db_name='product_database.db'):
                     INSERT OR IGNORE INTO strains VALUES ({strain_placeholders})
                 ''', strains)
                 
+                new_conn.commit()
                 print(f"✅ Copied {len(strains)} strains")
     except Exception as e:
         print(f"⚠️  Warning: Could not copy strains: {e}")
     
-    # Create indices
+    # Create indices AFTER all data is inserted (much faster)
     print(f"\n6. Creating indices...")
     new_cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_normalized ON products(normalized_name)')
     new_cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_vendor_brand ON products("Vendor/Supplier*", "Product Brand")')
     new_cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_type ON products("Product Type*")')
     new_cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_strain ON products("Product Strain")')
+    new_cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_name ON products("Product Name*")')
+    new_conn.commit()
     print(f"✅ Indices created")
     
-    # Commit and close
-    print(f"\n7. Finalizing...")
+    # Run VACUUM to optimize database
+    print(f"\n7. Running VACUUM to optimize database...")
+    new_cursor.execute('VACUUM')
     new_conn.commit()
+    print(f"✅ Database optimized")
+    
+    # Verify integrity
+    print(f"\n8. Verifying database integrity...")
+    new_cursor.execute('PRAGMA integrity_check')
+    result = new_cursor.fetchone()
+    if result[0] == 'ok':
+        print(f"✅ Database integrity check: OK")
+    else:
+        print(f"⚠️  Database integrity check: {result[0]}")
     
     # Get stats
     new_cursor.execute("SELECT COUNT(*) FROM products")
     product_count = new_cursor.fetchone()[0]
     
-    new_cursor.execute("SELECT COUNT(*) FROM strains")
-    strain_count = new_cursor.fetchone()[0]
+    try:
+        new_cursor.execute("SELECT COUNT(*) FROM strains")
+        strain_count = new_cursor.fetchone()[0]
+    except:
+        strain_count = 0
     
     old_conn.close()
     new_conn.close()
@@ -229,35 +259,21 @@ def rebuild_database(db_name='product_database.db'):
     old_size = os.path.getsize(old_db_path) / (1024*1024)  # MB
     new_size = os.path.getsize(new_db_path) / (1024*1024)  # MB
     
-    print(f"\n✅ DATABASE REBUILD COMPLETE!")
+    print(f"\n✅ BOTHELL DATABASE REBUILD COMPLETE!")
     print(f"\nStatistics:")
     print(f"  Products: {product_count}")
     print(f"  Strains: {strain_count}")
     print(f"  Old database size: {old_size:.2f} MB")
     print(f"  New database size: {new_size:.2f} MB")
     print(f"  Space saved: {old_size - new_size:.2f} MB ({((old_size - new_size) / old_size * 100):.1f}%)")
-    print(f"\nTo use the new database:")
-    print(f"  1. Stop the app")
-    print(f"  2. mv {old_db_path} {old_db_path.replace('.db', '_old_bloated.db')}")
-    print(f"  3. mv {new_db_path} {old_db_path}")
-    print(f"  4. Restart the app")
-    print(f"\nBackup location: {backup_path}")
+    print(f"\nNew database location: {new_db_path}")
+    print(f"Backup location: {backup_path}")
     
-    return new_db_path, old_db_path
+    # If we created a new file, give instructions to replace
+    if new_db_path != 'uploads/product_database_AGT_Bothell.db':
+        print(f"\nTo activate the new database:")
+        print(f"  mv {new_db_path} uploads/product_database_AGT_Bothell.db")
 
 if __name__ == "__main__":
-    import sys
-    
-    # Allow specifying database name as command line argument
-    if len(sys.argv) > 1:
-        db_name = sys.argv[1]
-        if not db_name.endswith('.db'):
-            db_name += '.db'
-        print(f"Rebuilding database: {db_name}\n")
-        rebuild_database(db_name)
-    else:
-        print("Usage: python rebuild_clean_database.py [database_name]")
-        print("Example: python rebuild_clean_database.py product_database_AGT_Bothell.db")
-        print("\nRebuilding default database...\n")
-        rebuild_database()
+    rebuild_bothell_database()
 
