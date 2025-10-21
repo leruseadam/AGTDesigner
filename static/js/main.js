@@ -6408,9 +6408,13 @@ const TagManager = {
     async clearAllFilters() {
         console.log('🔄 Clearing all filters and performing full app reset...');
         
-        try {
-            // Perform full app reset
-            await performFullAppReset();
+        // Add timeout to prevent hanging
+        const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Clear filters timeout')), 5000); // 5 second timeout
+        });
+        
+        const clearOperations = async () => {
+            // Clear filters directly without calling performFullAppReset to avoid recursion
             
             // Additional filter-specific clearing
             const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
@@ -6450,7 +6454,13 @@ const TagManager = {
             }
             
             console.log('✅ All filters cleared and app reset completed successfully');
-            
+        };
+        
+        try {
+            await Promise.race([
+                clearOperations(),
+                timeoutPromise
+            ]);
         } catch (error) {
             console.error('❌ Error during clear all filters:', error);
         }
@@ -7467,11 +7477,21 @@ function clearUIState() {
 async function performFullAppReset() {
     console.log('🔄 Performing full app reset...');
     
-    try {
-        // 1. Clear all filters first
-        if (window.TagManager && TagManager.clearAllFilters) {
-            TagManager.clearAllFilters();
-        }
+    // Add timeout to prevent hanging
+    const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Reset timeout')), 10000); // 10 second timeout
+    });
+    
+    const resetOperations = async () => {
+        // 1. Clear all filters first (avoid recursive call)
+        const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
+        filterIds.forEach(filterId => {
+            const filterElement = document.getElementById(filterId);
+            if (filterElement) {
+                filterElement.value = '';
+                filterElement.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        });
         
         // 2. Clear all selected tags
         if (window.TagManager && TagManager.clearSelected) {
@@ -7628,7 +7648,13 @@ async function performFullAppReset() {
         if (window.showToast) {
             showToast('App reset completed', 'success');
         }
-        
+    };
+    
+    try {
+        await Promise.race([
+            resetOperations(),
+            timeoutPromise
+        ]);
     } catch (error) {
         console.error('❌ Error during full app reset:', error);
         if (window.showToast) {
