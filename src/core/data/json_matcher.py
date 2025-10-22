@@ -1897,20 +1897,22 @@ class JSONMatcher:
     def _create_product_from_json_item(self, item: Dict, global_vendor: str) -> Dict:
         """Create a product from JSON item data directly (fallback when no Excel match found)."""
         try:
-            product_name = str(item.get("product_name", ""))
+            raw_product_name = str(item.get("product_name", ""))
+            # CRITICAL FIX: Transform SKU to human-readable name
+            product_name = transform_sku_to_readable_name(raw_product_name) or raw_product_name
             vendor = global_vendor if global_vendor else str(item.get("vendor", ""))
             brand = str(item.get("brand", "")).strip()
             inventory_type = str(item.get("inventory_type", "")).strip()
             inventory_category = str(item.get("inventory_category", "")).strip()
-            product_type = map_inventory_type_to_product_type(inventory_type, inventory_category, product_name)
+            product_type = map_inventory_type_to_product_type(inventory_type, inventory_category, raw_product_name)
             weight = str(item.get("unit_weight", item.get("weight", ""))).strip()
             strain = str(item.get("strain_name", item.get("strain", ""))).strip()
             
-            # Create basic product structure
+            # Create basic product structure with transformed name
             product = {
-                'Product Name*': product_name,
+                'Product Name*': product_name,  # Human-readable transformed name
                 'ProductName': product_name,
-                'Description': product_name,
+                'Description': product_name,  # Use transformed name as description too
                 'Vendor': vendor,
                 'Product Brand': brand or vendor,
                 'Product Type*': product_type,
@@ -2021,7 +2023,9 @@ class JSONMatcher:
     def _create_product_from_json(self, json_item, global_vendor):
         """Create a product object from JSON data only."""
         try:
-            product_name = str(json_item.get("product_name", "")).strip()
+            raw_product_name = str(json_item.get("product_name", "")).strip()
+            # CRITICAL FIX: Transform SKU to human-readable name
+            product_name = transform_sku_to_readable_name(raw_product_name) or raw_product_name
             vendor = global_vendor if global_vendor else str(json_item.get("vendor", "")).strip()
             brand = str(json_item.get("brand", "")).strip()
             # Try multiple possible product type columns in order of preference
@@ -2037,8 +2041,8 @@ class JSONMatcher:
             )
             raw_product_type = str(raw_product_type).strip()
             
-            # Apply product name-based overrides to Column C value
-            product_type = self._apply_product_name_overrides(raw_product_type, product_name, json_item)
+            # Apply product name-based overrides to Column C value (use raw name for pattern matching)
+            product_type = self._apply_product_name_overrides(raw_product_type, raw_product_name, json_item)
             
             # Log product type source for debugging
             if product_type:
