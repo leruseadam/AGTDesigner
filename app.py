@@ -8965,9 +8965,10 @@ def json_match():
         
         logging.info("JSON matcher created successfully")
         
-        # Perform JSON matching
-        matched_products = json_matcher.fetch_and_match(url)
-        logging.info(f"JSON matching returned {len(matched_products) if matched_products else 0} products")
+        # Perform JSON matching with Product Database integration
+        # CRITICAL FIX: Use fetch_and_match_with_product_db to get actual database descriptions
+        matched_products = json_matcher.fetch_and_match_with_product_db(url)
+        logging.info(f"JSON matching (with Product DB) returned {len(matched_products) if matched_products else 0} products")
 
         # Persist JSON-matched results for downstream flows (cache + session)
         try:
