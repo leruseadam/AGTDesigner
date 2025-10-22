@@ -3589,12 +3589,19 @@ class JSONMatcher:
                                 db_lookup_count += 1
                                 logging.info(f"✅ Product/Strain Database match found for: {product_name}")
                                 # Use database info to override JSON data
-                                # CRITICAL FIX: Use Description for human-readable names, Product Name* contains SKU codes
-                                description = db_info.get("Description", "") or db_info.get("description", "")
+                                # CRITICAL FIX: Use Description column from database FIRST
+                                # Priority: Database Description > Transformed SKU > Raw SKU
                                 raw_name = db_info.get("Product Name*", "") or db_info.get("product_name", product_name)
-                                product_name = (description or  # Human-readable description
-                                              transform_sku_to_readable_name(raw_name) or # Transform SKU to readable
-                                              raw_name) # Raw SKU as last resort
+                                db_description = db_info.get("Description", "") or db_info.get("description", "")
+                                
+                                # Use database Description if it exists and is different from SKU
+                                if db_description and db_description != raw_name:
+                                    product_name = db_description
+                                    logging.info(f"📝 Using database Description: '{product_name}'")
+                                else:
+                                    # Fall back to transforming the SKU
+                                    product_name = transform_sku_to_readable_name(raw_name) or raw_name
+                                    logging.info(f"📝 Using transformed SKU: '{product_name}'")
                                 vendor = db_info.get("Vendor/Supplier*", "") or db_info.get("vendor", vendor)
                                 brand = db_info.get("Product Brand", "") or db_info.get("brand", "")
                                 product_type = db_info.get("Product Type*", "") or db_info.get("product_type", "")
@@ -6099,12 +6106,19 @@ class JSONMatcher:
             
             # Create tag using database information - prioritize Product Name* from database
             # Always use Product Name* from database if available, otherwise use Description
-            # CRITICAL FIX: Use Description for human-readable names, Product Name* contains SKU codes
-            # Priority: Description (human-readable) > Transformed SKU > Raw SKU
+            # CRITICAL FIX: Use Description column from database FIRST (highest priority)
+            # Priority: Database Description > Transformed SKU > Raw SKU
             raw_product_name = db_info.get("Product Name*", "") or db_info.get("ProductName", "")
-            primary_product_name = (db_info.get("Description", "") or   # Human-readable description
-                                  transform_sku_to_readable_name(raw_product_name) or # Transform SKU to readable
-                                  raw_product_name) # Raw SKU code as last resort
+            db_description = db_info.get("Description", "")
+            
+            # Use database Description if it exists and is not just the SKU
+            if db_description and db_description != raw_product_name:
+                primary_product_name = db_description
+                logging.info(f"📝 Using database Description: '{primary_product_name}'")
+            else:
+                # Fall back to transforming the SKU
+                primary_product_name = transform_sku_to_readable_name(raw_product_name) or raw_product_name
+                logging.info(f"📝 Using transformed SKU: '{primary_product_name}'")
             
             if not primary_product_name and strain and lineage and weight and units:
                 # Strain-based lookup: create formatted description
@@ -6942,12 +6956,19 @@ class JSONMatcher:
         """
         try:
             # Extract data from educated guess
-            # CRITICAL FIX: Use Description for human-readable names, not SKU codes
-            description = educated_guess.get("description", "") or educated_guess.get("Description", "")
+            # CRITICAL FIX: Use Description column from database FIRST
+            # Priority: Database Description > Transformed SKU > Raw SKU
             raw_name = educated_guess.get("product_name", "") or educated_guess.get("Product Name*", "")
-            product_name = (description or  # Human-readable description
-                          transform_sku_to_readable_name(raw_name) or # Transform SKU to readable
-                          raw_name) # Raw name as last resort
+            db_description = educated_guess.get("description", "") or educated_guess.get("Description", "")
+            
+            # Use database Description if it exists and is different from SKU
+            if db_description and db_description != raw_name:
+                product_name = db_description
+                logging.info(f"📝 Using database Description: '{product_name}'")
+            else:
+                # Fall back to transforming the SKU
+                product_name = transform_sku_to_readable_name(raw_name) or raw_name
+                logging.info(f"📝 Using transformed SKU: '{product_name}'")
             brand = educated_guess.get("brand", "") or educated_guess.get("Product Brand", "")
             product_type = educated_guess.get("product_type", "") or educated_guess.get("Product Type*", "")
             strain = educated_guess.get("strain_name", "") or educated_guess.get("Product Strain", "")
