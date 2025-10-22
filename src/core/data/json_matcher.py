@@ -6141,7 +6141,7 @@ class JSONMatcher:
                 'ProductBrand': brand,
                 'Product Strain': strain,
                 'Strain Name': strain,
-                'Lineage': self._determine_lineage_for_product(product_type, lineage, product_name),
+                'Lineage': self._determine_lineage_for_product(product_type, lineage, primary_product_name),
                 'Weight*': f"{weight or '1'} {units or 'g'}",
                 'Weight': f"{weight or '1'} {units or 'g'}",
                 'Quantity*': "1",
@@ -6198,7 +6198,7 @@ class JSONMatcher:
                 # Additional fields for consistency
                 'vendor': vendor,
                 'productBrand': brand,
-                'lineage': self._determine_lineage_for_product(product_type, lineage, product_name),
+                'lineage': self._determine_lineage_for_product(product_type, lineage, primary_product_name),
                 'productType': product_type or "Unknown",
                 'weight': weight or "1",
                 'units': units or "g",
@@ -6618,11 +6618,15 @@ class JSONMatcher:
             logging.info(f"🔍 DEBUG: Full item dict: {item}")
             
             # Extract basic information - try multiple field name variations
-            product_name = (product.get('Product Name*', '') or 
-                          product.get('ProductName', '') or 
-                          product.get('Description', '') or
-                          product.get('product_name', '') or
-                          product.get('name', ''))
+            # CRITICAL FIX: Transform SKU codes to human-readable names
+            raw_name = (product.get('Product Name*', '') or 
+                       product.get('ProductName', '') or 
+                       product.get('product_name', '') or
+                       product.get('name', ''))
+            description = product.get('Description', '')
+            product_name = (description or  # Use Description if available
+                          transform_sku_to_readable_name(raw_name) or # Transform SKU to readable
+                          raw_name)  # Raw name as fallback
             
             vendor = (product.get('Vendor', '') or 
                      product.get('Vendor/Supplier*', '') or 
@@ -6648,7 +6652,9 @@ class JSONMatcher:
             
             # DEBUG: Log extracted values
             logging.info(f"🔍 DEBUG: Extracted values - product_name: '{product_name}', brand: '{brand}', product_type: '{product_type}', vendor: '{vendor}', weight: '{weight}', units: '{units}'")
-            description = product.get('Description', '') or product_name
+            # Description already set above, just ensure it has a value
+            if not description:
+                description = product_name
             weight = (product.get('Weight*', '') or 
                      product.get('Weight', '') or 
                      item.get('weight', '') or
