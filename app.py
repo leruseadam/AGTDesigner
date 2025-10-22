@@ -8973,7 +8973,15 @@ def json_match():
         try:
             total_matches = len(matched_products) if matched_products else 0
             # Extract product names for session-selected tags
+            # CRITICAL FIX: Product Name* should contain transformed human-readable names
             matched_names = [p.get('Product Name*', p.get('ProductName', '')) for p in matched_products if isinstance(p, dict)]
+            
+            # DEBUG: Log what Product Name* contains
+            if matched_products and len(matched_products) > 0:
+                first_product = matched_products[0] if isinstance(matched_products[0], dict) else {}
+                logging.info(f"📝 DEBUG: First matched product 'Product Name*' = '{first_product.get('Product Name*', 'NOT SET')}'")
+                logging.info(f"📝 DEBUG: First matched product 'Description' = '{first_product.get('Description', 'NOT SET')}'")
+                logging.info(f"📝 DEBUG: First matched_name = '{matched_names[0] if matched_names else 'NONE'}'")
 
             # Store available_tags cache with these matched products
             available_cache_key = get_session_cache_key('available_tags')
@@ -12851,25 +12859,23 @@ def debug_font_config():
 def performance_status():
     """Get current performance status and statistics."""
     try:
-        if not PERFORMANCE_ENABLED:
-            return jsonify({
-                "status": "disabled",
-                "message": "Performance optimizations not available"
-            })
-        
+        # Try to import performance optimizations
         try:
             from performance_optimizations import get_memory_usage, _memory_cache, _cache_timestamps
         except ImportError:
             # Fallback if performance_optimizations is not available
             def get_memory_usage():
-                if PSUTIL_AVAILABLE:
+                try:
+                    import psutil
+                    process = psutil.Process()
+                    return process.memory_info().rss / 1024 / 1024
+                except:
+                    # If psutil not available, use basic resource module
                     try:
-                        import psutil
-                        process = psutil.Process()
-                        return process.memory_info().rss / 1024 / 1024
+                        import resource
+                        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024  # Convert KB to MB
                     except:
                         return 0
-                return get_memory_usage_fallback()
             _memory_cache = {}
             _cache_timestamps = {}
         
@@ -12881,6 +12887,7 @@ def performance_status():
             "memory_usage_mb": round(memory_mb, 2),
             "cache_entries": cache_size,
             "is_production": IS_PRODUCTION,
+            "performance_module_loaded": PERFORMANCE_ENABLED,
             "chunk_size_limit": CHUNK_SIZE_LIMIT,
             "max_processing_time": MAX_PROCESSING_TIME_PER_CHUNK
         })
