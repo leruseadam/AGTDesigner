@@ -23,6 +23,30 @@ _DIGIT_UNIT_RE = re.compile(r"\b\d+(?:g|mg)\b")
 _NON_WORD_RE = re.compile(r"[^\w\s-]")
 _SPLIT_RE = re.compile(r"[-\s]+")
 
+def extract_keywords_from_sku(sku: str) -> set:
+    """
+    Extract searchable keywords from SKU for matching against database.
+    Example: 'BALL_SAT_CARAMEL_10pk' -> {'ball', 'sativa', 'caramel', '10pk'}
+    """
+    if not sku or not isinstance(sku, str):
+        return set()
+    
+    keywords = set()
+    parts = sku.split('_')
+    
+    # Mappings for abbreviations
+    lineage_map = {'SAT': 'sativa', 'IND': 'indica', 'MIXED': 'mixed'}
+    product_map = {'BALL': 'ball', 'BITE': 'bite', 'CHEW': 'chew', 'CAPS': 'capsule', 
+                   'TINCS': 'tincture', 'JAR': 'jar', 'SQUEEZE': 'squeeze', 'ROLL': 'roll'}
+    
+    for part in parts:
+        part_lower = part.lower()
+        # Add the expanded version if it's an abbreviation
+        keywords.add(lineage_map.get(part.upper(), part_lower))
+        keywords.add(product_map.get(part.upper(), part_lower))
+    
+    return keywords
+
 def transform_sku_to_readable_name(sku: str) -> str:
     """
     Transform SKU codes like 'BALL_SAT_CARAMEL_10pk' into human-readable names
@@ -3585,6 +3609,29 @@ class JSONMatcher:
                                         
                                         logging.info(f"✅ AI-Powered Strain Database match found for: {best_match.strain_name} -> {strain_info.get('canonical_lineage', 'HYBRID')}")
                             
+                            # If no database match yet, try keyword-based search for SKU codes
+                            if not db_info and '_' in product_name:
+                                # This looks like a SKU - try to find matching product in database
+                                keywords = extract_keywords_from_sku(product_name)
+                                if keywords:
+                                    logging.info(f"🔍 Searching database with SKU keywords: {keywords}")
+                                    # Search database for products containing these keywords
+                                    try:
+                                        db_products = product_db.get_all_products()
+                                        for db_product in db_products:
+                                            db_name = str(db_product.get('Product Name*', '')).lower()
+                                            db_desc = str(db_product.get('Description', '')).lower()
+                                            search_text = f"{db_name} {db_desc}"
+                                            
+                                            # Check if most keywords match
+                                            matches = sum(1 for kw in keywords if kw in search_text)
+                                            if matches >= len(keywords) * 0.6:  # 60% keyword match threshold
+                                                db_info = db_product
+                                                logging.info(f"✅ SKU keyword match found: '{product_name}' → '{db_product.get('Product Name*', '')}'")
+                                                break
+                                    except Exception as search_error:
+                                        logging.warning(f"SKU keyword search failed: {search_error}")
+                            
                             if db_info:
                                 db_lookup_count += 1
                                 logging.info(f"✅ Product/Strain Database match found for: {product_name}")
@@ -3594,8 +3641,8 @@ class JSONMatcher:
                                 raw_name = db_info.get("Product Name*", "") or db_info.get("product_name", product_name)
                                 db_description = db_info.get("Description", "") or db_info.get("description", "")
                                 
-                                # Use database Description if it exists and is different from SKU
-                                if db_description and db_description != raw_name:
+                                # ALWAYS use database Description when we have a database match
+                                if db_description:
                                     product_name = db_description
                                     logging.info(f"📝 Using database Description: '{product_name}'")
                                 else:
