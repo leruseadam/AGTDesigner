@@ -6245,11 +6245,15 @@ class JSONMatcher:
             ai_match_type = db_info.get("ai_match_type", "unknown")
             
             logging.info(f"🎯 Creating tag with DATABASE MATCHED VALUES:")
+            logging.info(f"   Product Name*: {primary_product_name} (from database)")
+            logging.info(f"   Description: {description} (from database)")
+            logging.info(f"   Price: {price} (from database)")
+            logging.info(f"   Weight: {weight}{units} (from database)")
+            logging.info(f"   Product Type: {product_type} (from database)")
+            logging.info(f"   Brand: {brand} (from database)")
+            logging.info(f"   Vendor: {vendor} (from database)")
             logging.info(f"   Strain: {strain} (from database)")
             logging.info(f"   Lineage: {lineage} (from database)")
-            logging.info(f"   Product Type: {product_type} (from database)")
-            logging.info(f"   Weight: {weight}{units} (from database)")
-            logging.info(f"   Description: {description} (from database)")
             logging.info(f"   AI Match Score: {ai_match_score:.3f}")
             logging.info(f"   AI Confidence: {ai_confidence}")
             logging.info(f"   AI Match Type: {ai_match_type}")
@@ -6268,13 +6272,13 @@ class JSONMatcher:
                 'Product Strain': strain,
                 'Strain Name': strain,
                 'Lineage': self._determine_lineage_for_product(product_type, lineage, primary_product_name),
-                'Weight*': f"{weight or '1'} {units or 'g'}",
-                'Weight': f"{weight or '1'} {units or 'g'}",
+                'Weight*': f"{weight} {units}" if weight and units else (weight or ''),
+                'Weight': f"{weight} {units}" if weight and units else (weight or ''),
                 'Quantity*': "1",
                 'Quantity': "1",
-                'Units': units or "g",
-                'Price': price or "25",
-                'Price* (Tier Name for Bulk)': price or "25",
+                'Units': units or "",
+                'Price': price or "",  # Use database price, no fallback
+                'Price* (Tier Name for Bulk)': price or "",  # Use database price, no fallback
                 
                 # Enhanced fields using database information
                 'State': 'active',
@@ -6746,9 +6750,9 @@ class JSONMatcher:
             # Extract basic information - try multiple field name variations
             # CRITICAL FIX: Transform SKU codes to human-readable names
             raw_name = (product.get('Product Name*', '') or 
-                       product.get('ProductName', '') or 
-                       product.get('product_name', '') or
-                       product.get('name', ''))
+                          product.get('ProductName', '') or 
+                          product.get('product_name', '') or
+                          product.get('name', ''))
             description = product.get('Description', '')
             product_name = (description or  # Use Description if available
                           transform_sku_to_readable_name(raw_name) or # Transform SKU to readable
