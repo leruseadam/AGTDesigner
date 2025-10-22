@@ -6672,6 +6672,16 @@ def search_products():
         vendor = request.args.get('vendor', '')
         search_term = request.args.get('q', '')
         
+        # Get filter parameters
+        brand_filter = request.args.get('brand', '')
+        product_type_filter = request.args.get('productType', '')
+        lineage_filter = request.args.get('lineage', '')
+        weight_filter = request.args.get('weight', '')
+        doh_filter = request.args.get('doh', '')
+        high_cbd_filter = request.args.get('highCbd', '')
+        
+        logging.info(f"Search filters - brand: {brand_filter}, productType: {product_type_filter}, lineage: {lineage_filter}, weight: {weight_filter}, doh: {doh_filter}, highCbd: {high_cbd_filter}")
+        
         if not vendor:
             return jsonify({'error': 'Vendor parameter is required'}), 400
         
@@ -6753,6 +6763,68 @@ def search_products():
                 # Apply search filter
                 filtered_df = vendor_filtered_df[search_mask].copy()
                 logging.info(f"After search term '{search_term}', found {len(filtered_df)} rows")
+            
+            # Apply additional filters
+            if brand_filter and brand_filter.strip() and brand_col:
+                brand_mask = filtered_df[brand_col].astype(str).str.lower().str.strip() == brand_filter.lower().strip()
+                filtered_df = filtered_df[brand_mask].copy()
+                logging.info(f"After brand filter '{brand_filter}', found {len(filtered_df)} rows")
+            
+            if product_type_filter and product_type_filter.strip() and product_type_col:
+                type_mask = filtered_df[product_type_col].astype(str).str.lower().str.strip() == product_type_filter.lower().strip()
+                filtered_df = filtered_df[type_mask].copy()
+                logging.info(f"After product type filter '{product_type_filter}', found {len(filtered_df)} rows")
+            
+            if lineage_filter and lineage_filter.strip() and lineage_col:
+                lineage_mask = filtered_df[lineage_col].astype(str).str.lower().str.strip() == lineage_filter.lower().strip()
+                filtered_df = filtered_df[lineage_mask].copy()
+                logging.info(f"After lineage filter '{lineage_filter}', found {len(filtered_df)} rows")
+            
+            if weight_filter and weight_filter.strip():
+                # Find weight column (try multiple possible names)
+                weight_col = None
+                for col in ['Weight*', 'Weight', 'CombinedWeight']:
+                    if col in filtered_df.columns:
+                        weight_col = col
+                        break
+                
+                if weight_col:
+                    # Normalize the weight filter for comparison
+                    normalized_filter = weight_filter.lower().strip()
+                    
+                    # Create a mask that checks multiple weight representations
+                    weight_mask = filtered_df[weight_col].astype(str).str.lower().str.strip() == normalized_filter
+                    
+                    # Also check if there's a Units column and combine weight+units
+                    if 'Units' in filtered_df.columns:
+                        combined_weight = (filtered_df[weight_col].astype(str) + filtered_df['Units'].astype(str)).str.lower().str.strip()
+                        weight_mask = weight_mask | (combined_weight == normalized_filter)
+                    
+                    filtered_df = filtered_df[weight_mask].copy()
+                    logging.info(f"After weight filter '{weight_filter}', found {len(filtered_df)} rows")
+            
+            if doh_filter and doh_filter.strip():
+                # Find DOH column
+                doh_col = None
+                for col in ['DOH', 'doh']:
+                    if col in filtered_df.columns:
+                        doh_col = col
+                        break
+                
+                if doh_col:
+                    doh_mask = filtered_df[doh_col].astype(str).str.upper().str.strip() == doh_filter.upper().strip()
+                    filtered_df = filtered_df[doh_mask].copy()
+                    logging.info(f"After DOH filter '{doh_filter}', found {len(filtered_df)} rows")
+            
+            if high_cbd_filter and high_cbd_filter.strip() and product_type_col:
+                if high_cbd_filter == 'High CBD Products':
+                    cbd_mask = filtered_df[product_type_col].astype(str).str.lower().str.strip().str.startswith('high cbd')
+                    filtered_df = filtered_df[cbd_mask].copy()
+                    logging.info(f"After High CBD filter (only High CBD), found {len(filtered_df)} rows")
+                elif high_cbd_filter == 'Non-High CBD Products':
+                    cbd_mask = ~filtered_df[product_type_col].astype(str).str.lower().str.strip().str.startswith('high cbd')
+                    filtered_df = filtered_df[cbd_mask].copy()
+                    logging.info(f"After High CBD filter (exclude High CBD), found {len(filtered_df)} rows")
             
             if len(filtered_df) == 0:
                 logging.info(f"No results found for vendor '{vendor}' and search term '{search_term}'")
