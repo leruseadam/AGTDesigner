@@ -61,6 +61,12 @@ class PerformanceOptimizer {
         
         try {
             const response = await fetch(url, options);
+            
+            // Check if response is ok
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
             const data = await response.json();
             
             // Store in cache
@@ -74,7 +80,11 @@ class PerformanceOptimizer {
             
             return data;
         } catch (error) {
-            console.error('Cached fetch error:', error);
+            // Return cached data if available, even if expired
+            if (cached) {
+                console.warn('Using expired cache due to fetch error:', error.message);
+                return cached.data;
+            }
             throw error;
         }
     }
@@ -288,11 +298,15 @@ class PerformanceOptimizer {
      */
     async getPerformanceMetrics() {
         try {
-            const response = await this.cachedFetch('/api/performance/status');
+            const response = await this.cachedFetch('/api/performance/status', {}, 10000); // 10 second cache
             return response;
         } catch (error) {
-            console.error('Failed to get performance metrics:', error);
-            return null;
+            // Return a graceful fallback response instead of null
+            return {
+                status: 'unavailable',
+                message: 'Performance metrics endpoint is not responding',
+                error: error.message
+            };
         }
     }
 
