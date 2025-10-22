@@ -23,6 +23,86 @@ _DIGIT_UNIT_RE = re.compile(r"\b\d+(?:g|mg)\b")
 _NON_WORD_RE = re.compile(r"[^\w\s-]")
 _SPLIT_RE = re.compile(r"[-\s]+")
 
+def transform_sku_to_readable_name(sku: str) -> str:
+    """
+    Transform SKU codes like 'BALL_SAT_CARAMEL_10pk' into human-readable names
+    like 'Sativa Salted Caramel Ball(s) - 10pk'.
+    """
+    if not sku or not isinstance(sku, str):
+        return sku
+    
+    # Parse the SKU format: PRODUCTTYPE_LINEAGE_FLAVOR_SIZE
+    parts = sku.split('_')
+    if len(parts) < 2:
+        return sku  # Not a recognizable SKU format
+    
+    # Product type mapping
+    product_type_map = {
+        'BALL': 'Ball(s)',
+        'BITE': 'Bite(s)',
+        'CHEW': 'Chew(s)',
+        'CAPS': 'Capsule(s)',
+        'TINCS': 'Tincture',
+        'JAR': 'Jar',
+        'SQUEEZE': 'Squeeze Tube',
+        'ROLL': 'Roll-On'
+    }
+    
+    # Lineage mapping
+    lineage_map = {
+        'SAT': 'Sativa',
+        'IND': 'Indica',
+        'MIXED': 'Mixed'
+    }
+    
+    # Extract components
+    product_type = parts[0]
+    lineage = parts[1] if len(parts) > 1 else ''
+    
+    # Get human-readable product type
+    readable_type = product_type_map.get(product_type, product_type.title())
+    readable_lineage = lineage_map.get(lineage, lineage.title())
+    
+    # Get flavor/description parts (everything except last part which is usually size)
+    flavor_parts = []
+    size = ''
+    
+    for i in range(2, len(parts)):
+        part = parts[i]
+        # Check if this looks like a size indicator
+        if part.endswith('pk') or part.endswith('oz') or part.endswith('mL') or part.upper() == 'SINGLE':
+            size = part
+        elif ':' in part:  # Ratio like '1:1' or '1:1:1'
+            flavor_parts.append(part)
+        else:
+            # Clean up flavor names
+            cleaned = part.replace('&', ' & ').replace('CREAM', 'Cream').title()
+            flavor_parts.append(cleaned)
+    
+    # Build the readable name
+    readable_parts = []
+    
+    if readable_lineage:
+        readable_parts.append(readable_lineage)
+    
+    if flavor_parts:
+        readable_parts.append(' '.join(flavor_parts))
+    
+    readable_parts.append(readable_type)
+    
+    # Add size if present
+    if size:
+        if size.upper() == 'SINGLE':
+            size = 'Single'
+        readable_name = ' '.join(readable_parts) + f' - {size}'
+    else:
+        readable_name = ' '.join(readable_parts)
+    
+    # Clean up multiple spaces
+    readable_name = ' '.join(readable_name.split())
+    
+    return readable_name
+
 # Type override lookup
 TYPE_OVERRIDES = {
     "all-in-one": "Vape Cartridge",
@@ -3507,9 +3587,10 @@ class JSONMatcher:
                                 # Use database info to override JSON data
                                 # CRITICAL FIX: Use Description for human-readable names, Product Name* contains SKU codes
                                 description = db_info.get("Description", "") or db_info.get("description", "")
+                                raw_name = db_info.get("Product Name*", "") or db_info.get("product_name", product_name)
                                 product_name = (description or  # Human-readable description
-                                              db_info.get("Product Name*", "") or 
-                                              db_info.get("product_name", product_name))
+                                              transform_sku_to_readable_name(raw_name) or # Transform SKU to readable
+                                              raw_name) # Raw SKU as last resort
                                 vendor = db_info.get("Vendor/Supplier*", "") or db_info.get("vendor", vendor)
                                 brand = db_info.get("Product Brand", "") or db_info.get("brand", "")
                                 product_type = db_info.get("Product Type*", "") or db_info.get("product_type", "")
@@ -6015,10 +6096,11 @@ class JSONMatcher:
             # Create tag using database information - prioritize Product Name* from database
             # Always use Product Name* from database if available, otherwise use Description
             # CRITICAL FIX: Use Description for human-readable names, Product Name* contains SKU codes
-            # Priority: Description (human-readable) > Product Name* (SKU)
+            # Priority: Description (human-readable) > Transformed SKU > Raw SKU
+            raw_product_name = db_info.get("Product Name*", "") or db_info.get("ProductName", "")
             primary_product_name = (db_info.get("Description", "") or   # Human-readable description
-                                  db_info.get("Product Name*", "") or # SKU code as fallback
-                                  db_info.get("ProductName", ""))
+                                  transform_sku_to_readable_name(raw_product_name) or # Transform SKU to readable
+                                  raw_product_name) # Raw SKU code as last resort
             
             if not primary_product_name and strain and lineage and weight and units:
                 # Strain-based lookup: create formatted description
@@ -6852,9 +6934,10 @@ class JSONMatcher:
             # Extract data from educated guess
             # CRITICAL FIX: Use Description for human-readable names, not SKU codes
             description = educated_guess.get("description", "") or educated_guess.get("Description", "")
+            raw_name = educated_guess.get("product_name", "") or educated_guess.get("Product Name*", "")
             product_name = (description or  # Human-readable description
-                          educated_guess.get("product_name", "") or 
-                          educated_guess.get("Product Name*", ""))
+                          transform_sku_to_readable_name(raw_name) or # Transform SKU to readable
+                          raw_name) # Raw name as last resort
             brand = educated_guess.get("brand", "") or educated_guess.get("Product Brand", "")
             product_type = educated_guess.get("product_type", "") or educated_guess.get("Product Type*", "")
             strain = educated_guess.get("strain_name", "") or educated_guess.get("Product Strain", "")
