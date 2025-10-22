@@ -3609,28 +3609,89 @@ class JSONMatcher:
                                         
                                         logging.info(f"✅ AI-Powered Strain Database match found for: {best_match.strain_name} -> {strain_info.get('canonical_lineage', 'HYBRID')}")
                             
-                            # If no database match yet, try keyword-based search for SKU codes
+                            # If no database match yet, try enhanced SKU-based search
                             if not db_info and '_' in product_name:
-                                # This looks like a SKU - try to find matching product in database
-                                keywords = extract_keywords_from_sku(product_name)
-                                if keywords:
-                                    logging.info(f"🔍 Searching database with SKU keywords: {keywords}")
-                                    # Search database for products containing these keywords
-                                    try:
-                                        db_products = product_db.get_all_products()
-                                        for db_product in db_products:
-                                            db_name = str(db_product.get('Product Name*', '')).lower()
-                                            db_desc = str(db_product.get('Description', '')).lower()
-                                            search_text = f"{db_name} {db_desc}"
+                                # This looks like a SKU - try to find matching product in database using smart search
+                                logging.info(f"🔍 SKU detected: '{product_name}' - attempting enhanced database search")
+                                
+                                try:
+                                    # Parse SKU to create search terms
+                                    parts = product_name.split('_')
+                                    search_terms = []
+                                    
+                                    # Map SKU components to searchable terms
+                                    if len(parts) >= 2:
+                                        # Product type
+                                        if parts[0] in ['BALL', 'ball']:
+                                            search_terms.extend(['ball', 'balls'])
+                                        elif parts[0] in ['BITE', 'bite']:
+                                            search_terms.extend(['bite', 'bites'])
+                                        elif parts[0] in ['CHEW', 'chew']:
+                                            search_terms.extend(['chew', 'chews'])
+                                        
+                                        # Lineage
+                                        if parts[1] in ['SAT', 'sat']:
+                                            search_terms.append('sativa')
+                                        elif parts[1] in ['IND', 'ind']:
+                                            search_terms.append('indica')
+                                        
+                                        # Flavor/descriptors
+                                        for i in range(2, len(parts)):
+                                            part = parts[i].lower()
+                                            if not part.endswith('pk') and part not in ['single']:
+                                                search_terms.append(part)
+                                    
+                                    # Search database using SQL LIKE for better performance
+                                    if search_terms and hasattr(product_db, '_get_connection'):
+                                        conn = product_db._get_connection()
+                                        cursor = conn.cursor()
+                                        
+                                        # Build WHERE clause with keywords
+                                        where_clauses = []
+                                        for term in search_terms[:3]:  # Use top 3 most important terms
+                                            where_clauses.append(f'("Product Name*" LIKE ? OR "Description" LIKE ?)')
+                                        
+                                        where_sql = ' AND '.join(where_clauses)
+                                        params = []
+                                        for term in search_terms[:3]:
+                                            params.extend([f'%{term}%', f'%{term}%'])
+                                        
+                                        # Add brand filter if we know it's Ceres
+                                        where_sql += ' AND "Product Brand" = ?'
+                                        params.append('Ceres')
+                                        
+                                        sql = f'''
+                                            SELECT "Product Name*", "Description", "Product Brand", "Lineage", 
+                                                   "Product Type*", "Weight*", "Units", "Price", "Vendor/Supplier*",
+                                                   "Product Strain"
+                                            FROM products
+                                            WHERE {where_sql}
+                                            LIMIT 1
+                                        '''
+                                        
+                                        cursor.execute(sql, params)
+                                        result = cursor.fetchone()
+                                        
+                                        if result:
+                                            # Create db_info dict from result
+                                            db_info = {
+                                                'Product Name*': result[0],
+                                                'Description': result[1],
+                                                'Product Brand': result[2],
+                                                'Lineage': result[3],
+                                                'Product Type*': result[4],
+                                                'Weight*': result[5],
+                                                'Units': result[6],
+                                                'Price': result[7],
+                                                'Vendor/Supplier*': result[8],
+                                                'Product Strain': result[9]
+                                            }
+                                            logging.info(f"✅ SKU search found database match: '{product_name}' → '{result[1]}'")
+                                        else:
+                                            logging.info(f"⚠️  No database match found for SKU '{product_name}' with search terms: {search_terms[:3]}")
                                             
-                                            # Check if most keywords match
-                                            matches = sum(1 for kw in keywords if kw in search_text)
-                                            if matches >= len(keywords) * 0.6:  # 60% keyword match threshold
-                                                db_info = db_product
-                                                logging.info(f"✅ SKU keyword match found: '{product_name}' → '{db_product.get('Product Name*', '')}'")
-                                                break
-                                    except Exception as search_error:
-                                        logging.warning(f"SKU keyword search failed: {search_error}")
+                                except Exception as search_error:
+                                    logging.warning(f"SKU database search failed: {search_error}")
                             
                             if db_info:
                                 db_lookup_count += 1
