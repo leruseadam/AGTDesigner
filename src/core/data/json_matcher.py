@@ -6131,6 +6131,13 @@ class JSONMatcher:
         # Import constants to check product type classification
         from src.core.constants import CLASSIC_TYPES
         
+        logging.info(f"🧬 LINEAGE DEBUG: product_type='{product_type}', existing_lineage='{existing_lineage}', product_name='{product_name}', product_strain='{product_strain}'")
+        logging.info(f"🧬 CLASSIC_TYPES: {CLASSIC_TYPES}")
+        
+        # Check if this is a classic product type
+        is_classic = product_type and product_type.strip().lower() in CLASSIC_TYPES
+        logging.info(f"🧬 IS_CLASSIC: {is_classic} (product_type.lower()='{product_type.lower() if product_type else 'None'}')")
+        
         # CRITICAL FIX: Check for explicit lineage indicators FIRST, regardless of product type
         # This ensures JSON matched tags like "Indica Salted Caramel" get proper lineage
         if product_name:
@@ -6177,7 +6184,7 @@ class JSONMatcher:
                         return 'CBD'
         
         # Check if this is a classic product type
-        if product_type and product_type.strip().lower() in CLASSIC_TYPES:
+        if is_classic:
             # Classic types (flower, pre-roll, concentrate, etc.) can use existing lineage or default to HYBRID
             result_lineage = existing_lineage or "HYBRID"
             logging.info(f"🧬 CLASSIC TYPE: '{product_type}' -> '{result_lineage}' (existing: '{existing_lineage}')")
