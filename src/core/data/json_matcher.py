@@ -6115,7 +6115,7 @@ class JSONMatcher:
             # Fallback to simple product name
             return product_name.strip() if product_name else "Unknown Product"
 
-    def _determine_lineage_for_product(self, product_type: str, existing_lineage: str, product_name: str = "") -> str:
+    def _determine_lineage_for_product(self, product_type: str, existing_lineage: str, product_name: str = "", product_strain: str = "") -> str:
         """
         Determine the appropriate lineage for a product based on its type.
         
@@ -6123,6 +6123,7 @@ class JSONMatcher:
             product_type: The product type (e.g., "edible (solid)", "flower", etc.)
             existing_lineage: Any existing lineage from the database
             product_name: The product name to check for explicit lineage indicators
+            product_strain: The product strain to check for CBD indicators
             
         Returns:
             The appropriate lineage string
@@ -6151,6 +6152,25 @@ class JSONMatcher:
                         return 'MIXED'
                 else:
                     return 'CBD'
+        
+        # Check Product Strain for CBD indicators (same logic as Excel processor)
+        if product_strain:
+            strain_lower = product_strain.lower()
+            if 'cbd blend' in strain_lower or 'cbd' in strain_lower:
+                # For nonclassic types, use Product Strain to determine CBD lineage
+                if product_type and product_type.strip().lower() not in CLASSIC_TYPES:
+                    # Define edible types for more conservative CBD assignment
+                    edible_types = ['edible (solid)', 'edible (liquid)', 'high cbd edible liquid', 'tincture', 'topical', 'capsule']
+                    if product_type.strip().lower() in edible_types:
+                        # For edibles, only assign CBD if explicitly high-CBD
+                        if product_name and ('high cbd' in product_name.lower() or 
+                                           ('cbd' in product_name.lower() and any(word in product_name.lower() for word in ['high', 'pure', 'isolate']))):
+                            return 'CBD'
+                        else:
+                            return 'MIXED'
+                    else:
+                        # Non-edibles with CBD strain get CBD lineage
+                        return 'CBD'
         
         # Check if this is a classic product type
         if product_type and product_type.strip().lower() in CLASSIC_TYPES:
@@ -6273,7 +6293,7 @@ class JSONMatcher:
                 'ProductBrand': brand,
                 'Product Strain': strain,
                 'Strain Name': strain,
-                'Lineage': self._determine_lineage_for_product(product_type, lineage, primary_product_name),
+                'Lineage': self._determine_lineage_for_product(product_type, lineage, primary_product_name, strain),
                 'Weight*': f"{weight} {units}" if weight and units else (weight or ''),
                 'Weight': f"{weight} {units}" if weight and units else (weight or ''),
                 'Quantity*': "1",
@@ -6330,7 +6350,7 @@ class JSONMatcher:
                 # Additional fields for consistency
                 'vendor': vendor,
                 'productBrand': brand,
-                'lineage': self._determine_lineage_for_product(product_type, lineage, primary_product_name),
+                'lineage': self._determine_lineage_for_product(product_type, lineage, primary_product_name, strain),
                 'productType': product_type or "Unknown",
                 'weight': weight or "1",
                 'units': units or "g",
@@ -6834,7 +6854,7 @@ class JSONMatcher:
             thc = product.get('THC test result', '') or product.get('THC Content', '')
             cbd = product.get('CBD test result', '') or product.get('CBD Content', '')
             strain = product.get('Product Strain', '') or product.get('Strain', '')
-            lineage = product.get('Lineage', '') or self._determine_lineage_for_product(product_type, '', product_name)
+            lineage = product.get('Lineage', '') or self._determine_lineage_for_product(product_type, '', product_name, strain)
             
             # Get DOH field: try multiple variations, then blank if not found
             doh = (product.get('DOH', '') or 
