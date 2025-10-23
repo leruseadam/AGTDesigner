@@ -6167,8 +6167,8 @@ class JSONMatcher:
                 logging.info(f"🧬 CBD STRAIN DETECTED: '{product_strain}' for product type '{product_type}'")
                 # For nonclassic types, use Product Strain to determine CBD lineage
                 if product_type and product_type.strip().lower() not in CLASSIC_TYPES:
-                    # Define edible types for more conservative CBD assignment
-                    edible_types = ['edible (solid)', 'edible (liquid)', 'high cbd edible liquid', 'tincture', 'topical', 'capsule']
+                    # Define edible types for more conservative CBD assignment (exclude topical)
+                    edible_types = ['edible (solid)', 'edible (liquid)', 'high cbd edible liquid', 'tincture', 'capsule']
                     if product_type.strip().lower() in edible_types:
                         # For edibles, only assign CBD if explicitly high-CBD
                         if product_name and ('high cbd' in product_name.lower() or 
@@ -6179,8 +6179,8 @@ class JSONMatcher:
                             logging.info(f"🧬 REGULAR EDIBLE WITH CBD STRAIN: '{product_name}' -> 'MIXED'")
                             return 'MIXED'
                     else:
-                        # Non-edibles with CBD strain get CBD lineage
-                        logging.info(f"🧬 NON-EDIBLE WITH CBD STRAIN: '{product_name}' -> 'CBD'")
+                        # Non-edibles (including topicals) with CBD strain get CBD lineage
+                        logging.info(f"🧬 NON-EDIBLE WITH CBD STRAIN: '{product_name}' (type: {product_type}) -> 'CBD'")
                         return 'CBD'
         
         # Check if this is a classic product type
