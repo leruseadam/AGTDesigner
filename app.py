@@ -9244,7 +9244,7 @@ def json_match():
         response_data = {
             'success': True,
             'matched_count': len(matched_products),
-            'matched_names': [p.get('Product Name*', p.get('ProductName', '')) for p in matched_products if isinstance(p, dict)],
+            'matched_names': matched_names,  # Use the same matched_names logic as session persistence
             'available_tags': matched_products,
             'selected_tags': matched_products,
             'json_matched_tags': matched_products,

@@ -7717,6 +7717,9 @@ window.performJsonMatch = function() {
         
         // Populate matched products list with note about where they were added
         if (matchResult.matched_names && matchResult.matched_names.length > 0) {
+            // Get the full matched products data to access lineage information
+            const matchedProductsData = matchResult.json_matched_tags || matchResult.available_tags || [];
+            
             matchedProductsList.innerHTML = `
                 <div class="alert alert-success mb-3">
                     <strong>Success!</strong> ${matchResult.matched_count} products were matched and added to the <strong>Available Tags</strong> list.
@@ -7724,7 +7727,27 @@ window.performJsonMatch = function() {
                 </div>
                 <div class="mb-2"><strong>Matched Products:</strong></div>
                 ${matchResult.matched_names
-                    .map(product => `<div class="mb-1">• ${product}</div>`)
+                    .map((productName, index) => {
+                        // Find the corresponding product data for lineage information
+                        const productData = matchedProductsData[index] || {};
+                        const lineage = productData.Lineage || productData.lineage || 'MIXED';
+                        
+                        // Apply the same lineage color logic as tags
+                        let lineageClass = '';
+                        if (lineage === 'CBD' || lineage === 'CBD_BLEND') {
+                            lineageClass = 'cbd-lineage';
+                        } else if (lineage === 'MIXED') {
+                            lineageClass = 'mixed-lineage';
+                        } else if (lineage === 'SATIVA') {
+                            lineageClass = 'sativa-lineage';
+                        } else if (lineage === 'INDICA') {
+                            lineageClass = 'indica-lineage';
+                        } else if (lineage === 'HYBRID') {
+                            lineageClass = 'hybrid-lineage';
+                        }
+                        
+                        return `<div class="mb-1 matched-product ${lineageClass}">• ${productName}</div>`;
+                    })
                     .join('')}
             `;
         } else {

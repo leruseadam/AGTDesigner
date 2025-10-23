@@ -2668,6 +2668,52 @@ img, video, canvas, svg {
     z-index: 1;
   }
 
+  /* Matched product lineage colors for JSON matching results display */
+  .matched-product.cbd-lineage {
+    background: rgba(241, 194, 50, 0.6) !important;
+    border: 1px solid rgba(241, 194, 50, 0.3) !important;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-weight: bold !important;
+    color: #000 !important;
+  }
+  
+  .matched-product.mixed-lineage {
+    background: rgba(0, 33, 245, 0.6) !important;
+    border: 1px solid rgba(0, 33, 245, 0.3) !important;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-weight: bold !important;
+    color: #fff !important;
+  }
+  
+  .matched-product.sativa-lineage {
+    background: rgba(237, 65, 35, 0.6) !important;
+    border: 1px solid rgba(237, 65, 35, 0.3) !important;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-weight: bold !important;
+    color: #fff !important;
+  }
+  
+  .matched-product.indica-lineage {
+    background: rgba(153, 0, 255, 0.6) !important;
+    border: 1px solid rgba(153, 0, 255, 0.3) !important;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-weight: bold !important;
+    color: #fff !important;
+  }
+  
+  .matched-product.hybrid-lineage {
+    background: rgba(0, 153, 0, 0.6) !important;
+    border: 1px solid rgba(0, 153, 0, 0.3) !important;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-weight: bold !important;
+    color: #fff !important;
+  }
+
   /* Lineage-specific checkbox colors */
   .tag-item[data-lineage="SATIVA"] .custom-checkbox:checked,
   .tag-item[data-lineage="SATIVA"] .tag-checkbox:checked,
