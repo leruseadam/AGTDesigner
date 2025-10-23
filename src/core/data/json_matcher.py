@@ -3531,26 +3531,126 @@ class JSONMatcher:
                     weight = str(item.get("unit_weight", item.get("weight", ""))).strip()
                     strain = str(item.get("strain_name", item.get("strain", ""))).strip()
                     
-                    # PRIORITY 1: Use comprehensive matching logic (same as Excel) with AI tools
+                    # PRIORITY 1: For SKU-like products, try database search first
+                    db_info = None
+                    if '_' in product_name and product_db:
+                        print(f"🔍 DEBUG: SKU detected '{product_name}', trying database search first")
+                        # Try SKU-based database search first for SKU products
+                        try:
+                            # Parse SKU to create search terms
+                            parts = product_name.split('_')
+                            search_terms = []
+                            
+                            # Map SKU components to searchable terms
+                            if len(parts) >= 2:
+                                # Product type
+                                if parts[0] in ['BALL', 'ball']:
+                                    search_terms.extend(['ball', 'balls'])
+                                elif parts[0] in ['BITE', 'bite']:
+                                    search_terms.extend(['bite', 'bites'])
+                                elif parts[0] in ['CHEW', 'chew']:
+                                    search_terms.extend(['chew', 'chews'])
+                                
+                                # Lineage
+                                if parts[1] in ['SAT', 'sat']:
+                                    search_terms.append('sativa')
+                                elif parts[1] in ['IND', 'ind']:
+                                    search_terms.append('indica')
+                                
+                                # Flavor/descriptors
+                                for i in range(2, len(parts)):
+                                    part = parts[i].lower()
+                                    if not part.endswith('pk') and part not in ['single']:
+                                        search_terms.append(part)
+                            
+                            # Search database using SQL LIKE for better performance
+                            if search_terms and hasattr(product_db, '_get_connection'):
+                                logging.info(f"🔍 Generated search terms: {search_terms}")
+                                conn = product_db._get_connection()
+                                cursor = conn.cursor()
+                                
+                                # Build WHERE clause with keywords
+                                where_clauses = []
+                                for term in search_terms[:3]:  # Use top 3 most important terms
+                                    where_clauses.append(f'("Product Name*" LIKE ? OR "Description" LIKE ?)')
+                                
+                                where_sql = ' AND '.join(where_clauses)
+                                params = []
+                                for term in search_terms[:3]:
+                                    params.extend([f'%{term}%', f'%{term}%'])
+                                
+                                # Add brand filter if we know it's Ceres
+                                where_sql += ' AND "Product Brand" = ?'
+                                params.append('Ceres')
+                                
+                                logging.info(f"🔍 SQL WHERE clause: {where_sql}")
+                                logging.info(f"🔍 SQL params: {params}")
+                                
+                                sql = f'''
+                                    SELECT "Product Name*", "Description", "Product Brand", "Lineage", 
+                                           "Product Type*", "Weight*", "Units", "Price", "Vendor/Supplier*",
+                                           "Product Strain"
+                                    FROM products
+                                    WHERE {where_sql}
+                                    AND ("Product Name*" NOT LIKE '%*VOID*%' AND "Description" NOT LIKE '%*VOID*%')
+                                    AND ("Product Name*" NOT LIKE '%trade sample%' AND "Description" NOT LIKE '%trade sample%')
+                                    AND ("Product Name*" NOT LIKE '%sample%' AND "Description" NOT LIKE '%sample%')
+                                    LIMIT 1
+                                '''
+                                
+                                cursor.execute(sql, params)
+                                result = cursor.fetchone()
+                                
+                                if result:
+                                    # Create db_info dict from result
+                                    db_info = {
+                                        'Product Name*': result[0],
+                                        'Description': result[1],
+                                        'Product Brand': result[2],
+                                        'Lineage': result[3],
+                                        'Product Type*': result[4],
+                                        'Weight*': result[5],
+                                        'Units': result[6],
+                                        'Price': result[7],
+                                        'Vendor/Supplier*': result[8],
+                                        'Product Strain': result[9]
+                                    }
+                                    
+                                    # Validate the database match
+                                    if self._is_valid_product(db_info):
+                                        logging.info(f"✅ SKU search found valid database match: '{product_name}' → '{result[1]}'")
+                                        
+                                        # Create tag from database info
+                                        tag = self._create_tag_from_database_info(db_info, vendor)
+                                        all_tags.append(tag)
+                                        matched_count += 1
+                                        print(f"🔍 DEBUG: Added valid database tag for SKU '{product_name}'")
+                                        continue  # Skip Excel matching for this SKU
+                                    else:
+                                        logging.info(f"🚫 SKU search found invalid database match (void/sample): '{product_name}' → '{result[1]}'")
+                                else:
+                                    logging.info(f"⚠️  No database match found for SKU '{product_name}' with search terms: {search_terms[:3]}")
+                                    
+                        except Exception as search_error:
+                            logging.warning(f"SKU database search failed: {search_error}")
+                    
+                    # PRIORITY 2: Use comprehensive matching logic (Excel) if no SKU database match
                     try:
                         # Use the same comprehensive matching logic that was working in the debug output
                         print(f"🔍 DEBUG: Trying comprehensive matching for '{product_name}' (type: {product_type})")
                         matched_products = self._process_item_with_main_matching(item, product_name, vendor, product_type, strain, global_vendor)
                         print(f"🔍 DEBUG: Comprehensive matching returned {len(matched_products)} products")
                         if matched_products:
-                            for product in matched_products:
+                            valid_products = [p for p in matched_products if self._is_valid_product(p)]
+                            if len(valid_products) != len(matched_products):
+                                print(f"🔍 DEBUG: Filtered out {len(matched_products) - len(valid_products)} invalid products (void/sample)")
+                            
+                            for product in valid_products:
                                 tag = self._create_tag_from_product(product, item, global_vendor)
                                 all_tags.append(tag)
                                 matched_count += 1
-                            print(f"🔍 DEBUG: Added {len(matched_products)} tags from comprehensive matching")
-                            
-                            # CRITICAL FIX: Even if Excel matches are found, still try SKU-based database search
-                            # to get proper database descriptions instead of Excel names
-                            if '_' in product_name and product_db:
-                                print(f"🔍 DEBUG: SKU detected in Excel match, trying database search for better descriptions")
-                                # Don't continue - let it fall through to SKU search logic
-                            else:
-                                continue  # Skip the educated guess and JSON processing below
+                            print(f"🔍 DEBUG: Added {len(valid_products)} valid tags from comprehensive matching")
+                            continue  # Skip the educated guess and JSON processing below
                         else:
                             print(f"🔍 DEBUG: No products found by comprehensive matching, falling back to AI-powered database lookup")
                     except Exception as main_match_error:
@@ -3570,6 +3670,11 @@ class JSONMatcher:
                             
                             # First try to find the product directly
                             db_info = product_db.get_product_info(product_name, vendor)
+                            
+                            # Validate db_info if found
+                            if db_info and not self._is_valid_product(db_info):
+                                logging.info(f"🚫 Direct database lookup found invalid product (void/sample): '{product_name}'")
+                                db_info = None  # Reset to None to try AI matching
                             
                             if not db_info:
                                 # Use AI-powered matching to find the best strain match
@@ -3622,133 +3727,9 @@ class JSONMatcher:
                                         logging.info(f"   Score Breakdown: {match_summary['score_breakdown']}")
                                         
                                         logging.info(f"✅ AI-Powered Strain Database match found for: {best_match.strain_name} -> {strain_info.get('canonical_lineage', 'HYBRID')}")
+                        except Exception as ai_error:
+                            logging.warning(f"AI matching error for '{product_name}': {ai_error}")
                             
-                            # If no database match yet, try enhanced SKU-based search
-                            if not db_info and '_' in product_name:
-                                # This looks like a SKU - try to find matching product in database using smart search
-                                logging.info(f"🔍 SKU detected: '{product_name}' - attempting enhanced database search")
-                                logging.info(f"🔍 Product DB available: {product_db is not None}")
-                                if product_db:
-                                    logging.info(f"🔍 Product DB has connection method: {hasattr(product_db, '_get_connection')}")
-                                
-                                try:
-                                    # Parse SKU to create search terms
-                                    parts = product_name.split('_')
-                                    search_terms = []
-                                    
-                                    # Map SKU components to searchable terms
-                                    if len(parts) >= 2:
-                                        # Product type
-                                        if parts[0] in ['BALL', 'ball']:
-                                            search_terms.extend(['ball', 'balls'])
-                                        elif parts[0] in ['BITE', 'bite']:
-                                            search_terms.extend(['bite', 'bites'])
-                                        elif parts[0] in ['CHEW', 'chew']:
-                                            search_terms.extend(['chew', 'chews'])
-                                        
-                                        # Lineage
-                                        if parts[1] in ['SAT', 'sat']:
-                                            search_terms.append('sativa')
-                                        elif parts[1] in ['IND', 'ind']:
-                                            search_terms.append('indica')
-                                        
-                                        # Flavor/descriptors
-                                        for i in range(2, len(parts)):
-                                            part = parts[i].lower()
-                                            if not part.endswith('pk') and part not in ['single']:
-                                                search_terms.append(part)
-                                    
-                                    # Search database using SQL LIKE for better performance
-                                    if search_terms and hasattr(product_db, '_get_connection'):
-                                        logging.info(f"🔍 Generated search terms: {search_terms}")
-                                        conn = product_db._get_connection()
-                                        cursor = conn.cursor()
-                                        
-                                        # Build WHERE clause with keywords
-                                        where_clauses = []
-                                        for term in search_terms[:3]:  # Use top 3 most important terms
-                                            where_clauses.append(f'("Product Name*" LIKE ? OR "Description" LIKE ?)')
-                                        
-                                        where_sql = ' AND '.join(where_clauses)
-                                        params = []
-                                        for term in search_terms[:3]:
-                                            params.extend([f'%{term}%', f'%{term}%'])
-                                        
-                                        # Add brand filter if we know it's Ceres
-                                        where_sql += ' AND "Product Brand" = ?'
-                                        params.append('Ceres')
-                                        
-                                        logging.info(f"🔍 SQL WHERE clause: {where_sql}")
-                                        logging.info(f"🔍 SQL params: {params}")
-                                        
-                                        sql = f'''
-                                            SELECT "Product Name*", "Description", "Product Brand", "Lineage", 
-                                                   "Product Type*", "Weight*", "Units", "Price", "Vendor/Supplier*",
-                                                   "Product Strain"
-                                            FROM products
-                                            WHERE {where_sql}
-                                            LIMIT 1
-                                        '''
-                                        
-                                        cursor.execute(sql, params)
-                                        result = cursor.fetchone()
-                                        
-                                        if result:
-                                            # Create db_info dict from result
-                                            db_info = {
-                                                'Product Name*': result[0],
-                                                'Description': result[1],
-                                                'Product Brand': result[2],
-                                                'Lineage': result[3],
-                                                'Product Type*': result[4],
-                                                'Weight*': result[5],
-                                                'Units': result[6],
-                                                'Price': result[7],
-                                                'Vendor/Supplier*': result[8],
-                                                'Product Strain': result[9]
-                                            }
-                                            logging.info(f"✅ SKU search found database match: '{product_name}' → '{result[1]}'")
-                                        else:
-                                            logging.info(f"⚠️  No database match found for SKU '{product_name}' with search terms: {search_terms[:3]}")
-                                            
-                                except Exception as search_error:
-                                    logging.warning(f"SKU database search failed: {search_error}")
-                            
-                            if db_info:
-                                db_lookup_count += 1
-                                logging.info(f"✅ Product/Strain Database match found for: {product_name}")
-                                # Use database info to override JSON data
-                                # CRITICAL FIX: Use Description column from database FIRST
-                                # Priority: Database Description > Transformed SKU > Raw SKU
-                                raw_name = db_info.get("Product Name*", "") or db_info.get("product_name", product_name)
-                                db_description = db_info.get("Description", "") or db_info.get("description", "")
-                                
-                                # ALWAYS use database Description when we have a database match
-                                if db_description:
-                                    product_name = db_description
-                                    logging.info(f"📝 Using database Description: '{product_name}'")
-                                else:
-                                    # Fall back to transforming the SKU
-                                    product_name = transform_sku_to_readable_name(raw_name) or raw_name
-                                    logging.info(f"📝 Using transformed SKU: '{product_name}'")
-                                vendor = db_info.get("Vendor/Supplier*", "") or db_info.get("vendor", vendor)
-                                brand = db_info.get("Product Brand", "") or db_info.get("brand", "")
-                                product_type = db_info.get("Product Type*", "") or db_info.get("product_type", "")
-                                strain = db_info.get("Product Strain", "") or db_info.get("strain_name", "")
-                                lineage = db_info.get("Lineage", "") or db_info.get("lineage", "")
-                                price = str(db_info.get("Price", "") or db_info.get("price", ""))
-                                weight = str(db_info.get("Weight*", "") or db_info.get("weight", ""))
-                                units = str(db_info.get("Units", "") or db_info.get("units", ""))
-                                
-                                # Create tag using database information - prioritize description over product name
-                                tag = self._create_tag_from_database_info(db_info, vendor)
-                                all_tags.append(tag)
-                                matched_count += 1
-                                continue  # Skip JSON processing since we have database info
-                            else:
-                                logging.debug(f"No Product/Strain Database match found for: {product_name}, proceeding with JSON processing")
-                        except Exception as db_error:
-                            logging.warning(f"Product Database lookup error for '{product_name}': {db_error}")
                     
                     # PRIORITY 3: Try educated guessing if no database match
                     educated_guess = None
@@ -6758,6 +6739,25 @@ class JSONMatcher:
         except Exception as e:
             logging.warning(f"Error creating product from advanced match: {e}")
             return {}
+
+    def _is_valid_product(self, product: Dict) -> bool:
+        """Check if product is valid (not voided or trade sample)."""
+        if not product:
+            return False
+        
+        # Check Product Name* and Description for void/sample indicators
+        product_name = str(product.get('Product Name*', '')).upper()
+        description = str(product.get('Description', '')).upper()
+        
+        # Filter out voided products and trade samples
+        void_indicators = ['*VOID*', 'VOID', 'TRADE SAMPLE', 'SAMPLE']
+        
+        for indicator in void_indicators:
+            if indicator in product_name or indicator in description:
+                logging.info(f"🚫 Filtered out invalid product: {product.get('Product Name*', 'Unknown')} (contains '{indicator}')")
+                return False
+        
+        return True
 
     def _create_tag_from_product(self, product: Dict, item: Dict, global_vendor: str) -> Dict[str, Any]:
         """Create a tag from a product object."""
