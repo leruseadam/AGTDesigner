@@ -3297,6 +3297,9 @@ class JSONMatcher:
         Returns:
             List of product dictionaries
         """
+        logging.info("=" * 80)
+        logging.info("🔍 fetch_and_match_with_product_db called - PRODUCT DATABASE INTEGRATION ENABLED")
+        logging.info("=" * 80)
         logging.debug(f"fetch_and_match_with_product_db called with URL: {url}")
         if not url.lower().startswith("http"):
             raise ValueError("Please provide a valid HTTP URL")
