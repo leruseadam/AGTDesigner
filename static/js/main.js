@@ -7732,6 +7732,9 @@ window.performJsonMatch = function() {
                         const productData = matchedProductsData[index] || {};
                         const lineage = productData.Lineage || productData.lineage || 'MIXED';
                         
+                        // DEBUG: Log lineage information for troubleshooting
+                        console.log(`DEBUG: Product ${index} - Name: "${productName}", Lineage: "${lineage}", ProductData:`, productData);
+                        
                         // Apply the same lineage color logic as tags
                         let lineageClass = '';
                         if (lineage === 'CBD' || lineage === 'CBD_BLEND') {
@@ -7745,6 +7748,8 @@ window.performJsonMatch = function() {
                         } else if (lineage === 'HYBRID') {
                             lineageClass = 'hybrid-lineage';
                         }
+                        
+                        console.log(`DEBUG: Product ${index} - Applied lineageClass: "${lineageClass}"`);
                         
                         return `<div class="mb-1 matched-product ${lineageClass}">• ${productName}</div>`;
                     })

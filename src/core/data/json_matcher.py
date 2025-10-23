@@ -6157,6 +6157,7 @@ class JSONMatcher:
         if product_strain:
             strain_lower = product_strain.lower()
             if 'cbd blend' in strain_lower or 'cbd' in strain_lower:
+                logging.info(f"🧬 CBD STRAIN DETECTED: '{product_strain}' for product type '{product_type}'")
                 # For nonclassic types, use Product Strain to determine CBD lineage
                 if product_type and product_type.strip().lower() not in CLASSIC_TYPES:
                     # Define edible types for more conservative CBD assignment
@@ -6165,20 +6166,26 @@ class JSONMatcher:
                         # For edibles, only assign CBD if explicitly high-CBD
                         if product_name and ('high cbd' in product_name.lower() or 
                                            ('cbd' in product_name.lower() and any(word in product_name.lower() for word in ['high', 'pure', 'isolate']))):
+                            logging.info(f"🧬 CBD EDIBLE: '{product_name}' -> 'CBD'")
                             return 'CBD'
                         else:
+                            logging.info(f"🧬 REGULAR EDIBLE WITH CBD STRAIN: '{product_name}' -> 'MIXED'")
                             return 'MIXED'
                     else:
                         # Non-edibles with CBD strain get CBD lineage
+                        logging.info(f"🧬 NON-EDIBLE WITH CBD STRAIN: '{product_name}' -> 'CBD'")
                         return 'CBD'
         
         # Check if this is a classic product type
         if product_type and product_type.strip().lower() in CLASSIC_TYPES:
             # Classic types (flower, pre-roll, concentrate, etc.) can use existing lineage or default to HYBRID
-            return existing_lineage or "HYBRID"
+            result_lineage = existing_lineage or "HYBRID"
+            logging.info(f"🧬 CLASSIC TYPE: '{product_type}' -> '{result_lineage}' (existing: '{existing_lineage}')")
+            return result_lineage
         else:
             # Nonclassic types (edibles, tinctures, topicals, etc.) should ALWAYS be MIXED for blue color
             # This overrides any incorrect lineage values in the database
+            logging.info(f"🧬 NONCLASSIC TYPE: '{product_type}' -> 'MIXED' (existing: '{existing_lineage}', strain: '{product_strain}')")
             return "MIXED"
 
     def _create_tag_from_database_info(self, db_info: Dict, vendor: str) -> Dict:
