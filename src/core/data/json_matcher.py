@@ -3297,10 +3297,15 @@ class JSONMatcher:
         Returns:
             List of product dictionaries
         """
+        import time as time_module  # Import with alias to avoid variable name conflicts
+        
         logging.info("=" * 80)
         logging.info("🔍 fetch_and_match_with_product_db called - PRODUCT DATABASE INTEGRATION ENABLED")
         logging.info("=" * 80)
         logging.debug(f"fetch_and_match_with_product_db called with URL: {url}")
+        
+        start_time = time_module.time()  # Define start_time early to avoid errors
+        
         if not url.lower().startswith("http"):
             raise ValueError("Please provide a valid HTTP URL")
             
@@ -3479,8 +3484,7 @@ class JSONMatcher:
                 cleaned = re.sub(r'\s+', ' ', cleaned)
                 return cleaned.strip()
             
-            # Performance monitoring
-            start_time = time.time()
+            # Performance monitoring (start_time already defined at method start)
             
             for i, item in enumerate(items):
                 try:
@@ -4247,7 +4251,7 @@ class JSONMatcher:
                 logging.error(f"Error during Excel integration: {integration_error}")
             
             # Performance summary
-            total_time = time.time() - start_time
+            total_time = time_module.time() - start_time
             logging.info(f"🚀 JSON MATCHING PERFORMANCE SUMMARY:")
             logging.info(f"   Total time: {total_time:.2f}s")
             logging.info(f"   Items processed: {processed_count}")
