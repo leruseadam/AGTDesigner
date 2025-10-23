@@ -3620,6 +3620,9 @@ class JSONMatcher:
                             if not db_info and '_' in product_name:
                                 # This looks like a SKU - try to find matching product in database using smart search
                                 logging.info(f"🔍 SKU detected: '{product_name}' - attempting enhanced database search")
+                                logging.info(f"🔍 Product DB available: {product_db is not None}")
+                                if product_db:
+                                    logging.info(f"🔍 Product DB has connection method: {hasattr(product_db, '_get_connection')}")
                                 
                                 try:
                                     # Parse SKU to create search terms
@@ -3650,6 +3653,7 @@ class JSONMatcher:
                                     
                                     # Search database using SQL LIKE for better performance
                                     if search_terms and hasattr(product_db, '_get_connection'):
+                                        logging.info(f"🔍 Generated search terms: {search_terms}")
                                         conn = product_db._get_connection()
                                         cursor = conn.cursor()
                                         
@@ -3666,6 +3670,9 @@ class JSONMatcher:
                                         # Add brand filter if we know it's Ceres
                                         where_sql += ' AND "Product Brand" = ?'
                                         params.append('Ceres')
+                                        
+                                        logging.info(f"🔍 SQL WHERE clause: {where_sql}")
+                                        logging.info(f"🔍 SQL params: {params}")
                                         
                                         sql = f'''
                                             SELECT "Product Name*", "Description", "Product Brand", "Lineage", 
