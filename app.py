@@ -3476,11 +3476,174 @@ def get_session_stats():
         logging.error(f"Error getting session stats: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-# Store change logic removed - using single database for all stores
+# IP-based Store Selection System
+import hashlib
+from datetime import datetime, timedelta
 
-# Store get logic removed - using single database for all stores
+# In-memory store for IP-based store selections (12-hour expiration)
+_ip_store_selections = {}
+_ip_store_lock = threading.Lock()
 
-# Store check logic removed - using single database for all stores
+# Clear all store selections on application startup
+def clear_all_store_selections_on_startup():
+    """Clear all store selections when the application starts."""
+    global _ip_store_selections
+    with _ip_store_lock:
+        _ip_store_selections.clear()
+    logging.info("All store selections cleared on application startup")
+
+# Call this function when the application starts
+clear_all_store_selections_on_startup()
+
+def get_client_ip():
+    """Get the client's IP address."""
+    if request.headers.get('X-Forwarded-For'):
+        return request.headers.get('X-Forwarded-For').split(',')[0].strip()
+    elif request.headers.get('X-Real-IP'):
+        return request.headers.get('X-Real-IP')
+    else:
+        return request.remote_addr
+
+def is_store_selection_valid(ip_address, store_selection):
+    """Check if store selection is still valid (within 12 hours)."""
+    if not store_selection:
+        return False
+    
+    selection_time = store_selection.get('timestamp')
+    if not selection_time:
+        return False
+    
+    try:
+        selection_datetime = datetime.fromisoformat(selection_time)
+        expiration_time = selection_datetime + timedelta(hours=12)
+        return datetime.now() < expiration_time
+    except (ValueError, TypeError):
+        return False
+
+def cleanup_expired_store_selections():
+    """Remove expired store selections."""
+    current_time = datetime.now()
+    expired_ips = []
+    
+    with _ip_store_lock:
+        for ip_address, store_selection in _ip_store_selections.items():
+            if not is_store_selection_valid(ip_address, store_selection):
+                expired_ips.append(ip_address)
+        
+        for ip_address in expired_ips:
+            del _ip_store_selections[ip_address]
+
+@app.route('/api/set-store', methods=['POST'])
+def set_store():
+    """Set store selection for the current IP address."""
+    try:
+        data = request.get_json()
+        if not data or 'store' not in data:
+            return jsonify({'success': False, 'error': 'Store selection required'}), 400
+        
+        store_value = data['store']
+        ip_address = get_client_ip()
+        
+        # Validate store selection
+        valid_stores = ['AGT_Bothell', 'AGT_Burien', 'AGT_Goldbar', 'AGT_Lynnwood']
+        if store_value not in valid_stores:
+            return jsonify({'success': False, 'error': 'Invalid store selection'}), 400
+        
+        # Store selection with timestamp
+        with _ip_store_lock:
+            _ip_store_selections[ip_address] = {
+                'store': store_value,
+                'timestamp': datetime.now().isoformat(),
+                'ip_address': ip_address
+            }
+        
+        # Cleanup expired selections periodically
+        cleanup_expired_store_selections()
+        
+        logging.info(f"Store selection set for IP {ip_address}: {store_value}")
+        
+        return jsonify({
+            'success': True,
+            'store': store_value,
+            'expires_at': (datetime.now() + timedelta(hours=12)).isoformat()
+        })
+        
+    except Exception as e:
+        logging.error(f"Error setting store: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/get-store', methods=['GET'])
+def get_store():
+    """Get store selection for the current IP address."""
+    try:
+        ip_address = get_client_ip()
+        
+        with _ip_store_lock:
+            store_selection = _ip_store_selections.get(ip_address)
+        
+        if store_selection and is_store_selection_valid(ip_address, store_selection):
+            return jsonify({
+                'success': True,
+                'store': store_selection['store'],
+                'expires_at': (datetime.fromisoformat(store_selection['timestamp']) + timedelta(hours=12)).isoformat()
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'store': None,
+                'message': 'No valid store selection found'
+            })
+        
+    except Exception as e:
+        logging.error(f"Error getting store: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/clear-store', methods=['POST'])
+def clear_store():
+    """Clear store selection for the current IP address."""
+    try:
+        ip_address = get_client_ip()
+        
+        with _ip_store_lock:
+            if ip_address in _ip_store_selections:
+                del _ip_store_selections[ip_address]
+        
+        logging.info(f"Store selection cleared for IP {ip_address}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Store selection cleared'
+        })
+        
+    except Exception as e:
+        logging.error(f"Error clearing store: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/check-store-required', methods=['GET'])
+def check_store_required():
+    """Check if store selection is required for the current IP address."""
+    try:
+        ip_address = get_client_ip()
+        
+        with _ip_store_lock:
+            store_selection = _ip_store_selections.get(ip_address)
+        
+        if store_selection and is_store_selection_valid(ip_address, store_selection):
+            return jsonify({
+                'success': True,
+                'store_required': False,
+                'store': store_selection['store']
+            })
+        else:
+            return jsonify({
+                'success': True,
+                'store_required': True,
+                'store': None
+            })
+        
+    except Exception as e:
+        logging.error(f"Error checking store requirement: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/clear-session', methods=['POST'])
 def clear_session():
@@ -8982,14 +9145,31 @@ def json_match():
                     name = (p.get('Description', '') or 
                            p.get('Product Name*', '') or 
                            p.get('ProductName', ''))
+                    
                     if name:  # Only add non-empty names
-                        matched_names.append(name)
+                        # Add weight information if available
+                        weight = p.get('Weight*', '') or p.get('Weight', '')
+                        units = p.get('Units', '') or p.get('Weight Unit*', '')
+                        
+                        # Format weight with units like " - 3.5g"
+                        if weight and units:
+                            weight_display = f" - {weight}{units}"
+                        elif weight:
+                            weight_display = f" - {weight}"
+                        else:
+                            weight_display = ""
+                        
+                        # Combine name with weight
+                        display_name = f"{name}{weight_display}"
+                        matched_names.append(display_name)
             
             # DEBUG: Log what fields contain and what name is actually used
             if matched_products and len(matched_products) > 0:
                 first_product = matched_products[0] if isinstance(matched_products[0], dict) else {}
                 logging.info(f"📝 DEBUG: First matched product 'Product Name*' = '{first_product.get('Product Name*', 'NOT SET')}'")
                 logging.info(f"📝 DEBUG: First matched product 'Description' = '{first_product.get('Description', 'NOT SET')}'")
+                logging.info(f"📝 DEBUG: First matched product 'Weight*' = '{first_product.get('Weight*', 'NOT SET')}'")
+                logging.info(f"📝 DEBUG: First matched product 'Units' = '{first_product.get('Units', 'NOT SET')}'")
                 logging.info(f"📝 DEBUG: First matched_name = '{matched_names[0] if matched_names else 'NONE'}'")
                 logging.info(f"📝 DEBUG: Total matched_names count = {len(matched_names)}")
 
