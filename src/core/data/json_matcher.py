@@ -3543,7 +3543,14 @@ class JSONMatcher:
                                 all_tags.append(tag)
                                 matched_count += 1
                             print(f"🔍 DEBUG: Added {len(matched_products)} tags from comprehensive matching")
-                            continue  # Skip the educated guess and JSON processing below
+                            
+                            # CRITICAL FIX: Even if Excel matches are found, still try SKU-based database search
+                            # to get proper database descriptions instead of Excel names
+                            if '_' in product_name and product_db:
+                                print(f"🔍 DEBUG: SKU detected in Excel match, trying database search for better descriptions")
+                                # Don't continue - let it fall through to SKU search logic
+                            else:
+                                continue  # Skip the educated guess and JSON processing below
                         else:
                             print(f"🔍 DEBUG: No products found by comprehensive matching, falling back to AI-powered database lookup")
                     except Exception as main_match_error:
