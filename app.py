@@ -9147,29 +9147,13 @@ def json_match():
                            p.get('ProductName', ''))
                     
                     if name:  # Only add non-empty names
-                        # Add weight information if available
-                        weight = p.get('Weight*', '') or p.get('Weight', '')
-                        units = p.get('Units', '') or p.get('Weight Unit*', '')
-                        
-                        # Format weight with units like " - 3.5g"
-                        if weight and units:
-                            weight_display = f" - {weight}{units}"
-                        elif weight:
-                            weight_display = f" - {weight}"
-                        else:
-                            weight_display = ""
-                        
-                        # Combine name with weight
-                        display_name = f"{name}{weight_display}"
-                        matched_names.append(display_name)
+                        matched_names.append(name)
             
             # DEBUG: Log what fields contain and what name is actually used
             if matched_products and len(matched_products) > 0:
                 first_product = matched_products[0] if isinstance(matched_products[0], dict) else {}
                 logging.info(f"📝 DEBUG: First matched product 'Product Name*' = '{first_product.get('Product Name*', 'NOT SET')}'")
                 logging.info(f"📝 DEBUG: First matched product 'Description' = '{first_product.get('Description', 'NOT SET')}'")
-                logging.info(f"📝 DEBUG: First matched product 'Weight*' = '{first_product.get('Weight*', 'NOT SET')}'")
-                logging.info(f"📝 DEBUG: First matched product 'Units' = '{first_product.get('Units', 'NOT SET')}'")
                 logging.info(f"📝 DEBUG: First matched_name = '{matched_names[0] if matched_names else 'NONE'}'")
                 logging.info(f"📝 DEBUG: Total matched_names count = {len(matched_names)}")
 
