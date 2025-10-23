@@ -8974,15 +8974,24 @@ def json_match():
         try:
             total_matches = len(matched_products) if matched_products else 0
             # Extract product names for session-selected tags
-            # CRITICAL FIX: Product Name* should contain transformed human-readable names
-            matched_names = [p.get('Product Name*', p.get('ProductName', '')) for p in matched_products if isinstance(p, dict)]
+            # CRITICAL FIX: Use Description field for human-readable names, fallback to Product Name* if Description is empty
+            matched_names = []
+            for p in matched_products:
+                if isinstance(p, dict):
+                    # Priority: Description > Product Name* > ProductName
+                    name = (p.get('Description', '') or 
+                           p.get('Product Name*', '') or 
+                           p.get('ProductName', ''))
+                    if name:  # Only add non-empty names
+                        matched_names.append(name)
             
-            # DEBUG: Log what Product Name* contains
+            # DEBUG: Log what fields contain and what name is actually used
             if matched_products and len(matched_products) > 0:
                 first_product = matched_products[0] if isinstance(matched_products[0], dict) else {}
                 logging.info(f"📝 DEBUG: First matched product 'Product Name*' = '{first_product.get('Product Name*', 'NOT SET')}'")
                 logging.info(f"📝 DEBUG: First matched product 'Description' = '{first_product.get('Description', 'NOT SET')}'")
                 logging.info(f"📝 DEBUG: First matched_name = '{matched_names[0] if matched_names else 'NONE'}'")
+                logging.info(f"📝 DEBUG: Total matched_names count = {len(matched_names)}")
 
             # Store available_tags cache with these matched products
             available_cache_key = get_session_cache_key('available_tags')
