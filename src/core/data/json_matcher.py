@@ -6794,11 +6794,7 @@ class JSONMatcher:
                            product.get('inventory_type', '') or
                            'Edible (Solid)')  # Default for Ceres products
             
-            # DEBUG: Log extracted values
-            logging.info(f"🔍 DEBUG: Extracted values - product_name: '{product_name}', brand: '{brand}', product_type: '{product_type}', vendor: '{vendor}', weight: '{weight}', units: '{units}'")
-            # Description already set above, just ensure it has a value
-            if not description:
-                description = product_name
+            # Extract weight and units first
             weight = (product.get('Weight*', '') or 
                      product.get('Weight', '') or 
                      item.get('weight', '') or
@@ -6812,6 +6808,14 @@ class JSONMatcher:
                     item.get('Units', '') or
                     item.get('weight_unit', '') or
                     'g')
+            
+            # DEBUG: Log extracted values
+            logging.info(f"🔍 DEBUG: Extracted values - product_name: '{product_name}', brand: '{brand}', product_type: '{product_type}', vendor: '{vendor}', weight: '{weight}', units: '{units}'")
+            
+            # Description already set above, just ensure it has a value
+            if not description:
+                description = product_name
+            
             # Try multiple price field variations - extract actual price from data
             price = (product.get('Price*', '') or 
                     product.get('Price', '') or 
