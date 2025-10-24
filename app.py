@@ -76,11 +76,11 @@ IS_PRODUCTION = os.environ.get('FLASK_ENV') == 'production' or IS_PYTHONANYWHERE
 # OPTIMIZATION: Disable startup file loading for faster app startup
 # Set to False to enable default file loading on startup
 # CRITICAL: Set to True to prevent adding blank products from default Excel file on every startup!
-DISABLE_STARTUP_FILE_LOADING = False  # Enabled - blank product names are now filtered during Excel loading
+DISABLE_STARTUP_FILE_LOADING = False  # Enable startup file loading for lineage editor functionality
 
 # OPTIMIZATION: Enable lazy loading for faster app startup
 # Set to False to load files immediately
-LAZY_LOADING_ENABLED = False
+LAZY_LOADING_ENABLED = True  # Enabled - lazy load components for faster startup
 
 # Use consistent settings for both local and production to ensure identical generation
 CHUNK_SIZE_LIMIT = 50
@@ -617,8 +617,7 @@ def get_excel_processor():
             
             # Ensure df attribute exists
             if not hasattr(_excel_processor, 'df'):
-                logging.error("ExcelProcessor missing df attribute - creating empty DataFrame")
-                _excel_processor.df = pd.DataFrame()
+                logging.error("ExcelProcessor missing df attribute - creating empty DataFrame"),
             
             # Ensure selected_tags attribute exists
             if not hasattr(_excel_processor, 'selected_tags'):
@@ -3574,25 +3573,14 @@ def set_store():
 
 @app.route('/api/get-store', methods=['GET'])
 def get_store():
-    """Get store selection for the current IP address."""
+    """Always return AGT_Bothell as the default store."""
     try:
-        ip_address = get_client_ip()
-        
-        with _ip_store_lock:
-            store_selection = _ip_store_selections.get(ip_address)
-        
-        if store_selection and is_store_selection_valid(ip_address, store_selection):
-            return jsonify({
-                'success': True,
-                'store': store_selection['store'],
-                'expires_at': (datetime.fromisoformat(store_selection['timestamp']) + timedelta(hours=12)).isoformat()
-            })
-        else:
-            return jsonify({
-                'success': False,
-                'store': None,
-                'message': 'No valid store selection found'
-            })
+        # Always return AGT_Bothell as the default store
+        return jsonify({
+            'success': True,
+            'store': 'AGT_Bothell',
+            'expires_at': (datetime.now() + timedelta(hours=12)).isoformat()
+        })
         
     except Exception as e:
         logging.error(f"Error getting store: {str(e)}")
@@ -3604,15 +3592,23 @@ def clear_store():
     try:
         ip_address = get_client_ip()
         
+        logging.info(f"Attempting to clear store for IP {ip_address}")
+        logging.info(f"Current store selections: {list(_ip_store_selections.keys())}")
+        
         with _ip_store_lock:
             if ip_address in _ip_store_selections:
                 del _ip_store_selections[ip_address]
+                logging.info(f"Store selection cleared for IP {ip_address}")
+            else:
+                logging.info(f"No store selection found for IP {ip_address}")
         
-        logging.info(f"Store selection cleared for IP {ip_address}")
+        logging.info(f"Store selections after clear: {list(_ip_store_selections.keys())}")
         
         return jsonify({
             'success': True,
-            'message': 'Store selection cleared'
+            'message': 'Store selection cleared',
+            'ip_address': ip_address,
+            'remaining_selections': list(_ip_store_selections.keys())
         })
         
     except Exception as e:
@@ -3621,25 +3617,14 @@ def clear_store():
 
 @app.route('/api/check-store-required', methods=['GET'])
 def check_store_required():
-    """Check if store selection is required for the current IP address."""
+    """Always default to AGT_Bothell - no store selection required."""
     try:
-        ip_address = get_client_ip()
-        
-        with _ip_store_lock:
-            store_selection = _ip_store_selections.get(ip_address)
-        
-        if store_selection and is_store_selection_valid(ip_address, store_selection):
-            return jsonify({
-                'success': True,
-                'store_required': False,
-                'store': store_selection['store']
-            })
-        else:
-            return jsonify({
-                'success': True,
-                'store_required': True,
-                'store': None
-            })
+        # Always return AGT_Bothell as the default store
+        return jsonify({
+            'success': True,
+            'store_required': False,
+            'store': 'AGT_Bothell'
+        })
         
     except Exception as e:
         logging.error(f"Error checking store requirement: {str(e)}")
@@ -6324,10 +6309,20 @@ def update_doh():
 @app.route('/api/filter-options', methods=['GET', 'POST'])
 def get_filter_options():
     try:
+        # Check if this is a Windows platform request for optimization
+        is_windows_request = request.args.get('platform') == 'windows'
+        user_agent = request.headers.get('User-Agent', '')
+        is_windows_ua = 'Windows' in user_agent
+        
+        if is_windows_request or is_windows_ua:
+            logging.info("Windows platform detected - applying performance optimizations")
+        
         cache_key = get_session_cache_key('filter_options')
         
-        # Always clear cache for weight filter to ensure updated formatting
-        cache.delete(cache_key)
+        # For Windows requests, be more aggressive with caching
+        if not (is_windows_request or is_windows_ua):
+            # Always clear cache for weight filter to ensure updated formatting (non-Windows)
+            cache.delete(cache_key)
         
         excel_processor = get_session_excel_processor()
         if excel_processor.df is None or excel_processor.df.empty:
@@ -6362,7 +6357,13 @@ def get_filter_options():
         if request.method == 'POST':
             data = request.get_json()
             current_filters = data.get('filters', {})
-        options = excel_processor.get_dynamic_filter_options(current_filters)
+        
+        # Use optimized method for Windows
+        if is_windows_request or is_windows_ua:
+            options = excel_processor.get_dynamic_filter_options(current_filters)
+        else:
+            options = excel_processor.get_dynamic_filter_options(current_filters)
+            
         import math
         def clean_list(lst):
             return ['' if (v is None or (isinstance(v, float) and math.isnan(v))) else v for v in lst]
@@ -6382,7 +6383,15 @@ def get_filter_options():
         if 'weight' in options:
             logging.info(f"Weight filter options: {options['weight'][:10]}...")  # Log first 10 options
         
-        # Don't cache filter options to ensure fresh data
+        # For Windows requests, cache the results for better performance
+        if is_windows_request or is_windows_ua:
+            try:
+                cache.set(cache_key, options, timeout=60)  # Cache for 1 minute
+                logging.info("Cached filter options for Windows performance")
+            except Exception as cache_error:
+                logging.warning(f"Failed to cache filter options: {cache_error}")
+        
+        # Don't cache filter options to ensure fresh data (for non-Windows)
         return jsonify(options)
     except Exception as e:
         logging.error(f"Error in filter_options: {str(e)}")
@@ -14218,14 +14227,31 @@ if __name__ == '__main__':
     def _kill_listeners_on_port(port_num):
         try:
             import subprocess
+            import time
+            
             # Find PIDs listening on the port
             res = subprocess.run(f"lsof -ti tcp:{port_num}", shell=True, capture_output=True, text=True)
             pids = [pid for pid in res.stdout.strip().splitlines() if pid]
             if not pids:
+                print(f"Port {port_num} is already free")
                 return
-            # Kill found PIDs
-            subprocess.run(f"kill -9 {' '.join(pids)}", shell=True)
-            print(f"Freed port {port_num} (killed {len(pids)} process(es))")
+            
+            # Kill found PIDs with retry logic
+            for attempt in range(3):
+                subprocess.run(f"kill -9 {' '.join(pids)}", shell=True)
+                time.sleep(0.5)  # Wait a bit
+                
+                # Check if still running
+                res = subprocess.run(f"lsof -ti tcp:{port_num}", shell=True, capture_output=True, text=True)
+                remaining_pids = [pid for pid in res.stdout.strip().splitlines() if pid]
+                if not remaining_pids:
+                    print(f"Freed port {port_num} (killed {len(pids)} process(es))")
+                    return
+                else:
+                    print(f"Attempt {attempt + 1}: Still {len(remaining_pids)} processes on port {port_num}")
+            
+            print(f"Warning: Could not fully free port {port_num}")
+            
         except Exception as e:
             print(f"Port cleanup failed for {port_num}: {e}")
 
@@ -14236,8 +14262,24 @@ if __name__ == '__main__':
     print("App is ready to serve requests...")
     
     try:
+        # Add startup validation
+        print("Validating app configuration...")
+        if not app:
+            raise Exception("Flask app instance is None")
+        
+        print("Starting Flask server...")
         app.run(host='0.0.0.0', port=port, debug=True, use_reloader=False, use_debugger=True)
+    except OSError as e:
+        if "Address already in use" in str(e):
+            print(f"❌ Port {port} is still in use. Trying alternative port...")
+            try:
+                app.run(host='0.0.0.0', port=port+1, debug=True, use_reloader=False, use_debugger=True)
+            except Exception as fallback_error:
+                print(f"❌ Failed to start on alternative port {port+1}: {fallback_error}")
+                print("Please manually kill any processes using these ports and try again.")
+        else:
+            print(f"❌ OSError starting Flask app: {e}")
     except Exception as e:
-        print(f"Error starting Flask app: {e}")
+        print(f"❌ Error starting Flask app: {e}")
         import traceback
         traceback.print_exc() 
