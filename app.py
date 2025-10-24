@@ -848,9 +848,7 @@ if CACHE_AVAILABLE:
 else:
     cache = Cache()  # Use dummy cache
 
-# Initialize Flask-Compress after app creation (if available)
-if Compress is not None:
-    Compress(app)
+# Flask-Compress already initialized in create_app() - no need to initialize again
 
 # Initialize performance optimizations - DISABLED to prevent CPU issues on PythonAnywhere
 if False:  # Temporarily disabled due to high CPU usage on PythonAnywhere
@@ -1150,7 +1148,7 @@ class LabelMakerApp:
             
     def run(self):
         host = os.environ.get('HOST', '127.0.0.1')
-        port = int(os.environ.get('FLASK_PORT', 8001))  # Changed to 5003 to avoid port conflict
+        port = int(os.environ.get('FLASK_PORT', 8001))
         development_mode = self.app.config.get('DEVELOPMENT_MODE', False)
         
         # Show optimization status
@@ -1158,11 +1156,13 @@ class LabelMakerApp:
             logging.info("🚀 PERFORMANCE OPTIMIZATION: Startup file loading disabled for faster app startup")
         
         logging.info(f"Starting Label Maker application on {host}:{port}")
+        
+        # Prevent double startup by using use_reloader=False in development
         self.app.run(
             host=host, 
             port=port, 
             debug=development_mode, 
-            use_reloader=development_mode
+            use_reloader=False  # Disable reloader to prevent double startup
         )
 
 # === SESSION-BASED HELPERS ===
@@ -14679,65 +14679,9 @@ def optimize_performance():
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    # Use the global app instance that has all routes registered
-    port = int(os.environ.get('FLASK_PORT', 8001))  # Use port 8001 by default
-    # Auto-kill any existing process on the target port before starting
-    def _kill_listeners_on_port(port_num):
-        try:
-            import subprocess
-            import time
-            
-            # Find PIDs listening on the port
-            res = subprocess.run(f"lsof -ti tcp:{port_num}", shell=True, capture_output=True, text=True)
-            pids = [pid for pid in res.stdout.strip().splitlines() if pid]
-            if not pids:
-                print(f"Port {port_num} is already free")
-                return
-            
-            # Kill found PIDs with retry logic
-            for attempt in range(3):
-                subprocess.run(f"kill -9 {' '.join(pids)}", shell=True)
-                time.sleep(0.5)  # Wait a bit
-                
-                # Check if still running
-                res = subprocess.run(f"lsof -ti tcp:{port_num}", shell=True, capture_output=True, text=True)
-                remaining_pids = [pid for pid in res.stdout.strip().splitlines() if pid]
-                if not remaining_pids:
-                    print(f"Freed port {port_num} (killed {len(pids)} process(es))")
-                    return
-                else:
-                    print(f"Attempt {attempt + 1}: Still {len(remaining_pids)} processes on port {port_num}")
-            
-            print(f"Warning: Could not fully free port {port_num}")
-            
-        except Exception as e:
-            print(f"Port cleanup failed for {port_num}: {e}")
-
-    # Clean up any existing processes on the port
-    _kill_listeners_on_port(port)
+    # Use the LabelMakerApp class for proper startup
+    print("Starting Label Maker application...")
     
-    print(f"Starting Flask app on port {port}")
-    print("App is ready to serve requests...")
-    
-    try:
-        # Add startup validation
-        print("Validating app configuration...")
-        if not app:
-            raise Exception("Flask app instance is None")
-        
-        print("Starting Flask server...")
-        app.run(host='0.0.0.0', port=port, debug=True, use_reloader=False, use_debugger=True)
-    except OSError as e:
-        if "Address already in use" in str(e):
-            print(f"❌ Port {port} is still in use. Trying alternative port...")
-            try:
-                app.run(host='0.0.0.0', port=port+1, debug=True, use_reloader=False, use_debugger=True)
-            except Exception as fallback_error:
-                print(f"❌ Failed to start on alternative port {port+1}: {fallback_error}")
-                print("Please manually kill any processes using these ports and try again.")
-        else:
-            print(f"❌ OSError starting Flask app: {e}")
-    except Exception as e:
-        print(f"❌ Error starting Flask app: {e}")
-        import traceback
-        traceback.print_exc() 
+    # Create and run the application
+    label_maker_app = LabelMakerApp()
+    label_maker_app.run() 
