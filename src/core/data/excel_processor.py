@@ -1446,137 +1446,6 @@ class ExcelProcessor:
     def load_file(self, file_path: str) -> bool:
         """Load Excel file and prepare data exactly like MAIN.py. STANDARDIZED for both local and PythonAnywhere."""
         try:
-            # PC optimization: Detect platform and use optimized processing
-            import platform
-            is_windows = platform.system() == 'Windows'
-            
-            if is_windows:
-                return self.load_file_optimized_windows(file_path)
-            else:
-                return self.load_file_original(file_path)
-                
-        except Exception as e:
-            self.logger.error(f"Error in load_file: {e}")
-            return False
-
-    def load_file_optimized_windows(self, file_path: str) -> bool:
-        """PC-optimized file loading with minimal processing for maximum speed."""
-        try:
-            self.logger.info(f"[PC-OPTIMIZED] Loading file: {file_path}")
-            
-            # Check if we've already loaded this exact file
-            if (self._last_loaded_file == file_path and 
-                self.df is not None and 
-                not self.df.empty):
-                self.logger.debug(f"File {file_path} already loaded, skipping reload")
-                return True
-            
-            # Basic file validation
-            import os
-            if not os.path.exists(file_path):
-                self.logger.error(f"File does not exist: {file_path}")
-                return False
-            
-            if not os.access(file_path, os.R_OK):
-                self.logger.error(f"File not readable: {file_path}")
-                return False
-            
-            # Check file size
-            file_size = os.path.getsize(file_path)
-            max_size = 100 * 1024 * 1024  # 100MB limit
-            if file_size > max_size:
-                self.logger.error(f"File too large: {file_size} bytes (max: {max_size})")
-                return False
-            
-            # PC optimization: Use minimal logging for better performance
-            self.logger.info(f"[PC-OPTIMIZED] File size: {file_size / (1024*1024):.1f} MB")
-            
-            # Clear previous data efficiently
-            if hasattr(self, 'df') and self.df is not None:
-                del self.df
-                import gc
-                gc.collect()
-            
-            # PC optimization: Use optimized dtype settings for speed
-            dtype_dict = {
-                "Product Type*": "string",
-                "Lineage": "string", 
-                "Product Brand": "string",
-                "Vendor": "string",
-                "Product Name*": "string"
-            }
-            
-            # PC optimization: Read with minimal settings for maximum speed
-            df = pd.read_excel(
-                file_path,
-                engine='openpyxl',
-                dtype=dtype_dict,
-                na_filter=False,  # Don't filter NA values
-                keep_default_na=False,  # Don't use default NA values
-                nrows=50000  # Limit rows for PC performance
-            )
-            
-            if df is None or df.empty:
-                self.logger.error("No data found in Excel file")
-                return False
-            
-            self.logger.info(f"[PC-OPTIMIZED] Loaded {len(df)} rows, {len(df.columns)} columns")
-            
-            # PC optimization: Minimal duplicate handling
-            initial_count = len(df)
-            df.drop_duplicates(inplace=True)
-            df.reset_index(drop=True, inplace=True)
-            final_count = len(df)
-            
-            if initial_count != final_count:
-                self.logger.info(f"[PC-OPTIMIZED] Removed {initial_count - final_count} duplicate rows")
-            
-            # PC optimization: Essential columns only
-            essential_columns = ['Product Name*', 'Product Type*', 'Vendor', 'Product Brand', 'Lineage']
-            
-            # Ensure essential columns exist with minimal processing
-            if "Product Name*" not in df.columns:
-                if "ProductName" in df.columns:
-                    df["Product Name*"] = df["ProductName"]
-                else:
-                    df["Product Name*"] = "Unknown"
-            
-            for col in ["Product Type*", "Lineage", "Product Brand", "Vendor"]:
-                if col not in df.columns:
-                    df[col] = "Unknown"
-            
-            # PC optimization: Minimal string operations
-            df["Product Name*"] = df["Product Name*"].astype(str).str.strip()
-            
-            # PC optimization: Minimal filtering - only exclude obvious invalid rows
-            initial_count = len(df)
-            
-            # Only exclude rows with completely blank product names
-            blank_mask = (df["Product Name*"].isna()) | (df["Product Name*"].str.strip() == "")
-            df = df[~blank_mask]
-            
-            # Reset index once after all filtering
-            df.reset_index(drop=True, inplace=True)
-            final_count = len(df)
-            
-            if initial_count != final_count:
-                self.logger.info(f"[PC-OPTIMIZED] Filtered to {final_count} valid products")
-            
-            # PC optimization: Minimal processing - skip heavy operations
-            self.df = df
-            self._last_loaded_file = file_path
-            
-            # PC optimization: Skip heavy processing steps for speed
-            self.logger.info(f"[PC-OPTIMIZED] Processing complete: {len(df)} rows")
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"[PC-OPTIMIZED] Error loading file: {e}")
-            return False
-
-    def load_file_original(self, file_path: str) -> bool:
-        """Original file loading implementation for Mac and other platforms."""
-        try:
             # Check if we've already loaded this exact file
             if (self._last_loaded_file == file_path and 
                 self.df is not None and 
@@ -3033,16 +2902,56 @@ class ExcelProcessor:
             brand_value = safe_get_value(row.get('Product Brand', ''))
             weight_value = safe_get_value(raw_weight)
             
-            # Create a unique key that includes vendor/brand/weight to allow same product names with different weights
-            product_key = f"{product_name}|{vendor_value}|{brand_value}|{weight_value}"
+            # ENHANCED DEDUPLICATION: Create multiple keys for better duplicate detection
+            # Primary key: name + vendor + brand + weight (allows same product with different weights)
+            primary_key = f"{product_name}|{vendor_value}|{brand_value}|{weight_value}"
             
-            # Skip if we've already seen this product key (deduplication)
-            if product_key in seen_product_keys:
-                logger.debug(f"Skipping exact duplicate product: {product_key}")
+            # Secondary key: name + vendor + brand (catches same product with different weights)
+            secondary_key = f"{product_name}|{vendor_value}|{brand_value}"
+            
+            # Tertiary key: name + vendor (catches same product from same vendor)
+            tertiary_key = f"{product_name}|{vendor_value}"
+            
+            # Check for duplicates using multiple strategies
+            is_duplicate = False
+            duplicate_reason = ""
+            
+            if primary_key in seen_product_keys:
+                is_duplicate = True
+                duplicate_reason = "exact match (name+vendor+brand+weight)"
+            elif secondary_key in seen_product_keys:
+                is_duplicate = True
+                duplicate_reason = "same product with different weight"
+            elif tertiary_key in seen_product_keys:
+                # Only flag as duplicate if the weight difference is small (likely same product)
+                existing_weight = None
+                for key in seen_product_keys:
+                    if key.startswith(f"{product_name}|{vendor_value}|"):
+                        try:
+                            existing_weight = float(key.split('|')[-1])
+                            break
+                        except:
+                            continue
+                
+                if existing_weight and weight_value:
+                    try:
+                        current_weight = float(weight_value)
+                        weight_diff = abs(existing_weight - current_weight)
+                        # If weight difference is less than 10%, consider it a duplicate
+                        if weight_diff < max(existing_weight, current_weight) * 0.1:
+                            is_duplicate = True
+                            duplicate_reason = f"same product with similar weight ({existing_weight} vs {current_weight})"
+                    except:
+                        pass
+            
+            if is_duplicate:
+                logger.info(f"🔄 ENHANCED DEDUPLICATION: Skipping duplicate product '{product_name}' - {duplicate_reason}")
                 continue
             
-            # Add to seen set
-            seen_product_keys.add(product_key)
+            # Add all keys to seen set for future duplicate detection
+            seen_product_keys.add(primary_key)
+            seen_product_keys.add(secondary_key)
+            seen_product_keys.add(tertiary_key)
             
             # Get vendor from multiple possible column names
             vendor_value = (
@@ -3189,6 +3098,17 @@ class ExcelProcessor:
         
         sorted_tags = sorted(tags, key=sort_key)
         logger.info(f"get_available_tags: Returning {len(sorted_tags)} tags (removed {len(filtered_df) - len(sorted_tags)} duplicates)")
+        
+        # Log enhanced deduplication summary
+        total_processed = len(sorted_tags)
+        duplicates_removed = len(filtered_df) - total_processed
+        logger.info(f"📊 EXCEL PROCESSING SUMMARY:")
+        logger.info(f"   📄 Total rows in Excel: {len(self.df)}")
+        logger.info(f"   🔍 Filtered rows: {len(filtered_df)}")
+        logger.info(f"   ✅ Unique products processed: {total_processed}")
+        logger.info(f"   🔄 Duplicates removed: {duplicates_removed}")
+        logger.info(f"   📈 Deduplication rate: {(duplicates_removed/len(filtered_df)*100):.1f}%")
+        
         return sorted_tags
 
     def select_tags(self, tags):
@@ -4156,10 +4076,6 @@ class ExcelProcessor:
         return result
 
     def get_dynamic_filter_options(self, current_filters: Dict[str, str]) -> Dict[str, list]:
-        """
-        Get dynamic filter options with performance optimizations for PC compatibility.
-        Uses cached dropdown values when possible to avoid expensive DataFrame operations.
-        """
         if self.df is None:
             # Return empty options if no data is loaded
             return {
@@ -4172,41 +4088,68 @@ class ExcelProcessor:
                 "doh": [],
                 "highCbd": []
             }
-        
-        # Performance optimization: Use cached values when no filters are applied
-        if not current_filters or all(not v or v == "All" for v in current_filters.values()):
-            if hasattr(self, 'dropdown_cache') and self.dropdown_cache:
-                self.logger.debug("Using cached dropdown values for better performance")
-                return self._get_cached_filter_options()
-        
-        # For filtered requests, use optimized approach
-        return self._get_filtered_options_optimized(current_filters)
-    
-    def _get_cached_filter_options(self) -> Dict[str, list]:
-        """Get filter options from cache with proper formatting."""
+        df = self.df.copy()
+        filter_map = {
+            "vendor": "Vendor",
+            "brand": "Product Brand",
+            "productType": "Product Type*",
+            "lineage": "Lineage",
+            "weight": "CombinedWeight",  # Reverted back to "CombinedWeight" as requested
+            "strain": "Product Strain",
+            "doh": "DOH",
+            "highCbd": "Product Type*"  # Will be processed specially for high CBD detection
+        }
+        options = {}
         import math
         def clean_list(lst):
             return ['' if (v is None or (isinstance(v, float) and math.isnan(v))) else v for v in lst]
-        
-        options = {}
-        filter_map = {
-            "vendor": "vendor",
-            "brand": "brand", 
-            "productType": "productType",
-            "lineage": "lineage",
-            "weight": "weight",
-            "strain": "strain",
-            "doh": "doh",
-            "highCbd": "productType"  # Will be processed specially
-        }
-        
-        for filter_key, cache_key in filter_map.items():
-            if cache_key in self.dropdown_cache:
-                values = self.dropdown_cache[cache_key].copy()
+        # For each filter type, generate options by applying all other filters except itself
+        for filter_key, col in filter_map.items():
+            temp_df = df.copy()
+            # Apply all other filters except the current one
+            for key, value in current_filters.items():
+                if key == filter_key:
+                    continue  # Skip filtering by itself
+                if value and value != "All":
+                    filter_col = filter_map.get(key)
+                    if filter_col and filter_col in temp_df.columns:
+                        temp_df = temp_df[
+                            temp_df[filter_col].astype(str).str.lower().str.strip() == value.lower().strip()
+                        ]
+            # Get unique values for this filter type
+            if col in temp_df.columns:
+                if filter_key == "weight":
+                    # For weight, use the properly formatted weight with units
+                    values = []
+                    for _, row in temp_df.iterrows():
+                        # Convert row to dict for _format_weight_units
+                        row_dict = row.to_dict()
+                        weight_with_units = self._format_weight_units(row_dict, excel_priority=True)
+                        if weight_with_units and weight_with_units.strip():
+                            weight_str = weight_with_units.strip()
+                            
+                            # Only include values that look like actual weights (with units like g, oz, mg)
+                            # Exclude THC/CBD content, ratios, and other non-weight content
+                            import re
+                            weight_pattern = re.compile(r'^\d+\.?\d*\s*(g|oz|mg|grams?|ounces?)$', re.IGNORECASE)
+                            
+                            if weight_pattern.match(weight_str):
+                                values.append(weight_str)
+                            elif not any(keyword in weight_str.lower() for keyword in ['thc', 'cbd', 'ratio', '|br|', ':']):
+                                # If it doesn't match weight pattern but also doesn't contain THC/CBD keywords, include it
+                                values.append(weight_str)
+                    
+                    # Debug: Log what weight values are being generated
+                    if values:
+                        self.logger.info(f"Weight filter values generated: {values[:5]}...")  # Log first 5 values
+                    else:
+                        self.logger.warning("No weight values generated for filter dropdown")
+                else:
+                    values = temp_df[col].dropna().unique().tolist()
+                    values = [str(v) for v in values if str(v).strip()]
                 
-                # Apply special processing for each filter type
+                # Exclude unwanted product types from dropdown and apply product type normalization
                 if filter_key == "productType":
-                    # Apply product type normalization
                     filtered_values = []
                     for v in values:
                         v_lower = v.strip().lower()
@@ -4217,6 +4160,7 @@ class ExcelProcessor:
                         filtered_values.append(normalized_v)
                     values = filtered_values
                 
+                # Special processing for DOH filter
                 elif filter_key == "doh":
                     # Only include "YES" and "NO" values, normalize case
                     filtered_values = []
@@ -4226,115 +4170,9 @@ class ExcelProcessor:
                             filtered_values.append(v_upper)
                     values = filtered_values
                 
+                # Special processing for High CBD filter
                 elif filter_key == "highCbd":
                     # Check if any product types start with "high cbd"
-                    has_high_cbd = any(v.strip().lower().startswith('high cbd') for v in values)
-                    values = ["High CBD Products", "Non-High CBD Products"] if has_high_cbd else ["Non-High CBD Products"]
-                
-                elif filter_key == "weight":
-                    # For weight, we need to format the cached values properly
-                    formatted_values = []
-                    for _, row in self.df.iterrows():
-                        if pd.notna(row.get('Weight*')) or pd.notna(row.get('Units')):
-                            row_dict = row.to_dict()
-                            weight_with_units = self._format_weight_units(row_dict, excel_priority=True)
-                            if weight_with_units and weight_with_units.strip():
-                                weight_str = weight_with_units.strip()
-                                
-                                # Only include values that look like actual weights
-                                import re
-                                weight_pattern = re.compile(r'^\d+\.?\d*\s*(g|oz|mg|grams?|ounces?)$', re.IGNORECASE)
-                                
-                                if weight_pattern.match(weight_str):
-                                    formatted_values.append(weight_str)
-                                elif not any(keyword in weight_str.lower() for keyword in ['thc', 'cbd', 'ratio', '|br|', ':']):
-                                    formatted_values.append(weight_str)
-                    
-                    values = list(set(formatted_values))  # Remove duplicates
-                
-                # Remove duplicates and sort
-                values = list(set(values))
-                values.sort()
-                options[filter_key] = clean_list(values)
-            else:
-                options[filter_key] = []
-        
-        return options
-    
-    def _get_filtered_options_optimized(self, current_filters: Dict[str, str]) -> Dict[str, list]:
-        """Get filtered options using optimized DataFrame operations."""
-        import math
-        def clean_list(lst):
-            return ['' if (v is None or (isinstance(v, float) and math.isnan(v))) else v for v in lst]
-        
-        # Use boolean indexing instead of copying DataFrames
-        mask = pd.Series([True] * len(self.df), index=self.df.index)
-        
-        filter_map = {
-            "vendor": "Vendor",
-            "brand": "Product Brand", 
-            "productType": "Product Type*",
-            "lineage": "Lineage",
-            "weight": "CombinedWeight",
-            "strain": "Product Strain",
-            "doh": "DOH",
-            "highCbd": "Product Type*"
-        }
-        
-        # Apply filters using boolean indexing (much faster than copying DataFrames)
-        for key, value in current_filters.items():
-            if value and value != "All":
-                filter_col = filter_map.get(key)
-                if filter_col and filter_col in self.df.columns:
-                    mask &= (self.df[filter_col].astype(str).str.lower().str.strip() == value.lower().strip())
-        
-        # Get filtered DataFrame using boolean indexing
-        filtered_df = self.df[mask]
-        
-        options = {}
-        for filter_key, col in filter_map.items():
-            if col in filtered_df.columns:
-                if filter_key == "weight":
-                    # Optimized weight processing - only process unique combinations
-                    weight_units_combos = filtered_df[['Weight*', 'Units']].drop_duplicates()
-                    values = []
-                    for _, row in weight_units_combos.iterrows():
-                        row_dict = row.to_dict()
-                        weight_with_units = self._format_weight_units(row_dict, excel_priority=True)
-                        if weight_with_units and weight_with_units.strip():
-                            weight_str = weight_with_units.strip()
-                            
-                            import re
-                            weight_pattern = re.compile(r'^\d+\.?\d*\s*(g|oz|mg|grams?|ounces?)$', re.IGNORECASE)
-                            
-                            if weight_pattern.match(weight_str):
-                                values.append(weight_str)
-                            elif not any(keyword in weight_str.lower() for keyword in ['thc', 'cbd', 'ratio', '|br|', ':']):
-                                values.append(weight_str)
-                else:
-                    values = filtered_df[col].dropna().unique().tolist()
-                    values = [str(v) for v in values if str(v).strip()]
-                
-                # Apply same special processing as before
-                if filter_key == "productType":
-                    filtered_values = []
-                    for v in values:
-                        v_lower = v.strip().lower()
-                        if ("trade sample" in v_lower or "deactivated" in v_lower):
-                            continue
-                        normalized_v = TYPE_OVERRIDES.get(v_lower, v)
-                        filtered_values.append(normalized_v)
-                    values = filtered_values
-                
-                elif filter_key == "doh":
-                    filtered_values = []
-                    for v in values:
-                        v_upper = v.strip().upper()
-                        if v_upper in ["YES", "NO"]:
-                            filtered_values.append(v_upper)
-                    values = filtered_values
-                
-                elif filter_key == "highCbd":
                     has_high_cbd = any(v.strip().lower().startswith('high cbd') for v in values)
                     values = ["High CBD Products", "Non-High CBD Products"] if has_high_cbd else ["Non-High CBD Products"]
                 
@@ -6740,7 +6578,24 @@ class ExcelProcessor:
                     logger.info(f"Applied filters, returning {len(filtered_tags)} tags")
                     return filtered_tags
                 
-                return tags
+                # CRITICAL FIX: Final deduplication to catch any remaining duplicates
+                final_tags = []
+                seen_final_names = set()
+                duplicate_count = 0
+                
+                for tag in tags:
+                    product_name = tag.get('Product Name*', '')
+                    if product_name and product_name not in seen_final_names:
+                        seen_final_names.add(product_name)
+                        final_tags.append(tag)
+                    else:
+                        duplicate_count += 1
+                        logger.info(f"🔄 FINAL DEDUPLICATION: Skipping duplicate '{product_name}'")
+                
+                if duplicate_count > 0:
+                    logger.info(f"🔄 FINAL DEDUPLICATION: Removed {duplicate_count} duplicates, returning {len(final_tags)} unique products")
+                
+                return final_tags
                 
             except Exception as e:
                 logger.error(f"Failed to get products from database: {e}")
@@ -6952,6 +6807,17 @@ class ExcelProcessor:
         
         sorted_tags = sorted(tags, key=sort_key)
         logger.info(f"get_available_tags: Returning {len(sorted_tags)} tags (removed {len(filtered_df) - len(sorted_tags)} duplicates)")
+        
+        # Log enhanced deduplication summary
+        total_processed = len(sorted_tags)
+        duplicates_removed = len(filtered_df) - total_processed
+        logger.info(f"📊 EXCEL PROCESSING SUMMARY:")
+        logger.info(f"   📄 Total rows in Excel: {len(self.df)}")
+        logger.info(f"   🔍 Filtered rows: {len(filtered_df)}")
+        logger.info(f"   ✅ Unique products processed: {total_processed}")
+        logger.info(f"   🔄 Duplicates removed: {duplicates_removed}")
+        logger.info(f"   📈 Deduplication rate: {(duplicates_removed/len(filtered_df)*100):.1f}%")
+        
         return sorted_tags
 
 

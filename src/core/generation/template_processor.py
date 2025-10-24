@@ -50,7 +50,7 @@ IS_PYTHONANYWHERE = 'pythonanywhere.com' in os.environ.get('HTTP_HOST', '')
 
 # Use same settings for both local and PythonAnywhere to ensure consistent generation
 MAX_PROCESSING_TIME_PER_CHUNK = 30  # 30 seconds max per chunk
-MAX_TOTAL_PROCESSING_TIME = 300     # 5 minutes max total
+MAX_TOTAL_PROCESSING_TIME = 600     # 10 minutes max total (increased for large batches)
 CHUNK_SIZE_LIMIT = 50               # Limit chunk size for performance
 
 def get_font_scheme(template_type, base_size=12):

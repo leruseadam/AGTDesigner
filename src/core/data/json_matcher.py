@@ -1843,9 +1843,11 @@ class JSONMatcher:
                 inventory_category = str(item.get("inventory_category", "")).strip()
                 product_type = map_inventory_type_to_product_type(inventory_type, inventory_category, product_name)
                 weight = str(item.get("unit_weight", item.get("weight", ""))).strip()
+                price = str(item.get("line_price", item.get("price", ""))).strip()
                 strain = str(item.get("strain_name", item.get("strain", ""))).strip()
                 
                 print(f"🔍 DEBUG: SIMPLIFIED - Processing item {i+1}/{len(unique_items)}: '{product_name}'")
+                print(f"🔍 DEBUG: SIMPLIFIED - Extracted values: weight='{weight}', price='{price}', strain='{strain}'")
                 
                 # SIMPLIFIED MATCHING: Try basic Excel matching first (no vendor restrictions)
                 best_match = None
@@ -1929,8 +1931,17 @@ class JSONMatcher:
             inventory_type = str(item.get("inventory_type", "")).strip()
             inventory_category = str(item.get("inventory_category", "")).strip()
             product_type = map_inventory_type_to_product_type(inventory_type, inventory_category, raw_product_name)
-            weight = str(item.get("unit_weight", item.get("weight", ""))).strip()
+            
+            # CRITICAL FIX: Use proper weight normalization for nonclassic types
+            raw_weight = str(item.get("unit_weight", item.get("weight", ""))).strip()
+            raw_units = str(item.get("unit_weight_uom", item.get("uom", "g"))).strip()
+            weight, weight_units = self._normalize_weight_for_json_product(raw_weight, raw_units, product_type, product_name)
+            
+            price = str(item.get("line_price", item.get("price", ""))).strip()
             strain = str(item.get("strain_name", item.get("strain", ""))).strip()
+            
+            # DEBUG: Log price extraction
+            print(f"🔍 DEBUG: JSON FALLBACK - Product: '{product_name}', Raw price: '{item.get('line_price', item.get('price', ''))}', Final price: '{price}'")
             
             # CRITICAL FIX: Determine proper lineage based on product type
             lineage = self._determine_lineage_for_product(product_type, '', product_name, strain)
@@ -1944,12 +1955,14 @@ class JSONMatcher:
                 'Product Brand': brand or vendor,
                 'Product Type*': product_type,
                 'Weight*': weight or '1',
-                'Units': 'g',
-                'Price*': '25',  # Default price
+                'Units': weight_units or 'g',
+                'Price*': price or '25',  # Use actual price from JSON or default
                 'THC test result': '',
                 'CBD test result': '',
                 'Product Strain': strain,
                 'Lineage': lineage,  # Use properly determined lineage
+                'Ratio': self._calculate_ratio_for_json_product(product_type, item),
+                'Ratio_or_THC_CBD': self._calculate_ratio_for_json_product(product_type, item),
                 'Quantity*': '1',
                 'Source': 'JSON Fallback'
             }
@@ -1979,7 +1992,7 @@ class JSONMatcher:
             weight_raw = safe_row_get(excel_row, 'Weight*', '')
             weight_with_units = weight_raw
             if weight_raw and safe_row_get(excel_row, 'Units'):
-                weight_with_units = f"{weight_raw} {safe_row_get(excel_row, 'Units')}"
+                weight_with_units = f"{weight_raw}{safe_row_get(excel_row, 'Units')}"
             
             # Use the dynamically detected product name column
             product_name_col = 'Product Name*'
@@ -1993,6 +2006,26 @@ class JSONMatcher:
             # Get vendor with fallback logic
             vendor = safe_row_get(excel_row, 'Vendor/Supplier*') or safe_row_get(excel_row, 'Vendor/Supplier') or safe_row_get(excel_row, 'Vendor') or global_vendor
             
+            # CRITICAL FIX: Override with JSON data if available (for price and weight)
+            excel_price = safe_row_get(excel_row, 'Price*')
+            excel_weight = safe_row_get(excel_row, 'Weight*')
+            excel_units = safe_row_get(excel_row, 'Units')
+            
+            if json_item:
+                json_price = str(json_item.get("line_price", json_item.get("price", ""))).strip()
+                json_weight = str(json_item.get("unit_weight", json_item.get("weight", ""))).strip()
+                json_units = str(json_item.get("unit_weight_uom", json_item.get("uom", ""))).strip()
+                
+                if json_price:
+                    excel_price = json_price
+                    logging.info(f"💰 Excel match using JSON price '{json_price}' instead of Excel price")
+                
+                if json_weight:
+                    excel_weight = json_weight
+                    if json_units:
+                        excel_units = json_units
+                    logging.info(f"⚖️ Excel match using JSON weight '{json_weight}' with units '{json_units}' instead of Excel values")
+            
             # Build the product structure
             product = {
                 'Product Name*': product_name,
@@ -2000,10 +2033,10 @@ class JSONMatcher:
                 'Vendor': vendor,
                 'Product Brand': safe_row_get(excel_row, 'Product Brand') or vendor,
                 'Product Type*': safe_row_get(excel_row, 'Product Type*'),
-                'Weight*': safe_row_get(excel_row, 'Weight*'),
-                'Units': safe_row_get(excel_row, 'Units'),
+                'Weight*': excel_weight,
+                'Units': excel_units,
                 'Weight Value + Unit': weight_with_units,
-                'Price*': safe_row_get(excel_row, 'Price*'),
+                'Price*': excel_price,
                 'Cost*': safe_row_get(excel_row, 'Cost*'),
                 'THC test result': safe_row_get(excel_row, 'THC test result'),
                 'CBD test result': safe_row_get(excel_row, 'CBD test result'),
@@ -2199,9 +2232,8 @@ class JSONMatcher:
             weight_with_units = f"{weight_value}{units or 'g'}"
             
             # Create DescAndWeight field in the same format as other tags
+            # CRITICAL FIX: Don't add weight to description to avoid duplication
             desc_and_weight = cleaned_product_name
-            if weight_value and units:
-                desc_and_weight = f"{cleaned_product_name} -\u00A0{weight_value}{units}"
             
             # Create the product object
             product = {
@@ -2209,7 +2241,7 @@ class JSONMatcher:
                 'ProductName': cleaned_product_name,
                 'Description': cleaned_product_name,
                 'DescAndWeight': desc_and_weight,  # Format: "Description - Weight" like other tags
-                'displayName': comprehensive_display_name,
+                'displayName': cleaned_product_name,  # Use clean name for UI display
                 'Product Type*': final_assigned_type,
                 'Product Brand': final_brand or '',
                 'Product Strain': strain or 'Unknown Strain',
@@ -3635,7 +3667,7 @@ class JSONMatcher:
                                         logging.info(f"✅ SKU search found valid database match: '{product_name}' → '{result[1]}'")
                                         
                                         # Create tag from database info
-                                        tag = self._create_tag_from_database_info(db_info, vendor)
+                                        tag = self._create_tag_from_database_info(db_info, vendor, item)
                                         all_tags.append(tag)
                                         matched_count += 1
                                         print(f"🔍 DEBUG: Added valid database tag for SKU '{product_name}'")
@@ -4175,7 +4207,7 @@ class JSONMatcher:
                         'DescAndWeight': self._process_description_from_product_name(primary_product_name, weight, units),  # Use Excel processor formula with weight
                         'Description_Complexity': '1',
                         'Ratio_or_THC_CBD': '',
-                        'displayName': self._create_detailed_display_name(product_name, description, thc_result, cbd_result, test_unit, weight, units),  # Create detailed display name with CBD/THC info
+                        'displayName': primary_product_name,  # Use clean product name for UI display
                         'weightWithUnits': f"{str(round(float(weight or '1')))}{units or 'g'}",
                         'WeightWithUnits': f"{str(round(float(weight or '1')))}{units or 'g'}",
                         'WeightUnits': f"{str(round(float(weight or '1')))}{units or 'g'}",
@@ -6030,12 +6062,8 @@ class JSONMatcher:
         import re
         description = re.sub(r' - [\d.].*$', '', description)
         
-        # Add weight with hyphen staying with weight (space after hyphen) if provided
-        if weight and units:
-            weight_units = f"{str(round(float(weight or '1')))}{units or 'g'}"
-            if weight_units and weight_units.lower() not in ['nan', 'none', 'null', '']:
-                return f"{description} -\u00A0{weight_units}"
-        
+        # CRITICAL FIX: Don't add weight to description to avoid duplication
+        # Weight will be handled separately in the WeightUnits field
         return description
 
     def _create_detailed_display_name(self, product_name: str, description: str, thc_result: str, cbd_result: str, test_unit: str, weight: str = None, units: str = None) -> str:
@@ -6116,11 +6144,8 @@ class JSONMatcher:
                 cannabinoid_info = " / ".join(cannabinoid_parts)
                 detailed_name = f"{base_name} - {cannabinoid_info}"
             else:
-                # If no cannabinoid info, just use the base name with weight if available
-                if weight and units:
-                    detailed_name = f"{base_name} - {weight}{units}"
-                else:
-                    detailed_name = base_name
+                # If no cannabinoid info, just use the base name (no weight duplication)
+                detailed_name = base_name
             
             return detailed_name
             
@@ -6152,42 +6177,23 @@ class JSONMatcher:
         is_classic = product_type and product_type.strip().lower() in CLASSIC_TYPES
         logging.info(f"🧬 IS_CLASSIC: {is_classic} (product_type.lower()='{product_type.lower() if product_type else 'None'}')")
         
-        # CRITICAL FIX: Check for explicit lineage indicators FIRST, regardless of product type
-        # This ensures JSON matched tags like "Indica Salted Caramel" get proper lineage
-        if product_name:
-            name_lower = product_name.lower()
-            if any(word in name_lower for word in ['sativa', 'sativa-dominant']):
-                return 'SATIVA'
-            elif any(word in name_lower for word in ['indica', 'indica-dominant']):
-                return 'INDICA'
-            elif any(word in name_lower for word in ['hybrid', 'balanced']):
-                return 'HYBRID'
-            elif any(word in name_lower for word in ['cbd', 'hemp', 'low-thc']):
-                # For edibles, be more conservative - only assign CBD if it's explicitly high-CBD
-                if product_type and product_type.strip().lower() in ['edible (solid)', 'edible (liquid)', 'high cbd edible liquid', 'tincture', 'topical', 'capsule']:
-                    # Only assign CBD lineage to edibles if they are explicitly high-CBD products
-                    if 'high cbd' in name_lower or 'cbd' in name_lower and any(word in name_lower for word in ['high', 'pure', 'isolate']):
-                        return 'CBD'
-                    else:
-                        # Regular edibles with CBD content should be MIXED
-                        return 'MIXED'
-                else:
-                    return 'CBD'
-        
-        # Check Product Strain for CBD indicators (same logic as Excel processor)
-        if product_strain:
-            strain_lower = product_strain.lower()
-            if 'cbd blend' in strain_lower or 'cbd' in strain_lower:
-                logging.info(f"🧬 CBD STRAIN DETECTED: '{product_strain}' for product type '{product_type}'")
-                # For nonclassic types, use Product Strain to determine CBD lineage
-                if product_type and product_type.strip().lower() not in CLASSIC_TYPES:
-                    # Define edible types for more conservative CBD assignment (exclude topical)
+        # CRITICAL FIX: For NONCLASSIC types, ALWAYS use MIXED or CBD (never SATIVA/INDICA/HYBRID)
+        # This ensures edibles, tinctures, topicals, etc. get proper nonclassic colors
+        if not is_classic:
+            logging.info(f"🧬 NONCLASSIC TYPE DETECTED: '{product_type}' - will use MIXED or CBD lineage only")
+            
+            # Check Product Strain for CBD indicators first
+            if product_strain:
+                strain_lower = product_strain.lower()
+                if 'cbd blend' in strain_lower or 'cbd' in strain_lower:
+                    logging.info(f"🧬 CBD STRAIN DETECTED: '{product_strain}' for nonclassic type '{product_type}'")
+                    # Define edible types for more conservative CBD assignment
                     edible_types = ['edible (solid)', 'edible (liquid)', 'high cbd edible liquid', 'tincture', 'capsule']
                     if product_type.strip().lower() in edible_types:
                         # For edibles, only assign CBD if explicitly high-CBD
                         if product_name and ('high cbd' in product_name.lower() or 
                                            ('cbd' in product_name.lower() and any(word in product_name.lower() for word in ['high', 'pure', 'isolate']))):
-                            logging.info(f"🧬 CBD EDIBLE: '{product_name}' -> 'CBD'")
+                            logging.info(f"🧬 HIGH-CBD EDIBLE: '{product_name}' -> 'CBD'")
                             return 'CBD'
                         else:
                             logging.info(f"🧬 REGULAR EDIBLE WITH CBD STRAIN: '{product_name}' -> 'MIXED'")
@@ -6196,20 +6202,167 @@ class JSONMatcher:
                         # Non-edibles (including topicals) with CBD strain get CBD lineage
                         logging.info(f"🧬 NON-EDIBLE WITH CBD STRAIN: '{product_name}' (type: {product_type}) -> 'CBD'")
                         return 'CBD'
+            
+            # Check product name for CBD indicators
+            if product_name:
+                name_lower = product_name.lower()
+                if any(word in name_lower for word in ['cbd', 'hemp', 'low-thc']):
+                    # For edibles, be more conservative - only assign CBD if it's explicitly high-CBD
+                    edible_types = ['edible (solid)', 'edible (liquid)', 'high cbd edible liquid', 'tincture', 'capsule']
+                    if product_type.strip().lower() in edible_types:
+                        if 'high cbd' in name_lower or ('cbd' in name_lower and any(word in name_lower for word in ['high', 'pure', 'isolate'])):
+                            logging.info(f"🧬 HIGH-CBD EDIBLE FROM NAME: '{product_name}' -> 'CBD'")
+                            return 'CBD'
+                        else:
+                            logging.info(f"🧬 REGULAR EDIBLE WITH CBD IN NAME: '{product_name}' -> 'MIXED'")
+                            return 'MIXED'
+                    else:
+                        logging.info(f"🧬 NON-EDIBLE WITH CBD IN NAME: '{product_name}' -> 'CBD'")
+                        return 'CBD'
+            
+            # Default for nonclassic types is MIXED (blue color)
+            logging.info(f"🧬 NONCLASSIC TYPE DEFAULT: '{product_type}' -> 'MIXED'")
+            return 'MIXED'
         
-        # Check if this is a classic product type
-        if is_classic:
-            # Classic types (flower, pre-roll, concentrate, etc.) can use existing lineage or default to HYBRID
-            result_lineage = existing_lineage or "HYBRID"
-            logging.info(f"🧬 CLASSIC TYPE: '{product_type}' -> '{result_lineage}' (existing: '{existing_lineage}')")
-            return result_lineage
-        else:
-            # Nonclassic types (edibles, tinctures, topicals, etc.) should ALWAYS be MIXED for blue color
-            # This overrides any incorrect lineage values in the database
-            logging.info(f"🧬 NONCLASSIC TYPE: '{product_type}' -> 'MIXED' (existing: '{existing_lineage}', strain: '{product_strain}')")
-            return "MIXED"
+        # CLASSIC TYPES ONLY: Check for explicit lineage indicators in product name
+        if product_name:
+            name_lower = product_name.lower()
+            if any(word in name_lower for word in ['sativa', 'sativa-dominant']):
+                logging.info(f"🧬 CLASSIC TYPE WITH SATIVA IN NAME: '{product_name}' -> 'SATIVA'")
+                return 'SATIVA'
+            elif any(word in name_lower for word in ['indica', 'indica-dominant']):
+                logging.info(f"🧬 CLASSIC TYPE WITH INDICA IN NAME: '{product_name}' -> 'INDICA'")
+                return 'INDICA'
+            elif any(word in name_lower for word in ['hybrid', 'balanced']):
+                logging.info(f"🧬 CLASSIC TYPE WITH HYBRID IN NAME: '{product_name}' -> 'HYBRID'")
+                return 'HYBRID'
+            elif any(word in name_lower for word in ['cbd', 'hemp', 'low-thc']):
+                logging.info(f"🧬 CLASSIC TYPE WITH CBD IN NAME: '{product_name}' -> 'CBD'")
+                return 'CBD'
+        
+        # Classic types: use existing lineage or default to HYBRID
+        result_lineage = existing_lineage or "HYBRID"
+        logging.info(f"🧬 CLASSIC TYPE: '{product_type}' -> '{result_lineage}' (existing: '{existing_lineage}')")
+        return result_lineage
 
-    def _create_tag_from_database_info(self, db_info: Dict, vendor: str) -> Dict:
+    def _calculate_ratio_for_json_product(self, product_type: str, json_item: Dict = None) -> str:
+        """
+        Calculate ratio for JSON products following classic vs nonclassic rules.
+        
+        Args:
+            product_type: The product type
+            json_item: Original JSON item data (optional)
+            
+        Returns:
+            Properly formatted ratio string
+        """
+        from src.core.constants import CLASSIC_TYPES
+        
+        if not product_type:
+            return ""
+        
+        product_type_lower = product_type.strip().lower()
+        is_classic = product_type_lower in CLASSIC_TYPES
+        
+        # For classic types, use default THC:CBD format
+        if is_classic:
+            return "THC: | BR | CBD:"
+        
+        # For nonclassic types, try to extract ratio from JSON data or product name
+        ratio = ""
+        
+        # First, try to get ratio from JSON item
+        if json_item:
+            # Check various possible ratio fields in JSON
+            ratio_fields = ['ratio', 'ratio_or_thc_cbd', 'thc_cbd_ratio', 'cannabinoid_ratio']
+            for field in ratio_fields:
+                if field in json_item and json_item[field]:
+                    ratio = str(json_item[field]).strip()
+                    if ratio and ratio.lower() not in ['nan', 'none', 'null', '']:
+                        break
+            
+            # If no ratio field found, try to extract from product name
+            if not ratio and 'product_name' in json_item:
+                product_name = str(json_item['product_name']).strip()
+                ratio = self._extract_ratio_from_product_name(product_name, product_type)
+        
+        # Return the ratio if found, otherwise empty string for nonclassic types
+        return ratio if ratio else ""
+
+    def _extract_ratio_from_product_name(self, product_name: str, product_type: str) -> str:
+        """
+        Extract ratio from product name for nonclassic products.
+        
+        Args:
+            product_name: The product name
+            product_type: The product type
+            
+        Returns:
+            Extracted ratio string or empty string
+        """
+        if not product_name:
+            return ""
+        
+        import re
+        
+        # Look for ratio patterns in product name
+        ratio_patterns = [
+            r'(\d+:\d+(?::\d+)*)',  # 1:1, 2:1, 1:2:1, etc.
+            r'(\d+/\d+)',           # 1/1, 2/1, etc.
+            r'(\d+mg.*?cbd)',       # 100mg CBD, etc.
+            r'(cbd.*?\d+mg)',       # CBD 100mg, etc.
+        ]
+        
+        for pattern in ratio_patterns:
+            match = re.search(pattern, product_name, re.IGNORECASE)
+            if match:
+                return match.group(1)
+        
+        return ""
+
+    def _normalize_weight_for_json_product(self, weight: str, units: str, product_type: str, product_name: str = "") -> tuple:
+        """
+        Normalize weight and units for JSON products following Excel processor rules.
+        
+        Args:
+            weight: Original weight value
+            units: Original units
+            product_type: Product type
+            product_name: Product name for special cases
+            
+        Returns:
+            Tuple of (normalized_weight, normalized_units)
+        """
+        from src.core.constants import CLASSIC_TYPES
+        
+        if not weight or str(weight).strip() in ['', 'nan', 'NaN', 'None']:
+            return '1', 'g'  # Default fallback
+        
+        weight = str(weight).strip()
+        units = str(units).strip() if units else 'g'
+        
+        # Determine if this is a nonclassic product
+        is_nonclassic = product_type.lower() not in [ct.lower() for ct in CLASSIC_TYPES]
+        
+        # For nonclassic types, convert grams to ounces
+        if is_nonclassic and units.lower() in ['g', 'gram', 'grams']:
+            try:
+                weight_val = float(weight)
+                # Convert grams to ounces (1 oz = 28.3495 g)
+                oz_val = round(weight_val / 28.3495, 2)
+                # Remove trailing zeros and format without space before unit
+                if oz_val.is_integer():
+                    return f"{int(oz_val)}oz", 'oz'
+                else:
+                    return f"{oz_val:.2f}".rstrip('0').rstrip('.') + 'oz', 'oz'
+            except ValueError:
+                # If conversion fails, return original values
+                return weight, units
+        
+        # For classic types or already correct units, return as-is
+        return weight, units
+
+    def _create_tag_from_database_info(self, db_info: Dict, vendor: str, json_item: Dict = None) -> Dict:
         """
         Create a product tag from Product Database information.
         This method is used when a Product Database lookup is successful.
@@ -6217,6 +6370,7 @@ class JSONMatcher:
         Args:
             db_info: Product information from the database
             vendor: The vendor name
+            json_item: Original JSON item data (optional, for price/weight override)
             
         Returns:
             Dictionary containing the product tag information
@@ -6239,8 +6393,14 @@ class JSONMatcher:
             strain = db_info.get("Product Strain", "") or db_info.get("product_strain", "")
             lineage = db_info.get("Lineage", "") or db_info.get("lineage", "")
             price = str(db_info.get("Price", "") or db_info.get("price", ""))
-            weight = str(db_info.get("Weight*", "") or db_info.get("weight", ""))
-            units = str(db_info.get("Units", "") or db_info.get("units", ""))
+            
+            # CRITICAL FIX: Use proper weight normalization for nonclassic types
+            weight, units = self._normalize_weight_for_json_product(
+                db_info.get("Weight*", "") or db_info.get("weight", ""),
+                db_info.get("Units", "") or db_info.get("units", ""),
+                product_type,
+                db_info.get("Product Name*", "") or db_info.get("product_name", "")
+            )
             description = db_info.get("Description", "") or db_info.get("description", "")
             thc_result = str(db_info.get("THC test result", "") or db_info.get("thc_test_result", ""))
             cbd_result = str(db_info.get("CBD test result", "") or db_info.get("cbd_test_result", ""))
@@ -6308,16 +6468,30 @@ class JSONMatcher:
             logging.info(f"   AI Confidence: {ai_confidence}")
             logging.info(f"   AI Match Type: {ai_match_type}")
             
+            # Helper function to extract clean product name (remove cannabinoid details)
+            def extract_clean_product_name(full_name):
+                if not full_name:
+                    return full_name
+                # Remove cannabinoid details like "- 1000mg CBD / 75mg CBN / 75mg CBG / 1150mg THC"
+                import re
+                # Remove patterns like "- 1000mg CBD / 75mg CBN / 75mg CBG / 1150mg THC"
+                cleaned = re.sub(r'\s*-\s*\d+mg\s+[A-Z]+(?:\s*/\s*\d+mg\s+[A-Z]+)*', '', full_name)
+                # Remove "by Ceres" patterns
+                cleaned = re.sub(r'\s*by\s+Ceres\s*$', '', cleaned, flags=re.IGNORECASE)
+                return cleaned.strip()
+            
+            # Extract clean product name for UI display
+            clean_display_name = extract_clean_product_name(primary_product_name)
+            
             # Create DescAndWeight field in the same format as other tags
+            # CRITICAL FIX: Don't add weight to description to avoid duplication
             desc_and_weight = description or primary_product_name
-            if weight and units:
-                desc_and_weight = f"{desc_and_weight} -\u00A0{weight}{units}"
             
             tag = {
                 # Core product information - follow existing tag format
                 'Product Name*': primary_product_name,
                 'ProductName': primary_product_name,
-                'Description': description or primary_product_name,
+                'Description': self._create_detailed_display_name(primary_product_name, description, thc_result, cbd_result, test_unit, weight, units),  # Use detailed name for output
                 'DescAndWeight': desc_and_weight,  # Format: "Description - Weight" like other tags
                 'Product Type*': product_type or "Unknown",
                 'Product Type': product_type or "Unknown",
@@ -6335,6 +6509,7 @@ class JSONMatcher:
                 'Units': units or "",
                 'Price': price or "",  # Use database price, no fallback
                 'Price* (Tier Name for Bulk)': price or "",  # Use database price, no fallback
+                'displayName': clean_display_name,  # Use clean product name for UI display
                 
                 # Enhanced fields using database information
                 'State': 'active',
@@ -6343,12 +6518,12 @@ class JSONMatcher:
                 'Discountable? (yes/no)': 'yes',
                 'Room*': 'Default',
                 'Medical Only (Yes/No)': medical_only or 'No',
-                'DOH': db_info.get('DOH', ''),  # Use DOH from database
+                'DOH': db_info.get('DOH', ''),                  # Use DOH from database
                 'DOH Compliant (Yes/No)': db_info.get('DOH Compliant (Yes/No)', db_info.get('DOH', '')),
                 
                 # Database column mappings
                 'Concentrate Type': product_type if product_type and "concentrate" in product_type.lower() else '',
-                'Ratio': '',
+                'Ratio': self._calculate_ratio_for_json_product(product_type, json_item),
                 'Joint Ratio': '',
                 'JointRatio': '',
                 'THC test result': thc_result,
@@ -6375,11 +6550,11 @@ class JSONMatcher:
                 'Weight Unit* (grams/gm or ounces/oz)': units or "g",
                 'CombinedWeight': weight or "1",
                 'Description_Complexity': '1',
-                'Ratio_or_THC_CBD': '',
+                'Ratio_or_THC_CBD': self._calculate_ratio_for_json_product(product_type, json_item),
                 'displayName': clean_product_name(primary_product_name),
-                'weightWithUnits': f"{str(round(float(weight or '1')))} {units or 'g'}",
-                'WeightWithUnits': f"{str(round(float(weight or '1')))} {units or 'g'}",
-                'WeightUnits': f"{str(round(float(weight or '1')))} {units or 'g'}",
+                'weightWithUnits': f"{str(round(float(weight or '1')))}{units or 'g'}",
+                'WeightWithUnits': f"{str(round(float(weight or '1')))}{units or 'g'}",
+                'WeightUnits': f"{str(round(float(weight or '1')))}{units or 'g'}",
                 
                 # Additional fields for consistency
                 'vendor': vendor,
@@ -6428,7 +6603,7 @@ class JSONMatcher:
                 'Product Name*': primary_product_name,
                 'ProductName': primary_product_name,
                 'Description': primary_product_name,
-                'displayName': clean_product_name(primary_product_name),  # Add cleaned displayName
+                'displayName': primary_product_name,  # Use clean product name for UI display
                 'Vendor': vendor,
                 'Source': 'JSON Match',  # Changed back to 'JSON Match' for proper frontend detection
                 'Product Type*': 'Unknown',
@@ -6885,10 +7060,15 @@ class JSONMatcher:
                     item.get('price', '') or
                     item.get('line_price', '') or
                     '')  # Leave blank if no price found - don't use defaults
+            
+            # DEBUG: Log price extraction
+            print(f"🔍 DEBUG: _create_tag_from_product - Product: '{product_name}', JSON price: '{item.get('line_price', item.get('price', ''))}', Final price: '{price}'")
             thc = product.get('THC test result', '') or product.get('THC Content', '')
             cbd = product.get('CBD test result', '') or product.get('CBD Content', '')
             strain = product.get('Product Strain', '') or product.get('Strain', '')
-            lineage = product.get('Lineage', '') or self._determine_lineage_for_product(product_type, '', product_name, strain)
+            # CRITICAL FIX: ALWAYS determine lineage to ensure nonclassic types get correct colors
+            existing_lineage = product.get('Lineage', '')
+            lineage = self._determine_lineage_for_product(product_type, existing_lineage, product_name, strain)
             
             # Get DOH field: try multiple variations, then blank if not found
             doh = (product.get('DOH', '') or 
@@ -6900,9 +7080,23 @@ class JSONMatcher:
                    '')  # Leave blank if not found in data
             
             # Create DescAndWeight field in the same format as other tags
+            # CRITICAL FIX: Don't add weight to description to avoid duplication
             desc_and_weight = description or product_name
-            if weight and units:
-                desc_and_weight = f"{desc_and_weight} -\u00A0{weight}{units}"
+            
+            # Helper function to extract clean product name (remove cannabinoid details)
+            def extract_clean_product_name(full_name):
+                if not full_name:
+                    return full_name
+                # Remove cannabinoid details like "- 1000mg CBD / 75mg CBN / 75mg CBG / 1150mg THC"
+                import re
+                # Remove patterns like "- 1000mg CBD / 75mg CBN / 75mg CBG / 1150mg THC"
+                cleaned = re.sub(r'\s*-\s*\d+mg\s+[A-Z]+(?:\s*/\s*\d+mg\s+[A-Z]+)*', '', full_name)
+                # Remove "by Ceres" patterns
+                cleaned = re.sub(r'\s*by\s+Ceres\s*$', '', cleaned, flags=re.IGNORECASE)
+                return cleaned.strip()
+            
+            # Extract clean product name for UI display
+            clean_display_name = extract_clean_product_name(product_name)
             
             # Create the tag with proper field names that template generation expects
             tag = {
@@ -6927,6 +7121,7 @@ class JSONMatcher:
                 'Units': units,
                 'Price': price,
                 'Price* (Tier Name for Bulk)': price,
+                'displayName': clean_display_name,  # Use clean product name for UI display
                 
                 # Enhanced fields
                 'State': 'active',

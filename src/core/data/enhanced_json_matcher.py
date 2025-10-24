@@ -907,16 +907,22 @@ ENHANCED_JSON_FIELD_MAP = {
     "vendor": "Vendor/Supplier*",
     "brand": "Product Brand",
     "price": "Price",
+    "line_price": "Price",  # Cultivera uses line_price for price
     "weight": "Weight*",
+    "unit_weight": "Weight*",  # Cultivera uses unit_weight for weight
     "strain": "Product Strain",
+    "strain_name": "Product Strain",  # Cultivera uses strain_name
     "product_type": "Product Type*",
+    "inventory_type": "Product Type*",  # Cultivera uses inventory_type
     "sku": "Internal Product Identifier",
     "batch_number": "Batch Number",
     "lot_number": "Lot Number",
     "room": "Room*",
     "quantity": "Quantity*",
+    "qty": "Quantity*",  # Cultivera uses qty for quantity
     "units": "Units",
-    "unit_weight_uom": "Units",
+    "unit_weight_uom": "Units",  # Cultivera uses unit_weight_uom for weight units
+    "uom": "Units",  # Cultivera uses uom for units
     "thc_percentage": "THC test result",
     "cbd_percentage": "CBD test result",
     "harvest_date": "Accepted Date",

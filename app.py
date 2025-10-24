@@ -744,8 +744,8 @@ def create_app():
     app.config.from_object('config.Config')
     
     # Enable development mode for auto-reload and debug features
-    # DISABLED: Prevent multiple restarts by disabling development mode by default
-    app.config['DEVELOPMENT_MODE'] = os.environ.get('DEVELOPMENT_MODE', 'false').lower() == 'true'
+    # ENABLED: Allow easy restart by enabling development mode by default
+    app.config['DEVELOPMENT_MODE'] = os.environ.get('DEVELOPMENT_MODE', 'true').lower() == 'true'
     
     # Enable detailed logging for development
     logging.getLogger().setLevel(logging.DEBUG)
@@ -798,13 +798,13 @@ def create_app():
     # Check if we're in development mode
     development_mode = app.config.get('DEVELOPMENT_MODE', False)
 
-    # Respect environment: enable dev features only in development
-    app.config['TEMPLATES_AUTO_RELOAD'] = bool(development_mode)
+    # Respect environment: disable template auto-reload to prevent force reloads
+    app.config['TEMPLATES_AUTO_RELOAD'] = False
     app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0 if development_mode else 31536000
     app.config['DEBUG'] = bool(app.config.get('DEBUG', development_mode))
     app.config['PROPAGATE_EXCEPTIONS'] = bool(development_mode)
     if development_mode:
-        logging.info("Running in DEVELOPMENT mode with template auto-reload enabled")
+        logging.info("Running in DEVELOPMENT mode with template auto-reload DISABLED to prevent force reloads")
     else:
         logging.info("Running in PRODUCTION mode with static asset caching enabled")
     
@@ -840,6 +840,14 @@ def create_app():
             'text/plain'
         ])
     return app
+
+# Debug: Track app creation
+import sys
+print(f"🔍 DEBUG: Creating Flask app (import count: {sys.modules.get('app', {}).get('__import_count', 0) + 1})")
+if 'app' in sys.modules:
+    if not hasattr(sys.modules['app'], '__import_count'):
+        sys.modules['app'].__import_count = 0
+    sys.modules['app'].__import_count += 1
 
 app = create_app()
 
@@ -1146,6 +1154,18 @@ class LabelMakerApp:
                 
                 self.logger.debug("Basic logging configured for Label Maker application")
             self.logger.debug(f"Log file location: {log_file}")
+    
+    def _is_port_available(self, port):
+        """Check if a port is available for binding."""
+        import socket
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1)
+            result = sock.connect_ex(('127.0.0.1', port))
+            sock.close()
+            return result != 0  # Port is available if connection fails
+        except Exception:
+            return False
             
     def run(self):
         host = os.environ.get('HOST', '127.0.0.1')
@@ -1161,12 +1181,16 @@ class LabelMakerApp:
             sock.close()
             
             if result == 0:
-                logging.warning(f"⚠️  Port {port} is already in use! App may already be running.")
-                logging.warning("🔄 If you're seeing multiple restarts, try:")
-                logging.warning("   1. Kill existing processes: lsof -i :8001")
-                logging.warning("   2. Use a different port: FLASK_PORT=8002 python app.py")
-                logging.warning("   3. Disable development mode: DEVELOPMENT_MODE=false python app.py")
-                return
+                logging.warning(f"⚠️  Port {port} is already in use! Finding available port...")
+                # Try ports 8001-8010
+                for test_port in range(8001, 8011):
+                    if self._is_port_available(test_port):
+                        port = test_port
+                        logging.info(f"✅ Found available port: {port}")
+                        break
+                else:
+                    logging.error("❌ No available ports found in range 8001-8010")
+                    return
         except Exception as e:
             logging.debug(f"Port check failed (this is normal): {e}")
         
@@ -1175,14 +1199,15 @@ class LabelMakerApp:
             logging.info("🚀 PERFORMANCE OPTIMIZATION: Startup file loading disabled for faster app startup")
         
         logging.info(f"Starting Label Maker application on {host}:{port}")
+        print(f"🌐 App will be available at: http://{host}:{port}")
         logging.info(f"Development mode: {development_mode}")
         
-        # PREVENT MULTIPLE RESTARTS: Always disable reloader to prevent multiple startups
+        # DEVELOPMENT MODE: Keep debug but disable reloader to prevent multiple restarts
         self.app.run(
             host=host, 
             port=port, 
             debug=development_mode, 
-            use_reloader=False,  # Always disable reloader to prevent multiple restarts
+            use_reloader=False,  # Disable reloader to prevent multiple restarts
             threaded=True  # Enable threading for better performance
         )
 
@@ -14099,7 +14124,7 @@ def enhanced_json_match():
         data = request.get_json()
         url = data.get('url', '').strip()
         strategy = data.get('strategy', 'hybrid')  # hybrid, fuzzy, semantic, ml_enhanced
-        debug_mode = data.get('debug', False)  # Enable debug mode for more matches
+        debug_mode = data.get('debug', True)  # Enable debug mode for more matches
         
         if not url:
             return jsonify({'error': 'URL is required'}), 400
@@ -14915,21 +14940,75 @@ def optimize_performance():
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    # PREVENT MULTIPLE RESTARTS: Add startup guard
+    # SIMPLE STARTUP: Allow easy process termination
     import sys
     import os
+    import signal
     
-    # Check if this is the main process (not a subprocess)
-    if hasattr(sys, '_getframe'):
-        frame = sys._getframe()
-        if frame.f_back is not None and frame.f_back.f_code.co_filename != '<stdin>':
-            print("⚠️  Detected subprocess startup - preventing multiple instances")
-            sys.exit(0)
+    # Set up signal handlers for clean shutdown
+    def signal_handler(signum, frame):
+        print(f"\n🛑 Received signal {signum} - shutting down gracefully...")
+        # Clean up lock file if it exists
+        try:
+            lock_file = '/tmp/labelmaker_app.lock'
+            if os.path.exists(lock_file):
+                os.remove(lock_file)
+        except Exception:
+            pass
+        sys.exit(0)
+    
+    # Register signal handlers for clean shutdown
+    signal.signal(signal.SIGINT, signal_handler)   # Ctrl+C
+    signal.signal(signal.SIGTERM, signal_handler)  # kill command
+    signal.signal(signal.SIGHUP, signal_handler)   # hangup
+    
+    # Simple lock file check (but allow override)
+    lock_file = '/tmp/labelmaker_app.lock'
+    if os.path.exists(lock_file):
+        try:
+            with open(lock_file, 'r') as f:
+                pid = int(f.read().strip())
+            # Check if the process is still running
+            try:
+                os.kill(pid, 0)  # This will raise an exception if process doesn't exist
+                print(f"⚠️  App already running with PID {pid}")
+                print("💡 To force start, run: rm -f /tmp/labelmaker_app.lock && python app.py")
+                sys.exit(0)
+            except (OSError, ProcessLookupError):
+                # Process doesn't exist, remove stale lock file
+                os.remove(lock_file)
+        except (ValueError, FileNotFoundError):
+            # Invalid lock file, remove it
+            try:
+                os.remove(lock_file)
+            except FileNotFoundError:
+                pass
+    
+    # Create lock file with current PID
+    try:
+        with open(lock_file, 'w') as f:
+            f.write(str(os.getpid()))
+    except Exception:
+        pass  # Continue even if we can't create lock file
     
     # Use the LabelMakerApp class for proper startup
     print("Starting Label Maker application...")
-    print("🛡️  Multiple restart protection enabled")
+    print(f"🆔 Process ID: {os.getpid()}")
+    print(f"🆔 Parent Process ID: {os.getppid()}")
+    print("🛑 Press Ctrl+C to stop the app")
     
-    # Create and run the application
-    label_maker_app = LabelMakerApp()
-    label_maker_app.run() 
+    try:
+        # Create and run the application
+        label_maker_app = LabelMakerApp()
+        label_maker_app.run()
+    except KeyboardInterrupt:
+        print("\n🛑 Shutdown requested by user")
+    except Exception as e:
+        print(f"\n❌ Error: {e}")
+    finally:
+        # Clean up lock file on exit
+        try:
+            if os.path.exists(lock_file):
+                os.remove(lock_file)
+        except Exception:
+            pass 

@@ -147,10 +147,8 @@ async function handleFiles(files) {
   }
 }
 
-// Platform-specific optimizations for better performance
+// Add smooth scrolling (but ONLY on Mac - Windows handles native scrolling better)
 const isWindows = /Windows|Win32|Win64/.test(navigator.userAgent);
-const isMac = /Mac|Macintosh|MacIntel/.test(navigator.userAgent);
-
 if (!isWindows) {
   document.querySelectorAll('.tag-list-container').forEach(container => {
     container.addEventListener('wheel', (e) => {
@@ -162,135 +160,6 @@ if (!isWindows) {
 } else {
   console.log('🪟 Windows detected - using native scrolling for better performance');
 }
-
-// PC-specific dropdown performance optimizations
-if (isWindows) {
-  console.log('🪟 Applying Windows-specific dropdown performance optimizations');
-  
-  // Debounce dropdown change events to reduce API calls
-  let dropdownDebounceTimer = null;
-  const originalAddEventListener = EventTarget.prototype.addEventListener;
-  
-  // Override addEventListener for dropdown elements to add debouncing
-  EventTarget.prototype.addEventListener = function(type, listener, options) {
-    if (this.tagName === 'SELECT' && type === 'change') {
-      const debouncedListener = function(event) {
-        if (dropdownDebounceTimer) {
-          clearTimeout(dropdownDebounceTimer);
-        }
-        dropdownDebounceTimer = setTimeout(() => {
-          listener.call(this, event);
-        }, 150); // 150ms debounce for PC
-      };
-      return originalAddEventListener.call(this, type, debouncedListener, options);
-    }
-    return originalAddEventListener.call(this, type, listener, options);
-  };
-  
-  // Optimize dropdown rendering for Windows
-  const optimizeDropdownRendering = () => {
-    document.querySelectorAll('select').forEach(select => {
-      // Add CSS to improve rendering performance
-      select.style.willChange = 'contents';
-      select.style.transform = 'translateZ(0)'; // Force hardware acceleration
-      
-      // Reduce repaints by batching style changes
-      if (select.classList.contains('form-select')) {
-        select.style.transition = 'none'; // Disable transitions for better performance
-      }
-    });
-  };
-  
-  // Apply optimizations when DOM is ready
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', optimizeDropdownRendering);
-  } else {
-    optimizeDropdownRendering();
-  }
-  
-  // Monitor dropdown performance
-  const monitorDropdownPerformance = () => {
-    let dropdownChangeCount = 0;
-    let lastChangeTime = Date.now();
-    
-    document.addEventListener('change', (e) => {
-      if (e.target.tagName === 'SELECT') {
-        dropdownChangeCount++;
-        const now = Date.now();
-        const timeSinceLastChange = now - lastChangeTime;
-        
-        if (timeSinceLastChange < 100) { // Rapid changes detected
-          console.warn(`🪟 PC Performance: Rapid dropdown changes detected (${dropdownChangeCount} changes in ${timeSinceLastChange}ms)`);
-        }
-        
-        lastChangeTime = now;
-      }
-    });
-  };
-  
-      monitorDropdownPerformance();
-    }
-    
-    // PC optimization: Enhanced file processing performance
-    if (isWindows) {
-      console.log('🪟 Applying Windows-specific file processing optimizations');
-      
-      // PC optimization: Reduce file processing timeout for faster feedback
-      const originalSetTimeout = window.setTimeout;
-      window.setTimeout = function(callback, delay) {
-        // Reduce timeouts for file processing on PC
-        if (delay > 1000) {
-          delay = Math.min(delay, 2000); // Cap at 2 seconds for PC
-        }
-        return originalSetTimeout(callback, delay);
-      };
-      
-      // PC optimization: Optimize file upload progress updates
-      const optimizeFileUploadProgress = () => {
-        const progressBars = document.querySelectorAll('.progress-bar');
-        progressBars.forEach(bar => {
-          // Reduce animation duration for faster feedback
-          bar.style.transition = 'width 0.1s ease';
-        });
-      };
-      
-      // Apply optimizations when DOM is ready
-      if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', optimizeFileUploadProgress);
-      } else {
-        optimizeFileUploadProgress();
-      }
-      
-      // PC optimization: Monitor file processing performance
-      const monitorFileProcessingPerformance = () => {
-        let processingStartTime = null;
-        
-        // Monitor file upload events
-        document.addEventListener('change', (e) => {
-          if (e.target.type === 'file') {
-            processingStartTime = Date.now();
-            console.log('🪟 PC Performance: File upload started');
-          }
-        });
-        
-        // Monitor processing completion
-        const originalFetch = window.fetch;
-        window.fetch = function(...args) {
-          return originalFetch.apply(this, args).then(response => {
-            if (args[0] && args[0].includes('/upload') && response.ok) {
-              if (processingStartTime) {
-                const processingTime = Date.now() - processingStartTime;
-                console.log(`🪟 PC Performance: File processing completed in ${processingTime}ms`);
-                processingStartTime = null;
-              }
-            }
-            return response;
-          });
-        };
-      };
-      
-      monitorFileProcessingPerformance();
-    }
 
 // Add keyboard shortcuts
 document.addEventListener('keydown', (e) => {

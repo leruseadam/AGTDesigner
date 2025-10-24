@@ -2668,52 +2668,6 @@ img, video, canvas, svg {
     z-index: 1;
   }
 
-  /* Matched product lineage colors for JSON matching results display */
-  .matched-product.cbd-lineage {
-    background: rgba(241, 194, 50, 0.6) !important;
-    border: 1px solid rgba(241, 194, 50, 0.3) !important;
-    border-radius: 4px;
-    padding: 4px 8px;
-    font-weight: bold !important;
-    color: #000 !important;
-  }
-  
-  .matched-product.mixed-lineage {
-    background: rgba(0, 33, 245, 0.6) !important;
-    border: 1px solid rgba(0, 33, 245, 0.3) !important;
-    border-radius: 4px;
-    padding: 4px 8px;
-    font-weight: bold !important;
-    color: #fff !important;
-  }
-  
-  .matched-product.sativa-lineage {
-    background: rgba(237, 65, 35, 0.6) !important;
-    border: 1px solid rgba(237, 65, 35, 0.3) !important;
-    border-radius: 4px;
-    padding: 4px 8px;
-    font-weight: bold !important;
-    color: #fff !important;
-  }
-  
-  .matched-product.indica-lineage {
-    background: rgba(153, 0, 255, 0.6) !important;
-    border: 1px solid rgba(153, 0, 255, 0.3) !important;
-    border-radius: 4px;
-    padding: 4px 8px;
-    font-weight: bold !important;
-    color: #fff !important;
-  }
-  
-  .matched-product.hybrid-lineage {
-    background: rgba(0, 153, 0, 0.6) !important;
-    border: 1px solid rgba(0, 153, 0, 0.3) !important;
-    border-radius: 4px;
-    padding: 4px 8px;
-    font-weight: bold !important;
-    color: #fff !important;
-  }
-
   /* Lineage-specific checkbox colors */
   .tag-item[data-lineage="SATIVA"] .custom-checkbox:checked,
   .tag-item[data-lineage="SATIVA"] .tag-checkbox:checked,
@@ -5398,13 +5352,13 @@ img, video, canvas, svg {
 
   .excel-loading-container {
     background: 
-      radial-gradient(circle at 20% 20%, rgba(255, 0, 102, 0.15) 0%, transparent 50%),
-      radial-gradient(circle at 80% 80%, rgba(0, 255, 136, 0.15) 0%, transparent 50%),
-      radial-gradient(circle at 40% 60%, rgba(255, 102, 0, 0.15) 0%, transparent 50%),
-      radial-gradient(circle at 60% 40%, rgba(102, 0, 255, 0.15) 0%, transparent 50%),
+      radial-gradient(circle at 20% 20%, rgba(255, 0, 102, 0.2) 0%, transparent 50%),
+      radial-gradient(circle at 80% 80%, rgba(0, 255, 136, 0.2) 0%, transparent 50%),
+      radial-gradient(circle at 40% 60%, rgba(255, 102, 0, 0.2) 0%, transparent 50%),
+      radial-gradient(circle at 60% 40%, rgba(102, 0, 255, 0.2) 0%, transparent 50%),
       linear-gradient(45deg, rgba(26, 0, 51, 0.9), rgba(51, 0, 102, 0.9), rgba(102, 0, 204, 0.9), rgba(153, 0, 255, 0.9));
     background-size: 200% 200%, 150% 150%, 180% 180%, 220% 220%, 100% 100%;
-    animation: excelLoadingBackground 60s ease-in-out infinite;
+    animation: excelLoadingBackground 30s ease-in-out infinite;
     border: 1px solid rgba(160, 132, 232, 0.5);
     border-radius: 20px;
     padding: 40px;
@@ -5425,7 +5379,7 @@ img, video, canvas, svg {
 
   .excel-loading-icon {
     margin-bottom: 20px;
-    animation: excelIconPulse 6s ease-in-out infinite;
+    animation: excelIconPulse 4s ease-in-out infinite;
   }
 
   .excel-loading-icon svg {
@@ -5447,23 +5401,23 @@ img, video, canvas, svg {
   @keyframes excelLoadingBackground {
     0% { 
       background-position: 0% 0%, 100% 100%, 50% 50%, 25% 75%, 0% 0%;
-      filter: hue-rotate(0deg) saturate(1.0) brightness(1.0);
+      filter: hue-rotate(0deg) saturate(1.1) brightness(1.0);
     }
     25% { 
       background-position: 25% 25%, 75% 75%, 75% 25%, 50% 50%, 25% 25%;
-      filter: hue-rotate(15deg) saturate(1.05) brightness(1.02);
+      filter: hue-rotate(45deg) saturate(1.15) brightness(1.05);
     }
     50% { 
       background-position: 50% 50%, 50% 50%, 0% 100%, 75% 25%, 50% 50%;
-      filter: hue-rotate(30deg) saturate(1.1) brightness(1.05);
+      filter: hue-rotate(90deg) saturate(1.2) brightness(1.1);
     }
     75% { 
       background-position: 75% 75%, 25% 25%, 25% 75%, 0% 100%, 75% 75%;
-      filter: hue-rotate(15deg) saturate(1.05) brightness(1.02);
+      filter: hue-rotate(135deg) saturate(1.15) brightness(1.05);
     }
     100% { 
       background-position: 100% 100%, 0% 0%, 50% 50%, 25% 75%, 100% 100%;
-      filter: hue-rotate(0deg) saturate(1.0) brightness(1.0);
+      filter: hue-rotate(180deg) saturate(1.1) brightness(1.0);
     }
   }
 
@@ -5503,7 +5457,7 @@ img, video, canvas, svg {
     height: 8px;
     background: #00d4aa;
     border-radius: 50%;
-    animation: excelDotPulse 3.5s ease-in-out infinite;
+    animation: excelDotPulse 2.5s ease-in-out infinite;
   }
 
   .excel-loading-dots span:nth-child(1) { animation-delay: 0s; }
@@ -8310,22 +8264,22 @@ img, video, canvas, svg {
   /* Cross-platform dropdown consistency fixes */
   /* Ensure consistent dropdown appearance across PC and Mac */
 
-  /* Universal dropdown reset for all platforms */
+  /* Mac-like fast dropdown styling - minimal and native */
   select, .form-select, .form-select-modern, .lineage-dropdown, .lineage-dropdown-mini,
   .sticky-filter-bar select, .filter-bar select, .compact-filter,
   .strain-lineage-editor .form-select, .modal select {
-    /* Remove all platform-specific styling */
+    /* Minimal styling for Mac-like speed */
     -webkit-appearance: none !important;
     -moz-appearance: none !important;
     appearance: none !important;
     
-    /* Ensure consistent box model */
+    /* Fast rendering */
     box-sizing: border-box !important;
+    cursor: pointer !important;
+    outline: none !important;
     
-    /* Standardize font rendering */
-    -webkit-font-smoothing: antialiased !important;
-    -moz-osx-font-smoothing: grayscale !important;
-    text-rendering: optimizeLegibility !important;
+    /* Native-like behavior */
+    transition: border-color 0.15s ease !important;
   }
 
   /* Ensure consistent arrow positioning and styling */
@@ -8368,6 +8322,24 @@ img, video, canvas, svg {
     -webkit-font-smoothing: antialiased !important;
     -moz-osx-font-smoothing: grayscale !important;
     text-rendering: optimizeLegibility !important;
+    
+    /* PC-specific option improvements */
+    background-color: #2d223a !important;
+    color: #ffffff !important;
+    border: none !important;
+    cursor: pointer !important;
+    
+    /* Better hover states for PC */
+    transition: background-color 0.2s ease !important;
+  }
+  
+  /* PC-specific option hover states */
+  select option:hover, .form-select option:hover, .form-select-modern option:hover,
+  .lineage-dropdown option:hover, .lineage-dropdown-mini option:hover,
+  .sticky-filter-bar select option:hover, .filter-bar select option:hover,
+  .compact-filter option:hover, .strain-lineage-editor .form-select option:hover,
+  .modal select option:hover {
+    background-color: rgba(160, 132, 232, 0.3) !important;
   }
 
   /* Platform-specific overrides for better consistency */
@@ -8384,6 +8356,31 @@ img, video, canvas, svg {
     select, .form-select, .form-select-modern, .lineage-dropdown, .lineage-dropdown-mini {
       -moz-appearance: none !important;
       border-radius: inherit !important;
+    }
+  }
+
+  /* PC/Windows-specific fixes */
+  @media screen and (min-width: 1px) {
+    /* Target Windows browsers specifically */
+    select, .form-select, .form-select-modern, .lineage-dropdown, .lineage-dropdown-mini,
+    .sticky-filter-bar select, .filter-bar select, .compact-filter,
+    .strain-lineage-editor .form-select, .modal select {
+      /* Ensure Windows browsers use custom styling */
+      -webkit-appearance: none !important;
+      -moz-appearance: none !important;
+      appearance: none !important;
+      
+      /* Fix Windows-specific rendering issues */
+      background-clip: padding-box !important;
+      -webkit-background-clip: padding-box !important;
+      
+      /* Better focus handling for Windows */
+      -webkit-focus-ring-color: transparent !important;
+      focus-ring-color: transparent !important;
+      
+      /* Ensure proper click handling on Windows */
+      pointer-events: auto !important;
+      -webkit-pointer-events: auto !important;
     }
   }
 
@@ -8442,6 +8439,12 @@ img, video, canvas, svg {
   .modal select:focus {
     outline: none !important;
     /* Maintain existing focus styles from individual selectors */
+  }
+
+  /* Mac-like fast hover states */
+  select:hover, .form-select:hover, .compact-filter:hover {
+    border-color: rgba(160, 132, 232, 0.5) !important;
+    background: rgba(42, 32, 64, 0.95) !important;
   }
 
   /* Instructional blurb styling */

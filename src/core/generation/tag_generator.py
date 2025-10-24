@@ -216,7 +216,14 @@ def chunk_records(records, chunk_size=9):
         else:
             logger.info(f"Keeping all {len(records)} records (duplicate rate: {duplicate_percentage:.1f}%)")
     
-    return [records[i:i+chunk_size] for i in range(0, len(records), chunk_size)]
+    # Split records into chunks
+    chunks = []
+    for i in range(0, len(records), chunk_size):
+        chunk = records[i:i + chunk_size]
+        chunks.append(chunk)
+    
+    logger.info(f"Split {len(records)} records into {len(chunks)} chunks of size {chunk_size}")
+    return chunks
 
 def flatten_tags(records):
     """Extract Description values from records for tag generation."""
