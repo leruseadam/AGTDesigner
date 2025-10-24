@@ -2195,11 +2195,17 @@ class JSONMatcher:
                 weight_value = '1'
             weight_with_units = f"{weight_value}{units or 'g'}"
             
+            # Create DescAndWeight field in the same format as other tags
+            desc_and_weight = cleaned_product_name
+            if weight_value and units:
+                desc_and_weight = f"{cleaned_product_name} -\u00A0{weight_value}{units}"
+            
             # Create the product object
             product = {
                 'Product Name*': cleaned_product_name,
                 'ProductName': cleaned_product_name,
                 'Description': cleaned_product_name,
+                'DescAndWeight': desc_and_weight,  # Format: "Description - Weight" like other tags
                 'displayName': comprehensive_display_name,
                 'Product Type*': final_assigned_type,
                 'Product Brand': final_brand or '',
@@ -6294,11 +6300,17 @@ class JSONMatcher:
             logging.info(f"   AI Confidence: {ai_confidence}")
             logging.info(f"   AI Match Type: {ai_match_type}")
             
+            # Create DescAndWeight field in the same format as other tags
+            desc_and_weight = description or primary_product_name
+            if weight and units:
+                desc_and_weight = f"{desc_and_weight} -\u00A0{weight}{units}"
+            
             tag = {
                 # Core product information - follow existing tag format
                 'Product Name*': primary_product_name,
                 'ProductName': primary_product_name,
                 'Description': description or primary_product_name,
+                'DescAndWeight': desc_and_weight,  # Format: "Description - Weight" like other tags
                 'Product Type*': product_type or "Unknown",
                 'Product Type': product_type or "Unknown",
                 'Vendor': vendor,
@@ -6879,12 +6891,18 @@ class JSONMatcher:
                    item.get('doh_compliant', '') or
                    '')  # Leave blank if not found in data
             
+            # Create DescAndWeight field in the same format as other tags
+            desc_and_weight = description or product_name
+            if weight and units:
+                desc_and_weight = f"{desc_and_weight} -\u00A0{weight}{units}"
+            
             # Create the tag with proper field names that template generation expects
             tag = {
                 # Core product information - use template generation field names
                 'Product Name*': product_name,
                 'ProductName': product_name,
                 'Description': description,
+                'DescAndWeight': desc_and_weight,  # Format: "Description - Weight" like other tags
                 'Product Type*': product_type,
                 'ProductType': product_type,
                 'Vendor': vendor,
@@ -7162,7 +7180,7 @@ class JSONMatcher:
             tag = {
                 'Product Name*': product_name,
                 'ProductName': product_name,
-                'Description': description,
+                'Description': product_name,  # Use product_name, not description
                 'Product Type*': product_type,
                 'Product Type': product_type,
                 'Vendor': vendor,
