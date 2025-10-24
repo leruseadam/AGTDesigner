@@ -82,6 +82,13 @@ class ProductDatabase:
         # Serialize writers to avoid 'database is locked' under concurrent writes
         self._write_lock = threading.RLock()
         
+        # Track rejected products to reduce log noise
+        self._rejected_blank_names = 0
+        self._rejected_invalid_names = 0
+        self._rejected_short_names = 0
+        self._rejected_missing_vendor = 0
+        self._rejected_missing_type = 0
+        
         # Performance timing
         self._timing_stats = {
             'queries': 0,
@@ -881,17 +888,24 @@ class ProductDatabase:
             
             # CRITICAL VALIDATION: Prevent blank entries from being added to database
             if not product_name or str(product_name).strip() == '':
-                logger.warning("❌ REJECTED: Cannot add product with blank/empty product name")
+                self._rejected_blank_names += 1
+                # Only log every 10th rejection to reduce noise
+                if self._rejected_blank_names % 10 == 1:
+                    logger.debug(f"❌ REJECTED: Cannot add product with blank/empty product name (count: {self._rejected_blank_names})")
                 return None
             
             # Check for invalid values
             if str(product_name).lower() in ['nan', 'none', 'null', '']:
-                logger.warning(f"❌ REJECTED: Cannot add product with invalid product name: '{product_name}'")
+                self._rejected_invalid_names += 1
+                if self._rejected_invalid_names % 10 == 1:
+                    logger.debug(f"❌ REJECTED: Cannot add product with invalid product name: '{product_name}' (count: {self._rejected_invalid_names})")
                 return None
             
             # Check for minimum length (at least 2 characters)
             if len(str(product_name).strip()) < 2:
-                logger.warning(f"❌ REJECTED: Product name too short (must be at least 2 characters): '{product_name}'")
+                self._rejected_short_names += 1
+                if self._rejected_short_names % 10 == 1:
+                    logger.debug(f"❌ REJECTED: Product name too short (must be at least 2 characters): '{product_name}' (count: {self._rejected_short_names})")
                 return None
             
             # Additional validation for essential fields
@@ -899,11 +913,15 @@ class ProductDatabase:
             product_type = product_data.get('Product Type*', '').strip() if product_data.get('Product Type*') else ''
             
             if not vendor or str(vendor).lower() in ['nan', 'none', 'null', '']:
-                logger.warning(f"❌ REJECTED: Product '{product_name}' missing vendor information")
+                self._rejected_missing_vendor += 1
+                if self._rejected_missing_vendor % 10 == 1:
+                    logger.debug(f"❌ REJECTED: Product '{product_name}' missing vendor information (count: {self._rejected_missing_vendor})")
                 return None
             
             if not product_type or str(product_type).lower() in ['nan', 'none', 'null', '']:
-                logger.warning(f"❌ REJECTED: Product '{product_name}' missing product type")
+                self._rejected_missing_type += 1
+                if self._rejected_missing_type % 10 == 1:
+                    logger.debug(f"❌ REJECTED: Product '{product_name}' missing product type (count: {self._rejected_missing_type})")
                 return None
             
             normalized_name = self._normalize_product_name(product_name)
@@ -1096,6 +1114,21 @@ class ProductDatabase:
             product_name = product_data.get('Product Name*', product_data.get('ProductName', ''))
             logger.error(f"Error adding/updating product '{product_name}': {e}")
             raise
+    
+    def log_rejection_summary(self):
+        """Log summary of rejected products to provide insight into data quality issues."""
+        total_rejected = (self._rejected_blank_names + self._rejected_invalid_names + 
+                         self._rejected_short_names + self._rejected_missing_vendor + 
+                         self._rejected_missing_type)
+        
+        if total_rejected > 0:
+            logger.info(f"📊 Product Rejection Summary:")
+            logger.info(f"   Blank/empty names: {self._rejected_blank_names}")
+            logger.info(f"   Invalid names: {self._rejected_invalid_names}")
+            logger.info(f"   Too short names: {self._rejected_short_names}")
+            logger.info(f"   Missing vendor: {self._rejected_missing_vendor}")
+            logger.info(f"   Missing product type: {self._rejected_missing_type}")
+            logger.info(f"   Total rejected: {total_rejected}")
     
     def store_excel_data(self, df: pd.DataFrame, source_file: str = None) -> Dict[str, Any]:
         """Store Excel data in the database. New data replaces existing data when duplicates are found."""
@@ -1539,6 +1572,10 @@ class ProductDatabase:
             
             print(f"🔍 DEBUG: Database storage completed - Stored: {stored_count}, Updated: {updated_count}, Errors: {error_count}")
             logger.info(f"Excel data storage completed: {result['message']}")
+            
+            # Log rejection summary to provide insight into data quality issues
+            self.log_rejection_summary()
+            
             return result
             
         except Exception as e:
