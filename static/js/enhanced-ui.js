@@ -147,8 +147,10 @@ async function handleFiles(files) {
   }
 }
 
-// Add smooth scrolling (but ONLY on Mac - Windows handles native scrolling better)
+// Platform-specific optimizations for better performance
 const isWindows = /Windows|Win32|Win64/.test(navigator.userAgent);
+const isMac = /Mac|Macintosh|MacIntel/.test(navigator.userAgent);
+
 if (!isWindows) {
   document.querySelectorAll('.tag-list-container').forEach(container => {
     container.addEventListener('wheel', (e) => {
@@ -159,6 +161,74 @@ if (!isWindows) {
   console.log('🍎 Mac detected - using custom smooth scrolling');
 } else {
   console.log('🪟 Windows detected - using native scrolling for better performance');
+}
+
+// PC-specific dropdown performance optimizations
+if (isWindows) {
+  console.log('🪟 Applying Windows-specific dropdown performance optimizations');
+  
+  // Debounce dropdown change events to reduce API calls
+  let dropdownDebounceTimer = null;
+  const originalAddEventListener = EventTarget.prototype.addEventListener;
+  
+  // Override addEventListener for dropdown elements to add debouncing
+  EventTarget.prototype.addEventListener = function(type, listener, options) {
+    if (this.tagName === 'SELECT' && type === 'change') {
+      const debouncedListener = function(event) {
+        if (dropdownDebounceTimer) {
+          clearTimeout(dropdownDebounceTimer);
+        }
+        dropdownDebounceTimer = setTimeout(() => {
+          listener.call(this, event);
+        }, 150); // 150ms debounce for PC
+      };
+      return originalAddEventListener.call(this, type, debouncedListener, options);
+    }
+    return originalAddEventListener.call(this, type, listener, options);
+  };
+  
+  // Optimize dropdown rendering for Windows
+  const optimizeDropdownRendering = () => {
+    document.querySelectorAll('select').forEach(select => {
+      // Add CSS to improve rendering performance
+      select.style.willChange = 'contents';
+      select.style.transform = 'translateZ(0)'; // Force hardware acceleration
+      
+      // Reduce repaints by batching style changes
+      if (select.classList.contains('form-select')) {
+        select.style.transition = 'none'; // Disable transitions for better performance
+      }
+    });
+  };
+  
+  // Apply optimizations when DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', optimizeDropdownRendering);
+  } else {
+    optimizeDropdownRendering();
+  }
+  
+  // Monitor dropdown performance
+  const monitorDropdownPerformance = () => {
+    let dropdownChangeCount = 0;
+    let lastChangeTime = Date.now();
+    
+    document.addEventListener('change', (e) => {
+      if (e.target.tagName === 'SELECT') {
+        dropdownChangeCount++;
+        const now = Date.now();
+        const timeSinceLastChange = now - lastChangeTime;
+        
+        if (timeSinceLastChange < 100) { // Rapid changes detected
+          console.warn(`🪟 PC Performance: Rapid dropdown changes detected (${dropdownChangeCount} changes in ${timeSinceLastChange}ms)`);
+        }
+        
+        lastChangeTime = now;
+      }
+    });
+  };
+  
+  monitorDropdownPerformance();
 }
 
 // Add keyboard shortcuts

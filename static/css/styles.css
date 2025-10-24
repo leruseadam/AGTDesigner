@@ -5398,13 +5398,13 @@ img, video, canvas, svg {
 
   .excel-loading-container {
     background: 
-      radial-gradient(circle at 20% 20%, rgba(255, 0, 102, 0.2) 0%, transparent 50%),
-      radial-gradient(circle at 80% 80%, rgba(0, 255, 136, 0.2) 0%, transparent 50%),
-      radial-gradient(circle at 40% 60%, rgba(255, 102, 0, 0.2) 0%, transparent 50%),
-      radial-gradient(circle at 60% 40%, rgba(102, 0, 255, 0.2) 0%, transparent 50%),
+      radial-gradient(circle at 20% 20%, rgba(255, 0, 102, 0.15) 0%, transparent 50%),
+      radial-gradient(circle at 80% 80%, rgba(0, 255, 136, 0.15) 0%, transparent 50%),
+      radial-gradient(circle at 40% 60%, rgba(255, 102, 0, 0.15) 0%, transparent 50%),
+      radial-gradient(circle at 60% 40%, rgba(102, 0, 255, 0.15) 0%, transparent 50%),
       linear-gradient(45deg, rgba(26, 0, 51, 0.9), rgba(51, 0, 102, 0.9), rgba(102, 0, 204, 0.9), rgba(153, 0, 255, 0.9));
     background-size: 200% 200%, 150% 150%, 180% 180%, 220% 220%, 100% 100%;
-    animation: excelLoadingBackground 30s ease-in-out infinite;
+    animation: excelLoadingBackground 60s ease-in-out infinite;
     border: 1px solid rgba(160, 132, 232, 0.5);
     border-radius: 20px;
     padding: 40px;
@@ -5425,7 +5425,7 @@ img, video, canvas, svg {
 
   .excel-loading-icon {
     margin-bottom: 20px;
-    animation: excelIconPulse 4s ease-in-out infinite;
+    animation: excelIconPulse 6s ease-in-out infinite;
   }
 
   .excel-loading-icon svg {
@@ -5447,23 +5447,23 @@ img, video, canvas, svg {
   @keyframes excelLoadingBackground {
     0% { 
       background-position: 0% 0%, 100% 100%, 50% 50%, 25% 75%, 0% 0%;
-      filter: hue-rotate(0deg) saturate(1.1) brightness(1.0);
+      filter: hue-rotate(0deg) saturate(1.0) brightness(1.0);
     }
     25% { 
       background-position: 25% 25%, 75% 75%, 75% 25%, 50% 50%, 25% 25%;
-      filter: hue-rotate(45deg) saturate(1.15) brightness(1.05);
+      filter: hue-rotate(15deg) saturate(1.05) brightness(1.02);
     }
     50% { 
       background-position: 50% 50%, 50% 50%, 0% 100%, 75% 25%, 50% 50%;
-      filter: hue-rotate(90deg) saturate(1.2) brightness(1.1);
+      filter: hue-rotate(30deg) saturate(1.1) brightness(1.05);
     }
     75% { 
       background-position: 75% 75%, 25% 25%, 25% 75%, 0% 100%, 75% 75%;
-      filter: hue-rotate(135deg) saturate(1.15) brightness(1.05);
+      filter: hue-rotate(15deg) saturate(1.05) brightness(1.02);
     }
     100% { 
       background-position: 100% 100%, 0% 0%, 50% 50%, 25% 75%, 100% 100%;
-      filter: hue-rotate(180deg) saturate(1.1) brightness(1.0);
+      filter: hue-rotate(0deg) saturate(1.0) brightness(1.0);
     }
   }
 
@@ -5503,7 +5503,7 @@ img, video, canvas, svg {
     height: 8px;
     background: #00d4aa;
     border-radius: 50%;
-    animation: excelDotPulse 2.5s ease-in-out infinite;
+    animation: excelDotPulse 3.5s ease-in-out infinite;
   }
 
   .excel-loading-dots span:nth-child(1) { animation-delay: 0s; }

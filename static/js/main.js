@@ -4243,23 +4243,59 @@ const TagManager = {
         }
     },
 
-    async fetchAndPopulateFilters() {
+    async fetchAndPopulateFilters(forceRefresh = false) {
         try {
-            // Use the filter options API with cache refresh and timestamp to ensure updated weight formatting
-            const timestamp = Date.now();
-            const response = await fetch(`/api/filter-options?refresh=true&t=${timestamp}`, {
+            // Performance optimization: Use cached data when possible
+            const cacheKey = 'filter_options_cache';
+            const cacheTimestamp = 'filter_options_timestamp';
+            const CACHE_DURATION = 30000; // 30 seconds cache for PC performance
+            
+            // Check if we have recent cached data and don't need to refresh
+            if (!forceRefresh && this.state.filterOptionsCache) {
+                const cacheAge = Date.now() - this.state.filterOptionsCache.timestamp;
+                if (cacheAge < CACHE_DURATION) {
+                    console.log('Using cached filter options for better performance');
+                    this.updateFilters(this.state.filterOptionsCache.data, true);
+                    return;
+                }
+            }
+            
+            // Platform-specific API call optimization
+            const isWindows = /Windows|Win32|Win64/.test(navigator.userAgent);
+            const apiUrl = isWindows 
+                ? `/api/filter-options?refresh=${forceRefresh}&t=${Date.now()}&platform=windows`
+                : `/api/filter-options?refresh=${forceRefresh}&t=${Date.now()}`;
+            
+            console.log(`Fetching filter options${isWindows ? ' (Windows optimized)' : ''}...`);
+            const response = await fetch(apiUrl, {
                 method: 'GET',
                 headers: { 'Content-Type': 'application/json' }
             });
+            
             if (!response.ok) {
                 throw new Error('Failed to fetch filter options');
             }
+            
             const filterOptions = await response.json();
             console.log('Fetched filter options:', filterOptions);
+            
+            // Cache the results for future use
+            this.state.filterOptionsCache = {
+                data: filterOptions,
+                timestamp: Date.now()
+            };
+            
             this.updateFilters(filterOptions, true); // Preserve existing filter values
         } catch (error) {
             console.error('Error fetching filter options:', error);
-            alert('Failed to load filter options');
+            
+            // Fallback to cached data if available
+            if (this.state.filterOptionsCache) {
+                console.log('Using fallback cached filter options');
+                this.updateFilters(this.state.filterOptionsCache.data, true);
+            } else {
+                alert('Failed to load filter options');
+            }
         }
     },
 
