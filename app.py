@@ -744,7 +744,8 @@ def create_app():
     app.config.from_object('config.Config')
     
     # Enable development mode for auto-reload and debug features
-    app.config['DEVELOPMENT_MODE'] = True
+    # DISABLED: Prevent multiple restarts by disabling development mode by default
+    app.config['DEVELOPMENT_MODE'] = os.environ.get('DEVELOPMENT_MODE', 'false').lower() == 'true'
     
     # Enable detailed logging for development
     logging.getLogger().setLevel(logging.DEBUG)
@@ -1151,18 +1152,38 @@ class LabelMakerApp:
         port = int(os.environ.get('FLASK_PORT', 8001))
         development_mode = self.app.config.get('DEVELOPMENT_MODE', False)
         
+        # PREVENT MULTIPLE RESTARTS: Check if app is already running
+        import socket
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1)
+            result = sock.connect_ex((host, port))
+            sock.close()
+            
+            if result == 0:
+                logging.warning(f"⚠️  Port {port} is already in use! App may already be running.")
+                logging.warning("🔄 If you're seeing multiple restarts, try:")
+                logging.warning("   1. Kill existing processes: lsof -i :8001")
+                logging.warning("   2. Use a different port: FLASK_PORT=8002 python app.py")
+                logging.warning("   3. Disable development mode: DEVELOPMENT_MODE=false python app.py")
+                return
+        except Exception as e:
+            logging.debug(f"Port check failed (this is normal): {e}")
+        
         # Show optimization status
         if DISABLE_STARTUP_FILE_LOADING:
             logging.info("🚀 PERFORMANCE OPTIMIZATION: Startup file loading disabled for faster app startup")
         
         logging.info(f"Starting Label Maker application on {host}:{port}")
+        logging.info(f"Development mode: {development_mode}")
         
-        # Prevent double startup by using use_reloader=False in development
+        # PREVENT MULTIPLE RESTARTS: Always disable reloader to prevent multiple startups
         self.app.run(
             host=host, 
             port=port, 
             debug=development_mode, 
-            use_reloader=False  # Disable reloader to prevent double startup
+            use_reloader=False,  # Always disable reloader to prevent multiple restarts
+            threaded=True  # Enable threading for better performance
         )
 
 # === SESSION-BASED HELPERS ===
@@ -14894,8 +14915,20 @@ def optimize_performance():
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
+    # PREVENT MULTIPLE RESTARTS: Add startup guard
+    import sys
+    import os
+    
+    # Check if this is the main process (not a subprocess)
+    if hasattr(sys, '_getframe'):
+        frame = sys._getframe()
+        if frame.f_back is not None and frame.f_back.f_code.co_filename != '<stdin>':
+            print("⚠️  Detected subprocess startup - preventing multiple instances")
+            sys.exit(0)
+    
     # Use the LabelMakerApp class for proper startup
     print("Starting Label Maker application...")
+    print("🛡️  Multiple restart protection enabled")
     
     # Create and run the application
     label_maker_app = LabelMakerApp()

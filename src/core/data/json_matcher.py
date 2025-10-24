@@ -1932,6 +1932,9 @@ class JSONMatcher:
             weight = str(item.get("unit_weight", item.get("weight", ""))).strip()
             strain = str(item.get("strain_name", item.get("strain", ""))).strip()
             
+            # CRITICAL FIX: Determine proper lineage based on product type
+            lineage = self._determine_lineage_for_product(product_type, '', product_name, strain)
+            
             # Create basic product structure with transformed name
             product = {
                 'Product Name*': product_name,  # Human-readable transformed name
@@ -1946,7 +1949,7 @@ class JSONMatcher:
                 'THC test result': '',
                 'CBD test result': '',
                 'Product Strain': strain,
-                'Lineage': '',
+                'Lineage': lineage,  # Use properly determined lineage
                 'Quantity*': '1',
                 'Source': 'JSON Fallback'
             }
