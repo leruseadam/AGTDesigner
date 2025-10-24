@@ -1076,6 +1076,20 @@ def save_template_settings(template_type, font_settings):
         logging.error(f"Error saving template settings: {str(e)}")
         raise
 
+# Global enhanced logger instance
+enhanced_logger = None
+
+# --- Enhanced Logging System ---
+try:
+    from enhanced_logging import setup_enhanced_logging, EnhancedLogger, ErrorContext, log_route_error, log_database_error, log_file_processing_error
+    ENHANCED_LOGGING_AVAILABLE = True
+    enhanced_logger = setup_enhanced_logging()
+    print("✅ Enhanced logging system loaded")
+except ImportError as e:
+    ENHANCED_LOGGING_AVAILABLE = False
+    enhanced_logger = None
+    print(f"⚠️  Enhanced logging not available: {e}")
+
 # --- LabelMakerApp Class ---
 class LabelMakerApp:
     def __init__(self):
@@ -1083,47 +1097,55 @@ class LabelMakerApp:
         self._configure_logging()
         
     def _configure_logging(self):
-        # Configure logging only once
-        self.logger = logging.getLogger(__name__)
-        if not self.logger.handlers:
-            # Create logs directory if it doesn't exist
-            log_dir = Path(__file__).parent / 'logs'
-            log_dir.mkdir(exist_ok=True)
-            
-            # Set up logging format
-            log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-            formatter = logging.Formatter(log_format)
-            
-            # Configure console handler - show info and above for debugging
-            console_handler = logging.StreamHandler()
-            console_handler.setLevel(logging.INFO)  # Show info, warnings, and errors
-            console_handler.setFormatter(formatter)
-            
-            # Configure file handler
-            log_file = log_dir / 'label_maker.log'
-            file_handler = logging.FileHandler(log_file)
-            file_handler.setLevel(logging.INFO)
-            file_handler.setFormatter(formatter)
-            
-            # Configure root logger
-            logging.basicConfig(
-                level=logging.INFO,
-                format=log_format,
-                handlers=[console_handler, file_handler]
-            )
-            
-            # Suppress verbose logging from third-party libraries
-            logging.getLogger('watchdog').setLevel(logging.WARNING)
-            logging.getLogger('werkzeug').setLevel(logging.WARNING)
-            logging.getLogger('urllib3').setLevel(logging.WARNING)
-            logging.getLogger('requests').setLevel(logging.WARNING)
-            
-            # Add handlers to application logger
-            self.logger.addHandler(console_handler)
-            self.logger.addHandler(file_handler)
-            self.logger.setLevel(logging.INFO)
-            
-            self.logger.debug("Logging configured for Label Maker application")
+        """Configure enhanced logging system"""
+        
+        if ENHANCED_LOGGING_AVAILABLE:
+            # Use enhanced logging system
+            self.enhanced_logger = setup_enhanced_logging()
+            self.logger = self.enhanced_logger.logger
+            self.logger.info("🚀 Enhanced logging system initialized")
+        else:
+            # Fallback to basic logging
+            self.logger = logging.getLogger(__name__)
+            if not self.logger.handlers:
+                # Create logs directory if it doesn't exist
+                log_dir = Path(__file__).parent / 'logs'
+                log_dir.mkdir(exist_ok=True)
+                
+                # Set up logging format
+                log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+                formatter = logging.Formatter(log_format)
+                
+                # Configure console handler - show info and above for debugging
+                console_handler = logging.StreamHandler()
+                console_handler.setLevel(logging.INFO)  # Show info, warnings, and errors
+                console_handler.setFormatter(formatter)
+                
+                # Configure file handler
+                log_file = log_dir / 'label_maker.log'
+                file_handler = logging.FileHandler(log_file)
+                file_handler.setLevel(logging.INFO)
+                file_handler.setFormatter(formatter)
+                
+                # Configure root logger
+                logging.basicConfig(
+                    level=logging.INFO,
+                    format=log_format,
+                    handlers=[console_handler, file_handler]
+                )
+                
+                # Suppress verbose logging from third-party libraries
+                logging.getLogger('watchdog').setLevel(logging.WARNING)
+                logging.getLogger('werkzeug').setLevel(logging.WARNING)
+                logging.getLogger('urllib3').setLevel(logging.WARNING)
+                logging.getLogger('requests').setLevel(logging.WARNING)
+                
+                # Add handlers to application logger
+                self.logger.addHandler(console_handler)
+                self.logger.addHandler(file_handler)
+                self.logger.setLevel(logging.INFO)
+                
+                self.logger.debug("Basic logging configured for Label Maker application")
             self.logger.debug(f"Log file location: {log_file}")
             
     def run(self):
@@ -1999,23 +2021,37 @@ def upload_file_simple():
         return jsonify({'error': 'Upload failed'}), 500
 
 def process_excel_sync(filename, temp_path):
-    """Synchronous Excel processing for immediate response"""
+    """Synchronous Excel processing for immediate response with enhanced error logging"""
     try:
         # PC optimization: Detect platform and use optimized processing
         import platform
         is_windows = platform.system() == 'Windows'
         
         if is_windows:
-            logging.info(f"[PC-SYNC] ===== PC-OPTIMIZED SYNCHRONOUS PROCESSING START =====")
+            if ENHANCED_LOGGING_AVAILABLE:
+                enhanced_logger.log_info(f"PC-OPTIMIZED SYNCHRONOUS PROCESSING START", 
+                                       {'filename': filename, 'platform': 'windows'})
+            else:
+                logging.info(f"[PC-SYNC] ===== PC-OPTIMIZED SYNCHRONOUS PROCESSING START =====")
         else:
-            logging.info(f"[SYNC] ===== SYNCHRONOUS PROCESSING START =====")
+            if ENHANCED_LOGGING_AVAILABLE:
+                enhanced_logger.log_info(f"SYNCHRONOUS PROCESSING START", 
+                                       {'filename': filename, 'platform': 'mac'})
+            else:
+                logging.info(f"[SYNC] ===== SYNCHRONOUS PROCESSING START =====")
         
-        logging.info(f"[SYNC] Processing file: {temp_path}")
-        logging.info(f"[SYNC] Filename: {filename}")
+        if ENHANCED_LOGGING_AVAILABLE:
+            enhanced_logger.log_info(f"Processing file", {'file': temp_path, 'filename': filename})
+        else:
+            logging.info(f"[SYNC] Processing file: {temp_path}")
+            logging.info(f"[SYNC] Filename: {filename}")
         
         # Verify file exists
         if not os.path.exists(temp_path):
-            logging.error(f"[SYNC] File not found: {temp_path}")
+            if ENHANCED_LOGGING_AVAILABLE:
+                enhanced_logger.log_error(f"File not found", context={'file': temp_path})
+            else:
+                logging.error(f"[SYNC] File not found: {temp_path}")
             return False
         
         # Create ExcelProcessor and load file
@@ -2026,21 +2062,36 @@ def process_excel_sync(filename, temp_path):
         if is_windows:
             if hasattr(processor, 'enable_product_db_integration'):
                 processor.enable_product_db_integration(False)
-                logging.info("[PC-SYNC] Product database integration disabled for faster processing")
+                if ENHANCED_LOGGING_AVAILABLE:
+                    enhanced_logger.log_info("Product database integration disabled for faster processing", 
+                                           {'platform': 'windows'})
+                else:
+                    logging.info("[PC-SYNC] Product database integration disabled for faster processing")
         else:
             # Enable database integration for new product storage
             if hasattr(processor, 'enable_product_db_integration'):
                 processor.enable_product_db_integration(True)
-                logging.info("[SYNC] Product database integration enabled for new product storage")
+                if ENHANCED_LOGGING_AVAILABLE:
+                    enhanced_logger.log_info("Product database integration enabled for new product storage", 
+                                           {'platform': 'mac'})
+                else:
+                    logging.info("[SYNC] Product database integration enabled for new product storage")
         
         # PC optimization: Use optimized loading strategy
         if is_windows:
             # PC: Use ultra-fast loading with minimal processing
             success = processor.load_file(temp_path)  # This will use the PC-optimized version
             if not success or processor.df is None or processor.df.empty:
-                logging.error(f"[PC-SYNC] Failed to load file: {temp_path}")
+                if ENHANCED_LOGGING_AVAILABLE:
+                    enhanced_logger.log_error(f"Failed to load file", context={'file': temp_path})
+                else:
+                    logging.error(f"[PC-SYNC] Failed to load file: {temp_path}")
                 return False
-            logging.info(f"[PC-SYNC] Ultra-fast load complete: {len(processor.df)} rows")
+            if ENHANCED_LOGGING_AVAILABLE:
+                enhanced_logger.log_success(f"Ultra-fast load complete", 
+                                          {'rows': len(processor.df), 'platform': 'windows'})
+            else:
+                logging.info(f"[PC-SYNC] Ultra-fast load complete: {len(processor.df)} rows")
         else:
             # Mac: Use original loading strategy
             import pandas as pd
@@ -2050,14 +2101,24 @@ def process_excel_sync(filename, temp_path):
                 if not df.empty:
                     processor.df = df
                     success = True
-                    logging.info(f"[SYNC] Loaded {len(df)} rows (limited to 5000)")
+                    if ENHANCED_LOGGING_AVAILABLE:
+                        enhanced_logger.log_success(f"Loaded rows (limited to 5000)", 
+                                                  {'rows': len(df), 'platform': 'mac'})
+                    else:
+                        logging.info(f"[SYNC] Loaded {len(df)} rows (limited to 5000)")
                 else:
                     success = False
             except Exception as e:
-                logging.warning(f"Limited load failed, trying full load: {e}")
+                if ENHANCED_LOGGING_AVAILABLE:
+                    enhanced_logger.log_warning(f"Limited load failed, trying full load", {'error': str(e)})
+                else:
+                    logging.warning(f"Limited load failed, trying full load: {e}")
                 success = processor.load_file(temp_path)
             if not success or processor.df is None or processor.df.empty:
-                logging.error(f"[SYNC] Failed to load file: {temp_path}")
+                if ENHANCED_LOGGING_AVAILABLE:
+                    enhanced_logger.log_error(f"Failed to load file", context={'file': temp_path})
+                else:
+                    logging.error(f"[SYNC] Failed to load file: {temp_path}")
                 return False
         
         # Update global processor
@@ -6368,8 +6429,63 @@ def update_doh():
         logging.error(f"Error updating DOH: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/logs')
+def log_viewer():
+    """Serve the log viewer web interface"""
+    return render_template('log_viewer.html')
+
+@app.route('/api/logs')
+def api_logs():
+    """API endpoint for log viewer"""
+    try:
+        from log_viewer import LogViewer
+        
+        # Get query parameters
+        hours = int(request.args.get('hours', 24))
+        level = request.args.get('level', '')
+        search = request.args.get('search', '')
+        
+        # Create log viewer instance
+        viewer = LogViewer()
+        
+        # Get log entries
+        all_entries = []
+        for log_file in viewer.get_log_files():
+            entries = viewer.filter_logs(log_file, level=level if level else None, 
+                                       hours=hours, search=search if search else None)
+            all_entries.extend(entries)
+        
+        # Sort by timestamp (newest first)
+        all_entries.sort(key=lambda x: x['timestamp'], reverse=True)
+        
+        # Limit to last 100 entries for performance
+        all_entries = all_entries[:100]
+        
+        return jsonify({
+            'success': True,
+            'logs': all_entries,
+            'total': len(all_entries),
+            'filters': {
+                'hours': hours,
+                'level': level,
+                'search': search
+            }
+        })
+        
+    except Exception as e:
+        if ENHANCED_LOGGING_AVAILABLE:
+            log_route_error('api_logs', e, request)
+        else:
+            logging.error(f"Error in api_logs: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'logs': []
+        }), 500
+
 @app.route('/api/filter-options', methods=['GET', 'POST'])
 def get_filter_options():
+    """Get filter options for dropdowns with enhanced error logging"""
     try:
         # Check if this is a Windows platform request for optimization
         is_windows_request = request.args.get('platform') == 'windows'
@@ -6377,7 +6493,11 @@ def get_filter_options():
         is_windows_ua = 'Windows' in user_agent
         
         if is_windows_request or is_windows_ua:
-            logging.info("Windows platform detected - applying performance optimizations")
+            if ENHANCED_LOGGING_AVAILABLE:
+                enhanced_logger.log_info("Windows platform detected - applying performance optimizations", 
+                                       {'platform': 'windows', 'user_agent': user_agent[:50]})
+            else:
+                logging.info("Windows platform detected - applying performance optimizations")
         
         cache_key = get_session_cache_key('filter_options')
         
@@ -6391,7 +6511,11 @@ def get_filter_options():
             from src.core.data.excel_processor import get_default_upload_file
             default_file = get_default_upload_file()
             if default_file and os.path.exists(default_file):
-                logging.info(f"Attempting to load default file for filter options: {default_file}")
+                if ENHANCED_LOGGING_AVAILABLE:
+                    enhanced_logger.log_info(f"Attempting to load default file for filter options", 
+                                           {'file': default_file})
+                else:
+                    logging.info(f"Attempting to load default file for filter options: {default_file}")
                 success = excel_processor.load_file(default_file)
                 if not success:
                     return jsonify({
@@ -6433,25 +6557,43 @@ def get_filter_options():
         
         # Debug: Log available columns and weight options
         if excel_processor.df is not None:
-            logging.info(f"Available columns: {list(excel_processor.df.columns)}")
-            if 'Weight*' in excel_processor.df.columns:
-                sample_weights = excel_processor.df['Weight*'].head(5).tolist()
-                logging.info(f"Sample Weight* values: {sample_weights}")
-            if 'Units' in excel_processor.df.columns:
-                sample_units = excel_processor.df['Units'].head(5).tolist()
-                logging.info(f"Sample Units values: {sample_units}")
+            if ENHANCED_LOGGING_AVAILABLE:
+                enhanced_logger.log_info(f"Available columns: {list(excel_processor.df.columns)}")
+                if 'Weight*' in excel_processor.df.columns:
+                    sample_weights = excel_processor.df['Weight*'].head(5).tolist()
+                    enhanced_logger.log_info(f"Sample Weight* values: {sample_weights}")
+                if 'Units' in excel_processor.df.columns:
+                    sample_units = excel_processor.df['Units'].head(5).tolist()
+                    enhanced_logger.log_info(f"Sample Units values: {sample_units}")
+            else:
+                logging.info(f"Available columns: {list(excel_processor.df.columns)}")
+                if 'Weight*' in excel_processor.df.columns:
+                    sample_weights = excel_processor.df['Weight*'].head(5).tolist()
+                    logging.info(f"Sample Weight* values: {sample_weights}")
+                if 'Units' in excel_processor.df.columns:
+                    sample_units = excel_processor.df['Units'].head(5).tolist()
+                    logging.info(f"Sample Units values: {sample_units}")
         
         # Log weight options for debugging
         if 'weight' in options:
-            logging.info(f"Weight filter options: {options['weight'][:10]}...")  # Log first 10 options
+            if ENHANCED_LOGGING_AVAILABLE:
+                enhanced_logger.log_info(f"Weight filter options: {options['weight'][:10]}...")  # Log first 10 options
+            else:
+                logging.info(f"Weight filter options: {options['weight'][:10]}...")  # Log first 10 options
         
         # For Windows requests, cache the results for better performance
         if is_windows_request or is_windows_ua:
             try:
                 cache.set(cache_key, options, timeout=60)  # Cache for 1 minute
-                logging.info("Cached filter options for Windows performance")
+                if ENHANCED_LOGGING_AVAILABLE:
+                    enhanced_logger.log_success("Cached filter options for Windows performance")
+                else:
+                    logging.info("Cached filter options for Windows performance")
             except Exception as cache_error:
-                logging.warning(f"Failed to cache filter options: {cache_error}")
+                if ENHANCED_LOGGING_AVAILABLE:
+                    enhanced_logger.log_warning(f"Failed to cache filter options", {'error': str(cache_error)})
+                else:
+                    logging.warning(f"Failed to cache filter options: {cache_error}")
         
         # PC optimization: Add response compression for large datasets
         if is_windows_request or is_windows_ua:
@@ -6471,7 +6613,10 @@ def get_filter_options():
         # Don't cache filter options to ensure fresh data (for non-Windows)
         return jsonify(options)
     except Exception as e:
-        logging.error(f"Error in filter_options: {str(e)}")
+        if ENHANCED_LOGGING_AVAILABLE:
+            log_route_error('get_filter_options', e, request)
+        else:
+            logging.error(f"Error in filter_options: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/debug-weight-formatting', methods=['GET'])
