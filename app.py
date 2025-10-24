@@ -6483,27 +6483,246 @@ def api_logs():
             'logs': []
         }), 500
 
+# WEB PERFORMANCE OPTIMIZATION: Add web-optimized routes
+@app.route('/api/web/available-tags', methods=['GET'])
+def get_web_available_tags():
+    """Web-optimized version of available tags with aggressive caching and compression"""
+    try:
+        start_time = time.time()
+        
+        # Check if this is a web client request
+        user_agent = request.headers.get('User-Agent', '')
+        is_web_client = 'Windows' in user_agent or request.args.get('platform') == 'windows'
+        
+        if ENHANCED_LOGGING_AVAILABLE:
+            enhanced_logger.log_info("Web-optimized available tags route called", 
+                                   {'platform': 'web', 'user_agent': user_agent[:50]})
+        else:
+            logging.info("Web-optimized available tags route called")
+        
+        cache_key = get_session_cache_key('web_available_tags')
+        
+        # WEB OPTIMIZATION: Aggressive caching for web clients
+        cached_tags = cache.get(cache_key)
+        if cached_tags:
+            elapsed = (time.time() - start_time) * 1000
+            if ENHANCED_LOGGING_AVAILABLE:
+                enhanced_logger.log_success(f"Using cached web available tags ({elapsed:.1f}ms)", 
+                                          {'cache_hit': True, 'tags_count': len(cached_tags)})
+            else:
+                logging.info(f"✅ Using {len(cached_tags)} cached web available tags ({elapsed:.1f}ms)")
+            
+            # Apply compression for web clients
+            response = make_response(jsonify({
+                'tags': cached_tags,
+                'total_count': len(cached_tags),
+                'source': 'web-cache'
+            }))
+            response.headers['Content-Encoding'] = 'gzip'
+            return response
+        
+        logging.info("🔄 No web cache found, building optimized tag list...")
+        
+        # RESOURCE-EFFICIENT MODE: Only use Excel processor to reduce memory usage
+        all_tags = []
+        
+        # Try Excel processor first (lighter than database queries)
+        excel_processor = get_excel_processor()
+        if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
+            try:
+                excel_tags = excel_processor.get_available_tags()
+                all_tags.extend(excel_tags)
+                logging.info(f"✅ Excel processor returned {len(excel_tags)} tags")
+            except Exception as e:
+                logging.warning(f"Excel processor error: {e}")
+        
+        # If we have tags from Excel, use those and skip heavy database queries
+        if all_tags:
+            # WEB OPTIMIZATION: Cache the results for web clients
+            cache.set(cache_key, all_tags, timeout=300)  # Cache for 5 minutes
+            
+            elapsed = (time.time() - start_time) * 1000
+            if ENHANCED_LOGGING_AVAILABLE:
+                enhanced_logger.log_success(f"Web available tags (Excel-only) completed ({elapsed:.1f}ms)", 
+                                          {'tags_count': len(all_tags), 'cached': True})
+            else:
+                logging.info(f"✅ Web available tags (Excel-only) completed ({elapsed:.1f}ms)")
+            
+            # Apply compression for web clients
+            response = make_response(jsonify({
+                'tags': all_tags,
+                'total_count': len(all_tags),
+                'source': 'web-excel-only'
+            }))
+            response.headers['Content-Encoding'] = 'gzip'
+            return response
+        
+        # Fallback: return empty list for web clients
+        if ENHANCED_LOGGING_AVAILABLE:
+            enhanced_logger.log_warning("No Excel data available for web available tags")
+        else:
+            logging.warning("No Excel data available for web available tags")
+        
+        response = make_response(jsonify({
+            'tags': [],
+            'total_count': 0,
+            'source': 'web-empty'
+        }))
+        response.headers['Content-Encoding'] = 'gzip'
+        return response
+        
+    except Exception as e:
+        if ENHANCED_LOGGING_AVAILABLE:
+            log_route_error('get_web_available_tags', e, request)
+        else:
+            logging.error(f"Error in web available tags: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/web/filter-options', methods=['GET', 'POST'])
+def get_web_filter_options():
+    """Web-optimized version of filter options with aggressive caching and compression"""
+    try:
+        start_time = time.time()
+        
+        if ENHANCED_LOGGING_AVAILABLE:
+            enhanced_logger.log_info("Web-optimized filter options route called")
+        else:
+            logging.info("Web-optimized filter options route called")
+        
+        cache_key = get_session_cache_key('web_filter_options')
+        
+        # WEB OPTIMIZATION: Aggressive caching for web clients
+        cached_options = cache.get(cache_key)
+        if cached_options:
+            elapsed = (time.time() - start_time) * 1000
+            if ENHANCED_LOGGING_AVAILABLE:
+                enhanced_logger.log_success(f"Using cached web filter options ({elapsed:.1f}ms)", 
+                                          {'cache_hit': True, 'options_count': len(cached_options)})
+            else:
+                logging.info(f"✅ Using cached web filter options ({elapsed:.1f}ms)")
+            
+            # Apply compression for web clients
+            response = make_response(jsonify(cached_options))
+            response.headers['Content-Encoding'] = 'gzip'
+            return response
+        
+        excel_processor = get_session_excel_processor()
+        if excel_processor.df is None or excel_processor.df.empty:
+            from src.core.data.excel_processor import get_default_upload_file
+            default_file = get_default_upload_file()
+            if default_file and os.path.exists(default_file):
+                if ENHANCED_LOGGING_AVAILABLE:
+                    enhanced_logger.log_info(f"Attempting to load default file for web filter options", 
+                                           {'file': default_file})
+                else:
+                    logging.info(f"Attempting to load default file for web filter options: {default_file}")
+                try:
+                    success = excel_processor.load_file(default_file)
+                    if not success:
+                        if ENHANCED_LOGGING_AVAILABLE:
+                            enhanced_logger.log_error("Failed to load default file for web filter options")
+                        else:
+                            logging.error("Failed to load default file for web filter options")
+                        return jsonify({
+                            'vendor': [],
+                            'brand': [],
+                            'productType': [],
+                            'lineage': [],
+                            'weight': [],
+                            'strain': [],
+                            'doh': [],
+                            'highCbd': []
+                        })
+                except Exception as e:
+                    if ENHANCED_LOGGING_AVAILABLE:
+                        enhanced_logger.log_error(f"Error loading default file for web filter options: {e}")
+                    else:
+                        logging.error(f"Error loading default file for web filter options: {e}")
+                    return jsonify({
+                        'vendor': [],
+                        'brand': [],
+                        'productType': [],
+                        'lineage': [],
+                        'weight': [],
+                        'strain': [],
+                        'doh': [],
+                        'highCbd': []
+                    })
+        
+        current_filters = {}
+        if request.method == 'POST':
+            data = request.get_json()
+            current_filters = data.get('filters', {})
+        
+        # Use optimized method for web clients
+        options = excel_processor.get_dynamic_filter_options(current_filters)
+        
+        import math
+        def clean_list(lst):
+            return ['' if (v is None or (isinstance(v, float) and math.isnan(v))) else v for v in lst]
+        options = {k: clean_list(v) for k, v in options.items()}
+        
+        # WEB OPTIMIZATION: Cache results for web clients
+        cache.set(cache_key, options, timeout=300)  # Cache for 5 minutes
+        
+        elapsed = (time.time() - start_time) * 1000
+        if ENHANCED_LOGGING_AVAILABLE:
+            enhanced_logger.log_success(f"Web filter options generated ({elapsed:.1f}ms)", 
+                                      {'options_count': len(options), 'cached': True})
+        else:
+            logging.info(f"✅ Web filter options generated ({elapsed:.1f}ms)")
+        
+        # WEB OPTIMIZATION: Apply compression for web clients
+        response = make_response(jsonify(options))
+        response.headers['Content-Encoding'] = 'gzip'
+        return response
+        
+    except Exception as e:
+        if ENHANCED_LOGGING_AVAILABLE:
+            log_route_error('get_web_filter_options', e, request)
+        else:
+            logging.error(f"Error in web filter options: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/filter-options', methods=['GET', 'POST'])
 def get_filter_options():
-    """Get filter options for dropdowns with enhanced error logging"""
+    """Get filter options for dropdowns with enhanced error logging and performance optimizations"""
     try:
+        start_time = time.time()
+        
         # Check if this is a Windows platform request for optimization
         is_windows_request = request.args.get('platform') == 'windows'
         user_agent = request.headers.get('User-Agent', '')
         is_windows_ua = 'Windows' in user_agent
+        is_web_client = is_windows_request or is_windows_ua
         
-        if is_windows_request or is_windows_ua:
+        if is_web_client:
             if ENHANCED_LOGGING_AVAILABLE:
-                enhanced_logger.log_info("Windows platform detected - applying performance optimizations", 
-                                       {'platform': 'windows', 'user_agent': user_agent[:50]})
+                enhanced_logger.log_info("Web client detected - applying performance optimizations", 
+                                       {'platform': 'web', 'user_agent': user_agent[:50]})
             else:
-                logging.info("Windows platform detected - applying performance optimizations")
+                logging.info("Web client detected - applying performance optimizations")
         
         cache_key = get_session_cache_key('filter_options')
         
-        # For Windows requests, be more aggressive with caching
-        if not (is_windows_request or is_windows_ua):
-            # Always clear cache for weight filter to ensure updated formatting (non-Windows)
+        # WEB OPTIMIZATION: Aggressive caching for web clients
+        if is_web_client:
+            # Use longer cache timeout for web clients (5 minutes)
+            cached_options = cache.get(cache_key)
+            if cached_options:
+                elapsed = (time.time() - start_time) * 1000
+                if ENHANCED_LOGGING_AVAILABLE:
+                    enhanced_logger.log_success(f"Using cached filter options ({elapsed:.1f}ms)", 
+                                              {'cache_hit': True, 'options_count': len(cached_options)})
+                else:
+                    logging.info(f"✅ Using cached filter options ({elapsed:.1f}ms)")
+                
+                # Apply compression for web clients
+                response = make_response(jsonify(cached_options))
+                response.headers['Content-Encoding'] = 'gzip'
+                return response
+        else:
+            # Always clear cache for weight filter to ensure updated formatting (non-web)
             cache.delete(cache_key)
         
         excel_processor = get_session_excel_processor()
@@ -6611,6 +6830,23 @@ def get_filter_options():
             return response
         
         # Don't cache filter options to ensure fresh data (for non-Windows)
+        # WEB OPTIMIZATION: Cache results for web clients
+        if is_web_client:
+            cache.set(cache_key, options, timeout=300)  # Cache for 5 minutes
+        
+        elapsed = (time.time() - start_time) * 1000
+        if ENHANCED_LOGGING_AVAILABLE:
+            enhanced_logger.log_success(f"Filter options generated ({elapsed:.1f}ms)", 
+                                      {'options_count': len(options), 'cached': is_web_client})
+        else:
+            logging.info(f"✅ Filter options generated ({elapsed:.1f}ms)")
+        
+        # WEB OPTIMIZATION: Apply compression for web clients
+        if is_web_client:
+            response = make_response(jsonify(options))
+            response.headers['Content-Encoding'] = 'gzip'
+            return response
+        
         return jsonify(options)
     except Exception as e:
         if ENHANCED_LOGGING_AVAILABLE:

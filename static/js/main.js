@@ -4426,13 +4426,16 @@ const TagManager = {
                 }
             }
             
-            // Platform-specific API call optimization
+            // WEB PERFORMANCE OPTIMIZATION: Use web-optimized routes for better performance
             const isWindows = /Windows|Win32|Win64/.test(navigator.userAgent);
-            const apiUrl = isWindows 
-                ? `/api/filter-options?refresh=${forceRefresh}&t=${Date.now()}&platform=windows`
-                : `/api/filter-options?refresh=${forceRefresh}&t=${Date.now()}`;
+            const isWebClient = isWindows || window.location.hostname !== 'localhost';
             
-            console.log(`Fetching filter options${isWindows ? ' (Windows optimized)' : ''}...`);
+            // Use web-optimized routes for better performance
+            const apiUrl = isWebClient 
+                ? `/api/web/filter-options?refresh=${forceRefresh}&t=${Date.now()}&platform=windows`
+                : `/api/filter-options?refresh=${forceRefresh}&t=${Date.now()}&platform=windows`;
+            
+            console.log(`Fetching filter options${isWebClient ? ' (Web-optimized)' : ''}...`);
             const response = await fetch(apiUrl, {
                 method: 'GET',
                 headers: { 'Content-Type': 'application/json' }
@@ -4455,7 +4458,35 @@ const TagManager = {
         } catch (error) {
             console.error('Error fetching filter options:', error);
             
-            // Fallback to cached data if available
+            // WEB PERFORMANCE OPTIMIZATION: Fallback to original route if web-optimized route fails
+            if (isWebClient) {
+                console.log('Web-optimized route failed, trying fallback...');
+                try {
+                    const fallbackUrl = `/api/filter-options?refresh=${forceRefresh}&t=${Date.now()}&platform=windows`;
+                    const fallbackResponse = await fetch(fallbackUrl, {
+                        method: 'GET',
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                    
+                    if (fallbackResponse.ok) {
+                        const filterOptions = await fallbackResponse.json();
+                        console.log('✅ Fallback filter route successful');
+                        
+                        // Cache the results for future use
+                        this.state.filterOptionsCache = {
+                            data: filterOptions,
+                            timestamp: Date.now()
+                        };
+                        
+                        this.updateFilters(filterOptions, true);
+                        return;
+                    }
+                } catch (fallbackError) {
+                    console.error('Fallback filter route also failed:', fallbackError);
+                }
+            }
+            
+            // Final fallback to cached data if available
             if (this.state.filterOptionsCache) {
                 console.log('Using fallback cached filter options');
                 this.updateFilters(this.state.filterOptionsCache.data, true);
