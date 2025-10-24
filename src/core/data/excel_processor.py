@@ -1446,6 +1446,137 @@ class ExcelProcessor:
     def load_file(self, file_path: str) -> bool:
         """Load Excel file and prepare data exactly like MAIN.py. STANDARDIZED for both local and PythonAnywhere."""
         try:
+            # PC optimization: Detect platform and use optimized processing
+            import platform
+            is_windows = platform.system() == 'Windows'
+            
+            if is_windows:
+                return self.load_file_optimized_windows(file_path)
+            else:
+                return self.load_file_original(file_path)
+                
+        except Exception as e:
+            self.logger.error(f"Error in load_file: {e}")
+            return False
+
+    def load_file_optimized_windows(self, file_path: str) -> bool:
+        """PC-optimized file loading with minimal processing for maximum speed."""
+        try:
+            self.logger.info(f"[PC-OPTIMIZED] Loading file: {file_path}")
+            
+            # Check if we've already loaded this exact file
+            if (self._last_loaded_file == file_path and 
+                self.df is not None and 
+                not self.df.empty):
+                self.logger.debug(f"File {file_path} already loaded, skipping reload")
+                return True
+            
+            # Basic file validation
+            import os
+            if not os.path.exists(file_path):
+                self.logger.error(f"File does not exist: {file_path}")
+                return False
+            
+            if not os.access(file_path, os.R_OK):
+                self.logger.error(f"File not readable: {file_path}")
+                return False
+            
+            # Check file size
+            file_size = os.path.getsize(file_path)
+            max_size = 100 * 1024 * 1024  # 100MB limit
+            if file_size > max_size:
+                self.logger.error(f"File too large: {file_size} bytes (max: {max_size})")
+                return False
+            
+            # PC optimization: Use minimal logging for better performance
+            self.logger.info(f"[PC-OPTIMIZED] File size: {file_size / (1024*1024):.1f} MB")
+            
+            # Clear previous data efficiently
+            if hasattr(self, 'df') and self.df is not None:
+                del self.df
+                import gc
+                gc.collect()
+            
+            # PC optimization: Use optimized dtype settings for speed
+            dtype_dict = {
+                "Product Type*": "string",
+                "Lineage": "string", 
+                "Product Brand": "string",
+                "Vendor": "string",
+                "Product Name*": "string"
+            }
+            
+            # PC optimization: Read with minimal settings for maximum speed
+            df = pd.read_excel(
+                file_path,
+                engine='openpyxl',
+                dtype=dtype_dict,
+                na_filter=False,  # Don't filter NA values
+                keep_default_na=False,  # Don't use default NA values
+                nrows=50000  # Limit rows for PC performance
+            )
+            
+            if df is None or df.empty:
+                self.logger.error("No data found in Excel file")
+                return False
+            
+            self.logger.info(f"[PC-OPTIMIZED] Loaded {len(df)} rows, {len(df.columns)} columns")
+            
+            # PC optimization: Minimal duplicate handling
+            initial_count = len(df)
+            df.drop_duplicates(inplace=True)
+            df.reset_index(drop=True, inplace=True)
+            final_count = len(df)
+            
+            if initial_count != final_count:
+                self.logger.info(f"[PC-OPTIMIZED] Removed {initial_count - final_count} duplicate rows")
+            
+            # PC optimization: Essential columns only
+            essential_columns = ['Product Name*', 'Product Type*', 'Vendor', 'Product Brand', 'Lineage']
+            
+            # Ensure essential columns exist with minimal processing
+            if "Product Name*" not in df.columns:
+                if "ProductName" in df.columns:
+                    df["Product Name*"] = df["ProductName"]
+                else:
+                    df["Product Name*"] = "Unknown"
+            
+            for col in ["Product Type*", "Lineage", "Product Brand", "Vendor"]:
+                if col not in df.columns:
+                    df[col] = "Unknown"
+            
+            # PC optimization: Minimal string operations
+            df["Product Name*"] = df["Product Name*"].astype(str).str.strip()
+            
+            # PC optimization: Minimal filtering - only exclude obvious invalid rows
+            initial_count = len(df)
+            
+            # Only exclude rows with completely blank product names
+            blank_mask = (df["Product Name*"].isna()) | (df["Product Name*"].str.strip() == "")
+            df = df[~blank_mask]
+            
+            # Reset index once after all filtering
+            df.reset_index(drop=True, inplace=True)
+            final_count = len(df)
+            
+            if initial_count != final_count:
+                self.logger.info(f"[PC-OPTIMIZED] Filtered to {final_count} valid products")
+            
+            # PC optimization: Minimal processing - skip heavy operations
+            self.df = df
+            self._last_loaded_file = file_path
+            
+            # PC optimization: Skip heavy processing steps for speed
+            self.logger.info(f"[PC-OPTIMIZED] Processing complete: {len(df)} rows")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"[PC-OPTIMIZED] Error loading file: {e}")
+            return False
+
+    def load_file_original(self, file_path: str) -> bool:
+        """Original file loading implementation for Mac and other platforms."""
+        try:
             # Check if we've already loaded this exact file
             if (self._last_loaded_file == file_path and 
                 self.df is not None and 

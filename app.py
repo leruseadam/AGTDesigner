@@ -2001,7 +2001,15 @@ def upload_file_simple():
 def process_excel_sync(filename, temp_path):
     """Synchronous Excel processing for immediate response"""
     try:
-        logging.info(f"[SYNC] ===== SYNCHRONOUS PROCESSING START =====")
+        # PC optimization: Detect platform and use optimized processing
+        import platform
+        is_windows = platform.system() == 'Windows'
+        
+        if is_windows:
+            logging.info(f"[PC-SYNC] ===== PC-OPTIMIZED SYNCHRONOUS PROCESSING START =====")
+        else:
+            logging.info(f"[SYNC] ===== SYNCHRONOUS PROCESSING START =====")
+        
         logging.info(f"[SYNC] Processing file: {temp_path}")
         logging.info(f"[SYNC] Filename: {filename}")
         
@@ -2014,29 +2022,43 @@ def process_excel_sync(filename, temp_path):
         from src.core.data.excel_processor import ExcelProcessor
         processor = ExcelProcessor()
         
-        # Enable database integration for new product storage
-        if hasattr(processor, 'enable_product_db_integration'):
-            processor.enable_product_db_integration(True)
-            logging.info("[SYNC] Product database integration enabled for new product storage")
+        # PC optimization: Skip database integration for faster processing
+        if is_windows:
+            if hasattr(processor, 'enable_product_db_integration'):
+                processor.enable_product_db_integration(False)
+                logging.info("[PC-SYNC] Product database integration disabled for faster processing")
+        else:
+            # Enable database integration for new product storage
+            if hasattr(processor, 'enable_product_db_integration'):
+                processor.enable_product_db_integration(True)
+                logging.info("[SYNC] Product database integration enabled for new product storage")
         
-        # Load the file
-        # Limit rows to prevent timeout on large files
-        import pandas as pd
-        try:
-            # Try to load with row limit first
-            df = pd.read_excel(temp_path, nrows=5000, engine='openpyxl')
-            if not df.empty:
-                processor.df = df
-                success = True
-                logging.info(f"[ULTRA-FAST-BG] Loaded {len(df)} rows (limited to 5000)")
-            else:
-                success = False
-        except Exception as e:
-            logging.warning(f"Limited load failed, trying full load: {e}")
-            success = processor.load_file(temp_path)
-        if not success or processor.df is None or processor.df.empty:
-            logging.error(f"[SYNC] Failed to load file: {temp_path}")
-            return False
+        # PC optimization: Use optimized loading strategy
+        if is_windows:
+            # PC: Use ultra-fast loading with minimal processing
+            success = processor.load_file(temp_path)  # This will use the PC-optimized version
+            if not success or processor.df is None or processor.df.empty:
+                logging.error(f"[PC-SYNC] Failed to load file: {temp_path}")
+                return False
+            logging.info(f"[PC-SYNC] Ultra-fast load complete: {len(processor.df)} rows")
+        else:
+            # Mac: Use original loading strategy
+            import pandas as pd
+            try:
+                # Try to load with row limit first
+                df = pd.read_excel(temp_path, nrows=5000, engine='openpyxl')
+                if not df.empty:
+                    processor.df = df
+                    success = True
+                    logging.info(f"[SYNC] Loaded {len(df)} rows (limited to 5000)")
+                else:
+                    success = False
+            except Exception as e:
+                logging.warning(f"Limited load failed, trying full load: {e}")
+                success = processor.load_file(temp_path)
+            if not success or processor.df is None or processor.df.empty:
+                logging.error(f"[SYNC] Failed to load file: {temp_path}")
+                return False
         
         # Update global processor
         global _excel_processor
@@ -2189,7 +2211,15 @@ def process_excel_background(filename, temp_path):
     global os  # Ensure os is available in this scope
     
     try:
-        logging.info(f"[BG] ===== ULTRA-FAST BACKGROUND PROCESSING START =====")
+        # PC optimization: Detect platform and use optimized processing
+        import platform
+        is_windows = platform.system() == 'Windows'
+        
+        if is_windows:
+            logging.info(f"[PC-BG] ===== PC-OPTIMIZED BACKGROUND PROCESSING START =====")
+        else:
+            logging.info(f"[BG] ===== ULTRA-FAST BACKGROUND PROCESSING START =====")
+        
         logging.info(f"[BG] Processing: {filename}")
         
         # Quick file existence check
@@ -2205,18 +2235,32 @@ def process_excel_background(filename, temp_path):
         new_processor = ExcelProcessor()
         
         try:
-            # Disable product database integration for faster loading
-            if hasattr(new_processor, 'enable_product_db_integration'):
-                new_processor.enable_product_db_integration(False)
-                logging.info("[BG] Product database integration disabled for faster loading")
+            # PC optimization: Skip database integration for faster loading
+            if is_windows:
+                if hasattr(new_processor, 'enable_product_db_integration'):
+                    new_processor.enable_product_db_integration(False)
+                    logging.info("[PC-BG] Product database integration disabled for faster loading")
+            else:
+                # Disable product database integration for faster loading
+                if hasattr(new_processor, 'enable_product_db_integration'):
+                    new_processor.enable_product_db_integration(False)
+                    logging.info("[BG] Product database integration disabled for faster loading")
             
-            # Use fast load for immediate response
-            success = new_processor.load_file(temp_path)
-            if not success or new_processor.df is None or new_processor.df.empty:
-                update_processing_status(filename, f'error: Failed to load file')
-                return
-            
-            logging.info(f"[BG] File loaded successfully: {len(new_processor.df)} rows")
+            # PC optimization: Use optimized loading strategy
+            if is_windows:
+                # PC: Use ultra-fast loading with minimal processing
+                success = new_processor.load_file(temp_path)  # This will use the PC-optimized version
+                if not success or new_processor.df is None or new_processor.df.empty:
+                    update_processing_status(filename, f'error: Failed to load file')
+                    return
+                logging.info(f"[PC-BG] Ultra-fast load complete: {len(new_processor.df)} rows")
+            else:
+                # Mac: Use original loading strategy
+                success = new_processor.load_file(temp_path)
+                if not success or new_processor.df is None or new_processor.df.empty:
+                    update_processing_status(filename, f'error: Failed to load file')
+                    return
+                logging.info(f"[BG] File loaded successfully: {len(new_processor.df)} rows")
             
             # Mark as ready immediately
             update_processing_status(filename, 'ready')
@@ -2839,7 +2883,15 @@ def upload_lightning():
 def process_lightning():
     """Process the lightning-uploaded file in the background"""
     try:
-        logging.info("=== LIGHTNING PROCESSING START ===")
+        # PC optimization: Detect platform and use optimized processing
+        import platform
+        is_windows = platform.system() == 'Windows'
+        
+        if is_windows:
+            logging.info("=== PC-OPTIMIZED LIGHTNING PROCESSING START ===")
+        else:
+            logging.info("=== LIGHTNING PROCESSING START ===")
+        
         start_time = time.time()
         
         # Get file path from session or request
@@ -2853,18 +2905,26 @@ def process_lightning():
         from src.core.data.excel_processor import ExcelProcessor
         processor = ExcelProcessor()
         
-        # Quick row-limited load for speed
-        import pandas as pd
-        try:
-            # OPTIMIZATION: Load more rows for better data coverage
-            df = pd.read_excel(file_path, nrows=50000, engine='openpyxl', dtype=str, na_filter=False)
-            processor.df = df
-            logging.info(f"[LIGHTNING] Loaded {len(df)} rows (optimized for speed)")
-        except Exception as e:
-            logging.warning(f"[LIGHTNING] Quick load failed, trying full load: {e}")
-            success = processor.load_file(file_path)
+        # PC optimization: Use platform-specific loading strategy
+        if is_windows:
+            # PC: Use ultra-fast loading with minimal processing
+            success = processor.load_file(file_path)  # This will use the PC-optimized version
             if not success:
                 return jsonify({'error': 'Failed to process file'}), 500
+            logging.info(f"[PC-LIGHTNING] Ultra-fast load complete: {len(processor.df)} rows")
+        else:
+            # Mac: Use original loading strategy
+            import pandas as pd
+            try:
+                # OPTIMIZATION: Load more rows for better data coverage
+                df = pd.read_excel(file_path, nrows=50000, engine='openpyxl', dtype=str, na_filter=False)
+                processor.df = df
+                logging.info(f"[LIGHTNING] Loaded {len(df)} rows (optimized for speed)")
+            except Exception as e:
+                logging.warning(f"[LIGHTNING] Quick load failed, trying full load: {e}")
+                success = processor.load_file(file_path)
+                if not success:
+                    return jsonify({'error': 'Failed to process file'}), 500
         
         # Update global processor
         global _excel_processor
@@ -2872,9 +2932,11 @@ def process_lightning():
             _excel_processor = processor
             _excel_processor._last_loaded_file = file_path
         
-        # Clear minimal caches only
-        cache.delete('full_excel_cache_key')
-        cache.delete('dropdown_cache_key')
+        # PC optimization: Skip cache clearing for better performance
+        if not is_windows:
+            # Clear minimal caches only
+            cache.delete('full_excel_cache_key')
+            cache.delete('dropdown_cache_key')
         
         process_time = time.time() - start_time
         logging.info(f"[LIGHTNING] Processing completed in {process_time:.3f}s")

@@ -228,8 +228,69 @@ if (isWindows) {
     });
   };
   
-  monitorDropdownPerformance();
-}
+      monitorDropdownPerformance();
+    }
+    
+    // PC optimization: Enhanced file processing performance
+    if (isWindows) {
+      console.log('🪟 Applying Windows-specific file processing optimizations');
+      
+      // PC optimization: Reduce file processing timeout for faster feedback
+      const originalSetTimeout = window.setTimeout;
+      window.setTimeout = function(callback, delay) {
+        // Reduce timeouts for file processing on PC
+        if (delay > 1000) {
+          delay = Math.min(delay, 2000); // Cap at 2 seconds for PC
+        }
+        return originalSetTimeout(callback, delay);
+      };
+      
+      // PC optimization: Optimize file upload progress updates
+      const optimizeFileUploadProgress = () => {
+        const progressBars = document.querySelectorAll('.progress-bar');
+        progressBars.forEach(bar => {
+          // Reduce animation duration for faster feedback
+          bar.style.transition = 'width 0.1s ease';
+        });
+      };
+      
+      // Apply optimizations when DOM is ready
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', optimizeFileUploadProgress);
+      } else {
+        optimizeFileUploadProgress();
+      }
+      
+      // PC optimization: Monitor file processing performance
+      const monitorFileProcessingPerformance = () => {
+        let processingStartTime = null;
+        
+        // Monitor file upload events
+        document.addEventListener('change', (e) => {
+          if (e.target.type === 'file') {
+            processingStartTime = Date.now();
+            console.log('🪟 PC Performance: File upload started');
+          }
+        });
+        
+        // Monitor processing completion
+        const originalFetch = window.fetch;
+        window.fetch = function(...args) {
+          return originalFetch.apply(this, args).then(response => {
+            if (args[0] && args[0].includes('/upload') && response.ok) {
+              if (processingStartTime) {
+                const processingTime = Date.now() - processingStartTime;
+                console.log(`🪟 PC Performance: File processing completed in ${processingTime}ms`);
+                processingStartTime = null;
+              }
+            }
+            return response;
+          });
+        };
+      };
+      
+      monitorFileProcessingPerformance();
+    }
 
 // Add keyboard shortcuts
 document.addEventListener('keydown', (e) => {
