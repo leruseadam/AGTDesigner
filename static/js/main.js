@@ -2322,19 +2322,23 @@ const TagManager = {
                 return;
             }
             
-            // Save current state for undo before making changes
-            try {
-                await fetch('/api/save-selection-state', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        action_type: 'checkbox_selection'
-                    })
-                });
-                console.log('Selection state saved for undo');
-            } catch (error) {
-                console.warn('Failed to save selection state for undo:', error);
-                // Continue with the operation even if undo save fails
+            // PC optimization: Skip undo save for better performance on Windows
+            const isWindows = /Windows|Win32|Win64/.test(navigator.userAgent);
+            if (!isWindows) {
+                // Save current state for undo before making changes (Mac only)
+                try {
+                    await fetch('/api/save-selection-state', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            action_type: 'checkbox_selection'
+                        })
+                    });
+                    console.log('Selection state saved for undo');
+                } catch (error) {
+                    console.warn('Failed to save selection state for undo:', error);
+                    // Continue with the operation even if undo save fails
+                }
             }
             
             // Ensure the checkbox state is properly updated
@@ -2968,6 +2972,10 @@ const TagManager = {
             return;
         }
         
+        // PC-specific optimization: Use shorter debounce for better responsiveness
+        const isWindows = /Windows|Win32|Win64/.test(navigator.userAgent);
+        const debounceDelay = isWindows ? 25 : 50; // Faster response on PC
+        
         // Add debouncing for rapid deselection to prevent UI issues
         if (this.tagSelectionTimeout) {
             clearTimeout(this.tagSelectionTimeout);
@@ -2982,6 +2990,19 @@ const TagManager = {
             
             console.log('Persistent selected tags after change:', this.state.persistentSelectedTags);
             
+            // PC-specific optimization: Use cached tag lookup for better performance
+            if (!this.state.tagLookupCache) {
+                this.state.tagLookupCache = new Map();
+                // Build cache from both tags and originalTags
+                [...this.state.tags, ...this.state.originalTags].forEach(t => {
+                    if (t && t['Product Name*']) {
+                        this.state.tagLookupCache.set(t['Product Name*'], t);
+                        // Also cache lowercase version for case-insensitive lookup
+                        this.state.tagLookupCache.set(t['Product Name*'].toLowerCase(), t);
+                    }
+                });
+            }
+            
             // Only use backend data - never fall back to frontend persistent tags
             // Get selected tags from backend
             console.log('=== SELECTED TAGS DEBUG ===');
@@ -2989,21 +3010,7 @@ const TagManager = {
             console.log('this.state.tags length:', this.state.tags.length);
             console.log('this.state.originalTags length:', this.state.originalTags.length);
             
-            // Debug: Show first few tags in state
-            if (this.state.tags.length > 0) {
-                console.log('First 3 tags in this.state.tags:');
-                this.state.tags.slice(0, 3).forEach(tag => {
-                    console.log(`  "${tag && tag['Product Name*'] ? tag['Product Name*'] : 'UNDEFINED'}"`);
-                });
-            }
-            
-            if (this.state.originalTags.length > 0) {
-                console.log('First 3 tags in this.state.originalTags:');
-                this.state.originalTags.slice(0, 3).forEach(tag => {
-                    console.log(`  "${tag && tag['Product Name*'] ? tag['Product Name*'] : 'UNDEFINED'}"`);
-                });
-            }
-            
+            // PC optimization: Use cached lookup instead of expensive .find() operations
             const selectedTagObjects = this.state.persistentSelectedTags.map(name => {
                 // Safety check: ensure name is valid
                 if (!name || typeof name !== 'string') {
@@ -3011,19 +3018,17 @@ const TagManager = {
                     return null;
                 }
                 
-                // Only use tags that exist in the current backend data
-                let foundTag = this.state.tags.find(t => t && t['Product Name*'] && t['Product Name*'] === name) || 
-                              this.state.originalTags.find(t => t && t['Product Name*'] && t['Product Name*'] === name);
+                // Use cached lookup for O(1) performance instead of O(n) .find()
+                let foundTag = this.state.tagLookupCache.get(name);
                 
-                // If not found, try case-insensitive search
+                // If not found, try case-insensitive search using cache
                 if (!foundTag) {
-                    foundTag = this.state.tags.find(t => t && t['Product Name*'] && t['Product Name*'].toLowerCase() === name.toLowerCase()) || 
-                              this.state.originalTags.find(t => t && t['Product Name*'] && t['Product Name*'].toLowerCase() === name.toLowerCase());
+                    foundTag = this.state.tagLookupCache.get(name.toLowerCase());
                 }
                 
                 // If still not found, create a minimal tag object for the selected tag
                 if (!foundTag) {
-                    console.log(`Tag "${name}" not found in state, creating minimal tag object`);
+                    console.log(`Tag "${name}" not found in cache, creating minimal tag object`);
                     foundTag = {
                         'Product Name*': name,
                         'Product Brand': 'Unknown',
@@ -3035,17 +3040,18 @@ const TagManager = {
                 }
                 
                 console.log(`Looking for tag "${name}":`, foundTag ? 'FOUND' : 'NOT FOUND');
-                if (!foundTag) {
-                    console.log(`  Tag name length: ${name.length}`);
-                    console.log(`  Tag name characters: ${Array.from(name).map(c => c.charCodeAt(0)).join(', ')}`);
-                }
                 return foundTag;
             }).filter(Boolean); // Filter out null values from invalid names
             
             console.log('selectedTagObjects:', selectedTagObjects);
             console.log('selectedTagObjects length:', selectedTagObjects.length);
             
-            this.updateSelectedTags(selectedTagObjects);
+            // PC optimization: Use optimized update method
+            if (isWindows) {
+                this.updateSelectedTagsOptimized(selectedTagObjects);
+            } else {
+                this.updateSelectedTags(selectedTagObjects);
+            }
             
             // FIXED: Don't hide selected tags from available display - keep all items visible
             // This allows users to see all available options even after making selections
@@ -3076,7 +3082,7 @@ const TagManager = {
                     this.syncDeselectionWithBackend(tag['Product Name*']);
                 }
             }
-        }, 50); // 50ms debounce delay for individual tag selection
+        }, debounceDelay); // PC-optimized debounce delay
     },
 
     updateTagLineage(tag, lineage) {
@@ -3192,6 +3198,149 @@ const TagManager = {
                 lineageBadge.textContent = newLineage;
                 lineageBadge.className = `badge lineage-badge ${this.getLineageColor(newLineage)}`;
             }
+        }
+    },
+
+    updateSelectedTagsOptimized(tags) {
+        // PC-optimized version of updateSelectedTags with better performance
+        if (!tags || !Array.isArray(tags)) {
+            console.warn('updateSelectedTagsOptimized called with invalid tags:', tags);
+            tags = [];
+        }
+        
+        // Prevent updates during tag move operations to avoid race conditions
+        if (this.isMovingTags) {
+            console.log('Ignoring updateSelectedTagsOptimized during tag move operation');
+            return;
+        }
+        
+        const container = document.getElementById('selectedTags');
+        if (!container) {
+            console.error('Selected tags container not found');
+            return;
+        }
+        
+        console.time('updateSelectedTagsOptimized');
+        console.log('updateSelectedTagsOptimized called with tags:', tags);
+        
+        // PC optimization: Use DocumentFragment for batch DOM operations
+        const fragment = document.createDocumentFragment();
+        
+        // PC optimization: Cache DOM elements to avoid repeated queries
+        if (!this.state.selectedTagsCache) {
+            this.state.selectedTagsCache = {
+                container: container,
+                selectAllContainer: null,
+                lastTagCount: 0
+            };
+        }
+        
+        // Clear existing content efficiently
+        container.innerHTML = '';
+        
+        // Create select all container if needed
+        if (!this.state.selectedTagsCache.selectAllContainer) {
+            const selectAllContainer = document.createElement('div');
+            selectAllContainer.className = 'd-flex align-items-center gap-3 mb-2 px-3';
+            selectAllContainer.innerHTML = `
+                <label class="d-flex align-items-center gap-2 cursor-pointer mb-0 select-all-container">
+                    <input type="checkbox" id="selectAllSelected" class="custom-checkbox">
+                    <span class="text-secondary fw-semibold">SELECT ALL</span>
+                </label>
+            `;
+            this.state.selectedTagsCache.selectAllContainer = selectAllContainer;
+        }
+        
+        fragment.appendChild(this.state.selectedTagsCache.selectAllContainer.cloneNode(true));
+        
+        // PC optimization: Render tags directly without complex grouping for better performance
+        if (tags.length > 0) {
+            tags.forEach(tag => {
+                if (tag && tag['Product Name*']) {
+                    const tagElement = this.createTagElement(tag, true); // true = isForSelectedTags
+                    fragment.appendChild(tagElement);
+                }
+            });
+        } else {
+            // Show empty state
+            const emptyState = document.createElement('div');
+            emptyState.className = 'd-flex align-items-center justify-content-center';
+            emptyState.style.minHeight = '100%';
+            emptyState.innerHTML = `
+                <div class="text-center p-4" style="max-width: 500px;">
+                    <h5 class="text-secondary fw-bold mb-3">No tags selected</h5>
+                    <p class="text-secondary">Select tags from the left panel to get started.</p>
+                </div>
+            `;
+            fragment.appendChild(emptyState);
+        }
+        
+        // Batch DOM update
+        container.appendChild(fragment);
+        
+        // Update tag count
+        this.updateTagCount('selected', tags.length);
+        
+        // Attach event listeners efficiently
+        this.attachSelectedTagsEventListeners();
+        
+        console.timeEnd('updateSelectedTagsOptimized');
+        
+        // Update select all checkbox state
+        this.updateSelectAllCheckboxes();
+    },
+
+    attachSelectedTagsEventListeners() {
+        // PC optimization: Efficiently attach event listeners to selected tags
+        const container = document.getElementById('selectedTags');
+        if (!container) return;
+        
+        // Use event delegation for better performance
+        container.addEventListener('change', (e) => {
+            if (e.target.classList.contains('tag-checkbox')) {
+                const tagName = e.target.value;
+                const isChecked = e.target.checked;
+                
+                if (isChecked) {
+                    if (!this.state.persistentSelectedTags.includes(tagName)) {
+                        this.state.persistentSelectedTags.push(tagName);
+                    }
+                } else {
+                    const index = this.state.persistentSelectedTags.indexOf(tagName);
+                    if (index > -1) {
+                        this.state.persistentSelectedTags.splice(index, 1);
+                    }
+                }
+                
+                // Update the regular selectedTags set
+                this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+                
+                // Update select all checkbox state
+                this.updateSelectAllCheckboxes();
+            }
+        });
+        
+        // Handle select all checkbox
+        const selectAllCheckbox = document.getElementById('selectAllSelected');
+        if (selectAllCheckbox && !selectAllCheckbox.hasAttribute('data-listener-added')) {
+            selectAllCheckbox.setAttribute('data-listener-added', 'true');
+            selectAllCheckbox.addEventListener('change', (e) => {
+                const isChecked = e.target.checked;
+                const tagCheckboxes = container.querySelectorAll('.tag-checkbox');
+                
+                tagCheckboxes.forEach(checkbox => {
+                    checkbox.checked = isChecked;
+                });
+                
+                // Update persistent selected tags
+                if (isChecked) {
+                    this.state.persistentSelectedTags = Array.from(tagCheckboxes).map(cb => cb.value);
+                } else {
+                    this.state.persistentSelectedTags = [];
+                }
+                
+                this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+            });
         }
     },
 
