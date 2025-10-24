@@ -2947,18 +2947,26 @@ const TagManager = {
     },
 
     handleTagSelection(e, tag) {
-        console.log('=== HANDLE TAG SELECTION CALLED ===');
-        console.log('Event:', e);
-        console.log('Tag:', tag);
+        // PC optimization: Reduce console logging for better performance
+        const isWindows = /Windows|Win32|Win64/.test(navigator.userAgent);
+        const enableLogging = !isWindows; // Disable logging on Windows for performance
+        
+        if (enableLogging) {
+            console.log('=== HANDLE TAG SELECTION CALLED ===');
+            console.log('Event:', e);
+            console.log('Tag:', tag);
+        }
         
         // Ignore changes during drag-and-drop reordering
         if (e.target.hasAttribute('data-reordering') || e.target.hasAttribute('data-drag-disabled')) {
-            console.log('Ignoring tag selection change during drag operation');
+            if (enableLogging) console.log('Ignoring tag selection change during drag operation');
             return;
         }
         
         const isChecked = e.target.checked;
-        console.log('Tag selection changed:', tag && tag['Product Name*'] ? tag['Product Name*'] : 'UNDEFINED', 'checked:', isChecked);
+        if (enableLogging) {
+            console.log('Tag selection changed:', tag && tag['Product Name*'] ? tag['Product Name*'] : 'UNDEFINED', 'checked:', isChecked);
+        }
         
         // Safety check: ensure tag exists and has required properties
         if (!tag || !tag['Product Name*']) {
@@ -2968,12 +2976,11 @@ const TagManager = {
         
         // Prevent rapid deselection issues
         if (this.isMovingTags) {
-            console.log('Ignoring tag selection during tag move operation');
+            if (enableLogging) console.log('Ignoring tag selection during tag move operation');
             return;
         }
         
         // PC-specific optimization: Use shorter debounce for better responsiveness
-        const isWindows = /Windows|Win32|Win64/.test(navigator.userAgent);
         const debounceDelay = isWindows ? 25 : 50; // Faster response on PC
         
         // Add debouncing for rapid deselection to prevent UI issues
@@ -2988,7 +2995,9 @@ const TagManager = {
             // Note: The persistent selected tags are already updated in the checkbox event handler
             // This function now focuses on UI updates and backend synchronization
             
-            console.log('Persistent selected tags after change:', this.state.persistentSelectedTags);
+            if (enableLogging) {
+                console.log('Persistent selected tags after change:', this.state.persistentSelectedTags);
+            }
             
             // PC-specific optimization: Use cached tag lookup for better performance
             if (!this.state.tagLookupCache) {
@@ -3005,16 +3014,18 @@ const TagManager = {
             
             // Only use backend data - never fall back to frontend persistent tags
             // Get selected tags from backend
-            console.log('=== SELECTED TAGS DEBUG ===');
-            console.log('persistentSelectedTags:', this.state.persistentSelectedTags);
-            console.log('this.state.tags length:', this.state.tags.length);
-            console.log('this.state.originalTags length:', this.state.originalTags.length);
+            if (enableLogging) {
+                console.log('=== SELECTED TAGS DEBUG ===');
+                console.log('persistentSelectedTags:', this.state.persistentSelectedTags);
+                console.log('this.state.tags length:', this.state.tags.length);
+                console.log('this.state.originalTags length:', this.state.originalTags.length);
+            }
             
             // PC optimization: Use cached lookup instead of expensive .find() operations
             const selectedTagObjects = this.state.persistentSelectedTags.map(name => {
                 // Safety check: ensure name is valid
                 if (!name || typeof name !== 'string') {
-                    console.warn('Invalid name in persistentSelectedTags:', name);
+                    if (enableLogging) console.warn('Invalid name in persistentSelectedTags:', name);
                     return null;
                 }
                 
@@ -3028,7 +3039,7 @@ const TagManager = {
                 
                 // If still not found, create a minimal tag object for the selected tag
                 if (!foundTag) {
-                    console.log(`Tag "${name}" not found in cache, creating minimal tag object`);
+                    if (enableLogging) console.log(`Tag "${name}" not found in cache, creating minimal tag object`);
                     foundTag = {
                         'Product Name*': name,
                         'Product Brand': 'Unknown',
@@ -3039,12 +3050,16 @@ const TagManager = {
                     };
                 }
                 
-                console.log(`Looking for tag "${name}":`, foundTag ? 'FOUND' : 'NOT FOUND');
+                if (enableLogging) {
+                    console.log(`Looking for tag "${name}":`, foundTag ? 'FOUND' : 'NOT FOUND');
+                }
                 return foundTag;
             }).filter(Boolean); // Filter out null values from invalid names
             
-            console.log('selectedTagObjects:', selectedTagObjects);
-            console.log('selectedTagObjects length:', selectedTagObjects.length);
+            if (enableLogging) {
+                console.log('selectedTagObjects:', selectedTagObjects);
+                console.log('selectedTagObjects length:', selectedTagObjects.length);
+            }
             
             // PC optimization: Use optimized update method
             if (isWindows) {
@@ -3056,7 +3071,7 @@ const TagManager = {
             // FIXED: Don't hide selected tags from available display - keep all items visible
             // This allows users to see all available options even after making selections
             if (isChecked && e.target.closest('#availableTags')) {
-                console.log('FIXED: Not hiding selected tag from available display - keeping all items visible');
+                if (enableLogging) console.log('FIXED: Not hiding selected tag from available display - keeping all items visible');
                 // Tag remains visible in available list even after selection
             }
             
@@ -3077,7 +3092,9 @@ const TagManager = {
                 // For JSON matched items and educated guess items, also ensure they appear in available tags
                 // This is important for items that might not exist in the original Excel data
                 if (tag.Source && (tag.Source === 'JSON Match' || tag.Source.includes('Educated Guess'))) {
-                    console.log(`${tag.Source.includes('Educated Guess') ? 'Educated guess' : 'JSON matched'} item deselected: ${tag['Product Name*']}`);
+                    if (enableLogging) {
+                        console.log(`${tag.Source.includes('Educated Guess') ? 'Educated guess' : 'JSON matched'} item deselected: ${tag['Product Name*']}`);
+                    }
                     // Sync with backend to ensure deselection is persisted
                     this.syncDeselectionWithBackend(tag['Product Name*']);
                 }
@@ -5915,10 +5932,56 @@ const TagManager = {
 
     // Efficient helper to update available tags display without DOM rebuilding
     efficientlyUpdateAvailableTagsDisplay() {
-        // FIXED: Don't hide selected tags from available display - keep all items visible
-        // This allows users to see all available options even after making selections
-        console.log('FIXED: Not hiding selected tags from available display - keeping all items visible');
+        // PC optimization: Use cached DOM elements and requestAnimationFrame for better performance
+        const isWindows = /Windows|Win32|Win64/.test(navigator.userAgent);
         
+        if (isWindows) {
+            // Use requestAnimationFrame to batch DOM updates
+            requestAnimationFrame(() => {
+                this.efficientlyUpdateAvailableTagsDisplayOptimized();
+            });
+        } else {
+            // Mac gets the original implementation
+            this.efficientlyUpdateAvailableTagsDisplayOriginal();
+        }
+    },
+
+    efficientlyUpdateAvailableTagsDisplayOptimized() {
+        // PC-optimized version with cached DOM elements
+        if (!this.state.domCache) {
+            this.state.domCache = {
+                availableTagElements: null,
+                lastCacheTime: 0,
+                cacheTimeout: 1000 // Cache for 1 second
+            };
+        }
+        
+        const now = Date.now();
+        const cacheAge = now - this.state.domCache.lastCacheTime;
+        
+        // Use cached elements if cache is fresh
+        if (this.state.domCache.availableTagElements && cacheAge < this.state.domCache.cacheTimeout) {
+            // Show all tags using cached elements
+            this.state.domCache.availableTagElements.forEach(tagElement => {
+                tagElement.style.display = 'block';
+            });
+        } else {
+            // Refresh cache
+            this.state.domCache.availableTagElements = document.querySelectorAll('#availableTags .tag-item');
+            this.state.domCache.lastCacheTime = now;
+            
+            // Show all tags
+            this.state.domCache.availableTagElements.forEach(tagElement => {
+                tagElement.style.display = 'block';
+            });
+        }
+        
+        // Update select all checkboxes state efficiently
+        this.updateSelectAllCheckboxesOptimized();
+    },
+
+    efficientlyUpdateAvailableTagsDisplayOriginal() {
+        // Original implementation for Mac
         const availableTagElements = document.querySelectorAll('#availableTags .tag-item');
         
         // Show all tags regardless of selection status
@@ -5932,7 +5995,70 @@ const TagManager = {
 
     // Update select all checkboxes state
     updateSelectAllCheckboxes() {
-        // FIXED: Don't filter out hidden elements since we're not hiding any elements anymore
+        // PC optimization: Use optimized version for Windows
+        const isWindows = /Windows|Win32|Win64/.test(navigator.userAgent);
+        
+        if (isWindows) {
+            this.updateSelectAllCheckboxesOptimized();
+        } else {
+            this.updateSelectAllCheckboxesOriginal();
+        }
+    },
+
+    updateSelectAllCheckboxesOptimized() {
+        // PC-optimized version with cached DOM elements
+        if (!this.state.checkboxCache) {
+            this.state.checkboxCache = {
+                availableCheckboxes: null,
+                selectedCheckboxes: null,
+                lastCacheTime: 0,
+                cacheTimeout: 500 // Cache for 500ms
+            };
+        }
+        
+        const now = Date.now();
+        const cacheAge = now - this.state.checkboxCache.lastCacheTime;
+        
+        // Use cached elements if cache is fresh
+        if (this.state.checkboxCache.availableCheckboxes && cacheAge < this.state.checkboxCache.cacheTimeout) {
+            const availableCheckboxes = this.state.checkboxCache.availableCheckboxes;
+            const checkedCount = Array.from(availableCheckboxes).filter(cb => cb.checked).length;
+            
+            // Update global select all for available tags
+            const selectAllAvailable = document.getElementById('selectAllAvailable');
+            if (selectAllAvailable && availableCheckboxes.length > 0) {
+                selectAllAvailable.checked = checkedCount === availableCheckboxes.length;
+                selectAllAvailable.indeterminate = checkedCount > 0 && checkedCount < availableCheckboxes.length;
+            }
+        } else {
+            // Refresh cache and update
+            this.state.checkboxCache.availableCheckboxes = document.querySelectorAll('#availableTags .tag-checkbox');
+            this.state.checkboxCache.lastCacheTime = now;
+            
+            const availableCheckboxes = this.state.checkboxCache.availableCheckboxes;
+            const checkedCount = Array.from(availableCheckboxes).filter(cb => cb.checked).length;
+            
+            // Update global select all for available tags
+            const selectAllAvailable = document.getElementById('selectAllAvailable');
+            if (selectAllAvailable && availableCheckboxes.length > 0) {
+                selectAllAvailable.checked = checkedCount === availableCheckboxes.length;
+                selectAllAvailable.indeterminate = checkedCount > 0 && checkedCount < availableCheckboxes.length;
+            }
+        }
+        
+        // Update selected tags select all checkbox
+        const selectedCheckboxes = document.querySelectorAll('#selectedTags .tag-checkbox');
+        const selectedCheckedCount = Array.from(selectedCheckboxes).filter(cb => cb.checked).length;
+        const selectAllSelected = document.getElementById('selectAllSelected');
+        
+        if (selectAllSelected && selectedCheckboxes.length > 0) {
+            selectAllSelected.checked = selectedCheckedCount === selectedCheckboxes.length;
+            selectAllSelected.indeterminate = selectedCheckedCount > 0 && selectedCheckedCount < selectedCheckboxes.length;
+        }
+    },
+
+    updateSelectAllCheckboxesOriginal() {
+        // Original implementation for Mac
         const availableCheckboxes = document.querySelectorAll('#availableTags .tag-checkbox');
         const checkedCheckboxes = document.querySelectorAll('#availableTags .tag-checkbox:checked');
         

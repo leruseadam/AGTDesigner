@@ -6391,6 +6391,21 @@ def get_filter_options():
             except Exception as cache_error:
                 logging.warning(f"Failed to cache filter options: {cache_error}")
         
+        # PC optimization: Add response compression for large datasets
+        if is_windows_request or is_windows_ua:
+            # Compress response for Windows to reduce transfer time
+            import gzip
+            import json
+            from flask import make_response
+            response_data = json.dumps(options)
+            compressed_data = gzip.compress(response_data.encode('utf-8'))
+            
+            response = make_response(compressed_data)
+            response.headers['Content-Type'] = 'application/json'
+            response.headers['Content-Encoding'] = 'gzip'
+            response.headers['Content-Length'] = str(len(compressed_data))
+            return response
+        
         # Don't cache filter options to ensure fresh data (for non-Windows)
         return jsonify(options)
     except Exception as e:
