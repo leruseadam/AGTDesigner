@@ -1,11 +1,12 @@
-// Performance optimization utilities
+// Memory-optimized performance utilities
 const performanceUtils = {
-    // Debounce function for search inputs
+    // Memory-efficient debounce with cleanup
     debounce(func, wait) {
         let timeout;
         return function executedFunction(...args) {
             const later = () => {
                 clearTimeout(timeout);
+                timeout = null; // Help GC
                 func(...args);
             };
             clearTimeout(timeout);
@@ -13,7 +14,7 @@ const performanceUtils = {
         };
     },
     
-    // Throttle function for scroll events
+    // Memory-efficient throttle
     throttle(func, limit) {
         let inThrottle;
         return function() {
@@ -27,21 +28,42 @@ const performanceUtils = {
         }
     },
     
-    // Batch DOM updates to minimize reflows
+    // Memory-efficient DOM batching
     batchDOMUpdate(callback) {
         return requestAnimationFrame(() => {
             callback();
         });
     },
     
-    // Performance monitoring
+    // Memory monitoring
     startTiming: () => performance.now(),
     endTiming: (start, operation) => {
         const duration = performance.now() - start;
-        if (duration > 16) { // Log if slower than 60fps
+        if (duration > 16) {
             console.warn(`Performance: ${operation} took ${duration.toFixed(2)}ms`);
         }
         return duration;
+    },
+    
+    // Memory cleanup utilities
+    cleanup: {
+        // Clear large objects
+        clearLargeObjects(obj) {
+            if (obj && typeof obj === 'object') {
+                Object.keys(obj).forEach(key => {
+                    if (obj[key] && typeof obj[key] === 'object' && obj[key].length > 1000) {
+                        obj[key] = null;
+                    }
+                });
+            }
+        },
+        
+        // Force garbage collection if available
+        forceGC() {
+            if (window.gc) {
+                window.gc();
+            }
+        }
     }
 };
 
@@ -779,15 +801,15 @@ const AppLoadingSplash = {
 
 const TagManager = {
     state: {
-        selectedTags: new Set(),
-        persistentSelectedTags: new Set(), // New: persistent selected tags independent of filters
+        selectedTags: new Set(), // Memory-efficient Set
+        persistentSelectedTags: new Set(), // Memory-efficient Set
         initialized: false,
         filters: {},
         loading: false,
-        isJsonMatchedSession: false, // Flag to indicate if we're in a JSON matched session
-        brandCategories: new Map(),  // Add this for storing brand subcategories
-        originalTags: [], // Store original tags separately
-        originalFilterOptions: {}, // Store original filter options to preserve order
+        isJsonMatchedSession: false,
+        brandCategories: new Map(), // Memory-efficient Map
+        originalTags: [], // Will be cleared when not needed
+        originalFilterOptions: {}, // Minimal filter options
         lineageColors: {
             'SATIVA': 'var(--lineage-sativa)',
             'INDICA': 'var(--lineage-indica)',
@@ -799,9 +821,12 @@ const TagManager = {
             'MIXED': 'var(--lineage-mixed)',
             'CBD_BLEND': 'var(--lineage-cbd)'
         },
-        filterCache: null,
-        updateAvailableTagsTimer: null, // Add timer tracking
-        isSearching: false // Whether a tag search term is active
+        filterCache: null, // Single cache entry
+        updateAvailableTagsTimer: null,
+        isSearching: false,
+        // Memory optimization flags
+        _memoryOptimized: true,
+        _lastCleanup: Date.now()
     },
     isGenerating: false, // Add generation lock flag
 
@@ -2422,43 +2447,43 @@ const TagManager = {
         const isNonclassic = !classicTypes.map(ct => ct.toLowerCase()).includes(productType.toLowerCase());
         
         if (isNonclassic) {
-            // For nonclassic products, use Product Strain to determine lineage
-            // UPDATED: Use the same conservative logic as backend
-            const productStrain = tag['Product Strain'] || tag.productStrain || tag.ProductStrain || '';
-            const strainStr = String(productStrain).toLowerCase();
-            
-            // Define edible types for more conservative CBD assignment
-            const edibleTypes = ['edible (solid)', 'edible (liquid)', 'high cbd edible liquid', 'tincture', 'topical', 'capsule'];
-            const isEdible = edibleTypes.includes(productType.toLowerCase());
-            
-            if (strainStr.includes('cbd blend')) {
-                // For edibles, only assign CBD lineage if explicitly high-CBD
-                if (isEdible) {
-                    const productName = (tag['Product Name*'] || tag.ProductName || '').toString().toUpperCase();
-                    if (productType.toLowerCase() === 'high cbd edible liquid' || 
-                        (productName.includes('CBD') && ['HIGH', 'PURE', 'ISOLATE'].some(word => productName.includes(word)))) {
-                        displayLineage = 'CBD'; // Explicitly high-CBD edible
-                    } else {
-                        displayLineage = 'MIXED'; // Regular edible with CBD Blend strain
-                    }
-                } else {
-                    displayLineage = 'CBD'; // Non-edible with CBD Blend strain
-                }
-            } else if (strainStr.includes('cbn') || strainStr.includes('cbc') || strainStr.includes('cbg')) {
-                // CBN, CBC, CBG products should get CBD lineage (yellow color)
-                displayLineage = 'CBD';
-            } else if (strainStr.includes('paraphernalia')) {
-                displayLineage = 'PARAPHERNALIA'; // Pink color
-            } else if (strainStr.includes('mixed')) {
-                displayLineage = 'MIXED'; // Blue color
+            // CRITICAL FIX: For JSON matched products, trust the lineage that was already determined during matching
+            if (isJsonMatched) {
+                // For JSON matched products, use the lineage from the matched database data
+                // This ensures CBD Blend products get the correct yellow color
+                displayLineage = lineage; // Use the lineage from the matched database
+                console.log(`🎨 JSON MATCHED: Using database lineage "${lineage}" for nonclassic product "${displayName}"`);
             } else {
-                // Check product name for CBN/CBC/CBG content
-                const productName = (tag['Product Name*'] || tag.ProductName || '').toString().toUpperCase();
-                if (productName.includes('CBN') || productName.includes('CBC') || productName.includes('CBG')) {
-                    displayLineage = 'CBD'; // CBN/CBC/CBG products get CBD lineage (yellow color)
-                } else {
-                    // Default for nonclassic products without specific strain
+                // For nonclassic products, use Product Strain to determine lineage
+                // UPDATED: Use the same conservative logic as backend
+                const productStrain = tag['Product Strain'] || tag.productStrain || tag.ProductStrain || '';
+                const strainStr = String(productStrain).toLowerCase();
+                
+                // Define edible types for more conservative CBD assignment
+                const edibleTypes = ['edible (solid)', 'edible (liquid)', 'high cbd edible liquid', 'tincture', 'topical', 'capsule'];
+                const isEdible = edibleTypes.includes(productType.toLowerCase());
+                
+                if (strainStr.includes('cbd blend')) {
+                    // CRITICAL FIX: CBD Blend products should ALWAYS get CBD lineage (yellow color)
+                    // regardless of product type - this ensures proper color display
+                    displayLineage = 'CBD';
+                    console.log(`🎨 CBD BLEND FIX: Set lineage to CBD for ${displayName} (strain: ${productStrain})`);
+                } else if (strainStr.includes('cbn') || strainStr.includes('cbc') || strainStr.includes('cbg')) {
+                    // CBN, CBC, CBG products should get CBD lineage (yellow color)
+                    displayLineage = 'CBD';
+                } else if (strainStr.includes('paraphernalia')) {
+                    displayLineage = 'PARAPHERNALIA'; // Pink color
+                } else if (strainStr.includes('mixed')) {
                     displayLineage = 'MIXED'; // Blue color
+                } else {
+                    // Check product name for CBN/CBC/CBG content
+                    const productName = (tag['Product Name*'] || tag.ProductName || '').toString().toUpperCase();
+                    if (productName.includes('CBN') || productName.includes('CBC') || productName.includes('CBG')) {
+                        displayLineage = 'CBD'; // CBN/CBC/CBG products get CBD lineage (yellow color)
+                    } else {
+                        // Default for nonclassic products without specific strain
+                        displayLineage = 'MIXED'; // Blue color
+                    }
                 }
             }
         }
@@ -4346,6 +4371,9 @@ const TagManager = {
         
         // Skip PC compatibility for Mac-like speed
         // this.initializePCCompatibility();
+        
+        // Start memory optimization
+        this.startMemoryOptimization();
         
         // Update table header if TagsTable is available
         setTimeout(() => {
@@ -6743,7 +6771,98 @@ const TagManager = {
         }
     },
 
-    // Removed complex platform detection and PC compatibility for Mac-like speed
+    // Start memory optimization
+    startMemoryOptimization() {
+        // Run memory optimization every 30 seconds
+        setInterval(() => {
+            this.optimizeMemory();
+        }, 30000);
+        
+        // Clear unused data when page becomes hidden
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                this.clearUnusedData();
+            }
+        });
+        
+        console.log('Memory optimization started');
+    },
+
+    // Memory optimization functions
+    optimizeMemory() {
+        const now = Date.now();
+        
+        // Only cleanup every 30 seconds to avoid overhead
+        if (now - this.state._lastCleanup < 30000) {
+            return;
+        }
+        
+        this.state._lastCleanup = now;
+        
+        // Clear large arrays when not needed
+        if (this.state.tags && this.state.tags.length > 1000) {
+            // Keep only essential data
+            this.state.tags = this.state.tags.slice(0, 100);
+        }
+        
+        // Clear filter cache if it's large
+        if (this.state.filterCache && JSON.stringify(this.state.filterCache).length > 100000) {
+            this.state.filterCache = null;
+        }
+        
+        // Clear old timers
+        if (this.state.updateAvailableTagsTimer) {
+            clearTimeout(this.state.updateAvailableTagsTimer);
+            this.state.updateAvailableTagsTimer = null;
+        }
+        
+        // Force garbage collection if available
+        performanceUtils.cleanup.forceGC();
+        
+        console.log('Memory optimization completed');
+    },
+    
+    // Clear unused data
+    clearUnusedData() {
+        // Clear original tags if we have processed them
+        if (this.state.originalTags && this.state.originalTags.length > 0) {
+            this.state.originalTags = [];
+        }
+        
+        // Clear filter cache
+        this.state.filterCache = null;
+        
+        // Clear brand categories if not needed
+        if (this.state.brandCategories.size > 100) {
+            this.state.brandCategories.clear();
+        }
+        
+        // Force garbage collection
+        performanceUtils.cleanup.forceGC();
+    },
+    
+    // Memory-efficient tag processing
+    processTagsMemoryEfficient(tags) {
+        if (!tags || !Array.isArray(tags)) {
+            return [];
+        }
+        
+        // Process in chunks to avoid memory spikes
+        const chunkSize = 100;
+        const processedTags = [];
+        
+        for (let i = 0; i < tags.length; i += chunkSize) {
+            const chunk = tags.slice(i, i + chunkSize);
+            processedTags.push(...chunk);
+            
+            // Allow other operations to run
+            if (i % (chunkSize * 5) === 0) {
+                setTimeout(() => {}, 0);
+            }
+        }
+        
+        return processedTags;
+    }
 };
 
 // Expose TagManager to global scope

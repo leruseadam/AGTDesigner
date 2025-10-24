@@ -103,10 +103,11 @@ class TemplateProcessor:
             if not IS_PYTHONANYWHERE:
                 self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for inventory template")
         else:
-            # For standard templates (horizontal, vertical), use 3x3 grid = 9 labels per page
-            self.chunk_size = min(9, CHUNK_SIZE_LIMIT)  # Fixed: 3x3 grid = 9 labels per page
+            # For standard templates (horizontal, vertical), use larger chunks for better performance
+            # Allow up to 50 products per chunk for horizontal/vertical templates
+            self.chunk_size = min(50, CHUNK_SIZE_LIMIT)  # Increased chunk size for better performance
             if not IS_PYTHONANYWHERE:
-                self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for template type '{self.template_type}' (standard 3x3)")
+                self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for template type '{self.template_type}' (expanded)")
         
         self.logger.info(f"Template type: {self.template_type}, Chunk size: {self.chunk_size}")
         
@@ -706,7 +707,7 @@ class TemplateProcessor:
         return buf
 
     def _expand_template_to_3x3_fixed(self, num_products=None):
-        """Expand template to 3x3 grid for standard templates."""
+        """Expand template to accommodate the number of products needed."""
         from docx import Document
         from docx.shared import Pt
         from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT
@@ -714,8 +715,18 @@ class TemplateProcessor:
         from docx.oxml.ns import qn
         from io import BytesIO
         from copy import deepcopy
+        import math
 
-        num_cols, num_rows = 3, 3
+        # CRITICAL FIX: Calculate grid size based on number of products
+        if num_products and num_products > 9:
+            # For more than 9 products, expand the grid to accommodate them
+            # Use 3 columns but calculate rows needed
+            num_cols = 3
+            num_rows = math.ceil(num_products / num_cols)
+            self.logger.info(f"🔧 EXPANDING GRID: {num_products} products -> {num_rows}x{num_cols} grid")
+        else:
+            # Default 3x3 grid for 9 or fewer products
+            num_cols, num_rows = 3, 3
         
         # Set dimensions based on template type - use constants for consistency
         from src.core.constants import CELL_DIMENSIONS
@@ -782,28 +793,31 @@ class TemplateProcessor:
         for r in range(num_rows):
             for c in range(num_cols):
                 if cnt > max_cells:
-                    # Clear extra cells completely and set white background
-                    cell = tbl.cell(r,c)
-                    cell._tc.clear_content()
-                    
-                    # Set white background for extra cells
-                    tc = cell._tc
-                    tcPr = tc.find(qn('w:tcPr'))
-                    if tcPr is None:
-                        tcPr = OxmlElement('w:tcPr')
-                        tc.insert(0, tcPr)
-                    
-                    # Remove any existing background color
-                    shd = tcPr.find(qn('w:shd'))
-                    if shd is not None:
-                        tcPr.remove(shd)
-                    
-                    # Add white background
-                    shd = OxmlElement('w:shd')
-                    shd.set(qn('w:val'), 'clear')
-                    shd.set(qn('w:color'), 'auto')
-                    shd.set(qn('w:fill'), 'FFFFFF')  # White background
-                    tcPr.append(shd)
+                    # CRITICAL FIX: Don't clear cells if we're expanding the grid
+                    # Only clear cells if we have fewer products than the grid size
+                    if num_products and num_products < (num_rows * num_cols):
+                        # Clear extra cells completely and set white background
+                        cell = tbl.cell(r,c)
+                        cell._tc.clear_content()
+                        
+                        # Set white background for extra cells
+                        tc = cell._tc
+                        tcPr = tc.find(qn('w:tcPr'))
+                        if tcPr is None:
+                            tcPr = OxmlElement('w:tcPr')
+                            tc.insert(0, tcPr)
+                        
+                        # Remove any existing background color
+                        shd = tcPr.find(qn('w:shd'))
+                        if shd is not None:
+                            tcPr.remove(shd)
+                        
+                        # Add white background
+                        shd = OxmlElement('w:shd')
+                        shd.set(qn('w:val'), 'clear')
+                        shd.set(qn('w:color'), 'auto')
+                        shd.set(qn('w:fill'), 'FFFFFF')  # White background
+                        tcPr.append(shd)
                     
                     cell.add_paragraph()  # Add empty paragraph to maintain structure
                     continue

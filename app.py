@@ -29,13 +29,62 @@ import json
 PYTHONANYWHERE_OPTIMIZATION = os.environ.get('PYTHONANYWHERE_DOMAIN') is not None
 if PYTHONANYWHERE_OPTIMIZATION:
     # Reduce memory usage on PythonAnywhere
-    MAX_CONTENT_LENGTH = 10 * 1024 * 1024  # 10MB instead of 100MB
-    SEND_FILE_MAX_AGE_DEFAULT = 300  # 5 minutes instead of 1 year
-    PERMANENT_SESSION_LIFETIME = 1800  # 30 minutes instead of 1 hour
+    MAX_CONTENT_LENGTH = 5 * 1024 * 1024  # 5MB instead of 10MB for memory efficiency
+    SEND_FILE_MAX_AGE_DEFAULT = 180  # 3 minutes instead of 5 minutes
+    PERMANENT_SESSION_LIFETIME = 900  # 15 minutes instead of 30 minutes
+    
+    # Memory optimization settings
+    MAX_MEMORY_MB = 150  # Maximum memory usage
+    CACHE_SIZE_LIMIT = 50  # Reduced cache size
+    BATCH_SIZE_LIMIT = 250  # Smaller batch sizes
+else:
+    # Local development settings
+    MAX_CONTENT_LENGTH = 25 * 1024 * 1024  # 25MB for local development
+    SEND_FILE_MAX_AGE_DEFAULT = 300
+    PERMANENT_SESSION_LIFETIME = 1800
+    
+    # More generous memory settings for local
+    MAX_MEMORY_MB = 500
+    CACHE_SIZE_LIMIT = 100
+    BATCH_SIZE_LIMIT = 500
 
-# Add timeout protection for file operations
-import signal
-import threading
+# Memory monitoring and optimization
+def get_memory_usage():
+    """Get current memory usage in MB."""
+    try:
+        import psutil
+        process = psutil.Process()
+        return process.memory_info().rss / (1024 * 1024)
+    except ImportError:
+        try:
+            import resource
+            return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+        except:
+            return 0
+
+def cleanup_memory():
+    """Cleanup memory by clearing caches and forcing garbage collection."""
+    try:
+        import gc
+        gc.collect()
+        
+        # Clear Flask cache if available
+        if hasattr(app, 'cache') and app.cache:
+            app.cache.clear()
+            
+        return True
+    except Exception as e:
+        logging.error(f"Memory cleanup failed: {e}")
+        return False
+
+def check_memory_limit():
+    """Check if memory usage is within limits."""
+    memory_mb = get_memory_usage()
+    if memory_mb > MAX_MEMORY_MB:
+        logging.warning(f"Memory usage high: {memory_mb:.1f}MB (limit: {MAX_MEMORY_MB}MB)")
+        cleanup_memory()
+        return False
+    return True
 
 def timeout_handler(signum, frame):
     raise TimeoutError("File operation timed out")
@@ -642,20 +691,37 @@ def get_excel_processor():
 def get_product_database(store_name=None):
     """Lazy load ProductDatabase to avoid startup delay."""
     global _product_database
+    
+    # If no store_name provided, get the current store selection
+    if store_name is None:
+        try:
+            ip_address = get_client_ip()
+            with _ip_store_lock:
+                if ip_address in _ip_store_selections:
+                    store_data = _ip_store_selections[ip_address]
+                    # Check if the selection is still valid (not expired)
+                    if datetime.now() - datetime.fromisoformat(store_data['timestamp']) < timedelta(hours=12):
+                        store_name = store_data['store']
+                    else:
+                        # Remove expired selection
+                        del _ip_store_selections[ip_address]
+                        store_name = 'AGT_Bothell'  # Default fallback
+                else:
+                    store_name = 'AGT_Bothell'  # Default fallback
+        except Exception as e:
+            logging.warning(f"Error getting current store selection: {e}")
+            store_name = 'AGT_Bothell'  # Default fallback
+    
     if _product_database is None or (store_name and getattr(_product_database, '_store_name', None) != store_name):
         from src.core.data.product_database import ProductDatabase
-        # Use main product_database.db by default, store-specific only if requested
-        if store_name:
-            db_filename = f'product_database_{store_name}.db'
-            db_path = os.path.join(current_dir, 'uploads', db_filename)
-            _product_database = ProductDatabase(db_path)
-            _product_database._store_name = store_name
-            logging.info(f"ProductDatabase created for store '{store_name}' at: {db_path}")
-        else:
-            # Use main product_database.db (524MB database)
-            db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
-            _product_database = ProductDatabase(db_path)
-            logging.info(f"ProductDatabase created (main database) at: {db_path}")
+        # Use store-specific database for better matching
+        db_filename = f'product_database_{store_name}.db'
+        db_path = os.path.join(current_dir, 'uploads', db_filename)
+        _product_database = ProductDatabase(db_path)
+        _product_database._store_name = store_name
+        # Force database initialization to ensure it's loaded
+        _product_database.init_database()
+        logging.info(f"ProductDatabase created and initialized for store '{store_name}' at: {db_path}")
     return _product_database
 
 def get_json_matcher():
@@ -3928,7 +3994,7 @@ def set_store():
         ip_address = get_client_ip()
         
         # Validate store selection
-        valid_stores = ['AGT_Bothell', 'AGT_Burien', 'AGT_Goldbar', 'AGT_Lynnwood']
+        valid_stores = ['AGT_Bothell', 'AGT_Burien', 'AGT_Goldbar', 'AGT_Lynnwood', 'AGT_Seattle', 'AGT_Shoreline', 'AGT_Walla_Walla']
         if store_value not in valid_stores:
             return jsonify({'success': False, 'error': 'Invalid store selection'}), 400
         
@@ -3942,6 +4008,11 @@ def set_store():
         
         # Cleanup expired selections periodically
         cleanup_expired_store_selections()
+        
+        # Clear the global product database instance to force reload with new store
+        global _product_database
+        _product_database = None
+        logging.info(f"Cleared global product database instance for store change to: {store_value}")
         
         logging.info(f"Store selection set for IP {ip_address}: {store_value}")
         
@@ -3957,9 +4028,26 @@ def set_store():
 
 @app.route('/api/get-store', methods=['GET'])
 def get_store():
-    """Always return AGT_Bothell as the default store."""
+    """Get the current store selection for the IP address."""
     try:
-        # Always return AGT_Bothell as the default store
+        ip_address = get_client_ip()
+        
+        # Check if there's a stored selection for this IP
+        with _ip_store_lock:
+            if ip_address in _ip_store_selections:
+                store_data = _ip_store_selections[ip_address]
+                # Check if the selection is still valid (not expired)
+                if datetime.now() - datetime.fromisoformat(store_data['timestamp']) < timedelta(hours=12):
+                    return jsonify({
+                        'success': True,
+                        'store': store_data['store'],
+                        'expires_at': (datetime.fromisoformat(store_data['timestamp']) + timedelta(hours=12)).isoformat()
+                    })
+                else:
+                    # Remove expired selection
+                    del _ip_store_selections[ip_address]
+        
+        # No valid selection found, return default
         return jsonify({
             'success': True,
             'store': 'AGT_Bothell',
@@ -4602,6 +4690,16 @@ def generate_labels():
         if selected_tags_from_request:
             logging.info(f"   - Sample tags: {selected_tags_from_request[:3]}")
         logging.debug(f"Selected tags from request: {selected_tags_from_request}")
+        
+        # CRITICAL DEBUG: Check if we have JSON matched products in the Excel DataFrame
+        if excel_processor.df is not None and 'Source' in excel_processor.df.columns:
+            json_count = len(excel_processor.df[excel_processor.df['Source'] == 'JSON Match'])
+            logging.info(f"🔍 DEBUG: Found {json_count} JSON matched products in Excel DataFrame")
+            if json_count > 0:
+                json_products = excel_processor.df[excel_processor.df['Source'] == 'JSON Match']
+                logging.info(f"🔍 DEBUG: JSON product names: {json_products['Product Name*'].tolist()[:10]}")
+        else:
+            logging.info(f"🔍 DEBUG: No JSON matched products found in Excel DataFrame")
 
         # Enable product DB integration for proper tag matching
         excel_processor = get_excel_processor()
@@ -4947,109 +5045,11 @@ def generate_labels():
         
         # PRIORITY: Use database data when available, fall back to Excel data
         records = []
-        
-        # CRITICAL FIX: Check if this is a JSON matched session first
-        json_matched_cache_key = session.get('json_matched_cache_key')
-        is_json_matched_session = json_matched_cache_key is not None
-        
-        if is_json_matched_session:
-            logging.info("CRITICAL FIX: JSON matched session detected - processing JSON matched products directly")
-            # For JSON matched sessions, use the JSON matched data directly
-            json_matched_tags = session.get('json_matched_tags', [])
-            if json_matched_tags:
-                logging.info(f"Processing {len(json_matched_tags)} JSON matched products directly")
-                records = []
-                
-                # Try to get database for weight lookup
-                product_db = None
-                try:
-                    from src.core.data.product_database import get_product_database
-                    product_db = get_product_database()
-                except:
-                    logging.warning("Could not get product database for weight lookup")
-                
-                for tag in json_matched_tags:
-                    if isinstance(tag, dict):
-                        logging.info(f"CRITICAL DEBUG: Processing JSON matched tag: {tag}")
-                        # Try to get weight data from database if available
-                        product_name = tag.get('Product Name*', '') or tag.get('ProductName', '')
-                        db_weight_data = None
-                        
-                        if product_db and product_name:
-                            try:
-                                db_products = product_db.get_products_by_names([product_name])
-                                if db_products and len(db_products) > 0:
-                                    db_weight_data = db_products[0]
-                                    logging.info(f"Found database weight data for '{product_name}': Weight*='{db_weight_data.get('Weight*', '')}', Units='{db_weight_data.get('Units', '')}'")
-                            except Exception as e:
-                                logging.warning(f"Error looking up database weight for '{product_name}': {e}")
-                        
-                        # CRITICAL FIX: Use database match weight data from JSON matched tags
-                        # The JSON matched tags should already contain database weight data from the matching process
-                        
-                        # Convert JSON matched tag to record format
-                        record = {
-                            'Product Name*': tag.get('Product Name*', ''),
-                            'ProductName': tag.get('ProductName', ''),
-                            'Product Brand': tag.get('Product Brand', 'CERES'),
-                            'ProductBrand': tag.get('Product Brand', 'CERES'),
-                            'Product Type*': tag.get('Product Type*', 'Edible (Solid)'),
-                            'ProductType': tag.get('Product Type*', 'Edible (Solid)'),
-                            'Vendor/Supplier*': tag.get('Vendor/Supplier*', 'A Greener Today'),
-                            'Vendor': tag.get('Vendor/Supplier*', 'A Greener Today'),
-                            'Description': tag.get('Description', tag.get('Product Name*', '')),
-                            'Lineage': tag.get('Lineage', 'MIXED'),
-                            'THC test result': tag.get('THC test result', '0.00'),
-                            'CBD test result': tag.get('CBD test result', '0.00'),
-                            'Test result unit (% or mg)': tag.get('Test result unit (% or mg)', '%'),
-                            'Weight*': tag.get('Weight*', ''),
-                            'Units': tag.get('Units', ''),
-                            'CombinedWeight': tag.get('CombinedWeight', ''),
-                            'WeightUnits': tag.get('WeightUnits', ''),
-                            'Price': tag.get('Price', ''),
-                            'Price* (Tier Name for Bulk)': tag.get('Price', ''),
-                            'Quantity*': tag.get('Quantity*', '1'),
-                            'Product Strain': tag.get('Product Strain', 'Mixed'),
-                            'DOH': tag.get('DOH', ''),
-                            'DOH Compliant (Yes/No)': tag.get('DOH Compliant (Yes/No)', ''),
-                            'displayName': tag.get('displayName', tag.get('Product Name*', '')),
-                            'Source': tag.get('Source', 'JSON Match - Database Priority (100% DB)')
-                        }
-                        
-                        # CRITICAL DEBUG: Log all weight-related fields
-                        logging.info(f"CRITICAL DEBUG: Weight fields for '{record.get('Product Name*', '')}':")
-                        logging.info(f"  Weight*: '{record.get('Weight*', '')}'")
-                        logging.info(f"  Units: '{record.get('Units', '')}'")
-                        logging.info(f"  CombinedWeight: '{record.get('CombinedWeight', '')}'")
-                        logging.info(f"  WeightUnits: '{record.get('WeightUnits', '')}'")
-                        logging.info(f"  All record keys: {list(record.keys())}")
-                        
-                        records.append(record)
-                logging.info(f"CRITICAL FIX: Generated {len(records)} records from JSON matched data")
-                
-                # CRITICAL FIX: Override lineage from Excel processor if it has been updated
-                if has_excel_data and excel_processor.df is not None and 'Lineage' in excel_processor.df.columns:
-                    logging.info("LINEAGE OVERRIDE: Checking for updated lineage in Excel processor for JSON matched products...")
-                    for record in records:
-                        product_name = record.get('Product Name*', '')
-                        if product_name:
-                            # Try different column names for product names
-                            product_name_columns = ['ProductName', 'Product Name*', 'Product Name']
-                            for col in product_name_columns:
-                                if col in excel_processor.df.columns:
-                                    mask = excel_processor.df[col] == product_name
-                                    if mask.any():
-                                        excel_lineage = excel_processor.df.loc[mask, 'Lineage'].iloc[0]
-                                        if excel_lineage and str(excel_lineage).strip():
-                                            original_lineage = record.get('Lineage', '')
-                                            if str(excel_lineage).strip() != str(original_lineage).strip():
-                                                logging.info(f"LINEAGE OVERRIDE (JSON): '{product_name}' - Original: '{original_lineage}' -> Excel: '{excel_lineage}'")
-                                                record['Lineage'] = str(excel_lineage).strip()
-                                        break
-            else:
-                logging.warning("CRITICAL FIX: JSON matched session but no json_matched_tags found")
-                records = []
-        elif has_database:
+
+        # JSON matched products are now in the Excel DataFrame, so no special handling needed
+        # All products (including JSON matched) are processed through the normal database/Excel flow
+
+        if has_database:
             logging.info("Using database for record generation (preferred source)")
             try:
                 from src.core.data.product_database import get_product_database
@@ -5215,6 +5215,43 @@ def generate_labels():
             records = excel_processor.get_selected_records(template_type)
             logging.debug(f"LINEAGE DEBUG: Records returned from get_selected_records: {len(records) if records else 0}")
             
+            # CRITICAL FIX: If we have JSON matched products but no records, try to include them directly
+            if not records and excel_processor.df is not None and 'Source' in excel_processor.df.columns:
+                json_matched_products = excel_processor.df[excel_processor.df['Source'] == 'JSON Match']
+                if not json_matched_products.empty:
+                    logging.info(f"CRITICAL FIX: No records found but {len(json_matched_products)} JSON matched products exist, creating records directly")
+                    records = []
+                    for _, json_product in json_matched_products.iterrows():
+                        product_name = json_product.get('Product Name*', json_product.get('ProductName', ''))
+                        if product_name and product_name.strip():
+                            # Create a record from the JSON matched product
+                            record = {
+                                'ProductName': product_name,
+                                'Product Name*': product_name,
+                                'Description': json_product.get('Description', product_name),
+                                'DescAndWeight': json_product.get('DescAndWeight', product_name),
+                                'Product Type*': json_product.get('Product Type*', 'flower'),
+                                'Product Brand': json_product.get('Product Brand', ''),
+                                'Product Strain': json_product.get('Product Strain', ''),
+                                'Lineage': json_product.get('Lineage', 'HYBRID'),
+                                'Vendor': json_product.get('Vendor/Supplier*', json_product.get('Vendor', '')),
+                                'Price': json_product.get('Price', '25'),
+                                'DOH': json_product.get('DOH', ''),
+                                'Ratio': json_product.get('Ratio', ''),
+                                'Weight*': json_product.get('Weight*', ''),
+                                'Units': json_product.get('Units', 'g'),
+                                'Quantity*': json_product.get('Quantity*', '1'),
+                                'THC test result': json_product.get('THC test result', ''),
+                                'CBD test result': json_product.get('CBD test result', ''),
+                                'Test result unit (% or mg)': json_product.get('Test result unit (% or mg)', '%'),
+                                'Source': 'JSON Match'
+                            }
+                            records.append(record)
+                            logging.info(f"CRITICAL FIX: Created record for JSON matched product '{product_name}'")
+                    
+                    if records:
+                        logging.info(f"CRITICAL FIX: Created {len(records)} records from JSON matched products")
+            
             # CRITICAL FIX: Log lineage values for debugging
             if records:
                 for i, record in enumerate(records[:3]):  # Log first 3 records
@@ -5223,6 +5260,11 @@ def generate_labels():
                     logging.info(f"LINEAGE DEBUG: Record {i+1} - Product: '{product_name}', Lineage: '{lineage}'")
             logging.debug(f"Records returned from get_selected_records: {len(records) if records else 0}")
 
+        # CRITICAL DEBUG: Log final record count
+        logging.info(f"🔍 DEBUG: Final records count: {len(records) if records else 0}")
+        if records:
+            logging.info(f"🔍 DEBUG: Sample record names: {[r.get('ProductName', r.get('Product Name*', 'NO_NAME')) for r in records[:5]]}")
+        
         if not records:
             logging.error("No selected tags found in the data or failed to process records.")
             return jsonify({'error': 'No selected tags found in the data or failed to process records. Please ensure you have selected tags and they exist in the loaded data.'}), 400
@@ -5790,6 +5832,10 @@ def process_database_product_for_api(db_product):
 @app.route('/api/available-tags', methods=['GET'])
 def get_available_tags():
     try:
+        # Check memory before processing
+        if not check_memory_limit():
+            return jsonify({'error': 'Memory usage too high, please try again later'}), 503
+        
         # Rate limiting: prevent rapid successive requests
         client_ip = request.remote_addr
         current_time = time.time()
@@ -9857,54 +9903,81 @@ def json_match():
         logging.info("JSON matcher created successfully")
         
         # Perform JSON matching with Product Database integration
-        # CRITICAL FIX: Use fetch_and_match_with_product_db to get actual database descriptions
-        matched_products = json_matcher.fetch_and_match_with_product_db(url)
-        logging.info(f"JSON matching (with Product DB) returned {len(matched_products) if matched_products else 0} products")
+        # CRITICAL FIX: Use simplified matching approach to ensure all products are processed with complete data
+        matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=True)
+        logging.info(f"JSON matching (simplified approach) returned {len(matched_products) if matched_products else 0} products")
 
-        # Persist JSON-matched results for downstream flows (cache + session)
+        # CRITICAL DEBUG: Log what we actually got back
+        if matched_products:
+            logging.info(f"🔍 First matched product keys: {list(matched_products[0].keys()) if matched_products[0] else 'EMPTY'}")
+            logging.info(f"🔍 First matched product Product Name*: '{matched_products[0].get('Product Name*', 'NOT FOUND')}'")
+            logging.info(f"🔍 First matched product Description: '{matched_products[0].get('Description', 'NOT FOUND')}'")
+            logging.info(f"🔍 First matched product displayName: '{matched_products[0].get('displayName', 'NOT FOUND')}'")
+        else:
+            logging.warning("🔍 matched_products is empty or None!")
+
+        # CRITICAL FIX: Add JSON matched products directly to Excel DataFrame
+        # This makes them work exactly like regular tags - no special handling needed
         try:
             total_matches = len(matched_products) if matched_products else 0
-            # Extract product names for session-selected tags
-            # CRITICAL FIX: Use Description field for human-readable names, fallback to Product Name* if Description is empty
-            matched_names = []
-            for p in matched_products:
-                if isinstance(p, dict):
-                    # Priority: Description > Product Name* > ProductName
-                    name = (p.get('Description', '') or 
-                           p.get('Product Name*', '') or 
-                           p.get('ProductName', ''))
-                    
-                    if name:  # Only add non-empty names
-                        matched_names.append(name)
-            
-            # DEBUG: Log what fields contain and what name is actually used
-            if matched_products and len(matched_products) > 0:
-                first_product = matched_products[0] if isinstance(matched_products[0], dict) else {}
-                logging.info(f"📝 DEBUG: First matched product 'Product Name*' = '{first_product.get('Product Name*', 'NOT SET')}'")
-                logging.info(f"📝 DEBUG: First matched product 'Description' = '{first_product.get('Description', 'NOT SET')}'")
-                logging.info(f"📝 DEBUG: First matched_name = '{matched_names[0] if matched_names else 'NONE'}'")
-                logging.info(f"📝 DEBUG: Total matched_names count = {len(matched_names)}")
 
-            # Store available_tags cache with these matched products
-            available_cache_key = get_session_cache_key('available_tags')
-            cache.set(available_cache_key, matched_products or [], timeout=3600)
-            logging.info(f"Stored {total_matches} JSON matched products in available_tags cache: {available_cache_key}")
+            if matched_products and excel_processor:
+                logging.info(f"Adding {total_matches} JSON matched products directly to Excel DataFrame")
 
-            # Store a dedicated json_matched cache and key in session
-            json_matched_cache_key = get_session_cache_key('json_matched_tags')
-            cache.set(json_matched_cache_key, matched_products or [], timeout=3600)
-            session['json_matched_cache_key'] = json_matched_cache_key
-            logging.info(f"Stored {total_matches} JSON matched products in json_matched cache: {json_matched_cache_key}")
+                # Convert matched products to DataFrame format
+                import pandas as pd
 
-            # Persist selected tags in session for generate flow
-            session['selected_tags'] = matched_names
-            session['json_selected_tags'] = matched_names
-            session['last_json_match_count'] = total_matches
-            session['json_match_timestamp'] = time.time()
-            session.modified = True
-            logging.info(f"Session updated: selected_tags={len(matched_names)}, last_json_match_count={total_matches}")
+                # Remove 'Source' field from matched products so they're not treated specially
+                for product in matched_products:
+                    if isinstance(product, dict):
+                        # Remove the Source marker - we want these treated like regular products
+                        product.pop('Source', None)
+                        product.pop('JSON_Source', None)
+
+                # Create DataFrame from matched products
+                json_df = pd.DataFrame(matched_products)
+                logging.info(f"Created DataFrame from {len(json_df)} JSON matched products")
+                logging.info(f"DataFrame columns: {list(json_df.columns)}")
+                logging.info(f"Sample product names: {json_df['Product Name*'].head(3).tolist() if 'Product Name*' in json_df.columns else 'NO PRODUCT NAME COLUMN'}")
+
+                # If Excel processor has no data, use JSON products as the data
+                if excel_processor.df is None or excel_processor.df.empty:
+                    logging.info("Excel processor is empty, using JSON matched products as the dataset")
+                    excel_processor.df = json_df
+                else:
+                    # Append JSON matched products to existing Excel data
+                    logging.info(f"Appending {len(json_df)} JSON matched products to existing Excel data ({len(excel_processor.df)} rows)")
+                    excel_processor.df = pd.concat([excel_processor.df, json_df], ignore_index=True)
+
+                logging.info(f"✅ Successfully added JSON matched products to Excel DataFrame. Total rows: {len(excel_processor.df)}")
+                logging.info(f"DataFrame shape: {excel_processor.df.shape}")
+
+                # Extract product names for selection
+                matched_names = []
+                for p in matched_products:
+                    if isinstance(p, dict):
+                        # Priority: Description > Product Name* > ProductName
+                        name = (p.get('Description', '') or
+                               p.get('Product Name*', '') or
+                               p.get('ProductName', ''))
+
+                        if name:  # Only add non-empty names
+                            matched_names.append(name)
+
+                logging.info(f"Extracted {len(matched_names)} product names from matched products")
+                logging.info(f"Sample matched names: {matched_names[:3]}")
+
+                # Set selected tags - these will be processed like regular Excel tags
+                excel_processor.selected_tags = matched_names
+                session['selected_tags'] = matched_names
+                session.modified = True
+
+                logging.info(f"✅ Set {len(matched_names)} products as selected tags for generation")
+
         except Exception as persist_error:
-            logging.error(f"Error persisting JSON match results: {persist_error}")
+            logging.error(f"Error adding JSON matched products to Excel DataFrame: {persist_error}")
+            import traceback
+            logging.error(f"Full traceback: {traceback.format_exc()}")
         
         # DEBUG: Log the actual JSON data to understand why only 6 products
         try:
@@ -9955,7 +10028,7 @@ def json_match():
         else:
             logging.info("DEBUG: No Excel data available for matching")
         
-        # Handle empty results gracefully - this is normal for strict vendor isolation
+        # Handle empty results gracefully
         if not matched_products:
             logging.info("No products matched - likely due to strict vendor isolation or no matching products in database")
             return jsonify({
@@ -9964,27 +10037,46 @@ def json_match():
                 'matched_names': [],
                 'available_tags': [],
                 'selected_tags': [],
-                'json_matched_tags': [],
                 'message': 'No products matched. This may be due to strict vendor isolation - only products from the same vendor are matched.'
             }), 200
-        
-        # Create response data
+
+        # CRITICAL FIX: Return matched products directly as available tags
+        # Don't rely on Excel processor since products were just added
+        logging.info(f"🔍 Preparing to return {len(matched_products)} matched products as available tags")
+
+        # Ensure each matched product has the display fields needed by frontend
+        for i, product in enumerate(matched_products):
+            if 'displayName' not in product:
+                display_name = (product.get('Description', '') or
+                               product.get('Product Name*', '') or
+                               product.get('ProductName', ''))
+                product['displayName'] = display_name
+                if i < 3:  # Log first 3
+                    logging.info(f"🔍 Set displayName for product {i}: '{display_name}'")
+
+        if matched_products:
+            logging.info(f"🔍 Sample matched product (first one):")
+            logging.info(f"🔍   - Product Name*: {matched_products[0].get('Product Name*', 'MISSING')}")
+            logging.info(f"🔍   - Description: {matched_products[0].get('Description', 'MISSING')}")
+            logging.info(f"🔍   - displayName: {matched_products[0].get('displayName', 'MISSING')}")
+            logging.info(f"🔍   - All keys: {list(matched_products[0].keys())}")
+
+        # Create response data - Return matched products directly
         response_data = {
             'success': True,
             'matched_count': len(matched_products),
-            'matched_names': matched_names,  # Use the same matched_names logic as session persistence
-            'available_tags': matched_products,
-            'selected_tags': matched_products,
-            'json_matched_tags': matched_products,
-            'cache_status': f'JSON Match Complete - {len(matched_products)} products processed',
-            'filter_mode': 'json_matched',
-            'has_full_excel': True,
-            'message': f"JSON matched {len(matched_products)} products successfully.",
+            'matched_names': matched_names,
+            'available_tags': matched_products,  # Return matched products directly
+            'selected_tags': matched_names,  # Return names of selected products
+            'message': f"Successfully matched {len(matched_products)} products. They are ready for label generation.",
             'auto_selected': True,
-            'selected_count': len(matched_products)
+            'selected_count': len(matched_names)
         }
-        
-        logging.info(f"Sending JSON match response with {len(matched_products)} products")
+
+        logging.info(f"✅ Sending JSON match response:")
+        logging.info(f"   - matched_count: {len(matched_products)}")
+        logging.info(f"   - available_tags count: {len(matched_products)}")
+        logging.info(f"   - selected_tags count: {len(matched_names)}")
         return jsonify(response_data)
         
     except Exception as e:
@@ -10009,7 +10101,7 @@ def json_process():
             
         # Process JSON data directly
         json_matcher = get_json_matcher()
-        matched_products = json_matcher.fetch_and_match_with_product_db(url)
+        matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=True)
         
         if matched_products:
             logging.info(f'✅ Successfully matched {len(matched_products)} products from JSON')
