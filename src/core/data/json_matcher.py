@@ -3418,7 +3418,7 @@ class JSONMatcher:
                 return normalized
             
             unique_items = []
-            seen_normalized = set()
+            seen_item_ids = set()
             duplicate_count = 0
             
             for item in items:
@@ -3451,16 +3451,21 @@ class JSONMatcher:
                     
                     logging.info(f"⚠️  Created fallback product name: '{product_name}' for JSON item with missing name")
                 
-                # Check for duplicates using normalized name
-                normalized_name = normalize_product_name(product_name)
+                # CRITICAL FIX: Use unique item identifiers instead of normalized names for deduplication
+                # This preserves products with different SKUs/IDs even if they have similar names
+                item_id = item.get("inventory_id") or item.get("integrator_data") or item.get("sample_source_id")
+                if not item_id:
+                    # Fallback to using the original product name as ID if no unique ID exists
+                    item_id = product_name
                 
-                if normalized_name and normalized_name in seen_normalized:
+                if item_id and item_id in seen_item_ids:
                     duplicate_count += 1
-                    logging.info(f"🔄 Skipping duplicate product: '{product_name}' (normalized: '{normalized_name}')")
+                    logging.info(f"🔄 Skipping duplicate JSON item: '{product_name}' (ID: '{item_id}')")
                     continue
                 
                 # Add to seen set and unique items
-                seen_normalized.add(normalized_name)
+                if item_id:
+                    seen_item_ids.add(item_id)
                 unique_items.append(item)
             
             logging.info(f"INTELLIGENT DEDUPLICATION: {len(items)} items -> {len(unique_items)} unique products ({duplicate_count} duplicates removed)")

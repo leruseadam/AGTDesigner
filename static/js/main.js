@@ -2457,50 +2457,57 @@ const TagManager = {
         let displayLineage = lineage;
         
         // Apply nonclassic product type logic to ensure correct lineage colors
-        const productType = tag['Product Type*'] || tag.productType || tag.ProductType || '';
-        const classicTypes = ['flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'];
-        const isNonclassic = !classicTypes.map(ct => ct.toLowerCase()).includes(productType.toLowerCase());
-        
-        if (isNonclassic) {
-            // For nonclassic products, use Product Strain to determine lineage
-            // UPDATED: Use the same conservative logic as backend
-            const productStrain = tag['Product Strain'] || tag.productStrain || tag.ProductStrain || '';
-            const strainStr = String(productStrain).toLowerCase();
+        // CRITICAL FIX: For JSON matched tags, trust the backend's lineage assignment
+        if (!isJsonMatched) {
+            const productType = tag['Product Type*'] || tag.productType || tag.ProductType || '';
+            const classicTypes = ['flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'];
+            const isNonclassic = !classicTypes.map(ct => ct.toLowerCase()).includes(productType.toLowerCase());
             
-            // Define edible types for more conservative CBD assignment
-            const edibleTypes = ['edible (solid)', 'edible (liquid)', 'high cbd edible liquid', 'tincture', 'topical', 'capsule'];
-            const isEdible = edibleTypes.includes(productType.toLowerCase());
-            
-            if (strainStr.includes('cbd blend')) {
-                // For edibles, only assign CBD lineage if explicitly high-CBD
-                if (isEdible) {
-                    const productName = (tag['Product Name*'] || tag.ProductName || '').toString().toUpperCase();
-                    if (productType.toLowerCase() === 'high cbd edible liquid' || 
-                        (productName.includes('CBD') && ['HIGH', 'PURE', 'ISOLATE'].some(word => productName.includes(word)))) {
-                        displayLineage = 'CBD'; // Explicitly high-CBD edible
+            if (isNonclassic) {
+                // For nonclassic products, use Product Strain to determine lineage
+                // UPDATED: Use the same conservative logic as backend
+                const productStrain = tag['Product Strain'] || tag.productStrain || tag.ProductStrain || '';
+                const strainStr = String(productStrain).toLowerCase();
+                
+                // Define edible types for more conservative CBD assignment
+                const edibleTypes = ['edible (solid)', 'edible (liquid)', 'high cbd edible liquid', 'tincture', 'topical', 'capsule'];
+                const isEdible = edibleTypes.includes(productType.toLowerCase());
+                
+                if (strainStr.includes('cbd blend')) {
+                    // For edibles, only assign CBD lineage if explicitly high-CBD
+                    if (isEdible) {
+                        const productName = (tag['Product Name*'] || tag.ProductName || '').toString().toUpperCase();
+                        if (productType.toLowerCase() === 'high cbd edible liquid' || 
+                            (productName.includes('CBD') && ['HIGH', 'PURE', 'ISOLATE'].some(word => productName.includes(word)))) {
+                            displayLineage = 'CBD'; // Explicitly high-CBD edible
+                        } else {
+                            displayLineage = 'MIXED'; // Regular edible with CBD Blend strain
+                        }
                     } else {
-                        displayLineage = 'MIXED'; // Regular edible with CBD Blend strain
+                        displayLineage = 'CBD'; // Non-edible with CBD Blend strain
                     }
-                } else {
-                    displayLineage = 'CBD'; // Non-edible with CBD Blend strain
-                }
-            } else if (strainStr.includes('cbn') || strainStr.includes('cbc') || strainStr.includes('cbg')) {
-                // CBN, CBC, CBG products should get CBD lineage (yellow color)
-                displayLineage = 'CBD';
-            } else if (strainStr.includes('paraphernalia')) {
-                displayLineage = 'PARAPHERNALIA'; // Pink color
-            } else if (strainStr.includes('mixed')) {
-                displayLineage = 'MIXED'; // Blue color
-            } else {
-                // Check product name for CBN/CBC/CBG content
-                const productName = (tag['Product Name*'] || tag.ProductName || '').toString().toUpperCase();
-                if (productName.includes('CBN') || productName.includes('CBC') || productName.includes('CBG')) {
-                    displayLineage = 'CBD'; // CBN/CBC/CBG products get CBD lineage (yellow color)
-                } else {
-                    // Default for nonclassic products without specific strain
+                } else if (strainStr.includes('cbn') || strainStr.includes('cbc') || strainStr.includes('cbg')) {
+                    // CBN, CBC, CBG products should get CBD lineage (yellow color)
+                    displayLineage = 'CBD';
+                } else if (strainStr.includes('paraphernalia')) {
+                    displayLineage = 'PARAPHERNALIA'; // Pink color
+                } else if (strainStr.includes('mixed')) {
                     displayLineage = 'MIXED'; // Blue color
+                } else {
+                    // Check product name for CBN/CBC/CBG content
+                    const productName = (tag['Product Name*'] || tag.ProductName || '').toString().toUpperCase();
+                    if (productName.includes('CBN') || productName.includes('CBC') || productName.includes('CBG')) {
+                        displayLineage = 'CBD'; // CBN/CBC/CBG products get CBD lineage (yellow color)
+                    } else {
+                        // Default for nonclassic products without specific strain
+                        displayLineage = 'MIXED'; // Blue color
+                    }
                 }
             }
+        } else {
+            // For JSON matched tags, trust the backend's lineage assignment
+            // The backend correctly determines lineage based on product type and strain
+            console.log(`DEBUG: JSON matched tag using backend lineage: "${lineage}" -> "${displayLineage}"`);
         }
         
         // Backend now handles lineage assignment correctly:
@@ -6194,69 +6201,60 @@ const TagManager = {
 
     async uploadFile(file) {
         try {
-            console.log(`🚀 Starting LIGHTNING upload:`, file.name, 'Size:', file.size, 'bytes');
+            const startTime = performance.now();
+            
+            // Check file size to determine upload method
+            const fileSizeMB = file.size / (1024 * 1024);
+            const isLargeFile = fileSizeMB > 5; // 5MB threshold
+            
+            console.log(`🚀 Starting ${isLargeFile ? 'streaming' : 'optimized'} upload:`, file.name, 'Size:', fileSizeMB.toFixed(1), 'MB');
             
             // Show Excel loading splash screen
             this.showExcelLoadingSplash(file.name);
             
-            // Phase 1: Lightning-fast upload (save file only)
-            this.updateUploadUI(`⚡ Lightning upload: ${file.name}...`);
+            // Use streaming upload for all files (it handles both large and small files)
+            this.updateUploadUI(`⚡ ${isLargeFile ? 'Streaming' : 'Optimized'} upload: ${file.name}...`);
             
             const formData = new FormData();
             formData.append('file', file);
             
-            console.log('🚀 Sending lightning upload request...');
+            console.log('🚀 Sending streaming upload request...');
             
-            const uploadResponse = await fetch('/upload-lightning', {
+            const uploadResponse = await fetch('/upload-streaming', {
                 method: 'POST',
                 body: formData
             });
             
             const uploadData = await uploadResponse.json();
-            console.log('⚡ Lightning upload response:', uploadData);
+            const uploadTime = performance.now() - startTime;
+            
+            console.log('⚡ Streaming upload response:', uploadData);
             
             if (!uploadResponse.ok) {
-                throw new Error(uploadData.error || 'Lightning upload failed');
+                throw new Error(uploadData.error || 'Streaming upload failed');
             }
             
-            // Phase 2: Background processing
-            this.updateUploadUI(`🔄 Processing ${file.name}...`);
-            console.log('🔄 Starting background processing...');
-            
-            const processResponse = await fetch('/process-lightning', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    file_path: uploadData.file_path,
-                    filename: uploadData.filename
-                })
-            });
-            
-            const processData = await processResponse.json();
-            console.log('✅ Processing response:', processData);
-            
-            if (!processResponse.ok) {
-                throw new Error(processData.error || 'Processing failed');
+            if (uploadData.success) {
+                console.log(`✅ Upload completed in ${uploadTime.toFixed(2)}ms using ${uploadData.method}`);
+                console.log(`📊 Processed ${uploadData.rows_loaded} rows in ${uploadData.processing_time.toFixed(3)}s`);
+                
+                // Update UI with success message
+                this.updateUploadUI(`✅ ${uploadData.message}`);
+                this.updateExcelLoadingStatus(`Loaded ${uploadData.rows_loaded} products`);
+                
+                // Refresh data after successful upload
+                await this.refreshDataAfterUpload();
+                
+                return true;
+            } else {
+                throw new Error(uploadData.error || 'Upload processing failed');
             }
             
-            // Success!
-            this.updateUploadUI(`✅ ${file.name} ready!`, 'File processed successfully', 'success');
-            console.log(`✅ Lightning upload completed! Upload: ${uploadData.upload_time?.toFixed(3)}s, Process: ${processData.process_time?.toFixed(3)}s`);
-            
-            // Refresh the page to show new data
-            setTimeout(() => {
-                console.log('🔄 Refreshing page to show new data...');
-                window.location.reload();
-            }, 1000);
-            
-            return; // Success!
         } catch (error) {
-            console.error('⚡ Lightning upload error:', error);
-            this.hideExcelLoadingSplash();
-            this.updateUploadUI('Upload failed: ' + error.message, 'error');
-            return;
+            console.error('❌ Upload error:', error);
+            this.updateUploadUI(`❌ Upload error: ${error.message}`);
+            this.updateExcelLoadingStatus('Upload error');
+            return false;
         }
     },
     // Fallback upload method for PythonAnywhere

@@ -1816,6 +1816,221 @@ def upload_file():
         return jsonify({'error': str(e)}), 500
 
 
+# EXCEL UPLOAD PERFORMANCE OPTIMIZATION: Add ultra-fast streaming upload
+@app.route('/upload-streaming', methods=['POST'])
+def upload_file_streaming():
+    """Ultra-fast streaming Excel upload with chunked processing for maximum performance"""
+    try:
+        start_time = time.time()
+        
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file provided'}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        # Generate unique filename
+        filename = secure_filename(file.filename)
+        timestamp = int(time.time())
+        unique_filename = f"upload_{timestamp}_{filename}"
+        temp_path = os.path.join('uploads', unique_filename)
+        
+        # Ensure uploads directory exists
+        os.makedirs('uploads', exist_ok=True)
+        
+        # Save file
+        file.save(temp_path)
+        
+        # STREAMING OPTIMIZATION: Process file in chunks for large files
+        file_size = os.path.getsize(temp_path)
+        is_large_file = file_size > 5 * 1024 * 1024  # 5MB threshold
+        
+        if ENHANCED_LOGGING_AVAILABLE:
+            enhanced_logger.log_info("Starting streaming Excel upload", 
+                                   {'filename': filename, 'size_mb': file_size / (1024*1024), 'large_file': is_large_file})
+        else:
+            logging.info(f"Starting streaming Excel upload: {filename} ({file_size / (1024*1024):.1f}MB)")
+        
+        if is_large_file:
+            # Use streaming processing for large files
+            return process_large_file_streaming(temp_path, filename, start_time)
+        else:
+            # Use optimized processing for smaller files
+            return process_small_file_optimized(temp_path, filename, start_time)
+            
+    except Exception as e:
+        if ENHANCED_LOGGING_AVAILABLE:
+            log_file_processing_error(temp_path, 'streaming_upload', e)
+        else:
+            logging.error(f"Streaming upload error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+def process_large_file_streaming(temp_path: str, filename: str, start_time: float):
+    """Process large Excel files using streaming/chunked approach"""
+    try:
+        from src.core.data.excel_processor import ExcelProcessor
+        import pandas as pd
+        
+        # STREAMING OPTIMIZATION: Process in chunks
+        chunk_size = 1000  # Process 1000 rows at a time
+        total_rows = 0
+        processed_chunks = 0
+        
+        # First, get total row count
+        try:
+            # Quick row count without loading full data
+            sample_df = pd.read_excel(temp_path, nrows=0)
+            total_columns = len(sample_df.columns)
+            
+            # Estimate total rows (rough estimate)
+            with open(temp_path, 'rb') as f:
+                file_content = f.read()
+                # Rough estimation: each row is approximately 200 bytes
+                estimated_rows = len(file_content) // 200
+                total_rows = min(estimated_rows, 100000)  # Cap at 100k for safety
+                
+        except Exception as e:
+            logging.warning(f"Could not estimate rows: {e}")
+            total_rows = 10000  # Default estimate
+        
+        if ENHANCED_LOGGING_AVAILABLE:
+            enhanced_logger.log_info("Starting chunked processing", 
+                                   {'estimated_rows': total_rows, 'chunk_size': chunk_size})
+        else:
+            logging.info(f"Starting chunked processing: ~{total_rows} rows in chunks of {chunk_size}")
+        
+        # STREAMING OPTIMIZATION: Process file in chunks
+        processor = ExcelProcessor()
+        all_chunks = []
+        
+        try:
+            # Read file in chunks
+            for chunk_start in range(0, total_rows, chunk_size):
+                chunk_df = pd.read_excel(
+                    temp_path,
+                    skiprows=chunk_start,
+                    nrows=chunk_size,
+                    dtype=str,  # Read as strings for speed
+                    na_filter=False,
+                    engine='openpyxl'
+                )
+                
+                if chunk_df.empty:
+                    break
+                
+                all_chunks.append(chunk_df)
+                processed_chunks += 1
+                
+                # Log progress every 10 chunks
+                if processed_chunks % 10 == 0:
+                    progress = (chunk_start / total_rows) * 100
+                    logging.info(f"Streaming progress: {progress:.1f}% ({processed_chunks} chunks)")
+                
+                # Memory management
+                if processed_chunks % 50 == 0:
+                    import gc
+                    gc.collect()
+            
+            # Combine all chunks
+            if all_chunks:
+                processor.df = pd.concat(all_chunks, ignore_index=True)
+                processor.df.reset_index(drop=True, inplace=True)
+                
+                # STREAMING OPTIMIZATION: Minimal processing for speed
+                processor.df = processor.df.dropna(subset=['Product Name*'], how='all')
+                
+                # Update global processor
+                global _excel_processor
+                with excel_processor_lock:
+                    _excel_processor = processor
+                    _excel_processor._last_loaded_file = temp_path
+                
+                processing_time = time.time() - start_time
+                
+                if ENHANCED_LOGGING_AVAILABLE:
+                    enhanced_logger.log_success("Streaming upload completed", 
+                                              {'rows': len(processor.df), 'chunks': processed_chunks, 
+                                               'time_seconds': processing_time})
+                else:
+                    logging.info(f"✅ Streaming upload completed: {len(processor.df)} rows in {processing_time:.3f}s")
+                
+                return jsonify({
+                    'success': True,
+                    'message': f'Large file processed successfully using streaming (chunks: {processed_chunks})',
+                    'rows_loaded': len(processor.df),
+                    'processing_time': processing_time,
+                    'method': 'streaming',
+                    'chunks_processed': processed_chunks
+                })
+            else:
+                return jsonify({'error': 'No data found in file'}), 400
+                
+        except Exception as e:
+            logging.error(f"Chunked processing failed: {e}")
+            # Fallback to regular processing
+            return process_small_file_optimized(temp_path, filename, start_time)
+            
+    except Exception as e:
+        if ENHANCED_LOGGING_AVAILABLE:
+            log_file_processing_error(temp_path, 'large_file_streaming', e)
+        else:
+            logging.error(f"Large file streaming error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+def process_small_file_optimized(temp_path: str, filename: str, start_time: float):
+    """Process smaller Excel files with optimized settings"""
+    try:
+        from src.core.data.excel_processor import ExcelProcessor
+        
+        processor = ExcelProcessor()
+        
+        # OPTIMIZATION: Use platform-specific loading
+        import platform
+        is_windows = platform.system() == 'Windows'
+        
+        if is_windows and hasattr(processor, 'load_file_optimized_windows'):
+            # Use Windows-optimized loading
+            success = processor.load_file_optimized_windows(temp_path)
+            method = 'windows_optimized'
+        else:
+            # Use regular optimized loading
+            success = processor.load_file(temp_path)
+            method = 'standard_optimized'
+        
+        if not success or processor.df is None or processor.df.empty:
+            return jsonify({'error': 'Failed to process file or file is empty'}), 400
+        
+        # Update global processor
+        global _excel_processor
+        with excel_processor_lock:
+            _excel_processor = processor
+            _excel_processor._last_loaded_file = temp_path
+        
+        processing_time = time.time() - start_time
+        
+        if ENHANCED_LOGGING_AVAILABLE:
+            enhanced_logger.log_success("Small file upload completed", 
+                                      {'rows': len(processor.df), 'method': method, 
+                                       'time_seconds': processing_time})
+        else:
+            logging.info(f"✅ Small file upload completed: {len(processor.df)} rows in {processing_time:.3f}s")
+        
+        return jsonify({
+            'success': True,
+            'message': f'File processed successfully ({method})',
+            'rows_loaded': len(processor.df),
+            'processing_time': processing_time,
+            'method': method
+        })
+        
+    except Exception as e:
+        if ENHANCED_LOGGING_AVAILABLE:
+            log_file_processing_error(temp_path, 'small_file_optimized', e)
+        else:
+            logging.error(f"Small file optimization error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/upload-pythonanywhere', methods=['POST'])
 def upload_file_simple_pythonanywhere():
     """OPTIMIZED upload endpoint with increased row limits and better performance"""
