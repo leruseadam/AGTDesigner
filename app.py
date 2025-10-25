@@ -2022,47 +2022,10 @@ def get_all_available_tags():
         
         logging.info(f"🚨 AGGRESSIVE FIX: Getting ALL tags from {len(excel_processor.df)} rows")
         
-        # Get ALL rows without any filtering
-        all_tags = []
-        filtered_df = excel_processor.df.copy()
+        # Use the bypass_filtering parameter to get ALL tags
+        all_tags = excel_processor.get_available_tags(bypass_filtering=True)
         
-        for index, row in filtered_df.iterrows():
-            try:
-                # Create tag with minimal processing
-                tag = {
-                    'Product Name*': str(row.get('Product Name*', '')),
-                    'Description': str(row.get('Description', '')),
-                    'Product Brand': str(row.get('Product Brand', '')),
-                    'Product Type*': str(row.get('Product Type*', '')),
-                    'Vendor': str(row.get('Vendor', '')),
-                    'Weight*': str(row.get('Weight*', '')),
-                    'Units': str(row.get('Units', '')),
-                    'Price': str(row.get('Price', '')),
-                    'Lineage': str(row.get('Lineage', '')),
-                    'DOH': str(row.get('DOH', '')),
-                    'Product Strain': str(row.get('Product Strain', '')),
-                    'vendor': str(row.get('Vendor', '')),
-                    'productBrand': str(row.get('Product Brand', '')),
-                    'productType': str(row.get('Product Type*', '')),
-                    'weight': str(row.get('Weight*', '')),
-                    'lineage': str(row.get('Lineage', '')),
-                    'strain': str(row.get('Product Strain', '')),
-                    'doh': str(row.get('DOH', '')),
-                    'price': str(row.get('Price', '')),
-                    'units': str(row.get('Units', ''))
-                }
-                
-                # Only skip if completely empty
-                if not tag['Product Name*'].strip():
-                    continue
-                
-                all_tags.append(tag)
-                
-            except Exception as e:
-                logging.warning(f"Error processing row {index}: {e}")
-                continue
-        
-        logging.info(f"🚨 AGGRESSIVE FIX: Returning {len(all_tags)} tags (no filtering applied)")
+        logging.info(f"🚨 AGGRESSIVE FIX: Returning {len(all_tags)} tags (bypass_filtering=True)")
         
         return jsonify({
             'tags': all_tags,

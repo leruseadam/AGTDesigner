@@ -6752,6 +6752,11 @@ class ExcelProcessor:
                 
                 logger.info(f"Converted {len(tags)} database products to tags")
                 
+                # AGGRESSIVE TAG FIX: Bypass filtering if requested
+                if bypass_filtering:
+                    logger.info(f"AGGRESSIVE FIX: Bypassing all filtering, returning {len(tags)} tags")
+                    return tags
+                
                 # Apply filters if provided
                 if filters:
                     filtered_tags = []
