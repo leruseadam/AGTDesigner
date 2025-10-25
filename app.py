@@ -2075,6 +2075,76 @@ def get_all_available_tags():
         logging.error(f"Error in get_all_available_tags: {e}")
         return jsonify({'error': str(e)}), 500
 
+# ULTIMATE FIX: Direct Excel data test endpoint
+@app.route('/api/test-excel-data', methods=['GET'])
+def test_excel_data():
+    """Test endpoint to verify Excel data directly"""
+    try:
+        excel_processor = get_excel_processor()
+        
+        if excel_processor is None:
+            return jsonify({'error': 'Excel processor not available'}), 400
+        
+        if excel_processor.df is None or excel_processor.df.empty:
+            return jsonify({'error': 'No Excel data loaded'}), 400
+        
+        # Get basic stats
+        total_rows = len(excel_processor.df)
+        non_empty_names = len(excel_processor.df[excel_processor.df['Product Name*'].notna() & (excel_processor.df['Product Name*'] != '')])
+        
+        # Get sample data
+        sample_data = []
+        for index, row in excel_processor.df.head(10).iterrows():
+            sample_data.append({
+                'index': index,
+                'Product Name*': str(row.get('Product Name*', '')),
+                'Product Brand': str(row.get('Product Brand', '')),
+                'Product Type*': str(row.get('Product Type*', '')),
+                'Weight*': str(row.get('Weight*', '')),
+                'Vendor': str(row.get('Vendor', ''))
+            })
+        
+        # Test filtering
+        filtered_count = 0
+        for index, row in excel_processor.df.iterrows():
+            product_name = str(row.get('Product Name*', ''))
+            product_type = str(row.get('Product Type*', ''))
+            weight = str(row.get('Weight*', ''))
+            
+            if not product_name.strip():
+                continue
+                
+            # Apply same filtering as get_available_tags
+            product_name_lower = product_name.lower()
+            product_type_lower = product_type.lower()
+            
+            should_filter = False
+            
+            if weight == '-1g':
+                should_filter = True
+            elif 'trade sample' in product_type_lower and 'not for sale' in product_type_lower:
+                should_filter = True
+            elif 'trade sample' in product_name_lower and 'not for sale' in product_name_lower:
+                should_filter = True
+            elif 'deactivated' in product_type_lower:
+                should_filter = True
+            
+            if not should_filter:
+                filtered_count += 1
+        
+        return jsonify({
+            'total_rows': total_rows,
+            'non_empty_names': non_empty_names,
+            'filtered_count': filtered_count,
+            'sample_data': sample_data,
+            'columns': list(excel_processor.df.columns),
+            'test_timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logging.error(f"Error in test_excel_data: {e}")
+        return jsonify({'error': str(e)}), 500
+
 # PC PERFORMANCE OPTIMIZATION: Add chunked upload support
 @app.route('/upload-chunk', methods=['POST'])
 def upload_file_chunk():
