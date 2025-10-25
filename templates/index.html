@@ -32,11 +32,334 @@
   <meta name="author" content="AGT">
   <meta name="robots" content="index, follow">
   
+  <!-- Immediate Store Selection Check -->
+  <script>
+    // Run this immediately, before any other scripts
+    console.log('🔍 DEBUG: Immediate script starting...');
+    
+    // Check for JavaScript errors
+    window.onerror = function(msg, url, lineNo, columnNo, error) {
+      console.error('🔍 DEBUG: JavaScript Error:', msg);
+      console.error('🔍 DEBUG: File:', url);
+      console.error('🔍 DEBUG: Line:', lineNo);
+      console.error('🔍 DEBUG: Column:', columnNo);
+      console.error('🔍 DEBUG: Error object:', error);
+      return false;
+    };
+    
+    // Test if basic JavaScript is working
+    try {
+      console.log('🔍 DEBUG: JavaScript is working!');
+      
+      
+      // Add global error handler
+      window.addEventListener('error', function(e) {
+        console.error('🔍 DEBUG: Global JavaScript error:', e.error);
+        console.error('🔍 DEBUG: Error message:', e.message);
+        console.error('🔍 DEBUG: Error file:', e.filename);
+        console.error('🔍 DEBUG: Error line:', e.lineno);
+      });
+      
+        // Initialize store button event listeners once
+        setTimeout(() => {
+          console.log('🔍 DEBUG: Initializing store button event listeners...');
+          initializeStoreButtonListeners();
+        }, 1000);
+      
+    } catch(e) {
+      console.error('🔍 DEBUG: JavaScript error:', e);
+    }
+    
+    // Function to hide main content
+    function hideMainContentImmediate() {
+      console.log('🔍 DEBUG: Hiding main content immediately...');
+      const mainContent = document.getElementById('mainContent');
+      if (mainContent) {
+        mainContent.style.display = 'none';
+        console.log('🔍 DEBUG: Main content hidden immediately');
+      } else {
+        console.error('🔍 DEBUG: Main content element not found');
+      }
+    }
+    
+    // Function to check store requirement
+    function checkStoreRequiredImmediate() {
+      console.log('🔍 DEBUG: Checking store requirement immediately...');
+      fetch('/api/check-store-required')
+        .then(response => {
+          console.log('🔍 DEBUG: API response received:', response);
+          return response.json();
+        })
+        .then(data => {
+          console.log('🔍 DEBUG: Store requirement check response:', data);
+          if (data.success && data.store_required) {
+            console.log('🔍 DEBUG: Store selection required, showing modal immediately');
+            // Show the modal immediately
+            showStoreSelectionModalImmediate();
+            
+            // Also ensure modal is visible
+            const modal = document.getElementById('storeSelectionModal');
+            if (modal) {
+              modal.style.display = 'block';
+              modal.classList.add('show');
+              modal.setAttribute('aria-hidden', 'false');
+              console.log('🔍 DEBUG: Modal forced to be visible');
+            }
+          } else if (data.success && data.store) {
+            console.log('🔍 DEBUG: Store already selected:', data.store);
+            // Hide the modal and show main content since store is already selected
+            hideStoreModalImmediate();
+            const mainContent = document.getElementById('mainContent');
+            if (mainContent) {
+              mainContent.style.display = 'block';
+            }
+          }
+        })
+        .catch(error => {
+          console.log('🔍 DEBUG: Error checking store requirement:', error);
+        });
+    }
+    
+    // Function to show store selection modal immediately
+    function showStoreSelectionModalImmediate() {
+      console.log('🔍 DEBUG: Attempting to show store modal immediately...');
+      
+      // Try Bootstrap modal first
+      const modalElement = document.getElementById('storeSelectionModal');
+      if (modalElement) {
+        console.log('🔍 DEBUG: Modal element found, attempting Bootstrap show...');
+        
+        // Check if Bootstrap is available
+        if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+          console.log('🔍 DEBUG: Bootstrap available, using Bootstrap Modal...');
+          const modal = new bootstrap.Modal(modalElement, {
+            backdrop: 'static',
+            keyboard: false
+          });
+          modal.show();
+          console.log('🔍 DEBUG: Bootstrap modal shown');
+        } else {
+          console.log('🔍 DEBUG: Bootstrap not available, showing modal manually...');
+          // Fallback: show modal manually
+          modalElement.style.display = 'block';
+          modalElement.classList.add('show');
+          modalElement.setAttribute('aria-hidden', 'false');
+          
+          // Bootstrap will handle the backdrop automatically
+          
+          console.log('🔍 DEBUG: Modal shown manually');
+        }
+      } else {
+        console.error('🔍 DEBUG: Modal element not found!');
+      }
+    }
+    
+    // Function to initialize store button event listeners (called once)
+    function initializeStoreButtonListeners() {
+      console.log('🔍 DEBUG: ===== INITIALIZING STORE BUTTON LISTENERS =====');
+      
+      // Remove any existing event listeners first
+      const storeButtons = document.querySelectorAll('.btn-store-option');
+      storeButtons.forEach(button => {
+        // Clone the button to remove all event listeners
+        const newButton = button.cloneNode(true);
+        button.parentNode.replaceChild(newButton, button);
+      });
+      
+      // Add fresh event listeners
+      const storeButtonConfigs = [
+        {id: 'bothellBtn', store: 'AGT_Bothell'},
+        {id: 'burienBtn', store: 'AGT_Burien'},
+        {id: 'goldbarBtn', store: 'AGT_Goldbar'},
+        {id: 'lynnwoodBtn', store: 'AGT_Lynnwood'},
+        {id: 'shorelineBtn', store: 'AGT_Shoreline'},
+        {id: 'seattleBtn', store: 'AGT_Seattle'},
+        {id: 'wallawallaBtn', store: 'AGT_Walla_Walla'}
+      ];
+
+      storeButtonConfigs.forEach(buttonConfig => {
+        const button = document.getElementById(buttonConfig.id);
+        if (button) {
+          console.log('🔍 DEBUG: Adding event listener to', buttonConfig.id);
+          
+          // Add click event listener
+          button.addEventListener('click', function(e) {
+            console.log('🔍 DEBUG: ===== STORE BUTTON CLICKED =====');
+            console.log('🔍 DEBUG: Button:', buttonConfig.id);
+            console.log('🔍 DEBUG: Store:', buttonConfig.store);
+            
+            e.preventDefault();
+            e.stopPropagation();
+            
+            if (window.selectStore) {
+              console.log('🔍 DEBUG: Calling selectStore...');
+              window.selectStore(buttonConfig.store);
+            } else {
+              console.error('🔍 DEBUG: selectStore function not available!');
+            }
+          });
+          
+          // Ensure button is clickable
+          button.style.pointerEvents = 'auto';
+          button.style.cursor = 'pointer';
+          button.style.zIndex = '9999';
+          button.style.position = 'relative';
+          
+        } else {
+          console.error('🔍 DEBUG: Button not found:', buttonConfig.id);
+        }
+      });
+      
+      console.log('🔍 DEBUG: ===== STORE BUTTON LISTENERS INITIALIZED =====');
+    }
+    
+    // Clear JSON match session data on page load
+    function clearJsonMatchSession() {
+      console.log('🔍 DEBUG: Clearing JSON match session data...');
+      
+      // Clear JSON match results
+      const resultsDiv = document.getElementById('jsonMatchResults');
+      if (resultsDiv) {
+        resultsDiv.classList.add('d-none');
+        console.log('🔍 DEBUG: Hidden JSON match results');
+      }
+      
+      // Clear matched products list
+      const matchedProductsList = document.getElementById('matchedProductsList');
+      if (matchedProductsList) {
+        matchedProductsList.innerHTML = '';
+        console.log('🔍 DEBUG: Cleared matched products list');
+      }
+      
+      // Clear match count
+      const matchCount = document.getElementById('matchCount');
+      if (matchCount) {
+        matchCount.textContent = '0';
+        console.log('🔍 DEBUG: Reset match count');
+      }
+      
+      // Clear JSON URL input
+      const jsonUrlInput = document.getElementById('jsonUrlInput');
+      if (jsonUrlInput) {
+        jsonUrlInput.value = '';
+        console.log('🔍 DEBUG: Cleared JSON URL input');
+      }
+      
+      // Remove any JSON match notifications/alerts
+      const alerts = document.querySelectorAll('.alert');
+      alerts.forEach(alert => {
+        if (alert.textContent.includes('JSON Matching') || alert.textContent.includes('JSON matched')) {
+          alert.remove();
+          console.log('🔍 DEBUG: Removed JSON match alert');
+        }
+      });
+      
+      // Hide JSON filter toggle button
+      const jsonFilterToggleBtn = document.getElementById('jsonFilterToggleBtn');
+      if (jsonFilterToggleBtn) {
+        jsonFilterToggleBtn.style.display = 'none';
+        console.log('🔍 DEBUG: Hidden JSON filter toggle button');
+      }
+      
+      // Clear any JSON match related session storage
+      sessionStorage.removeItem('jsonMatchResults');
+      sessionStorage.removeItem('jsonMatchedProducts');
+      localStorage.removeItem('jsonMatchResults');
+      localStorage.removeItem('jsonMatchedProducts');
+      
+      console.log('🔍 DEBUG: JSON match session cleared');
+    }
+    
+    // Immediate button test - check if buttons exist and add listeners
+    setTimeout(() => {
+      console.log('🔍 DEBUG: ===== IMMEDIATE BUTTON TEST =====');
+
+      // Check if buttons exist
+      const bothellBtn = document.getElementById('bothellBtn');
+      console.log('🔍 DEBUG: bothellBtn exists:', !!bothellBtn);
+
+      if (bothellBtn) {
+        console.log('🔍 DEBUG: Adding immediate event listener to Bothell button...');
+        bothellBtn.onclick = function() {
+          console.log('🔍 DEBUG: Bothell button clicked via onclick!');
+          if (window.selectStore) {
+            window.selectStore('AGT_Bothell');
+          }
+        };
+      }
+
+      console.log('🔍 DEBUG: ===== BUTTON TEST COMPLETE =====');
+    }, 2000);
+    
+    // Immediate event listener test - try to add listeners right away
+    setTimeout(() => {
+      console.log('🔍 DEBUG: ===== IMMEDIATE EVENT LISTENER TEST =====');
+      
+      const bothellBtn = document.getElementById('bothellBtn');
+      console.log('🔍 DEBUG: bothellBtn found:', !!bothellBtn);
+      
+      if (bothellBtn) {
+        console.log('🔍 DEBUG: Adding immediate click listener to Bothell button...');
+        
+        // Try multiple methods
+        bothellBtn.onclick = function() {
+          console.log('🔍 DEBUG: Bothell button clicked via onclick assignment!');
+          if (window.selectStore) {
+            window.selectStore('AGT_Bothell');
+          }
+        };
+        
+        bothellBtn.addEventListener('click', function() {
+          console.log('🔍 DEBUG: Bothell button clicked via addEventListener!');
+          if (window.selectStore) {
+            window.selectStore('AGT_Bothell');
+          }
+        });
+        
+        // Test if we can trigger the click manually
+        console.log('🔍 DEBUG: Testing manual click trigger...');
+        setTimeout(() => {
+          console.log('🔍 DEBUG: Triggering manual click...');
+          bothellBtn.click();
+        }, 1000);
+      }
+      
+      console.log('🔍 DEBUG: ===== IMMEDIATE TEST COMPLETE =====');
+    }, 3000);
+    
+    // Test event listener on simple button
+    setTimeout(() => {
+      console.log('🔍 DEBUG: Test event listener setup complete');
+    }, 500);
+    
+    // Debug modal buttons specifically
+    setTimeout(() => {
+      console.log('🔍 DEBUG: ===== MODAL BUTTON DEBUG =====');
+
+      // Check if modal exists
+      const modal = document.getElementById('storeSelectionModal');
+      console.log('🔍 DEBUG: Modal exists:', !!modal);
+      console.log('🔍 DEBUG: Modal display:', modal ? modal.style.display : 'N/A');
+
+      // Check all store buttons
+      const storeButtonIds = ['bothellBtn', 'burienBtn', 'goldbarBtn', 'lynnwoodBtn', 'shorelineBtn', 'seattleBtn', 'wallawallaBtn'];
+      storeButtonIds.forEach(id => {
+        const btn = document.getElementById(id);
+        console.log('🔍 DEBUG:', id, 'exists:', !!btn);
+        if (btn) {
+          console.log('🔍 DEBUG:', id, 'display:', btn.style.display);
+          console.log('🔍 DEBUG:', id, 'visible:', btn.offsetParent !== null);
+        }
+      });
+
+      console.log('🔍 DEBUG: ===== MODAL BUTTON DEBUG COMPLETE =====');
+    }, 4000);
+  </script>
+  
   <!-- Stylesheets -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}?v={{ cache_bust }}">
   <!-- Windows Performance Optimizations CSS -->
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/windows-performance.css') }}?v={{ cache_bust }}">
   <link rel="icon" type="image/x-icon" href="/favicon.ico">
   <link rel="alternate icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css">
@@ -51,7 +374,6 @@
   <!-- Performance Optimizations -->
   <script src="{{ url_for('static', filename='js/performance.js') }}?v={{ cache_bust }}"></script>
   <!-- Windows-specific performance optimizations - Load early for best results -->
-  <script src="{{ url_for('static', filename='js/windows-performance-optimization.js') }}?v={{ cache_bust }}"></script>
   
   <!-- Preload critical resources -->
   <link rel="preload" href="{{ url_for('static', filename='css/styles.css') }}" as="style">
@@ -197,7 +519,9 @@
     
     // Store Management Functions
     function changeStore(storeValue) {
+      console.log('🔍 DEBUG: changeStore called with:', storeValue);
       if (!storeValue) {
+        console.log('🔍 DEBUG: No store value provided');
         updateStoreStatus('Please select a store', 'inactive');
         return;
       }
@@ -222,6 +546,8 @@
           console.log('Store selection saved to backend:', storeValue);
           // Clear any existing data to ensure fresh start with new store
           clearExistingData();
+          // Show main content after successful store selection
+          showMainContent();
         } else {
           console.error('Failed to save store selection:', data.error);
           updateStoreStatus('Failed to save store selection', 'inactive');
@@ -233,11 +559,32 @@
       });
     }
     
-    function selectStore(storeValue) {
-      // Close the modal
-      const modal = bootstrap.Modal.getInstance(document.getElementById('storeSelectionModal'));
-      if (modal) {
-        modal.hide();
+    window.selectStore = function(storeValue) {
+      console.log('🔍 DEBUG: ===== selectStore FUNCTION CALLED =====');
+      console.log('🔍 DEBUG: Store selected:', storeValue);
+      console.log('🔍 DEBUG: Function execution started...');
+      
+      // Close the modal - try multiple methods
+      const modalElement = document.getElementById('storeSelectionModal');
+      if (modalElement) {
+        // Try Bootstrap first
+        const modal = bootstrap.Modal.getInstance(modalElement);
+        if (modal) {
+          modal.hide();
+          console.log('🔍 DEBUG: Modal closed via Bootstrap');
+        } else {
+          // Manual close
+          modalElement.style.display = 'none';
+          modalElement.classList.remove('show');
+          modalElement.setAttribute('aria-hidden', 'true');
+          
+          // Remove any backdrop that Bootstrap might have created
+          const backdrop = document.querySelector('.modal-backdrop');
+          if (backdrop) {
+            backdrop.remove();
+          }
+          console.log('🔍 DEBUG: Modal closed manually');
+        }
       }
       
       // Set the store
@@ -245,46 +592,220 @@
       
       // Update the display
       updateCurrentStoreDisplay(storeValue);
+      
+      // Show main content after store selection
+      showMainContent();
     }
     
     function showStoreSelectionModal() {
       try {
-        console.log('Attempting to show store selection modal...');
-        
-        // Check if Bootstrap is available
-        if (typeof bootstrap === 'undefined') {
-          console.error('Bootstrap not available, cannot show modal');
-          return;
-        }
+        console.log('🔍 DEBUG: Attempting to show store selection modal...');
         
         const modalElement = document.getElementById('storeSelectionModal');
         if (!modalElement) {
-          console.error('Store selection modal element not found');
+          console.error('🔍 DEBUG: Store selection modal element not found');
           return;
         }
         
-        const modal = new bootstrap.Modal(modalElement);
-        modal.show();
-        console.log('Store selection modal shown successfully');
+        // Check if Bootstrap is available
+        if (typeof bootstrap !== 'undefined') {
+          console.log('🔍 DEBUG: Bootstrap available, using Bootstrap modal...');
+          const modal = new bootstrap.Modal(modalElement);
+          modal.show();
+          console.log('🔍 DEBUG: Bootstrap modal shown successfully');
+        } else {
+          console.log('🔍 DEBUG: Bootstrap not available, using manual modal display...');
+          // Manual modal display fallback
+          modalElement.style.display = 'block';
+          modalElement.classList.add('show');
+          modalElement.setAttribute('aria-hidden', 'false');
+          document.body.classList.add('modal-open');
+          
+          // Add backdrop
+          const backdrop = document.createElement('div');
+          backdrop.className = 'modal-backdrop fade show';
+          backdrop.id = 'manual-modal-backdrop';
+          document.body.appendChild(backdrop);
+          
+          console.log('🔍 DEBUG: Manual modal shown successfully');
+        }
       } catch (error) {
-        console.error('Error showing store selection modal:', error);
+        console.error('🔍 DEBUG: Error showing store selection modal:', error);
+        // Try manual fallback even if Bootstrap fails
+        try {
+          const modalElement = document.getElementById('storeSelectionModal');
+          if (modalElement) {
+            modalElement.style.display = 'block';
+            modalElement.classList.add('show');
+            console.log('🔍 DEBUG: Emergency manual modal display successful');
+          }
+        } catch (fallbackError) {
+          console.error('🔍 DEBUG: Emergency fallback also failed:', fallbackError);
+        }
       }
     }
     
     // Make function globally available for main.js
     window.showStoreSelectionModal = showStoreSelectionModal;
     
-    // Function to verify modal element exists
-    function verifyModalExists() {
-      const modalElement = document.getElementById('storeSelectionModal');
-      if (modalElement) {
-        console.log('✅ Store selection modal element found');
-        return true;
+    // Test function for debugging - can be called from browser console
+    window.testStoreSelection = function() {
+      console.log('🔍 DEBUG: Manual test of store selection...');
+      checkStoreRequired();
+    };
+    
+    // Force show modal function for debugging
+    window.forceShowStoreModal = function() {
+      console.log('🔍 DEBUG: Force showing store modal...');
+      showStoreSelectionModal();
+    };
+    
+    // Test store selection function
+    window.testSelectStore = function(storeValue) {
+      console.log('🔍 DEBUG: Testing store selection with:', storeValue);
+      if (window.selectStore) {
+        window.selectStore(storeValue);
       } else {
-        console.error('❌ Store selection modal element NOT found');
-        return false;
+        console.error('🔍 DEBUG: selectStore function not found!');
       }
-    }
+    };
+    
+    // Test function to manually trigger main content initialization
+    window.testMainContent = function() {
+      console.log('🔍 DEBUG: Testing main content initialization...');
+      
+      // Clear store first
+      fetch('/api/clear-store', {method: 'POST'})
+        .then(response => response.json())
+        .then(data => {
+          console.log('🔍 DEBUG: Store cleared:', data);
+          
+          // Set store
+          return fetch('/api/set-store', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({store: 'AGT_Bothell'})
+          });
+        })
+        .then(response => response.json())
+        .then(data => {
+          console.log('🔍 DEBUG: Store set:', data);
+          
+          // Show main content
+          showMainContent();
+          
+          // Test if elements are working
+          setTimeout(() => {
+            const fileInput = document.getElementById('excelFile');
+            const generateBtn = document.getElementById('generateBtn');
+            const tagManager = document.getElementById('tagManager');
+            
+            console.log('🔍 DEBUG: File input:', fileInput ? 'FOUND' : 'NOT FOUND');
+            console.log('🔍 DEBUG: Generate button:', generateBtn ? 'FOUND' : 'NOT FOUND');
+            console.log('🔍 DEBUG: Tag manager:', tagManager ? 'FOUND' : 'NOT FOUND');
+            
+            if (fileInput) {
+              console.log('🔍 DEBUG: File input disabled:', fileInput.disabled);
+            }
+          }, 1000);
+        })
+        .catch(error => {
+          console.error('🔍 DEBUG: Error in test:', error);
+        });
+    };
+    
+    // Test function to simulate button click
+    window.testButtonClick = function() {
+      console.log('🔍 DEBUG: Testing button click simulation...');
+      const button = document.querySelector('.btn-store-option[data-store="AGT_Bothell"]');
+      if (button) {
+        console.log('🔍 DEBUG: Found button, simulating click...');
+        button.click();
+      } else {
+        console.error('🔍 DEBUG: Button not found!');
+      }
+    };
+    
+    // PREVENT FORCE RELOADS: Add comprehensive protection
+    (function() {
+      let reloadPreventionActive = false;
+      let lastReloadTime = 0;
+      const RELOAD_COOLDOWN = 2000; // 2 seconds cooldown
+      
+      // Override window.location.reload to add protection
+      const originalReload = window.location.reload;
+      window.location.reload = function(forceReload) {
+        const now = Date.now();
+        
+        // If reload prevention is active or within cooldown, block the reload
+        if (reloadPreventionActive || (now - lastReloadTime < RELOAD_COOLDOWN)) {
+          console.log('🚫 Reload blocked by protection system');
+          return;
+        }
+        
+        lastReloadTime = now;
+        console.log('✅ Reload allowed by protection system');
+        return originalReload.call(this, forceReload);
+      };
+      
+      // Add beforeunload protection for accidental refreshes
+      window.addEventListener('beforeunload', function(e) {
+        if (reloadPreventionActive) {
+          e.preventDefault();
+          e.returnValue = 'Are you sure you want to leave? Your work may be lost.';
+          return e.returnValue;
+        }
+      });
+      
+      // Expose control functions
+      window.enableReloadProtection = function() {
+        reloadPreventionActive = true;
+        console.log('🛡️ Reload protection enabled');
+      };
+      
+      window.disableReloadProtection = function() {
+        reloadPreventionActive = false;
+        console.log('🛡️ Reload protection disabled');
+      };
+      
+      // Auto-disable protection after 5 seconds to allow intentional reloads
+      setTimeout(() => {
+        reloadPreventionActive = false;
+        console.log('🛡️ Reload protection auto-disabled after 5 seconds');
+      }, 5000);
+      
+    })();
+    
+    // Add event listeners as backup to onclick handlers
+    document.addEventListener('DOMContentLoaded', function() {
+      console.log('🔍 DEBUG: DOM Content Loaded - store button listeners already initialized');
+    });
+    
+    // Listen for main content shown event
+    document.addEventListener('mainContentShown', function() {
+      console.log('🔍 DEBUG: Main content shown event received, ensuring proper initialization...');
+      
+      // Re-initialize any components that need it
+      if (window.TagManager && typeof window.TagManager.loadAvailableTags === 'function') {
+        console.log('🔍 DEBUG: Loading available tags after main content shown...');
+        window.TagManager.loadAvailableTags();
+      }
+      
+      // Ensure all form elements are properly initialized
+      const forms = document.querySelectorAll('form');
+      forms.forEach((form, index) => {
+        console.log('🔍 DEBUG: Found form', index, ':', form.id || 'unnamed');
+      });
+      
+      // Check if file input is working
+      const fileInput = document.getElementById('excelFile');
+      if (fileInput) {
+        console.log('🔍 DEBUG: File input found and ready');
+      } else {
+        console.error('🔍 DEBUG: File input not found!');
+      }
+      
+    });
     
     // Function to force modal display
     function forceShowModal() {
@@ -348,17 +869,16 @@
         window.clearJsonMatches();
       }
       
+      // Clear JSON match session data
+      clearJsonMatchSession();
+      
       console.log('Cleared existing data for new store selection');
     }
     
     function loadSavedStore() {
-      // Always default to Bothell upon loading
-      console.log('Setting default store to AGT_Bothell upon loading');
-      changeStore('AGT_Bothell');
-      updateCurrentStoreDisplay('AGT_Bothell');
-      
-      // Also check backend for current store status
-      updateStoreStatusFromBackend();
+      // Check if store selection is required instead of defaulting to Bothell
+      console.log('Checking store selection requirement...');
+      checkStoreRequired();
     }
     
     function updateStoreStatusFromBackend() {
@@ -369,36 +889,99 @@
             // Update the display
             updateCurrentStoreDisplay(data.store);
             updateStoreStatus(`Store: ${data.store.replace(/_/g, ' ')}`, 'active');
+            // Show main content since we have a valid store
+            showMainContent();
           } else {
-            // No store set in backend, ensure Bothell is set
-            console.log('No store in backend, ensuring AGT_Bothell is set');
-            changeStore('AGT_Bothell');
+            // No store set in backend, check if store selection is required
+            console.log('No store in backend, checking if store selection is required');
+            checkStoreRequired();
           }
         })
         .catch(error => {
-          console.log('Error checking backend, ensuring AGT_Bothell is set');
-          // Ensure Bothell is set as default
-          changeStore('AGT_Bothell');
+          console.log('Error checking backend, checking if store selection is required');
+          // Check if store selection is required instead of defaulting
+          checkStoreRequired();
         });
     }
     
+    function hideMainContent() {
+      console.log('🔍 DEBUG: Hiding main content...');
+      const mainContent = document.getElementById('mainContent');
+      if (mainContent) {
+        mainContent.style.display = 'none';
+        console.log('🔍 DEBUG: Main content hidden successfully');
+      } else {
+        console.error('🔍 DEBUG: Main content element not found');
+      }
+    }
+    
+    function showMainContent() {
+      console.log('🔍 DEBUG: Showing main content...');
+      const mainContent = document.getElementById('mainContent');
+      if (mainContent) {
+        mainContent.style.display = 'block';
+        console.log('🔍 DEBUG: Main content shown successfully');
+        
+        // Clear JSON match session data
+        clearJsonMatchSession();
+        
+        // Re-initialize components that might not work properly when hidden
+        setTimeout(() => {
+          console.log('🔍 DEBUG: Re-initializing components for main content...');
+          
+          // Re-initialize TagManager if needed
+          if (window.TagManager && typeof window.TagManager.init === 'function') {
+            console.log('🔍 DEBUG: Re-initializing TagManager...');
+            window.TagManager.init();
+          }
+          
+          // Trigger any necessary DOM events
+          const event = new Event('mainContentShown');
+          document.dispatchEvent(event);
+          console.log('🔍 DEBUG: Dispatched mainContentShown event');
+          
+          // Ensure all interactive elements are properly initialized
+          const interactiveElements = mainContent.querySelectorAll('button, input, select, textarea');
+          console.log('🔍 DEBUG: Found', interactiveElements.length, 'interactive elements');
+          
+        }, 100);
+        
+      } else {
+        console.error('🔍 DEBUG: Main content element not found');
+      }
+    }
+    
     function checkStoreRequired() {
-      console.log('Checking if store selection is required...');
+      console.log('🔍 DEBUG: Checking if store selection is required...');
       fetch('/api/check-store-required')
-        .then(response => response.json())
+        .then(response => {
+          console.log('🔍 DEBUG: API response received:', response);
+          return response.json();
+        })
         .then(data => {
-          console.log('Store requirement check response:', data);
-          if (data.success && data.requires_store) {
-            // Store selection is required, show modal
-            console.log('Store selection required, showing modal');
+          console.log('🔍 DEBUG: Store requirement check response:', data);
+          if (data.success && data.store_required) {
+            // Store selection is required, show modal and hide main content
+            console.log('🔍 DEBUG: Store selection required, showing modal');
+            hideMainContent();
             showStoreSelectionModal();
+          } else if (data.success && data.store) {
+            console.log('🔍 DEBUG: Store selection not required, current store:', data.store);
+            // Update the display with the current store and show main content
+            updateCurrentStoreDisplay(data.store);
+            updateStoreStatus(`Store: ${data.store.replace(/_/g, ' ')}`, 'active');
+            localStorage.setItem('selectedStore', data.store);
+            showMainContent();
           } else {
-            console.log('Store selection not required, current store:', data.store);
+            console.log('🔍 DEBUG: No store found, showing modal');
+            hideMainContent();
+            showStoreSelectionModal();
           }
         })
         .catch(error => {
-          console.log('Error checking store requirement:', error);
+          console.log('🔍 DEBUG: Error checking store requirement:', error);
           // If there's an error, show modal as fallback
+          hideMainContent();
           showStoreSelectionModal();
         });
     }
@@ -4237,8 +4820,8 @@
     </div>
   </div>
 
-  <!-- Main Content (initially hidden) -->
-  <div class="main-content" id="mainContent">
+  <!-- Main Content (visible by default - AGT_Bothell) -->
+  <div class="main-content" id="mainContent" style="display: block;">
     <canvas id="lava-lamp-canvas" style="position:fixed;top:0;left:0;z-index:0;pointer-events:none;"></canvas>
     <!-- Psychedelic Background Effects -->
     <div class="psychedelic-orbs">
@@ -4410,7 +4993,7 @@
                 </svg>
                 <span class="fw-bold">Upload</span>
               </button>
-              <input type="file" id="fileInput" accept=".xlsx" style="display:none;" onchange="console.log('File input changed:', this.files[0]);">
+              <input type="file" id="fileInput" accept=".xlsx" style="display:none;">
               <span class="file-info-modern d-flex align-items-center gap-1 ms-2" id="currentFileInfo" style="min-width:200px; max-width:none; font-size:0.82rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;">
                   <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
@@ -4498,12 +5081,6 @@
                     <label for="highCbdFilter" class="filter-category-label mb-0">HIGH CBD</label>
                     <select id="highCbdFilter" class="form-select form-select-sm compact-filter" aria-label="Filter by High CBD products" style="background: #2a2040; color: #fff; border-radius: 8px; border: 1.5px solid #a084e8; width: 100%;">
                       <option value="All">All Products</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label for="ratioFilter" class="filter-category-label mb-0">RATIO</label>
-                    <select id="ratioFilter" class="form-select form-select-sm compact-filter" aria-label="Filter by ratio" style="width: 100%;">
-                      <option value="All">All Ratios</option>
                     </select>
                   </div>
               </div>
@@ -4721,7 +5298,7 @@
   <!-- Modals -->
   
   <!-- Store Selection Modal -->
-  <div class="modal fade" id="storeSelectionModal" tabindex="-1" aria-labelledby="storeSelectionModalLabel" data-bs-backdrop="static" data-bs-keyboard="false">
+  <div class="modal fade show" id="storeSelectionModal" tabindex="-1" aria-labelledby="storeSelectionModalLabel" data-bs-backdrop="static" data-bs-keyboard="false" style="display: block;" aria-modal="true" role="dialog">
     <div class="modal-dialog modal-dialog-centered">
       <div class="modal-content glass-card">
         <div class="modal-header border-0">
@@ -4734,52 +5311,56 @@
           </h5>
         </div>
         <div class="modal-body text-center">
-          <p class="mb-4 text-light">Please select your store location to continue. This selection will be saved and remembered for future visits.</p>
+          <p class="mb-4 text-light">Please select your store location to continue. This selection will be saved and remembered for 12 hours.</p>
+          <div class="alert alert-warning mb-4" role="alert">
+            <i class="fas fa-exclamation-triangle me-2"></i>
+            <strong>Required:</strong> You must select a store before accessing the application.
+          </div>
           
           <div class="store-options-grid">
-            <button class="btn btn-store-option" onclick="selectStore('AGT_Bothell')">
+            <button class="btn btn-store-option" id="bothellBtn" data-store="AGT_Bothell">
               <div class="store-option-content">
                 <div class="store-name">AGT Bothell</div>
                 <div class="store-location">Bothell, WA</div>
               </div>
             </button>
-            
-            <button class="btn btn-store-option" onclick="selectStore('AGT_Burien')">
+
+            <button class="btn btn-store-option" id="burienBtn" data-store="AGT_Burien">
               <div class="store-option-content">
                 <div class="store-name">AGT Burien</div>
                 <div class="store-location">Burien, WA</div>
               </div>
             </button>
-            
-            <button class="btn btn-store-option" onclick="selectStore('AGT_Goldbar')">
+
+            <button class="btn btn-store-option" id="goldbarBtn" data-store="AGT_Goldbar">
               <div class="store-option-content">
                 <div class="store-name">AGT Goldbar</div>
                 <div class="store-location">Goldbar, WA</div>
               </div>
             </button>
-            
-            <button class="btn btn-store-option" onclick="selectStore('AGT_Lynnwood')">
+
+            <button class="btn btn-store-option" id="lynnwoodBtn" data-store="AGT_Lynnwood">
               <div class="store-option-content">
                 <div class="store-name">AGT Lynnwood</div>
                 <div class="store-location">Lynnwood, WA</div>
               </div>
             </button>
-            
-            <button class="btn btn-store-option" onclick="selectStore('AGT_Shoreline')">
+
+            <button class="btn btn-store-option" id="shorelineBtn" data-store="AGT_Shoreline">
               <div class="store-option-content">
                 <div class="store-name">AGT Shoreline</div>
                 <div class="store-location">Shoreline, WA</div>
               </div>
             </button>
-            
-            <button class="btn btn-store-option" onclick="selectStore('AGT_Seattle')">
+
+            <button class="btn btn-store-option" id="seattleBtn" data-store="AGT_Seattle">
               <div class="store-option-content">
                 <div class="store-name">AGT Seattle</div>
                 <div class="store-location">Seattle, WA</div>
               </div>
             </button>
-            
-            <button class="btn btn-store-option" onclick="selectStore('AGT_Walla_Walla')">
+
+            <button class="btn btn-store-option" id="wallawallaBtn" data-store="AGT_Walla_Walla">
               <div class="store-option-content">
                 <div class="store-name">AGT Walla Walla</div>
                 <div class="store-location">Walla Walla, WA</div>
@@ -6724,13 +7305,38 @@
       }
     };
 
-    document.addEventListener('DOMContentLoaded', function () {
-      console.log('DOM Content Loaded - initializing TagManager...');
+    // Immediate store selection check - don't wait for complex initialization
+    function immediateStoreCheck() {
+      console.log('🔍 DEBUG: Immediate store check starting...');
       
-      // Ensure Bothell is still set as default store display
-      console.log('DOMContentLoaded: Ensuring Bothell display is set...');
-      updateCurrentStoreDisplay('AGT_Bothell');
-      updateStoreStatus('Store: AGT Bothell', 'active');
+      // Hide main content immediately
+      hideMainContent();
+      
+      // Check store requirement immediately
+      checkStoreRequired();
+    }
+    
+    // Run immediate store check as soon as possible
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', immediateStoreCheck);
+    } else {
+      // DOM is already loaded, run immediately
+      immediateStoreCheck();
+    }
+    
+    // Also run after a short delay as backup
+    setTimeout(immediateStoreCheck, 100);
+    setTimeout(immediateStoreCheck, 500);
+    setTimeout(immediateStoreCheck, 1000);
+
+    document.addEventListener('DOMContentLoaded', function () {
+      console.log('🔍 DEBUG: DOM Content Loaded - initializing TagManager...');
+      
+      // Clear JSON match session data on page load
+      clearJsonMatchSession();
+      
+      // Main content is visible by default (AGT_Bothell)
+      console.log('🔍 DEBUG: Main content visible by default');
       
       TagManager.init();
       
@@ -6808,32 +7414,38 @@
             // Also update the store status
             updateStoreStatus(`Store: ${data.store.replace(/_/g, ' ')}`, 'active');
             localStorage.setItem('selectedStore', data.store);
+            // Show main content since we have a valid store
+            showMainContent();
             console.log('Store sync completed successfully');
           } else {
-            console.log('No store in backend data, Bothell should be set as default');
+            console.log('No store in backend data, will check store requirements');
           }
         })
         .catch(error => {
           console.error('Error syncing store on DOMContentLoaded:', error);
-          // Ensure Bothell is still set as default even if backend check fails
-          changeStore('AGT_Bothell');
+          // Check store requirements instead of defaulting
+          console.log('Will check store requirements due to error');
         });
       
       console.log('TagManager initialized, waiting for Bootstrap...');
       
       // Wait a bit for Bootstrap to be fully loaded
       setTimeout(() => {
-        console.log('Timeout completed, checking store selection...');
+        console.log('🔍 DEBUG: Timeout completed, checking store selection...');
         
         // Verify modal exists
         verifyModalExists();
         
-        // Load saved store selection
-        loadSavedStore();
-        
-        // Check if store selection is required
+        // Check if store selection is required (this will handle everything)
+        console.log('🔍 DEBUG: About to call checkStoreRequired...');
         checkStoreRequired();
-      }, 500);
+      }, 1000); // Increased timeout to 1 second
+      
+      // Additional fallback - check again after 2 seconds
+      setTimeout(() => {
+        console.log('🔍 DEBUG: Fallback timeout - checking store selection again...');
+        checkStoreRequired();
+      }, 2000);
       
       // Periodically check store status from backend
       setInterval(updateStoreStatusFromBackend, 30000); // Check every 30 seconds
@@ -6860,20 +7472,7 @@
         
         // Check if TagManager and uploadFile method are available
         if (window.TagManager && typeof window.TagManager.uploadFile === 'function') {
-          console.log('✓ TagManager ready, attaching file upload listener');
-          
-          fileInput.addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            if (file) {
-              console.log('File selected:', file.name);
-              try {
-                window.TagManager.uploadFile(file);
-              } catch (error) {
-                console.error('Error uploading file:', error);
-                alert('Error uploading file. Please try again or refresh the page.');
-              }
-            }
-          });
+          console.log('✓ TagManager ready, file upload handler already attached in enhanced-ui.js');
         } else {
           console.warn('TagManager not ready yet, retrying in 100ms...');
           // Retry after a short delay
@@ -9155,10 +9754,52 @@
           <button type="button" class="btn btn-glass" data-bs-dismiss="modal">Close</button>
         </div>
       </div>
-    </div>
   </div>
+</div>
 
-  <!-- Manual Product Entry Modal -->
+<!-- Immediate Store Selection Script -->
+<script>
+  // This script runs immediately after the modal HTML is parsed
+  console.log('🔍 DEBUG: Modal HTML parsed, checking if store selection needed...');
+  
+  // Wait a tiny bit for the DOM to be ready
+  setTimeout(() => {
+    console.log('🔍 DEBUG: Post-modal script executing...');
+    
+    // Check if main content is hidden (indicating we need store selection)
+    const mainContent = document.getElementById('mainContent');
+    if (mainContent && mainContent.style.display === 'none') {
+      console.log('🔍 DEBUG: Main content is hidden, showing store modal...');
+      
+      // Try to show the modal immediately
+      const modalElement = document.getElementById('storeSelectionModal');
+      if (modalElement) {
+        console.log('🔍 DEBUG: Modal found, attempting to show...');
+        
+        // Try Bootstrap first
+        if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+          const modal = new bootstrap.Modal(modalElement, {
+            backdrop: 'static',
+            keyboard: false
+          });
+          modal.show();
+          console.log('🔍 DEBUG: Bootstrap modal shown from post-modal script');
+        } else {
+          // Manual fallback
+          modalElement.style.display = 'block';
+          modalElement.classList.add('show');
+          modalElement.setAttribute('aria-hidden', 'false');
+          
+          // Bootstrap will handle the backdrop automatically
+          
+          console.log('🔍 DEBUG: Manual modal shown from post-modal script');
+        }
+      }
+    }
+  }, 50);
+</script>
+
+<!-- Manual Product Entry Modal -->
   <div class="modal fade" id="manualProductModal" tabindex="-1" aria-labelledby="manualProductModalLabel" inert>
     <div class="modal-dialog modal-lg">
       <div class="modal-content glass-card">
@@ -11445,6 +12086,25 @@
       // Refresh metrics every 30 seconds
       setInterval(refreshPerformanceMetrics, 30000);
     }
+  </script>
+  
+  <!-- Final Test Script -->
+  <script>
+    console.log('🔍 DEBUG: Final script executing...');
+    
+    // Test if we can find the ultra simple button
+    setTimeout(() => {
+      const ultraBtn = document.querySelector('button[onclick*="ULTRA SIMPLE"]');
+      console.log('🔍 DEBUG: Ultra simple button found:', !!ultraBtn);
+      
+      if (ultraBtn) {
+        console.log('🔍 DEBUG: Adding click listener to ultra simple button...');
+        ultraBtn.addEventListener('click', function() {
+          console.log('🔍 DEBUG: Ultra simple button clicked via event listener!');
+          alert('EVENT LISTENER WORKS!');
+        });
+      }
+    }, 3000);
   </script>
 
   </body>

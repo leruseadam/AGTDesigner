@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/adamcordova/Desktop/**)",
+      "Bash(cd:*)",
+      "Bash(sqlite3:*)",
+      "Bash(python3 populate_bothell_db.py)",
+      "Bash(awk:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

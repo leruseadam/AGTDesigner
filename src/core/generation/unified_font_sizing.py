@@ -398,8 +398,11 @@ def get_font_size_by_marker(text, marker_type, template_type='vertical', scale_f
     if base_marker in ('LINEAGE', 'LINEAGE_CENTER'):
         try:
             template_lower = str(template_type).lower()
-            if template_lower in ('double', 'mini', 'vertical'):
+            if template_lower in ('double', 'mini'):
                 field_type = 'brand'
+            elif template_lower == 'vertical':
+                # CRITICAL FIX: Vertical template should use lineage field type, not brand
+                field_type = 'lineage'
             else:
                 # Use product_type when available
                 if product_type is not None and not is_classic_type(product_type):

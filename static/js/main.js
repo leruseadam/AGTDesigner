@@ -1,12 +1,11 @@
-// Memory-optimized performance utilities
+// Performance optimization utilities
 const performanceUtils = {
-    // Memory-efficient debounce with cleanup
+    // Debounce function for search inputs
     debounce(func, wait) {
         let timeout;
         return function executedFunction(...args) {
             const later = () => {
                 clearTimeout(timeout);
-                timeout = null; // Help GC
                 func(...args);
             };
             clearTimeout(timeout);
@@ -14,7 +13,7 @@ const performanceUtils = {
         };
     },
     
-    // Memory-efficient throttle
+    // Throttle function for scroll events
     throttle(func, limit) {
         let inThrottle;
         return function() {
@@ -28,42 +27,21 @@ const performanceUtils = {
         }
     },
     
-    // Memory-efficient DOM batching
+    // Batch DOM updates to minimize reflows
     batchDOMUpdate(callback) {
         return requestAnimationFrame(() => {
             callback();
         });
     },
     
-    // Memory monitoring
+    // Performance monitoring
     startTiming: () => performance.now(),
     endTiming: (start, operation) => {
         const duration = performance.now() - start;
-        if (duration > 16) {
+        if (duration > 16) { // Log if slower than 60fps
             console.warn(`Performance: ${operation} took ${duration.toFixed(2)}ms`);
         }
         return duration;
-    },
-    
-    // Memory cleanup utilities
-    cleanup: {
-        // Clear large objects
-        clearLargeObjects(obj) {
-            if (obj && typeof obj === 'object') {
-                Object.keys(obj).forEach(key => {
-                    if (obj[key] && typeof obj[key] === 'object' && obj[key].length > 1000) {
-                        obj[key] = null;
-                    }
-                });
-            }
-        },
-        
-        // Force garbage collection if available
-        forceGC() {
-            if (window.gc) {
-                window.gc();
-            }
-        }
     }
 };
 
@@ -642,14 +620,28 @@ const VALID_PRODUCT_TYPES = [
   "rso/co2 tankers"
 ];
 
-// Mac-like ultra-fast debounce function
 const debounce = (func, delay) => {
     let timeoutId;
+    let isExecuting = false; // Add execution lock
     
     return function(...args) {
         const context = this;
+        
+        // If already executing, don't schedule another execution
+        if (isExecuting) {
+            console.log('Generation already in progress, ignoring duplicate request');
+            return;
+        }
+        
         clearTimeout(timeoutId);
-        timeoutId = setTimeout(() => func.apply(context, args), delay);
+        timeoutId = setTimeout(async () => {
+            isExecuting = true;
+            try {
+                await func.apply(context, args);
+            } finally {
+                isExecuting = false;
+            }
+        }, delay);
     };
 };
 
@@ -801,15 +793,15 @@ const AppLoadingSplash = {
 
 const TagManager = {
     state: {
-        selectedTags: new Set(), // Memory-efficient Set
-        persistentSelectedTags: new Set(), // Memory-efficient Set
+        selectedTags: new Set(),
+        persistentSelectedTags: new Set(), // New: persistent selected tags independent of filters
         initialized: false,
         filters: {},
         loading: false,
-        isJsonMatchedSession: false,
-        brandCategories: new Map(), // Memory-efficient Map
-        originalTags: [], // Will be cleared when not needed
-        originalFilterOptions: {}, // Minimal filter options
+        isJsonMatchedSession: false, // Flag to indicate if we're in a JSON matched session
+        brandCategories: new Map(),  // Add this for storing brand subcategories
+        originalTags: [], // Store original tags separately
+        originalFilterOptions: {}, // Store original filter options to preserve order
         lineageColors: {
             'SATIVA': 'var(--lineage-sativa)',
             'INDICA': 'var(--lineage-indica)',
@@ -821,12 +813,9 @@ const TagManager = {
             'MIXED': 'var(--lineage-mixed)',
             'CBD_BLEND': 'var(--lineage-cbd)'
         },
-        filterCache: null, // Single cache entry
-        updateAvailableTagsTimer: null,
-        isSearching: false,
-        // Memory optimization flags
-        _memoryOptimized: true,
-        _lastCleanup: Date.now()
+        filterCache: null,
+        updateAvailableTagsTimer: null, // Add timer tracking
+        isSearching: false // Whether a tag search term is active
     },
     isGenerating: false, // Add generation lock flag
 
@@ -949,12 +938,7 @@ const TagManager = {
 
     async updateFilterOptions() {
         try {
-            // Fast path: skip if no original options (Mac-like speed)
-            if (!this.state.originalFilterOptions.vendor) {
-                return;
-            }
-            
-            // Get current filter values (minimal)
+            // Get current filter values
             const currentFilters = {
                 vendor: document.getElementById('vendorFilter')?.value || '',
                 brand: document.getElementById('brandFilter')?.value || '',
@@ -962,9 +946,14 @@ const TagManager = {
                 lineage: document.getElementById('lineageFilter')?.value || '',
                 weight: document.getElementById('weightFilter')?.value || '',
                 doh: document.getElementById('dohFilter')?.value || '',
-                highCbd: document.getElementById('highCbdFilter')?.value || '',
-                ratio: document.getElementById('ratioFilter')?.value || ''
+                highCbd: document.getElementById('highCbdFilter')?.value || ''
             };
+
+            // Only update filter options if we have original options
+            if (!this.state.originalFilterOptions.vendor) {
+                console.log('No original filter options available, skipping update');
+                return;
+            }
 
             // Get the currently filtered tags to determine available options
             const tagsToFilter = this.state.originalTags.length > 0 ? this.state.originalTags : this.state.tags;
@@ -1066,14 +1055,6 @@ const TagManager = {
                     }
                 }
                 
-                // Check ratio filter - only apply if not empty and not "All"
-                if (currentFilters.ratio && currentFilters.ratio.trim() !== '' && currentFilters.ratio.toLowerCase() !== 'all') {
-                    const tagRatio = (tag.Ratio || tag['Ratio_or_THC_CBD'] || '').toString().trim();
-                    if (tagRatio.toLowerCase() !== currentFilters.ratio.toLowerCase()) {
-                        return false;
-                    }
-                }
-                
                 return true;
             }) : tagsToFilter;
 
@@ -1085,8 +1066,7 @@ const TagManager = {
                 lineage: new Set(),
                 weight: new Set(),
                 doh: new Set(),
-                highCbd: new Set(),
-                ratio: new Set()
+                highCbd: new Set()
             };
 
             filteredTags.forEach(tag => {
@@ -1107,12 +1087,6 @@ const TagManager = {
                 }
                 if (tag.DOH || tag.doh) availableOptions.doh.add((tag.DOH || tag.doh || '').toString().trim());
                 
-                // Extract ratio information
-                if (tag.Ratio || tag['Ratio_or_THC_CBD']) {
-                    const ratio = (tag.Ratio || tag['Ratio_or_THC_CBD'] || '').toString().trim();
-                    if (ratio) availableOptions.ratio.add(ratio);
-                }
-                
                 // For High CBD, categorize the product type
                 const tagProductType = (tag['Product Type*'] || tag.productType || '').toString().trim().toLowerCase();
                 const isHighCbd = tagProductType.startsWith('high cbd');
@@ -1131,8 +1105,7 @@ const TagManager = {
                 lineage: 'lineageFilter',
                 weight: 'weightFilter',
                 doh: 'dohFilter',
-                highCbd: 'highCbdFilter',
-                ratio: 'ratioFilter'
+                highCbd: 'highCbdFilter'
             };
 
             Object.entries(filterFieldMap).forEach(([filterType, filterId]) => {
@@ -1194,7 +1167,9 @@ const TagManager = {
     },
 
     applyFilters() {
-        // Fast path: show all if no filters (Mac-like speed)
+        console.log('applyFilters() called - HOT RELOAD TEST');
+        
+        // Get current filter values
         const vendorFilter = document.getElementById('vendorFilter')?.value || '';
         const brandFilter = document.getElementById('brandFilter')?.value || '';
         const productTypeFilter = document.getElementById('productTypeFilter')?.value || '';
@@ -1202,14 +1177,50 @@ const TagManager = {
         const weightFilter = document.getElementById('weightFilter')?.value || '';
         const dohFilter = document.getElementById('dohFilter')?.value || '';
         const highCbdFilter = document.getElementById('highCbdFilter')?.value || '';
-        const ratioFilter = document.getElementById('ratioFilter')?.value || '';
         
-        // Check if all filters are "All" - show everything (fast path)
-        const allFiltersAll = [vendorFilter, brandFilter, productTypeFilter, lineageFilter, weightFilter, dohFilter, highCbdFilter, ratioFilter]
+        console.log('Filter values:', {
+            vendor: vendorFilter,
+            brand: brandFilter,
+            productType: productTypeFilter,
+            lineage: lineageFilter,
+            weight: weightFilter,
+            doh: dohFilter,
+            highCbd: highCbdFilter
+        });
+        
+        // DEBUG: Check if productTypeFilter is being set correctly
+        if (productTypeFilter) {
+            console.log('🔍 Product Type Filter Debug:', {
+                rawValue: productTypeFilter,
+                normalizedValue: normalizeProductType(productTypeFilter),
+                elementValue: document.getElementById('productTypeFilter')?.value,
+                elementOptions: Array.from(document.getElementById('productTypeFilter')?.options || []).map(opt => opt.value)
+            });
+        }
+        
+        // Store current filters in state for use by updateSelectedTags
+        this.state.filters = {
+            vendor: vendorFilter,
+            brand: brandFilter,
+            productType: productTypeFilter,
+            lineage: lineageFilter,
+            weight: weightFilter,
+            doh: dohFilter,
+            highCbd: highCbdFilter
+        };
+        
+        // Create a filter key for caching
+        const filterKey = `${vendorFilter}|${brandFilter}|${productTypeFilter}|${lineageFilter}|${weightFilter}|${dohFilter}|${highCbdFilter}`;
+        
+        // Check if all filters are set to "All" - this means show all tags
+        const allFiltersAll = [vendorFilter, brandFilter, productTypeFilter, lineageFilter, weightFilter, dohFilter, highCbdFilter]
             .every(filter => !filter || filter.trim() === '' || filter.toLowerCase() === 'all');
         
         if (allFiltersAll) {
+            console.log('All filters are "All", showing all original tags');
+            // Clear the filter cache since we're showing all tags
             this.state.filterCache = null;
+            // Pass original tags with no filtering
             this.debouncedUpdateAvailableTags(this.state.originalTags, null);
             this.renderActiveFilters();
             return;
@@ -2311,19 +2322,23 @@ const TagManager = {
                 return;
             }
             
-            // Save current state for undo before making changes
-            try {
-                await fetch('/api/save-selection-state', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        action_type: 'checkbox_selection'
-                    })
-                });
-                console.log('Selection state saved for undo');
-            } catch (error) {
-                console.warn('Failed to save selection state for undo:', error);
-                // Continue with the operation even if undo save fails
+            // PC optimization: Skip undo save for better performance on Windows
+            const isWindows = /Windows|Win32|Win64/.test(navigator.userAgent);
+            if (!isWindows) {
+                // Save current state for undo before making changes (Mac only)
+                try {
+                    await fetch('/api/save-selection-state', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            action_type: 'checkbox_selection'
+                        })
+                    });
+                    console.log('Selection state saved for undo');
+                } catch (error) {
+                    console.warn('Failed to save selection state for undo:', error);
+                    // Continue with the operation even if undo save fails
+                }
             }
             
             // Ensure the checkbox state is properly updated
@@ -2442,18 +2457,13 @@ const TagManager = {
         let displayLineage = lineage;
         
         // Apply nonclassic product type logic to ensure correct lineage colors
-        const productType = tag['Product Type*'] || tag.productType || tag.ProductType || '';
-        const classicTypes = ['flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'];
-        const isNonclassic = !classicTypes.map(ct => ct.toLowerCase()).includes(productType.toLowerCase());
-        
-        if (isNonclassic) {
-            // CRITICAL FIX: For JSON matched products, trust the lineage that was already determined during matching
-            if (isJsonMatched) {
-                // For JSON matched products, use the lineage from the matched database data
-                // This ensures CBD Blend products get the correct yellow color
-                displayLineage = lineage; // Use the lineage from the matched database
-                console.log(`🎨 JSON MATCHED: Using database lineage "${lineage}" for nonclassic product "${displayName}"`);
-            } else {
+        // CRITICAL FIX: For JSON matched tags, trust the backend's lineage assignment
+        if (!isJsonMatched) {
+            const productType = tag['Product Type*'] || tag.productType || tag.ProductType || '';
+            const classicTypes = ['flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'];
+            const isNonclassic = !classicTypes.map(ct => ct.toLowerCase()).includes(productType.toLowerCase());
+            
+            if (isNonclassic) {
                 // For nonclassic products, use Product Strain to determine lineage
                 // UPDATED: Use the same conservative logic as backend
                 const productStrain = tag['Product Strain'] || tag.productStrain || tag.ProductStrain || '';
@@ -2464,10 +2474,18 @@ const TagManager = {
                 const isEdible = edibleTypes.includes(productType.toLowerCase());
                 
                 if (strainStr.includes('cbd blend')) {
-                    // CRITICAL FIX: CBD Blend products should ALWAYS get CBD lineage (yellow color)
-                    // regardless of product type - this ensures proper color display
-                    displayLineage = 'CBD';
-                    console.log(`🎨 CBD BLEND FIX: Set lineage to CBD for ${displayName} (strain: ${productStrain})`);
+                    // For edibles, only assign CBD lineage if explicitly high-CBD
+                    if (isEdible) {
+                        const productName = (tag['Product Name*'] || tag.ProductName || '').toString().toUpperCase();
+                        if (productType.toLowerCase() === 'high cbd edible liquid' || 
+                            (productName.includes('CBD') && ['HIGH', 'PURE', 'ISOLATE'].some(word => productName.includes(word)))) {
+                            displayLineage = 'CBD'; // Explicitly high-CBD edible
+                        } else {
+                            displayLineage = 'MIXED'; // Regular edible with CBD Blend strain
+                        }
+                    } else {
+                        displayLineage = 'CBD'; // Non-edible with CBD Blend strain
+                    }
                 } else if (strainStr.includes('cbn') || strainStr.includes('cbc') || strainStr.includes('cbg')) {
                     // CBN, CBC, CBG products should get CBD lineage (yellow color)
                     displayLineage = 'CBD';
@@ -2486,6 +2504,10 @@ const TagManager = {
                     }
                 }
             }
+        } else {
+            // For JSON matched tags, trust the backend's lineage assignment
+            // The backend correctly determines lineage based on product type and strain
+            console.log(`DEBUG: JSON matched tag using backend lineage: "${lineage}" -> "${displayLineage}"`);
         }
         
         // Backend now handles lineage assignment correctly:
@@ -2653,22 +2675,6 @@ const TagManager = {
         
         updateDohImage(initialDohStatus);
         tagInfo.appendChild(imageContainer);
-        
-        // Add ratio display for nonclassic products
-        const ratio = tag.Ratio || tag['Ratio_or_THC_CBD'] || '';
-        if (ratio && ratio.trim() !== '') {
-            const ratioElement = document.createElement('span');
-            ratioElement.className = 'ratio-badge badge bg-info me-2';
-            ratioElement.style.fontSize = '0.7rem';
-            ratioElement.style.padding = '2px 6px';
-            ratioElement.style.backgroundColor = 'rgba(13, 202, 240, 0.8)';
-            ratioElement.style.color = '#fff';
-            ratioElement.style.borderRadius = '4px';
-            ratioElement.style.fontWeight = '500';
-            ratioElement.textContent = ratio.trim();
-            ratioElement.title = `Ratio: ${ratio.trim()}`;
-            tagInfo.appendChild(ratioElement);
-        }
         
         // Add JSON match indicator if this tag came from JSON matching or educated guessing
         if (isJsonMatched) {
@@ -2948,18 +2954,26 @@ const TagManager = {
     },
 
     handleTagSelection(e, tag) {
-        console.log('=== HANDLE TAG SELECTION CALLED ===');
-        console.log('Event:', e);
-        console.log('Tag:', tag);
+        // PC optimization: Reduce console logging for better performance
+        const isWindows = /Windows|Win32|Win64/.test(navigator.userAgent);
+        const enableLogging = !isWindows; // Disable logging on Windows for performance
+        
+        if (enableLogging) {
+            console.log('=== HANDLE TAG SELECTION CALLED ===');
+            console.log('Event:', e);
+            console.log('Tag:', tag);
+        }
         
         // Ignore changes during drag-and-drop reordering
         if (e.target.hasAttribute('data-reordering') || e.target.hasAttribute('data-drag-disabled')) {
-            console.log('Ignoring tag selection change during drag operation');
+            if (enableLogging) console.log('Ignoring tag selection change during drag operation');
             return;
         }
         
         const isChecked = e.target.checked;
-        console.log('Tag selection changed:', tag && tag['Product Name*'] ? tag['Product Name*'] : 'UNDEFINED', 'checked:', isChecked);
+        if (enableLogging) {
+            console.log('Tag selection changed:', tag && tag['Product Name*'] ? tag['Product Name*'] : 'UNDEFINED', 'checked:', isChecked);
+        }
         
         // Safety check: ensure tag exists and has required properties
         if (!tag || !tag['Product Name*']) {
@@ -2969,9 +2983,12 @@ const TagManager = {
         
         // Prevent rapid deselection issues
         if (this.isMovingTags) {
-            console.log('Ignoring tag selection during tag move operation');
+            if (enableLogging) console.log('Ignoring tag selection during tag move operation');
             return;
         }
+        
+        // PC-specific optimization: Use shorter debounce for better responsiveness
+        const debounceDelay = isWindows ? 25 : 50; // Faster response on PC
         
         // Add debouncing for rapid deselection to prevent UI issues
         if (this.tagSelectionTimeout) {
@@ -2985,50 +3002,51 @@ const TagManager = {
             // Note: The persistent selected tags are already updated in the checkbox event handler
             // This function now focuses on UI updates and backend synchronization
             
-            console.log('Persistent selected tags after change:', this.state.persistentSelectedTags);
+            if (enableLogging) {
+                console.log('Persistent selected tags after change:', this.state.persistentSelectedTags);
+            }
+            
+            // PC-specific optimization: Use cached tag lookup for better performance
+            if (!this.state.tagLookupCache) {
+                this.state.tagLookupCache = new Map();
+                // Build cache from both tags and originalTags
+                [...this.state.tags, ...this.state.originalTags].forEach(t => {
+                    if (t && t['Product Name*']) {
+                        this.state.tagLookupCache.set(t['Product Name*'], t);
+                        // Also cache lowercase version for case-insensitive lookup
+                        this.state.tagLookupCache.set(t['Product Name*'].toLowerCase(), t);
+                    }
+                });
+            }
             
             // Only use backend data - never fall back to frontend persistent tags
             // Get selected tags from backend
-            console.log('=== SELECTED TAGS DEBUG ===');
-            console.log('persistentSelectedTags:', this.state.persistentSelectedTags);
-            console.log('this.state.tags length:', this.state.tags.length);
-            console.log('this.state.originalTags length:', this.state.originalTags.length);
-            
-            // Debug: Show first few tags in state
-            if (this.state.tags.length > 0) {
-                console.log('First 3 tags in this.state.tags:');
-                this.state.tags.slice(0, 3).forEach(tag => {
-                    console.log(`  "${tag && tag['Product Name*'] ? tag['Product Name*'] : 'UNDEFINED'}"`);
-                });
+            if (enableLogging) {
+                console.log('=== SELECTED TAGS DEBUG ===');
+                console.log('persistentSelectedTags:', this.state.persistentSelectedTags);
+                console.log('this.state.tags length:', this.state.tags.length);
+                console.log('this.state.originalTags length:', this.state.originalTags.length);
             }
             
-            if (this.state.originalTags.length > 0) {
-                console.log('First 3 tags in this.state.originalTags:');
-                this.state.originalTags.slice(0, 3).forEach(tag => {
-                    console.log(`  "${tag && tag['Product Name*'] ? tag['Product Name*'] : 'UNDEFINED'}"`);
-                });
-            }
-            
+            // PC optimization: Use cached lookup instead of expensive .find() operations
             const selectedTagObjects = this.state.persistentSelectedTags.map(name => {
                 // Safety check: ensure name is valid
                 if (!name || typeof name !== 'string') {
-                    console.warn('Invalid name in persistentSelectedTags:', name);
+                    if (enableLogging) console.warn('Invalid name in persistentSelectedTags:', name);
                     return null;
                 }
                 
-                // Only use tags that exist in the current backend data
-                let foundTag = this.state.tags.find(t => t && t['Product Name*'] && t['Product Name*'] === name) || 
-                              this.state.originalTags.find(t => t && t['Product Name*'] && t['Product Name*'] === name);
+                // Use cached lookup for O(1) performance instead of O(n) .find()
+                let foundTag = this.state.tagLookupCache.get(name);
                 
-                // If not found, try case-insensitive search
+                // If not found, try case-insensitive search using cache
                 if (!foundTag) {
-                    foundTag = this.state.tags.find(t => t && t['Product Name*'] && t['Product Name*'].toLowerCase() === name.toLowerCase()) || 
-                              this.state.originalTags.find(t => t && t['Product Name*'] && t['Product Name*'].toLowerCase() === name.toLowerCase());
+                    foundTag = this.state.tagLookupCache.get(name.toLowerCase());
                 }
                 
                 // If still not found, create a minimal tag object for the selected tag
                 if (!foundTag) {
-                    console.log(`Tag "${name}" not found in state, creating minimal tag object`);
+                    if (enableLogging) console.log(`Tag "${name}" not found in cache, creating minimal tag object`);
                     foundTag = {
                         'Product Name*': name,
                         'Product Brand': 'Unknown',
@@ -3039,23 +3057,28 @@ const TagManager = {
                     };
                 }
                 
-                console.log(`Looking for tag "${name}":`, foundTag ? 'FOUND' : 'NOT FOUND');
-                if (!foundTag) {
-                    console.log(`  Tag name length: ${name.length}`);
-                    console.log(`  Tag name characters: ${Array.from(name).map(c => c.charCodeAt(0)).join(', ')}`);
+                if (enableLogging) {
+                    console.log(`Looking for tag "${name}":`, foundTag ? 'FOUND' : 'NOT FOUND');
                 }
                 return foundTag;
             }).filter(Boolean); // Filter out null values from invalid names
             
-            console.log('selectedTagObjects:', selectedTagObjects);
-            console.log('selectedTagObjects length:', selectedTagObjects.length);
+            if (enableLogging) {
+                console.log('selectedTagObjects:', selectedTagObjects);
+                console.log('selectedTagObjects length:', selectedTagObjects.length);
+            }
             
-            this.updateSelectedTags(selectedTagObjects);
+            // PC optimization: Use optimized update method
+            if (isWindows) {
+                this.updateSelectedTagsOptimized(selectedTagObjects);
+            } else {
+                this.updateSelectedTags(selectedTagObjects);
+            }
             
             // FIXED: Don't hide selected tags from available display - keep all items visible
             // This allows users to see all available options even after making selections
             if (isChecked && e.target.closest('#availableTags')) {
-                console.log('FIXED: Not hiding selected tag from available display - keeping all items visible');
+                if (enableLogging) console.log('FIXED: Not hiding selected tag from available display - keeping all items visible');
                 // Tag remains visible in available list even after selection
             }
             
@@ -3076,12 +3099,14 @@ const TagManager = {
                 // For JSON matched items and educated guess items, also ensure they appear in available tags
                 // This is important for items that might not exist in the original Excel data
                 if (tag.Source && (tag.Source === 'JSON Match' || tag.Source.includes('Educated Guess'))) {
-                    console.log(`${tag.Source.includes('Educated Guess') ? 'Educated guess' : 'JSON matched'} item deselected: ${tag['Product Name*']}`);
+                    if (enableLogging) {
+                        console.log(`${tag.Source.includes('Educated Guess') ? 'Educated guess' : 'JSON matched'} item deselected: ${tag['Product Name*']}`);
+                    }
                     // Sync with backend to ensure deselection is persisted
                     this.syncDeselectionWithBackend(tag['Product Name*']);
                 }
             }
-        }, 50); // 50ms debounce delay for individual tag selection
+        }, debounceDelay); // PC-optimized debounce delay
     },
 
     updateTagLineage(tag, lineage) {
@@ -3197,6 +3222,149 @@ const TagManager = {
                 lineageBadge.textContent = newLineage;
                 lineageBadge.className = `badge lineage-badge ${this.getLineageColor(newLineage)}`;
             }
+        }
+    },
+
+    updateSelectedTagsOptimized(tags) {
+        // PC-optimized version of updateSelectedTags with better performance
+        if (!tags || !Array.isArray(tags)) {
+            console.warn('updateSelectedTagsOptimized called with invalid tags:', tags);
+            tags = [];
+        }
+        
+        // Prevent updates during tag move operations to avoid race conditions
+        if (this.isMovingTags) {
+            console.log('Ignoring updateSelectedTagsOptimized during tag move operation');
+            return;
+        }
+        
+        const container = document.getElementById('selectedTags');
+        if (!container) {
+            console.error('Selected tags container not found');
+            return;
+        }
+        
+        console.time('updateSelectedTagsOptimized');
+        console.log('updateSelectedTagsOptimized called with tags:', tags);
+        
+        // PC optimization: Use DocumentFragment for batch DOM operations
+        const fragment = document.createDocumentFragment();
+        
+        // PC optimization: Cache DOM elements to avoid repeated queries
+        if (!this.state.selectedTagsCache) {
+            this.state.selectedTagsCache = {
+                container: container,
+                selectAllContainer: null,
+                lastTagCount: 0
+            };
+        }
+        
+        // Clear existing content efficiently
+        container.innerHTML = '';
+        
+        // Create select all container if needed
+        if (!this.state.selectedTagsCache.selectAllContainer) {
+            const selectAllContainer = document.createElement('div');
+            selectAllContainer.className = 'd-flex align-items-center gap-3 mb-2 px-3';
+            selectAllContainer.innerHTML = `
+                <label class="d-flex align-items-center gap-2 cursor-pointer mb-0 select-all-container">
+                    <input type="checkbox" id="selectAllSelected" class="custom-checkbox">
+                    <span class="text-secondary fw-semibold">SELECT ALL</span>
+                </label>
+            `;
+            this.state.selectedTagsCache.selectAllContainer = selectAllContainer;
+        }
+        
+        fragment.appendChild(this.state.selectedTagsCache.selectAllContainer.cloneNode(true));
+        
+        // PC optimization: Render tags directly without complex grouping for better performance
+        if (tags.length > 0) {
+            tags.forEach(tag => {
+                if (tag && tag['Product Name*']) {
+                    const tagElement = this.createTagElement(tag, true); // true = isForSelectedTags
+                    fragment.appendChild(tagElement);
+                }
+            });
+        } else {
+            // Show empty state
+            const emptyState = document.createElement('div');
+            emptyState.className = 'd-flex align-items-center justify-content-center';
+            emptyState.style.minHeight = '100%';
+            emptyState.innerHTML = `
+                <div class="text-center p-4" style="max-width: 500px;">
+                    <h5 class="text-secondary fw-bold mb-3">No tags selected</h5>
+                    <p class="text-secondary">Select tags from the left panel to get started.</p>
+                </div>
+            `;
+            fragment.appendChild(emptyState);
+        }
+        
+        // Batch DOM update
+        container.appendChild(fragment);
+        
+        // Update tag count
+        this.updateTagCount('selected', tags.length);
+        
+        // Attach event listeners efficiently
+        this.attachSelectedTagsEventListeners();
+        
+        console.timeEnd('updateSelectedTagsOptimized');
+        
+        // Update select all checkbox state
+        this.updateSelectAllCheckboxes();
+    },
+
+    attachSelectedTagsEventListeners() {
+        // PC optimization: Efficiently attach event listeners to selected tags
+        const container = document.getElementById('selectedTags');
+        if (!container) return;
+        
+        // Use event delegation for better performance
+        container.addEventListener('change', (e) => {
+            if (e.target.classList.contains('tag-checkbox')) {
+                const tagName = e.target.value;
+                const isChecked = e.target.checked;
+                
+                if (isChecked) {
+                    if (!this.state.persistentSelectedTags.includes(tagName)) {
+                        this.state.persistentSelectedTags.push(tagName);
+                    }
+                } else {
+                    const index = this.state.persistentSelectedTags.indexOf(tagName);
+                    if (index > -1) {
+                        this.state.persistentSelectedTags.splice(index, 1);
+                    }
+                }
+                
+                // Update the regular selectedTags set
+                this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+                
+                // Update select all checkbox state
+                this.updateSelectAllCheckboxes();
+            }
+        });
+        
+        // Handle select all checkbox
+        const selectAllCheckbox = document.getElementById('selectAllSelected');
+        if (selectAllCheckbox && !selectAllCheckbox.hasAttribute('data-listener-added')) {
+            selectAllCheckbox.setAttribute('data-listener-added', 'true');
+            selectAllCheckbox.addEventListener('change', (e) => {
+                const isChecked = e.target.checked;
+                const tagCheckboxes = container.querySelectorAll('.tag-checkbox');
+                
+                tagCheckboxes.forEach(checkbox => {
+                    checkbox.checked = isChecked;
+                });
+                
+                // Update persistent selected tags
+                if (isChecked) {
+                    this.state.persistentSelectedTags = Array.from(tagCheckboxes).map(cb => cb.value);
+                } else {
+                    this.state.persistentSelectedTags = [];
+                }
+                
+                this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+            });
         }
     },
 
@@ -4248,23 +4416,90 @@ const TagManager = {
         }
     },
 
-    async fetchAndPopulateFilters() {
+    async fetchAndPopulateFilters(forceRefresh = false) {
         try {
-            // Use the filter options API with cache refresh and timestamp to ensure updated weight formatting
-            const timestamp = Date.now();
-            const response = await fetch(`/api/filter-options?refresh=true&t=${timestamp}`, {
+            // Performance optimization: Use cached data when possible
+            const cacheKey = 'filter_options_cache';
+            const cacheTimestamp = 'filter_options_timestamp';
+            const CACHE_DURATION = 30000; // 30 seconds cache for PC performance
+            
+            // Check if we have recent cached data and don't need to refresh
+            if (!forceRefresh && this.state.filterOptionsCache) {
+                const cacheAge = Date.now() - this.state.filterOptionsCache.timestamp;
+                if (cacheAge < CACHE_DURATION) {
+                    console.log('Using cached filter options for better performance');
+                    this.updateFilters(this.state.filterOptionsCache.data, true);
+                    return;
+                }
+            }
+            
+            // WEB PERFORMANCE OPTIMIZATION: Use web-optimized routes for better performance
+            const isWindows = /Windows|Win32|Win64/.test(navigator.userAgent);
+            const isWebClient = isWindows || window.location.hostname !== 'localhost';
+            
+            // Use web-optimized routes for better performance
+            const apiUrl = isWebClient 
+                ? `/api/web/filter-options?refresh=${forceRefresh}&t=${Date.now()}&platform=windows`
+                : `/api/filter-options?refresh=${forceRefresh}&t=${Date.now()}&platform=windows`;
+            
+            console.log(`Fetching filter options${isWebClient ? ' (Web-optimized)' : ''}...`);
+            const response = await fetch(apiUrl, {
                 method: 'GET',
                 headers: { 'Content-Type': 'application/json' }
             });
+            
             if (!response.ok) {
                 throw new Error('Failed to fetch filter options');
             }
+            
             const filterOptions = await response.json();
             console.log('Fetched filter options:', filterOptions);
+            
+            // Cache the results for future use
+            this.state.filterOptionsCache = {
+                data: filterOptions,
+                timestamp: Date.now()
+            };
+            
             this.updateFilters(filterOptions, true); // Preserve existing filter values
         } catch (error) {
             console.error('Error fetching filter options:', error);
-            alert('Failed to load filter options');
+            
+            // WEB PERFORMANCE OPTIMIZATION: Fallback to original route if web-optimized route fails
+            if (isWebClient) {
+                console.log('Web-optimized route failed, trying fallback...');
+                try {
+                    const fallbackUrl = `/api/filter-options?refresh=${forceRefresh}&t=${Date.now()}&platform=windows`;
+                    const fallbackResponse = await fetch(fallbackUrl, {
+                        method: 'GET',
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                    
+                    if (fallbackResponse.ok) {
+                        const filterOptions = await fallbackResponse.json();
+                        console.log('✅ Fallback filter route successful');
+                        
+                        // Cache the results for future use
+                        this.state.filterOptionsCache = {
+                            data: filterOptions,
+                            timestamp: Date.now()
+                        };
+                        
+                        this.updateFilters(filterOptions, true);
+                        return;
+                    }
+                } catch (fallbackError) {
+                    console.error('Fallback filter route also failed:', fallbackError);
+                }
+            }
+            
+            // Final fallback to cached data if available
+            if (this.state.filterOptionsCache) {
+                console.log('Using fallback cached filter options');
+                this.updateFilters(this.state.filterOptionsCache.data, true);
+            } else {
+                alert('Failed to load filter options');
+            }
         }
     },
 
@@ -4319,7 +4554,6 @@ const TagManager = {
     // Initialize the tag manager
     init() {
         console.log('=== TAGMANAGER INIT FUNCTION CALLED ===');
-        console.log('TagManager initializing...');
         console.log('TagManager initialized');
         console.log('DOM ready, checking for available tags container...');
         const availableTagsContainer = document.getElementById('availableTags');
@@ -4327,9 +4561,6 @@ const TagManager = {
         if (availableTagsContainer) {
             console.log('Container innerHTML:', availableTagsContainer.innerHTML);
         }
-        
-        // Skip platform detection for Mac-like speed
-        // this.detectPlatform();
         
         // Show application splash screen
         AppLoadingSplash.show();
@@ -4368,12 +4599,6 @@ const TagManager = {
         
         // Add search event listeners
         this.setupSearchEventListeners();
-        
-        // Skip PC compatibility for Mac-like speed
-        // this.initializePCCompatibility();
-        
-        // Start memory optimization
-        this.startMemoryOptimization();
         
         // Update table header if TagsTable is available
         setTimeout(() => {
@@ -5745,10 +5970,56 @@ const TagManager = {
 
     // Efficient helper to update available tags display without DOM rebuilding
     efficientlyUpdateAvailableTagsDisplay() {
-        // FIXED: Don't hide selected tags from available display - keep all items visible
-        // This allows users to see all available options even after making selections
-        console.log('FIXED: Not hiding selected tags from available display - keeping all items visible');
+        // PC optimization: Use cached DOM elements and requestAnimationFrame for better performance
+        const isWindows = /Windows|Win32|Win64/.test(navigator.userAgent);
         
+        if (isWindows) {
+            // Use requestAnimationFrame to batch DOM updates
+            requestAnimationFrame(() => {
+                this.efficientlyUpdateAvailableTagsDisplayOptimized();
+            });
+        } else {
+            // Mac gets the original implementation
+            this.efficientlyUpdateAvailableTagsDisplayOriginal();
+        }
+    },
+
+    efficientlyUpdateAvailableTagsDisplayOptimized() {
+        // PC-optimized version with cached DOM elements
+        if (!this.state.domCache) {
+            this.state.domCache = {
+                availableTagElements: null,
+                lastCacheTime: 0,
+                cacheTimeout: 1000 // Cache for 1 second
+            };
+        }
+        
+        const now = Date.now();
+        const cacheAge = now - this.state.domCache.lastCacheTime;
+        
+        // Use cached elements if cache is fresh
+        if (this.state.domCache.availableTagElements && cacheAge < this.state.domCache.cacheTimeout) {
+            // Show all tags using cached elements
+            this.state.domCache.availableTagElements.forEach(tagElement => {
+                tagElement.style.display = 'block';
+            });
+        } else {
+            // Refresh cache
+            this.state.domCache.availableTagElements = document.querySelectorAll('#availableTags .tag-item');
+            this.state.domCache.lastCacheTime = now;
+            
+            // Show all tags
+            this.state.domCache.availableTagElements.forEach(tagElement => {
+                tagElement.style.display = 'block';
+            });
+        }
+        
+        // Update select all checkboxes state efficiently
+        this.updateSelectAllCheckboxesOptimized();
+    },
+
+    efficientlyUpdateAvailableTagsDisplayOriginal() {
+        // Original implementation for Mac
         const availableTagElements = document.querySelectorAll('#availableTags .tag-item');
         
         // Show all tags regardless of selection status
@@ -5762,7 +6033,70 @@ const TagManager = {
 
     // Update select all checkboxes state
     updateSelectAllCheckboxes() {
-        // FIXED: Don't filter out hidden elements since we're not hiding any elements anymore
+        // PC optimization: Use optimized version for Windows
+        const isWindows = /Windows|Win32|Win64/.test(navigator.userAgent);
+        
+        if (isWindows) {
+            this.updateSelectAllCheckboxesOptimized();
+        } else {
+            this.updateSelectAllCheckboxesOriginal();
+        }
+    },
+
+    updateSelectAllCheckboxesOptimized() {
+        // PC-optimized version with cached DOM elements
+        if (!this.state.checkboxCache) {
+            this.state.checkboxCache = {
+                availableCheckboxes: null,
+                selectedCheckboxes: null,
+                lastCacheTime: 0,
+                cacheTimeout: 500 // Cache for 500ms
+            };
+        }
+        
+        const now = Date.now();
+        const cacheAge = now - this.state.checkboxCache.lastCacheTime;
+        
+        // Use cached elements if cache is fresh
+        if (this.state.checkboxCache.availableCheckboxes && cacheAge < this.state.checkboxCache.cacheTimeout) {
+            const availableCheckboxes = this.state.checkboxCache.availableCheckboxes;
+            const checkedCount = Array.from(availableCheckboxes).filter(cb => cb.checked).length;
+            
+            // Update global select all for available tags
+            const selectAllAvailable = document.getElementById('selectAllAvailable');
+            if (selectAllAvailable && availableCheckboxes.length > 0) {
+                selectAllAvailable.checked = checkedCount === availableCheckboxes.length;
+                selectAllAvailable.indeterminate = checkedCount > 0 && checkedCount < availableCheckboxes.length;
+            }
+        } else {
+            // Refresh cache and update
+            this.state.checkboxCache.availableCheckboxes = document.querySelectorAll('#availableTags .tag-checkbox');
+            this.state.checkboxCache.lastCacheTime = now;
+            
+            const availableCheckboxes = this.state.checkboxCache.availableCheckboxes;
+            const checkedCount = Array.from(availableCheckboxes).filter(cb => cb.checked).length;
+            
+            // Update global select all for available tags
+            const selectAllAvailable = document.getElementById('selectAllAvailable');
+            if (selectAllAvailable && availableCheckboxes.length > 0) {
+                selectAllAvailable.checked = checkedCount === availableCheckboxes.length;
+                selectAllAvailable.indeterminate = checkedCount > 0 && checkedCount < availableCheckboxes.length;
+            }
+        }
+        
+        // Update selected tags select all checkbox
+        const selectedCheckboxes = document.querySelectorAll('#selectedTags .tag-checkbox');
+        const selectedCheckedCount = Array.from(selectedCheckboxes).filter(cb => cb.checked).length;
+        const selectAllSelected = document.getElementById('selectAllSelected');
+        
+        if (selectAllSelected && selectedCheckboxes.length > 0) {
+            selectAllSelected.checked = selectedCheckedCount === selectedCheckboxes.length;
+            selectAllSelected.indeterminate = selectedCheckedCount > 0 && selectedCheckedCount < selectedCheckboxes.length;
+        }
+    },
+
+    updateSelectAllCheckboxesOriginal() {
+        // Original implementation for Mac
         const availableCheckboxes = document.querySelectorAll('#availableTags .tag-checkbox');
         const checkedCheckboxes = document.querySelectorAll('#availableTags .tag-checkbox:checked');
         
@@ -5867,69 +6201,60 @@ const TagManager = {
 
     async uploadFile(file) {
         try {
-            console.log(`🚀 Starting LIGHTNING upload:`, file.name, 'Size:', file.size, 'bytes');
+            const startTime = performance.now();
+            
+            // Check file size to determine upload method
+            const fileSizeMB = file.size / (1024 * 1024);
+            const isLargeFile = fileSizeMB > 5; // 5MB threshold
+            
+            console.log(`🚀 Starting ${isLargeFile ? 'streaming' : 'optimized'} upload:`, file.name, 'Size:', fileSizeMB.toFixed(1), 'MB');
             
             // Show Excel loading splash screen
             this.showExcelLoadingSplash(file.name);
             
-            // Phase 1: Lightning-fast upload (save file only)
-            this.updateUploadUI(`⚡ Lightning upload: ${file.name}...`);
+            // Use streaming upload for all files (it handles both large and small files)
+            this.updateUploadUI(`⚡ ${isLargeFile ? 'Streaming' : 'Optimized'} upload: ${file.name}...`);
             
             const formData = new FormData();
             formData.append('file', file);
             
-            console.log('🚀 Sending lightning upload request...');
+            console.log('🚀 Sending streaming upload request...');
             
-            const uploadResponse = await fetch('/upload-lightning', {
+            const uploadResponse = await fetch('/upload-streaming', {
                 method: 'POST',
                 body: formData
             });
             
             const uploadData = await uploadResponse.json();
-            console.log('⚡ Lightning upload response:', uploadData);
+            const uploadTime = performance.now() - startTime;
+            
+            console.log('⚡ Streaming upload response:', uploadData);
             
             if (!uploadResponse.ok) {
-                throw new Error(uploadData.error || 'Lightning upload failed');
+                throw new Error(uploadData.error || 'Streaming upload failed');
             }
             
-            // Phase 2: Background processing
-            this.updateUploadUI(`🔄 Processing ${file.name}...`);
-            console.log('🔄 Starting background processing...');
-            
-            const processResponse = await fetch('/process-lightning', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    file_path: uploadData.file_path,
-                    filename: uploadData.filename
-                })
-            });
-            
-            const processData = await processResponse.json();
-            console.log('✅ Processing response:', processData);
-            
-            if (!processResponse.ok) {
-                throw new Error(processData.error || 'Processing failed');
+            if (uploadData.success) {
+                console.log(`✅ Upload completed in ${uploadTime.toFixed(2)}ms using ${uploadData.method}`);
+                console.log(`📊 Processed ${uploadData.rows_loaded} rows in ${uploadData.processing_time.toFixed(3)}s`);
+                
+                // Update UI with success message
+                this.updateUploadUI(`✅ ${uploadData.message}`);
+                this.updateExcelLoadingStatus(`Loaded ${uploadData.rows_loaded} products`);
+                
+                // Let enhanced-ui.js handle data refresh to avoid conflicts
+                console.log('Upload completed successfully');
+                
+                return true;
+            } else {
+                throw new Error(uploadData.error || 'Upload processing failed');
             }
             
-            // Success!
-            this.updateUploadUI(`✅ ${file.name} ready!`, 'File processed successfully', 'success');
-            console.log(`✅ Lightning upload completed! Upload: ${uploadData.upload_time?.toFixed(3)}s, Process: ${processData.process_time?.toFixed(3)}s`);
-            
-            // Refresh the page to show new data
-            setTimeout(() => {
-                console.log('🔄 Refreshing page to show new data...');
-                window.location.reload();
-            }, 1000);
-            
-            return; // Success!
         } catch (error) {
-            console.error('⚡ Lightning upload error:', error);
-            this.hideExcelLoadingSplash();
-            this.updateUploadUI('Upload failed: ' + error.message, 'error');
-            return;
+            console.error('❌ Upload error:', error);
+            this.updateUploadUI(`❌ Upload error: ${error.message}`);
+            this.updateExcelLoadingStatus('Upload error');
+            return false;
         }
     },
     // Fallback upload method for PythonAnywhere
@@ -5950,8 +6275,7 @@ const TagManager = {
             if (response.ok && data.status === 'ready') {
                 console.log('Fallback upload successful');
                 this.updateUploadUI(file.name, 'File uploaded successfully', 'success');
-                // Refresh the page to load the new file
-                window.location.reload();
+                // Let enhanced-ui.js handle the refresh to avoid multiple refreshes
                 return true;
             } else {
                 console.error('Fallback upload failed:', data.error);
@@ -6157,44 +6481,70 @@ const TagManager = {
     setupFilterEventListeners() {
         const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
         
-        console.log('Setting up Mac-like fast filter event listeners...');
+        console.log('Setting up filter event listeners...');
+        console.log('TagManager instance:', this);
+        console.log('this.applyFilters:', typeof this.applyFilters);
         
-        // Ultra-fast debounced filter update (Mac-like speed)
-        const fastFilterUpdate = debounce(async (filterType, value) => {
-            // Skip complex operations for speed
+        // Create a debounced version of the filter update function
+        const debouncedFilterUpdate = debounce(async (filterType, value) => {
+            console.log('Filter changed:', filterType, value);
+            
+            // Update table header if TagsTable is available
+            if (filterType === 'productType' && typeof TagsTable !== 'undefined' && TagsTable.updateTableHeader) {
+                TagsTable.updateTableHeader();
+            }
+            
+            // Update filter options for cascading behavior
             await this.updateFilterOptions();
+            
+            // Apply the filters to the tag lists
             this.applyFilters();
             this.renderActiveFilters();
-        }, 50); // Much faster debounce (50ms vs 150ms)
+        }, 150); // 150ms debounce delay
         
         filterIds.forEach(filterId => {
             const filterElement = document.getElementById(filterId);
+            console.log(`Filter element ${filterId}:`, filterElement);
+            console.log(`Filter element ${filterId} exists:`, !!filterElement);
+            console.log(`Filter element ${filterId} value:`, filterElement?.value);
+            console.log(`Filter element ${filterId} options:`, filterElement?.options?.length);
             
             if (filterElement) {
-                // Remove all existing listeners for clean slate
+                // Remove any existing event listeners first
                 filterElement.removeEventListener('change', filterElement._filterChangeHandler);
-                filterElement.removeEventListener('input', filterElement._filterInputHandler);
-                filterElement.removeEventListener('click', filterElement._filterClickHandler);
                 
-                // Single, fast event handler (Mac-like simplicity)
-                const self = this;
+                // Create new event handler
+                const self = this; // Capture 'this' context
                 filterElement._filterChangeHandler = (event) => {
+                    console.log(`Filter ${filterId} changed to:`, event.target.value);
                     const filterType = self.getFilterTypeFromId(filterId);
                     const value = event.target.value;
                     
-                    // Special handling for vendor filter
+                    // DEBUG: Special logging for product type filter
+                    if (filterId === 'productTypeFilter') {
+                        console.log('🔍 Product Type Filter Changed:', {
+                            filterId: filterId,
+                            value: value,
+                            filterType: filterType,
+                            element: event.target,
+                            options: Array.from(event.target.options).map(opt => ({ value: opt.value, text: opt.text }))
+                        });
+                    }
+                    
+                    // Special handling for vendor filter - reset all other filters when vendor changes
                     if (filterId === 'vendorFilter' && value && value.trim() !== '' && value.toLowerCase() !== 'all') {
+                        console.log('Vendor filter changed, resetting all other filters...');
                         self.resetAllOtherFilters();
                     }
                     
-                    // Ultra-fast filter update
-                    fastFilterUpdate(filterType, value);
+                    // Only use debounced filter updates to prevent race conditions
+                    debouncedFilterUpdate(filterType, value);
                 };
                 
-                // Only use change event for Mac-like behavior
                 filterElement.addEventListener('change', filterElement._filterChangeHandler);
-                
-                console.log(`Fast event listener attached to ${filterId}`);
+                console.log(`Event listener attached to ${filterId}`);
+            } else {
+                console.warn(`Filter element ${filterId} not found`);
             }
         });
     },
@@ -6770,99 +7120,6 @@ const TagManager = {
             }, 300); // Match the CSS transition duration
         }
     },
-
-    // Start memory optimization
-    startMemoryOptimization() {
-        // Run memory optimization every 30 seconds
-        setInterval(() => {
-            this.optimizeMemory();
-        }, 30000);
-        
-        // Clear unused data when page becomes hidden
-        document.addEventListener('visibilitychange', () => {
-            if (document.hidden) {
-                this.clearUnusedData();
-            }
-        });
-        
-        console.log('Memory optimization started');
-    },
-
-    // Memory optimization functions
-    optimizeMemory() {
-        const now = Date.now();
-        
-        // Only cleanup every 30 seconds to avoid overhead
-        if (now - this.state._lastCleanup < 30000) {
-            return;
-        }
-        
-        this.state._lastCleanup = now;
-        
-        // Clear large arrays when not needed
-        if (this.state.tags && this.state.tags.length > 1000) {
-            // Keep only essential data
-            this.state.tags = this.state.tags.slice(0, 100);
-        }
-        
-        // Clear filter cache if it's large
-        if (this.state.filterCache && JSON.stringify(this.state.filterCache).length > 100000) {
-            this.state.filterCache = null;
-        }
-        
-        // Clear old timers
-        if (this.state.updateAvailableTagsTimer) {
-            clearTimeout(this.state.updateAvailableTagsTimer);
-            this.state.updateAvailableTagsTimer = null;
-        }
-        
-        // Force garbage collection if available
-        performanceUtils.cleanup.forceGC();
-        
-        console.log('Memory optimization completed');
-    },
-    
-    // Clear unused data
-    clearUnusedData() {
-        // Clear original tags if we have processed them
-        if (this.state.originalTags && this.state.originalTags.length > 0) {
-            this.state.originalTags = [];
-        }
-        
-        // Clear filter cache
-        this.state.filterCache = null;
-        
-        // Clear brand categories if not needed
-        if (this.state.brandCategories.size > 100) {
-            this.state.brandCategories.clear();
-        }
-        
-        // Force garbage collection
-        performanceUtils.cleanup.forceGC();
-    },
-    
-    // Memory-efficient tag processing
-    processTagsMemoryEfficient(tags) {
-        if (!tags || !Array.isArray(tags)) {
-            return [];
-        }
-        
-        // Process in chunks to avoid memory spikes
-        const chunkSize = 100;
-        const processedTags = [];
-        
-        for (let i = 0; i < tags.length; i += chunkSize) {
-            const chunk = tags.slice(i, i + chunkSize);
-            processedTags.push(...chunk);
-            
-            // Allow other operations to run
-            if (i % (chunkSize * 5) === 0) {
-                setTimeout(() => {}, 0);
-            }
-        }
-        
-        return processedTags;
-    }
 };
 
 // Expose TagManager to global scope
@@ -7420,10 +7677,8 @@ async function clearStuckUploads() {
                 alert(result.message);
             }
             
-            // Refresh the page to reset the UI state
-            setTimeout(() => {
-                window.location.reload();
-            }, 1000);
+            // Don't refresh immediately - let user continue working
+            console.log('Upload status cleared successfully');
         } else {
             console.error('Failed to clear upload status:', response.statusText);
             alert('Failed to clear stuck uploads. Please try again.');
@@ -7799,6 +8054,9 @@ window.performJsonMatch = function() {
         
         // Populate matched products list with note about where they were added
         if (matchResult.matched_names && matchResult.matched_names.length > 0) {
+            // Get the full matched products data to access lineage information
+            const matchedProductsData = matchResult.json_matched_tags || matchResult.available_tags || [];
+            
             matchedProductsList.innerHTML = `
                 <div class="alert alert-success mb-3">
                     <strong>Success!</strong> ${matchResult.matched_count} products were matched and added to the <strong>Available Tags</strong> list.
@@ -7806,7 +8064,50 @@ window.performJsonMatch = function() {
                 </div>
                 <div class="mb-2"><strong>Matched Products:</strong></div>
                 ${matchResult.matched_names
-                    .map(product => `<div class="mb-1">• ${product}</div>`)
+                    .map((productName, index) => {
+                        // Find the corresponding product data for lineage information
+                        const productData = matchedProductsData[index] || {};
+                        const lineage = productData.Lineage || productData.lineage || 'MIXED';
+                        
+                        // DEBUG: Log lineage information for troubleshooting
+                        console.log(`DEBUG: Product ${index} - Name: "${productName}", Lineage: "${lineage}", ProductData:`, productData);
+                        
+                        // Apply the same lineage color logic as tags
+                        let lineageClass = '';
+                        if (lineage === 'CBD' || lineage === 'CBD_BLEND') {
+                            lineageClass = 'cbd-lineage';
+                        } else if (lineage === 'MIXED') {
+                            lineageClass = 'mixed-lineage';
+                        } else if (lineage === 'SATIVA') {
+                            lineageClass = 'sativa-lineage';
+                        } else if (lineage === 'INDICA') {
+                            lineageClass = 'indica-lineage';
+                        } else if (lineage === 'HYBRID') {
+                            lineageClass = 'hybrid-lineage';
+                        }
+                        
+                        console.log(`DEBUG: Product ${index} - Applied lineageClass: "${lineageClass}"`);
+                        
+                        // Extract weight and price information
+                        const weight = productData['Weight*'] || productData.Weight || '';
+                        const price = productData.Price || productData['Price*'] || '';
+                        const units = productData.Units || '';
+                        
+                        // Format weight and price for display
+                        let weightDisplay = '';
+                        if (weight && units) {
+                            weightDisplay = ` • ${weight}${units}`;
+                        } else if (weight) {
+                            weightDisplay = ` • ${weight}`;
+                        }
+                        
+                        let priceDisplay = '';
+                        if (price) {
+                            priceDisplay = ` • ${price}`;
+                        }
+                        
+                        return `<div class="mb-1 matched-product ${lineageClass}">• ${productName}${weightDisplay}${priceDisplay}</div>`;
+                    })
                     .join('')}
             `;
         } else {

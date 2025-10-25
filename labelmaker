@@ -1,0 +1,16 @@
+#!/bin/bash
+
+# Quick alias script for AGT Label Maker
+# Place this in your PATH or create an alias
+
+SCRIPT_DIR="/Users/adamcordova/Desktop/labelMaker_ QR copy final"
+MANAGE_SCRIPT="$SCRIPT_DIR/manage.sh"
+
+# Check if the manage script exists
+if [ ! -f "$MANAGE_SCRIPT" ]; then
+    echo "Error: manage.sh not found at $MANAGE_SCRIPT"
+    exit 1
+fi
+
+# Execute the manage script with all arguments
+exec "$MANAGE_SCRIPT" "$@"

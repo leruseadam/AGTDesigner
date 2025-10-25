@@ -50,7 +50,7 @@ IS_PYTHONANYWHERE = 'pythonanywhere.com' in os.environ.get('HTTP_HOST', '')
 
 # Use same settings for both local and PythonAnywhere to ensure consistent generation
 MAX_PROCESSING_TIME_PER_CHUNK = 30  # 30 seconds max per chunk
-MAX_TOTAL_PROCESSING_TIME = 600     # 10 minutes max total (increased for large batches)
+MAX_TOTAL_PROCESSING_TIME = 300     # 5 minutes max total
 CHUNK_SIZE_LIMIT = 50               # Limit chunk size for performance
 
 def get_font_scheme(template_type, base_size=12):
@@ -103,11 +103,10 @@ class TemplateProcessor:
             if not IS_PYTHONANYWHERE:
                 self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for inventory template")
         else:
-            # For standard templates (horizontal, vertical), use larger chunks for better performance
-            # Allow up to 50 products per chunk for horizontal/vertical templates
-            self.chunk_size = min(50, CHUNK_SIZE_LIMIT)  # Increased chunk size for better performance
+            # For standard templates (horizontal, vertical), use 3x3 grid = 9 labels per page
+            self.chunk_size = min(9, CHUNK_SIZE_LIMIT)  # Fixed: 3x3 grid = 9 labels per page
             if not IS_PYTHONANYWHERE:
-                self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for template type '{self.template_type}' (expanded)")
+                self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for template type '{self.template_type}' (standard 3x3)")
         
         self.logger.info(f"Template type: {self.template_type}, Chunk size: {self.chunk_size}")
         
@@ -707,7 +706,7 @@ class TemplateProcessor:
         return buf
 
     def _expand_template_to_3x3_fixed(self, num_products=None):
-        """Expand template to accommodate the number of products needed."""
+        """Expand template to 3x3 grid for standard templates."""
         from docx import Document
         from docx.shared import Pt
         from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT
@@ -715,18 +714,8 @@ class TemplateProcessor:
         from docx.oxml.ns import qn
         from io import BytesIO
         from copy import deepcopy
-        import math
 
-        # CRITICAL FIX: Calculate grid size based on number of products
-        if num_products and num_products > 9:
-            # For more than 9 products, expand the grid to accommodate them
-            # Use 3 columns but calculate rows needed
-            num_cols = 3
-            num_rows = math.ceil(num_products / num_cols)
-            self.logger.info(f"🔧 EXPANDING GRID: {num_products} products -> {num_rows}x{num_cols} grid")
-        else:
-            # Default 3x3 grid for 9 or fewer products
-            num_cols, num_rows = 3, 3
+        num_cols, num_rows = 3, 3
         
         # Set dimensions based on template type - use constants for consistency
         from src.core.constants import CELL_DIMENSIONS
@@ -793,31 +782,28 @@ class TemplateProcessor:
         for r in range(num_rows):
             for c in range(num_cols):
                 if cnt > max_cells:
-                    # CRITICAL FIX: Don't clear cells if we're expanding the grid
-                    # Only clear cells if we have fewer products than the grid size
-                    if num_products and num_products < (num_rows * num_cols):
-                        # Clear extra cells completely and set white background
-                        cell = tbl.cell(r,c)
-                        cell._tc.clear_content()
-                        
-                        # Set white background for extra cells
-                        tc = cell._tc
-                        tcPr = tc.find(qn('w:tcPr'))
-                        if tcPr is None:
-                            tcPr = OxmlElement('w:tcPr')
-                            tc.insert(0, tcPr)
-                        
-                        # Remove any existing background color
-                        shd = tcPr.find(qn('w:shd'))
-                        if shd is not None:
-                            tcPr.remove(shd)
-                        
-                        # Add white background
-                        shd = OxmlElement('w:shd')
-                        shd.set(qn('w:val'), 'clear')
-                        shd.set(qn('w:color'), 'auto')
-                        shd.set(qn('w:fill'), 'FFFFFF')  # White background
-                        tcPr.append(shd)
+                    # Clear extra cells completely and set white background
+                    cell = tbl.cell(r,c)
+                    cell._tc.clear_content()
+                    
+                    # Set white background for extra cells
+                    tc = cell._tc
+                    tcPr = tc.find(qn('w:tcPr'))
+                    if tcPr is None:
+                        tcPr = OxmlElement('w:tcPr')
+                        tc.insert(0, tcPr)
+                    
+                    # Remove any existing background color
+                    shd = tcPr.find(qn('w:shd'))
+                    if shd is not None:
+                        tcPr.remove(shd)
+                    
+                    # Add white background
+                    shd = OxmlElement('w:shd')
+                    shd.set(qn('w:val'), 'clear')
+                    shd.set(qn('w:color'), 'auto')
+                    shd.set(qn('w:fill'), 'FFFFFF')  # White background
+                    tcPr.append(shd)
                     
                     cell.add_paragraph()  # Add empty paragraph to maintain structure
                     continue
@@ -1274,6 +1260,14 @@ class TemplateProcessor:
             else:
                 label_context[key] = ""
 
+        # CRITICAL FIX: Remove "by Lifted Cannabis" from Description field
+        if label_context.get('Description'):
+            description = label_context['Description']
+            if ' by ' in description:
+                # Remove everything after " by " to clean up brand references
+                label_context['Description'] = description.split(' by ')[0].strip()
+                self.logger.info(f"🔧 DESCRIPTION CLEANUP: Removed 'by' text from '{description}' -> '{label_context['Description']}'")
+
         # Ensure WeightUnits is populated from available weight fields
         # Special handling for pre-roll products: use JointRatio instead of Weight* + Units
         raw_product_type = label_context.get('Product Type*', '')
@@ -1651,11 +1645,8 @@ class TemplateProcessor:
                     # For double, horizontal, and vertical templates, preserve the full lineage value without cleaning
                     self.logger.debug(f"DEBUG: Preserving full lineage for {self.template_type} template: '{cleaned_lineage_val}'")
                 
-                # For vertical and double templates, don't wrap with markers since they use simple placeholders
-                if self.template_type in ['vertical', 'double']:
-                    label_context['Lineage'] = cleaned_lineage_val
-                else:
-                    label_context['Lineage'] = f"LINEAGE_START{cleaned_lineage_val}LINEAGE_END"
+                # Use marker-based formatting for all templates for consistent font sizing
+                label_context['Lineage'] = f"LINEAGE_START{cleaned_lineage_val}LINEAGE_END"
                 self.logger.debug(f"Set Lineage to strain lineage: '{cleaned_lineage_val}' for classic type '{product_type}'")
             else:
                 label_context['Lineage'] = ""
@@ -1665,11 +1656,8 @@ class TemplateProcessor:
             # Get vendor from record, not from product_brand
             vendor_val = record.get('Vendor') or record.get('Vendor/Supplier*') or record.get('ProductVendor', '')
             if vendor_val and str(vendor_val).lower() != 'nan':
-                # For vertical template, don't wrap with markers since it uses simple placeholders
-                if self.template_type == 'vertical':
-                    label_context['ProductVendor'] = str(vendor_val)
-                else:
-                    label_context['ProductVendor'] = f"PRODUCTVENDOR_START{str(vendor_val)}PRODUCTVENDOR_END"
+                # Use marker-based formatting for all templates for consistent font sizing
+                label_context['ProductVendor'] = f"PRODUCTVENDOR_START{str(vendor_val)}PRODUCTVENDOR_END"
                 self.logger.debug(f"Set ProductVendor to vendor: '{vendor_val}' for classic type '{product_type}'")
             else:
                 label_context['ProductVendor'] = ""
@@ -1692,8 +1680,7 @@ class TemplateProcessor:
                 # Center brand should always be ALL CAPS
                 brand_center_text = str(product_brand).upper()
                 if self.template_type == 'vertical':
-                    # For vertical template, use marker-based formatting like horizontal for proper font sizing
-                    # CRITICAL FIX: Use markers instead of plain text to enable proper font sizing
+                    # Use consistent marker-based formatting for all templates
                     label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{brand_center_text}PRODUCTBRAND_CENTER_END"
                     label_context['ProductBrand'] = ""
                     label_context['ProductBrand_Center'] = ""
@@ -1812,17 +1799,8 @@ class TemplateProcessor:
                 self.logger.debug(f"Lineage, ProductBrand, and ProductBrand_Center set to empty for non-classic type '{product_type}'")
             
             # Always set ProductStrain for nonclassic types, regardless of whether there's a product brand
-            # CRITICAL FIX: For vertical template, use marker-based formatting for proper font sizing
-            if self.template_type == 'vertical':
-                # Don't override the ProductStrain we set above for vertical template
-                if 'ProductStrain' not in label_context:
-                    if product_strain:
-                        label_context['ProductStrain'] = f"PRODUCTSTRAIN_START{product_strain}PRODUCTSTRAIN_END"
-                    else:
-                        label_context['ProductStrain'] = ""
-                self.logger.debug(f"VERTICAL FIX: Keeping ProductStrain with markers for vertical template")
-            elif product_strain:
-                # All templates use wrapped format for consistent processing by manual_docx_replace()
+            # Use marker-based formatting for all templates for consistent font sizing
+            if product_strain:
                 label_context['ProductStrain'] = f"PRODUCTSTRAIN_START{product_strain}PRODUCTSTRAIN_END"
                 self.logger.debug(f"DEBUG: Set ProductStrain to '{label_context['ProductStrain']}' for {self.template_type} template")
             else:
@@ -3120,9 +3098,8 @@ class TemplateProcessor:
         if self.template_type in ['vertical', 'double']:
             self._optimize_vertical_template_spacing(doc)
             
-        # Apply unified font sizing to all text in vertical and double templates (not just markers)
-        if self.template_type in ['vertical', 'double']:
-            self._apply_unified_font_sizing_to_all_text(doc)
+        # Use marker-based font sizing for all templates (including vertical) for consistency
+        # This ensures vertical templates get the same reliable font sizing as horizontal templates
 
 
 
@@ -4269,14 +4246,18 @@ class TemplateProcessor:
                     rows_needed = (num_products + 2) // 3  # Round up to get number of rows needed
                     self.logger.info(f"🔧 DEBUG: Need {rows_needed} rows for {num_products} products")
                     
-                    # Remove extra rows
-                    if len(table.rows) > rows_needed:
-                        rows_to_remove = len(table.rows) - rows_needed
-                        self.logger.info(f"🔧 DEBUG: Removing {rows_to_remove} extra rows")
-                        for i in range(rows_to_remove):
-                            # Remove the last row
-                            last_row = table.rows[-1]
-                            last_row._element.getparent().remove(last_row._element)
+                    # For vertical templates, be more conservative - only remove rows if we have very few products
+                    if self.template_type == 'vertical' and num_products >= 6:
+                        self.logger.info(f"🔧 VERTICAL TEMPLATE: Keeping all 3 rows for {num_products} products to maintain layout")
+                    else:
+                        # Remove extra rows
+                        if len(table.rows) > rows_needed:
+                            rows_to_remove = len(table.rows) - rows_needed
+                            self.logger.info(f"🔧 DEBUG: Removing {rows_to_remove} extra rows")
+                            for i in range(rows_to_remove):
+                                # Remove the last row
+                                last_row = table.rows[-1]
+                                last_row._element.getparent().remove(last_row._element)
                 
                 # Also clear individual cells as backup
                 cell_count = 0
