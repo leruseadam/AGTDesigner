@@ -487,33 +487,56 @@ def extract_products_from_manifest(manifest_json):
         
         # CRITICAL FIX: Ensure basic fields are always populated even if mapping fails
         if not product.get('Product Name*') and not product.get('ProductName'):
-            product['Product Name*'] = item.get('product_name', '') or item.get('inventory_name', '') or item.get('name', '')
+            product['Product Name*'] = (item.get('product_name', '') or 
+                                      item.get('inventory_name', '') or 
+                                      item.get('name', '') or 
+                                      item.get('description', '') or 
+                                      'Unknown Product').strip()
             product['ProductName'] = product['Product Name*']
             logging.info(f"🔍 DEBUG: Fallback product name: '{product['Product Name*']}'")
         
         if not product.get('Product Brand') and not product.get('ProductBrand'):
-            product['Product Brand'] = item.get('brand', '') or item.get('vendor', '') or item.get('supplier_name', '') or 'Unknown Brand'
+            product['Product Brand'] = (item.get('brand', '') or 
+                                      item.get('vendor', '') or 
+                                      item.get('supplier', '') or 
+                                      'CERES').strip()
             product['ProductBrand'] = product['Product Brand']
             logging.info(f"🔍 DEBUG: Fallback brand: '{product['Product Brand']}'")
         
         if not product.get('Price') and not product.get('Price*'):
-            product['Price'] = item.get('price', '') or item.get('line_price', '') or '25.00'
+            product['Price'] = (item.get('price', '') or 
+                               item.get('line_price', '') or 
+                               item.get('unit_price', '') or 
+                               item.get('retail_price', '') or 
+                               '').strip()
             product['Price*'] = product['Price']
             logging.info(f"🔍 DEBUG: Fallback price: '{product['Price']}'")
         
-        if not product.get('Weight*') and not product.get('Weight'):
-            product['Weight*'] = item.get('weight', '') or item.get('unit_weight', '') or '1'
-            product['Weight'] = product['Weight*']
-            logging.info(f"🔍 DEBUG: Fallback weight: '{product['Weight*']}'")
-        
-        if not product.get('Units') and not product.get('unit_weight_uom'):
-            product['Units'] = item.get('unit_weight_uom', '') or item.get('uom', '') or 'g'
-            logging.info(f"🔍 DEBUG: Fallback units: '{product['Units']}'")
-        
         if not product.get('Product Type*') and not product.get('ProductType'):
-            product['Product Type*'] = item.get('inventory_type', '') or item.get('product_type', '') or 'Edible (Solid)'
+            product['Product Type*'] = (item.get('inventory_type', '') or 
+                                       item.get('product_type', '') or 
+                                       item.get('inventory_category', '') or 
+                                       item.get('category', '') or 
+                                       item.get('C', '') or  # Column C mapping
+                                       'Edible (Solid)').strip()
             product['ProductType'] = product['Product Type*']
             logging.info(f"🔍 DEBUG: Fallback product type: '{product['Product Type*']}'")
+        
+        if not product.get('Weight*'):
+            product['Weight*'] = (item.get('weight', '') or 
+                                 item.get('unit_weight', '') or 
+                                 item.get('net_weight', '') or 
+                                 item.get('F', '') or  # Column F mapping
+                                 '').strip()
+            logging.info(f"🔍 DEBUG: Fallback weight: '{product['Weight*']}'")
+        
+        if not product.get('Product Strain'):
+            product['Product Strain'] = (item.get('strain_name', '') or 
+                                        item.get('strain', '') or 
+                                        item.get('strain_type', '') or 
+                                        item.get('E', '') or  # Column E mapping
+                                        '').strip()
+            logging.info(f"🔍 DEBUG: Fallback strain: '{product['Product Strain']}'")
         
         logging.info(f"🔍 DEBUG: Final mapped product: {product}")
         # Nested lab_result_data
@@ -698,19 +721,18 @@ class JSONMatcher:
             self._indexed_cache = {}
             return
             
-        # Filter out trade samples and nulls (but keep legitimate products containing "sample")
+        # Filter out samples and nulls
         if description_col == "Description":
             df = df[
                 df[description_col].notna() &
-                ~df[description_col].astype(str).str.lower().str.contains("trade sample", na=False) &
-                ~df[description_col].astype(str).str.lower().str.match(r'^sample\s', na=False)
+                ~df[description_col].astype(str).str.lower().str.contains("sample", na=False)
             ]
         else:
-            # For ProductName/Product Name*, filter out trade samples and products starting with "sample"
+            # For ProductName/Product Name*, filter out samples and nulls
             df = df[
                 df[description_col].notna() &
-                ~df[description_col].astype(str).str.lower().str.contains("trade sample", na=False) &
-                ~df[description_col].astype(str).str.lower().str.match(r'^sample\s', na=False)
+                ~df[description_col].astype(str).str.lower().str.contains("sample", na=False) &
+                ~df[description_col].astype(str).str.lower().str.contains("trade sample", na=False)
             ]
         
         cache = []
@@ -1382,11 +1404,11 @@ class JSONMatcher:
             
             # Extract additional fields for enhanced matching
             json_brand = str(json_item.get("brand", "")).lower().strip()
-            cache_brand = str(cache_item.get("Product Brand", cache_item.get("brand", ""))).lower().strip()
+            cache_brand = str(cache_item.get("brand", "")).lower().strip()
             json_type = str(json_item.get("product_type", "")).lower().strip()
-            cache_type = str(cache_item.get("Product Type*", cache_item.get("product_type", ""))).lower().strip()
+            cache_type = str(cache_item.get("product_type", "")).lower().strip()
             json_weight = str(json_item.get("weight", "")).lower().strip()
-            cache_weight = str(cache_item.get("Weight*", cache_item.get("weight", ""))).lower().strip()
+            cache_weight = str(cache_item.get("weight", "")).lower().strip()
             
             # Debug log with description information
             logging.debug(f"[SCORE] JSON: '{json_name_raw}' (norm: '{json_name}') | Excel: '{cache_name_raw}' (norm: '{cache_name}') | Description: '{cache_description}' | Strain: '{json_strain}' vs '{cache_strain}' | Vendor: '{json_vendor}' vs '{cache_vendor}' | Brand: '{json_brand}' vs '{cache_brand}' | Type: '{json_type}' vs '{cache_type}' | Weight: '{json_weight}' vs '{cache_weight}'")
@@ -1815,21 +1837,8 @@ class JSONMatcher:
                 
             # Extract vendor information from root level if available
             vendor_meta = "Unknown Vendor"
-            json_vendor_filter = None
             if isinstance(payload, dict) and "from_license_name" in payload:
                 vendor_meta = payload.get('from_license_name', '')
-                if vendor_meta and vendor_meta != "Unknown Vendor":
-                    logging.info(f"🔍 VENDOR DETECTION: Found vendor '{vendor_meta}' in JSON metadata")
-                    print(f"🔍 VENDOR DETECTION: Found vendor '{vendor_meta}' in JSON metadata")
-                    
-                    # Extract the main vendor name (before the license number)
-                    if " - " in vendor_meta:
-                        json_vendor_filter = vendor_meta.split(" - ")[0].strip()
-                    else:
-                        json_vendor_filter = vendor_meta.strip()
-                    
-                    logging.info(f"🔍 VENDOR FILTER: Will only match products from vendor '{json_vendor_filter}'")
-                    print(f"🔍 VENDOR FILTER: Will only match products from vendor '{json_vendor_filter}'")
                 
             raw_date = datetime.now().strftime("%Y-%m-%d")
             if isinstance(payload, dict) and "est_arrival_at" in payload:
@@ -1839,8 +1848,6 @@ class JSONMatcher:
             
             # SIMPLIFIED APPROACH: Process each JSON item with basic matching for maximum results
             print(f"🔍 DEBUG: SIMPLIFIED MATCHING - Processing {len(unique_items)} items for maximum matches")
-            if json_vendor_filter:
-                print(f"🔍 VENDOR FILTERING: Only matching products from vendor '{json_vendor_filter}'")
             for i, item in enumerate(unique_items):
                 # Ensure product name exists
                 if not item.get("product_name"):
@@ -1871,8 +1878,8 @@ class JSONMatcher:
                 price = str(item.get("line_price", item.get("price", ""))).strip()
                 strain = str(item.get("strain_name", item.get("strain", ""))).strip()
                 
-                print(f"🔍 DEBUG: ENHANCED MATCH - Processing item {i+1}/{len(unique_items)}: '{product_name}'")
-                print(f"🔍 DEBUG: ENHANCED MATCH - Extracted values: weight='{weight}', price='{price}', strain='{strain}', brand='{brand}'")
+                print(f"🔍 DEBUG: SIMPLIFIED - Processing item {i+1}/{len(unique_items)}: '{product_name}'")
+                print(f"🔍 DEBUG: SIMPLIFIED - Extracted values: weight='{weight}', price='{price}', strain='{strain}'")
                 
                 # SIMPLIFIED MATCHING: Try basic Excel matching first (no vendor restrictions)
                 best_match = None
@@ -1888,81 +1895,43 @@ class JSONMatcher:
                             if not excel_product_name:
                                 continue
                             
-                            # ENHANCED SCORING: Multi-factor matching for better accuracy
+                            # SIMPLIFIED SCORING: Focus on name matching without vendor restrictions
                             score = 0.0
                             
-                            # 0. VENDOR FILTER: Only match products from the JSON vendor
-                            excel_vendor = str(row.get('Vendor/Supplier*', '') or row.get('Vendor/Supplier', '') or row.get('Vendor', '')).strip()
-                            if json_vendor_filter and excel_vendor:
-                                # Check if Excel vendor matches JSON vendor (case insensitive)
-                                if json_vendor_filter.lower() not in excel_vendor.lower() and excel_vendor.lower() not in json_vendor_filter.lower():
-                                    continue  # Skip this product - vendor doesn't match
-                            
-                            # 1. Exact name match (highest priority)
+                            # Exact name match (highest priority)
                             if product_name.lower() == excel_product_name:
                                 score += 100.0
                             
-                            # 2. Partial name match with better logic
+                            # Partial name match
                             elif product_name.lower() in excel_product_name or excel_product_name in product_name.lower():
                                 score += 80.0
                             
-                            # 3. Enhanced fuzzy matching with multiple algorithms
+                            # Fuzzy matching for similar names
                             try:
                                 from fuzzywuzzy import fuzz
-                                
-                                # Use multiple fuzzy algorithms for better matching
-                                ratio_score = fuzz.ratio(product_name.lower(), excel_product_name)
-                                partial_score = fuzz.partial_ratio(product_name.lower(), excel_product_name)
-                                token_sort_score = fuzz.token_sort_ratio(product_name.lower(), excel_product_name)
-                                token_set_score = fuzz.token_set_ratio(product_name.lower(), excel_product_name)
-                                
-                                # Take the best score from all algorithms
-                                best_fuzzy_score = max(ratio_score, partial_score, token_sort_score, token_set_score)
-                                
-                                if best_fuzzy_score >= 50:  # Lower threshold for more matches
-                                    score += best_fuzzy_score * 0.6
-                                    
+                                similarity = fuzz.ratio(product_name.lower(), excel_product_name)
+                                if similarity >= 60:
+                                    score += similarity * 0.5
                             except ImportError:
                                 pass
-                            
-                            # 4. Brand matching bonus
-                            excel_brand = str(row.get('Product Brand', '')).lower().strip()
-                            json_brand = str(item.get('brand', '')).lower().strip()
-                            if excel_brand and json_brand and excel_brand in json_brand or json_brand in excel_brand:
-                                score += 20.0
-                            
-                            # 4.5. Vendor matching bonus (extra points for matching vendor)
-                            if json_vendor_filter and excel_vendor and json_vendor_filter.lower() in excel_vendor.lower():
-                                score += 30.0  # High bonus for vendor match
-                            
-                            # 5. Product type matching bonus
-                            excel_type = str(row.get('Product Type*', '')).lower().strip()
-                            if product_type and excel_type and any(word in excel_type for word in product_type.lower().split()):
-                                score += 15.0
-                            
-                            # 6. Weight matching bonus
-                            excel_weight = str(row.get('Weight*', '')).lower().strip()
-                            if weight and excel_weight and weight in excel_weight or excel_weight in weight:
-                                score += 10.0
                             
                             # Store best match
                             if score > best_score:
                                 best_score = score
                                 best_match = row
-                                print(f"🔍 VENDOR FILTER: New best match for '{product_name}' (score: {score:.1f}, vendor: '{excel_vendor}')")
                                 
                         except Exception as e:
                             continue
                 
                 # If we found a good match, create a product
-                if best_match is not None and best_score >= 25.0:  # More lenient threshold for better matching
+                if best_match is not None and best_score >= 30.0:  # Lower threshold for more matches
                     try:
                         product = self._create_product_from_excel_match(best_match, item, global_vendor)
                         if product:
                             matched_products.append(product)
-                            print(f"🔍 DEBUG: ENHANCED MATCH - Added match for '{product_name}' (score: {best_score:.1f})")
+                            print(f"🔍 DEBUG: SIMPLIFIED - Added match for '{product_name}' (score: {best_score:.1f})")
                     except Exception as e:
-                        print(f"🔍 DEBUG: ENHANCED MATCH - Error creating product: {e}")
+                        print(f"🔍 DEBUG: SIMPLIFIED - Error creating product: {e}")
                         continue
                 else:
                     # FALLBACK: Create product from JSON data directly if no Excel match
@@ -1970,108 +1939,19 @@ class JSONMatcher:
                         product = self._create_product_from_json_item(item, global_vendor)
                         if product:
                             matched_products.append(product)
-                            print(f"🔍 DEBUG: ENHANCED MATCH - Added fallback product for '{product_name}' (no match found, score: {best_score:.1f})")
+                            print(f"🔍 DEBUG: SIMPLIFIED - Added fallback product for '{product_name}'")
                     except Exception as e:
-                        print(f"🔍 DEBUG: ENHANCED MATCH - Error creating fallback product: {e}")
+                        print(f"🔍 DEBUG: SIMPLIFIED - Error creating fallback product: {e}")
                         continue
             
             # Return all matched products
-            print(f"🔍 DEBUG: ENHANCED MATCHING COMPLETE - Found {len(matched_products)} total matches")
-            if json_vendor_filter:
-                print(f"🔍 VENDOR FILTERING: All matches filtered to vendor '{json_vendor_filter}'")
+            print(f"🔍 DEBUG: SIMPLIFIED MATCHING COMPLETE - Found {len(matched_products)} total matches")
             return matched_products
         except Exception as e:
+            import traceback
             logging.error(f"Error in fetch_and_match: {e}")
             logging.error(f"Traceback: {traceback.format_exc()}")
             return []
-    
-    def _extract_brand_from_product_name(self, product_name: str) -> str:
-        """Extract brand information from product name."""
-        try:
-            name_lower = product_name.lower()
-            
-            # Look for common brand patterns
-            brand_patterns = [
-                'ceres', 'dank czar', 'dcz', 'jsm', 'omega', 'airo', 'hustler', 
-                'super fog', 'moonshot', 'platinum', 'gold', 'silver'
-            ]
-            
-            for pattern in brand_patterns:
-                if pattern in name_lower:
-                    return pattern.title()
-            
-            # Try to extract first word as brand
-            words = product_name.split()
-            if words:
-                first_word = words[0].strip()
-                if len(first_word) > 2:  # Avoid single letters
-                    return first_word
-            
-            return ""
-        except Exception as e:
-            logging.warning(f"Error extracting brand from product name: {e}")
-            return ""
-    
-    def _estimate_price_from_product_info(self, product_type: str, weight: str, product_name: str) -> str:
-        """Estimate price based on product type and weight."""
-        try:
-            product_type_lower = product_type.lower()
-            
-            # Extract numeric weight
-            weight_value = 1.0
-            if weight:
-                try:
-                    # Extract number from weight string (e.g., "1g" -> 1.0)
-                    import re
-                    weight_match = re.search(r'(\d+(?:\.\d+)?)', str(weight))
-                    if weight_match:
-                        weight_value = float(weight_match.group(1))
-                except (ValueError, TypeError):
-                    weight_value = 1.0
-            
-            # Price estimation based on product type and weight
-            if 'edible' in product_type_lower or 'gummy' in product_type_lower or 'chocolate' in product_type_lower:
-                if weight_value <= 1:
-                    return "10"
-                elif weight_value <= 2:
-                    return "20"
-                else:
-                    return "30"
-            elif 'capsule' in product_type_lower:
-                if weight_value <= 0.5:
-                    return "10"
-                elif weight_value <= 1:
-                    return "20"
-                else:
-                    return "30"
-            elif 'topical' in product_type_lower or 'balm' in product_type_lower:
-                if weight_value <= 1:
-                    return "20"
-                elif weight_value <= 2:
-                    return "30"
-                elif weight_value <= 3.4:
-                    return "45"
-                else:
-                    return "60"
-            elif 'flower' in product_type_lower:
-                if weight_value <= 1:
-                    return "35"
-                elif weight_value <= 3.5:
-                    return "120"
-                else:
-                    return "220"
-            elif 'concentrate' in product_type_lower:
-                if weight_value <= 1:
-                    return "50"
-                else:
-                    return "90"
-            else:
-                # Default pricing for unknown types
-                return "25"
-                
-        except Exception as e:
-            logging.warning(f"Error estimating price: {e}")
-            return "25"
     
     def _create_product_from_json_item(self, item: Dict, global_vendor: str) -> Dict:
         """Create a product from JSON item data directly (fallback when no Excel match found)."""
@@ -2081,70 +1961,12 @@ class JSONMatcher:
             product_name = transform_sku_to_readable_name(raw_product_name) or raw_product_name
             vendor = global_vendor if global_vendor else str(item.get("vendor", ""))
             brand = str(item.get("brand", "")).strip()
-            
-            # IMPROVED: Create better product names for future matching
-            # Instead of generic names, create descriptive names that might match existing products
-            if not product_name or product_name.startswith("JSON Product"):
-                # Try to create a better name from available data
-                name_parts = []
-                
-                # Add strain if available
-                if strain and strain.lower() not in ['unknown', 'n/a', '']:
-                    name_parts.append(strain)
-                
-                # Add product type
-                if product_type and product_type.lower() not in ['unknown', 'n/a', '']:
-                    name_parts.append(product_type)
-                
-                # Add brand if available
-                if brand and brand.lower() not in ['unknown', 'n/a', '']:
-                    name_parts.append(brand)
-                
-                # Add weight if available
-                if weight and weight.lower() not in ['unknown', 'n/a', '']:
-                    name_parts.append(f"{weight}{weight_units or 'g'}")
-                
-                # Create the name
-                if name_parts:
-                    product_name = " ".join(name_parts)
-                else:
-                    product_name = f"Product {hash(str(item)) % 1000}"  # Use hash instead of undefined i
-                
-                logging.info(f"🔍 IMPROVED: Created better product name: '{product_name}'")
-            
-            # IMPROVED: Better brand extraction with multiple fallbacks
-            if not brand:
-                # Try to extract brand from vendor
-                if vendor:
-                    brand = vendor
-                # Try to extract brand from product name
-                elif product_name:
-                    brand = self._extract_brand_from_product_name(product_name)
-                # Final fallback
-                if not brand:
-                    brand = "CERES"  # Use CERES as default brand instead of empty
-            
             inventory_type = str(item.get("inventory_type", "")).strip()
             inventory_category = str(item.get("inventory_category", "")).strip()
             product_type = map_inventory_type_to_product_type(inventory_type, inventory_category, raw_product_name)
-            
-            # CRITICAL FIX: Use proper weight normalization for nonclassic types
-            raw_weight = str(item.get("unit_weight", item.get("weight", ""))).strip()
-            raw_units = str(item.get("unit_weight_uom", item.get("uom", "g"))).strip()
-            weight, weight_units = self._normalize_weight_for_json_product(raw_weight, raw_units, product_type, product_name)
-            
+            weight = str(item.get("unit_weight", item.get("weight", ""))).strip()
+            weight_units = str(item.get("unit_weight_uom", item.get("uom", "g"))).strip()
             price = str(item.get("line_price", item.get("price", ""))).strip()
-            
-            # IMPROVED: Better price extraction with intelligent fallbacks
-            if not price or price == "0" or price == "0.00":
-                # Try to estimate price based on product type and weight
-                estimated_price = self._estimate_price_from_product_info(product_type, weight, product_name)
-                if estimated_price:
-                    price = estimated_price
-                    logging.info(f"💰 Estimated price '{price}' for '{product_name}' based on type and weight")
-                else:
-                    price = "25"  # Final fallback
-            
             strain = str(item.get("strain_name", item.get("strain", ""))).strip()
             
             # DEBUG: Log price extraction
@@ -2159,7 +1981,7 @@ class JSONMatcher:
                 'ProductName': product_name,
                 'Description': product_name,  # Use transformed name as description too
                 'Vendor': vendor,
-                'Product Brand': brand,  # Use the improved brand extraction
+                'Product Brand': brand or vendor,
                 'Product Type*': product_type,
                 'Weight*': weight or '1',
                 'Units': weight_units or 'g',
@@ -2168,14 +1990,9 @@ class JSONMatcher:
                 'CBD test result': '',
                 'Product Strain': strain,
                 'Lineage': lineage,  # Use properly determined lineage
-                'Ratio': self._calculate_ratio_for_json_product(product_type, item),
-                'Ratio_or_THC_CBD': self._calculate_ratio_for_json_product(product_type, item),
                 'Quantity*': '1',
                 'Source': 'JSON Fallback'
             }
-            
-            # DEBUG: Log the critical fields
-            logging.info(f"🔍 JSON FALLBACK - Product: '{product_name}', Brand: '{brand}', Price: '{price}', Weight: '{weight}'")
             
             return product
             
@@ -2202,7 +2019,7 @@ class JSONMatcher:
             weight_raw = safe_row_get(excel_row, 'Weight*', '')
             weight_with_units = weight_raw
             if weight_raw and safe_row_get(excel_row, 'Units'):
-                weight_with_units = f"{weight_raw}{safe_row_get(excel_row, 'Units')}"
+                weight_with_units = f"{weight_raw} {safe_row_get(excel_row, 'Units')}"
             
             # Use the dynamically detected product name column
             product_name_col = 'Product Name*'
@@ -2216,45 +2033,37 @@ class JSONMatcher:
             # Get vendor with fallback logic
             vendor = safe_row_get(excel_row, 'Vendor/Supplier*') or safe_row_get(excel_row, 'Vendor/Supplier') or safe_row_get(excel_row, 'Vendor') or global_vendor
             
-            # CRITICAL FIX: Ensure brand, price, and weight are always populated
-            # Get brand with multiple fallbacks
-            excel_brand = safe_row_get(excel_row, 'Product Brand') or safe_row_get(excel_row, 'ProductBrand') or vendor or 'CERES'
+            # CRITICAL FIX: Override with JSON data if available (for price and weight)
+            excel_price = safe_row_get(excel_row, 'Price*')
+            excel_weight = safe_row_get(excel_row, 'Weight*')
+            excel_units = safe_row_get(excel_row, 'Units')
             
-            # Get price with JSON override and fallback
-            if json_item and json_item.get("line_price"):
-                excel_price = str(json_item.get("line_price", "")).strip()
-            elif json_item and json_item.get("price"):
-                excel_price = str(json_item.get("price", "")).strip()
-            else:
-                excel_price = safe_row_get(excel_row, 'Price*') or safe_row_get(excel_row, 'Price') or '25'
-            
-            # Get weight with JSON override and fallback
-            if json_item and json_item.get("unit_weight"):
-                excel_weight = str(json_item.get("unit_weight", "")).strip()
-            elif json_item and json_item.get("weight"):
-                excel_weight = str(json_item.get("weight", "")).strip()
-            else:
-                excel_weight = safe_row_get(excel_row, 'Weight*') or safe_row_get(excel_row, 'Weight') or '1'
-            
-            # Get units with JSON override and fallback
-            if json_item and json_item.get("unit_weight_uom"):
-                excel_units = str(json_item.get("unit_weight_uom", "")).strip()
-            elif json_item and json_item.get("uom"):
-                excel_units = str(json_item.get("uom", "")).strip()
-            else:
-                excel_units = safe_row_get(excel_row, 'Units') or 'g'
+            if json_item:
+                json_price = str(json_item.get("line_price", json_item.get("price", ""))).strip()
+                json_weight = str(json_item.get("unit_weight", json_item.get("weight", ""))).strip()
+                json_units = str(json_item.get("unit_weight_uom", json_item.get("uom", ""))).strip()
+                
+                if json_price:
+                    excel_price = json_price
+                    logging.info(f"💰 Excel match using JSON price '{json_price}' instead of Excel price")
+                
+                if json_weight:
+                    excel_weight = json_weight
+                    if json_units:
+                        excel_units = json_units
+                    logging.info(f"⚖️ Excel match using JSON weight '{json_weight}' with units '{json_units}' instead of Excel values")
             
             # Build the product structure
             product = {
                 'Product Name*': product_name,
                 'Description': product_name,
                 'Vendor': vendor,
-                'Product Brand': excel_brand,  # Use the improved brand extraction
+                'Product Brand': safe_row_get(excel_row, 'Product Brand') or vendor,
                 'Product Type*': safe_row_get(excel_row, 'Product Type*'),
-                'Weight*': excel_weight,  # Use the improved weight extraction
-                'Units': excel_units,  # Use the improved units extraction
-                'Weight Value + Unit': f"{excel_weight}{excel_units}" if excel_weight and excel_units else excel_weight,
-                'Price*': excel_price,  # Use the improved price extraction
+                'Weight*': excel_weight,
+                'Units': excel_units,
+                'Weight Value + Unit': weight_with_units,
+                'Price*': excel_price,
                 'Cost*': safe_row_get(excel_row, 'Cost*'),
                 'THC test result': safe_row_get(excel_row, 'THC test result'),
                 'CBD test result': safe_row_get(excel_row, 'CBD test result'),
@@ -2263,9 +2072,6 @@ class JSONMatcher:
                 'Quantity*': quantity,
                 'Source': 'Excel Match'
             }
-            
-            # DEBUG: Log the critical fields
-            logging.info(f"🔍 EXCEL MATCH - Product: '{product_name}', Brand: '{excel_brand}', Price: '{excel_price}', Weight: '{excel_weight}'")
             
             return product
         except Exception as e:
@@ -2276,68 +2082,26 @@ class JSONMatcher:
         """Convert a Product Database match to Excel row format for compatibility."""
         try:
             # Map database fields to Excel fields
-            # Database results can have either snake_case OR Excel-style field names, so check both
             excel_row = {
-                'Product Name*': (db_match.get('Product Name*', '') or
-                                 db_match.get('product_name', '') or
-                                 db_match.get('ProductName', '')),
-                'Description': (db_match.get('Description', '') or
-                              db_match.get('description', '') or
-                              db_match.get('Product Name*', '') or
-                              db_match.get('product_name', '')),
-                'Vendor': (db_match.get('Vendor/Supplier*', '') or
-                          db_match.get('Vendor', '') or
-                          db_match.get('vendor', '')),
-                'Vendor/Supplier*': (db_match.get('Vendor/Supplier*', '') or
-                                    db_match.get('Vendor', '') or
-                                    db_match.get('vendor', '')),
-                'Product Brand': (db_match.get('Product Brand', '') or
-                                 db_match.get('brand', '') or
-                                 db_match.get('ProductBrand', '')),
-                'Product Type*': (db_match.get('Product Type*', '') or
-                                 db_match.get('product_type', '') or
-                                 db_match.get('ProductType', '')),
-                'Weight*': (db_match.get('Weight*', '') or
-                           db_match.get('weight', '') or
-                           db_match.get('Weight', '')),
-                'Units': (db_match.get('Units', '') or
-                         db_match.get('units', '') or
-                         'g'),
-                'Price': (db_match.get('Price', '') or
-                         db_match.get('price', '') or
-                         db_match.get('Price*', '')),
-                'Price*': (db_match.get('Price', '') or
-                          db_match.get('price', '') or
-                          db_match.get('Price*', '')),
-                'Cost*': (db_match.get('Cost', '') or
-                         db_match.get('cost', '') or
-                         db_match.get('Cost*', '')),
-                'THC test result': (db_match.get('THC test result', '') or
-                                   db_match.get('thc', '') or
-                                   db_match.get('THC', '')),
-                'CBD test result': (db_match.get('CBD test result', '') or
-                                   db_match.get('cbd', '') or
-                                   db_match.get('CBD', '')),
-                'Product Strain': (db_match.get('Product Strain', '') or
-                                  db_match.get('product_strain', '') or
-                                  db_match.get('ProductStrain', '') or
-                                  db_match.get('strain_name', '')),
-                'Lineage': (db_match.get('Lineage', '') or
-                           db_match.get('lineage', '') or
-                           db_match.get('canonical_lineage', '')),
+                'Product Name*': db_match.get('product_name', ''),
+                'Description': db_match.get('description', db_match.get('product_name', '')),
+                'Vendor': db_match.get('vendor', ''),
+                'Vendor/Supplier*': db_match.get('vendor', ''),
+                'Product Brand': db_match.get('brand', ''),
+                'Product Type*': db_match.get('product_type', ''),
+                'Weight*': db_match.get('weight', ''),
+                'Units': db_match.get('units', 'g'),
+                'Price*': db_match.get('price', ''),
+                'Cost*': db_match.get('cost', ''),
+                'THC test result': db_match.get('thc', ''),
+                'CBD test result': db_match.get('cbd', ''),
+                'Product Strain': db_match.get('product_strain', ''),
+                'Lineage': db_match.get('lineage', ''),
                 'Quantity*': '1',  # Default quantity
-                'DOH': (db_match.get('DOH', '') or
-                       db_match.get('doh', '') or
-                       db_match.get('DOH Compliant (Yes/No)', '')),
+                'DOH': db_match.get('doh', ''),
                 'Source': 'Product Database'
             }
-
-            logging.info(f"🔍 Converted database match to Excel format:")
-            logging.info(f"  - Product Name*: '{excel_row.get('Product Name*', 'EMPTY')}'")
-            logging.info(f"  - Product Brand: '{excel_row.get('Product Brand', 'EMPTY')}'")
-            logging.info(f"  - Weight*: '{excel_row.get('Weight*', 'EMPTY')}'")
-            logging.info(f"  - Units: '{excel_row.get('Units', 'EMPTY')}'")
-            logging.info(f"  - Price*: '{excel_row.get('Price*', 'EMPTY')}'")
+            
             return excel_row
         except Exception as e:
             logging.error(f"Error converting database match to Excel format: {e}")
@@ -2495,8 +2259,9 @@ class JSONMatcher:
             weight_with_units = f"{weight_value}{units or 'g'}"
             
             # Create DescAndWeight field in the same format as other tags
-            # CRITICAL FIX: Don't add weight to description to avoid duplication
             desc_and_weight = cleaned_product_name
+            if weight_value and units:
+                desc_and_weight = f"{cleaned_product_name} -\u00A0{weight_value}{units}"
             
             # Create the product object
             product = {
@@ -3589,7 +3354,7 @@ class JSONMatcher:
             logging.warning(f"Error estimating price by type and weight: {e}")
             return 25.0  # Default fallback price
             
-    def fetch_and_match_with_product_db(self, url: str, force_simplified: bool = False) -> List[Dict]:
+    def fetch_and_match_with_product_db(self, url: str) -> List[Dict]:
         """
         Fetch JSON from URL and create product tags, prioritizing Product Database lookups
         over exact JSON wording. This method first tries to find existing products in the
@@ -3597,17 +3362,11 @@ class JSONMatcher:
         
         Args:
             url: URL to fetch JSON data from
-            force_simplified: If True, use simplified matching approach for maximum matches
             
         Returns:
             List of product dictionaries
         """
         import time as time_module  # Import with alias to avoid variable name conflicts
-        
-        # CRITICAL FIX: Use simplified approach when maximum matches are needed
-        if force_simplified:
-            logging.info("🔍 FORCING SIMPLIFIED MATCHING APPROACH FOR MAXIMUM MATCHES")
-            return self.fetch_and_match(url)
         
         logging.info("=" * 80)
         logging.info("🔍 fetch_and_match_with_product_db called - PRODUCT DATABASE INTEGRATION ENABLED")
@@ -3661,32 +3420,63 @@ class JSONMatcher:
                 response = requests.get(url, headers=headers, timeout=60)
                 response.raise_for_status()
                 payload = response.json()
+                logging.info(f"✅ Successfully fetched JSON data directly from URL")
             except (requests.exceptions.RequestException, ValueError) as direct_error:
                 logging.info(f"Direct request failed, trying proxy: {direct_error}")
                 # Fallback to proxy endpoint if direct request fails
                 import os
                 base_url = os.environ.get('FLASK_BASE_URL', 'http://127.0.0.1:5001')
-                response = requests.post(f'{base_url}/api/proxy-json', 
-                                       json=proxy_data, 
-                                       timeout=60)
-                response.raise_for_status()
-                payload = response.json()
+                try:
+                    response = requests.post(f'{base_url}/api/proxy-json', 
+                                           json=proxy_data, 
+                                           timeout=60)
+                    response.raise_for_status()
+                    payload = response.json()
+                    logging.info(f"✅ Successfully fetched JSON data via proxy")
+                except Exception as proxy_error:
+                    logging.error(f"❌ Both direct and proxy requests failed: {proxy_error}")
+                    return []
                 
-            # Handle both list and dictionary payloads
+            # Handle both list and dictionary payloads with enhanced validation
             if isinstance(payload, list):
                 items = payload
+                global_vendor = ""
+                logging.info(f"✅ Processing JSON list with {len(items)} items")
             elif isinstance(payload, dict):
                 items = payload.get("inventory_transfer_items", [])
                 # Extract global vendor from document metadata
                 global_vendor = payload.get("from_license_name", "")
-                logging.info(f"Extracted global vendor from document: {global_vendor}")
+                logging.info(f"✅ Processing JSON dict with {len(items)} items, global vendor: {global_vendor}")
+                
+                # Additional validation for common JSON structures
+                if not items and "items" in payload:
+                    items = payload.get("items", [])
+                    logging.info(f"✅ Found items in 'items' field: {len(items)} items")
+                if not items and "products" in payload:
+                    items = payload.get("products", [])
+                    logging.info(f"✅ Found items in 'products' field: {len(items)} items")
             else:
-                logging.warning(f"Unexpected payload type: {type(payload)}")
+                logging.warning(f"❌ Unexpected payload type: {type(payload)}")
                 return []
                 
             if not items:
-                logging.warning("No inventory transfer items found in JSON")
+                logging.warning("❌ No inventory transfer items found in JSON")
                 return []
+            
+            # Validate that items are dictionaries
+            valid_items = []
+            for i, item in enumerate(items):
+                if isinstance(item, dict):
+                    valid_items.append(item)
+                else:
+                    logging.warning(f"⚠️ Skipping non-dict item at index {i}: {type(item)}")
+            
+            if not valid_items:
+                logging.warning("❌ No valid dictionary items found in JSON")
+                return []
+                
+            items = valid_items
+            logging.info(f"✅ Processing {len(items)} valid JSON items")
                 
             # CRITICAL FIX: Intelligent deduplication to remove near-identical products
             logging.info(f"Processing {len(items)} JSON items with intelligent deduplication")
@@ -3902,13 +3692,14 @@ class JSONMatcher:
                                 logging.info(f"🔍 SQL params: {params}")
                                 
                                 sql = f'''
-                                    SELECT "Product Name*", "Description", "Product Brand", "Lineage",
+                                    SELECT "Product Name*", "Description", "Product Brand", "Lineage", 
                                            "Product Type*", "Weight*", "Units", "Price", "Vendor/Supplier*",
                                            "Product Strain"
                                     FROM products
                                     WHERE {where_sql}
                                     AND ("Product Name*" NOT LIKE '%*VOID*%' AND "Description" NOT LIKE '%*VOID*%')
                                     AND ("Product Name*" NOT LIKE '%trade sample%' AND "Description" NOT LIKE '%trade sample%')
+                                    AND ("Product Name*" NOT LIKE '%sample%' AND "Description" NOT LIKE '%sample%')
                                     LIMIT 1
                                 '''
                                 
@@ -5728,26 +5519,8 @@ class JSONMatcher:
 
             # PRIORITY 2: Database products (fallback source)
             try:
-                # Try to use the app's global database instance first (AGT_Bothell store database)
-                try:
-                    from app import get_product_database
-                    product_db = get_product_database()
-                    logging.info("Using global product database instance (AGT_Bothell)")
-                except ImportError:
-                    # Fallback to creating a new instance with AGT_Bothell store
-                    from .product_database import ProductDatabase
-                    import os
-                    current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-                    db_path = os.path.join(current_dir, 'uploads', 'product_database_AGT_Bothell.db')
-                    if os.path.exists(db_path):
-                        product_db = ProductDatabase(db_path)
-                        product_db.init_database()
-                        logging.info(f"Created ProductDatabase instance for AGT_Bothell at {db_path}")
-                    else:
-                        # Final fallback to default database
-                        product_db = ProductDatabase()
-                        logging.info("Using default ProductDatabase")
-                
+                from .product_database import ProductDatabase
+                product_db = ProductDatabase()
                 db_products = product_db.get_all_products()
                 if db_products:
                     # Mark database products with lower priority
@@ -5976,7 +5749,7 @@ class JSONMatcher:
         matches = []
         
         for cache_item in self._sheet_cache:
-            cache_brand = str(cache_item.get("Product Brand", cache_item.get("brand", ""))).strip().lower()
+            cache_brand = str(cache_item.get("brand", "")).strip().lower()
             cache_name = str(cache_item.get("original_name", "")).lower()
             cache_vendor = str(cache_item.get("vendor", ""))
             
@@ -6103,8 +5876,8 @@ class JSONMatcher:
             return matches
         
         for cache_item in self._sheet_cache:
-            cache_weight = str(cache_item.get("Weight*", cache_item.get("weight", "")))
-            cache_type = str(cache_item.get("Product Type*", cache_item.get("product_type", ""))).lower()
+            cache_weight = str(cache_item.get("weight", ""))
+            cache_type = str(cache_item.get("product_type", "")).lower()
             
             # Check weight compatibility
             if self._weights_compatible(json_weight_normalized, cache_weight):
@@ -6246,7 +6019,6 @@ class JSONMatcher:
     def _product_types_compatible(self, json_type: str, cache_item: dict) -> bool:
         """Check if product types are compatible."""
         cache_name = str(cache_item.get("original_name", "")).lower()
-        cache_type = str(cache_item.get("Product Type*", cache_item.get("product_type", ""))).lower()
         
         # Define product type categories
         type_categories = {
@@ -6266,22 +6038,12 @@ class JSONMatcher:
                 json_category = category
                 break
         
-        # Find cache item category - check both Product Type* field and name
+        # Find cache item category
         cache_category = None
-        
-        # First try to get category from Product Type* field
-        if cache_type:
-            for category, keywords in type_categories.items():
-                if any(keyword in cache_type for keyword in keywords):
-                    cache_category = category
-                    break
-        
-        # If no category found from Product Type* field, try the name
-        if not cache_category:
-            for category, keywords in type_categories.items():
-                if any(keyword in cache_name for keyword in keywords):
-                    cache_category = category
-                    break
+        for category, keywords in type_categories.items():
+            if any(keyword in cache_name for keyword in keywords):
+                cache_category = category
+                break
         
         # Return True if categories match or if either is None (unknown)
         return json_category is None or cache_category is None or json_category == cache_category
@@ -6359,8 +6121,12 @@ class JSONMatcher:
         import re
         description = re.sub(r' - [\d.].*$', '', description)
         
-        # CRITICAL FIX: Don't add weight to description to avoid duplication
-        # Weight will be handled separately in the WeightUnits field
+        # Add weight with hyphen staying with weight (space after hyphen) if provided
+        if weight and units:
+            weight_units = f"{str(round(float(weight or '1')))}{units or 'g'}"
+            if weight_units and weight_units.lower() not in ['nan', 'none', 'null', '']:
+                return f"{description} -\u00A0{weight_units}"
+        
         return description
 
     def _create_detailed_display_name(self, product_name: str, description: str, thc_result: str, cbd_result: str, test_unit: str, weight: str = None, units: str = None) -> str:
@@ -6441,8 +6207,11 @@ class JSONMatcher:
                 cannabinoid_info = " / ".join(cannabinoid_parts)
                 detailed_name = f"{base_name} - {cannabinoid_info}"
             else:
-                # If no cannabinoid info, just use the base name (no weight duplication)
-                detailed_name = base_name
+                # If no cannabinoid info, just use the base name with weight if available
+                if weight and units:
+                    detailed_name = f"{base_name} - {weight}{units}"
+                else:
+                    detailed_name = base_name
             
             return detailed_name
             
@@ -6484,19 +6253,38 @@ class JSONMatcher:
                 strain_lower = product_strain.lower()
                 if 'cbd blend' in strain_lower or 'cbd' in strain_lower:
                     logging.info(f"🧬 CBD STRAIN DETECTED: '{product_strain}' for nonclassic type '{product_type}'")
-                    # CRITICAL FIX: CBD Blend products should ALWAYS get CBD lineage (yellow color)
-                    # regardless of product type - this ensures proper color display
-                    logging.info(f"🧬 CBD BLEND FIX: '{product_name}' (strain: {product_strain}) -> 'CBD'")
-                    return 'CBD'
+                    # Define edible types for more conservative CBD assignment
+                    edible_types = ['edible (solid)', 'edible (liquid)', 'high cbd edible liquid', 'tincture', 'capsule']
+                    if product_type.strip().lower() in edible_types:
+                        # For edibles, only assign CBD if explicitly high-CBD
+                        if product_name and ('high cbd' in product_name.lower() or 
+                                           ('cbd' in product_name.lower() and any(word in product_name.lower() for word in ['high', 'pure', 'isolate']))):
+                            logging.info(f"🧬 HIGH-CBD EDIBLE: '{product_name}' -> 'CBD'")
+                            return 'CBD'
+                        else:
+                            logging.info(f"🧬 REGULAR EDIBLE WITH CBD STRAIN: '{product_name}' -> 'MIXED'")
+                            return 'MIXED'
+                    else:
+                        # Non-edibles (including topicals) with CBD strain get CBD lineage
+                        logging.info(f"🧬 NON-EDIBLE WITH CBD STRAIN: '{product_name}' (type: {product_type}) -> 'CBD'")
+                        return 'CBD'
             
             # Check product name for CBD indicators
             if product_name:
                 name_lower = product_name.lower()
                 if any(word in name_lower for word in ['cbd', 'hemp', 'low-thc']):
-                    # CRITICAL FIX: Products with CBD in the name should get CBD lineage (yellow color)
-                    # regardless of product type - this ensures proper color display
-                    logging.info(f"🧬 CBD NAME FIX: '{product_name}' -> 'CBD'")
-                    return 'CBD'
+                    # For edibles, be more conservative - only assign CBD if it's explicitly high-CBD
+                    edible_types = ['edible (solid)', 'edible (liquid)', 'high cbd edible liquid', 'tincture', 'capsule']
+                    if product_type.strip().lower() in edible_types:
+                        if 'high cbd' in name_lower or ('cbd' in name_lower and any(word in name_lower for word in ['high', 'pure', 'isolate'])):
+                            logging.info(f"🧬 HIGH-CBD EDIBLE FROM NAME: '{product_name}' -> 'CBD'")
+                            return 'CBD'
+                        else:
+                            logging.info(f"🧬 REGULAR EDIBLE WITH CBD IN NAME: '{product_name}' -> 'MIXED'")
+                            return 'MIXED'
+                    else:
+                        logging.info(f"🧬 NON-EDIBLE WITH CBD IN NAME: '{product_name}' -> 'CBD'")
+                        return 'CBD'
             
             # Default for nonclassic types is MIXED (blue color)
             logging.info(f"🧬 NONCLASSIC TYPE DEFAULT: '{product_type}' -> 'MIXED'")
@@ -6522,123 +6310,6 @@ class JSONMatcher:
         result_lineage = existing_lineage or "HYBRID"
         logging.info(f"🧬 CLASSIC TYPE: '{product_type}' -> '{result_lineage}' (existing: '{existing_lineage}')")
         return result_lineage
-
-    def _calculate_ratio_for_json_product(self, product_type: str, json_item: Dict = None) -> str:
-        """
-        Calculate ratio for JSON products following classic vs nonclassic rules.
-        
-        Args:
-            product_type: The product type
-            json_item: Original JSON item data (optional)
-            
-        Returns:
-            Properly formatted ratio string
-        """
-        from src.core.constants import CLASSIC_TYPES
-        
-        if not product_type:
-            return ""
-        
-        product_type_lower = product_type.strip().lower()
-        is_classic = product_type_lower in CLASSIC_TYPES
-        
-        # For classic types, use default THC:CBD format
-        if is_classic:
-            return "THC: | BR | CBD:"
-        
-        # For nonclassic types, try to extract ratio from JSON data or product name
-        ratio = ""
-        
-        # First, try to get ratio from JSON item
-        if json_item:
-            # Check various possible ratio fields in JSON
-            ratio_fields = ['ratio', 'ratio_or_thc_cbd', 'thc_cbd_ratio', 'cannabinoid_ratio']
-            for field in ratio_fields:
-                if field in json_item and json_item[field]:
-                    ratio = str(json_item[field]).strip()
-                    if ratio and ratio.lower() not in ['nan', 'none', 'null', '']:
-                        break
-            
-            # If no ratio field found, try to extract from product name
-            if not ratio and 'product_name' in json_item:
-                product_name = str(json_item['product_name']).strip()
-                ratio = self._extract_ratio_from_product_name(product_name, product_type)
-        
-        # Return the ratio if found, otherwise empty string for nonclassic types
-        return ratio if ratio else ""
-
-    def _extract_ratio_from_product_name(self, product_name: str, product_type: str) -> str:
-        """
-        Extract ratio from product name for nonclassic products.
-        
-        Args:
-            product_name: The product name
-            product_type: The product type
-            
-        Returns:
-            Extracted ratio string or empty string
-        """
-        if not product_name:
-            return ""
-        
-        import re
-        
-        # Look for ratio patterns in product name
-        ratio_patterns = [
-            r'(\d+:\d+(?::\d+)*)',  # 1:1, 2:1, 1:2:1, etc.
-            r'(\d+/\d+)',           # 1/1, 2/1, etc.
-            r'(\d+mg.*?cbd)',       # 100mg CBD, etc.
-            r'(cbd.*?\d+mg)',       # CBD 100mg, etc.
-        ]
-        
-        for pattern in ratio_patterns:
-            match = re.search(pattern, product_name, re.IGNORECASE)
-            if match:
-                return match.group(1)
-        
-        return ""
-
-    def _normalize_weight_for_json_product(self, weight: str, units: str, product_type: str, product_name: str = "") -> tuple:
-        """
-        Normalize weight and units for JSON products following Excel processor rules.
-        
-        Args:
-            weight: Original weight value
-            units: Original units
-            product_type: Product type
-            product_name: Product name for special cases
-            
-        Returns:
-            Tuple of (normalized_weight, normalized_units)
-        """
-        from src.core.constants import CLASSIC_TYPES
-        
-        if not weight or str(weight).strip() in ['', 'nan', 'NaN', 'None']:
-            return '1', 'g'  # Default fallback
-        
-        weight = str(weight).strip()
-        units = str(units).strip() if units else 'g'
-        
-        # Determine if this is a nonclassic product
-        is_nonclassic = product_type.lower() not in [ct.lower() for ct in CLASSIC_TYPES]
-        
-        # For nonclassic types, convert grams to ounces
-        if is_nonclassic and units.lower() in ['g', 'gram', 'grams']:
-            try:
-                weight_val = float(weight)
-                # Convert grams to ounces (1 oz = 28.3495 g)
-                oz_val = round(weight_val / 28.3495, 2)
-                # Remove trailing zeros and format without space before unit
-                if oz_val.is_integer():
-                    return f"{int(oz_val)}oz", 'oz'
-                else:
-                    return f"{oz_val:.2f}".rstrip('0').rstrip('.') + 'oz', 'oz'
-            except ValueError:
-                # If conversion fails, return original values
-                return weight, units
-        
-        # For classic types or already correct units, return as-is
-        return weight, units
 
     def _create_tag_from_database_info(self, db_info: Dict, vendor: str, json_item: Dict = None) -> Dict:
         """
@@ -6671,14 +6342,8 @@ class JSONMatcher:
             strain = db_info.get("Product Strain", "") or db_info.get("product_strain", "")
             lineage = db_info.get("Lineage", "") or db_info.get("lineage", "")
             price = str(db_info.get("Price", "") or db_info.get("price", ""))
-            
-            # CRITICAL FIX: Use proper weight normalization for nonclassic types
-            weight, units = self._normalize_weight_for_json_product(
-                db_info.get("Weight*", "") or db_info.get("weight", ""),
-                db_info.get("Units", "") or db_info.get("units", ""),
-                product_type,
-                db_info.get("Product Name*", "") or db_info.get("product_name", "")
-            )
+            weight = str(db_info.get("Weight*", "") or db_info.get("weight", ""))
+            units = str(db_info.get("Units", "") or db_info.get("units", ""))
             description = db_info.get("Description", "") or db_info.get("description", "")
             thc_result = str(db_info.get("THC test result", "") or db_info.get("thc_test_result", ""))
             cbd_result = str(db_info.get("CBD test result", "") or db_info.get("cbd_test_result", ""))
@@ -6762,8 +6427,9 @@ class JSONMatcher:
             clean_display_name = extract_clean_product_name(primary_product_name)
             
             # Create DescAndWeight field in the same format as other tags
-            # CRITICAL FIX: Don't add weight to description to avoid duplication
             desc_and_weight = description or primary_product_name
+            if weight and units:
+                desc_and_weight = f"{desc_and_weight} -\u00A0{weight}{units}"
             
             tag = {
                 # Core product information - follow existing tag format
@@ -6796,12 +6462,12 @@ class JSONMatcher:
                 'Discountable? (yes/no)': 'yes',
                 'Room*': 'Default',
                 'Medical Only (Yes/No)': medical_only or 'No',
-                'DOH': db_info.get('DOH', ''),                  # Use DOH from database
+                'DOH': db_info.get('DOH', ''),  # Use DOH from database
                 'DOH Compliant (Yes/No)': db_info.get('DOH Compliant (Yes/No)', db_info.get('DOH', '')),
                 
                 # Database column mappings
                 'Concentrate Type': product_type if product_type and "concentrate" in product_type.lower() else '',
-                'Ratio': self._calculate_ratio_for_json_product(product_type, json_item),
+                'Ratio': '',
                 'Joint Ratio': '',
                 'JointRatio': '',
                 'THC test result': thc_result,
@@ -6828,11 +6494,11 @@ class JSONMatcher:
                 'Weight Unit* (grams/gm or ounces/oz)': units or "g",
                 'CombinedWeight': weight or "1",
                 'Description_Complexity': '1',
-                'Ratio_or_THC_CBD': self._calculate_ratio_for_json_product(product_type, json_item),
+                'Ratio_or_THC_CBD': '',
                 'displayName': clean_product_name(primary_product_name),
-                'weightWithUnits': f"{str(round(float(weight or '1')))}{units or 'g'}",
-                'WeightWithUnits': f"{str(round(float(weight or '1')))}{units or 'g'}",
-                'WeightUnits': f"{str(round(float(weight or '1')))}{units or 'g'}",
+                'weightWithUnits': f"{str(round(float(weight or '1')))} {units or 'g'}",
+                'WeightWithUnits': f"{str(round(float(weight or '1')))} {units or 'g'}",
+                'WeightUnits': f"{str(round(float(weight or '1')))} {units or 'g'}",
                 
                 # Additional fields for consistency
                 'vendor': vendor,
@@ -7251,27 +6917,19 @@ class JSONMatcher:
         """Check if product is valid (not voided or trade sample)."""
         if not product:
             return False
-
+        
         # Check Product Name* and Description for void/sample indicators
         product_name = str(product.get('Product Name*', '')).upper()
         description = str(product.get('Description', '')).upper()
-
-        # Filter out voided products
-        if '*VOID*' in product_name or '*VOID*' in description:
-            logging.info(f"🚫 Filtered out invalid product: {product.get('Product Name*', 'Unknown')} (contains '*VOID*')")
-            return False
-
-        # Filter out trade samples specifically (not all products containing "sample")
-        if 'TRADE SAMPLE' in product_name or 'TRADE SAMPLE' in description:
-            logging.info(f"🚫 Filtered out invalid product: {product.get('Product Name*', 'Unknown')} (contains 'TRADE SAMPLE')")
-            return False
-
-        # Filter out products that START with "SAMPLE" (free samples)
-        # But allow products that contain "sample" in the middle (like "Sample Size" products)
-        if product_name.startswith('SAMPLE ') or description.startswith('SAMPLE '):
-            logging.info(f"🚫 Filtered out invalid product: {product.get('Product Name*', 'Unknown')} (starts with 'SAMPLE')")
-            return False
-
+        
+        # Filter out voided products and trade samples
+        void_indicators = ['*VOID*', 'VOID', 'TRADE SAMPLE', 'SAMPLE']
+        
+        for indicator in void_indicators:
+            if indicator in product_name or indicator in description:
+                logging.info(f"🚫 Filtered out invalid product: {product.get('Product Name*', 'Unknown')} (contains '{indicator}')")
+                return False
+        
         return True
 
     def _create_tag_from_product(self, product: Dict, item: Dict, global_vendor: str) -> Dict[str, Any]:
@@ -7366,8 +7024,9 @@ class JSONMatcher:
                    '')  # Leave blank if not found in data
             
             # Create DescAndWeight field in the same format as other tags
-            # CRITICAL FIX: Don't add weight to description to avoid duplication
             desc_and_weight = description or product_name
+            if weight and units:
+                desc_and_weight = f"{desc_and_weight} -\u00A0{weight}{units}"
             
             # Helper function to extract clean product name (remove cannabinoid details)
             def extract_clean_product_name(full_name):

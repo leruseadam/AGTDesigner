@@ -740,12 +740,13 @@ def resource_path(relative_path):
 
 def create_app():
     import flask
+    print(f"🔍 DEBUG: create_app() called - PID: {os.getpid()}")
     app = flask.Flask(__name__, static_url_path='/static', static_folder='static')
     app.config.from_object('config.Config')
     
     # Enable development mode for auto-reload and debug features
-    # ENABLED: Allow easy restart by enabling development mode by default
-    app.config['DEVELOPMENT_MODE'] = os.environ.get('DEVELOPMENT_MODE', 'true').lower() == 'true'
+    # DISABLED: Prevent double reloading by disabling development mode by default
+    app.config['DEVELOPMENT_MODE'] = os.environ.get('DEVELOPMENT_MODE', 'false').lower() == 'true'
     
     # Enable detailed logging for development
     logging.getLogger().setLevel(logging.DEBUG)
@@ -803,6 +804,11 @@ def create_app():
     app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0 if development_mode else 31536000
     app.config['DEBUG'] = False  # Always disable debug mode to prevent double reloading
     app.config['PROPAGATE_EXCEPTIONS'] = bool(development_mode)
+    
+    # ADDITIONAL SAFEGUARDS: Force disable all reload mechanisms
+    app.config['TESTING'] = False
+    app.config['WTF_CSRF_ENABLED'] = False  # Disable CSRF to prevent form reload issues
+    app.config['SESSION_COOKIE_SECURE'] = False  # Prevent HTTPS-only cookie issues
     if development_mode:
         logging.info("Running in DEVELOPMENT mode with template auto-reload DISABLED to prevent force reloads")
     else:
@@ -842,20 +848,7 @@ def create_app():
     return app
 
 # Debug: Track app creation
-import sys
-try:
-    app_module = sys.modules.get('app')
-    if app_module and hasattr(app_module, '__import_count'):
-        import_count = app_module.__import_count + 1
-    else:
-        import_count = 1
-    print(f"🔍 DEBUG: Creating Flask app (import count: {import_count})")
-    if 'app' in sys.modules:
-        if not hasattr(sys.modules['app'], '__import_count'):
-            sys.modules['app'].__import_count = 0
-        sys.modules['app'].__import_count += 1
-except Exception:
-    print("🔍 DEBUG: Creating Flask app (import count: 1)")
+# Create Flask app instance
 app = create_app()
 
 # Initialize Flask-Caching after app creation (if available)
@@ -1107,6 +1100,7 @@ except ImportError as e:
 # --- LabelMakerApp Class ---
 class LabelMakerApp:
     def __init__(self):
+        print(f"🔍 DEBUG: LabelMakerApp.__init__() called - PID: {os.getpid()}")
         self.app = app
         self._configure_logging()
         
@@ -1175,6 +1169,7 @@ class LabelMakerApp:
             return False
             
     def run(self):
+        print(f"🔍 DEBUG: LabelMakerApp.run() called - PID: {os.getpid()}")
         host = os.environ.get('HOST', '127.0.0.1')
         port = int(os.environ.get('FLASK_PORT', 8001))
         development_mode = self.app.config.get('DEVELOPMENT_MODE', False)
@@ -1237,13 +1232,20 @@ class LabelMakerApp:
         print(f"🌐 App will be available at: http://{host}:{port}")
         logging.info(f"Development mode: {development_mode}")
         
-        # DEVELOPMENT MODE: Disable both debug and reloader to prevent multiple restarts
+        # PREVENT DOUBLE RELOADING: Explicitly disable all reload mechanisms
+        # Force disable debug and reloader regardless of any other settings
+        # Override any environment variables that might enable reloading
+        import os as os_module
+        os_module.environ['FLASK_DEBUG'] = '0'
+        os_module.environ['FLASK_ENV'] = 'production'
+        
         self.app.run(
             host=host, 
             port=port, 
-            debug=False,  # Disable debug mode to prevent reloader issues
-            use_reloader=False,  # Disable reloader to prevent multiple restarts
-            threaded=True  # Enable threading for better performance
+            debug=False,  # Force disable debug mode
+            use_reloader=False,  # Force disable reloader
+            threaded=True,  # Enable threading for better performance
+            load_dotenv=False  # Disable dotenv loading to prevent config conflicts
         )
 
 # === SESSION-BASED HELPERS ===
@@ -14979,6 +14981,12 @@ if __name__ == '__main__':
     import sys
     import os
     import signal
+    
+    # Debug: Check if we're being executed multiple times
+    print(f"🔍 DEBUG: Starting app.py - PID: {os.getpid()}, Parent PID: {os.getppid()}")
+    print(f"🔍 DEBUG: sys.argv: {sys.argv}")
+    print(f"🔍 DEBUG: __name__: {__name__}")
+    print(f"🔍 DEBUG: Current working directory: {os.getcwd()}")
     
     # Set up signal handlers for clean shutdown
     def signal_handler(signum, frame):
