@@ -1,13 +1,12 @@
 #!/bin/bash
-# Quick fix for PythonAnywhere merge conflict
-# Run this directly on PythonAnywhere
+# PythonAnywhere deployment script
 
-echo "🔧 Quick fix for PythonAnywhere merge conflict..."
+echo "🔄 Updating PythonAnywhere deployment..."
 
 # Navigate to the project directory
 cd /home/adamcordova/AGTDesigner
 
-# Pull the latest changes and force overwrite
+# Pull the latest changes
 echo "📥 Pulling latest changes from GitHub..."
 git fetch origin
 git reset --hard origin/main
@@ -15,7 +14,6 @@ git reset --hard origin/main
 # Verify the app.py file is clean
 if grep -q "<<<<<<< HEAD" app.py; then
     echo "❌ Error: Git conflict markers still present in app.py"
-    echo "Manual intervention required"
     exit 1
 fi
 
@@ -25,4 +23,4 @@ echo "✅ app.py is clean"
 echo "🔄 Restarting web application..."
 touch /var/www/www_agtpricetags_com_wsgi.py
 
-echo "✅ Fix complete! Your site should be working now."
+echo "✅ Deployment complete!"

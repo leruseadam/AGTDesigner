@@ -8569,6 +8569,12 @@ document.addEventListener('DOMContentLoaded', function() {
         titleElement.title = 'Click to reload the application';
         
         titleElement.addEventListener('click', function() {
+            // Check if refresh is already in progress
+            if (window.refreshInProgress) {
+                console.log('🚫 Title click refresh prevented - refresh already in progress');
+                return;
+            }
+            
             // Add a subtle visual feedback
             titleElement.style.opacity = '0.7';
             titleElement.style.transform = 'scale(0.98)';
@@ -8581,6 +8587,7 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // Reload the page after a brief delay for visual feedback
             setTimeout(() => {
+                console.log('✅ Title click: Refresh initiated');
                 window.location.reload();
             }, 200);
         });

@@ -403,6 +403,16 @@ class EnhancedUploadProgress {
     }
     
     refreshPage() {
+        // Check if refresh is already in progress
+        if (window.refreshInProgress) {
+            console.log('🚫 Double refresh prevented in ENHANCED_UPLOAD_PROGRESS');
+            return;
+        }
+        
+        // Set flag to prevent double refresh
+        window.refreshInProgress = true;
+        console.log('✅ ENHANCED_UPLOAD_PROGRESS: Refresh initiated');
+        
         // Refresh the page to show updated data
         window.location.reload();
     }
