@@ -2387,11 +2387,20 @@ def process_excel_sync(filename, temp_path):
                 else:
                     logging.error(f"[PC-SYNC] Failed to load file: {temp_path}")
                 return False
+            # PC PERFORMANCE: Disable expensive operations after loading
+            processor.enable_product_db_integration(False)
+            if hasattr(processor, 'enable_lineage_processing'):
+                processor.enable_lineage_processing(False)
+            if hasattr(processor, 'enable_strain_similarity'):
+                processor.enable_strain_similarity(False)
+            if hasattr(processor, 'set_minimal_processing'):
+                processor.set_minimal_processing(True)
+            
             if ENHANCED_LOGGING_AVAILABLE:
-                enhanced_logger.log_success(f"Ultra-fast load complete", 
-                                          {'rows': len(processor.df), 'platform': 'windows'})
+                enhanced_logger.log_success(f"Ultra-fast load complete with minimal processing", 
+                                          {'rows': len(processor.df), 'platform': 'windows', 'minimal_processing': True})
             else:
-                logging.info(f"[PC-SYNC] Ultra-fast load complete: {len(processor.df)} rows")
+                logging.info(f"[PC-SYNC] Ultra-fast load complete: {len(processor.df)} rows with minimal processing")
         else:
             # Mac: Use original loading strategy
             import pandas as pd
@@ -2614,7 +2623,16 @@ def process_excel_background(filename, temp_path):
                 if not success or new_processor.df is None or new_processor.df.empty:
                     update_processing_status(filename, f'error: Failed to load file')
                     return
-                logging.info(f"[PC-BG] Ultra-fast load complete: {len(new_processor.df)} rows")
+                # PC PERFORMANCE: Disable expensive operations after loading
+                new_processor.enable_product_db_integration(False)
+                if hasattr(new_processor, 'enable_lineage_processing'):
+                    new_processor.enable_lineage_processing(False)
+                if hasattr(new_processor, 'enable_strain_similarity'):
+                    new_processor.enable_strain_similarity(False)
+                if hasattr(new_processor, 'set_minimal_processing'):
+                    new_processor.set_minimal_processing(True)
+                
+                logging.info(f"[PC-BG] Ultra-fast load complete: {len(new_processor.df)} rows with minimal processing")
             else:
                 # Mac: Use original loading strategy
                 success = new_processor.load_file(temp_path)
@@ -3272,7 +3290,17 @@ def process_lightning():
             success = processor.load_file(file_path)  # This will use the PC-optimized version
             if not success:
                 return jsonify({'error': 'Failed to process file'}), 500
-            logging.info(f"[PC-LIGHTNING] Ultra-fast load complete: {len(processor.df)} rows")
+            
+            # PC PERFORMANCE: Disable expensive operations after loading
+            processor.enable_product_db_integration(False)
+            if hasattr(processor, 'enable_lineage_processing'):
+                processor.enable_lineage_processing(False)
+            if hasattr(processor, 'enable_strain_similarity'):
+                processor.enable_strain_similarity(False)
+            if hasattr(processor, 'set_minimal_processing'):
+                processor.set_minimal_processing(True)
+            
+            logging.info(f"[PC-LIGHTNING] Ultra-fast load complete: {len(processor.df)} rows with minimal processing")
         else:
             # Mac: Use original loading strategy
             import pandas as pd
@@ -7072,6 +7100,33 @@ def get_filter_options():
             else:
                 logging.info("Ultra-fast mode enabled for PC performance")
         
+        # PC PERFORMANCE CRITICAL: Disable expensive operations for PC clients
+        if is_web_client:
+            # Disable product database integration for PC performance
+            excel_processor.enable_product_db_integration(False)
+            
+            # Disable expensive lineage processing for PC
+            if hasattr(excel_processor, 'enable_lineage_processing'):
+                excel_processor.enable_lineage_processing(False)
+            
+            # Disable strain similarity processing for PC
+            if hasattr(excel_processor, 'enable_strain_similarity'):
+                excel_processor.enable_strain_similarity(False)
+            
+            # Enable minimal processing mode for PC
+            if hasattr(excel_processor, 'set_minimal_processing'):
+                excel_processor.set_minimal_processing(True)
+            
+            logging.info("PC PERFORMANCE: Disabled expensive operations for maximum speed")
+        
+        # PC PERFORMANCE: Use aggressive caching for filter options
+        if is_web_client:
+            # Use cached filter options for PC performance
+            cached_options = cache.get(cache_key)
+            if cached_options and not force_refresh:
+                logging.info("PC PERFORMANCE: Using cached filter options")
+                return jsonify(cached_options)
+        
         # Use optimized method for Windows
         if is_windows_request or is_windows_ua:
             options = excel_processor.get_dynamic_filter_options(current_filters)
@@ -7109,10 +7164,16 @@ def get_filter_options():
             else:
                 logging.info(f"Weight filter options: {options['weight'][:10]}...")  # Log first 10 options
         
-        # For Windows requests, cache the results for better performance
-        if is_windows_request or is_windows_ua:
+        # PC PERFORMANCE: Cache results aggressively for web clients
+        if is_web_client:
             try:
-                cache.set(cache_key, options, timeout=60)  # Cache for 1 minute
+                cache.set(cache_key, options, timeout=3600)  # Cache for 1 hour for PC
+                logging.info("PC PERFORMANCE: Cached filter options for 1 hour")
+            except Exception as cache_error:
+                logging.warning(f"PC PERFORMANCE: Cache error: {cache_error}")
+        elif is_windows_request or is_windows_ua:
+            try:
+                cache.set(cache_key, options, timeout=60)  # Cache for 1 minute for Windows
                 if ENHANCED_LOGGING_AVAILABLE:
                     enhanced_logger.log_success("Cached filter options for Windows performance")
                 else:

@@ -730,11 +730,38 @@ class ExcelProcessor:
         self._product_db_enabled = True  # Enable product database integration by default
         self._debug_count = 0  # Initialize debug count
         self._store_name = store_name  # Store name for database operations
+        
+        # PC Performance optimization flags
+        self._ultra_fast_mode = False
+        self._lineage_processing_enabled = True
+        self._strain_similarity_enabled = True
+        self._minimal_processing_mode = False
 
     def clear_file_cache(self):
         """Clear the file cache to free memory."""
         self._file_cache.clear()
         self.logger.debug("File cache cleared")
+    
+    # PC Performance optimization methods
+    def set_ultra_fast_mode(self, enabled: bool):
+        """Enable/disable ultra-fast mode for PC performance."""
+        self._ultra_fast_mode = enabled
+        self.logger.info(f"Ultra-fast mode {'enabled' if enabled else 'disabled'}")
+    
+    def enable_lineage_processing(self, enabled: bool):
+        """Enable/disable lineage processing for PC performance."""
+        self._lineage_processing_enabled = enabled
+        self.logger.info(f"Lineage processing {'enabled' if enabled else 'disabled'}")
+    
+    def enable_strain_similarity(self, enabled: bool):
+        """Enable/disable strain similarity processing for PC performance."""
+        self._strain_similarity_enabled = enabled
+        self.logger.info(f"Strain similarity processing {'enabled' if enabled else 'disabled'}")
+    
+    def set_minimal_processing(self, enabled: bool):
+        """Enable/disable minimal processing mode for PC performance."""
+        self._minimal_processing_mode = enabled
+        self.logger.info(f"Minimal processing mode {'enabled' if enabled else 'disabled'}")
     
     def apply_strain_extraction(self):
         """Apply strain extraction logic to loaded data."""
