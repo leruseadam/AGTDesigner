@@ -741,12 +741,28 @@ def resource_path(relative_path):
 def create_app():
     import flask
     print(f"🔍 DEBUG: create_app() called - PID: {os.getpid()}")
+    
+    # CRITICAL FIX: Prevent double initialization by checking if app already exists
+    if hasattr(create_app, '_app_instance'):
+        print("🔍 DEBUG: Returning existing app instance to prevent double initialization")
+        return create_app._app_instance
+    
     app = flask.Flask(__name__, static_url_path='/static', static_folder='static')
     app.config.from_object('config.Config')
     
-    # Enable development mode for auto-reload and debug features
-    # DISABLED: Prevent double reloading by disabling development mode by default
-    app.config['DEVELOPMENT_MODE'] = os.environ.get('DEVELOPMENT_MODE', 'false').lower() == 'true'
+    # CRITICAL FIX: Force disable development mode to prevent double restarts
+    app.config['DEVELOPMENT_MODE'] = False
+    app.config['DEBUG'] = False
+    app.config['TESTING'] = False
+    
+    # CRITICAL FIX: Disable auto-reload mechanisms
+    app.config['TEMPLATES_AUTO_RELOAD'] = False
+    app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 31536000  # Long cache to prevent reloads
+    
+    # CRITICAL FIX: Set environment variables to prevent reloading
+    os.environ['FLASK_DEBUG'] = '0'
+    os.environ['FLASK_ENV'] = 'production'
+    os.environ['FLASK_RUN_RELOAD'] = '0'
     
     # Enable detailed logging for development
     logging.getLogger().setLevel(logging.DEBUG)
@@ -845,11 +861,20 @@ def create_app():
             'text/javascript',
             'text/plain'
         ])
+    
+    # CRITICAL FIX: Store app instance to prevent double initialization
+    create_app._app_instance = app
+    print(f"🔍 DEBUG: App instance stored - PID: {os.getpid()}")
+    
     return app
 
 # Debug: Track app creation
-# Create Flask app instance
-app = create_app()
+# CRITICAL FIX: Prevent multiple app creation
+if not hasattr(create_app, '_app_instance'):
+    app = create_app()
+else:
+    app = create_app._app_instance
+    print("🔍 DEBUG: Using existing app instance to prevent double creation")
 
 # Initialize Flask-Caching after app creation (if available)
 if CACHE_AVAILABLE:
@@ -1101,8 +1126,17 @@ except ImportError as e:
 class LabelMakerApp:
     def __init__(self):
         print(f"🔍 DEBUG: LabelMakerApp.__init__() called - PID: {os.getpid()}")
+        
+        # CRITICAL FIX: Prevent double initialization
+        if hasattr(LabelMakerApp, '_instance'):
+            print("🔍 DEBUG: LabelMakerApp already initialized, returning existing instance")
+            return LabelMakerApp._instance
+        
         self.app = app
         self._configure_logging()
+        
+        # CRITICAL FIX: Store instance to prevent double initialization
+        LabelMakerApp._instance = self
         
     def _configure_logging(self):
         """Configure enhanced logging system"""
@@ -15048,6 +15082,14 @@ if __name__ == '__main__':
     except Exception:
         pass  # Continue even if we can't create lock file
     
+    # CRITICAL FIX: Prevent multiple app instances
+    if hasattr(main, '_app_running'):
+        print("🔍 DEBUG: App already running, preventing double startup")
+        return
+    
+    # Mark app as running
+    main._app_running = True
+    
     # Use the LabelMakerApp class for proper startup
     print("Starting Label Maker application...")
     print(f"🆔 Process ID: {os.getpid()}")
@@ -15073,4 +15115,7 @@ if __name__ == '__main__':
             if os.path.exists(port_lock_file):
                 os.remove(port_lock_file)
         except Exception:
-            pass 
+            pass
+        
+        # Mark app as stopped
+        main._app_running = False 
