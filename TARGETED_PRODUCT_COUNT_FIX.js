@@ -197,11 +197,17 @@ if (typeof window.updateDashboardStats === 'function') {
 console.log("🚀 Applying immediate product count fix...");
 fixProductCountDisplay();
 
-// Set up periodic refresh
+// Set up periodic refresh with CPU optimization
 setInterval(() => {
+    // Check if CPU usage is high before running
+    if (window.CPUOptimizer && window.CPUOptimizer.isHighCPU()) {
+        console.log("🔄 Skipping product count refresh due to high CPU usage");
+        return;
+    }
+    
     console.log("🔄 Periodic product count refresh...");
     fixProductCountDisplay();
-}, 15000); // Every 15 seconds
+}, 30000); // Increased from 15 seconds to 30 seconds
 
 console.log("🎉 TARGETED PRODUCT COUNT FIX APPLIED!");
 console.log("Product count should now display correctly");

@@ -122,10 +122,18 @@ class EnhancedUploadProgress {
             clearInterval(this.progressInterval);
         }
         
-        // Poll every second for progress updates
+        // CPU-aware polling interval
+        const pollingInterval = (window.CPUOptimizer && window.CPUOptimizer.isHighCPU()) ? 3000 : 1000;
+        
+        // Poll with adaptive interval for progress updates
         this.progressInterval = setInterval(() => {
+            // Skip polling if CPU usage is high
+            if (window.CPUOptimizer && window.CPUOptimizer.isHighCPU()) {
+                console.log("🔄 Skipping progress polling due to high CPU usage");
+                return;
+            }
             this.fetchProgress();
-        }, 1000);
+        }, pollingInterval);
         
         // Immediate first fetch
         this.fetchProgress();
@@ -403,16 +411,6 @@ class EnhancedUploadProgress {
     }
     
     refreshPage() {
-        // Check if refresh is already in progress
-        if (window.refreshInProgress) {
-            console.log('🚫 Double refresh prevented in ENHANCED_UPLOAD_PROGRESS');
-            return;
-        }
-        
-        // Set flag to prevent double refresh
-        window.refreshInProgress = true;
-        console.log('✅ ENHANCED_UPLOAD_PROGRESS: Refresh initiated');
-        
         // Refresh the page to show updated data
         window.location.reload();
     }

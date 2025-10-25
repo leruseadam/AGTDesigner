@@ -91,7 +91,7 @@ class PerformanceMonitor:
                 # Cleanup old data
                 self._cleanup_old_data()
                 
-                time.sleep(10)  # Monitor every 10 seconds to reduce CPU usage
+                time.sleep(30)  # Monitor every 30 seconds to reduce CPU usage (increased from 10s)
                 
             except Exception as e:
                 logger.error(f"Performance monitoring error: {e}")
@@ -110,7 +110,7 @@ class PerformanceMonitor:
             })
             
             # CPU usage (with longer interval to reduce overhead)
-            cpu_percent = psutil.cpu_percent(interval=1)
+            cpu_percent = psutil.cpu_percent(interval=2)  # Increased from 1s to 2s
             self._cpu_usage.append({
                 'timestamp': time.time(),
                 'cpu_percent': cpu_percent

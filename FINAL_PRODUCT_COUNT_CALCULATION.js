@@ -291,11 +291,17 @@ async function updateVendorCount() {
 console.log("🚀 Starting immediate product count calculation...");
 calculateAndDisplayTotalProducts();
 
-// Set up periodic refresh
+// Set up periodic refresh with CPU optimization
 setInterval(() => {
+    // Check if CPU usage is high before running
+    if (window.CPUOptimizer && window.CPUOptimizer.isHighCPU()) {
+        console.log("🔄 Skipping product count calculation due to high CPU usage");
+        return;
+    }
+    
     console.log("🔄 Periodic product count calculation...");
     calculateAndDisplayTotalProducts();
-}, 30000); // Every 30 seconds
+}, 60000); // Increased from 30 seconds to 60 seconds
 
 console.log("🎉 FINAL PRODUCT COUNT CALCULATION APPLIED!");
 console.log("Should now show correct total products (3,305+) instead of 0");

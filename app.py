@@ -7070,6 +7070,14 @@ def get_filter_options():
             'WOW64' in user_agent
         )
         
+        # CPU PERFORMANCE OPTIMIZATION: Reduce monitoring frequency
+        if is_pc_client:
+            # Reduce monitoring frequency for PC clients to save CPU
+            if hasattr(create_app, '_last_monitor_check'):
+                if time.time() - create_app._last_monitor_check < 30:  # Only check every 30 seconds
+                    return jsonify({'success': True, 'message': 'Monitoring throttled for CPU optimization'})
+            create_app._last_monitor_check = time.time()
+        
         if is_web_client:
             if ENHANCED_LOGGING_AVAILABLE:
                 enhanced_logger.log_info("Web client detected - applying performance optimizations", 
