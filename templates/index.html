@@ -6914,6 +6914,8 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <!-- Double Refresh Fix - Must load before main.js -->
   <script src="{{ url_for('static', filename='js/double_refresh_fix.js') }}?v={{ cache_bust }}"></script>
+  <!-- Fast Upload Manager - Must load before main.js -->
+  <script src="{{ url_for('static', filename='js/fast_upload_manager.js') }}?v={{ cache_bust }}"></script>
   <script src="{{ url_for('static', filename='js/main.js') }}?v={{ cache_bust }}"></script>
   
   <!-- Debug Script -->

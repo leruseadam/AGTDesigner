@@ -1007,6 +1007,43 @@ class ExcelProcessor:
             self.logger.error(f"[Minimal] Error in minimal processing: {e}")
             raise
     
+    def apply_fast_processing(self):
+        """Apply ultra-fast processing for web performance - minimal operations only."""
+        if self.df is None or self.df.empty:
+            self.logger.warning("[Fast] No data to process")
+            return
+        
+        self.logger.info("[Fast] Applying ultra-fast processing for web performance")
+        
+        try:
+            # 1. Basic column cleaning only
+            self.df = self.df.fillna('')
+            
+            # 2. Add essential columns if missing (minimal set)
+            essential_columns = {
+                'THC test result': 0.0,
+                'CBD test result': 0.0,
+                'Test result unit (% or mg)': '%',
+                'Product Strain': '',
+                'Lineage': 'HYBRID'
+            }
+            
+            for col, default_value in essential_columns.items():
+                if col not in self.df.columns:
+                    self.df[col] = default_value
+            
+            # 3. Basic lineage normalization (vectorized)
+            if "Lineage" in self.df.columns:
+                self.df["Lineage"] = self.df["Lineage"].str.upper().str.strip()
+                self.df["Lineage"] = self.df["Lineage"].fillna('HYBRID')
+            
+            # 4. Skip heavy processing - just basic cleanup
+            self.logger.info("[Fast] Ultra-fast processing complete - skipping heavy operations")
+            
+        except Exception as e:
+            self.logger.error(f"[Fast] Error in fast processing: {e}")
+            # Continue with raw data if fast processing fails
+    
     def get_product_db_stats(self):
         """Get product database statistics."""
         try:
@@ -1115,10 +1152,14 @@ class ExcelProcessor:
                     self.logger.debug(f"Attempting to read with engine: {engine}")
                     
                     # Use optimized reading settings - minimal dtype specification for speed
+                    # Read everything as string for maximum speed
                     dtype_dict = {
                         "Product Name*": "string",
                         "Product Type*": "string",
-                        "Lineage": "string"
+                        "Lineage": "string",
+                        "Product Strain": "string",
+                        "Product Brand": "string",
+                        "Vendor": "string"
                     }
                     
                     # Read with minimal processing - no NA filtering for speed

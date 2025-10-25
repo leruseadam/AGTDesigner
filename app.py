@@ -1852,10 +1852,12 @@ def upload_file():
             
         else:
             # Local development: Process synchronously for immediate feedback
-            logging.info("[LOCAL] Processing file synchronously")
+            logging.info("[LOCAL] Processing file synchronously with fast mode")
             processor = get_excel_processor()
             
-            success = processor.load_file(file_path)
+            # Use fast processing for better performance
+            processor.set_processing_mode('fast')
+            success = processor.fast_load_file(file_path)
             if success:
                 row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
                 logging.info(f"File loaded successfully: {row_count} rows")
