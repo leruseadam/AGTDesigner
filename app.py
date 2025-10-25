@@ -22,6 +22,8 @@ import pandas as pd  # Add this import
 import time
 import re
 import json
+import requests
+from flask import make_response
 # CRITICAL FIX: Global process lock to prevent multiple instances
 import fcntl
 import tempfile
@@ -34,6 +36,22 @@ def acquire_process_lock():
     """Acquire a global process lock to prevent multiple instances"""
     global PROCESS_LOCK_FD
     try:
+        # Check if lock file exists and process is still running
+        if os.path.exists(PROCESS_LOCK_FILE):
+            try:
+                with open(PROCESS_LOCK_FILE, 'r') as f:
+                    pid = int(f.read().strip())
+                # Check if the process is still running
+                os.kill(pid, 0)  # This will raise an exception if process doesn't exist
+                print(f"❌ Another instance is already running (PID: {pid})")
+                return False
+            except (OSError, ProcessLookupError, ValueError):
+                # Process doesn't exist or invalid PID, remove stale lock file
+                try:
+                    os.remove(PROCESS_LOCK_FILE)
+                except:
+                    pass
+        
         PROCESS_LOCK_FD = os.open(PROCESS_LOCK_FILE, os.O_CREAT | os.O_WRONLY | os.O_TRUNC)
         fcntl.flock(PROCESS_LOCK_FD, fcntl.LOCK_EX | fcntl.LOCK_NB)
         os.write(PROCESS_LOCK_FD, str(os.getpid()).encode())
@@ -57,6 +75,12 @@ def release_process_lock():
         print(f"🔓 Process lock released - PID: {os.getpid()}")
     except Exception as e:
         print(f"⚠️  Error releasing process lock: {e}")
+
+# CRITICAL FIX: Prevent multiple imports/executions
+if hasattr(sys.modules[__name__], '_already_imported'):
+    print("❌ App module already imported, preventing duplicate execution")
+    sys.exit(1)
+sys.modules[__name__]._already_imported = True
 
 # Acquire process lock immediately
 if not acquire_process_lock():
@@ -830,7 +854,7 @@ def create_app():
     app.config['DEBUG'] = False
     app.config['TESTING'] = False
     
-    # CRITICAL FIX: Disable auto-reload mechanisms
+    # CRITICAL FIX: Disable auto-reload mechanisms completely
     app.config['TEMPLATES_AUTO_RELOAD'] = False
     app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 31536000  # Long cache to prevent reloads
     
@@ -838,6 +862,11 @@ def create_app():
     os.environ['FLASK_DEBUG'] = '0'
     os.environ['FLASK_ENV'] = 'production'
     os.environ['FLASK_RUN_RELOAD'] = '0'
+    os.environ['WERKZEUG_RUN_MAIN'] = 'true'  # Prevent Werkzeug from spawning child processes
+    
+    # CRITICAL FIX: Disable Werkzeug reloader completely
+    import werkzeug
+    werkzeug.serving.is_running_from_reloader = lambda: False
     
     # Enable detailed logging for development
     logging.getLogger().setLevel(logging.DEBUG)
@@ -2474,6 +2503,7 @@ def upload_file_simple_pythonanywhere():
 @app.route('/upload-simple', methods=['POST'])
 def upload_file_simple():
     """Simple, reliable file upload for PythonAnywhere"""
+    start_time = time.time()  # Add missing start_time variable
     try:
         logging.info("=== SIMPLE UPLOAD REQUEST START ===")
         
@@ -2905,7 +2935,7 @@ def process_excel_background(filename, temp_path):
         load_start = time.time()
         
         # Add timeout check
-        if time.time() - start_time > max_processing_time:
+        if time.time() - start_time > MAX_PROCESSING_TIME_PER_CHUNK:
             update_processing_status(filename, f'error: Processing timeout during file load')
             logging.error(f"[BG] Processing timeout for {filename}")
             return
@@ -7246,6 +7276,7 @@ def get_filter_options():
         # Check if this is a Windows platform request for optimization
         is_windows_request = request.args.get('platform') == 'windows'
         is_ultra_fast_request = request.args.get('ultra_fast') == 'true'
+        force_refresh = request.args.get('force_refresh', 'false').lower() == 'true'
         user_agent = request.headers.get('User-Agent', '')
         is_windows_ua = 'Windows' in user_agent
         is_web_client = is_windows_request or is_windows_ua
@@ -15334,6 +15365,12 @@ if __name__ == '__main__':
     print(f"🔍 DEBUG: __name__: {__name__}")
     print(f"🔍 DEBUG: Current working directory: {os.getcwd()}")
     
+    # CRITICAL FIX: Prevent multiple executions by checking environment
+    if os.environ.get('LABELMAKER_STARTED', '') == 'true':
+        print("❌ App already started in this environment, preventing duplicate startup")
+        sys.exit(0)
+    os.environ['LABELMAKER_STARTED'] = 'true'
+    
     # Set up signal handlers for clean shutdown
     def signal_handler(signum, frame):
         print(f"\n🛑 Received signal {signum} - shutting down gracefully...")
@@ -15381,12 +15418,12 @@ if __name__ == '__main__':
         pass  # Continue even if we can't create lock file
     
     # CRITICAL FIX: Prevent multiple app instances
-    if hasattr(main, '_app_running'):
+    if hasattr(sys.modules[__name__], '_app_running'):
         print("🔍 DEBUG: App already running, preventing double startup")
         sys.exit(0)
     
     # Mark app as running
-    main._app_running = True
+    sys.modules[__name__]._app_running = True
     
     # Use the LabelMakerApp class for proper startup
     print("Starting Label Maker application...")
@@ -15419,4 +15456,4 @@ if __name__ == '__main__':
         release_process_lock()
         
         # Mark app as stopped
-        main._app_running = False 
+        sys.modules[__name__]._app_running = False 
