@@ -1846,15 +1846,18 @@ def upload_file():
             
             def process_in_background():
                 try:
-                    logging.info(f"[BACKGROUND] Processing file: {file_path}")
+                    logging.info(f"[BACKGROUND] Processing file with ULTRA-FAST mode: {file_path}")
                     processor = get_excel_processor()
-                    success = processor.load_file(file_path)
+                    
+                    # Use ultra-fast processing for maximum speed
+                    processor.set_processing_mode('fast')
+                    success = processor.fast_load_file(file_path)
                     
                     if success:
                         row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
-                        logging.info(f"[BACKGROUND] File loaded: {row_count} rows")
+                        logging.info(f"[BACKGROUND] File loaded successfully with ULTRA-FAST mode: {row_count} rows")
                         
-                        # Store in database
+                        # Store in database (non-blocking)
                         try:
                             from src.core.data.product_database import get_product_database
                             product_db = get_product_database()
