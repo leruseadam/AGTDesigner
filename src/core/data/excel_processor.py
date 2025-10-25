@@ -2940,7 +2940,7 @@ class ExcelProcessor:
             else:
                 self.dropdown_cache[filter_id] = []
 
-    def get_available_tags(self, filters: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
+    def get_available_tags(self, filters: Optional[Dict[str, str]] = None, bypass_filtering: bool = False) -> List[Dict[str, Any]]:
         """Return a list of tag objects with all necessary data."""
         if self.df is None:
             logger.warning("DataFrame is None in get_available_tags")
@@ -3165,6 +3165,12 @@ class ExcelProcessor:
             tag['Lineage'] = lineage
             tag['lineage'] = lineage
 
+            # AGGRESSIVE TAG FIX: Bypass filtering if requested
+            if bypass_filtering:
+                logger.debug(f"AGGRESSIVE FIX: Bypassing filtering for: {product_name}")
+                tags.append(tag)
+                continue
+            
             # TAG COUNT FIX: Less aggressive filtering to preserve more tags
             product_name_lower = product_name.lower()
             product_type_lower = product_type.lower()
@@ -6980,6 +6986,12 @@ class ExcelProcessor:
             tag['Lineage'] = lineage
             tag['lineage'] = lineage
 
+            # AGGRESSIVE TAG FIX: Bypass filtering if requested
+            if bypass_filtering:
+                logger.debug(f"AGGRESSIVE FIX: Bypassing filtering for: {product_name}")
+                tags.append(tag)
+                continue
+            
             # TAG COUNT FIX: Less aggressive filtering to preserve more tags
             product_name_lower = product_name.lower()
             product_type_lower = product_type.lower()
