@@ -6698,7 +6698,7 @@ class ExcelProcessor:
             logger.error(f"Error in get_available_tag_names: {e}")
             return []
 
-    def get_available_tags(self, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    def get_available_tags(self, filters: Optional[Dict[str, Any]] = None, bypass_filtering: bool = False) -> List[Dict[str, Any]]:
         """Return a list of tag objects with all necessary data."""
         if self.df is None:
             logger.warning("DataFrame is None in get_available_tags, attempting to use database")

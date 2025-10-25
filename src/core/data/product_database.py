@@ -1522,6 +1522,7 @@ class ProductDatabase:
                     
                     # Store the product in database
                     # Get the count before to determine if it's new or updated
+                    conn = self._get_connection()
                     cursor_temp = conn.cursor()
                     cursor_temp.execute("SELECT COUNT(*) FROM products")
                     count_before = cursor_temp.fetchone()[0]
@@ -4657,7 +4658,27 @@ class ProductDatabase:
             print(f"🔍 DEBUG: With params: {params}")
             
             cursor.execute(query, params)
-            result = cursor.fetchone()
+            results = cursor.fetchall()
+            
+            # CRITICAL FIX: Handle multiple results and deduplicate
+            if results:
+                # If we got multiple results, deduplicate by product name
+                seen_names = set()
+                unique_results = []
+                
+                for result in results:
+                    product_name = result[1] if len(result) > 1 else None  # Product Name* is at index 1
+                    if product_name and product_name not in seen_names:
+                        seen_names.add(product_name)
+                        unique_results.append(result)
+                
+                # Use the first unique result (highest priority due to ORDER BY)
+                result = unique_results[0] if unique_results else None
+                
+                if len(unique_results) > 1:
+                    print(f"🔍 DEBUG: Found {len(results)} results, deduplicated to {len(unique_results)} unique products")
+            else:
+                result = None
             
             # DEBUG: Log database query results
             print(f"🔍 DEBUG: Database query returned: {result is not None}")
@@ -4670,15 +4691,28 @@ class ProductDatabase:
                 if strain and 'original_query' in locals():
                     print(f"🔍 DEBUG: Trying fallback query without strain matching...")
                     
-                    # Remove strain conditions from the query
-                    fallback_query = original_query
+                    # Build a clean fallback query without strain conditions
+                    fallback_query = """SELECT p.id, p."Product Name*", p."Product Strain", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
+                       p."Description", p."Weight*", p."Units", p."Price", p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio",
+                       p."State", p."Is Sample? (yes/no)", p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*",
+                       p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens", p."Solvent", p."Accepted Date",
+                       p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."CombinedWeight", p."Ratio_or_THC_CBD", 
+                       p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN", 0 as total_occurrences, '' as first_seen_date, '' as last_seen_date
+                FROM products p
+                WHERE 1=1"""
                     fallback_params = []
                     
-                    # Rebuild query without strain conditions
+                    # Add name conditions
                     if normalized_name:
                         fallback_query += " AND (p.normalized_name = ? OR LOWER(p.\"Product Name*\") LIKE ? OR LOWER(p.\"Product Name*\") LIKE ? OR LOWER(p.\"Product Name*\") LIKE ?)"
                         fallback_params.extend([normalized_name, f"%{normalized_name.lower()}%", f"%{normalized_name.lower()}%", f"%{normalized_name.lower()}%"])
                     
+                    # Add vendor condition
+                    if vendor:
+                        fallback_query += " AND p.\"Vendor/Supplier*\" LIKE ?"
+                        fallback_params.append(f"%{vendor}%")
+                    
+                    # Add product type conditions
                     if product_type:
                         product_type_lower = product_type.lower().strip()
                         product_type_mapping = {
@@ -4697,10 +4731,6 @@ class ProductDatabase:
                             
                             if type_conditions:
                                 fallback_query += " AND (" + " OR ".join(type_conditions) + ")"
-                    
-                    if vendor:
-                        fallback_query += " AND p.\"Vendor/Supplier*\" LIKE ?"
-                        fallback_params.append(f"%{vendor}%")
                     
                     # Add ordering
                     if product_type:
@@ -4728,7 +4758,27 @@ class ProductDatabase:
                     print(f"🔍 DEBUG: With fallback params: {fallback_params}")
                     
                     cursor.execute(fallback_query, fallback_params)
-                    result = cursor.fetchone()
+                    fallback_results = cursor.fetchall()
+                    
+                    # CRITICAL FIX: Handle multiple fallback results and deduplicate
+                    if fallback_results:
+                        # If we got multiple results, deduplicate by product name
+                        seen_names = set()
+                        unique_fallback_results = []
+                        
+                        for fallback_result in fallback_results:
+                            product_name = fallback_result[1] if len(fallback_result) > 1 else None  # Product Name* is at index 1
+                            if product_name and product_name not in seen_names:
+                                seen_names.add(product_name)
+                                unique_fallback_results.append(fallback_result)
+                        
+                        # Use the first unique result (highest priority due to ORDER BY)
+                        result = unique_fallback_results[0] if unique_fallback_results else None
+                        
+                        if len(unique_fallback_results) > 1:
+                            print(f"🔍 DEBUG: Fallback found {len(fallback_results)} results, deduplicated to {len(unique_fallback_results)} unique products")
+                    else:
+                        result = None
                     
                     print(f"🔍 DEBUG: Fallback query returned: {result is not None}")
                     if result:
