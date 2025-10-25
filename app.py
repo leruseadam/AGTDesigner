@@ -22,6 +22,60 @@ import pandas as pd  # Add this import
 import time
 import re
 import json
+# CRITICAL FIX: Global process lock to prevent multiple instances
+import fcntl
+import tempfile
+
+# Create a global process lock file
+PROCESS_LOCK_FILE = os.path.join(tempfile.gettempdir(), 'labelmaker_process.lock')
+PROCESS_LOCK_FD = None
+
+def acquire_process_lock():
+    """Acquire a global process lock to prevent multiple instances"""
+    global PROCESS_LOCK_FD
+    try:
+        PROCESS_LOCK_FD = os.open(PROCESS_LOCK_FILE, os.O_CREAT | os.O_WRONLY | os.O_TRUNC)
+        fcntl.flock(PROCESS_LOCK_FD, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        os.write(PROCESS_LOCK_FD, str(os.getpid()).encode())
+        os.fsync(PROCESS_LOCK_FD)
+        print(f"🔒 Process lock acquired - PID: {os.getpid()}")
+        return True
+    except (OSError, IOError) as e:
+        print(f"❌ Another instance is already running: {e}")
+        return False
+
+def release_process_lock():
+    """Release the global process lock"""
+    global PROCESS_LOCK_FD
+    try:
+        if PROCESS_LOCK_FD is not None:
+            fcntl.flock(PROCESS_LOCK_FD, fcntl.LOCK_UN)
+            os.close(PROCESS_LOCK_FD)
+            PROCESS_LOCK_FD = None
+        if os.path.exists(PROCESS_LOCK_FILE):
+            os.remove(PROCESS_LOCK_FILE)
+        print(f"🔓 Process lock released - PID: {os.getpid()}")
+    except Exception as e:
+        print(f"⚠️  Error releasing process lock: {e}")
+
+# Acquire process lock immediately
+if not acquire_process_lock():
+    print("❌ Cannot start: Another instance is already running")
+    sys.exit(1)
+
+# CRITICAL FIX: Global initialization flag to prevent multiple initializations
+_global_initialized = False
+
+def mark_global_initialized():
+    """Mark the global initialization as complete"""
+    global _global_initialized
+    _global_initialized = True
+    print(f"✅ Global initialization marked complete - PID: {os.getpid()}")
+
+def is_global_initialized():
+    """Check if global initialization is complete"""
+    return _global_initialized
+
 # Startup Performance Optimization
 # DISABLE_STARTUP_FILE_LOADING = True  # Disable startup file loading to prevent hangs
 
@@ -742,6 +796,12 @@ def create_app():
     import flask
     print(f"🔍 DEBUG: create_app() called - PID: {os.getpid()}")
     
+    # CRITICAL FIX: Check global initialization flag
+    if is_global_initialized():
+        print("🔍 DEBUG: Global initialization already complete, returning existing app")
+        if hasattr(create_app, '_app_instance'):
+            return create_app._app_instance
+    
     # CRITICAL FIX: Prevent double initialization by checking if app already exists
     if hasattr(create_app, '_app_instance'):
         print("🔍 DEBUG: Returning existing app instance to prevent double initialization")
@@ -865,6 +925,9 @@ def create_app():
     # CRITICAL FIX: Store app instance to prevent double initialization
     create_app._app_instance = app
     print(f"🔍 DEBUG: App instance stored - PID: {os.getpid()}")
+    
+    # CRITICAL FIX: Mark global initialization as complete
+    mark_global_initialized()
     
     return app
 
