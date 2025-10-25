@@ -884,6 +884,15 @@ else:
 
 # Flask-Compress already initialized in create_app() - no need to initialize again
 
+# Initialize ultra-lightweight performance optimizations
+try:
+    from ultra_lightweight_performance import get_optimizer, optimize_performance
+    ultra_optimizer = get_optimizer()
+    logging.info("Ultra-lightweight performance optimizer loaded")
+except ImportError:
+    ultra_optimizer = None
+    logging.warning("Ultra-lightweight performance optimizer not available")
+
 # Initialize performance optimizations - DISABLED to prevent CPU issues on PythonAnywhere
 if False:  # Temporarily disabled due to high CPU usage on PythonAnywhere
     try:
@@ -15009,19 +15018,47 @@ def clear_cache_route():
 
 @app.route('/api/performance/optimize', methods=['POST'])
 def optimize_performance():
-    """Trigger performance optimizations - SIMPLIFIED."""
+    """Ultra-lightweight performance optimization endpoint"""
     try:
-        # Clear Flask cache only (safe operation)
+        # Use ultra-lightweight optimizer if available
+        if ultra_optimizer:
+            ultra_optimizer.auto_optimize()
+            stats = ultra_optimizer.get_performance_stats()
+            return jsonify({
+                'success': True,
+                'message': 'Ultra-lightweight optimization completed',
+                'stats': stats
+            })
+        
+        # Fallback to basic optimization
         if hasattr(cache, 'clear'):
             cache.clear()
         
-        # Basic garbage collection
         import gc
         gc.collect()
         
         return jsonify({'message': 'Basic optimization completed'})
     except Exception as e:
         logging.error(f"Failed to optimize performance: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/performance/stats', methods=['GET'])
+def get_performance_stats():
+    """Get performance statistics"""
+    try:
+        if ultra_optimizer:
+            stats = ultra_optimizer.get_performance_stats()
+            return jsonify({
+                'success': True,
+                'stats': stats
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': 'Performance optimizer not available'
+            }), 503
+    except Exception as e:
+        logging.error(f"Failed to get performance stats: {e}")
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
