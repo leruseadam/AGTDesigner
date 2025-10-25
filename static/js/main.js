@@ -5664,6 +5664,16 @@ const TagManager = {
             filenameElement.textContent = filename;
             statusElement.textContent = 'Processing...';
             splash.style.display = 'flex';
+            
+            // Set a timeout to automatically hide splash screen after 30 seconds
+            // This prevents the splash from getting stuck forever
+            this.splashTimeout = setTimeout(() => {
+                console.warn('⚠️ Splash screen timeout - auto-hiding after 30 seconds');
+                this.hideExcelLoadingSplash();
+                this.updateUploadUI('Upload timeout - please refresh the page', 'warning');
+            }, 30000); // 30 seconds timeout
+            
+            console.log('Excel loading splash screen shown with 30s timeout');
         }
     },
 
@@ -5673,6 +5683,13 @@ const TagManager = {
         if (splash) {
             // Hide splash immediately
             splash.style.display = 'none';
+            console.log('Excel loading splash screen hidden');
+        }
+        
+        // Clear any existing timeout
+        if (this.splashTimeout) {
+            clearTimeout(this.splashTimeout);
+            this.splashTimeout = null;
         }
     },
 
@@ -6235,16 +6252,40 @@ const TagManager = {
             }
             
             if (uploadData.success) {
-                console.log(`✅ Upload completed in ${uploadTime.toFixed(2)}ms using ${uploadData.method}`);
-                console.log(`📊 Processed ${uploadData.rows_loaded} rows in ${uploadData.processing_time.toFixed(3)}s`);
+                console.log(`✅ Upload completed in ${uploadTime.toFixed(2)}ms`);
+                
+                // Handle different response formats
+                const rowsLoaded = uploadData.rows_loaded || uploadData.rows || 0;
+                const processingTime = uploadData.processing_time || (uploadTime / 1000);
+                const method = uploadData.method || 'standard';
+                
+                console.log(`📊 Processed ${rowsLoaded} rows in ${processingTime.toFixed(3)}s using ${method}`);
+                
+                // Check if this is background processing
+                if (uploadData.processing === true || uploadData.processing_status === 'background') {
+                    console.log('🔄 Background processing detected - starting status polling...');
+                    this.updateUploadUI(`✅ ${uploadData.message}`);
+                    this.updateExcelLoadingStatus('Processing in background...');
+                    
+                    // Start polling for background processing
+                    this.pollUploadStatusAndUpdateUI(file.name, file.name);
+                    return true;
+                }
                 
                 // Update UI with success message
                 this.updateUploadUI(`✅ ${uploadData.message}`);
-                this.updateExcelLoadingStatus(`Loaded ${uploadData.rows_loaded} products`);
+                this.updateExcelLoadingStatus(`Loaded ${rowsLoaded} products`);
                 
-                // Let enhanced-ui.js handle data refresh to avoid conflicts
+                // Hide splash screen immediately for synchronous uploads
+                this.hideExcelLoadingSplash();
+                
+                // Load data immediately for synchronous uploads
+                console.log('Loading data after synchronous upload...');
+                await this.fetchAndUpdateAvailableTags();
+                await this.fetchAndUpdateSelectedTags();
+                await this.fetchAndPopulateFilters();
+                
                 console.log('Upload completed successfully');
-                
                 return true;
             } else {
                 throw new Error(uploadData.error || 'Upload processing failed');
@@ -6254,6 +6295,7 @@ const TagManager = {
             console.error('❌ Upload error:', error);
             this.updateUploadUI(`❌ Upload error: ${error.message}`);
             this.updateExcelLoadingStatus('Upload error');
+            this.hideExcelLoadingSplash(); // Hide splash screen on error
             return false;
         }
     },
@@ -6275,16 +6317,26 @@ const TagManager = {
             if (response.ok && data.status === 'ready') {
                 console.log('Fallback upload successful');
                 this.updateUploadUI(file.name, 'File uploaded successfully', 'success');
-                // Let enhanced-ui.js handle the refresh to avoid multiple refreshes
+                
+                // Hide splash screen for fallback uploads
+                this.hideExcelLoadingSplash();
+                
+                // Load data immediately
+                await this.fetchAndUpdateAvailableTags();
+                await this.fetchAndUpdateSelectedTags();
+                await this.fetchAndPopulateFilters();
+                
                 return true;
             } else {
                 console.error('Fallback upload failed:', data.error);
                 this.updateUploadUI('Upload failed: ' + (data.error || 'Unknown error'), 'error');
+                this.hideExcelLoadingSplash(); // Hide splash screen on error too
                 return false;
             }
         } catch (error) {
             console.error('Fallback upload error:', error);
             this.updateUploadUI('Upload failed: ' + error.message, 'error');
+            this.hideExcelLoadingSplash(); // Hide splash screen on error
             return false;
         }
     },
