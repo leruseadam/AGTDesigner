@@ -856,7 +856,6 @@ try:
         sys.modules['app'].__import_count += 1
 except Exception:
     print("🔍 DEBUG: Creating Flask app (import count: 1)")
-
 app = create_app()
 
 # Initialize Flask-Caching after app creation (if available)
