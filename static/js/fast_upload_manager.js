@@ -295,9 +295,10 @@ function enhanceUploadPerformance() {
                 if (window.handleUploadSuccess) {
                     window.handleUploadSuccess(result.data);
                 } else {
-                    // Fallback success handling
+                    // Fallback success handling - DON'T reload automatically
                     console.log('✅ Upload successful:', result.data);
-                    location.reload();
+                    // Removed automatic reload to prevent unwanted refreshes
+                    // Users can manually refresh if needed
                 }
             } else {
                 uploadProgressDisplay.hide();
