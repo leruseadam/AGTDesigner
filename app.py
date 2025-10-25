@@ -63,6 +63,21 @@ if not acquire_process_lock():
     print("❌ Cannot start: Another instance is already running")
     sys.exit(1)
 
+# CRITICAL FIX: Add signal handlers for proper cleanup
+import signal
+
+def signal_handler(signum, frame):
+    """Handle termination signals"""
+    print(f"\n🛑 Received signal {signum}, cleaning up...")
+    release_process_lock()
+    sys.exit(0)
+
+# Register signal handlers
+signal.signal(signal.SIGINT, signal_handler)   # Ctrl+C
+signal.signal(signal.SIGTERM, signal_handler)  # Termination signal
+if hasattr(signal, 'SIGHUP'):
+    signal.signal(signal.SIGHUP, signal_handler)  # Hangup signal
+
 # CRITICAL FIX: Global initialization flag to prevent multiple initializations
 _global_initialized = False
 
@@ -15219,6 +15234,9 @@ if __name__ == '__main__':
                 os.remove(port_lock_file)
         except Exception:
             pass
+        
+        # CRITICAL FIX: Release process lock
+        release_process_lock()
         
         # Mark app as stopped
         main._app_running = False 
