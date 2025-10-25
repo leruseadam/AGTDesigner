@@ -6992,6 +6992,7 @@ def get_filter_options():
         
         # Check if this is a Windows platform request for optimization
         is_windows_request = request.args.get('platform') == 'windows'
+        is_ultra_fast_request = request.args.get('ultra_fast') == 'true'
         user_agent = request.headers.get('User-Agent', '')
         is_windows_ua = 'Windows' in user_agent
         is_web_client = is_windows_request or is_windows_ua
@@ -6999,9 +7000,9 @@ def get_filter_options():
         if is_web_client:
             if ENHANCED_LOGGING_AVAILABLE:
                 enhanced_logger.log_info("Web client detected - applying performance optimizations", 
-                                       {'platform': 'web', 'user_agent': user_agent[:50]})
+                                       {'platform': 'web', 'user_agent': user_agent[:50], 'ultra_fast': is_ultra_fast_request})
             else:
-                logging.info("Web client detected - applying performance optimizations")
+                logging.info(f"Web client detected - applying performance optimizations (ultra_fast: {is_ultra_fast_request})")
         
         cache_key = get_session_cache_key('filter_options')
         
@@ -7062,6 +7063,14 @@ def get_filter_options():
         if request.method == 'POST':
             data = request.get_json()
             current_filters = data.get('filters', {})
+        
+        # Enable ultra-fast mode for PC clients
+        if is_ultra_fast_request or is_web_client:
+            excel_processor.set_ultra_fast_mode(True)
+            if ENHANCED_LOGGING_AVAILABLE:
+                enhanced_logger.log_info("Ultra-fast mode enabled for PC performance", {'ultra_fast': True})
+            else:
+                logging.info("Ultra-fast mode enabled for PC performance")
         
         # Use optimized method for Windows
         if is_windows_request or is_windows_ua:
@@ -10379,81 +10388,23 @@ def match_json_tags():
         matched = []
         unmatched = []
         
-        # Use the improved matching logic from JSONMatcher
-        json_matcher = get_json_matcher()
+        # CRITICAL FIX: Use the same validation logic as Excel processing instead of complex JSONMatcher scoring
+        # This ensures JSON matching works exactly like normal Excel processed tags
+        valid_selected_tags, invalid_selected_tags = _validate_tags_against_excel(excel_processor, names)
         
-        # Build cache if needed
-        if json_matcher._sheet_cache is None:
-            json_matcher._build_sheet_cache()
-            
-        if not json_matcher._sheet_cache:
-            return jsonify({'matched': [], 'unmatched': names, 'error': 'Failed to build product cache. Please ensure your Excel file has product data.'}), 400
-        
-        # For each JSON name, find the best match using the improved scoring system with database descriptions
-        for name in names:
-            best_score = 0.0
-            best_match = None
-            
-            # Create a mock JSON item for scoring
-            json_item = {"product_name": name}
-            
-            # Try to match against all available tags using comprehensive database fields
+        # Convert valid tags back to full tag objects for response
+        for valid_tag_name in valid_selected_tags:
+            # Find the corresponding full tag object from available_tags
             for tag in available_tags:
                 tag_name = tag.get('Product Name*', '')
-                if not tag_name:
-                    continue
-                
-                # Get database description and other fields for comprehensive matching
-                description = tag.get('Description', '')
-                brand = tag.get('Product Brand', '')
-                strain = tag.get('Product Strain', '')
-                product_type = tag.get('Product Type*', '')
-                vendor = tag.get('Vendor/Supplier*', '')
-                weight = tag.get('Weight*', '')
-                units = tag.get('Units', '')
-                lineage = tag.get('Lineage', '')
-                
-                # Prioritize Description field for matching if available, otherwise use Product Name*
-                primary_name = description.strip() if description and description.strip() else tag_name
-                
-                # Create comprehensive cache item with all database fields
-                cache_item = {
-                    "original_name": primary_name,  # Use Description if available
-                    "product_name": tag_name,  # Keep original Product Name* for reference
-                    "description": description,
-                    "brand": brand,
-                    "strain": strain,
-                    "product_type": product_type,
-                    "vendor": vendor,
-                    "weight": weight,
-                    "units": units,
-                    "lineage": lineage,
-                    "key_terms": json_matcher._extract_key_terms(primary_name),
-                    "norm": json_matcher._normalize(primary_name)
-                }
-                
-                # Calculate match score using comprehensive database information
-                score = json_matcher._calculate_match_score(json_item, cache_item)
-                
-                if score > best_score:
-                    best_score = score
-                    best_match = tag
-                    
-            # Accept matches with higher confidence to reduce random matches
-            if best_score >= 0.4:  # Raised threshold for better accuracy (reduced random matches)
-                matched.append(best_match)
-                # Log the database values being used for this match
-                db_description = best_match.get('Description', '')
-                db_price = best_match.get('Price', '')
-                db_weight = best_match.get('Weight*', '')
-                db_units = best_match.get('Units', '')
-                logging.info(f"Matched '{name}' to '{best_match.get('Product Name*', '')}' (score: {best_score:.2f})")
-                logging.info(f"  Using database values - Description: '{db_description}', Price: '{db_price}', Weight: '{db_weight}{db_units}'")
-            else:
-                unmatched.append(name)
-                logging.info(f"No match found for '{name}' (best score: {best_score:.2f})")
+                if tag_name == valid_tag_name:
+                    matched.append(tag)
+                    break
         
-        logging.info(f"JSON matching: {len(matched)} matched, {len(unmatched)} unmatched out of {len(names)} total")
+        # Add unmatched tags
+        unmatched = invalid_selected_tags
+        
+        logging.info(f"JSON matching using Excel validation logic: {len(matched)} matched, {len(unmatched)} unmatched out of {len(names)} total")
         
         # Add debugging information for the first few unmatched items
         if unmatched and len(unmatched) > 0:
@@ -10467,7 +10418,7 @@ def match_json_tags():
                 'total_names': len(names),
                 'total_available_tags': len(available_tags),
                 'sample_unmatched': unmatched[:5] if unmatched else [],
-                'matching_threshold': 0.3
+                'matching_method': 'excel_validation_logic'
             }
         })
         

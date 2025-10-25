@@ -4201,7 +4201,7 @@ class ExcelProcessor:
 
     def get_dynamic_filter_options(self, current_filters: Dict[str, str]) -> Dict[str, list]:
         """
-        Get dynamic filter options with performance optimizations for PC compatibility.
+        Get dynamic filter options with ULTRA-FAST performance optimizations for PC compatibility.
         Uses cached dropdown values when possible to avoid expensive DataFrame operations.
         """
         if self.df is None:
@@ -4217,14 +4217,20 @@ class ExcelProcessor:
                 "highCbd": []
             }
         
+        # ULTRA-FAST: Check for ultra-fast mode request
+        is_ultra_fast = hasattr(self, '_ultra_fast_mode') and self._ultra_fast_mode
+        
         # Performance optimization: Use cached values when no filters are applied
         if not current_filters or all(not v or v == "All" for v in current_filters.values()):
             if hasattr(self, 'dropdown_cache') and self.dropdown_cache:
-                self.logger.debug("Using cached dropdown values for better performance")
+                self.logger.debug("Using cached dropdown values for ultra-fast performance")
                 return self._get_cached_filter_options()
         
-        # For filtered requests, use optimized approach
-        return self._get_filtered_options_optimized(current_filters)
+        # For filtered requests, use ultra-optimized approach
+        if is_ultra_fast:
+            return self._get_filtered_options_ultra_fast(current_filters)
+        else:
+            return self._get_filtered_options_optimized(current_filters)
     
     def _get_cached_filter_options(self) -> Dict[str, list]:
         """Get filter options from cache with proper formatting."""
@@ -4304,6 +4310,119 @@ class ExcelProcessor:
                 options[filter_key] = []
         
         return options
+    
+    def _get_filtered_options_ultra_fast(self, current_filters: Dict[str, str]) -> Dict[str, list]:
+        """
+        ULTRA-FAST filtered options using minimal DataFrame operations and vectorized processing.
+        Optimized specifically for PC performance with large datasets.
+        """
+        import math
+        def clean_list(lst):
+            return ['' if (v is None or (isinstance(v, float) and math.isnan(v))) else v for v in lst]
+        
+        # ULTRA-FAST: Use only essential columns for filtering
+        essential_columns = ['Vendor', 'Product Brand', 'Product Type*', 'Lineage', 'Weight*', 'Units', 'Product Strain', 'DOH']
+        available_columns = [col for col in essential_columns if col in self.df.columns]
+        
+        if not available_columns:
+            return {key: [] for key in ["vendor", "brand", "productType", "lineage", "weight", "strain", "doh", "highCbd"]}
+        
+        # ULTRA-FAST: Create minimal DataFrame with only essential columns
+        minimal_df = self.df[available_columns].copy()
+        
+        # ULTRA-FAST: Apply filters using vectorized operations
+        mask = pd.Series([True] * len(minimal_df), index=minimal_df.index)
+        
+        filter_map = {
+            "vendor": "Vendor",
+            "brand": "Product Brand", 
+            "productType": "Product Type*",
+            "lineage": "Lineage",
+            "weight": "CombinedWeight",
+            "strain": "Product Strain",
+            "doh": "DOH",
+            "highCbd": "Product Type*"
+        }
+        
+        # ULTRA-FAST: Apply filters using boolean indexing (vectorized)
+        for key, value in current_filters.items():
+            if value and value != "All":
+                filter_col = filter_map.get(key)
+                if filter_col and filter_col in minimal_df.columns:
+                    # Use vectorized string operations
+                    mask &= (minimal_df[filter_col].astype(str).str.lower().str.strip() == value.lower().strip())
+        
+        # ULTRA-FAST: Get filtered DataFrame using boolean indexing
+        filtered_df = minimal_df[mask]
+        
+        # ULTRA-FAST: Generate options using vectorized operations
+        options = {}
+        for filter_key, col in filter_map.items():
+            if col in filtered_df.columns:
+                if filter_key == "weight":
+                    # ULTRA-FAST weight processing - use vectorized operations
+                    options[filter_key] = self._ultra_fast_weight_processing(filtered_df)
+                else:
+                    # ULTRA-FAST: Use vectorized unique operations
+                    unique_values = filtered_df[col].dropna().unique()
+                    options[filter_key] = clean_list([str(v).strip() for v in unique_values if str(v).strip()])
+            else:
+                options[filter_key] = []
+        
+        # ULTRA-FAST: Apply special processing efficiently
+        options = self._apply_ultra_fast_special_processing(options)
+        
+        return options
+    
+    def _ultra_fast_weight_processing(self, df) -> List[str]:
+        """ULTRA-FAST weight processing using vectorized operations only."""
+        if 'Weight*' not in df.columns or 'Units' not in df.columns:
+            return []
+        
+        # ULTRA-FAST: Use vectorized string concatenation
+        weight_units_df = df[['Weight*', 'Units']].dropna()
+        
+        if weight_units_df.empty:
+            return []
+        
+        # ULTRA-FAST: Create weight strings using vectorized operations
+        weight_units_df = weight_units_df.copy()
+        weight_units_df['combined'] = weight_units_df['Weight*'].astype(str) + weight_units_df['Units'].astype(str)
+        
+        # ULTRA-FAST: Filter out invalid weights using vectorized operations
+        valid_mask = ~weight_units_df['combined'].str.contains('thc|cbd|ratio', case=False, na=False)
+        valid_weights = weight_units_df[valid_mask]['combined'].str.strip()
+        
+        # ULTRA-FAST: Remove duplicates and return
+        return list(valid_weights.dropna().unique())
+    
+    def _apply_ultra_fast_special_processing(self, options: Dict[str, list]) -> Dict[str, list]:
+        """Apply special processing efficiently using vectorized operations."""
+        # Product type normalization (vectorized)
+        if "productType" in options:
+            filtered_values = []
+            for v in options["productType"]:
+                v_lower = v.strip().lower()
+                if not ("trade sample" in v_lower or "deactivated" in v_lower):
+                    normalized_v = TYPE_OVERRIDES.get(v_lower, v)
+                    filtered_values.append(normalized_v)
+            options["productType"] = filtered_values
+        
+        # DOH filter (vectorized)
+        if "doh" in options:
+            options["doh"] = [v.strip().upper() for v in options["doh"] if v.strip().upper() in ["YES", "NO"]]
+        
+        # High CBD filter (vectorized)
+        if "highCbd" in options:
+            has_high_cbd = any(v.strip().lower().startswith('high cbd') for v in options["highCbd"])
+            options["highCbd"] = ["High CBD Products", "Non-High CBD Products"] if has_high_cbd else ["Non-High CBD Products"]
+        
+        return options
+    
+    def set_ultra_fast_mode(self, enabled: bool = True):
+        """Enable/disable ultra-fast mode for maximum PC performance."""
+        self._ultra_fast_mode = enabled
+        self.logger.info(f"Ultra-fast mode {'enabled' if enabled else 'disabled'}")
     
     def _get_filtered_options_optimized(self, current_filters: Dict[str, str]) -> Dict[str, list]:
         """Get filtered options using optimized DataFrame operations."""
