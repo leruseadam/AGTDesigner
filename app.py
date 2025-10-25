@@ -15085,7 +15085,7 @@ if __name__ == '__main__':
     # CRITICAL FIX: Prevent multiple app instances
     if hasattr(main, '_app_running'):
         print("🔍 DEBUG: App already running, preventing double startup")
-        return
+        sys.exit(0)
     
     # Mark app as running
     main._app_running = True
