@@ -6212,15 +6212,15 @@ const TagManager = {
             // Show Excel loading splash screen
             this.showExcelLoadingSplash(file.name);
             
-            // Use streaming upload for all files (it handles both large and small files)
-            this.updateUploadUI(`⚡ ${isLargeFile ? 'Streaming' : 'Optimized'} upload: ${file.name}...`);
+            // Use standard upload endpoint with ultra-fast backend processing
+            this.updateUploadUI(`⚡ Ultra-fast upload: ${file.name}...`);
             
             const formData = new FormData();
             formData.append('file', file);
             
-            console.log('🚀 Sending streaming upload request...');
+            console.log('🚀 Sending ultra-fast upload request to /upload...');
             
-            const uploadResponse = await fetch('/upload-streaming', {
+            const uploadResponse = await fetch('/upload', {
                 method: 'POST',
                 body: formData
             });
