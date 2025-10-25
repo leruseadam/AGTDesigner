@@ -361,6 +361,8 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}?v={{ cache_bust }}">
   <!-- PC Performance Optimizations -->
   <link rel="stylesheet" href="{{ url_for('static', filename='css/pc_performance.css') }}?v={{ cache_bust }}">
+  <!-- Ultra-Aggressive PC Optimizations -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/ultra_aggressive_pc.css') }}?v={{ cache_bust }}">
   <!-- Windows Performance Optimizations CSS -->
   <link rel="icon" type="image/x-icon" href="/favicon.ico">
   <link rel="alternate icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
@@ -6914,6 +6916,8 @@
   
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Ultra-Aggressive PC Optimizer - Must load FIRST to override all other optimizers -->
+  <script src="{{ url_for('static', filename='js/ultra_aggressive_pc_optimizer.js') }}?v={{ cache_bust }}"></script>
   <!-- Double Refresh Fix - Must load before main.js -->
   <script src="{{ url_for('static', filename='js/double_refresh_fix.js') }}?v={{ cache_bust }}"></script>
   <!-- Web Event Optimizer - Must load early for responsive checkboxes and filters -->
