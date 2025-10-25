@@ -216,14 +216,7 @@ def chunk_records(records, chunk_size=9):
         else:
             logger.info(f"Keeping all {len(records)} records (duplicate rate: {duplicate_percentage:.1f}%)")
     
-    # Split records into chunks
-    chunks = []
-    for i in range(0, len(records), chunk_size):
-        chunk = records[i:i + chunk_size]
-        chunks.append(chunk)
-    
-    logger.info(f"Split {len(records)} records into {len(chunks)} chunks of size {chunk_size}")
-    return chunks
+    return [records[i:i+chunk_size] for i in range(0, len(records), chunk_size)]
 
 def flatten_tags(records):
     """Extract Description values from records for tag generation."""
@@ -895,11 +888,11 @@ def process_chunk(args):
         num_labels = 12  # Use standard 4x3 grid
         logger.info(f"🔧 DOUBLE TEMPLATE EXPANSION: Using standard template expansion")
     else:
-        # CRITICAL FIX: Use dynamic label count based on chunk size
-        # Allow templates to expand to accommodate all products in the chunk
+        # CRITICAL FIX: Disable dynamic templates for horizontal/vertical to prevent XML corruption
+        # Use standard template expansion with post-processing cleanup instead
         local_template_buffer = base_template
-        num_labels = len(chunk)  # Use actual chunk size instead of hardcoded 9
-        logger.info(f"🔧 {orientation.upper()} TEMPLATE EXPANSION: Using dynamic expansion for {num_labels} labels")
+        num_labels = 9  # Use standard 3x3 grid
+        logger.info(f"🔧 {orientation.upper()} TEMPLATE EXPANSION: Using standard template expansion")
     tpl = DocxTemplate(local_template_buffer)
     context = {}
     image_width = Mm(8) if orientation == "mini" else Mm(9 if orientation == 'vertical' else 12)
@@ -1060,6 +1053,13 @@ def process_chunk(args):
             
             # Preserve original ProductName; keep Description as the clean field
             label_data["ProductName"] = product_name  # Do not repurpose ProductName
+            
+            # CRITICAL FIX: Remove "by Lifted Cannabis" from Description field
+            if description and ' by ' in description:
+                original_description = description
+                description = description.split(' by ')[0].strip()
+                logger.info(f"🔧 DESCRIPTION CLEANUP: Removed 'by' text from '{original_description}' -> '{description}'")
+            
             label_data["Description"] = description  # Primary clean display field
             label_data["WeightUnits"] = wrap_with_marker(weight_units, "WEIGHTUNITS")  # CRITICAL FIX: Wrap with markers for template rendering
             
