@@ -4691,6 +4691,9 @@ def generate_labels():
             logging.info(f"   - Sample tags: {selected_tags_from_request[:3]}")
         logging.debug(f"Selected tags from request: {selected_tags_from_request}")
         
+        # Enable product DB integration for proper tag matching
+        excel_processor = get_excel_processor()
+        
         # CRITICAL DEBUG: Check if we have JSON matched products in the Excel DataFrame
         if excel_processor.df is not None and 'Source' in excel_processor.df.columns:
             json_count = len(excel_processor.df[excel_processor.df['Source'] == 'JSON Match'])
@@ -4700,9 +4703,6 @@ def generate_labels():
                 logging.info(f"🔍 DEBUG: JSON product names: {json_products['Product Name*'].tolist()[:10]}")
         else:
             logging.info(f"🔍 DEBUG: No JSON matched products found in Excel DataFrame")
-
-        # Enable product DB integration for proper tag matching
-        excel_processor = get_excel_processor()
         excel_processor.enable_product_db_integration(True)
 
         # CRITICAL FIX: Preserve JSON matched products when reloading Excel data
