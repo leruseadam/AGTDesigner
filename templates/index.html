@@ -375,6 +375,9 @@
   <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   
+  <!-- Refresh Debugger - Load FIRST to catch all refresh attempts -->
+  <script src="{{ url_for('static', filename='js/refresh_debugger.js') }}?v={{ cache_bust }}"></script>
+  
   <!-- Performance Optimizations -->
   <script src="{{ url_for('static', filename='js/performance.js') }}?v={{ cache_bust }}"></script>
   <!-- Windows-specific performance optimizations - Load early for best results -->
