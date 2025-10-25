@@ -7239,9 +7239,9 @@ class ExcelProcessor:
             return df
 
     def streaming_load(self, file_path: str, chunk_size: int = 10000) -> bool:
-        """Load large files in streaming chunks for better memory usage"""
+        """ULTRA-FAST streaming load with minimal processing for maximum speed"""
         try:
-            self.logger.info(f"[STREAMING] Loading file in chunks: {file_path}")
+            self.logger.info(f"[ULTRA-FAST] Loading file: {file_path}")
             
             # Clear previous data
             if hasattr(self, 'df') and self.df is not None:
@@ -7249,45 +7249,62 @@ class ExcelProcessor:
                 import gc
                 gc.collect()
             
-            # Read file in chunks
-            chunks = []
-            total_rows = 0
-            
-            # First, try to read the full file with high row limit
+            # ULTRA-FAST: Read with minimal settings for maximum speed
             df = pd.read_excel(
                 file_path,
                 engine='openpyxl',
                 nrows=50000,  # High limit
                 dtype=str,  # Read as strings for speed
-                na_filter=False,
-                keep_default_na=False
+                na_filter=False,  # Don't filter NA values
+                keep_default_na=False,  # Don't use default NA values
+                parse_dates=False  # Don't parse dates for speed
             )
             
             if df is None or df.empty:
                 self.logger.error("No data found in Excel file")
                 return False
             
-            # Handle duplicate columns efficiently
-            df = self._handle_duplicate_columns_fast(df)
-            
-            # Remove duplicates efficiently
+            # ULTRA-FAST: Minimal duplicate handling
             initial_count = len(df)
             df.drop_duplicates(inplace=True)
             df.reset_index(drop=True, inplace=True)
             final_count = len(df)
             
             if initial_count != final_count:
-                self.logger.info(f"[STREAMING] Removed {initial_count - final_count} duplicate rows")
+                self.logger.info(f"[ULTRA-FAST] Removed {initial_count - final_count} duplicate rows")
             
-            # Apply minimal processing
-            df = self._ultra_minimal_processing(df)
+            # ULTRA-FAST: Essential columns only with minimal processing
+            essential_columns = ['Product Name*', 'Product Type*', 'Vendor', 'Product Brand', 'Lineage']
+            
+            # Ensure essential columns exist with minimal processing
+            if "Product Name*" not in df.columns:
+                if "ProductName" in df.columns:
+                    df["Product Name*"] = df["ProductName"]
+                else:
+                    df["Product Name*"] = "Unknown"
+            
+            for col in ["Product Type*", "Lineage", "Product Brand", "Vendor"]:
+                if col not in df.columns:
+                    df[col] = "Unknown"
+            
+            # ULTRA-FAST: Minimal string operations
+            df["Product Name*"] = df["Product Name*"].astype(str).str.strip()
+            
+            # ULTRA-FAST: Only exclude completely blank rows
+            initial_count = len(df)
+            df = df[df["Product Name*"].str.strip() != ""]
+            df.reset_index(drop=True, inplace=True)
+            final_count = len(df)
+            
+            if initial_count != final_count:
+                self.logger.info(f"[ULTRA-FAST] Removed {initial_count - final_count} blank rows")
             
             self.df = df
-            self.logger.info(f"[STREAMING] Streaming load completed: {len(df)} rows")
+            self.logger.info(f"[ULTRA-FAST] Streaming load completed: {len(df)} rows")
             return True
             
         except Exception as e:
-            self.logger.error(f"[STREAMING] Error in streaming load: {e}")
+            self.logger.error(f"[ULTRA-FAST] Error in streaming load: {e}")
             return False
     
     def _process_description_from_product_name(self, product_name: str) -> str:

@@ -1928,8 +1928,20 @@ def upload_file():
                     processor = get_excel_processor()
                     
                     # Use ultra-fast processing for maximum speed
-                    processor.set_processing_mode('fast')
-                    success = processor.fast_load_file(file_path)
+                    processor.set_ultra_fast_mode(True)
+                    processor.enable_product_db_integration(False)
+                    if hasattr(processor, 'enable_lineage_processing'):
+                        processor.enable_lineage_processing(False)
+                    if hasattr(processor, 'enable_strain_similarity'):
+                        processor.enable_strain_similarity(False)
+                    if hasattr(processor, 'set_minimal_processing'):
+                        processor.set_minimal_processing(True)
+                    
+                    # Use streaming load for maximum speed
+                    if hasattr(processor, 'streaming_load'):
+                        success = processor.streaming_load(file_path)
+                    else:
+                        success = processor.load_file(file_path)
                     
                     if success:
                         row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
@@ -1979,9 +1991,21 @@ def upload_file():
             logging.info("[LOCAL] Processing file synchronously with fast mode")
             processor = get_excel_processor()
             
-            # Use fast processing for better performance
-            processor.set_processing_mode('fast')
-            success = processor.fast_load_file(file_path)
+            # Use ultra-fast processing for better performance
+            processor.set_ultra_fast_mode(True)
+            processor.enable_product_db_integration(False)
+            if hasattr(processor, 'enable_lineage_processing'):
+                processor.enable_lineage_processing(False)
+            if hasattr(processor, 'enable_strain_similarity'):
+                processor.enable_strain_similarity(False)
+            if hasattr(processor, 'set_minimal_processing'):
+                processor.set_minimal_processing(True)
+            
+            # Use streaming load for maximum speed
+            if hasattr(processor, 'streaming_load'):
+                success = processor.streaming_load(file_path)
+            else:
+                success = processor.load_file(file_path)
             if success:
                 row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
                 logging.info(f"File loaded successfully: {row_count} rows")
@@ -2026,6 +2050,83 @@ def upload_file():
 
 
 # EXCEL UPLOAD PERFORMANCE OPTIMIZATION: Add ultra-fast streaming upload
+@app.route('/api/upload-ultra-fast', methods=['POST'])
+def upload_file_ultra_fast():
+    """ULTRA-FAST Excel upload with minimal processing for maximum speed"""
+    try:
+        logging.info("🚀 ULTRA-FAST UPLOAD: Starting optimized Excel upload")
+        start_time = time.time()
+        
+        # Check if file is present
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file provided'}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        # Get filename and create temp path
+        filename = secure_filename(file.filename)
+        temp_path = os.path.join(tempfile.gettempdir(), f"upload_{int(time.time())}_{filename}")
+        
+        # Save file
+        file.save(temp_path)
+        file_size = os.path.getsize(temp_path)
+        logging.info(f"📁 File saved: {filename} ({file_size:,} bytes)")
+        
+        # ULTRA-FAST PROCESSING: Use minimal processing for maximum speed
+        processor = ExcelProcessor()
+        
+        # CRITICAL: Disable all expensive operations for ultra-fast upload
+        processor.set_ultra_fast_mode(True)
+        processor.enable_product_db_integration(False)
+        if hasattr(processor, 'enable_lineage_processing'):
+            processor.enable_lineage_processing(False)
+        if hasattr(processor, 'enable_strain_similarity'):
+            processor.enable_strain_similarity(False)
+        if hasattr(processor, 'set_minimal_processing'):
+            processor.set_minimal_processing(True)
+        
+        # Use ultra-fast loading method
+        if hasattr(processor, 'streaming_load'):
+            success = processor.streaming_load(temp_path)
+        else:
+            # Fallback to fast load
+            success = processor.load_file(temp_path)
+        
+        if not success:
+            return jsonify({'error': 'Failed to process file'}), 500
+        
+        # Update global processor
+        global _excel_processor
+        with excel_processor_lock:
+            _excel_processor = processor
+            _excel_processor._last_loaded_file = temp_path
+        
+        # Store in session
+        session['file_path'] = temp_path
+        session['uploaded_filename'] = filename
+        session.modified = True
+        
+        # Calculate processing time
+        process_time = time.time() - start_time
+        row_count = len(processor.df) if processor.df is not None else 0
+        
+        logging.info(f"✅ ULTRA-FAST UPLOAD COMPLETE: {row_count} rows in {process_time:.2f}s")
+        
+        return jsonify({
+            'success': True,
+            'message': f'File uploaded successfully in {process_time:.2f}s',
+            'filename': filename,
+            'rows': row_count,
+            'process_time': process_time,
+            'optimization': 'ultra_fast'
+        })
+        
+    except Exception as e:
+        logging.error(f"❌ Ultra-fast upload error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/upload-streaming', methods=['POST'])
 def upload_file_streaming():
     """Ultra-fast streaming Excel upload with chunked processing for maximum performance"""
