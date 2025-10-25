@@ -1928,6 +1928,88 @@ def upload_file():
         return jsonify({'error': str(e)}), 500
 
 
+# TAG COUNT FIX: Add cache clearing endpoint
+@app.route('/api/clear-tag-cache', methods=['POST'])
+def clear_tag_cache():
+    """Clear tag-related caches to force refresh"""
+    try:
+        # Clear all tag-related caches
+        cache_keys_to_clear = [
+            'available_tags',
+            'dropdown_cache_key',
+            'full_excel_cache_key',
+            'filter_options'
+        ]
+        
+        cleared_count = 0
+        for key in cache_keys_to_clear:
+            if cache.delete(key):
+                cleared_count += 1
+        
+        # Also clear session-specific caches
+        session_id = session.get('session_id', 'default')
+        session_cache_keys = [
+            f'{session_id}_available_tags',
+            f'{session_id}_filter_options',
+            f'{session_id}_dropdown_cache'
+        ]
+        
+        for key in session_cache_keys:
+            if cache.delete(key):
+                cleared_count += 1
+        
+        logging.info(f"✅ Cleared {cleared_count} tag-related caches")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Cleared {cleared_count} caches',
+            'cleared_count': cleared_count
+        })
+        
+    except Exception as e:
+        logging.error(f"Error clearing tag cache: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# TAG COUNT FIX: Add tag count debugging endpoint
+@app.route('/api/debug-tag-count', methods=['GET'])
+def debug_tag_count():
+    """Debug tag count issues"""
+    try:
+        excel_processor = get_excel_processor()
+        
+        debug_info = {
+            'excel_processor_exists': excel_processor is not None,
+            'excel_df_exists': excel_processor.df is not None if excel_processor else False,
+            'excel_df_length': len(excel_processor.df) if excel_processor and excel_processor.df is not None else 0,
+            'cache_keys': [],
+            'session_id': session.get('session_id', 'default')
+        }
+        
+        # Check cache status
+        cache_keys = ['available_tags', 'dropdown_cache_key', 'full_excel_cache_key']
+        for key in cache_keys:
+            cached_data = cache.get(key)
+            debug_info['cache_keys'].append({
+                'key': key,
+                'exists': cached_data is not None,
+                'length': len(cached_data) if cached_data else 0
+            })
+        
+        # Get available tags count
+        if excel_processor and excel_processor.df is not None:
+            try:
+                available_tags = excel_processor.get_available_tags()
+                debug_info['available_tags_count'] = len(available_tags)
+                debug_info['sample_tags'] = [tag.get('Product Name*', 'Unknown') for tag in available_tags[:5]]
+            except Exception as e:
+                debug_info['available_tags_error'] = str(e)
+        
+        return jsonify(debug_info)
+        
+    except Exception as e:
+        logging.error(f"Error in debug tag count: {e}")
+        return jsonify({'error': str(e)}), 500
+
 # PC PERFORMANCE OPTIMIZATION: Add chunked upload support
 @app.route('/upload-chunk', methods=['POST'])
 def upload_file_chunk():

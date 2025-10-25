@@ -51,6 +51,9 @@
         <!-- CPU Performance Optimizer - Load FIRST to optimize all processes -->
         <script src="{{ url_for('static', filename='js/cpu_performance_optimizer.js') }}?v={{ cache_bust }}"></script>
         
+        <!-- Tag Count Fix - Resolves tag count mismatches -->
+        <script src="{{ url_for('static', filename='js/tag_count_fix.js') }}?v={{ cache_bust }}"></script>
+        
         <!-- Lazy Loading Optimizer - Reduces initial CPU load -->
         <script src="{{ url_for('static', filename='js/lazy_loading_optimizer.js') }}?v={{ cache_bust }}"></script>
         
