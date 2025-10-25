@@ -22,117 +22,6 @@ import pandas as pd  # Add this import
 import time
 import re
 import json
-import requests
-from flask import make_response
-# CRITICAL FIX: Global process lock to prevent multiple instances
-import fcntl
-import tempfile
-
-# Create a global process lock file
-PROCESS_LOCK_FILE = os.path.join(tempfile.gettempdir(), 'labelmaker_process.lock')
-PROCESS_LOCK_FD = None
-
-def acquire_process_lock():
-    """Acquire a global process lock to prevent multiple instances"""
-    global PROCESS_LOCK_FD
-    try:
-        # First, try to remove any existing lock file
-        if os.path.exists(PROCESS_LOCK_FILE):
-            try:
-                os.remove(PROCESS_LOCK_FILE)
-                print(f"🧹 Removed stale lock file: {PROCESS_LOCK_FILE}")
-            except:
-                pass
-        
-        # Create the lock file
-        PROCESS_LOCK_FD = os.open(PROCESS_LOCK_FILE, os.O_CREAT | os.O_WRONLY | os.O_TRUNC)
-        
-        # Try to acquire exclusive lock
-        fcntl.flock(PROCESS_LOCK_FD, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        
-        # Write PID to lock file
-        os.write(PROCESS_LOCK_FD, str(os.getpid()).encode())
-        os.fsync(PROCESS_LOCK_FD)
-        
-        print(f"🔒 Process lock acquired - PID: {os.getpid()}")
-        return True
-        
-    except (OSError, IOError) as e:
-        print(f"❌ Another instance is already running: {e}")
-        # Try to close the file descriptor if we opened it
-        if PROCESS_LOCK_FD is not None:
-            try:
-                os.close(PROCESS_LOCK_FD)
-                PROCESS_LOCK_FD = None
-            except:
-                pass
-        return False
-
-def release_process_lock():
-    """Release the global process lock"""
-    global PROCESS_LOCK_FD
-    try:
-        if PROCESS_LOCK_FD is not None:
-            fcntl.flock(PROCESS_LOCK_FD, fcntl.LOCK_UN)
-            os.close(PROCESS_LOCK_FD)
-            PROCESS_LOCK_FD = None
-        if os.path.exists(PROCESS_LOCK_FILE):
-            os.remove(PROCESS_LOCK_FILE)
-        print(f"🔓 Process lock released - PID: {os.getpid()}")
-    except Exception as e:
-        print(f"⚠️  Error releasing process lock: {e}")
-        # Force cleanup
-        try:
-            if PROCESS_LOCK_FD is not None:
-                os.close(PROCESS_LOCK_FD)
-                PROCESS_LOCK_FD = None
-        except:
-            pass
-        try:
-            if os.path.exists(PROCESS_LOCK_FILE):
-                os.remove(PROCESS_LOCK_FILE)
-        except:
-            pass
-
-# CRITICAL FIX: Prevent multiple imports/executions
-if hasattr(sys.modules[__name__], '_already_imported'):
-    print("❌ App module already imported, preventing duplicate execution")
-    sys.exit(1)
-sys.modules[__name__]._already_imported = True
-
-# Acquire process lock immediately
-if not acquire_process_lock():
-    print("❌ Cannot start: Another instance is already running")
-    sys.exit(1)
-
-# CRITICAL FIX: Add signal handlers for proper cleanup
-import signal
-
-def signal_handler(signum, frame):
-    """Handle termination signals"""
-    print(f"\n🛑 Received signal {signum}, cleaning up...")
-    release_process_lock()
-    sys.exit(0)
-
-# Register signal handlers
-signal.signal(signal.SIGINT, signal_handler)   # Ctrl+C
-signal.signal(signal.SIGTERM, signal_handler)  # Termination signal
-if hasattr(signal, 'SIGHUP'):
-    signal.signal(signal.SIGHUP, signal_handler)  # Hangup signal
-
-# CRITICAL FIX: Global initialization flag to prevent multiple initializations
-_global_initialized = False
-
-def mark_global_initialized():
-    """Mark the global initialization as complete"""
-    global _global_initialized
-    _global_initialized = True
-    print(f"✅ Global initialization marked complete - PID: {os.getpid()}")
-
-def is_global_initialized():
-    """Check if global initialization is complete"""
-    return _global_initialized
-
 # Startup Performance Optimization
 # DISABLE_STARTUP_FILE_LOADING = True  # Disable startup file loading to prevent hangs
 
@@ -140,13 +29,62 @@ def is_global_initialized():
 PYTHONANYWHERE_OPTIMIZATION = os.environ.get('PYTHONANYWHERE_DOMAIN') is not None
 if PYTHONANYWHERE_OPTIMIZATION:
     # Reduce memory usage on PythonAnywhere
-    MAX_CONTENT_LENGTH = 10 * 1024 * 1024  # 10MB instead of 100MB
-    SEND_FILE_MAX_AGE_DEFAULT = 300  # 5 minutes instead of 1 year
-    PERMANENT_SESSION_LIFETIME = 1800  # 30 minutes instead of 1 hour
+    MAX_CONTENT_LENGTH = 5 * 1024 * 1024  # 5MB instead of 10MB for memory efficiency
+    SEND_FILE_MAX_AGE_DEFAULT = 180  # 3 minutes instead of 5 minutes
+    PERMANENT_SESSION_LIFETIME = 900  # 15 minutes instead of 30 minutes
+    
+    # Memory optimization settings
+    MAX_MEMORY_MB = 150  # Maximum memory usage
+    CACHE_SIZE_LIMIT = 50  # Reduced cache size
+    BATCH_SIZE_LIMIT = 250  # Smaller batch sizes
+else:
+    # Local development settings
+    MAX_CONTENT_LENGTH = 25 * 1024 * 1024  # 25MB for local development
+    SEND_FILE_MAX_AGE_DEFAULT = 300
+    PERMANENT_SESSION_LIFETIME = 1800
+    
+    # More generous memory settings for local
+    MAX_MEMORY_MB = 500
+    CACHE_SIZE_LIMIT = 100
+    BATCH_SIZE_LIMIT = 500
 
-# Add timeout protection for file operations
-import signal
-import threading
+# Memory monitoring and optimization
+def get_memory_usage():
+    """Get current memory usage in MB."""
+    try:
+        import psutil
+        process = psutil.Process()
+        return process.memory_info().rss / (1024 * 1024)
+    except ImportError:
+        try:
+            import resource
+            return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+        except:
+            return 0
+
+def cleanup_memory():
+    """Cleanup memory by clearing caches and forcing garbage collection."""
+    try:
+        import gc
+        gc.collect()
+        
+        # Clear Flask cache if available
+        if hasattr(app, 'cache') and app.cache:
+            app.cache.clear()
+            
+        return True
+    except Exception as e:
+        logging.error(f"Memory cleanup failed: {e}")
+        return False
+
+def check_memory_limit():
+    """Check if memory usage is within limits."""
+    memory_mb = get_memory_usage()
+    if memory_mb > MAX_MEMORY_MB:
+        logging.warning(f"Memory usage high: {memory_mb:.1f}MB (limit: {MAX_MEMORY_MB}MB)")
+        cleanup_memory()
+        return False
+    return True
 
 def timeout_handler(signum, frame):
     raise TimeoutError("File operation timed out")
@@ -753,20 +691,37 @@ def get_excel_processor():
 def get_product_database(store_name=None):
     """Lazy load ProductDatabase to avoid startup delay."""
     global _product_database
+    
+    # If no store_name provided, get the current store selection
+    if store_name is None:
+        try:
+            ip_address = get_client_ip()
+            with _ip_store_lock:
+                if ip_address in _ip_store_selections:
+                    store_data = _ip_store_selections[ip_address]
+                    # Check if the selection is still valid (not expired)
+                    if datetime.now() - datetime.fromisoformat(store_data['timestamp']) < timedelta(hours=12):
+                        store_name = store_data['store']
+                    else:
+                        # Remove expired selection
+                        del _ip_store_selections[ip_address]
+                        store_name = 'AGT_Bothell'  # Default fallback
+                else:
+                    store_name = 'AGT_Bothell'  # Default fallback
+        except Exception as e:
+            logging.warning(f"Error getting current store selection: {e}")
+            store_name = 'AGT_Bothell'  # Default fallback
+    
     if _product_database is None or (store_name and getattr(_product_database, '_store_name', None) != store_name):
         from src.core.data.product_database import ProductDatabase
-        # Use main product_database.db by default, store-specific only if requested
-        if store_name:
-            db_filename = f'product_database_{store_name}.db'
-            db_path = os.path.join(current_dir, 'uploads', db_filename)
-            _product_database = ProductDatabase(db_path)
-            _product_database._store_name = store_name
-            logging.info(f"ProductDatabase created for store '{store_name}' at: {db_path}")
-        else:
-            # Use main product_database.db (524MB database)
-            db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
-            _product_database = ProductDatabase(db_path)
-            logging.info(f"ProductDatabase created (main database) at: {db_path}")
+        # Use store-specific database for better matching
+        db_filename = f'product_database_{store_name}.db'
+        db_path = os.path.join(current_dir, 'uploads', db_filename)
+        _product_database = ProductDatabase(db_path)
+        _product_database._store_name = store_name
+        # Force database initialization to ensure it's loaded
+        _product_database.init_database()
+        logging.info(f"ProductDatabase created and initialized for store '{store_name}' at: {db_path}")
     return _product_database
 
 def get_json_matcher():
@@ -851,40 +806,12 @@ def resource_path(relative_path):
 
 def create_app():
     import flask
-    print(f"🔍 DEBUG: create_app() called - PID: {os.getpid()}")
-    
-    # CRITICAL FIX: Prevent multiple calls to create_app
-    if hasattr(create_app, '_app_instance'):
-        print("🔍 DEBUG: App already created, returning existing instance")
-        return create_app._app_instance
-    
-    # CRITICAL FIX: Check global initialization flag
-    if is_global_initialized():
-        print("🔍 DEBUG: Global initialization already complete, returning existing app")
-        if hasattr(create_app, '_app_instance'):
-            return create_app._app_instance
-    
     app = flask.Flask(__name__, static_url_path='/static', static_folder='static')
     app.config.from_object('config.Config')
     
-    # CRITICAL FIX: Force disable development mode to prevent double restarts
-    app.config['DEVELOPMENT_MODE'] = False
-    app.config['DEBUG'] = False
-    app.config['TESTING'] = False
-    
-    # CRITICAL FIX: Disable auto-reload mechanisms completely
-    app.config['TEMPLATES_AUTO_RELOAD'] = False
-    app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 31536000  # Long cache to prevent reloads
-    
-    # CRITICAL FIX: Set environment variables to prevent reloading
-    os.environ['FLASK_DEBUG'] = '0'
-    os.environ['FLASK_ENV'] = 'production'
-    os.environ['FLASK_RUN_RELOAD'] = '0'
-    os.environ['WERKZEUG_RUN_MAIN'] = 'true'  # Prevent Werkzeug from spawning child processes
-    
-    # CRITICAL FIX: Disable Werkzeug reloader completely
-    import werkzeug
-    werkzeug.serving.is_running_from_reloader = lambda: False
+    # Enable development mode for auto-reload and debug features
+    # ENABLED: Allow easy restart by enabling development mode by default
+    app.config['DEVELOPMENT_MODE'] = os.environ.get('DEVELOPMENT_MODE', 'true').lower() == 'true'
     
     # Enable detailed logging for development
     logging.getLogger().setLevel(logging.DEBUG)
@@ -940,13 +867,8 @@ def create_app():
     # Respect environment: disable template auto-reload to prevent force reloads
     app.config['TEMPLATES_AUTO_RELOAD'] = False
     app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0 if development_mode else 31536000
-    app.config['DEBUG'] = False  # Always disable debug mode to prevent double reloading
+    app.config['DEBUG'] = bool(app.config.get('DEBUG', development_mode))
     app.config['PROPAGATE_EXCEPTIONS'] = bool(development_mode)
-    
-    # ADDITIONAL SAFEGUARDS: Force disable all reload mechanisms
-    app.config['TESTING'] = False
-    app.config['WTF_CSRF_ENABLED'] = False  # Disable CSRF to prevent form reload issues
-    app.config['SESSION_COOKIE_SECURE'] = False  # Prevent HTTPS-only cookie issues
     if development_mode:
         logging.info("Running in DEVELOPMENT mode with template auto-reload DISABLED to prevent force reloads")
     else:
@@ -983,25 +905,17 @@ def create_app():
             'text/javascript',
             'text/plain'
         ])
-    
-    # CRITICAL FIX: Store app instance to prevent double initialization
-    create_app._app_instance = app
-    print(f"🔍 DEBUG: App instance stored - PID: {os.getpid()}")
-    
-    # CRITICAL FIX: Mark global initialization as complete
-    mark_global_initialized()
-    
     return app
 
 # Debug: Track app creation
-# CRITICAL FIX: Prevent multiple app creation by using singleton pattern
-if not hasattr(create_app, '_app_instance'):
-    app = create_app()
-    create_app._app_instance = app
-    print("🔍 DEBUG: Created Flask app instance")
-else:
-    app = create_app._app_instance
-    print("🔍 DEBUG: Using existing Flask app instance to prevent double creation")
+import sys
+print(f"🔍 DEBUG: Creating Flask app (import count: {sys.modules.get('app', {}).get('__import_count', 0) + 1})")
+if 'app' in sys.modules:
+    if not hasattr(sys.modules['app'], '__import_count'):
+        sys.modules['app'].__import_count = 0
+    sys.modules['app'].__import_count += 1
+
+app = create_app()
 
 # Initialize Flask-Caching after app creation (if available)
 if CACHE_AVAILABLE:
@@ -1009,14 +923,7 @@ if CACHE_AVAILABLE:
 else:
     cache = Cache()  # Use dummy cache
 
-# Initialize ultra-lightweight performance optimizations
-try:
-    from ultra_lightweight_performance import get_optimizer, optimize_performance
-    ultra_optimizer = get_optimizer()
-    logging.info("Ultra-lightweight performance optimizer loaded")
-except ImportError:
-    ultra_optimizer = None
-    logging.warning("Ultra-lightweight performance optimizer not available")
+# Flask-Compress already initialized in create_app() - no need to initialize again
 
 # Initialize performance optimizations - DISABLED to prevent CPU issues on PythonAnywhere
 if False:  # Temporarily disabled due to high CPU usage on PythonAnywhere
@@ -1259,20 +1166,8 @@ except ImportError as e:
 # --- LabelMakerApp Class ---
 class LabelMakerApp:
     def __init__(self):
-        print(f"🔍 DEBUG: LabelMakerApp.__init__() called - PID: {os.getpid()}")
-        
-        # CRITICAL FIX: Prevent double initialization
-        if hasattr(LabelMakerApp, '_instance'):
-            print("🔍 DEBUG: LabelMakerApp already initialized, returning existing instance")
-            return LabelMakerApp._instance
-        
-        # CRITICAL FIX: Use existing app instance (don't create new one)
-        global app
         self.app = app
         self._configure_logging()
-        
-        # CRITICAL FIX: Store instance to prevent double initialization
-        LabelMakerApp._instance = self
         
     def _configure_logging(self):
         """Configure enhanced logging system"""
@@ -1339,38 +1234,9 @@ class LabelMakerApp:
             return False
             
     def run(self):
-        print(f"🔍 DEBUG: LabelMakerApp.run() called - PID: {os.getpid()}")
         host = os.environ.get('HOST', '127.0.0.1')
         port = int(os.environ.get('FLASK_PORT', 8001))
         development_mode = self.app.config.get('DEVELOPMENT_MODE', False)
-        
-        # PREVENT DOUBLE RELOADING: Check for existing Flask process
-        lock_file = f"/tmp/labelmaker_{port}.lock"
-        if os.path.exists(lock_file):
-            try:
-                with open(lock_file, 'r') as f:
-                    pid = int(f.read().strip())
-                # Check if the process is still running
-                try:
-                    os.kill(pid, 0)  # This will raise an exception if process doesn't exist
-                    logging.warning(f"⚠️  Another instance is already running (PID: {pid})")
-                    return
-                except (OSError, ProcessLookupError):
-                    # Process doesn't exist, remove stale lock file
-                    os.remove(lock_file)
-            except (ValueError, FileNotFoundError):
-                # Invalid lock file, remove it
-                try:
-                    os.remove(lock_file)
-                except:
-                    pass
-        
-        # Create lock file
-        try:
-            with open(lock_file, 'w') as f:
-                f.write(str(os.getpid()))
-        except:
-            pass
         
         # PREVENT MULTIPLE RESTARTS: Check if app is already running
         import socket
@@ -1402,20 +1268,13 @@ class LabelMakerApp:
         print(f"🌐 App will be available at: http://{host}:{port}")
         logging.info(f"Development mode: {development_mode}")
         
-        # PREVENT DOUBLE RELOADING: Explicitly disable all reload mechanisms
-        # Force disable debug and reloader regardless of any other settings
-        # Override any environment variables that might enable reloading
-        import os as os_module
-        os_module.environ['FLASK_DEBUG'] = '0'
-        os_module.environ['FLASK_ENV'] = 'production'
-        
+        # DEVELOPMENT MODE: Keep debug but disable reloader to prevent multiple restarts
         self.app.run(
             host=host, 
             port=port, 
-            debug=False,  # Force disable debug mode
-            use_reloader=False,  # Force disable reloader
-            threaded=True,  # Enable threading for better performance
-            load_dotenv=False  # Disable dotenv loading to prevent config conflicts
+            debug=development_mode, 
+            use_reloader=False,  # Disable reloader to prevent multiple restarts
+            threaded=True  # Enable threading for better performance
         )
 
 # === SESSION-BASED HELPERS ===
@@ -1973,30 +1832,15 @@ def upload_file():
             
             def process_in_background():
                 try:
-                    logging.info(f"[BACKGROUND] Processing file with ULTRA-FAST mode: {file_path}")
+                    logging.info(f"[BACKGROUND] Processing file: {file_path}")
                     processor = get_excel_processor()
-                    
-                    # Use ultra-fast processing for maximum speed
-                    processor.set_ultra_fast_mode(True)
-                    processor.enable_product_db_integration(False)
-                    if hasattr(processor, 'enable_lineage_processing'):
-                        processor.enable_lineage_processing(False)
-                    if hasattr(processor, 'enable_strain_similarity'):
-                        processor.enable_strain_similarity(False)
-                    if hasattr(processor, 'set_minimal_processing'):
-                        processor.set_minimal_processing(True)
-                    
-                    # Use streaming load for maximum speed
-                    if hasattr(processor, 'streaming_load'):
-                        success = processor.streaming_load(file_path)
-                    else:
-                        success = processor.load_file(file_path)
+                    success = processor.load_file(file_path)
                     
                     if success:
                         row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
-                        logging.info(f"[BACKGROUND] File loaded successfully with ULTRA-FAST mode: {row_count} rows")
+                        logging.info(f"[BACKGROUND] File loaded: {row_count} rows")
                         
-                        # Store in database (non-blocking)
+                        # Store in database
                         try:
                             from src.core.data.product_database import get_product_database
                             product_db = get_product_database()
@@ -2037,24 +1881,10 @@ def upload_file():
             
         else:
             # Local development: Process synchronously for immediate feedback
-            logging.info("[LOCAL] Processing file synchronously with fast mode")
+            logging.info("[LOCAL] Processing file synchronously")
             processor = get_excel_processor()
             
-            # Use ultra-fast processing for better performance
-            processor.set_ultra_fast_mode(True)
-            processor.enable_product_db_integration(False)
-            if hasattr(processor, 'enable_lineage_processing'):
-                processor.enable_lineage_processing(False)
-            if hasattr(processor, 'enable_strain_similarity'):
-                processor.enable_strain_similarity(False)
-            if hasattr(processor, 'set_minimal_processing'):
-                processor.set_minimal_processing(True)
-            
-            # Use streaming load for maximum speed
-            if hasattr(processor, 'streaming_load'):
-                success = processor.streaming_load(file_path)
-            else:
-                success = processor.load_file(file_path)
+            success = processor.load_file(file_path)
             if success:
                 row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
                 logging.info(f"File loaded successfully: {row_count} rows")
@@ -2098,84 +1928,66 @@ def upload_file():
         return jsonify({'error': str(e)}), 500
 
 
-# EXCEL UPLOAD PERFORMANCE OPTIMIZATION: Add ultra-fast streaming upload
-@app.route('/api/upload-ultra-fast', methods=['POST'])
-def upload_file_ultra_fast():
-    """ULTRA-FAST Excel upload with minimal processing for maximum speed"""
+# PC PERFORMANCE OPTIMIZATION: Add chunked upload support
+@app.route('/upload-chunk', methods=['POST'])
+def upload_file_chunk():
+    """Handle chunked file uploads for PC optimization"""
     try:
-        logging.info("🚀 ULTRA-FAST UPLOAD: Starting optimized Excel upload")
-        start_time = time.time()
+        if 'chunk' not in request.files:
+            return jsonify({'success': False, 'error': 'No chunk file provided'}), 400
         
-        # Check if file is present
-        if 'file' not in request.files:
-            return jsonify({'error': 'No file provided'}), 400
+        chunk_file = request.files['chunk']
+        chunk_index = int(request.form.get('chunkIndex', 0))
+        total_chunks = int(request.form.get('totalChunks', 1))
+        filename = request.form.get('filename', 'upload.xlsx')
+        session_id = request.form.get('sessionId', str(time.time()))
         
-        file = request.files['file']
-        if file.filename == '':
-            return jsonify({'error': 'No file selected'}), 400
+        if chunk_file.filename == '':
+            return jsonify({'success': False, 'error': 'No chunk selected'}), 400
         
-        # Get filename and create temp path
-        filename = secure_filename(file.filename)
-        temp_path = os.path.join(tempfile.gettempdir(), f"upload_{int(time.time())}_{filename}")
+        # Read chunk data
+        chunk_data = chunk_file.read()
         
-        # Save file
-        file.save(temp_path)
-        file_size = os.path.getsize(temp_path)
-        logging.info(f"📁 File saved: {filename} ({file_size:,} bytes)")
+        # Process chunk using PC optimizer
+        from pc_excel_upload_optimizer import pc_excel_optimizer
+        result = pc_excel_optimizer.handle_chunk_upload(
+            chunk_data, chunk_index, total_chunks, filename, session_id
+        )
         
-        # ULTRA-FAST PROCESSING: Use minimal processing for maximum speed
-        processor = ExcelProcessor()
+        return jsonify(result)
         
-        # CRITICAL: Disable all expensive operations for ultra-fast upload
-        processor.set_ultra_fast_mode(True)
-        processor.enable_product_db_integration(False)
-        if hasattr(processor, 'enable_lineage_processing'):
-            processor.enable_lineage_processing(False)
-        if hasattr(processor, 'enable_strain_similarity'):
-            processor.enable_strain_similarity(False)
-        if hasattr(processor, 'set_minimal_processing'):
-            processor.set_minimal_processing(True)
+    except Exception as e:
+        logging.error(f"Chunk upload error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/finalize-upload', methods=['POST'])
+def finalize_upload():
+    """Finalize chunked upload processing"""
+    try:
+        session_id = request.json.get('sessionId', str(time.time()))
         
-        # Use ultra-fast loading method
-        if hasattr(processor, 'streaming_load'):
-            success = processor.streaming_load(temp_path)
-        else:
-            # Fallback to fast load
-            success = processor.load_file(temp_path)
+        # Get upload status
+        from pc_excel_upload_optimizer import pc_excel_optimizer
+        status = pc_excel_optimizer.get_upload_status(session_id)
         
-        if not success:
-            return jsonify({'error': 'Failed to process file'}), 500
+        if not status['success']:
+            return jsonify(status), 400
         
-        # Update global processor
-        global _excel_processor
-        with excel_processor_lock:
-            _excel_processor = processor
-            _excel_processor._last_loaded_file = temp_path
-        
-        # Store in session
-        session['file_path'] = temp_path
-        session['uploaded_filename'] = filename
-        session.modified = True
-        
-        # Calculate processing time
-        process_time = time.time() - start_time
-        row_count = len(processor.df) if processor.df is not None else 0
-        
-        logging.info(f"✅ ULTRA-FAST UPLOAD COMPLETE: {row_count} rows in {process_time:.2f}s")
+        # Clear caches for fresh data
+        cache.delete('full_excel_cache_key')
+        cache.delete('dropdown_cache_key')
         
         return jsonify({
             'success': True,
-            'message': f'File uploaded successfully in {process_time:.2f}s',
-            'filename': filename,
-            'rows': row_count,
-            'process_time': process_time,
-            'optimization': 'ultra_fast'
+            'message': 'Upload finalized successfully',
+            'status': status
         })
         
     except Exception as e:
-        logging.error(f"❌ Ultra-fast upload error: {e}")
-        return jsonify({'error': str(e)}), 500
+        logging.error(f"Upload finalization error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
+# EXCEL UPLOAD PERFORMANCE OPTIMIZATION: Add ultra-fast streaming upload
 @app.route('/upload-streaming', methods=['POST'])
 def upload_file_streaming():
     """Ultra-fast streaming Excel upload with chunked processing for maximum performance"""
@@ -2523,7 +2335,6 @@ def upload_file_simple_pythonanywhere():
 @app.route('/upload-simple', methods=['POST'])
 def upload_file_simple():
     """Simple, reliable file upload for PythonAnywhere"""
-    start_time = time.time()  # Add missing start_time variable
     try:
         logging.info("=== SIMPLE UPLOAD REQUEST START ===")
         
@@ -2662,20 +2473,11 @@ def process_excel_sync(filename, temp_path):
                 else:
                     logging.error(f"[PC-SYNC] Failed to load file: {temp_path}")
                 return False
-            # PC PERFORMANCE: Disable expensive operations after loading
-            processor.enable_product_db_integration(False)
-            if hasattr(processor, 'enable_lineage_processing'):
-                processor.enable_lineage_processing(False)
-            if hasattr(processor, 'enable_strain_similarity'):
-                processor.enable_strain_similarity(False)
-            if hasattr(processor, 'set_minimal_processing'):
-                processor.set_minimal_processing(True)
-            
             if ENHANCED_LOGGING_AVAILABLE:
-                enhanced_logger.log_success(f"Ultra-fast load complete with minimal processing", 
-                                          {'rows': len(processor.df), 'platform': 'windows', 'minimal_processing': True})
+                enhanced_logger.log_success(f"Ultra-fast load complete", 
+                                          {'rows': len(processor.df), 'platform': 'windows'})
             else:
-                logging.info(f"[PC-SYNC] Ultra-fast load complete: {len(processor.df)} rows with minimal processing")
+                logging.info(f"[PC-SYNC] Ultra-fast load complete: {len(processor.df)} rows")
         else:
             # Mac: Use original loading strategy
             import pandas as pd
@@ -2898,16 +2700,7 @@ def process_excel_background(filename, temp_path):
                 if not success or new_processor.df is None or new_processor.df.empty:
                     update_processing_status(filename, f'error: Failed to load file')
                     return
-                # PC PERFORMANCE: Disable expensive operations after loading
-                new_processor.enable_product_db_integration(False)
-                if hasattr(new_processor, 'enable_lineage_processing'):
-                    new_processor.enable_lineage_processing(False)
-                if hasattr(new_processor, 'enable_strain_similarity'):
-                    new_processor.enable_strain_similarity(False)
-                if hasattr(new_processor, 'set_minimal_processing'):
-                    new_processor.set_minimal_processing(True)
-                
-                logging.info(f"[PC-BG] Ultra-fast load complete: {len(new_processor.df)} rows with minimal processing")
+                logging.info(f"[PC-BG] Ultra-fast load complete: {len(new_processor.df)} rows")
             else:
                 # Mac: Use original loading strategy
                 success = new_processor.load_file(temp_path)
@@ -2955,7 +2748,7 @@ def process_excel_background(filename, temp_path):
         load_start = time.time()
         
         # Add timeout check
-        if time.time() - start_time > MAX_PROCESSING_TIME_PER_CHUNK:
+        if time.time() - start_time > max_processing_time:
             update_processing_status(filename, f'error: Processing timeout during file load')
             logging.error(f"[BG] Processing timeout for {filename}")
             return
@@ -3565,17 +3358,7 @@ def process_lightning():
             success = processor.load_file(file_path)  # This will use the PC-optimized version
             if not success:
                 return jsonify({'error': 'Failed to process file'}), 500
-            
-            # PC PERFORMANCE: Disable expensive operations after loading
-            processor.enable_product_db_integration(False)
-            if hasattr(processor, 'enable_lineage_processing'):
-                processor.enable_lineage_processing(False)
-            if hasattr(processor, 'enable_strain_similarity'):
-                processor.enable_strain_similarity(False)
-            if hasattr(processor, 'set_minimal_processing'):
-                processor.set_minimal_processing(True)
-            
-            logging.info(f"[PC-LIGHTNING] Ultra-fast load complete: {len(processor.df)} rows with minimal processing")
+            logging.info(f"[PC-LIGHTNING] Ultra-fast load complete: {len(processor.df)} rows")
         else:
             # Mac: Use original loading strategy
             import pandas as pd
@@ -4270,7 +4053,7 @@ def set_store():
         ip_address = get_client_ip()
         
         # Validate store selection
-        valid_stores = ['AGT_Bothell', 'AGT_Burien', 'AGT_Goldbar', 'AGT_Lynnwood']
+        valid_stores = ['AGT_Bothell', 'AGT_Burien', 'AGT_Goldbar', 'AGT_Lynnwood', 'AGT_Seattle', 'AGT_Shoreline', 'AGT_Walla_Walla']
         if store_value not in valid_stores:
             return jsonify({'success': False, 'error': 'Invalid store selection'}), 400
         
@@ -4284,6 +4067,11 @@ def set_store():
         
         # Cleanup expired selections periodically
         cleanup_expired_store_selections()
+        
+        # Clear the global product database instance to force reload with new store
+        global _product_database
+        _product_database = None
+        logging.info(f"Cleared global product database instance for store change to: {store_value}")
         
         logging.info(f"Store selection set for IP {ip_address}: {store_value}")
         
@@ -4299,9 +4087,26 @@ def set_store():
 
 @app.route('/api/get-store', methods=['GET'])
 def get_store():
-    """Always return AGT_Bothell as the default store."""
+    """Get the current store selection for the IP address."""
     try:
-        # Always return AGT_Bothell as the default store
+        ip_address = get_client_ip()
+        
+        # Check if there's a stored selection for this IP
+        with _ip_store_lock:
+            if ip_address in _ip_store_selections:
+                store_data = _ip_store_selections[ip_address]
+                # Check if the selection is still valid (not expired)
+                if datetime.now() - datetime.fromisoformat(store_data['timestamp']) < timedelta(hours=12):
+                    return jsonify({
+                        'success': True,
+                        'store': store_data['store'],
+                        'expires_at': (datetime.fromisoformat(store_data['timestamp']) + timedelta(hours=12)).isoformat()
+                    })
+                else:
+                    # Remove expired selection
+                    del _ip_store_selections[ip_address]
+        
+        # No valid selection found, return default
         return jsonify({
             'success': True,
             'store': 'AGT_Bothell',
@@ -4944,9 +4749,19 @@ def generate_labels():
         if selected_tags_from_request:
             logging.info(f"   - Sample tags: {selected_tags_from_request[:3]}")
         logging.debug(f"Selected tags from request: {selected_tags_from_request}")
-
+        
         # Enable product DB integration for proper tag matching
         excel_processor = get_excel_processor()
+        
+        # CRITICAL DEBUG: Check if we have JSON matched products in the Excel DataFrame
+        if excel_processor.df is not None and 'Source' in excel_processor.df.columns:
+            json_count = len(excel_processor.df[excel_processor.df['Source'] == 'JSON Match'])
+            logging.info(f"🔍 DEBUG: Found {json_count} JSON matched products in Excel DataFrame")
+            if json_count > 0:
+                json_products = excel_processor.df[excel_processor.df['Source'] == 'JSON Match']
+                logging.info(f"🔍 DEBUG: JSON product names: {json_products['Product Name*'].tolist()[:10]}")
+        else:
+            logging.info(f"🔍 DEBUG: No JSON matched products found in Excel DataFrame")
         excel_processor.enable_product_db_integration(True)
 
         # CRITICAL FIX: Preserve JSON matched products when reloading Excel data
@@ -5289,109 +5104,11 @@ def generate_labels():
         
         # PRIORITY: Use database data when available, fall back to Excel data
         records = []
-        
-        # CRITICAL FIX: Check if this is a JSON matched session first
-        json_matched_cache_key = session.get('json_matched_cache_key')
-        is_json_matched_session = json_matched_cache_key is not None
-        
-        if is_json_matched_session:
-            logging.info("CRITICAL FIX: JSON matched session detected - processing JSON matched products directly")
-            # For JSON matched sessions, use the JSON matched data directly
-            json_matched_tags = session.get('json_matched_tags', [])
-            if json_matched_tags:
-                logging.info(f"Processing {len(json_matched_tags)} JSON matched products directly")
-                records = []
-                
-                # Try to get database for weight lookup
-                product_db = None
-                try:
-                    from src.core.data.product_database import get_product_database
-                    product_db = get_product_database()
-                except:
-                    logging.warning("Could not get product database for weight lookup")
-                
-                for tag in json_matched_tags:
-                    if isinstance(tag, dict):
-                        logging.info(f"CRITICAL DEBUG: Processing JSON matched tag: {tag}")
-                        # Try to get weight data from database if available
-                        product_name = tag.get('Product Name*', '') or tag.get('ProductName', '')
-                        db_weight_data = None
-                        
-                        if product_db and product_name:
-                            try:
-                                db_products = product_db.get_products_by_names([product_name])
-                                if db_products and len(db_products) > 0:
-                                    db_weight_data = db_products[0]
-                                    logging.info(f"Found database weight data for '{product_name}': Weight*='{db_weight_data.get('Weight*', '')}', Units='{db_weight_data.get('Units', '')}'")
-                            except Exception as e:
-                                logging.warning(f"Error looking up database weight for '{product_name}': {e}")
-                        
-                        # CRITICAL FIX: Use database match weight data from JSON matched tags
-                        # The JSON matched tags should already contain database weight data from the matching process
-                        
-                        # Convert JSON matched tag to record format
-                        record = {
-                            'Product Name*': tag.get('Product Name*', ''),
-                            'ProductName': tag.get('ProductName', ''),
-                            'Product Brand': tag.get('Product Brand', 'CERES'),
-                            'ProductBrand': tag.get('Product Brand', 'CERES'),
-                            'Product Type*': tag.get('Product Type*', 'Edible (Solid)'),
-                            'ProductType': tag.get('Product Type*', 'Edible (Solid)'),
-                            'Vendor/Supplier*': tag.get('Vendor/Supplier*', 'A Greener Today'),
-                            'Vendor': tag.get('Vendor/Supplier*', 'A Greener Today'),
-                            'Description': tag.get('Description', tag.get('Product Name*', '')),
-                            'Lineage': tag.get('Lineage', 'MIXED'),
-                            'THC test result': tag.get('THC test result', '0.00'),
-                            'CBD test result': tag.get('CBD test result', '0.00'),
-                            'Test result unit (% or mg)': tag.get('Test result unit (% or mg)', '%'),
-                            'Weight*': tag.get('Weight*', ''),
-                            'Units': tag.get('Units', ''),
-                            'CombinedWeight': tag.get('CombinedWeight', ''),
-                            'WeightUnits': tag.get('WeightUnits', ''),
-                            'Price': tag.get('Price', ''),
-                            'Price* (Tier Name for Bulk)': tag.get('Price', ''),
-                            'Quantity*': tag.get('Quantity*', '1'),
-                            'Product Strain': tag.get('Product Strain', 'Mixed'),
-                            'DOH': tag.get('DOH', ''),
-                            'DOH Compliant (Yes/No)': tag.get('DOH Compliant (Yes/No)', ''),
-                            'displayName': tag.get('displayName', tag.get('Product Name*', '')),
-                            'Source': tag.get('Source', 'JSON Match - Database Priority (100% DB)')
-                        }
-                        
-                        # CRITICAL DEBUG: Log all weight-related fields
-                        logging.info(f"CRITICAL DEBUG: Weight fields for '{record.get('Product Name*', '')}':")
-                        logging.info(f"  Weight*: '{record.get('Weight*', '')}'")
-                        logging.info(f"  Units: '{record.get('Units', '')}'")
-                        logging.info(f"  CombinedWeight: '{record.get('CombinedWeight', '')}'")
-                        logging.info(f"  WeightUnits: '{record.get('WeightUnits', '')}'")
-                        logging.info(f"  All record keys: {list(record.keys())}")
-                        
-                        records.append(record)
-                logging.info(f"CRITICAL FIX: Generated {len(records)} records from JSON matched data")
-                
-                # CRITICAL FIX: Override lineage from Excel processor if it has been updated
-                if has_excel_data and excel_processor.df is not None and 'Lineage' in excel_processor.df.columns:
-                    logging.info("LINEAGE OVERRIDE: Checking for updated lineage in Excel processor for JSON matched products...")
-                    for record in records:
-                        product_name = record.get('Product Name*', '')
-                        if product_name:
-                            # Try different column names for product names
-                            product_name_columns = ['ProductName', 'Product Name*', 'Product Name']
-                            for col in product_name_columns:
-                                if col in excel_processor.df.columns:
-                                    mask = excel_processor.df[col] == product_name
-                                    if mask.any():
-                                        excel_lineage = excel_processor.df.loc[mask, 'Lineage'].iloc[0]
-                                        if excel_lineage and str(excel_lineage).strip():
-                                            original_lineage = record.get('Lineage', '')
-                                            if str(excel_lineage).strip() != str(original_lineage).strip():
-                                                logging.info(f"LINEAGE OVERRIDE (JSON): '{product_name}' - Original: '{original_lineage}' -> Excel: '{excel_lineage}'")
-                                                record['Lineage'] = str(excel_lineage).strip()
-                                        break
-            else:
-                logging.warning("CRITICAL FIX: JSON matched session but no json_matched_tags found")
-                records = []
-        elif has_database:
+
+        # JSON matched products are now in the Excel DataFrame, so no special handling needed
+        # All products (including JSON matched) are processed through the normal database/Excel flow
+
+        if has_database:
             logging.info("Using database for record generation (preferred source)")
             try:
                 from src.core.data.product_database import get_product_database
@@ -5557,6 +5274,43 @@ def generate_labels():
             records = excel_processor.get_selected_records(template_type)
             logging.debug(f"LINEAGE DEBUG: Records returned from get_selected_records: {len(records) if records else 0}")
             
+            # CRITICAL FIX: If we have JSON matched products but no records, try to include them directly
+            if not records and excel_processor.df is not None and 'Source' in excel_processor.df.columns:
+                json_matched_products = excel_processor.df[excel_processor.df['Source'] == 'JSON Match']
+                if not json_matched_products.empty:
+                    logging.info(f"CRITICAL FIX: No records found but {len(json_matched_products)} JSON matched products exist, creating records directly")
+                    records = []
+                    for _, json_product in json_matched_products.iterrows():
+                        product_name = json_product.get('Product Name*', json_product.get('ProductName', ''))
+                        if product_name and product_name.strip():
+                            # Create a record from the JSON matched product
+                            record = {
+                                'ProductName': product_name,
+                                'Product Name*': product_name,
+                                'Description': json_product.get('Description', product_name),
+                                'DescAndWeight': json_product.get('DescAndWeight', product_name),
+                                'Product Type*': json_product.get('Product Type*', 'flower'),
+                                'Product Brand': json_product.get('Product Brand', ''),
+                                'Product Strain': json_product.get('Product Strain', ''),
+                                'Lineage': json_product.get('Lineage', 'HYBRID'),
+                                'Vendor': json_product.get('Vendor/Supplier*', json_product.get('Vendor', '')),
+                                'Price': json_product.get('Price', '25'),
+                                'DOH': json_product.get('DOH', ''),
+                                'Ratio': json_product.get('Ratio', ''),
+                                'Weight*': json_product.get('Weight*', ''),
+                                'Units': json_product.get('Units', 'g'),
+                                'Quantity*': json_product.get('Quantity*', '1'),
+                                'THC test result': json_product.get('THC test result', ''),
+                                'CBD test result': json_product.get('CBD test result', ''),
+                                'Test result unit (% or mg)': json_product.get('Test result unit (% or mg)', '%'),
+                                'Source': 'JSON Match'
+                            }
+                            records.append(record)
+                            logging.info(f"CRITICAL FIX: Created record for JSON matched product '{product_name}'")
+                    
+                    if records:
+                        logging.info(f"CRITICAL FIX: Created {len(records)} records from JSON matched products")
+            
             # CRITICAL FIX: Log lineage values for debugging
             if records:
                 for i, record in enumerate(records[:3]):  # Log first 3 records
@@ -5565,6 +5319,11 @@ def generate_labels():
                     logging.info(f"LINEAGE DEBUG: Record {i+1} - Product: '{product_name}', Lineage: '{lineage}'")
             logging.debug(f"Records returned from get_selected_records: {len(records) if records else 0}")
 
+        # CRITICAL DEBUG: Log final record count
+        logging.info(f"🔍 DEBUG: Final records count: {len(records) if records else 0}")
+        if records:
+            logging.info(f"🔍 DEBUG: Sample record names: {[r.get('ProductName', r.get('Product Name*', 'NO_NAME')) for r in records[:5]]}")
+        
         if not records:
             logging.error("No selected tags found in the data or failed to process records.")
             return jsonify({'error': 'No selected tags found in the data or failed to process records. Please ensure you have selected tags and they exist in the loaded data.'}), 400
@@ -6132,6 +5891,10 @@ def process_database_product_for_api(db_product):
 @app.route('/api/available-tags', methods=['GET'])
 def get_available_tags():
     try:
+        # Check memory before processing
+        if not check_memory_limit():
+            return jsonify({'error': 'Memory usage too high, please try again later'}), 503
+        
         # Rate limiting: prevent rapid successive requests
         client_ip = request.remote_addr
         current_time = time.time()
@@ -7293,26 +7056,49 @@ def get_filter_options():
     try:
         start_time = time.time()
         
-        # Check if this is a Windows platform request for optimization
+        # PC PERFORMANCE OPTIMIZATION: Enhanced Windows detection
         is_windows_request = request.args.get('platform') == 'windows'
-        is_ultra_fast_request = request.args.get('ultra_fast') == 'true'
-        force_refresh = request.args.get('force_refresh', 'false').lower() == 'true'
         user_agent = request.headers.get('User-Agent', '')
         is_windows_ua = 'Windows' in user_agent
         is_web_client = is_windows_request or is_windows_ua
         
+        # Additional PC detection for better optimization
+        is_pc_client = (
+            is_web_client or 
+            'Windows NT' in user_agent or 
+            'Win64' in user_agent or
+            'WOW64' in user_agent
+        )
+        
         if is_web_client:
             if ENHANCED_LOGGING_AVAILABLE:
                 enhanced_logger.log_info("Web client detected - applying performance optimizations", 
-                                       {'platform': 'web', 'user_agent': user_agent[:50], 'ultra_fast': is_ultra_fast_request})
+                                       {'platform': 'web', 'user_agent': user_agent[:50]})
             else:
-                logging.info(f"Web client detected - applying performance optimizations (ultra_fast: {is_ultra_fast_request})")
+                logging.info("Web client detected - applying performance optimizations")
         
         cache_key = get_session_cache_key('filter_options')
         
-        # WEB OPTIMIZATION: Aggressive caching for web clients
-        if is_web_client:
-            # Use longer cache timeout for web clients (1 hour for PC performance)
+        # PC PERFORMANCE OPTIMIZATION: Enhanced caching for PC clients
+        if is_pc_client:
+            # Use longer cache timeout for PC clients (10 minutes)
+            cached_options = cache.get(cache_key)
+            if cached_options:
+                elapsed = (time.time() - start_time) * 1000
+                if ENHANCED_LOGGING_AVAILABLE:
+                    enhanced_logger.log_success(f"Using cached filter options for PC ({elapsed:.1f}ms)", 
+                                              {'cache_hit': True, 'options_count': len(cached_options), 'platform': 'pc'})
+                else:
+                    logging.info(f"✅ Using cached filter options for PC ({elapsed:.1f}ms)")
+                
+                # Apply compression and PC-specific headers
+                response = make_response(jsonify(cached_options))
+                response.headers['Content-Encoding'] = 'gzip'
+                response.headers['Cache-Control'] = 'public, max-age=600'  # 10 minutes
+                response.headers['X-PC-Optimized'] = 'true'
+                return response
+        elif is_web_client:
+            # Use longer cache timeout for web clients (5 minutes)
             cached_options = cache.get(cache_key)
             if cached_options:
                 elapsed = (time.time() - start_time) * 1000
@@ -7368,41 +7154,6 @@ def get_filter_options():
             data = request.get_json()
             current_filters = data.get('filters', {})
         
-        # Enable ultra-fast mode for PC clients
-        if is_ultra_fast_request or is_web_client:
-            excel_processor.set_ultra_fast_mode(True)
-            if ENHANCED_LOGGING_AVAILABLE:
-                enhanced_logger.log_info("Ultra-fast mode enabled for PC performance", {'ultra_fast': True})
-            else:
-                logging.info("Ultra-fast mode enabled for PC performance")
-        
-        # PC PERFORMANCE CRITICAL: Disable expensive operations for PC clients
-        if is_web_client:
-            # Disable product database integration for PC performance
-            excel_processor.enable_product_db_integration(False)
-            
-            # Disable expensive lineage processing for PC
-            if hasattr(excel_processor, 'enable_lineage_processing'):
-                excel_processor.enable_lineage_processing(False)
-            
-            # Disable strain similarity processing for PC
-            if hasattr(excel_processor, 'enable_strain_similarity'):
-                excel_processor.enable_strain_similarity(False)
-            
-            # Enable minimal processing mode for PC
-            if hasattr(excel_processor, 'set_minimal_processing'):
-                excel_processor.set_minimal_processing(True)
-            
-            logging.info("PC PERFORMANCE: Disabled expensive operations for maximum speed")
-        
-        # PC PERFORMANCE: Use aggressive caching for filter options
-        if is_web_client:
-            # Use cached filter options for PC performance
-            cached_options = cache.get(cache_key)
-            if cached_options and not force_refresh:
-                logging.info("PC PERFORMANCE: Using cached filter options")
-                return jsonify(cached_options)
-        
         # Use optimized method for Windows
         if is_windows_request or is_windows_ua:
             options = excel_processor.get_dynamic_filter_options(current_filters)
@@ -7440,16 +7191,10 @@ def get_filter_options():
             else:
                 logging.info(f"Weight filter options: {options['weight'][:10]}...")  # Log first 10 options
         
-        # PC PERFORMANCE: Cache results aggressively for web clients
-        if is_web_client:
+        # For Windows requests, cache the results for better performance
+        if is_windows_request or is_windows_ua:
             try:
-                cache.set(cache_key, options, timeout=3600)  # Cache for 1 hour for PC
-                logging.info("PC PERFORMANCE: Cached filter options for 1 hour")
-            except Exception as cache_error:
-                logging.warning(f"PC PERFORMANCE: Cache error: {cache_error}")
-        elif is_windows_request or is_windows_ua:
-            try:
-                cache.set(cache_key, options, timeout=60)  # Cache for 1 minute for Windows
+                cache.set(cache_key, options, timeout=60)  # Cache for 1 minute
                 if ENHANCED_LOGGING_AVAILABLE:
                     enhanced_logger.log_success("Cached filter options for Windows performance")
                 else:
@@ -7460,9 +7205,38 @@ def get_filter_options():
                 else:
                     logging.warning(f"Failed to cache filter options: {cache_error}")
         
-        # PC optimization: Add response compression for large datasets
-        if is_windows_request or is_windows_ua:
-            # Compress response for Windows to reduce transfer time
+        # PC PERFORMANCE OPTIMIZATION: Enhanced response optimization
+        if is_pc_client:
+            # Cache for PC clients with longer timeout
+            cache.set(cache_key, options, timeout=600)  # 10 minutes
+            
+            # Apply PC-specific optimizations
+            import gzip
+            import json
+            from flask import make_response
+            response_data = json.dumps(options)
+            compressed_data = gzip.compress(response_data.encode('utf-8'))
+            
+            response = make_response(compressed_data)
+            response.headers['Content-Type'] = 'application/json'
+            response.headers['Content-Encoding'] = 'gzip'
+            response.headers['Content-Length'] = str(len(compressed_data))
+            response.headers['Cache-Control'] = 'public, max-age=600'  # 10 minutes
+            response.headers['X-PC-Optimized'] = 'true'
+            response.headers['X-Performance-Mode'] = 'ultra-fast'
+            
+            elapsed = (time.time() - start_time) * 1000
+            if ENHANCED_LOGGING_AVAILABLE:
+                enhanced_logger.log_success(f"PC-optimized filter options generated ({elapsed:.1f}ms)", 
+                                          {'options_count': len(options), 'platform': 'pc', 'compressed_size': len(compressed_data)})
+            else:
+                logging.info(f"✅ PC-optimized filter options generated ({elapsed:.1f}ms)")
+            
+            return response
+        elif is_windows_request or is_windows_ua:
+            # Legacy Windows optimization
+            cache.set(cache_key, options, timeout=60)  # Cache for 1 minute
+            
             import gzip
             import json
             from flask import make_response
@@ -10242,54 +10016,81 @@ def json_match():
         logging.info("JSON matcher created successfully")
         
         # Perform JSON matching with Product Database integration
-        # CRITICAL FIX: Use fetch_and_match_with_product_db to get actual database descriptions
-        matched_products = json_matcher.fetch_and_match_with_product_db(url)
-        logging.info(f"JSON matching (with Product DB) returned {len(matched_products) if matched_products else 0} products")
+        # CRITICAL FIX: Use simplified matching approach to ensure all products are processed with complete data
+        matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=True)
+        logging.info(f"JSON matching (simplified approach) returned {len(matched_products) if matched_products else 0} products")
 
-        # Persist JSON-matched results for downstream flows (cache + session)
+        # CRITICAL DEBUG: Log what we actually got back
+        if matched_products:
+            logging.info(f"🔍 First matched product keys: {list(matched_products[0].keys()) if matched_products[0] else 'EMPTY'}")
+            logging.info(f"🔍 First matched product Product Name*: '{matched_products[0].get('Product Name*', 'NOT FOUND')}'")
+            logging.info(f"🔍 First matched product Description: '{matched_products[0].get('Description', 'NOT FOUND')}'")
+            logging.info(f"🔍 First matched product displayName: '{matched_products[0].get('displayName', 'NOT FOUND')}'")
+        else:
+            logging.warning("🔍 matched_products is empty or None!")
+
+        # CRITICAL FIX: Add JSON matched products directly to Excel DataFrame
+        # This makes them work exactly like regular tags - no special handling needed
         try:
             total_matches = len(matched_products) if matched_products else 0
-            # Extract product names for session-selected tags
-            # CRITICAL FIX: Use Description field for human-readable names, fallback to Product Name* if Description is empty
-            matched_names = []
-            for p in matched_products:
-                if isinstance(p, dict):
-                    # Priority: Description > Product Name* > ProductName
-                    name = (p.get('Description', '') or 
-                           p.get('Product Name*', '') or 
-                           p.get('ProductName', ''))
-                    
-                    if name:  # Only add non-empty names
-                        matched_names.append(name)
-            
-            # DEBUG: Log what fields contain and what name is actually used
-            if matched_products and len(matched_products) > 0:
-                first_product = matched_products[0] if isinstance(matched_products[0], dict) else {}
-                logging.info(f"📝 DEBUG: First matched product 'Product Name*' = '{first_product.get('Product Name*', 'NOT SET')}'")
-                logging.info(f"📝 DEBUG: First matched product 'Description' = '{first_product.get('Description', 'NOT SET')}'")
-                logging.info(f"📝 DEBUG: First matched_name = '{matched_names[0] if matched_names else 'NONE'}'")
-                logging.info(f"📝 DEBUG: Total matched_names count = {len(matched_names)}")
 
-            # Store available_tags cache with these matched products
-            available_cache_key = get_session_cache_key('available_tags')
-            cache.set(available_cache_key, matched_products or [], timeout=3600)
-            logging.info(f"Stored {total_matches} JSON matched products in available_tags cache: {available_cache_key}")
+            if matched_products and excel_processor:
+                logging.info(f"Adding {total_matches} JSON matched products directly to Excel DataFrame")
 
-            # Store a dedicated json_matched cache and key in session
-            json_matched_cache_key = get_session_cache_key('json_matched_tags')
-            cache.set(json_matched_cache_key, matched_products or [], timeout=3600)
-            session['json_matched_cache_key'] = json_matched_cache_key
-            logging.info(f"Stored {total_matches} JSON matched products in json_matched cache: {json_matched_cache_key}")
+                # Convert matched products to DataFrame format
+                import pandas as pd
 
-            # Persist selected tags in session for generate flow
-            session['selected_tags'] = matched_names
-            session['json_selected_tags'] = matched_names
-            session['last_json_match_count'] = total_matches
-            session['json_match_timestamp'] = time.time()
-            session.modified = True
-            logging.info(f"Session updated: selected_tags={len(matched_names)}, last_json_match_count={total_matches}")
+                # Remove 'Source' field from matched products so they're not treated specially
+                for product in matched_products:
+                    if isinstance(product, dict):
+                        # Remove the Source marker - we want these treated like regular products
+                        product.pop('Source', None)
+                        product.pop('JSON_Source', None)
+
+                # Create DataFrame from matched products
+                json_df = pd.DataFrame(matched_products)
+                logging.info(f"Created DataFrame from {len(json_df)} JSON matched products")
+                logging.info(f"DataFrame columns: {list(json_df.columns)}")
+                logging.info(f"Sample product names: {json_df['Product Name*'].head(3).tolist() if 'Product Name*' in json_df.columns else 'NO PRODUCT NAME COLUMN'}")
+
+                # If Excel processor has no data, use JSON products as the data
+                if excel_processor.df is None or excel_processor.df.empty:
+                    logging.info("Excel processor is empty, using JSON matched products as the dataset")
+                    excel_processor.df = json_df
+                else:
+                    # Append JSON matched products to existing Excel data
+                    logging.info(f"Appending {len(json_df)} JSON matched products to existing Excel data ({len(excel_processor.df)} rows)")
+                    excel_processor.df = pd.concat([excel_processor.df, json_df], ignore_index=True)
+
+                logging.info(f"✅ Successfully added JSON matched products to Excel DataFrame. Total rows: {len(excel_processor.df)}")
+                logging.info(f"DataFrame shape: {excel_processor.df.shape}")
+
+                # Extract product names for selection
+                matched_names = []
+                for p in matched_products:
+                    if isinstance(p, dict):
+                        # Priority: Description > Product Name* > ProductName
+                        name = (p.get('Description', '') or
+                               p.get('Product Name*', '') or
+                               p.get('ProductName', ''))
+
+                        if name:  # Only add non-empty names
+                            matched_names.append(name)
+
+                logging.info(f"Extracted {len(matched_names)} product names from matched products")
+                logging.info(f"Sample matched names: {matched_names[:3]}")
+
+                # Set selected tags - these will be processed like regular Excel tags
+                excel_processor.selected_tags = matched_names
+                session['selected_tags'] = matched_names
+                session.modified = True
+
+                logging.info(f"✅ Set {len(matched_names)} products as selected tags for generation")
+
         except Exception as persist_error:
-            logging.error(f"Error persisting JSON match results: {persist_error}")
+            logging.error(f"Error adding JSON matched products to Excel DataFrame: {persist_error}")
+            import traceback
+            logging.error(f"Full traceback: {traceback.format_exc()}")
         
         # DEBUG: Log the actual JSON data to understand why only 6 products
         try:
@@ -10340,7 +10141,7 @@ def json_match():
         else:
             logging.info("DEBUG: No Excel data available for matching")
         
-        # Handle empty results gracefully - this is normal for strict vendor isolation
+        # Handle empty results gracefully
         if not matched_products:
             logging.info("No products matched - likely due to strict vendor isolation or no matching products in database")
             return jsonify({
@@ -10349,27 +10150,46 @@ def json_match():
                 'matched_names': [],
                 'available_tags': [],
                 'selected_tags': [],
-                'json_matched_tags': [],
                 'message': 'No products matched. This may be due to strict vendor isolation - only products from the same vendor are matched.'
             }), 200
-        
-        # Create response data
+
+        # CRITICAL FIX: Return matched products directly as available tags
+        # Don't rely on Excel processor since products were just added
+        logging.info(f"🔍 Preparing to return {len(matched_products)} matched products as available tags")
+
+        # Ensure each matched product has the display fields needed by frontend
+        for i, product in enumerate(matched_products):
+            if 'displayName' not in product:
+                display_name = (product.get('Description', '') or
+                               product.get('Product Name*', '') or
+                               product.get('ProductName', ''))
+                product['displayName'] = display_name
+                if i < 3:  # Log first 3
+                    logging.info(f"🔍 Set displayName for product {i}: '{display_name}'")
+
+        if matched_products:
+            logging.info(f"🔍 Sample matched product (first one):")
+            logging.info(f"🔍   - Product Name*: {matched_products[0].get('Product Name*', 'MISSING')}")
+            logging.info(f"🔍   - Description: {matched_products[0].get('Description', 'MISSING')}")
+            logging.info(f"🔍   - displayName: {matched_products[0].get('displayName', 'MISSING')}")
+            logging.info(f"🔍   - All keys: {list(matched_products[0].keys())}")
+
+        # Create response data - Return matched products directly
         response_data = {
             'success': True,
             'matched_count': len(matched_products),
-            'matched_names': matched_names,  # Use the same matched_names logic as session persistence
-            'available_tags': matched_products,
-            'selected_tags': matched_products,
-            'json_matched_tags': matched_products,
-            'cache_status': f'JSON Match Complete - {len(matched_products)} products processed',
-            'filter_mode': 'json_matched',
-            'has_full_excel': True,
-            'message': f"JSON matched {len(matched_products)} products successfully.",
+            'matched_names': matched_names,
+            'available_tags': matched_products,  # Return matched products directly
+            'selected_tags': matched_names,  # Return names of selected products
+            'message': f"Successfully matched {len(matched_products)} products. They are ready for label generation.",
             'auto_selected': True,
-            'selected_count': len(matched_products)
+            'selected_count': len(matched_names)
         }
-        
-        logging.info(f"Sending JSON match response with {len(matched_products)} products")
+
+        logging.info(f"✅ Sending JSON match response:")
+        logging.info(f"   - matched_count: {len(matched_products)}")
+        logging.info(f"   - available_tags count: {len(matched_products)}")
+        logging.info(f"   - selected_tags count: {len(matched_names)}")
         return jsonify(response_data)
         
     except Exception as e:
@@ -10394,7 +10214,7 @@ def json_process():
             
         # Process JSON data directly
         json_matcher = get_json_matcher()
-        matched_products = json_matcher.fetch_and_match_with_product_db(url)
+        matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=True)
         
         if matched_products:
             logging.info(f'✅ Successfully matched {len(matched_products)} products from JSON')
@@ -10725,23 +10545,81 @@ def match_json_tags():
         matched = []
         unmatched = []
         
-        # CRITICAL FIX: Use the same validation logic as Excel processing instead of complex JSONMatcher scoring
-        # This ensures JSON matching works exactly like normal Excel processed tags
-        valid_selected_tags, invalid_selected_tags = _validate_tags_against_excel(excel_processor, names)
+        # Use the improved matching logic from JSONMatcher
+        json_matcher = get_json_matcher()
         
-        # Convert valid tags back to full tag objects for response
-        for valid_tag_name in valid_selected_tags:
-            # Find the corresponding full tag object from available_tags
+        # Build cache if needed
+        if json_matcher._sheet_cache is None:
+            json_matcher._build_sheet_cache()
+            
+        if not json_matcher._sheet_cache:
+            return jsonify({'matched': [], 'unmatched': names, 'error': 'Failed to build product cache. Please ensure your Excel file has product data.'}), 400
+        
+        # For each JSON name, find the best match using the improved scoring system with database descriptions
+        for name in names:
+            best_score = 0.0
+            best_match = None
+            
+            # Create a mock JSON item for scoring
+            json_item = {"product_name": name}
+            
+            # Try to match against all available tags using comprehensive database fields
             for tag in available_tags:
                 tag_name = tag.get('Product Name*', '')
-                if tag_name == valid_tag_name:
-                    matched.append(tag)
-                    break
+                if not tag_name:
+                    continue
+                
+                # Get database description and other fields for comprehensive matching
+                description = tag.get('Description', '')
+                brand = tag.get('Product Brand', '')
+                strain = tag.get('Product Strain', '')
+                product_type = tag.get('Product Type*', '')
+                vendor = tag.get('Vendor/Supplier*', '')
+                weight = tag.get('Weight*', '')
+                units = tag.get('Units', '')
+                lineage = tag.get('Lineage', '')
+                
+                # Prioritize Description field for matching if available, otherwise use Product Name*
+                primary_name = description.strip() if description and description.strip() else tag_name
+                
+                # Create comprehensive cache item with all database fields
+                cache_item = {
+                    "original_name": primary_name,  # Use Description if available
+                    "product_name": tag_name,  # Keep original Product Name* for reference
+                    "description": description,
+                    "brand": brand,
+                    "strain": strain,
+                    "product_type": product_type,
+                    "vendor": vendor,
+                    "weight": weight,
+                    "units": units,
+                    "lineage": lineage,
+                    "key_terms": json_matcher._extract_key_terms(primary_name),
+                    "norm": json_matcher._normalize(primary_name)
+                }
+                
+                # Calculate match score using comprehensive database information
+                score = json_matcher._calculate_match_score(json_item, cache_item)
+                
+                if score > best_score:
+                    best_score = score
+                    best_match = tag
+                    
+            # Accept matches with higher confidence to reduce random matches
+            if best_score >= 0.4:  # Raised threshold for better accuracy (reduced random matches)
+                matched.append(best_match)
+                # Log the database values being used for this match
+                db_description = best_match.get('Description', '')
+                db_price = best_match.get('Price', '')
+                db_weight = best_match.get('Weight*', '')
+                db_units = best_match.get('Units', '')
+                logging.info(f"Matched '{name}' to '{best_match.get('Product Name*', '')}' (score: {best_score:.2f})")
+                logging.info(f"  Using database values - Description: '{db_description}', Price: '{db_price}', Weight: '{db_weight}{db_units}'")
+            else:
+                unmatched.append(name)
+                logging.info(f"No match found for '{name}' (best score: {best_score:.2f})")
         
-        # Add unmatched tags
-        unmatched = invalid_selected_tags
-        
-        logging.info(f"JSON matching using Excel validation logic: {len(matched)} matched, {len(unmatched)} unmatched out of {len(names)} total")
+        logging.info(f"JSON matching: {len(matched)} matched, {len(unmatched)} unmatched out of {len(names)} total")
         
         # Add debugging information for the first few unmatched items
         if unmatched and len(unmatched) > 0:
@@ -10755,7 +10633,7 @@ def match_json_tags():
                 'total_names': len(names),
                 'total_available_tags': len(available_tags),
                 'sample_unmatched': unmatched[:5] if unmatched else [],
-                'matching_method': 'excel_validation_logic'
+                'matching_threshold': 0.3
             }
         })
         
@@ -15251,22 +15129,13 @@ def clear_cache_route():
 
 @app.route('/api/performance/optimize', methods=['POST'])
 def optimize_performance():
-    """Ultra-lightweight performance optimization endpoint"""
+    """Trigger performance optimizations - SIMPLIFIED."""
     try:
-        # Use ultra-lightweight optimizer if available
-        if ultra_optimizer:
-            ultra_optimizer.auto_optimize()
-            stats = ultra_optimizer.get_performance_stats()
-            return jsonify({
-                'success': True,
-                'message': 'Ultra-lightweight optimization completed',
-                'stats': stats
-            })
-        
-        # Fallback to basic optimization
+        # Clear Flask cache only (safe operation)
         if hasattr(cache, 'clear'):
             cache.clear()
         
+        # Basic garbage collection
         import gc
         gc.collect()
         
@@ -15275,121 +15144,11 @@ def optimize_performance():
         logging.error(f"Failed to optimize performance: {e}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/performance/stats', methods=['GET'])
-def get_performance_stats():
-    """Get performance statistics"""
-    try:
-        if ultra_optimizer:
-            stats = ultra_optimizer.get_performance_stats()
-            return jsonify({
-                'success': True,
-                'stats': stats
-            })
-        else:
-            return jsonify({
-                'success': False,
-                'message': 'Performance optimizer not available'
-            }), 503
-    except Exception as e:
-        logging.error(f"Failed to get performance stats: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/performance/pc-stats', methods=['GET'])
-def get_pc_performance_stats():
-    """Get PC performance statistics and optimizations"""
-    try:
-        user_agent = request.headers.get('User-Agent', '')
-        is_windows = 'Windows' in user_agent
-        
-        stats = {
-            'is_windows': is_windows,
-            'user_agent': user_agent[:100],  # Truncate for privacy
-            'optimizations': {
-                'ultra_fast_mode': True,
-                'backdrop_filter_disabled': True,
-                'transitions_disabled': True,
-                'animations_disabled': True,
-                'aggressive_caching': True,
-                'minimal_processing': True,
-                'debounced_updates': True,
-                'event_delegation': True,
-                'ultra_aggressive_mode': True,
-                'hardware_acceleration': True,
-                'batch_processing': True,
-                'conflict_prevention': True
-            },
-            'cache_stats': {
-                'filter_options_cached': cache.get(get_session_cache_key('filter_options')) is not None,
-                'cache_timeout': 3600 if is_windows else 300
-            },
-            'performance_mode': 'ultra_aggressive' if is_windows else 'standard'
-        }
-        
-        logging.info(f"PC Performance Stats: Windows={is_windows}, Optimizations={len(stats['optimizations'])}")
-        return jsonify(stats)
-        
-    except Exception as e:
-        logging.error(f"Error getting PC performance stats: {e}")
-        return jsonify({'error': 'Failed to get performance stats'}), 500
-
-@app.route('/api/performance/ultra-aggressive-stats', methods=['GET'])
-def get_ultra_aggressive_stats():
-    """Get ultra-aggressive PC optimizer statistics"""
-    try:
-        user_agent = request.headers.get('User-Agent', '')
-        is_windows = 'Windows' in user_agent
-        
-        stats = {
-            'is_windows': is_windows,
-            'ultra_aggressive_active': is_windows,
-            'optimizations': {
-                'ultra_aggressive_css': True,
-                'consolidated_event_handling': True,
-                'batch_processing_60fps': True,
-                'hardware_acceleration': True,
-                'conflict_prevention': True,
-                'minimal_dom_operations': True,
-                'zero_transitions': True,
-                'zero_animations': True,
-                'zero_transforms': True,
-                'zero_backdrop_filters': True,
-                'zero_text_shadows': True,
-                'zero_box_shadows': True
-            },
-            'performance_improvements': {
-                'checkbox_lag_reduction': '90%',
-                'filter_dropdown_lag_reduction': '95%',
-                'event_handling_speed': '10x faster',
-                'dom_operation_reduction': '80%',
-                'css_complexity_reduction': '95%'
-            },
-            'mode': 'ultra_aggressive' if is_windows else 'standard'
-        }
-        
-        logging.info(f"Ultra-Aggressive Stats: Windows={is_windows}, Active={is_windows}")
-        return jsonify(stats)
-        
-    except Exception as e:
-        logging.error(f"Error getting ultra-aggressive stats: {e}")
-        return jsonify({'error': 'Failed to get ultra-aggressive stats'}), 500
-
 if __name__ == '__main__':
     # SIMPLE STARTUP: Allow easy process termination
     import sys
     import os
     import signal
-    
-    # Debug: Check if we're being executed multiple times
-    print(f"🔍 DEBUG: Starting app.py - PID: {os.getpid()}, Parent PID: {os.getppid()}")
-    print(f"🔍 DEBUG: sys.argv: {sys.argv}")
-    print(f"🔍 DEBUG: __name__: {__name__}")
-    print(f"🔍 DEBUG: Current working directory: {os.getcwd()}")
-    
-    # CRITICAL FIX: Prevent multiple executions by checking environment
-    if os.environ.get('LABELMAKER_STARTED', '') == 'true':
-        print("❌ App already started in this environment, preventing duplicate startup")
-        sys.exit(0)
-    os.environ['LABELMAKER_STARTED'] = 'true'
     
     # Set up signal handlers for clean shutdown
     def signal_handler(signum, frame):
@@ -15452,17 +15211,9 @@ if __name__ == '__main__':
     except Exception as e:
         print(f"\n❌ Error: {e}")
     finally:
-        # Clean up lock files on exit
+        # Clean up lock file on exit
         try:
             if os.path.exists(lock_file):
                 os.remove(lock_file)
-            # Also clean up port-specific lock file
-            port = int(os.environ.get('FLASK_PORT', 8001))
-            port_lock_file = f"/tmp/labelmaker_{port}.lock"
-            if os.path.exists(port_lock_file):
-                os.remove(port_lock_file)
         except Exception:
-            pass
-        
-        # CRITICAL FIX: Release process lock
-        release_process_lock() 
+            pass 
