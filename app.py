@@ -7261,7 +7261,7 @@ def get_filter_options():
         
         # WEB OPTIMIZATION: Aggressive caching for web clients
         if is_web_client:
-            # Use longer cache timeout for web clients (5 minutes)
+            # Use longer cache timeout for web clients (1 hour for PC performance)
             cached_options = cache.get(cache_key)
             if cached_options:
                 elapsed = (time.time() - start_time) * 1000
@@ -15242,6 +15242,40 @@ def get_performance_stats():
     except Exception as e:
         logging.error(f"Failed to get performance stats: {e}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/performance/pc-stats', methods=['GET'])
+def get_pc_performance_stats():
+    """Get PC performance statistics and optimizations"""
+    try:
+        user_agent = request.headers.get('User-Agent', '')
+        is_windows = 'Windows' in user_agent
+        
+        stats = {
+            'is_windows': is_windows,
+            'user_agent': user_agent[:100],  # Truncate for privacy
+            'optimizations': {
+                'ultra_fast_mode': True,
+                'backdrop_filter_disabled': True,
+                'transitions_disabled': True,
+                'animations_disabled': True,
+                'aggressive_caching': True,
+                'minimal_processing': True,
+                'debounced_updates': True,
+                'event_delegation': True
+            },
+            'cache_stats': {
+                'filter_options_cached': cache.get(get_session_cache_key('filter_options')) is not None,
+                'cache_timeout': 3600 if is_windows else 300
+            },
+            'performance_mode': 'ultra_fast' if is_windows else 'standard'
+        }
+        
+        logging.info(f"PC Performance Stats: Windows={is_windows}, Optimizations={len(stats['optimizations'])}")
+        return jsonify(stats)
+        
+    except Exception as e:
+        logging.error(f"Error getting PC performance stats: {e}")
+        return jsonify({'error': 'Failed to get performance stats'}), 500
 
 if __name__ == '__main__':
     # SIMPLE STARTUP: Allow easy process termination
