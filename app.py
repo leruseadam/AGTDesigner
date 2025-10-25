@@ -36,30 +36,36 @@ def acquire_process_lock():
     """Acquire a global process lock to prevent multiple instances"""
     global PROCESS_LOCK_FD
     try:
-        # Check if lock file exists and process is still running
+        # First, try to remove any existing lock file
         if os.path.exists(PROCESS_LOCK_FILE):
             try:
-                with open(PROCESS_LOCK_FILE, 'r') as f:
-                    pid = int(f.read().strip())
-                # Check if the process is still running
-                os.kill(pid, 0)  # This will raise an exception if process doesn't exist
-                print(f"❌ Another instance is already running (PID: {pid})")
-                return False
-            except (OSError, ProcessLookupError, ValueError):
-                # Process doesn't exist or invalid PID, remove stale lock file
-                try:
-                    os.remove(PROCESS_LOCK_FILE)
-                except:
-                    pass
+                os.remove(PROCESS_LOCK_FILE)
+                print(f"🧹 Removed stale lock file: {PROCESS_LOCK_FILE}")
+            except:
+                pass
         
+        # Create the lock file
         PROCESS_LOCK_FD = os.open(PROCESS_LOCK_FILE, os.O_CREAT | os.O_WRONLY | os.O_TRUNC)
+        
+        # Try to acquire exclusive lock
         fcntl.flock(PROCESS_LOCK_FD, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        
+        # Write PID to lock file
         os.write(PROCESS_LOCK_FD, str(os.getpid()).encode())
         os.fsync(PROCESS_LOCK_FD)
+        
         print(f"🔒 Process lock acquired - PID: {os.getpid()}")
         return True
+        
     except (OSError, IOError) as e:
         print(f"❌ Another instance is already running: {e}")
+        # Try to close the file descriptor if we opened it
+        if PROCESS_LOCK_FD is not None:
+            try:
+                os.close(PROCESS_LOCK_FD)
+                PROCESS_LOCK_FD = None
+            except:
+                pass
         return False
 
 def release_process_lock():
@@ -75,6 +81,18 @@ def release_process_lock():
         print(f"🔓 Process lock released - PID: {os.getpid()}")
     except Exception as e:
         print(f"⚠️  Error releasing process lock: {e}")
+        # Force cleanup
+        try:
+            if PROCESS_LOCK_FD is not None:
+                os.close(PROCESS_LOCK_FD)
+                PROCESS_LOCK_FD = None
+        except:
+            pass
+        try:
+            if os.path.exists(PROCESS_LOCK_FILE):
+                os.remove(PROCESS_LOCK_FILE)
+        except:
+            pass
 
 # CRITICAL FIX: Prevent multiple imports/executions
 if hasattr(sys.modules[__name__], '_already_imported'):
@@ -835,16 +853,16 @@ def create_app():
     import flask
     print(f"🔍 DEBUG: create_app() called - PID: {os.getpid()}")
     
+    # CRITICAL FIX: Prevent multiple calls to create_app
+    if hasattr(create_app, '_app_instance'):
+        print("🔍 DEBUG: App already created, returning existing instance")
+        return create_app._app_instance
+    
     # CRITICAL FIX: Check global initialization flag
     if is_global_initialized():
         print("🔍 DEBUG: Global initialization already complete, returning existing app")
         if hasattr(create_app, '_app_instance'):
             return create_app._app_instance
-    
-    # CRITICAL FIX: Prevent double initialization by checking if app already exists
-    if hasattr(create_app, '_app_instance'):
-        print("🔍 DEBUG: Returning existing app instance to prevent double initialization")
-        return create_app._app_instance
     
     app = flask.Flask(__name__, static_url_path='/static', static_folder='static')
     app.config.from_object('config.Config')
@@ -976,20 +994,20 @@ def create_app():
     return app
 
 # Debug: Track app creation
-# CRITICAL FIX: Prevent multiple app creation
+# CRITICAL FIX: Prevent multiple app creation by using singleton pattern
 if not hasattr(create_app, '_app_instance'):
     app = create_app()
+    create_app._app_instance = app
+    print("🔍 DEBUG: Created Flask app instance")
 else:
     app = create_app._app_instance
-    print("🔍 DEBUG: Using existing app instance to prevent double creation")
+    print("🔍 DEBUG: Using existing Flask app instance to prevent double creation")
 
 # Initialize Flask-Caching after app creation (if available)
 if CACHE_AVAILABLE:
     cache = Cache(app, config={'CACHE_TYPE': 'SimpleCache', 'CACHE_DEFAULT_TIMEOUT': 300})
 else:
     cache = Cache()  # Use dummy cache
-
-# Flask-Compress already initialized in create_app() - no need to initialize again
 
 # Initialize ultra-lightweight performance optimizations
 try:
@@ -1248,6 +1266,8 @@ class LabelMakerApp:
             print("🔍 DEBUG: LabelMakerApp already initialized, returning existing instance")
             return LabelMakerApp._instance
         
+        # CRITICAL FIX: Use existing app instance (don't create new one)
+        global app
         self.app = app
         self._configure_logging()
         
@@ -15417,14 +15437,6 @@ if __name__ == '__main__':
     except Exception:
         pass  # Continue even if we can't create lock file
     
-    # CRITICAL FIX: Prevent multiple app instances
-    if hasattr(sys.modules[__name__], '_app_running'):
-        print("🔍 DEBUG: App already running, preventing double startup")
-        sys.exit(0)
-    
-    # Mark app as running
-    sys.modules[__name__]._app_running = True
-    
     # Use the LabelMakerApp class for proper startup
     print("Starting Label Maker application...")
     print(f"🆔 Process ID: {os.getpid()}")
@@ -15453,7 +15465,4 @@ if __name__ == '__main__':
             pass
         
         # CRITICAL FIX: Release process lock
-        release_process_lock()
-        
-        # Mark app as stopped
-        sys.modules[__name__]._app_running = False 
+        release_process_lock() 
