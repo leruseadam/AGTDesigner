@@ -1522,7 +1522,6 @@ class ProductDatabase:
                     
                     # Store the product in database
                     # Get the count before to determine if it's new or updated
-                    conn = self._get_connection()
                     cursor_temp = conn.cursor()
                     cursor_temp.execute("SELECT COUNT(*) FROM products")
                     count_before = cursor_temp.fetchone()[0]
@@ -2600,6 +2599,222 @@ class ProductDatabase:
         # Use the existing normalization function
         from .excel_processor import normalize_name
         return normalize_name(product_name)
+    
+    def _decode_json_abbreviations(self, json_name: str) -> str:
+        """Decode JSON abbreviations to full product names."""
+        decoded = json_name.lower().strip()
+        
+        # Decode product type abbreviations
+        type_mappings = {
+            'ball': 'chocolate ball',
+            'bite': 'chocolate bites', 
+            'chew': 'fruit chews',
+            'caps': 'capsules',
+            'tincs': 'tincture',
+            'jar': 'balm',
+            'squeeze_tube': 'squeeze tube',
+            'roll_ups': 'roll up',
+        }
+        
+        # Decode strain abbreviations
+        strain_mappings = {
+            'sat': 'sativa',
+            'ind': 'indica',
+        }
+        
+        # Decode flavor/type abbreviations
+        flavor_mappings = {
+            'caramel': 'salted caramel',
+            'assorted': 'assorted',
+            'dark': 'dark chocolate',
+            'milk': 'milk chocolate',
+            'cookies&cream': 'cookies cream',
+            'dragon': 'dragon',
+            'malt': 'malt',
+            'cherry': 'cherry',
+            'mango': 'mango',
+            'watermelon': 'watermelon',
+            'sour_apple': 'sour apple',
+            'tropical': 'tropical',
+            'mixed_berry': 'mixed berry',
+            'guava': 'guava',
+            'balance': 'balance',
+            'chill': 'chill',
+            'lifted': 'lifted',
+            'relief': 'relief',
+            'gold_max': 'max gold',
+            'xtra': 'xtra strength',
+        }
+        
+        # Split and decode
+        parts = decoded.replace('_', ' ').split()
+        decoded_parts = []
+        
+        for part in parts:
+            if part in type_mappings:
+                decoded_parts.append(type_mappings[part])
+            elif part in strain_mappings:
+                decoded_parts.append(strain_mappings[part])
+            elif part in flavor_mappings:
+                decoded_parts.append(flavor_mappings[part])
+            elif part.endswith('pk'):
+                continue  # Skip pack indicators
+            else:
+                decoded_parts.append(part)
+        
+        return ' '.join(decoded_parts)
+    
+    def _extract_key_words(self, product_name: str) -> set:
+        """Extract key identifying words from a product name."""
+        
+        # First decode if it's a JSON abbreviation
+        if '_' in product_name and any(c.isupper() for c in product_name):
+            name = self._decode_json_abbreviations(product_name)
+        else:
+            name = product_name.lower()
+        
+        # Remove brand info
+        import re
+        name = re.sub(r'\bby\s+ceres\b', '', name, flags=re.IGNORECASE)
+        name = re.sub(r'\bceres\s*-\s*\d+\b', '', name, flags=re.IGNORECASE)
+        name = re.sub(r'\bceres\b', '', name, flags=re.IGNORECASE)
+        
+        # Remove common filler words
+        filler_words = {
+            'by', 'the', 'a', 'an', 'and', 'or', 'of', 'in', 'on', 'at', 'to', 
+            'for', 'with', 'from', 'up', 'about', 'into', 'through', 'during',
+            'before', 'after', 'above', 'below', 'between', 'among', 'through',
+            'pack', 'pk', 'single', '10', '20', 'mg', 'thc', 'cbd', 'cbg', 'cbn'
+        }
+        
+        # Split into words and filter
+        words = re.findall(r'\b\w+\b', name.lower())
+        key_words = set()
+        
+        for word in words:
+            if len(word) >= 3 and word not in filler_words:
+                key_words.add(word)
+        
+        return key_words
+    
+    def _fuzzy_match_products(self, json_name: str, db_name: str, threshold: float = 0.4) -> tuple:
+        """Calculate fuzzy match score between JSON and database product names."""
+        
+        json_words = self._extract_key_words(json_name)
+        db_words = self._extract_key_words(db_name)
+        
+        if not json_words or not db_words:
+            return False, 0.0, set(), json_words, db_words
+        
+        # Find intersection
+        common_words = json_words & db_words
+        
+        # Calculate Jaccard similarity
+        union_words = json_words | db_words
+        jaccard_score = len(common_words) / len(union_words) if union_words else 0.0
+        
+        # Calculate overlap percentage for JSON words (how many JSON words are found in DB)
+        json_coverage = len(common_words) / len(json_words) if json_words else 0.0
+        
+        # Use the higher of the two scores
+        final_score = max(jaccard_score, json_coverage)
+        
+        is_match = final_score >= threshold
+        
+        return is_match, final_score, common_words, json_words, db_words
+    
+    def get_products_by_names_with_fuzzy(self, product_names: List[str]) -> List[Dict[str, Any]]:
+        """Enhanced product lookup with fuzzy matching for JSON abbreviations."""
+        
+        # First try exact matching
+        exact_results = self.get_products_by_names(product_names)
+        
+        # Count how many exact matches we got
+        exact_matches = [r for r in exact_results if r.get('id') is not None]
+        
+        if len(exact_matches) >= len(product_names) * 0.8:  # If we got 80%+ exact matches
+            logger.info(f"🔍 EXACT MATCHING: Found {len(exact_matches)}/{len(product_names)} exact matches, skipping fuzzy matching")
+            return exact_results
+        
+        # Otherwise, try fuzzy matching for missing items
+        logger.info(f"🔍 FUZZY MATCHING: Only {len(exact_matches)}/{len(product_names)} exact matches found, trying fuzzy matching")
+        
+        # Get all CERES products for fuzzy matching
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT id, "Product Name*", normalized_name, "Vendor/Supplier*"
+            FROM products 
+            WHERE "Vendor/Supplier*" LIKE '%CERES%'
+            LIMIT 500
+        """)
+        
+        ceres_products = cursor.fetchall()
+        logger.info(f"🔍 FUZZY MATCHING: Checking against {len(ceres_products)} CERES products")
+        
+        # Create fuzzy matching results
+        fuzzy_results = []
+        fuzzy_match_count = 0
+        
+        for product_name in product_names:
+            best_match = None
+            best_score = 0.0
+            
+            # Check if we already have an exact match
+            exact_match = None
+            for result in exact_results:
+                if (result.get('Product Name*') == product_name or 
+                    result.get('normalized_name') == self._normalize_product_name(product_name)):
+                    exact_match = result
+                    break
+            
+            if exact_match and exact_match.get('id'):
+                fuzzy_results.append(exact_match)
+                continue
+            
+            # Try fuzzy matching
+            for db_product in ceres_products:
+                db_name = db_product[1]  # Product Name*
+                
+                is_match, score, common, json_words, db_words = self._fuzzy_match_products(product_name, db_name)
+                
+                if score > best_score and score >= 0.4:  # 40% threshold
+                    best_score = score
+                    best_match = db_product
+            
+            if best_match:
+                logger.info(f"🔍 FUZZY MATCH: '{product_name}' -> '{best_match[1]}' (score: {best_score:.3f})")
+                fuzzy_match_count += 1
+                
+                # Get full product info
+                full_products = self.get_products_by_names([best_match[1]])
+                if full_products and full_products[0].get('id'):
+                    fuzzy_results.append(full_products[0])
+                else:
+                    # Create placeholder
+                    fuzzy_results.append({
+                        'ProductName': product_name,
+                        'Product Name*': product_name,
+                        'Description': product_name,
+                        'Vendor': '',
+                        'Vendor/Supplier*': '',
+                    })
+            else:
+                logger.info(f"🔍 FUZZY NO MATCH: '{product_name}' - no suitable match found")
+                # Create placeholder
+                fuzzy_results.append({
+                    'ProductName': product_name,
+                    'Product Name*': product_name,
+                    'Description': product_name,
+                    'Vendor': '',
+                    'Vendor/Supplier*': '',
+                })
+        
+        logger.info(f"🔍 FUZZY MATCHING COMPLETE: Found {fuzzy_match_count} additional fuzzy matches")
+        logger.info(f"🔍 TOTAL MATCHES: {len(exact_matches)} exact + {fuzzy_match_count} fuzzy = {len(exact_matches) + fuzzy_match_count}/{len(product_names)}")
+        
+        return fuzzy_results
     
     def _normalize_lineage(self, lineage: str) -> str:
         """Normalize lineage to proper ALL CAPS format."""

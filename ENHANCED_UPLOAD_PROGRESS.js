@@ -122,18 +122,10 @@ class EnhancedUploadProgress {
             clearInterval(this.progressInterval);
         }
         
-        // CPU-aware polling interval
-        const pollingInterval = (window.CPUOptimizer && window.CPUOptimizer.isHighCPU()) ? 3000 : 1000;
-        
-        // Poll with adaptive interval for progress updates
+        // Poll every second for progress updates
         this.progressInterval = setInterval(() => {
-            // Skip polling if CPU usage is high
-            if (window.CPUOptimizer && window.CPUOptimizer.isHighCPU()) {
-                console.log("🔄 Skipping progress polling due to high CPU usage");
-                return;
-            }
             this.fetchProgress();
-        }, pollingInterval);
+        }, 1000);
         
         // Immediate first fetch
         this.fetchProgress();

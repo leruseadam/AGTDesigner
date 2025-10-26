@@ -2940,7 +2940,7 @@ class ExcelProcessor:
             else:
                 self.dropdown_cache[filter_id] = []
 
-    def get_available_tags(self, filters: Optional[Dict[str, str]] = None, bypass_filtering: bool = False) -> List[Dict[str, Any]]:
+    def get_available_tags(self, filters: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
         """Return a list of tag objects with all necessary data."""
         if self.df is None:
             logger.warning("DataFrame is None in get_available_tags")
@@ -3165,43 +3165,17 @@ class ExcelProcessor:
             tag['Lineage'] = lineage
             tag['lineage'] = lineage
 
-            # AGGRESSIVE TAG FIX: Bypass filtering if requested
-            if bypass_filtering:
-                logger.debug(f"AGGRESSIVE FIX: Bypassing filtering for: {product_name}")
-                tags.append(tag)
-                continue
-            
-            # TAG COUNT FIX: Less aggressive filtering to preserve more tags
+            # Filter out samples and invalid products
             product_name_lower = product_name.lower()
             product_type_lower = product_type.lower()
-            
-            # Only filter out truly invalid products
-            should_filter = False
-            filter_reason = ""
-            
-            # Filter only obvious invalid weights
-            if weight == '-1g':
-                should_filter = True
-                filter_reason = "Invalid weight (-1g)"
-            
-            # Only filter out explicit trade samples, not regular samples
-            elif 'trade sample' in product_type_lower and 'not for sale' in product_type_lower:
-                should_filter = True
-                filter_reason = "Trade sample not for sale"
-            
-            # Only filter out explicit trade samples in product name
-            elif 'trade sample' in product_name_lower and 'not for sale' in product_name_lower:
-                should_filter = True
-                filter_reason = "Trade sample not for sale in name"
-            
-            # Only filter out deactivated products
-            elif 'deactivated' in product_type_lower:
-                should_filter = True
-                filter_reason = "Deactivated product"
-            
-            # Log filtering for debugging
-            if should_filter:
-                logger.debug(f"Filtering out: {product_name} - Reason: {filter_reason}")
+            if (
+                weight == '-1g' or  # Invalid weight
+                'trade sample' in product_type_lower or  # Filter any trade sample product types
+                'sample' in product_name_lower or  # Filter products with "Sample" in name
+                'trade sample' in product_name_lower or  # Filter products with "Trade Sample" in name
+                any(pattern.lower() in product_name_lower for pattern in EXCLUDED_PRODUCT_PATTERNS) or  # Filter based on excluded patterns
+                any(pattern.lower() in product_type_lower for pattern in EXCLUDED_PRODUCT_PATTERNS)  # Filter product types based on excluded patterns
+            ):
                 continue  # Skip this tag
             tags.append(tag)
         
@@ -4130,6 +4104,23 @@ class ExcelProcessor:
         return common_oz_weights['default'][0]  # Return '1oz' as default
 
     def _format_weight_units(self, record, excel_priority=True):
+        # --- Outlier Fix Logic ---
+        # If self.df exists, find similar products and their weights
+        product_brand = record.get('ProductBrand', '')
+        most_common_weight = None
+        if hasattr(self, 'df') and self.df is not None and product_brand:
+            # Find similar products by type and brand
+            sim_df = self.df[(self.df['Product Type*'].str.lower() == product_type) & (self.df['ProductBrand'] == product_brand)]
+            weights = sim_df['Weight*'].dropna().astype(str)
+            weights = [w for w in weights if w not in ['', 'nan', 'NaN']]
+            if weights:
+                # Find most common weight
+                from collections import Counter
+                most_common_weight, _ = Counter(weights).most_common(1)[0]
+                # If current weight is not the most common, treat as outlier
+                if weight_val not in weights or Counter(weights)[weight_val] == 1:
+                    self.logger.info(f"OUTLIER FIX: '{product_name}' weight '{weight_val}' replaced with most common '{most_common_weight}' for type '{product_type}' and brand '{product_brand}'")
+                    weight_val = most_common_weight
         # Handle pandas Series and NA values properly
         def safe_get_value(value, default=''):
             if value is None or pd.isna(value):
@@ -6698,7 +6689,7 @@ class ExcelProcessor:
             logger.error(f"Error in get_available_tag_names: {e}")
             return []
 
-    def get_available_tags(self, filters: Optional[Dict[str, Any]] = None, bypass_filtering: bool = False) -> List[Dict[str, Any]]:
+    def get_available_tags(self, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """Return a list of tag objects with all necessary data."""
         if self.df is None:
             logger.warning("DataFrame is None in get_available_tags, attempting to use database")
@@ -6751,11 +6742,6 @@ class ExcelProcessor:
                     tags.append(tag)
                 
                 logger.info(f"Converted {len(tags)} database products to tags")
-                
-                # AGGRESSIVE TAG FIX: Bypass filtering if requested
-                if bypass_filtering:
-                    logger.info(f"AGGRESSIVE FIX: Bypassing all filtering, returning {len(tags)} tags")
-                    return tags
                 
                 # Apply filters if provided
                 if filters:
@@ -6991,43 +6977,17 @@ class ExcelProcessor:
             tag['Lineage'] = lineage
             tag['lineage'] = lineage
 
-            # AGGRESSIVE TAG FIX: Bypass filtering if requested
-            if bypass_filtering:
-                logger.debug(f"AGGRESSIVE FIX: Bypassing filtering for: {product_name}")
-                tags.append(tag)
-                continue
-            
-            # TAG COUNT FIX: Less aggressive filtering to preserve more tags
+            # Filter out samples and invalid products
             product_name_lower = product_name.lower()
             product_type_lower = product_type.lower()
-            
-            # Only filter out truly invalid products
-            should_filter = False
-            filter_reason = ""
-            
-            # Filter only obvious invalid weights
-            if weight == '-1g':
-                should_filter = True
-                filter_reason = "Invalid weight (-1g)"
-            
-            # Only filter out explicit trade samples, not regular samples
-            elif 'trade sample' in product_type_lower and 'not for sale' in product_type_lower:
-                should_filter = True
-                filter_reason = "Trade sample not for sale"
-            
-            # Only filter out explicit trade samples in product name
-            elif 'trade sample' in product_name_lower and 'not for sale' in product_name_lower:
-                should_filter = True
-                filter_reason = "Trade sample not for sale in name"
-            
-            # Only filter out deactivated products
-            elif 'deactivated' in product_type_lower:
-                should_filter = True
-                filter_reason = "Deactivated product"
-            
-            # Log filtering for debugging
-            if should_filter:
-                logger.debug(f"Filtering out: {product_name} - Reason: {filter_reason}")
+            if (
+                weight == '-1g' or  # Invalid weight
+                'trade sample' in product_type_lower or  # Filter any trade sample product types
+                'sample' in product_name_lower or  # Filter products with "Sample" in name
+                'trade sample' in product_name_lower or  # Filter products with "Trade Sample" in name
+                any(pattern.lower() in product_name_lower for pattern in EXCLUDED_PRODUCT_PATTERNS) or  # Filter based on excluded patterns
+                any(pattern.lower() in product_type_lower for pattern in EXCLUDED_PRODUCT_PATTERNS)  # Filter product types based on excluded patterns
+            ):
                 continue  # Skip this tag
             tags.append(tag)
         

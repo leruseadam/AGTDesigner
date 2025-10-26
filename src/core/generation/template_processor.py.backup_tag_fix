@@ -68,23 +68,6 @@ def get_font_scheme(template_type, base_size=12):
     }
 
 class TemplateProcessor:
-    # ...existing code...
-    def _get_template_path(self):
-        """Return the path to the DOCX template file for the current template type."""
-        base_dir = os.path.join(os.path.dirname(__file__), 'templates')
-        template_map = {
-            'mini': 'mini.docx',
-            'double': 'double.docx',
-            'inventory': 'inventory.docx',
-            'horizontal': 'horizontal.docx',
-            'vertical': 'vertical.docx',
-        }
-        filename = template_map.get(self.template_type, 'horizontal.docx')
-        template_path = os.path.abspath(os.path.join(base_dir, filename))
-        if not os.path.exists(template_path):
-            self.logger.error(f"Template not found: {template_path}")
-            raise FileNotFoundError(f"Template not found: {template_path}")
-        return template_path
     def __init__(self, template_type, font_scheme, scale_factor=1.0, excel_processor=None):
         self.template_type = template_type
         self.font_scheme = font_scheme
@@ -132,10 +115,44 @@ class TemplateProcessor:
         self.start_time = time.time()
         self.chunk_count = 0
 
-        # CRITICAL FIX: Disable chunking and grid limits, always set chunk_size to number of records for all templates
-        self.chunk_size = None  # Will be set dynamically in process_records
-        self.logger.info(f"CRITICAL FIX: Chunking disabled, chunk_size will be set to number of records for all templates")
-            # ...existing code...
+    def _get_template_path(self):
+        """Get the template path based on template type."""
+        try:
+            base_path = Path(__file__).resolve().parent / "templates"
+            # Map template types to filenames
+            template_files = {
+                'horizontal': 'horizontal.docx',
+                'vertical': 'vertical.docx',
+                'mini': 'mini.docx',
+                'double': 'double.docx',
+                'inventory': 'inventory.docx'
+            }
+            template_name = template_files.get(self.template_type, f"{self.template_type}.docx")
+            template_path = base_path / template_name
+            
+            if not template_path.exists():
+                # Fallback: case-insensitive match ONLY for non-hidden files (ignore . and ~$ temp files)
+                expected_lower = template_name.lower()
+                fallback = None
+                for p in base_path.iterdir():
+                    if not p.is_file():
+                        continue
+                    name = p.name
+                    if name.startswith('.') or name.startswith('~$'):
+                        continue
+                    if name.lower() == expected_lower:
+                        fallback = p
+                        break
+                if fallback and fallback.exists():
+                    self.logger.warning(f"Using fallback template due to case-only mismatch: {fallback}")
+                    return fallback
+                self.logger.error(f"Template not found: {template_path}")
+                raise FileNotFoundError(f"Template not found: {template_path}")
+            
+            return template_path
+        except Exception as e:
+            self.logger.error(f"Error getting template path: {e}")
+            raise
 
     def _expand_template_if_needed(self, force_expand=False):
         """Expand template if needed and return buffer."""
@@ -690,149 +707,282 @@ class TemplateProcessor:
         return buf
 
     def _expand_template_to_3x3_fixed(self, num_products=None):
+        """Expand template to accommodate the number of products needed."""
+        from docx import Document
+        from docx.shared import Pt
+        from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+        from io import BytesIO
+        from copy import deepcopy
+        import math
+
+        # CRITICAL FIX: Calculate grid size based on number of products
+        if num_products and num_products > 9:
+            # For more than 9 products, expand the grid to accommodate them
+            # Use 3 columns but calculate rows needed
+            num_cols = 3
+            num_rows = math.ceil(num_products / num_cols)
+            self.logger.info(f"🔧 EXPANDING GRID: {num_products} products -> {num_rows}x{num_cols} grid")
+        else:
+            # Default 3x3 grid for 9 or fewer products
+            num_cols, num_rows = 3, 3
+        
+        # Set dimensions based on template type - use constants for consistency
+        from src.core.constants import CELL_DIMENSIONS
+        
+        cell_dims = CELL_DIMENSIONS.get(self.template_type, {'width': 2.4, 'height': 2.4})
+        col_width_twips = str(int(cell_dims['width'] * 1440))  # Use width from constants
+        row_height_pts = Pt(cell_dims['height'] * 72)  # Use height from constants
+        # Use minimal spacing for vertical template to ensure all 9 labels fit
+        if self.template_type == 'vertical':
+            cut_line_twips = int(0.0001 * 1440)  # Minimal spacing for vertical
+        else:
+            cut_line_twips = int(0.001 * 1440)
+
         template_path = self._get_template_path()
         doc = Document(template_path)
         if not doc.tables:
-            raise ValueError("Template DOCX does not contain any tables.")
-        old_table = doc.tables[0]
-        src_tc = deepcopy(old_table.cell(0, 0)._tc)
-        # Remove original table and empty paragraphs, preserve content outside tables
-        old_table._element.getparent().remove(old_table._element)
-        doc_paragraphs = list(doc.paragraphs)
+            raise RuntimeError("Template must contain at least one table.")
+        old = doc.tables[0]
+        src_tc = deepcopy(old.cell(0,0)._tc)
+        old._element.getparent().remove(old._element)
+
+        # Only remove empty paragraphs, preserve content paragraphs
+        # This is important for templates that have content outside of tables
+        doc_paragraphs = list(doc.paragraphs)  # Create a copy to avoid modification during iteration
         for paragraph in doc_paragraphs:
             if not paragraph.text.strip():
                 paragraph._element.getparent().remove(paragraph._element)
 
-        # Set grid and cell dimensions
-        num_rows = 3
-        num_cols = 3
-        col_width_twips = "3000"  # Adjust as needed
-        row_height_pts = Pt(120)   # Adjust as needed
-        max_cells = num_rows * num_cols
-        total_products = num_products if num_products is not None else 49
-        pages = (total_products + max_cells - 1) // max_cells
-        self.logger.info(f"🔍 TEMPLATE EXPANSION: Creating {pages} pages of 3x3 grids for {total_products} products.")
-        product_idx = 0
-        for page in range(pages):
-            tbl = doc.add_table(rows=num_rows, cols=num_cols)
-            tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
-            tbl.autofit = False
-            tbl.allow_autofit = False
-            tblPr = tbl._element.find(qn('w:tblPr')) or OxmlElement('w:tblPr')
-            layout = OxmlElement('w:tblLayout')
-            layout.set(qn('w:type'), 'fixed')
-            tblPr.append(layout)
-            tbl._element.insert(0, tblPr)
-            grid = OxmlElement('w:tblGrid')
-            for _ in range(num_cols):
-                gc = OxmlElement('w:gridCol')
-                gc.set(qn('w:w'), col_width_twips)
-                grid.append(gc)
-            tbl._element.insert(0, grid)
-            for row in tbl.rows:
-                row.height = row_height_pts
-                row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
-            borders = OxmlElement('w:tblBorders')
-            for side in ('insideH','insideV'):
-                b = OxmlElement(f"w:{side}")
-                b.set(qn('w:val'), "single")
-                b.set(qn('w:sz'), "4")
-                b.set(qn('w:color'), "D3D3D3")
-                b.set(qn('w:space'), "0")
-                borders.append(b)
-            tblPr.append(borders)
-            for r in range(num_rows):
-                for c in range(num_cols):
-                    cell = tbl.cell(r, c)
-                    cell._tc.clear_content()
-                    if product_idx < total_products:
-                        cnt = product_idx + 1
-                        tc = deepcopy(src_tc)
-                        cell_text = ''
-                        for t in tc.iter(qn('w:t')):
-                            if t.text:
-                                cell_text += t.text
-                                if 'Label1' in t.text:
-                                    t.text = t.text.replace('Label1', f'Label{cnt}')
-                        if ('{{Label1.ProductBrand}}' not in cell_text and 'ProductBrand' not in cell_text):
-                            text_elements = list(tc.iter(qn('w:t')))
-                            lineage_end_index = -1
-                            for i, t in enumerate(text_elements):
-                                if t.text and 'Lineage' in t.text:
-                                    for j in range(i, len(text_elements)):
-                                        if text_elements[j].text and '}}' in text_elements[j].text:
-                                            lineage_end_index = j
-                                            break
-                            if lineage_end_index >= 0:
-                                new_text = OxmlElement('w:t')
-                                new_text.text = f'{{{{Label{cnt}.ProductBrand}}}}'
-                                lineage_end_element = text_elements[lineage_end_index]
-                                lineage_end_element.getparent().insert(
-                                    lineage_end_element.getparent().index(lineage_end_element) + 1,
-                                    new_text
-                                )
-                        if '{{Label1.DOH}}' not in cell_text and 'DOH' not in cell_text:
-                            text_elements = list(tc.iter(qn('w:t')))
-                            strain_end_index = -1
-                            for i, t in enumerate(text_elements):
-                                if t.text and 'ProductStrain' in t.text:
-                                    for j in range(i, len(text_elements)):
-                                        if text_elements[j].text and '}}' in text_elements[j].text:
-                                            strain_end_index = j
-                                            break
-                            if strain_end_index >= 0:
-                                new_text = OxmlElement('w:t')
-                                new_text.text = f'\n{{{{Label{cnt}.DOH}}}}'
-                                strain_end_element = text_elements[strain_end_index]
-                                strain_end_element.getparent().insert(
-                                    strain_end_element.getparent().index(strain_end_element) + 1,
-                                    new_text
-                                )
-                        for el in tc.xpath('./*'):
-                            cell._tc.append(deepcopy(el))
-                        product_idx += 1
+        tbl = doc.add_table(rows=num_rows, cols=num_cols)
+        tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
+        tblPr = tbl._element.find(qn('w:tblPr')) or OxmlElement('w:tblPr')
+        shd = OxmlElement('w:shd')
+        shd.set(qn('w:val'), 'clear')
+        shd.set(qn('w:color'), 'auto')
+        shd.set(qn('w:fill'), 'D3D3D3')
+        tblPr.insert(0, shd)
+        layout = OxmlElement('w:tblLayout')
+        layout.set(qn('w:type'), 'fixed')
+        tblPr.append(layout)
+        tbl._element.insert(0, tblPr)
+        grid = OxmlElement('w:tblGrid')
+        for _ in range(num_cols):
+            gc = OxmlElement('w:gridCol')
+            gc.set(qn('w:w'), col_width_twips)
+            grid.append(gc)
+        tbl._element.insert(0, grid)
+        for row in tbl.rows:
+            row.height = row_height_pts
+            row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+        borders = OxmlElement('w:tblBorders')
+        for side in ('insideH','insideV'):
+            b = OxmlElement(f"w:{side}")
+            b.set(qn('w:val'), "single")
+            b.set(qn('w:sz'), "4")
+            b.set(qn('w:val'), "single")
+            b.set(qn('w:sz'), "4")
+            b.set(qn('w:color'), "D3D3D3")
+            b.set(qn('w:space'), "0")
+            borders.append(b)
+        tblPr.append(borders)
+        cnt = 1
+        max_cells = num_products if num_products else (num_rows * num_cols)
+        
+        for r in range(num_rows):
+            for c in range(num_cols):
+                if cnt > max_cells:
+                    # CRITICAL FIX: Don't clear cells if we're expanding the grid
+                    # Only clear cells if we have fewer products than the grid size
+                    if num_products and num_products < (num_rows * num_cols):
+                        # Clear extra cells completely and set white background
+                        cell = tbl.cell(r,c)
+                        cell._tc.clear_content()
+                        
+                        # Set white background for extra cells
+                        tc = cell._tc
+                        tcPr = tc.find(qn('w:tcPr'))
+                        if tcPr is None:
+                            tcPr = OxmlElement('w:tcPr')
+                            tc.insert(0, tcPr)
+                        
+                        # Remove any existing background color
+                        shd = tcPr.find(qn('w:shd'))
+                        if shd is not None:
+                            tcPr.remove(shd)
+                        
+                        # Add white background
+                        shd = OxmlElement('w:shd')
+                        shd.set(qn('w:val'), 'clear')
+                        shd.set(qn('w:color'), 'auto')
+                        shd.set(qn('w:fill'), 'FFFFFF')  # White background
+                        tcPr.append(shd)
+                    
+                    cell.add_paragraph()  # Add empty paragraph to maintain structure
+                    continue
+                    
+                cell = tbl.cell(r,c)
+                cell._tc.clear_content()
+                tc = deepcopy(src_tc)
+                
+                # Update Label1 references to Label{cnt} for proper grid expansion
+                cell_text = ''
+                for t in tc.iter(qn('w:t')):
+                    if t.text:
+                        cell_text += t.text
+                        if 'Label1' in t.text:
+                            t.text = t.text.replace('Label1', f'Label{cnt}')
+                
+                # CRITICAL FIX: The template uses Lineage and ProductVendor, but for non-classic types
+                # we also need ProductBrand placeholder to ensure proper rendering
+                # Add ProductBrand placeholder if it's missing for non-classic type compatibility
+                
+                # Add ProductBrand placeholder if it's missing for non-classic type compatibility
+                if ('{{Label1.ProductBrand}}' not in cell_text and 'ProductBrand' not in cell_text):
+                    self.logger.debug(f"Adding ProductBrand placeholder to cell {cnt}")
+                    # Find the position after the Lineage placeholder
+                    text_elements = list(tc.iter(qn('w:t')))
+                    lineage_end_index = -1
+                    
+                    # Find where the Lineage placeholder ends
+                    for i, t in enumerate(text_elements):
+                        if t.text and 'Lineage' in t.text:
+                            # Found the Lineage text element, look for the closing }}
+                            for j in range(i, len(text_elements)):
+                                if text_elements[j].text and '}}' in text_elements[j].text:
+                                    lineage_end_index = j
+                                    break
+                            break
+                    
+                    if lineage_end_index >= 0:
+                        self.logger.debug(f"Found Lineage end at index {lineage_end_index}")
+                        # Insert ProductBrand placeholder after the Lineage placeholder
+                        new_text = OxmlElement('w:t')
+                        new_text.text = f'{{{{Label{cnt}.ProductBrand}}}}'
+                        
+                        # Insert after the lineage end element
+                        lineage_end_element = text_elements[lineage_end_index]
+                        lineage_end_element.getparent().insert(
+                            lineage_end_element.getparent().index(lineage_end_element) + 1, 
+                            new_text
+                        )
+                        self.logger.debug(f"Inserted ProductBrand placeholder: {new_text.text}")
                     else:
-                        cell.add_paragraph()
-            # Add minimal spacing between cells
-            tblPr2 = tbl._element.find(qn('w:tblPr'))
-            spacing = OxmlElement('w:tblCellSpacing')
-            spacing.set(qn('w:w'), str(int(0.001 * 1440)))
-            spacing.set(qn('w:type'), 'dxa')
-            tblPr2.append(spacing)
-            
-            # Insert page break after each table except the last
-            if page < pages - 1:
-                # Add a page break paragraph to force Word to create a new page
-                page_break_para = doc.add_paragraph()
-                page_break_run = page_break_para.add_run()
-                page_break_run.add_break(WD_BREAK.PAGE)
-                self.logger.info(f"🔍 PAGE BREAK: Added page break after page {page + 1} of {pages}")
-
+                        self.logger.warning(f"Could not find Lineage end position for cell {cnt}")
+                else:
+                    self.logger.debug(f"ProductBrand placeholder already exists in cell {cnt}")
+                
+                # Add DOH placeholder if it's missing
+                self.logger.debug(f"Cell {cnt} - cell_text: '{cell_text}'")
+                self.logger.debug(f"Cell {cnt} - checking for DOH: '{{Label1.DOH}}' not in '{cell_text}' and 'DOH' not in '{cell_text}'")
+                if '{{Label1.DOH}}' not in cell_text and 'DOH' not in cell_text:
+                    self.logger.debug(f"Adding DOH placeholder to cell {cnt}")
+                    # Find the position after the ProductStrain placeholder
+                    text_elements = list(tc.iter(qn('w:t')))
+                    strain_end_index = -1
+                    
+                    # Find where the ProductStrain placeholder ends
+                    for i, t in enumerate(text_elements):
+                        if t.text and 'ProductStrain' in t.text:
+                            # Found the ProductStrain text element, look for the closing }}
+                            for j in range(i, len(text_elements)):
+                                if text_elements[j].text and '}}' in text_elements[j].text:
+                                    strain_end_index = j
+                                    break
+                            break
+                    
+                    if strain_end_index >= 0:
+                        self.logger.debug(f"Found ProductStrain end at index {strain_end_index}")
+                        # Insert DOH placeholder after the ProductStrain placeholder
+                        new_text = OxmlElement('w:t')
+                        new_text.text = f'\n{{{{Label{cnt}.DOH}}}}'
+                        
+                        # Insert after the strain end element
+                        strain_end_element = text_elements[strain_end_index]
+                        strain_end_element.getparent().insert(
+                            strain_end_element.getparent().index(strain_end_element) + 1, 
+                            new_text
+                        )
+                        self.logger.debug(f"Inserted DOH placeholder: {new_text.text}")
+                    else:
+                        self.logger.warning(f"Could not find ProductStrain end position for cell {cnt}")
+                else:
+                    self.logger.debug(f"DOH placeholder already exists in cell {cnt}")
+                
+                for el in tc.xpath('./*'):
+                    cell._tc.append(deepcopy(el))
+                cnt += 1
+        from docx.oxml.shared import OxmlElement as OE
+        tblPr2 = tbl._element.find(qn('w:tblPr'))
+        spacing = OxmlElement('w:tblCellSpacing')
+        spacing.set(qn('w:w'), str(cut_line_twips))
+        spacing.set(qn('w:type'), 'dxa')
+        tblPr2.append(spacing)
+        
+        # CRITICAL: Remove ALL headers and footers from the expanded template
         from src.core.generation.docx_formatting import remove_all_headers_and_footers
         doc = remove_all_headers_and_footers(doc)
+        
         buf = BytesIO()
         doc.save(buf)
         buf.seek(0)
         return buf
 
     def process_records(self, records):
-        # FULLY DISABLE CHUNKING for horizontal, vertical, and double templates
+        """Process records with performance monitoring and timeout protection."""
         try:
-            if self.template_type in ['horizontal', 'vertical', 'double']:
-                self.chunk_size = len(records)
-                self.logger.info(f"🔍 LABEL RENDER: For template '{self.template_type}', forced chunk_size to {self.chunk_size} to render all labels.")
-                self.logger.info(f"🔍 LABEL RENDER: Chunking is fully disabled. All {len(records)} records will be processed in one pass.")
-                self.start_time = time.time()
-                self.chunk_count = 1
-                overall_order = [record.get('ProductName', 'Unknown') for record in records]
-                self.logger.info(f"Processing {len(records)} records in overall order: {overall_order}")
-                has_json_products = any(record.get('Source', '').startswith('JSON') or record.get('Source', '').startswith('Database Priority') for record in records)
-                documents = []
-                # Process all records in a single chunk
-                chunk = records
-                self.chunk_count = 1
-                documents.append(self._process_chunk(chunk))
-                # All records processed in one chunk; no further chunking or looping required
+            self.start_time = time.time()
+            self.chunk_count = 0
+            
+            # Debug: Log the overall order of records
+            overall_order = [record.get('ProductName', 'Unknown') for record in records]
+            self.logger.info(f"Processing {len(records)} records in overall order: {overall_order}")
+            
+            # CRITICAL FIX: JSON matched products are already unique by design - no deduplication needed
+            # Check if any records are from JSON matching
+            has_json_products = any(record.get('Source', '').startswith('JSON') or 
+                                  record.get('Source', '').startswith('Database Priority') for record in records)
+            
+            if has_json_products:
+                self.logger.info(f"JSON matched products detected - all products are unique by design, processing all {len(records)} records")
+                # JSON matches are already unique - process all records without deduplication
+            else:
+                # Only deduplicate non-JSON products (Excel imports)
+                seen_products = set()
+                unique_records = []
+                for record in records:
+                    product_name = record.get('ProductName', 'Unknown')
+                    if product_name not in seen_products:
+                        seen_products.add(product_name)
+                        unique_records.append(record)
+                    else:
+                        self.logger.warning(f"Skipping duplicate product: {product_name}")
+                
+                if len(unique_records) != len(records):
+                    self.logger.info(f"Deduplicated records: {len(records)} -> {len(unique_records)}")
+                    records = unique_records
+            
+            # Performance optimization: Log record count but don't limit
+            if len(records) > 200:
+                self.logger.info(f"Processing {len(records)} records (performance monitoring enabled)")
+            else:
+                self.logger.info(f"Processing {len(records)} records")
+            
+            documents = []
+            for i in range(0, len(records), self.chunk_size):
+                # Check total processing time
+                if time.time() - self.start_time > MAX_TOTAL_PROCESSING_TIME:
+                    self.logger.warning(f"Total processing time limit reached ({MAX_TOTAL_PROCESSING_TIME}s), stopping")
+                    break
+                
+                chunk = records[i:i + self.chunk_size]
+                self.chunk_count += 1
+                
+                self.logger.info(f"Processing chunk {self.chunk_count} ({len(chunk)} records)")
+                result = self._process_chunk(chunk)
+                if result: 
+                    documents.append(result)
             
             if not documents: 
                 return None
@@ -861,21 +1011,12 @@ class TemplateProcessor:
         except Exception as e:
             self.logger.error(f"Error processing records: {e}")
             return None
-        except Exception as e:
-            self.logger.error(f"Error processing records: {e}")
-            return None
 
     def _process_chunk(self, chunk):
         """Process a chunk of records with timeout protection."""
         from docxtpl import DocxTemplate
         from docx import Document
         from io import BytesIO
-        
-        # DEBUG_CHUNK_SIZE_TRACKING: Log actual chunk sizes
-        self.logger.info(f"🔍 CHUNK SIZE DEBUG: Processing chunk with {len(chunk)} records")
-        self.logger.info(f"🔍 CHUNK SIZE DEBUG: Expected all {len(chunk)} records in this chunk for template '{self.template_type}'")
-        # After rendering, log the number of labels actually created
-        self.logger.info(f"🔍 LABEL RENDER: Actually rendered {len(chunk)} labels in this chunk.")
         
         chunk_start_time = time.time()
         
@@ -4191,27 +4332,25 @@ class TemplateProcessor:
         try:
             import re
             
-            # CRITICAL FIX: Multiple tables represent multiple pages - DO NOT REMOVE THEM!
+            # CRITICAL FIX: For all templates, remove entire extra tables
             tables = doc.tables
             if len(tables) > 1:
-                self.logger.info(f"Found {len(tables)} tables representing {len(tables)} pages - KEEPING ALL TABLES for multi-page document")
-                # DO NOT remove tables - they represent different pages in the document
+                self.logger.info(f"Found {len(tables)} tables, removing extra tables")
+                # Keep only the first table, remove the rest
+                for i in range(1, len(tables)):
+                    table = tables[i]
+                    table._element.getparent().remove(table._element)
+                    self.logger.debug(f"Removed extra table {i+1}")
             
-            # Now clear extra cells within each table
-            # For multi-page documents, each table represents a page with up to 9 labels
-            for table_idx, table in enumerate(doc.tables):
-                cells_per_page = 9  # 3x3 grid
-                page_start_product = table_idx * cells_per_page
-                page_end_product = min(page_start_product + cells_per_page, num_products)
-                
+            # Now clear extra cells within the remaining table(s)
+            for table in doc.tables:
                 cell_count = 0
                 for row in table.rows:
                     for cell in row.cells:
                         cell_count += 1
-                        product_num = page_start_product + cell_count
-                        if product_num > num_products:
+                        if cell_count > num_products:
                             # This is an extra cell - completely clear it and set white background
-                            self.logger.debug(f"Clearing extra cell on page {table_idx + 1}, cell {cell_count} (product {product_num} > {num_products})")
+                            self.logger.debug(f"Clearing extra cell {cell_count}")
                             
                             # Clear all content from the cell
                             cell._tc.clear_content()

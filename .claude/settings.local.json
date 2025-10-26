@@ -5,7 +5,11 @@
       "Bash(cd:*)",
       "Bash(sqlite3:*)",
       "Bash(python3 populate_bothell_db.py)",
-      "Bash(awk:*)"
+      "Bash(awk:*)",
+      "Bash(python3:*)",
+      "Bash(pkill:*)",
+      "Bash(xargs:*)",
+      "Bash(curl:*)"
     ],
     "deny": [],
     "ask": []

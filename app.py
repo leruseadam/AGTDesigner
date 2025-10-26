@@ -1928,245 +1928,6 @@ def upload_file():
         return jsonify({'error': str(e)}), 500
 
 
-# TAG COUNT FIX: Add cache clearing endpoint
-@app.route('/api/clear-tag-cache', methods=['POST'])
-def clear_tag_cache():
-    """Clear tag-related caches to force refresh"""
-    try:
-        # Clear all tag-related caches
-        cache_keys_to_clear = [
-            'available_tags',
-            'dropdown_cache_key',
-            'full_excel_cache_key',
-            'filter_options'
-        ]
-        
-        cleared_count = 0
-        for key in cache_keys_to_clear:
-            if cache.delete(key):
-                cleared_count += 1
-        
-        # Also clear session-specific caches
-        session_id = session.get('session_id', 'default')
-        session_cache_keys = [
-            f'{session_id}_available_tags',
-            f'{session_id}_filter_options',
-            f'{session_id}_dropdown_cache'
-        ]
-        
-        for key in session_cache_keys:
-            if cache.delete(key):
-                cleared_count += 1
-        
-        logging.info(f"✅ Cleared {cleared_count} tag-related caches")
-        
-        return jsonify({
-            'success': True,
-            'message': f'Cleared {cleared_count} caches',
-            'cleared_count': cleared_count
-        })
-        
-    except Exception as e:
-        logging.error(f"Error clearing tag cache: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-# TAG COUNT FIX: Add tag count debugging endpoint
-@app.route('/api/debug-tag-count', methods=['GET'])
-def debug_tag_count():
-    """Debug tag count issues"""
-    try:
-        excel_processor = get_excel_processor()
-        
-        debug_info = {
-            'excel_processor_exists': excel_processor is not None,
-            'excel_df_exists': excel_processor.df is not None if excel_processor else False,
-            'excel_df_length': len(excel_processor.df) if excel_processor and excel_processor.df is not None else 0,
-            'cache_keys': [],
-            'session_id': session.get('session_id', 'default')
-        }
-        
-        # Check cache status
-        cache_keys = ['available_tags', 'dropdown_cache_key', 'full_excel_cache_key']
-        for key in cache_keys:
-            cached_data = cache.get(key)
-            debug_info['cache_keys'].append({
-                'key': key,
-                'exists': cached_data is not None,
-                'length': len(cached_data) if cached_data else 0
-            })
-        
-        # Get available tags count
-        if excel_processor and excel_processor.df is not None:
-            try:
-                available_tags = excel_processor.get_available_tags()
-                debug_info['available_tags_count'] = len(available_tags)
-                debug_info['sample_tags'] = [tag.get('Product Name*', 'Unknown') for tag in available_tags[:5]]
-            except Exception as e:
-                debug_info['available_tags_error'] = str(e)
-        
-        return jsonify(debug_info)
-        
-    except Exception as e:
-        logging.error(f"Error in debug tag count: {e}")
-        return jsonify({'error': str(e)}), 500
-
-# AGGRESSIVE TAG FIX: Add endpoint that bypasses all filtering
-@app.route('/api/available-tags-all', methods=['GET'])
-def get_all_available_tags():
-    """Get ALL available tags without any filtering"""
-    try:
-        excel_processor = get_excel_processor()
-        
-        if excel_processor is None or excel_processor.df is None or excel_processor.df.empty:
-            return jsonify({'error': 'No Excel data available'}), 400
-        
-        logging.info(f"🚨 AGGRESSIVE FIX: Getting ALL tags from {len(excel_processor.df)} rows")
-        
-        # Use the bypass_filtering parameter to get ALL tags
-        all_tags = excel_processor.get_available_tags(bypass_filtering=True)
-        
-        logging.info(f"🚨 AGGRESSIVE FIX: Returning {len(all_tags)} tags (bypass_filtering=True)")
-        
-        return jsonify({
-            'tags': all_tags,
-            'total_count': len(all_tags),
-            'source': 'aggressive-fix-all',
-            'original_rows': len(excel_processor.df)
-        })
-        
-    except Exception as e:
-        logging.error(f"Error in get_all_available_tags: {e}")
-        return jsonify({'error': str(e)}), 500
-
-# ULTIMATE FIX: Direct Excel data test endpoint
-@app.route('/api/test-excel-data', methods=['GET'])
-def test_excel_data():
-    """Test endpoint to verify Excel data directly"""
-    try:
-        excel_processor = get_excel_processor()
-        
-        if excel_processor is None:
-            return jsonify({'error': 'Excel processor not available'}), 400
-        
-        if excel_processor.df is None or excel_processor.df.empty:
-            return jsonify({'error': 'No Excel data loaded'}), 400
-        
-        # Get basic stats
-        total_rows = len(excel_processor.df)
-        non_empty_names = len(excel_processor.df[excel_processor.df['Product Name*'].notna() & (excel_processor.df['Product Name*'] != '')])
-        
-        # Get sample data
-        sample_data = []
-        for index, row in excel_processor.df.head(10).iterrows():
-            sample_data.append({
-                'index': index,
-                'Product Name*': str(row.get('Product Name*', '')),
-                'Product Brand': str(row.get('Product Brand', '')),
-                'Product Type*': str(row.get('Product Type*', '')),
-                'Weight*': str(row.get('Weight*', '')),
-                'Vendor': str(row.get('Vendor', ''))
-            })
-        
-        # Test filtering
-        filtered_count = 0
-        for index, row in excel_processor.df.iterrows():
-            product_name = str(row.get('Product Name*', ''))
-            product_type = str(row.get('Product Type*', ''))
-            weight = str(row.get('Weight*', ''))
-            
-            if not product_name.strip():
-                continue
-                
-            # Apply same filtering as get_available_tags
-            product_name_lower = product_name.lower()
-            product_type_lower = product_type.lower()
-            
-            should_filter = False
-            
-            if weight == '-1g':
-                should_filter = True
-            elif 'trade sample' in product_type_lower and 'not for sale' in product_type_lower:
-                should_filter = True
-            elif 'trade sample' in product_name_lower and 'not for sale' in product_name_lower:
-                should_filter = True
-            elif 'deactivated' in product_type_lower:
-                should_filter = True
-            
-            if not should_filter:
-                filtered_count += 1
-        
-        return jsonify({
-            'total_rows': total_rows,
-            'non_empty_names': non_empty_names,
-            'filtered_count': filtered_count,
-            'sample_data': sample_data,
-            'columns': list(excel_processor.df.columns),
-            'test_timestamp': datetime.now().isoformat()
-        })
-        
-    except Exception as e:
-        logging.error(f"Error in test_excel_data: {e}")
-        return jsonify({'error': str(e)}), 500
-
-# PC PERFORMANCE OPTIMIZATION: Add chunked upload support
-@app.route('/upload-chunk', methods=['POST'])
-def upload_file_chunk():
-    """Handle chunked file uploads for PC optimization"""
-    try:
-        if 'chunk' not in request.files:
-            return jsonify({'success': False, 'error': 'No chunk file provided'}), 400
-        
-        chunk_file = request.files['chunk']
-        chunk_index = int(request.form.get('chunkIndex', 0))
-        total_chunks = int(request.form.get('totalChunks', 1))
-        filename = request.form.get('filename', 'upload.xlsx')
-        session_id = request.form.get('sessionId', str(time.time()))
-        
-        if chunk_file.filename == '':
-            return jsonify({'success': False, 'error': 'No chunk selected'}), 400
-        
-        # Read chunk data
-        chunk_data = chunk_file.read()
-        
-        # Process chunk using PC optimizer
-        from pc_excel_upload_optimizer import pc_excel_optimizer
-        result = pc_excel_optimizer.handle_chunk_upload(
-            chunk_data, chunk_index, total_chunks, filename, session_id
-        )
-        
-        return jsonify(result)
-        
-    except Exception as e:
-        logging.error(f"Chunk upload error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/finalize-upload', methods=['POST'])
-def finalize_upload():
-    """Finalize chunked upload processing"""
-    try:
-        session_id = request.json.get('sessionId', str(time.time()))
-        
-        # Get upload status
-        from pc_excel_upload_optimizer import pc_excel_optimizer
-        status = pc_excel_optimizer.get_upload_status(session_id)
-        
-        if not status['success']:
-            return jsonify(status), 400
-        
-        # Clear caches for fresh data
-        cache.delete('full_excel_cache_key')
-        cache.delete('dropdown_cache_key')
-        
-        return jsonify({
-            'success': True,
-            'message': 'Upload finalized successfully',
-            'status': status
-        })
-        
-    except Exception as e:
-        logging.error(f"Upload finalization error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
 # EXCEL UPLOAD PERFORMANCE OPTIMIZATION: Add ultra-fast streaming upload
 @app.route('/upload-streaming', methods=['POST'])
 def upload_file_streaming():
@@ -5188,53 +4949,89 @@ def generate_labels():
             json_matched_cache_key = session.get('json_matched_cache_key')
             is_json_matched_session = json_matched_cache_key is not None
             
+            logging.info(f"🔍 SESSION CHECK: json_matched_cache_key = {json_matched_cache_key}")
+            logging.info(f"🔍 SESSION CHECK: is_json_matched_session = {is_json_matched_session}")
+            if is_json_matched_session:
+                logging.info(f"🔍 JSON SESSION DETECTED: This should trigger fuzzy matching")
+            else:
+                logging.info(f"🔍 REGULAR SESSION: Will use exact matching only")
+            
             # Try to validate tags against database first, then fall back to Excel data
             valid_selected_tags = []
             invalid_selected_tags = []
             
-            # CRITICAL FIX: For JSON matched sessions, be more lenient with validation
-            if is_json_matched_session:
-                logging.info(f"CRITICAL FIX: JSON matched session detected, using lenient validation for {len(normalized_tags)} tags")
-                # For JSON matched tags, accept all tags as valid since they were already processed
-                valid_selected_tags = normalized_tags
-                logging.info(f"CRITICAL FIX: Accepted all {len(valid_selected_tags)} JSON matched tags as valid")
-            else:
-                # First, try to check if we have database data available
-                try:
-                    from src.core.data.product_database import get_product_database
-                    # Store context removed - using single database
-                    product_db = get_product_database()
-                    if product_db:
-                        logging.info("Attempting to validate selected tags against database...")
-                        # Check if tags exist in database by trying to get them
-                        db_records = product_db.get_products_by_names(normalized_tags)
-                        if db_records:
-                            # Some or all tags were found in database
-                            found_names = []
-                            for record in db_records:
-                                if isinstance(record, dict):
-                                    name = record.get('Product Name*', record.get('ProductName', ''))
-                                    if name:
-                                        found_names.append(name)
-                            
-                            # Use the found names as valid tags
-                            valid_selected_tags = found_names
-                            invalid_selected_tags = [tag for tag in normalized_tags if tag not in found_names]
-                            
-                            logging.info(f"CRITICAL FIX: Found {len(valid_selected_tags)} tags in database")
-                            logging.info(f"CRITICAL FIX: {len(invalid_selected_tags)} tags not found in database")
-                            
-                            if invalid_selected_tags:
-                                logging.warning(f"CRITICAL FIX: Some tags not found in database: {invalid_selected_tags}")
-                        else:
-                            logging.warning("No database records found for selected tags, falling back to Excel validation")
-                            # Fall back to Excel validation
-                            valid_selected_tags, invalid_selected_tags = _validate_tags_against_excel(excel_processor, normalized_tags)
+            # Always try database validation, but use fuzzy matching for JSON sessions
+            try:
+                from src.core.data.product_database import get_product_database
+                product_db = get_product_database()
+                if product_db:
+                    logging.info("Attempting to validate selected tags against database...")
+                    
+                    # VALIDATION DEBUG: Track what happens to JSON matches
+                    logging.info(f"🔍 VALIDATION DEBUG: About to validate {len(normalized_tags)} normalized tags")
+                    logging.info(f"🔍 VALIDATION DEBUG: First 10 tags: {normalized_tags[:10]}")
+                    
+                    # Use fuzzy matching for JSON matched sessions
+                    if is_json_matched_session:
+                        logging.info(f"🔍 JSON SESSION: Using fuzzy matching for better JSON abbreviation handling")
+                        db_records = product_db.get_products_by_names_with_fuzzy(normalized_tags)
                     else:
-                        logging.warning("Product database not available, using Excel validation")
+                        db_records = product_db.get_products_by_names(normalized_tags)
+                    
+                    logging.info(f"🔍 VALIDATION DEBUG: Database lookup returned {len(db_records)} records")
+                    
+                    # Count valid vs placeholder records
+                    valid_count = 0
+                    placeholder_count = 0
+                    for i, record in enumerate(db_records):
+                        has_id = record.get('id') is not None
+                        product_name = record.get('Product Name*', '')
+                        vendor = record.get('Vendor/Supplier*', '')
+                        
+                        if has_id:
+                            valid_count += 1
+                            if i < 5:  # Log first 5 valid matches
+                                logging.info(f"🔍 VALIDATION DEBUG: Valid match {valid_count}: '{product_name}' (Vendor: {vendor})")
+                        else:
+                            placeholder_count += 1
+                            if i < 5:  # Log first 5 placeholders
+                                logging.info(f"🔍 VALIDATION DEBUG: Placeholder {placeholder_count}: '{product_name}' (NOT FOUND IN DB)")
+                    
+                    logging.info(f"🔍 VALIDATION DEBUG: Found {valid_count} valid records, {placeholder_count} placeholders")
+                    
+                    if db_records:
+                        # Some or all tags were found in database
+                        found_names = []
+                        matched_original_tags = []
+                        matched_pairs = []
+                        for i, record in enumerate(db_records):
+                            if isinstance(record, dict):
+                                name = record.get('Product Name*', record.get('ProductName', ''))
+                                if name and record.get('id') is not None:  # Only count valid records
+                                    found_names.append(name)
+                                    if i < len(normalized_tags):
+                                        matched_original_tags.append(normalized_tags[i])
+                                        matched_pairs.append((normalized_tags[i], name))
+                        # Use the found names as valid tags
+                        valid_selected_tags = found_names
+                        invalid_selected_tags = [tag for tag in normalized_tags if tag not in matched_original_tags]
+                        logging.info(f"🔍 VALIDATION SUCCESS: Found {len(valid_selected_tags)} valid products in database")
+                        logging.info(f"🔍 VALIDATION INFO: {len(invalid_selected_tags)} original tags had no valid database match")
+                        if matched_pairs[:5]:
+                            logging.info(f"🔍 VALIDATION INFO: Sample abbreviation→product matches: {matched_pairs[:5]}")
+                        if invalid_selected_tags[:5]:  # Show first 5 unmatched
+                            logging.info(f"🔍 VALIDATION INFO: Sample unmatched tags: {invalid_selected_tags[:5]}")
+                        if found_names[:5]:  # Show first 5 matches
+                            logging.info(f"🔍 VALIDATION INFO: Sample matched products: {[name[:50] + '...' if len(name) > 50 else name for name in found_names[:5]]}")
+                    else:
+                        logging.warning("No database records found for selected tags, falling back to Excel validation")
                         # Fall back to Excel validation
                         valid_selected_tags, invalid_selected_tags = _validate_tags_against_excel(excel_processor, normalized_tags)
-                except Exception as e:
+                else:
+                    logging.warning("Product database not available, using Excel validation")
+                    # Fall back to Excel validation
+                    valid_selected_tags, invalid_selected_tags = _validate_tags_against_excel(excel_processor, normalized_tags)
+            except Exception as e:
                     logging.warning(f"Database validation failed, falling back to Excel validation: {e}")
                     # Fall back to Excel validation
                     valid_selected_tags, invalid_selected_tags = _validate_tags_against_excel(excel_processor, normalized_tags)
@@ -5572,8 +5369,20 @@ def generate_labels():
                 'optimization': template_settings.get('optimization', False)
             }
         
-        # The TemplateProcessor now handles all post-processing internally
+        # Log the number of records passed to the template processor
+        logging.info(f"🔍 LABEL RENDER: Passing {len(records)} records to TemplateProcessor for template '{template_type}'")
+
+        # For horizontal/vertical/double templates, ensure all records are processed (no chunking)
+        if template_type in ['horizontal', 'vertical', 'double']:
+            if hasattr(processor, 'CHUNK_SIZE_LIMIT'):
+                processor.CHUNK_SIZE_LIMIT = max(len(records), 1000)  # Remove chunking limit
+            if hasattr(processor, 'chunk_size'):
+                processor.chunk_size = max(len(records), 1000)
+            logging.info(f"🔍 LABEL RENDER: Disabled chunking for template '{template_type}'")
+
         final_doc = processor.process_records(records)
+        if hasattr(final_doc, 'labels_rendered'):
+            logging.info(f"🔍 LABEL RENDER: TemplateProcessor rendered {final_doc.labels_rendered} labels")
         if final_doc is None:
             return jsonify({'error': 'Failed to generate document.'}), 500
 
@@ -7236,27 +7045,11 @@ def get_filter_options():
     try:
         start_time = time.time()
         
-        # PC PERFORMANCE OPTIMIZATION: Enhanced Windows detection
+        # Check if this is a Windows platform request for optimization
         is_windows_request = request.args.get('platform') == 'windows'
         user_agent = request.headers.get('User-Agent', '')
         is_windows_ua = 'Windows' in user_agent
         is_web_client = is_windows_request or is_windows_ua
-        
-        # Additional PC detection for better optimization
-        is_pc_client = (
-            is_web_client or 
-            'Windows NT' in user_agent or 
-            'Win64' in user_agent or
-            'WOW64' in user_agent
-        )
-        
-        # CPU PERFORMANCE OPTIMIZATION: Reduce monitoring frequency
-        if is_pc_client:
-            # Reduce monitoring frequency for PC clients to save CPU
-            if hasattr(create_app, '_last_monitor_check'):
-                if time.time() - create_app._last_monitor_check < 30:  # Only check every 30 seconds
-                    return jsonify({'success': True, 'message': 'Monitoring throttled for CPU optimization'})
-            create_app._last_monitor_check = time.time()
         
         if is_web_client:
             if ENHANCED_LOGGING_AVAILABLE:
@@ -7267,25 +7060,8 @@ def get_filter_options():
         
         cache_key = get_session_cache_key('filter_options')
         
-        # PC PERFORMANCE OPTIMIZATION: Enhanced caching for PC clients
-        if is_pc_client:
-            # Use longer cache timeout for PC clients (10 minutes)
-            cached_options = cache.get(cache_key)
-            if cached_options:
-                elapsed = (time.time() - start_time) * 1000
-                if ENHANCED_LOGGING_AVAILABLE:
-                    enhanced_logger.log_success(f"Using cached filter options for PC ({elapsed:.1f}ms)", 
-                                              {'cache_hit': True, 'options_count': len(cached_options), 'platform': 'pc'})
-                else:
-                    logging.info(f"✅ Using cached filter options for PC ({elapsed:.1f}ms)")
-                
-                # Apply compression and PC-specific headers
-                response = make_response(jsonify(cached_options))
-                response.headers['Content-Encoding'] = 'gzip'
-                response.headers['Cache-Control'] = 'public, max-age=600'  # 10 minutes
-                response.headers['X-PC-Optimized'] = 'true'
-                return response
-        elif is_web_client:
+        # WEB OPTIMIZATION: Aggressive caching for web clients
+        if is_web_client:
             # Use longer cache timeout for web clients (5 minutes)
             cached_options = cache.get(cache_key)
             if cached_options:
@@ -7393,38 +7169,9 @@ def get_filter_options():
                 else:
                     logging.warning(f"Failed to cache filter options: {cache_error}")
         
-        # PC PERFORMANCE OPTIMIZATION: Enhanced response optimization
-        if is_pc_client:
-            # Cache for PC clients with longer timeout
-            cache.set(cache_key, options, timeout=600)  # 10 minutes
-            
-            # Apply PC-specific optimizations
-            import gzip
-            import json
-            from flask import make_response
-            response_data = json.dumps(options)
-            compressed_data = gzip.compress(response_data.encode('utf-8'))
-            
-            response = make_response(compressed_data)
-            response.headers['Content-Type'] = 'application/json'
-            response.headers['Content-Encoding'] = 'gzip'
-            response.headers['Content-Length'] = str(len(compressed_data))
-            response.headers['Cache-Control'] = 'public, max-age=600'  # 10 minutes
-            response.headers['X-PC-Optimized'] = 'true'
-            response.headers['X-Performance-Mode'] = 'ultra-fast'
-            
-            elapsed = (time.time() - start_time) * 1000
-            if ENHANCED_LOGGING_AVAILABLE:
-                enhanced_logger.log_success(f"PC-optimized filter options generated ({elapsed:.1f}ms)", 
-                                          {'options_count': len(options), 'platform': 'pc', 'compressed_size': len(compressed_data)})
-            else:
-                logging.info(f"✅ PC-optimized filter options generated ({elapsed:.1f}ms)")
-            
-            return response
-        elif is_windows_request or is_windows_ua:
-            # Legacy Windows optimization
-            cache.set(cache_key, options, timeout=60)  # Cache for 1 minute
-            
+        # PC optimization: Add response compression for large datasets
+        if is_windows_request or is_windows_ua:
+            # Compress response for Windows to reduce transfer time
             import gzip
             import json
             from flask import make_response

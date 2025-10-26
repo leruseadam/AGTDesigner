@@ -903,28 +903,18 @@ class ProductTypeSpecificMatcher:
 # Enhanced JSON field mapping for hybrid approach
 ENHANCED_JSON_FIELD_MAP = {
     "product_name": "Product Name*",
-    "inventory_name": "Product Name*",  # Additional field for product name
-    "name": "Product Name*",  # Generic name field
     "description": "Description", 
     "vendor": "Vendor/Supplier*",
     "brand": "Product Brand",
     "price": "Price",
     "line_price": "Price",  # Cultivera uses line_price for price
-    "unit_price": "Price",  # Additional price field
-    "retail_price": "Price",  # Additional price field
     "weight": "Weight*",
     "unit_weight": "Weight*",  # Cultivera uses unit_weight for weight
-    "net_weight": "Weight*",  # Additional weight field
     "strain": "Product Strain",
     "strain_name": "Product Strain",  # Cultivera uses strain_name
-    "strain_type": "Product Strain",  # Additional strain field
     "product_type": "Product Type*",
     "inventory_type": "Product Type*",  # Cultivera uses inventory_type
-    "inventory_category": "Product Type*",  # Additional category field
-    "category": "Product Type*",  # Generic category field
     "sku": "Internal Product Identifier",
-    "product_sku": "Internal Product Identifier",  # Additional SKU field
-    "inventory_id": "Internal Product Identifier",  # Additional ID field
     "batch_number": "Batch Number",
     "lot_number": "Lot Number",
     "room": "Room*",
@@ -933,21 +923,11 @@ ENHANCED_JSON_FIELD_MAP = {
     "units": "Units",
     "unit_weight_uom": "Units",  # Cultivera uses unit_weight_uom for weight units
     "uom": "Units",  # Cultivera uses uom for units
-    "weight_unit": "Units",  # Additional weight unit field
     "thc_percentage": "THC test result",
     "cbd_percentage": "CBD test result",
-    "thc": "THC test result",  # Additional THC field
-    "cbd": "CBD test result",  # Additional CBD field
     "harvest_date": "Accepted Date",
     "package_date": "Accepted Date",
-    "lineage": "Lineage",
-    "canonical_lineage": "Lineage",  # Additional lineage field
-    "genetics": "Lineage",  # Additional genetics field
-    "C": "Product Type*",  # Column C mapping as requested
-    "D": "Product Brand",  # Column D mapping
-    "E": "Product Strain",  # Column E mapping
-    "F": "Weight*",  # Column F mapping
-    "G": "Price"  # Column G mapping
+    "lineage": "Lineage"
 }
 
 class EnhancedJSONMatcher:

@@ -48,35 +48,8 @@
   <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   
-        <!-- CPU Performance Optimizer - Load FIRST to optimize all processes -->
-        <script src="{{ url_for('static', filename='js/cpu_performance_optimizer.js') }}?v={{ cache_bust }}"></script>
-        
-        <!-- Tag Count Fix - Resolves tag count mismatches -->
-        <script src="{{ url_for('static', filename='js/tag_count_fix.js') }}?v={{ cache_bust }}"></script>
-        
-        <!-- Aggressive Tag Count Fix - Forces all 49+ tags to be displayed -->
-        <script src="{{ url_for('static', filename='js/aggressive_tag_fix.js') }}?v={{ cache_bust }}"></script>
-        
-        <!-- Ultimate Tag Count Fix - Direct debugging and forced display -->
-        <script src="{{ url_for('static', filename='js/ultimate_tag_fix.js') }}?v={{ cache_bust }}"></script>
-        
-        <!-- Force 49 Tags - Prevents deduplication -->
-        <script src="{{ url_for('static', filename='js/force_49_tags.js') }}?v={{ cache_bust }}"></script>
-        
-        <!-- Lazy Loading Optimizer - Reduces initial CPU load -->
-        <script src="{{ url_for('static', filename='js/lazy_loading_optimizer.js') }}?v={{ cache_bust }}"></script>
-        
-        <!-- PC Performance Optimizer - Load FIRST for maximum performance -->
-        <script src="{{ url_for('static', filename='js/pc_performance_optimizer.js') }}?v={{ cache_bust }}"></script>
-        
-        <!-- PC Checkbox Optimizer - Optimizes checkbox selections -->
-        <script src="{{ url_for('static', filename='js/pc_checkbox_optimizer.js') }}?v={{ cache_bust }}"></script>
-        
-        <!-- PC CSS Optimizer - Applies PC-specific CSS optimizations -->
-        <script src="{{ url_for('static', filename='js/pc_css_optimizer.js') }}?v={{ cache_bust }}"></script>
-        
-        <!-- Performance Optimizations -->
-        <script src="{{ url_for('static', filename='js/performance.js') }}?v={{ cache_bust }}"></script>
+  <!-- Performance Optimizations -->
+  <script src="{{ url_for('static', filename='js/performance.js') }}?v={{ cache_bust }}"></script>
   <!-- Windows-specific performance optimizations - Load early for best results -->
   <script src="{{ url_for('static', filename='js/windows-performance-optimization.js') }}?v={{ cache_bust }}"></script>
   

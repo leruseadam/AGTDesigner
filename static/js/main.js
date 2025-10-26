@@ -6165,7 +6165,7 @@ const TagManager = {
             await this.updateFilterOptions();
             this.applyFilters();
             this.renderActiveFilters();
-        }, this.isHighCPU() ? 200 : 50); // Adaptive debounce based on CPU usage
+        }, 50); // Much faster debounce (50ms vs 150ms)
         
         filterIds.forEach(filterId => {
             const filterElement = document.getElementById(filterId);
@@ -6771,14 +6771,12 @@ const TagManager = {
         }
     },
 
-    // Start memory optimization with CPU awareness
+    // Start memory optimization
     startMemoryOptimization() {
-        // Run memory optimization every 60 seconds (reduced from 30s)
-        const memoryInterval = setInterval(() => {
-            if (!this.isHighCPU()) {
-                this.optimizeMemory();
-            }
-        }, 60000);
+        // Run memory optimization every 30 seconds
+        setInterval(() => {
+            this.optimizeMemory();
+        }, 30000);
         
         // Clear unused data when page becomes hidden
         document.addEventListener('visibilitychange', () => {
@@ -6787,23 +6785,7 @@ const TagManager = {
             }
         });
         
-        console.log('Memory optimization started with CPU awareness');
-    },
-
-    // CPU detection method
-    isHighCPU() {
-        // Check if CPU optimizer is available
-        if (window.CPUOptimizer) {
-            return window.CPUOptimizer.isHighCPU();
-        }
-        
-        // Fallback: check memory pressure
-        if (performance.memory) {
-            const memoryPressure = performance.memory.usedJSHeapSize / performance.memory.totalJSHeapSize;
-            return memoryPressure > 0.7; // High if using >70% of memory
-        }
-        
-        return false;
+        console.log('Memory optimization started');
     },
 
     // Memory optimization functions
