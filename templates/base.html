@@ -39,8 +39,6 @@
     <!-- Custom CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}?v={{ cache_bust if cache_bust else '1.0' }}">
-    <!-- Windows Performance Optimizations CSS -->
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/windows-performance.css') }}?v={{ cache_bust if cache_bust else '1.0' }}">
     
     <!-- Bootstrap Icons -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css">
@@ -50,13 +48,11 @@
     
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    
     {% block head %}{% endblock %}
 </head>
 <body>
     {% block content %}{% endblock %}
-    <!-- PC Performance Optimizations - Load first for best results -->
-    <script src="{{ url_for('static', filename='js/pc-performance-boost.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/windows-performance-optimization.js') }}"></script>
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
     <script src="{{ url_for('static', filename='js/enhanced-ui.js') }}"></script>
     <script src="{{ url_for('static', filename='js/generation-splash.js') }}"></script>

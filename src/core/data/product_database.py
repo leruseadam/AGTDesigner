@@ -82,6 +82,13 @@ class ProductDatabase:
         # Serialize writers to avoid 'database is locked' under concurrent writes
         self._write_lock = threading.RLock()
         
+        # Track rejected products to reduce log noise
+        self._rejected_blank_names = 0
+        self._rejected_invalid_names = 0
+        self._rejected_short_names = 0
+        self._rejected_missing_vendor = 0
+        self._rejected_missing_type = 0
+        
         # Performance timing
         self._timing_stats = {
             'queries': 0,
@@ -114,11 +121,11 @@ class ProductDatabase:
     def init_database(self):
         """Initialize the database with required tables (lazy initialization)."""
         if self._initialized:
-            return True
+            return
             
         with self._init_lock:
             if self._initialized:  # Double-check pattern
-                return True
+                return
                 
             start_time = time.time()
             logger.info(f"Initializing product database at {self.db_path}...")
@@ -138,7 +145,7 @@ class ProductDatabase:
                     if count > 0:
                         logger.info(f"Database already initialized with {count} products")
                         self._initialized = True
-                        return True
+                        return
                 
                 # Create strains table
                 cursor.execute('''
@@ -163,7 +170,6 @@ class ProductDatabase:
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         "Product Name*" TEXT NOT NULL,
                         normalized_name TEXT NOT NULL,
-                        name TEXT,
                         strain_id INTEGER,
                         "Product Type*" TEXT NOT NULL,
                         "Vendor/Supplier*" TEXT,
@@ -283,7 +289,6 @@ class ProductDatabase:
                 
                 elapsed = time.time() - start_time
                 logger.info(f"Product database initialized successfully in {elapsed:.3f}s")
-                return True
                 
             except Exception as e:
                 logger.error(f"Error initializing database: {e}")
@@ -883,17 +888,25 @@ class ProductDatabase:
             
             # CRITICAL VALIDATION: Prevent blank entries from being added to database
             if not product_name or str(product_name).strip() == '':
-                logger.warning("❌ REJECTED: Cannot add product with blank/empty product name")
+                self._rejected_blank_names += 1
+                # Only log every 10th rejection to reduce noise
+                if self._rejected_blank_names % 10 == 1:
+                    logger.debug(f"❌ REJECTED: Cannot add product with blank/empty product name (count: {self._rejected_blank_names})")
                 return None
             
             # Check for invalid values
             if str(product_name).lower() in ['nan', 'none', 'null', '']:
-                logger.warning(f"❌ REJECTED: Cannot add product with invalid product name: '{product_name}'")
+                self._rejected_invalid_names += 1
+                if self._rejected_invalid_names % 10 == 1:
+                    logger.debug(f"❌ REJECTED: Cannot add product with invalid product name: '{product_name}' (count: {self._rejected_invalid_names})")
                 return None
             
-            # Check for minimum length (at least 2 characters)
-            if len(str(product_name).strip()) < 2:
-                logger.warning(f"❌ REJECTED: Product name too short (must be at least 2 characters): '{product_name}'")
+            # RELAXED VALIDATION: Allow single character names for vertical template compatibility
+            # Check for minimum length (at least 1 character instead of 2)
+            if len(str(product_name).strip()) < 1:
+                self._rejected_short_names += 1
+                if self._rejected_short_names % 10 == 1:
+                    logger.debug(f"❌ REJECTED: Product name too short (must be at least 1 character): '{product_name}' (count: {self._rejected_short_names})")
                 return None
             
             # Additional validation for essential fields
@@ -901,11 +914,15 @@ class ProductDatabase:
             product_type = product_data.get('Product Type*', '').strip() if product_data.get('Product Type*') else ''
             
             if not vendor or str(vendor).lower() in ['nan', 'none', 'null', '']:
-                logger.warning(f"❌ REJECTED: Product '{product_name}' missing vendor information")
+                self._rejected_missing_vendor += 1
+                if self._rejected_missing_vendor % 10 == 1:
+                    logger.debug(f"❌ REJECTED: Product '{product_name}' missing vendor information (count: {self._rejected_missing_vendor})")
                 return None
             
             if not product_type or str(product_type).lower() in ['nan', 'none', 'null', '']:
-                logger.warning(f"❌ REJECTED: Product '{product_name}' missing product type")
+                self._rejected_missing_type += 1
+                if self._rejected_missing_type % 10 == 1:
+                    logger.debug(f"❌ REJECTED: Product '{product_name}' missing product type (count: {self._rejected_missing_type})")
                 return None
             
             normalized_name = self._normalize_product_name(product_name)
@@ -1098,6 +1115,21 @@ class ProductDatabase:
             product_name = product_data.get('Product Name*', product_data.get('ProductName', ''))
             logger.error(f"Error adding/updating product '{product_name}': {e}")
             raise
+    
+    def log_rejection_summary(self):
+        """Log summary of rejected products to provide insight into data quality issues."""
+        total_rejected = (self._rejected_blank_names + self._rejected_invalid_names + 
+                         self._rejected_short_names + self._rejected_missing_vendor + 
+                         self._rejected_missing_type)
+        
+        if total_rejected > 0:
+            logger.info(f"📊 Product Rejection Summary:")
+            logger.info(f"   Blank/empty names: {self._rejected_blank_names}")
+            logger.info(f"   Invalid names: {self._rejected_invalid_names}")
+            logger.info(f"   Too short names: {self._rejected_short_names}")
+            logger.info(f"   Missing vendor: {self._rejected_missing_vendor}")
+            logger.info(f"   Missing product type: {self._rejected_missing_type}")
+            logger.info(f"   Total rejected: {total_rejected}")
     
     def store_excel_data(self, df: pd.DataFrame, source_file: str = None) -> Dict[str, Any]:
         """Store Excel data in the database. New data replaces existing data when duplicates are found."""
@@ -1541,6 +1573,10 @@ class ProductDatabase:
             
             print(f"🔍 DEBUG: Database storage completed - Stored: {stored_count}, Updated: {updated_count}, Errors: {error_count}")
             logger.info(f"Excel data storage completed: {result['message']}")
+            
+            # Log rejection summary to provide insight into data quality issues
+            self.log_rejection_summary()
+            
             return result
             
         except Exception as e:
@@ -1714,13 +1750,11 @@ class ProductDatabase:
             for col in json_match_indicators:
                 if col in filtered_df.columns:
                     if col == 'Source':
-                        # Look for SPECIFIC JSON match indicators in Source column (be more specific to avoid false positives)
-                        # Only filter out rows that are EXPLICITLY from JSON/AI matching systems
+                        # Look for JSON match indicators in Source column
                         json_match_mask |= filtered_df[col].astype(str).str.contains(
-                            'JSON Match|AI Match|AI Enhanced|Enhanced JSON|JSON API|API Match', 
+                            'JSON Match|AI Match|JSON|AI|Match|Generated', 
                             case=False, 
-                            na=False,
-                            regex=True
+                            na=False
                         )
                     else:
                         # Look for non-null values in other JSON match columns
@@ -2565,6 +2599,222 @@ class ProductDatabase:
         # Use the existing normalization function
         from .excel_processor import normalize_name
         return normalize_name(product_name)
+    
+    def _decode_json_abbreviations(self, json_name: str) -> str:
+        """Decode JSON abbreviations to full product names."""
+        decoded = json_name.lower().strip()
+        
+        # Decode product type abbreviations
+        type_mappings = {
+            'ball': 'chocolate ball',
+            'bite': 'chocolate bites', 
+            'chew': 'fruit chews',
+            'caps': 'capsules',
+            'tincs': 'tincture',
+            'jar': 'balm',
+            'squeeze_tube': 'squeeze tube',
+            'roll_ups': 'roll up',
+        }
+        
+        # Decode strain abbreviations
+        strain_mappings = {
+            'sat': 'sativa',
+            'ind': 'indica',
+        }
+        
+        # Decode flavor/type abbreviations
+        flavor_mappings = {
+            'caramel': 'salted caramel',
+            'assorted': 'assorted',
+            'dark': 'dark chocolate',
+            'milk': 'milk chocolate',
+            'cookies&cream': 'cookies cream',
+            'dragon': 'dragon',
+            'malt': 'malt',
+            'cherry': 'cherry',
+            'mango': 'mango',
+            'watermelon': 'watermelon',
+            'sour_apple': 'sour apple',
+            'tropical': 'tropical',
+            'mixed_berry': 'mixed berry',
+            'guava': 'guava',
+            'balance': 'balance',
+            'chill': 'chill',
+            'lifted': 'lifted',
+            'relief': 'relief',
+            'gold_max': 'max gold',
+            'xtra': 'xtra strength',
+        }
+        
+        # Split and decode
+        parts = decoded.replace('_', ' ').split()
+        decoded_parts = []
+        
+        for part in parts:
+            if part in type_mappings:
+                decoded_parts.append(type_mappings[part])
+            elif part in strain_mappings:
+                decoded_parts.append(strain_mappings[part])
+            elif part in flavor_mappings:
+                decoded_parts.append(flavor_mappings[part])
+            elif part.endswith('pk'):
+                continue  # Skip pack indicators
+            else:
+                decoded_parts.append(part)
+        
+        return ' '.join(decoded_parts)
+    
+    def _extract_key_words(self, product_name: str) -> set:
+        """Extract key identifying words from a product name."""
+        
+        # First decode if it's a JSON abbreviation
+        if '_' in product_name and any(c.isupper() for c in product_name):
+            name = self._decode_json_abbreviations(product_name)
+        else:
+            name = product_name.lower()
+        
+        # Remove brand info
+        import re
+        name = re.sub(r'\bby\s+ceres\b', '', name, flags=re.IGNORECASE)
+        name = re.sub(r'\bceres\s*-\s*\d+\b', '', name, flags=re.IGNORECASE)
+        name = re.sub(r'\bceres\b', '', name, flags=re.IGNORECASE)
+        
+        # Remove common filler words
+        filler_words = {
+            'by', 'the', 'a', 'an', 'and', 'or', 'of', 'in', 'on', 'at', 'to', 
+            'for', 'with', 'from', 'up', 'about', 'into', 'through', 'during',
+            'before', 'after', 'above', 'below', 'between', 'among', 'through',
+            'pack', 'pk', 'single', '10', '20', 'mg', 'thc', 'cbd', 'cbg', 'cbn'
+        }
+        
+        # Split into words and filter
+        words = re.findall(r'\b\w+\b', name.lower())
+        key_words = set()
+        
+        for word in words:
+            if len(word) >= 3 and word not in filler_words:
+                key_words.add(word)
+        
+        return key_words
+    
+    def _fuzzy_match_products(self, json_name: str, db_name: str, threshold: float = 0.4) -> tuple:
+        """Calculate fuzzy match score between JSON and database product names."""
+        
+        json_words = self._extract_key_words(json_name)
+        db_words = self._extract_key_words(db_name)
+        
+        if not json_words or not db_words:
+            return False, 0.0, set(), json_words, db_words
+        
+        # Find intersection
+        common_words = json_words & db_words
+        
+        # Calculate Jaccard similarity
+        union_words = json_words | db_words
+        jaccard_score = len(common_words) / len(union_words) if union_words else 0.0
+        
+        # Calculate overlap percentage for JSON words (how many JSON words are found in DB)
+        json_coverage = len(common_words) / len(json_words) if json_words else 0.0
+        
+        # Use the higher of the two scores
+        final_score = max(jaccard_score, json_coverage)
+        
+        is_match = final_score >= threshold
+        
+        return is_match, final_score, common_words, json_words, db_words
+    
+    def get_products_by_names_with_fuzzy(self, product_names: List[str]) -> List[Dict[str, Any]]:
+        """Enhanced product lookup with fuzzy matching for JSON abbreviations."""
+        
+        # First try exact matching
+        exact_results = self.get_products_by_names(product_names)
+        
+        # Count how many exact matches we got
+        exact_matches = [r for r in exact_results if r.get('id') is not None]
+        
+        if len(exact_matches) >= len(product_names) * 0.8:  # If we got 80%+ exact matches
+            logger.info(f"🔍 EXACT MATCHING: Found {len(exact_matches)}/{len(product_names)} exact matches, skipping fuzzy matching")
+            return exact_results
+        
+        # Otherwise, try fuzzy matching for missing items
+        logger.info(f"🔍 FUZZY MATCHING: Only {len(exact_matches)}/{len(product_names)} exact matches found, trying fuzzy matching")
+        
+        # Get all CERES products for fuzzy matching
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT id, "Product Name*", normalized_name, "Vendor/Supplier*"
+            FROM products 
+            WHERE "Vendor/Supplier*" LIKE '%CERES%'
+            LIMIT 500
+        """)
+        
+        ceres_products = cursor.fetchall()
+        logger.info(f"🔍 FUZZY MATCHING: Checking against {len(ceres_products)} CERES products")
+        
+        # Create fuzzy matching results
+        fuzzy_results = []
+        fuzzy_match_count = 0
+        
+        for product_name in product_names:
+            best_match = None
+            best_score = 0.0
+            
+            # Check if we already have an exact match
+            exact_match = None
+            for result in exact_results:
+                if (result.get('Product Name*') == product_name or 
+                    result.get('normalized_name') == self._normalize_product_name(product_name)):
+                    exact_match = result
+                    break
+            
+            if exact_match and exact_match.get('id'):
+                fuzzy_results.append(exact_match)
+                continue
+            
+            # Try fuzzy matching
+            for db_product in ceres_products:
+                db_name = db_product[1]  # Product Name*
+                
+                is_match, score, common, json_words, db_words = self._fuzzy_match_products(product_name, db_name)
+                
+                if score > best_score and score >= 0.4:  # 40% threshold
+                    best_score = score
+                    best_match = db_product
+            
+            if best_match:
+                logger.info(f"🔍 FUZZY MATCH: '{product_name}' -> '{best_match[1]}' (score: {best_score:.3f})")
+                fuzzy_match_count += 1
+                
+                # Get full product info
+                full_products = self.get_products_by_names([best_match[1]])
+                if full_products and full_products[0].get('id'):
+                    fuzzy_results.append(full_products[0])
+                else:
+                    # Create placeholder
+                    fuzzy_results.append({
+                        'ProductName': product_name,
+                        'Product Name*': product_name,
+                        'Description': product_name,
+                        'Vendor': '',
+                        'Vendor/Supplier*': '',
+                    })
+            else:
+                logger.info(f"🔍 FUZZY NO MATCH: '{product_name}' - no suitable match found")
+                # Create placeholder
+                fuzzy_results.append({
+                    'ProductName': product_name,
+                    'Product Name*': product_name,
+                    'Description': product_name,
+                    'Vendor': '',
+                    'Vendor/Supplier*': '',
+                })
+        
+        logger.info(f"🔍 FUZZY MATCHING COMPLETE: Found {fuzzy_match_count} additional fuzzy matches")
+        logger.info(f"🔍 TOTAL MATCHES: {len(exact_matches)} exact + {fuzzy_match_count} fuzzy = {len(exact_matches) + fuzzy_match_count}/{len(product_names)}")
+        
+        return fuzzy_results
     
     def _normalize_lineage(self, lineage: str) -> str:
         """Normalize lineage to proper ALL CAPS format."""
@@ -4078,7 +4328,7 @@ class ProductDatabase:
             cursor.execute(f'''
                 SELECT id, "Product Name*", normalized_name, "Product Type*", "Vendor/Supplier*", "Product Brand", "Lineage",
                        "Product Strain" as strain_name, "Lineage" as canonical_lineage, total_occurrences, first_seen_date, last_seen_date,
-                       "Description", "Weight*", "Units", "Price", name,
+                       "Description", "Weight*", "Units", "Price", 
                        "THC test result", "CBD test result", "Test result unit (% or mg)",
                        "Quantity*", "DOH", "Concentrate Type", "Ratio", "JointRatio", "State", "Is Sample? (yes/no)",
                        "Is MJ product?(yes/no)", "Discountable? (yes/no)", "Room*", "Batch Number", "Lot Number", "Barcode*",
@@ -4109,9 +4359,8 @@ class ProductDatabase:
                     
                     product_info = {
                         'id': result[0],
-                        'ProductName': result[1],  # product_name (SKU code)
-                        'Product Name*': result[1],  # Excel column name compatibility (SKU code)
-                        'Product Name': result[16],  # name column (human-readable name)
+                        'ProductName': result[1],  # product_name
+                        'Product Name*': result[1],  # Excel column name compatibility
                         'normalized_name': result[2],
                         'Product Type*': result[3],  # product_type
                         'Vendor': result[4],  # vendor
@@ -4124,45 +4373,45 @@ class ProductDatabase:
                         'total_occurrences': result[9],
                         'first_seen_date': result[10],
                         'last_seen_date': result[11],
-                        'Description': result[12] or result[16] or result[1],  # description or name or product_name
+                        'Description': result[12] or result[1],  # description or product_name
                         'Weight*': result[13],  # weight
                         'Units': result[14],  # units
                         'Price': result[15],  # price
-                        'THC test result': result[17],  # thc_test_result (shifted by 1 due to name column)
-                        'CBD test result': result[18],  # cbd_test_result (shifted by 1 due to name column)
-                        'Test result unit (% or mg)': result[19],  # test_result_unit (shifted by 1 due to name column)
-                        'Quantity*': result[20],  # quantity (shifted by 1 due to name column)
-                        'DOH': result[21],  # doh_compliant (shifted by 1 due to name column)
-                        'Concentrate Type': result[22],  # concentrate_type (shifted by 1 due to name column)
-                        'Ratio': result[23],  # ratio (shifted by 1 due to name column)
-                        'JointRatio': result[24],  # joint_ratio (shifted by 1 due to name column)
-                        'State': result[25],  # state (shifted by 1 due to name column)
-                        'Is Sample? (yes/no)': result[26],  # is_sample (shifted by 1 due to name column)
-                        'Is MJ product?(yes/no)': result[27],  # is_mj_product (shifted by 1 due to name column)
-                        'Discountable? (yes/no)': result[28],  # discountable (shifted by 1 due to name column)
-                        'Room*': result[29],  # room (shifted by 1 due to name column)
-                        'Batch Number': result[30],  # batch_number (shifted by 1 due to name column)
-                        'Lot Number': result[31],  # lot_number (shifted by 1 due to name column)
-                        'Barcode*': result[32],  # barcode (shifted by 1 due to name column)
-                        'Medical Only (Yes/No)': result[33],  # medical_only (shifted by 1 due to name column)
-                        'Med Price': result[34],  # med_price (shifted by 1 due to name column)
-                        'Expiration Date(YYYY-MM-DD)': result[35],  # expiration_date (shifted by 1 due to name column)
-                        'Is Archived? (yes/no)': result[36],  # is_archived (shifted by 1 due to name column)
-                        'THC Per Serving': result[37],  # thc_per_serving (shifted by 1 due to name column)
-                        'Allergens': result[38],  # allergens (shifted by 1 due to name column)
-                        'Solvent': result[39],  # solvent (shifted by 1 due to name column)
-                        'Accepted Date': result[40],  # accepted_date (shifted by 1 due to name column)
-                        'Internal Product Identifier': result[41],  # internal_product_identifier (shifted by 1 due to name column)
-                        'Product Tags (comma separated)': result[42],  # product_tags (shifted by 1 due to name column)
-                        'Image URL': result[43],  # image_url (shifted by 1 due to name column)
-                        'Ingredients': result[44],  # ingredients (shifted by 1 due to name column)
-                        'CombinedWeight': result[45],  # combined_weight (shifted by 1 due to name column)
-                        'Ratio_or_THC_CBD': result[46],  # ratio_or_thc_cbd (shifted by 1 due to name column)
-                        'Description_Complexity': result[47],  # description_complexity (shifted by 1 due to name column)
-                        'Total THC': result[48],  # total_thc (shifted by 1 due to name column)
-                        'THCA': result[49],  # thca (shifted by 1 due to name column)
-                        'CBDA': result[50],  # cbda (shifted by 1 due to name column)
-                        'CBN': result[51],  # cbn (shifted by 1 due to name column)
+                        'THC test result': result[16],  # thc_test_result
+                        'CBD test result': result[17],  # cbd_test_result
+                        'Test result unit (% or mg)': result[18],  # test_result_unit with correct field name
+                        'Quantity*': result[19],  # quantity
+                        'DOH': result[20],  # doh_compliant
+                        'Concentrate Type': result[21],  # concentrate_type with correct field name
+                        'Ratio': result[22],  # ratio
+                        'JointRatio': result[23],  # joint_ratio
+                        'State': result[24],  # state
+                        'Is Sample? (yes/no)': result[25],  # is_sample with correct field name
+                        'Is MJ product?(yes/no)': result[26],  # is_mj_product with correct field name
+                        'Discountable? (yes/no)': result[27],  # discountable with correct field name
+                        'Room*': result[28],  # room
+                        'Batch Number': result[29],  # batch_number with correct field name
+                        'Lot Number': result[30],  # lot_number with correct field name
+                        'Barcode*': result[31],  # barcode with correct field name
+                        'Medical Only (Yes/No)': result[32],  # medical_only with correct field name
+                        'Med Price': result[33],  # med_price with correct field name
+                        'Expiration Date(YYYY-MM-DD)': result[34],  # expiration_date with correct field name
+                        'Is Archived? (yes/no)': result[35],  # is_archived with correct field name
+                        'THC Per Serving': result[36],  # thc_per_serving with correct field name
+                        'Allergens': result[37],  # allergens with correct field name
+                        'Solvent': result[38],  # solvent with correct field name
+                        'Accepted Date': result[39],  # accepted_date with correct field name
+                        'Internal Product Identifier': result[40],  # internal_product_identifier with correct field name
+                        'Product Tags (comma separated)': result[41],  # product_tags with correct field name
+                        'Image URL': result[42],  # image_url with correct field name
+                        'Ingredients': result[43],  # ingredients with correct field name
+                        'CombinedWeight': result[44],  # combined_weight with correct field name
+                        'Ratio_or_THC_CBD': result[45],  # ratio_or_thc_cbd with correct field name
+                        'Description_Complexity': result[46],  # description_complexity with correct field name
+                        'Total THC': result[47],  # total_thc
+                        'THCA': result[48],  # thca
+                        'CBDA': result[49],  # cbda
+                        'CBN': result[50],  # cbn
                         # Add Excel column name compatibility fields
                         'ProductBrand': result[5],
                         'ProductStrain': result[7],
@@ -4624,7 +4873,27 @@ class ProductDatabase:
             print(f"🔍 DEBUG: With params: {params}")
             
             cursor.execute(query, params)
-            result = cursor.fetchone()
+            results = cursor.fetchall()
+            
+            # CRITICAL FIX: Handle multiple results and deduplicate
+            if results:
+                # If we got multiple results, deduplicate by product name
+                seen_names = set()
+                unique_results = []
+                
+                for result in results:
+                    product_name = result[1] if len(result) > 1 else None  # Product Name* is at index 1
+                    if product_name and product_name not in seen_names:
+                        seen_names.add(product_name)
+                        unique_results.append(result)
+                
+                # Use the first unique result (highest priority due to ORDER BY)
+                result = unique_results[0] if unique_results else None
+                
+                if len(unique_results) > 1:
+                    print(f"🔍 DEBUG: Found {len(results)} results, deduplicated to {len(unique_results)} unique products")
+            else:
+                result = None
             
             # DEBUG: Log database query results
             print(f"🔍 DEBUG: Database query returned: {result is not None}")
@@ -4637,15 +4906,28 @@ class ProductDatabase:
                 if strain and 'original_query' in locals():
                     print(f"🔍 DEBUG: Trying fallback query without strain matching...")
                     
-                    # Remove strain conditions from the query
-                    fallback_query = original_query
+                    # Build a clean fallback query without strain conditions
+                    fallback_query = """SELECT p.id, p."Product Name*", p."Product Strain", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
+                       p."Description", p."Weight*", p."Units", p."Price", p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio",
+                       p."State", p."Is Sample? (yes/no)", p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*",
+                       p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens", p."Solvent", p."Accepted Date",
+                       p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."CombinedWeight", p."Ratio_or_THC_CBD", 
+                       p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN", 0 as total_occurrences, '' as first_seen_date, '' as last_seen_date
+                FROM products p
+                WHERE 1=1"""
                     fallback_params = []
                     
-                    # Rebuild query without strain conditions
+                    # Add name conditions
                     if normalized_name:
                         fallback_query += " AND (p.normalized_name = ? OR LOWER(p.\"Product Name*\") LIKE ? OR LOWER(p.\"Product Name*\") LIKE ? OR LOWER(p.\"Product Name*\") LIKE ?)"
                         fallback_params.extend([normalized_name, f"%{normalized_name.lower()}%", f"%{normalized_name.lower()}%", f"%{normalized_name.lower()}%"])
                     
+                    # Add vendor condition
+                    if vendor:
+                        fallback_query += " AND p.\"Vendor/Supplier*\" LIKE ?"
+                        fallback_params.append(f"%{vendor}%")
+                    
+                    # Add product type conditions
                     if product_type:
                         product_type_lower = product_type.lower().strip()
                         product_type_mapping = {
@@ -4664,10 +4946,6 @@ class ProductDatabase:
                             
                             if type_conditions:
                                 fallback_query += " AND (" + " OR ".join(type_conditions) + ")"
-                    
-                    if vendor:
-                        fallback_query += " AND p.\"Vendor/Supplier*\" LIKE ?"
-                        fallback_params.append(f"%{vendor}%")
                     
                     # Add ordering
                     if product_type:
@@ -4695,7 +4973,27 @@ class ProductDatabase:
                     print(f"🔍 DEBUG: With fallback params: {fallback_params}")
                     
                     cursor.execute(fallback_query, fallback_params)
-                    result = cursor.fetchone()
+                    fallback_results = cursor.fetchall()
+                    
+                    # CRITICAL FIX: Handle multiple fallback results and deduplicate
+                    if fallback_results:
+                        # If we got multiple results, deduplicate by product name
+                        seen_names = set()
+                        unique_fallback_results = []
+                        
+                        for fallback_result in fallback_results:
+                            product_name = fallback_result[1] if len(fallback_result) > 1 else None  # Product Name* is at index 1
+                            if product_name and product_name not in seen_names:
+                                seen_names.add(product_name)
+                                unique_fallback_results.append(fallback_result)
+                        
+                        # Use the first unique result (highest priority due to ORDER BY)
+                        result = unique_fallback_results[0] if unique_fallback_results else None
+                        
+                        if len(unique_fallback_results) > 1:
+                            print(f"🔍 DEBUG: Fallback found {len(fallback_results)} results, deduplicated to {len(unique_fallback_results)} unique products")
+                    else:
+                        result = None
                     
                     print(f"🔍 DEBUG: Fallback query returned: {result is not None}")
                     if result:

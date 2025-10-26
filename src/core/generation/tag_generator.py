@@ -216,7 +216,14 @@ def chunk_records(records, chunk_size=9):
         else:
             logger.info(f"Keeping all {len(records)} records (duplicate rate: {duplicate_percentage:.1f}%)")
     
-    return [records[i:i+chunk_size] for i in range(0, len(records), chunk_size)]
+    # Split records into chunks
+    chunks = []
+    for i in range(0, len(records), chunk_size):
+        chunk = records[i:i + chunk_size]
+        chunks.append(chunk)
+    
+    logger.info(f"Split {len(records)} records into {len(chunks)} chunks of size {chunk_size}")
+    return chunks
 
 def flatten_tags(records):
     """Extract Description values from records for tag generation."""
@@ -888,11 +895,11 @@ def process_chunk(args):
         num_labels = 12  # Use standard 4x3 grid
         logger.info(f"🔧 DOUBLE TEMPLATE EXPANSION: Using standard template expansion")
     else:
-        # CRITICAL FIX: Disable dynamic templates for horizontal/vertical to prevent XML corruption
-        # Use standard template expansion with post-processing cleanup instead
+        # CRITICAL FIX: Use dynamic label count based on chunk size
+        # Allow templates to expand to accommodate all products in the chunk
         local_template_buffer = base_template
-        num_labels = 9  # Use standard 3x3 grid
-        logger.info(f"🔧 {orientation.upper()} TEMPLATE EXPANSION: Using standard template expansion")
+        num_labels = len(chunk)  # Use actual chunk size instead of hardcoded 9
+        logger.info(f"🔧 {orientation.upper()} TEMPLATE EXPANSION: Using dynamic expansion for {num_labels} labels")
     tpl = DocxTemplate(local_template_buffer)
     context = {}
     image_width = Mm(8) if orientation == "mini" else Mm(9 if orientation == 'vertical' else 12)

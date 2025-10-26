@@ -3883,7 +3883,7 @@ img, video, canvas, svg {
     background: rgba(45, 34, 58, 0.8) !important;
     color: var(--text-primary) !important;
     border: 1px solid rgba(160, 132, 232, 0.3) !important;
-    border-radius: 0px !important;
+    border-radius: 6px !important;
     transition: all 0.3s ease !important;
     backdrop-filter: blur(10px) !important;
     -webkit-backdrop-filter: blur(10px) !important;
@@ -3925,7 +3925,7 @@ img, video, canvas, svg {
     height: auto;
     min-height: 38px;
     line-height: 1.4;
-    border-radius: 0px;
+    border-radius: 6px;
     background: rgba(45, 34, 58, 0.8);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
@@ -5018,7 +5018,7 @@ img, video, canvas, svg {
     background: rgba(34, 34, 51, 0.55) !important;
     color: #e0d6f6 !important;
     border: 1.5px solid rgba(160, 132, 232, 0.22) !important;
-    border-radius: 0px !important;
+    border-radius: 10px !important;
     padding: 10px 36px 10px 14px !important;
     font-size: 1em !important;
     box-shadow: 0 2px 12px 0 rgba(160, 132, 232, 0.10) !important;
@@ -5708,7 +5708,7 @@ img, video, canvas, svg {
   .sticky-filter-bar .compact-filter {
     background: rgba(42, 32, 64, 0.9) !important; /* Darker background for contrast */
     color: #ffffff !important;
-    border-radius: 0px !important;
+    border-radius: 8px !important;
     border: 1.5px solid rgba(160, 132, 232, 0.3) !important;
     transition: all 0.3s cubic-bezier(0.4,0,0.2,1) !important;
     padding: 0.5rem 0.75rem !important;
@@ -5951,7 +5951,7 @@ img, video, canvas, svg {
 
   /* Filter dropdowns styling */
   .sticky-filter-bar .form-select {
-    border-radius: 0px;
+    border-radius: 6px;
     border: 1px solid #dee2e6;
     transition: all 0.2s ease;
     padding: 0.5rem 0.75rem;
@@ -6043,7 +6043,7 @@ img, video, canvas, svg {
   .horizontal-filter-bar .compact-filter {
     background: #2a2040;
     color: #fff;
-    border-radius: 0px;
+    border-radius: 8px;
     border: 1.5px solid #a084e8;
     height: 36px;
     min-height: 36px;
@@ -8264,22 +8264,22 @@ img, video, canvas, svg {
   /* Cross-platform dropdown consistency fixes */
   /* Ensure consistent dropdown appearance across PC and Mac */
 
-  /* Universal dropdown reset for all platforms */
+  /* Mac-like fast dropdown styling - minimal and native */
   select, .form-select, .form-select-modern, .lineage-dropdown, .lineage-dropdown-mini,
   .sticky-filter-bar select, .filter-bar select, .compact-filter,
   .strain-lineage-editor .form-select, .modal select {
-    /* Remove all platform-specific styling */
+    /* Minimal styling for Mac-like speed */
     -webkit-appearance: none !important;
     -moz-appearance: none !important;
     appearance: none !important;
     
-    /* Ensure consistent box model */
+    /* Fast rendering */
     box-sizing: border-box !important;
+    cursor: pointer !important;
+    outline: none !important;
     
-    /* Standardize font rendering */
-    -webkit-font-smoothing: antialiased !important;
-    -moz-osx-font-smoothing: grayscale !important;
-    text-rendering: optimizeLegibility !important;
+    /* Native-like behavior */
+    transition: border-color 0.15s ease !important;
   }
 
   /* Ensure consistent arrow positioning and styling */
@@ -8322,6 +8322,24 @@ img, video, canvas, svg {
     -webkit-font-smoothing: antialiased !important;
     -moz-osx-font-smoothing: grayscale !important;
     text-rendering: optimizeLegibility !important;
+    
+    /* PC-specific option improvements */
+    background-color: #2d223a !important;
+    color: #ffffff !important;
+    border: none !important;
+    cursor: pointer !important;
+    
+    /* Better hover states for PC */
+    transition: background-color 0.2s ease !important;
+  }
+  
+  /* PC-specific option hover states */
+  select option:hover, .form-select option:hover, .form-select-modern option:hover,
+  .lineage-dropdown option:hover, .lineage-dropdown-mini option:hover,
+  .sticky-filter-bar select option:hover, .filter-bar select option:hover,
+  .compact-filter option:hover, .strain-lineage-editor .form-select option:hover,
+  .modal select option:hover {
+    background-color: rgba(160, 132, 232, 0.3) !important;
   }
 
   /* Platform-specific overrides for better consistency */
@@ -8338,6 +8356,31 @@ img, video, canvas, svg {
     select, .form-select, .form-select-modern, .lineage-dropdown, .lineage-dropdown-mini {
       -moz-appearance: none !important;
       border-radius: inherit !important;
+    }
+  }
+
+  /* PC/Windows-specific fixes */
+  @media screen and (min-width: 1px) {
+    /* Target Windows browsers specifically */
+    select, .form-select, .form-select-modern, .lineage-dropdown, .lineage-dropdown-mini,
+    .sticky-filter-bar select, .filter-bar select, .compact-filter,
+    .strain-lineage-editor .form-select, .modal select {
+      /* Ensure Windows browsers use custom styling */
+      -webkit-appearance: none !important;
+      -moz-appearance: none !important;
+      appearance: none !important;
+      
+      /* Fix Windows-specific rendering issues */
+      background-clip: padding-box !important;
+      -webkit-background-clip: padding-box !important;
+      
+      /* Better focus handling for Windows */
+      -webkit-focus-ring-color: transparent !important;
+      focus-ring-color: transparent !important;
+      
+      /* Ensure proper click handling on Windows */
+      pointer-events: auto !important;
+      -webkit-pointer-events: auto !important;
     }
   }
 
@@ -8396,6 +8439,12 @@ img, video, canvas, svg {
   .modal select:focus {
     outline: none !important;
     /* Maintain existing focus styles from individual selectors */
+  }
+
+  /* Mac-like fast hover states */
+  select:hover, .form-select:hover, .compact-filter:hover {
+    border-color: rgba(160, 132, 232, 0.5) !important;
+    background: rgba(42, 32, 64, 0.95) !important;
   }
 
   /* Instructional blurb styling */

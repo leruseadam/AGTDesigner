@@ -225,6 +225,7 @@ class TagsTable {
         <div class="tag-info flex-grow-1">
           <div class="d-flex align-items-center">
             <label class="tag-name me-3" for="${safeId}">${tagName}${dohImageHtml}</label>
+            ${tag.Ratio || tag['Ratio_or_THC_CBD'] ? `<span class="ratio-badge badge bg-info me-2" style="font-size: 0.7rem; padding: 2px 6px; background-color: rgba(13, 202, 240, 0.8); color: #fff; border-radius: 4px; font-weight: 500;" title="Ratio: ${tag.Ratio || tag['Ratio_or_THC_CBD']}">${tag.Ratio || tag['Ratio_or_THC_CBD']}</span>` : ''}
             <select class="form-select form-select-sm lineage-dropdown lineage-dropdown-mini" 
                     onchange="TagsTable.handleLineageChange(this, '${safeTagName}')">
               ${dropdownOptions}

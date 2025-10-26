@@ -8,6 +8,7 @@
   <meta http-equiv="Expires" content="0">
   <title>AGT Label Maker - Professional Cannabis Label Generation - UPDATED</title>
   
+  
   <!-- Open Graph / Facebook -->
   <meta property="og:type" content="website">
   <meta property="og:url" content="{{ request.url }}">
@@ -4499,6 +4500,12 @@
                       <option value="All">All Products</option>
                     </select>
                   </div>
+                  <div>
+                    <label for="ratioFilter" class="filter-category-label mb-0">RATIO</label>
+                    <select id="ratioFilter" class="form-select form-select-sm compact-filter" aria-label="Filter by ratio" style="width: 100%;">
+                      <option value="All">All Ratios</option>
+                    </select>
+                  </div>
               </div>
             </div>
           </div>
@@ -5679,54 +5686,100 @@
        console.log('Vendor selection complete. selectedVendor:', window.selectedVendor);
      };
      
-     // Function to search products by vendor from real database
-     window.searchProducts = function(searchTerm) {
-       console.log('🔍 searchProducts called with:', searchTerm);
-       
-       if (!window.selectedVendor) {
-         document.getElementById('productResults').innerHTML = `
-           <div class="text-center text-warning">
-             <i class="fas fa-exclamation-triangle me-2"></i>
-             Please select a vendor first
-           </div>
-         `;
-         return;
-       }
-       
-       // Show loading state immediately
-       if (searchTerm.length === 0) {
-         document.getElementById('productResults').innerHTML = `
-           <div class="text-center text-white-50">
-             <i class="fas fa-search me-2"></i>
-             Start typing to search products from ${window.selectedVendor}
-           </div>
-         `;
-         return;
-       }
-       
-       if (searchTerm.length === 1) {
-         document.getElementById('productResults').innerHTML = `
-           <div class="text-center text-white-50">
-             <i class="fas fa-spinner fa-spin me-2"></i>
-             Type more characters...
-           </div>
-         `;
-         return;
-       }
-       
-       // Show loading state
-       document.getElementById('productResults').innerHTML = `
-         <div class="text-center text-white-50">
-           <i class="fas fa-spinner fa-spin me-2"></i>
-           Searching products...
-         </div>
-       `;
-       
-       // Fetch real product data from database using the new products search API
-       const searchUrl = `/api/products/search?vendor=${encodeURIComponent(window.selectedVendor)}&q=${encodeURIComponent(searchTerm)}`;
-       console.log('🔍 Searching products with URL:', searchUrl);
-       console.log('🔍 Selected vendor:', window.selectedVendor);
-       console.log('🔍 Search term:', searchTerm);
+    // Function to search products by vendor from real database
+    window.searchProducts = function(searchTerm) {
+      console.log('🔍 searchProducts called with:', searchTerm);
+      
+      if (!window.selectedVendor) {
+        document.getElementById('productResults').innerHTML = `
+          <div class="text-center text-warning">
+            <i class="fas fa-exclamation-triangle me-2"></i>
+            Please select a vendor first
+          </div>
+        `;
+        return;
+      }
+      
+      // Show loading state immediately
+      if (searchTerm.length === 0) {
+        document.getElementById('productResults').innerHTML = `
+          <div class="text-center text-white-50">
+            <i class="fas fa-search me-2"></i>
+            Start typing to search products from ${window.selectedVendor}
+          </div>
+        `;
+        return;
+      }
+      
+      if (searchTerm.length === 1) {
+        document.getElementById('productResults').innerHTML = `
+          <div class="text-center text-white-50">
+            <i class="fas fa-spinner fa-spin me-2"></i>
+            Type more characters...
+          </div>
+        `;
+        return;
+      }
+      
+      // Show loading state
+      document.getElementById('productResults').innerHTML = `
+        <div class="text-center text-white-50">
+          <i class="fas fa-spinner fa-spin me-2"></i>
+          Searching products...
+        </div>
+      `;
+      
+      // Collect all active filter values
+      const filters = {};
+      
+      // Get brand filter
+      const brandFilter = document.getElementById('brandFilter');
+      if (brandFilter && brandFilter.value && brandFilter.value !== 'All') {
+        filters.brand = brandFilter.value;
+      }
+      
+      // Get product type filter
+      const productTypeFilter = document.getElementById('productTypeFilter');
+      if (productTypeFilter && productTypeFilter.value && productTypeFilter.value !== 'All') {
+        filters.productType = productTypeFilter.value;
+      }
+      
+      // Get lineage filter
+      const lineageFilter = document.getElementById('lineageFilter');
+      if (lineageFilter && lineageFilter.value && lineageFilter.value !== 'All') {
+        filters.lineage = lineageFilter.value;
+      }
+      
+      // Get weight filter
+      const weightFilter = document.getElementById('weightFilter');
+      if (weightFilter && weightFilter.value && weightFilter.value !== 'All') {
+        filters.weight = weightFilter.value;
+      }
+      
+      // Get DOH filter
+      const dohFilter = document.getElementById('dohFilter');
+      if (dohFilter && dohFilter.value && dohFilter.value !== 'All') {
+        filters.doh = dohFilter.value;
+      }
+      
+      // Get High CBD filter
+      const highCbdFilter = document.getElementById('highCbdFilter');
+      if (highCbdFilter && highCbdFilter.value && highCbdFilter.value !== 'All') {
+        filters.highCbd = highCbdFilter.value;
+      }
+      
+      // Build search URL with filters
+      let searchUrl = `/api/products/search?vendor=${encodeURIComponent(window.selectedVendor)}&q=${encodeURIComponent(searchTerm)}`;
+      
+      // Add filter parameters to URL
+      Object.keys(filters).forEach(key => {
+        searchUrl += `&${key}=${encodeURIComponent(filters[key])}`;
+      });
+      
+      console.log('🔍 Searching products with URL:', searchUrl);
+      console.log('🔍 Selected vendor:', window.selectedVendor);
+      console.log('🔍 Search term:', searchTerm);
+      console.log('🔍 Active filters:', filters);
        
        fetch(searchUrl)
          .then(response => {
@@ -11305,24 +11358,68 @@
       }
     }
 
+    let performanceMetricsFailCount = 0;
+    const MAX_FAIL_COUNT = 3;
+    
     async function refreshPerformanceMetrics() {
       try {
+        // Check if performance optimizer is available
+        if (!window.performanceOptimizer) {
+          return;
+        }
+        
         const metrics = await window.performanceOptimizer.getPerformanceMetrics();
+        
         if (metrics) {
-          document.getElementById('memoryUsage').textContent = `${metrics.memory_usage_mb} MB`;
-          document.getElementById('cacheEntries').textContent = metrics.cache_entries;
-          document.getElementById('productionMode').textContent = metrics.is_production ? 'Yes' : 'No';
+          // Handle different status types
+          if (metrics.status === 'enabled') {
+            // Reset fail count on success
+            performanceMetricsFailCount = 0;
+            document.getElementById('memoryUsage').textContent = `${metrics.memory_usage_mb || 0} MB`;
+            document.getElementById('cacheEntries').textContent = metrics.cache_entries || 0;
+            document.getElementById('productionMode').textContent = metrics.is_production ? 'Yes' : 'No';
+          } else if (metrics.status === 'disabled') {
+            performanceMetricsFailCount = 0;
+            document.getElementById('memoryUsage').textContent = 'N/A';
+            document.getElementById('cacheEntries').textContent = 'N/A';
+            document.getElementById('productionMode').textContent = 'N/A';
+          } else if (metrics.status === 'unavailable') {
+            performanceMetricsFailCount++;
+            // Only log the first few errors to avoid console spam
+            if (performanceMetricsFailCount <= MAX_FAIL_COUNT) {
+              console.warn('Performance metrics unavailable:', metrics.message);
+            }
+            document.getElementById('memoryUsage').textContent = 'Unavailable';
+            document.getElementById('cacheEntries').textContent = 'Unavailable';
+            document.getElementById('productionMode').textContent = 'Unavailable';
+          } else {
+            throw new Error('Invalid metrics response status: ' + metrics.status);
+          }
+        } else {
+          throw new Error('No metrics returned');
         }
       } catch (error) {
-        console.error('Failed to get performance metrics:', error);
-        document.getElementById('memoryUsage').textContent = 'Error';
-        document.getElementById('cacheEntries').textContent = 'Error';
-        document.getElementById('productionMode').textContent = 'Error';
+        performanceMetricsFailCount++;
+        
+        // Only log the first few errors to avoid console spam
+        if (performanceMetricsFailCount <= MAX_FAIL_COUNT) {
+          console.warn('Failed to get performance metrics:', error.message);
+        }
+        
+        // Update UI to show unavailable instead of error
+        document.getElementById('memoryUsage').textContent = 'Unavailable';
+        document.getElementById('cacheEntries').textContent = 'Unavailable';
+        document.getElementById('productionMode').textContent = 'Unavailable';
       }
     }
 
     async function clearPerformanceCache() {
       try {
+        if (!window.performanceOptimizer) {
+          showToast('Performance optimizer not available', 'error');
+          return;
+        }
+        
         const result = await window.performanceOptimizer.clearCache();
         if (result && result.status === 'success') {
           showToast('Cache cleared successfully', 'success');
@@ -11339,6 +11436,12 @@
     // Initialize performance monitoring
     if (window.performanceOptimizer) {
       console.log('Performance optimizer initialized');
+      
+      // Try to load metrics on page load (delayed to ensure everything is ready)
+      setTimeout(() => {
+        refreshPerformanceMetrics();
+      }, 1000);
+      
       // Refresh metrics every 30 seconds
       setInterval(refreshPerformanceMetrics, 30000);
     }
