@@ -1195,6 +1195,7 @@ const TagManager = {
     },
 
     applyFilters() {
+        console.log('🔍 applyFilters() called');
         // Fast path: show all if no filters (Mac-like speed)
         const vendorFilter = document.getElementById('vendorFilter')?.value || '';
         const brandFilter = document.getElementById('brandFilter')?.value || '';
@@ -1205,19 +1206,21 @@ const TagManager = {
         const highCbdFilter = document.getElementById('highCbdFilter')?.value || '';
         const ratioFilter = document.getElementById('ratioFilter')?.value || '';
         
+        console.log('🔍 Current filter values:', { vendorFilter, brandFilter, productTypeFilter, lineageFilter, weightFilter, dohFilter, highCbdFilter, ratioFilter });
+        
         // Check if all filters are "All" - show everything (fast path)
         const allFiltersAll = [vendorFilter, brandFilter, productTypeFilter, lineageFilter, weightFilter, dohFilter, highCbdFilter, ratioFilter]
             .every(filter => !filter || filter.trim() === '' || filter.toLowerCase() === 'all');
         
+        console.log('🔍 All filters empty?', allFiltersAll);
+        
         if (allFiltersAll) {
+            console.log('🔍 All filters empty - showing all tags');
             this.state.filterCache = null;
             this.debouncedUpdateAvailableTags(this.state.originalTags, null);
             this.renderActiveFilters();
             return;
         }
-        
-        // Create a filter key from the current filter combination
-        const filterKey = `vendor:${vendorFilter}|brand:${brandFilter}|productType:${productTypeFilter}|lineage:${lineageFilter}|weight:${weightFilter}|doh:${dohFilter}|highCbd:${highCbdFilter}|ratio:${ratioFilter}`;
         
         // Check if we have cached results for this exact filter combination
         if (this.state.filterCache && this.state.filterCache.key === filterKey) {
@@ -1334,14 +1337,6 @@ const TagManager = {
                 if (highCbdFilter === 'High CBD Products' && !isHighCbd) {
                     return false;
                 } else if (highCbdFilter === 'Non-High CBD Products' && isHighCbd) {
-                    return false;
-                }
-            }
-            
-            // Check ratio filter - only apply if not empty and not "All"
-            if (ratioFilter && ratioFilter.trim() !== '' && ratioFilter.toLowerCase() !== 'all') {
-                const tagRatio = (tag.Ratio || tag['Ratio_or_THC_CBD'] || '').toString().trim();
-                if (tagRatio.toLowerCase() !== ratioFilter.toLowerCase()) {
                     return false;
                 }
             }
@@ -6173,10 +6168,12 @@ const TagManager = {
         
         // Ultra-fast debounced filter update (Mac-like speed)
         const fastFilterUpdate = debounce(async (filterType, value) => {
+            console.log(`🔥 fastFilterUpdate called for ${filterType}: ${value}`);
             // Skip complex operations for speed
             await this.updateFilterOptions();
             this.applyFilters();
             this.renderActiveFilters();
+            console.log(`🔥 fastFilterUpdate completed for ${filterType}`);
         }, 50); // Much faster debounce (50ms vs 150ms)
         
         filterIds.forEach(filterId => {
@@ -6191,6 +6188,7 @@ const TagManager = {
                 // Single, fast event handler (Mac-like simplicity)
                 const self = this;
                 filterElement._filterChangeHandler = (event) => {
+                    console.log(`🔥 FILTER CHANGED: ${filterId} = "${event.target.value}"`);
                     const filterType = self.getFilterTypeFromId(filterId);
                     const value = event.target.value;
                     
@@ -6200,6 +6198,7 @@ const TagManager = {
                     }
                     
                     // Ultra-fast filter update
+                    console.log(`🔥 Calling fastFilterUpdate for ${filterType}: ${value}`);
                     fastFilterUpdate(filterType, value);
                 };
                 
