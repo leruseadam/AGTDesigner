@@ -7072,8 +7072,10 @@ def get_filter_options():
                 response = make_response(jsonify(cached_options))
                 response.headers['Content-Encoding'] = 'gzip'
                 return response
-        else:
-            # Always clear cache for weight filter to ensure updated formatting (non-web)
+        # CRITICAL FIX: Don't clear cache for web clients - this was causing slowness!
+        # Only clear cache for non-web clients to ensure updated formatting
+        elif not is_web_client:
+            # Always clear cache for weight filter to ensure updated formatting (non-web only)
             cache.delete(cache_key)
         
         excel_processor = get_session_excel_processor()
@@ -7154,7 +7156,7 @@ def get_filter_options():
         # For Windows requests, cache the results for better performance
         if is_windows_request or is_windows_ua:
             try:
-                cache.set(cache_key, options, timeout=60)  # Cache for 1 minute
+                cache.set(cache_key, options, timeout=300)  # Cache for 5 minutes
                 if ENHANCED_LOGGING_AVAILABLE:
                     enhanced_logger.log_success("Cached filter options for Windows performance")
                 else:
