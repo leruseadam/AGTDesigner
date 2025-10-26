@@ -5033,7 +5033,8 @@ def generate_labels():
                     valid_selected_tags, invalid_selected_tags = _validate_tags_against_excel(excel_processor, normalized_tags)
             
             if invalid_selected_tags:
-                logging.warning(f"Removed {len(invalid_selected_tags)} invalid tags: {invalid_selected_tags}")
+                logging.warning(f"⚠️ REMOVED {len(invalid_selected_tags)} INVALID TAGS: {invalid_selected_tags}")
+                logging.warning(f"✅ KEPT {len(valid_selected_tags)} VALID TAGS")
                 
                 # CRITICAL FIX: If we're in a JSON matched session and have invalid tags, try to restore from cache
                 if is_json_matched_session and invalid_selected_tags:
@@ -5061,7 +5062,13 @@ def generate_labels():
                             logging.info(f"CRITICAL FIX: After cache restoration: {len(valid_selected_tags)} valid, {len(invalid_selected_tags)} invalid")
                 
                 if not valid_selected_tags:
-                    return jsonify({'error': f'No valid tags selected. All selected tags ({len(invalid_selected_tags)}) do not exist in the loaded data. Please ensure you have selected tags that exist in the current Excel file or database.'}), 400
+                    logging.error(f"❌ NO VALID TAGS: All {len(normalized_tags)} tags were filtered out")
+                    logging.error(f"❌ INVALID TAGS: {invalid_selected_tags}")
+                    return jsonify({
+                        'error': f'No valid tags selected. All selected tags ({len(invalid_selected_tags)}) do not exist in the loaded data. Please ensure you have selected tags that exist in the current Excel file or database.',
+                        'invalid_tags': invalid_selected_tags,
+                        'total_selected': len(normalized_tags)
+                    }), 400
             
             # Store the valid tags in both the Excel processor and session for persistence
             excel_processor.selected_tags = valid_selected_tags
