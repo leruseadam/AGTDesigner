@@ -5126,10 +5126,10 @@ def generate_labels():
                             # Convert database records to the format expected by TemplateProcessor
                             records = []
                             for db_record in valid_db_records:
-                            logging.info(f"Processing database record: {db_record.get('Product Name*', '')} - Units: {db_record.get('Units', 'MISSING')}, Weight: {db_record.get('Weight*', 'MISSING')}")
-                            
-                            # CRITICAL FIX: Use process_database_product_for_api to ensure consistent DescAndWeight creation
-                            processed_record = process_database_product_for_api(db_record)
+                                logging.info(f"Processing database record: {db_record.get('Product Name*', '')} - Units: {db_record.get('Units', 'MISSING')}, Weight: {db_record.get('Weight*', 'MISSING')}")
+                                
+                                # CRITICAL FIX: Use process_database_product_for_api to ensure consistent DescAndWeight creation
+                                processed_record = process_database_product_for_api(db_record)
                             
                             # Map database fields to template fields (using correct field names from database)
                             record = {
