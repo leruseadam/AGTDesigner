@@ -1216,6 +1216,9 @@ const TagManager = {
             return;
         }
         
+        // Create a filter key from the current filter combination
+        const filterKey = `vendor:${vendorFilter}|brand:${brandFilter}|productType:${productTypeFilter}|lineage:${lineageFilter}|weight:${weightFilter}|doh:${dohFilter}|highCbd:${highCbdFilter}|ratio:${ratioFilter}`;
+        
         // Check if we have cached results for this exact filter combination
         if (this.state.filterCache && this.state.filterCache.key === filterKey) {
             // Always pass original tags to preserve persistent selections
@@ -1331,6 +1334,14 @@ const TagManager = {
                 if (highCbdFilter === 'High CBD Products' && !isHighCbd) {
                     return false;
                 } else if (highCbdFilter === 'Non-High CBD Products' && isHighCbd) {
+                    return false;
+                }
+            }
+            
+            // Check ratio filter - only apply if not empty and not "All"
+            if (ratioFilter && ratioFilter.trim() !== '' && ratioFilter.toLowerCase() !== 'all') {
+                const tagRatio = (tag.Ratio || tag['Ratio_or_THC_CBD'] || '').toString().trim();
+                if (tagRatio.toLowerCase() !== ratioFilter.toLowerCase()) {
                     return false;
                 }
             }
