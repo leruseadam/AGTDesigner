@@ -5118,11 +5118,14 @@ def generate_labels():
                         logging.info(f"Filtered {len(db_records)} database records to {len(valid_db_records)} valid records")
                         
                         if not valid_db_records:
-                            return jsonify({'error': 'No valid products found in database (all products have missing ProductName)'}), 400
-                        
-                        # Convert database records to the format expected by TemplateProcessor
-                        records = []
-                        for db_record in valid_db_records:
+                            # CRITICAL FIX: When database is empty, fall back to Excel data
+                            logging.warning("⚠️ Database returned 0 valid records - falling back to Excel data")
+                            logging.info(f"Switching to Excel data for {len(valid_selected_tags)} tags")
+                            has_database = False  # Force Excel fallback
+                        else:
+                            # Convert database records to the format expected by TemplateProcessor
+                            records = []
+                            for db_record in valid_db_records:
                             logging.info(f"Processing database record: {db_record.get('Product Name*', '')} - Units: {db_record.get('Units', 'MISSING')}, Weight: {db_record.get('Weight*', 'MISSING')}")
                             
                             # CRITICAL FIX: Use process_database_product_for_api to ensure consistent DescAndWeight creation
