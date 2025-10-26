@@ -858,7 +858,8 @@ const TagManager = {
             lineage: 'lineageFilter',
             weight: 'weightFilter',
             doh: 'dohFilter',
-            highCbd: 'highCbdFilter'
+            highCbd: 'highCbdFilter',
+            ratio: 'ratioFilter'
             // Removed strain since there's no strainFilter dropdown in the HTML
         };
         
@@ -4351,7 +4352,7 @@ const TagManager = {
             weight: 'All'
         };
         // Set each filter dropdown to 'All' (or '')
-        const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
+        const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter', 'ratioFilter'];
         filterIds.forEach(id => {
             const el = document.getElementById(id);
             if (el) el.value = '';
@@ -6155,7 +6156,7 @@ const TagManager = {
     },
 
     setupFilterEventListeners() {
-        const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
+        const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter', 'ratioFilter'];
         
         console.log('Setting up Mac-like fast filter event listeners...');
         
@@ -6231,7 +6232,8 @@ const TagManager = {
             'lineageFilter': 'lineage',
             'weightFilter': 'weight',
             'dohFilter': 'doh',
-            'highCbdFilter': 'highCbd'
+            'highCbdFilter': 'highCbd',
+            'ratioFilter': 'ratio'
         };
         return idToType[filterId] || filterId;
     },
@@ -6245,7 +6247,8 @@ const TagManager = {
             { id: 'lineageFilter', label: 'Lineage' },
             { id: 'weightFilter', label: 'Weight' },
             { id: 'dohFilter', label: 'DOH' },
-            { id: 'highCbdFilter', label: 'High CBD' }
+            { id: 'highCbdFilter', label: 'High CBD' },
+            { id: 'ratioFilter', label: 'Ratio' }
         ];
         let container = document.getElementById('activeFiltersContainer');
         if (!container) {
@@ -6342,7 +6345,7 @@ const TagManager = {
             await performFullAppReset();
             
             // Additional filter-specific clearing
-            const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
+            const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter', 'ratioFilter'];
             
             // Clear each filter dropdown
             filterIds.forEach(filterId => {
@@ -6394,7 +6397,7 @@ const TagManager = {
         const currentVendorValue = vendorFilter ? vendorFilter.value : '';
         
         // List of all filters except vendor
-        const otherFilterIds = ['brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
+        const otherFilterIds = ['brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter', 'ratioFilter'];
         
         // Clear all other filter dropdowns
         otherFilterIds.forEach(filterId => {
