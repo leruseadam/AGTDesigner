@@ -5131,9 +5131,9 @@ def generate_labels():
                                 # CRITICAL FIX: Use process_database_product_for_api to ensure consistent DescAndWeight creation
                                 processed_record = process_database_product_for_api(db_record)
                             
-                            # Map database fields to template fields (using correct field names from database)
-                            record = {
-                                'Product Name*': processed_record.get('Product Name*', ''),
+                                # Map database fields to template fields (using correct field names from database)
+                                record = {
+                                    'Product Name*': processed_record.get('Product Name*', ''),
                                 'ProductName': processed_record.get('Product Name*', ''),  # Add ProductName for Excel processor compatibility
                                 'ProductType': processed_record.get('Product Type*', ''),
                                 'Lineage': processed_record.get('Lineage', 'MIXED'),
