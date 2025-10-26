@@ -909,12 +909,8 @@ def create_app():
 
 # Debug: Track app creation
 import sys
-print(f"🔍 DEBUG: Creating Flask app (import count: {sys.modules.get('app', {}).get('__import_count', 0) + 1})")
-if 'app' in sys.modules:
-    if not hasattr(sys.modules['app'], '__import_count'):
-        sys.modules['app'].__import_count = 0
-    sys.modules['app'].__import_count += 1
 
+# Create Flask app instance
 app = create_app()
 
 # Initialize Flask-Caching after app creation (if available)
