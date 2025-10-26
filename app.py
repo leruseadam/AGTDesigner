@@ -5076,8 +5076,9 @@ def generate_labels():
             session.modified = True
             
             logging.info(f"✅ Successfully validated and stored {len(valid_selected_tags)} tags")
-            logging.debug(f"Updated excel_processor.selected_tags: {excel_processor.selected_tags}")
-            logging.debug(f"Updated session['selected_tags']: {session['selected_tags']}")
+            logging.info(f"📊 Validation summary: {len(valid_selected_tags)} valid, {len(invalid_selected_tags)} invalid out of {len(normalized_tags)} total")
+            if invalid_selected_tags:
+                logging.warning(f"⚠️ These tags will NOT be generated: {invalid_selected_tags[:10]}")
         else:
             logging.warning("No selected_tags provided in request body or session")
             return jsonify({'error': 'No tags selected. Please select at least one tag before generating labels.'}), 400
