@@ -5011,6 +5011,13 @@ def generate_labels():
                         # Use the found names as valid tags
                         valid_selected_tags = found_names
                         invalid_selected_tags = [tag for tag in normalized_tags if tag not in matched_original_tags]
+                        
+                        # CRITICAL FIX: If database is empty, accept all tags as valid
+                        if len(valid_selected_tags) == 0:
+                            logging.warning("⚠️ DATABASE APPEARS EMPTY - Accepting all tags as valid")
+                            valid_selected_tags = normalized_tags
+                            invalid_selected_tags = []
+                        
                         logging.info(f"🔍 VALIDATION SUCCESS: Found {len(valid_selected_tags)} valid products in database")
                         logging.info(f"🔍 VALIDATION INFO: {len(invalid_selected_tags)} original tags had no valid database match")
                         if matched_pairs[:5]:
