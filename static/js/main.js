@@ -1222,6 +1222,18 @@ const TagManager = {
             return;
         }
         
+        // Create a unique key for the current filter combination
+        const filterKey = [
+            vendorFilter || '',
+            brandFilter || '',
+            productTypeFilter || '',
+            lineageFilter || '',
+            weightFilter || '',
+            dohFilter || '',
+            highCbdFilter || '',
+            ratioFilter || ''
+        ].join('|');
+        
         // Check if we have cached results for this exact filter combination
         if (this.state.filterCache && this.state.filterCache.key === filterKey) {
             // Always pass original tags to preserve persistent selections
