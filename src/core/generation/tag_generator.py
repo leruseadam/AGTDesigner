@@ -949,6 +949,21 @@ def process_chunk(args):
             elif row.get('Price') and str(row.get('Price', '')).strip():
                 price_val = str(row.get('Price', '')).strip()
             
+            # CRITICAL FIX: Format price with dollar sign before wrapping
+            if price_val and price_val.strip():
+                try:
+                    # Remove $ and commas, convert to float
+                    price_float = float(str(price_val).replace('$', '').replace(',', ''))
+                    # Format with $ sign
+                    if price_float.is_integer():
+                        price_val = f"${int(price_float)}"
+                    else:
+                        price_val = f"${price_float:.2f}"
+                except (ValueError, TypeError):
+                    # If it's not a valid number, just add $ if not present
+                    if not price_val.startswith('$'):
+                        price_val = f"${price_val}"
+            
             label_data["Price"] = wrap_with_marker(price_val, "PRICE")  # Fixed: Use "PRICE" marker to match markers.py definition
             
             lineage_text   = str(row.get("Lineage", "")).strip()
@@ -1161,9 +1176,14 @@ def process_chunk(args):
                 # Use Product Brand instead of Description for edibles in double template
                 desc = product_brand if product_brand else desc
             
-            # DescAndWeight should only contain the description text, not description + weight
-            # This field is mapped to the DESC marker in templates
-            combined = desc  # Just use the description, no weight combination
+            # DescAndWeight should contain description + weight (mapped to DESC marker in templates)
+            # Get weight units from the row
+            weight_units = row.get("WeightUnits", "") or row.get("CombinedWeight", "")
+            if weight_units:
+                # Combine description and weight with " - " separator
+                combined = f"{desc} - {weight_units}"
+            else:
+                combined = desc
             
             label_data["DescAndWeight"] = wrap_with_marker(combined, "DESC")
             
