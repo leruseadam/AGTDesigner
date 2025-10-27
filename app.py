@@ -5397,7 +5397,7 @@ def generate_labels():
                                 'Product Strain': json_product.get('Product Strain', ''),
                                 'Lineage': json_product.get('Lineage', 'HYBRID'),
                                 'Vendor': json_product.get('Vendor/Supplier*', json_product.get('Vendor', '')),
-                                'Price': json_product.get('Price', '25'),
+                                'Price': json_product.get('Price', ''),  # NO DEFAULT PRICE
                                 'DOH': json_product.get('DOH', ''),
                                 'Ratio': json_product.get('Ratio', ''),
                                 'Weight*': json_product.get('Weight*', ''),
@@ -5422,10 +5422,16 @@ def generate_labels():
                     logging.info(f"LINEAGE DEBUG: Record {i+1} - Product: '{product_name}', Lineage: '{lineage}'")
             logging.debug(f"Records returned from get_selected_records: {len(records) if records else 0}")
 
-        # CRITICAL DEBUG: Log final record count
+        # CRITICAL DEBUG: Log final record count and price data
         logging.info(f"🔍 DEBUG: Final records count: {len(records) if records else 0}")
         if records:
             logging.info(f"🔍 DEBUG: Sample record names: {[r.get('ProductName', r.get('Product Name*', 'NO_NAME')) for r in records[:5]]}")
+            # Log price information for each record to diagnose missing prices
+            for i, record in enumerate(records):
+                product_name = record.get('ProductName', record.get('Product Name*', 'Unknown'))
+                price = record.get('Price', 'NOT_FOUND')
+                price_star = record.get('Price*', 'NOT_FOUND')
+                logging.info(f"🔍 PRICE DEBUG Record {i+1}: '{product_name}' - Price={price}, Price*={price_star}")
         
         if not records:
             logging.error("No selected tags found in the data or failed to process records.")

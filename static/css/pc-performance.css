@@ -1,0 +1,91 @@
+/* PC Performance Optimizations - Remove expensive styling from filter dropdowns */
+
+/* Remove expensive backdrop-filter effects from filter dropdowns on PC */
+.sticky-filter-bar .form-select,
+.sticky-filter-bar .compact-filter,
+.filter-bar select {
+    /* Remove expensive backdrop-filter for faster rendering */
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    
+    /* Remove expensive box-shadow */
+    box-shadow: none !important;
+    
+    /* Remove expensive transitions */
+    transition: none !important;
+    
+    /* Simplify background to solid color for better performance */
+    background: rgba(42, 32, 64, 0.98) !important;
+}
+
+/* Remove hover effects from filter dropdowns */
+.sticky-filter-bar .form-select:hover,
+.sticky-filter-bar .compact-filter:hover,
+.filter-bar select:hover {
+    /* Remove transform for better performance */
+    transform: none !important;
+    
+    /* Remove box-shadow */
+    box-shadow: none !important;
+}
+
+/* Remove focus effects from filter dropdowns */
+.sticky-filter-bar .form-select:focus,
+.sticky-filter-bar .compact-filter:focus,
+.filter-bar select:focus {
+    /* Remove box-shadow */
+    box-shadow: none !important;
+    
+    /* Simple border color change only */
+    border-color: rgba(160, 132, 232, 0.5) !important;
+    outline: none !important;
+}
+
+/* Remove expensive styling from filter buttons */
+.sticky-filter-bar .btn {
+    /* Remove backdrop-filter */
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    
+    /* Remove transitions */
+    transition: none !important;
+}
+
+/* Remove hover effects from filter buttons */
+.sticky-filter-bar .btn:hover {
+    /* Remove transform */
+    transform: none !important;
+    
+    /* Remove box-shadow */
+    box-shadow: none !important;
+}
+
+/* Remove expensive styling from horizontal filter bar */
+.horizontal-filter-bar {
+    /* Remove backdrop-filter */
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    
+    /* Remove box-shadow */
+    box-shadow: none !important;
+    
+    /* Remove transitions */
+    transition: none !important;
+}
+
+/* Remove hover effects from horizontal filter bar */
+.horizontal-filter-bar:hover {
+    /* Remove transform */
+    transform: none !important;
+    
+    /* Remove box-shadow */
+    box-shadow: none !important;
+}
+
+/* Remove expensive option hover effects */
+.sticky-filter-bar select option:hover,
+.filter-bar select option:hover,
+.compact-filter option:hover {
+    /* Remove transitions */
+    transition: none !important;
+}

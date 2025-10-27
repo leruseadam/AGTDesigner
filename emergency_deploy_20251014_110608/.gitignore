@@ -1,9 +1,0 @@
-*.pyc
-__pycache__/
-*.log
-sessions/
-uploads/*.xlsx
-uploads/*.zip
-uploads/old_corrupted_backups/
-*.db-shm
-*.db-wal

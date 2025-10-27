@@ -914,6 +914,12 @@ def process_chunk(args):
         label_data = {}
         if i < len(chunk):
             row = chunk[i]
+            
+            # CRITICAL FIX: Log missing product data for debugging
+            product_name = str(row.get("ProductName", "")).strip()
+            if not product_name or product_name.lower() in ['', 'nan', 'none', 'null']:
+                logger.warning(f"⚠️  SKIPPING EMPTY PRODUCT at index {i}: No product name found")
+                continue
             doh_value = str(row.get("DOH", "")).strip().upper()
             if DEBUG_ENABLED:
                 logger.debug(f"Processing DOH value: {doh_value}")
@@ -948,6 +954,11 @@ def process_chunk(args):
                 price_val = str(row.get('Price*', '')).strip()
             elif row.get('Price') and str(row.get('Price', '')).strip():
                 price_val = str(row.get('Price', '')).strip()
+            
+            # CRITICAL FIX: Log missing prices for debugging
+            if not price_val or not price_val.strip():
+                logger.warning(f"⚠️  MISSING PRICE for product '{product_name}' at index {i}")
+                logger.debug(f"   Row data: Price*={row.get('Price*')}, Price={row.get('Price')}")
             
             # CRITICAL FIX: Format price with dollar sign before wrapping
             if price_val and price_val.strip():

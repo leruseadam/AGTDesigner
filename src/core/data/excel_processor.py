@@ -3861,7 +3861,7 @@ class ExcelProcessor:
                         'Description': description,
                         'WeightUnits': record.get('JointRatio', '') if product_type in {"pre-roll", "infused pre-roll"} else self._format_weight_units(record, excel_priority=True),
                         'ProductBrand': product_brand,
-                        'Price': str(record.get('Price*', '')).strip() if record.get('Price*') and str(record.get('Price*', '')).strip() else (str(record.get('Price', '')).strip() if record.get('Price') and str(record.get('Price', '')).strip() else '25'),
+                        'Price': str(record.get('Price*', '')).strip() if record.get('Price*') and str(record.get('Price*', '')).strip() else (str(record.get('Price', '')).strip() if record.get('Price') and str(record.get('Price', '')).strip() else ''),  # NO DEFAULT PRICE
                         'Lineage': str(final_lineage) if str(final_lineage) else "",
                         'DOH': doh_value,  # Keep DOH as raw value
                         'Ratio_or_THC_CBD': self._construct_thc_cbd_field(ai_value, ak_value, product_type) if product_type in classic_types else ratio_text,  # Use THC_CBD for classic types, ratio for non-classic
@@ -6527,7 +6527,7 @@ class ExcelProcessor:
                         'WeightUnits': record.get('JointRatio', '') if product_type in {"pre-roll", "infused pre-roll"} else self._format_weight_units(record, excel_priority=True),
                         'ProductBrand': product_brand,
                         'Product Brand': product_brand,  # CRITICAL FIX: Add Product Brand field for template processor compatibility
-                        'Price': str(record.get('Price*', '')).strip() if record.get('Price*') and str(record.get('Price*', '')).strip() else (str(record.get('Price', '')).strip() if record.get('Price') and str(record.get('Price', '')).strip() else '25'),  # Use correct price column with fallback
+                        'Price': str(record.get('Price*', '')).strip() if record.get('Price*') and str(record.get('Price*', '')).strip() else (str(record.get('Price', '')).strip() if record.get('Price') and str(record.get('Price', '')).strip() else ''),  # NO DEFAULT PRICE
                         'Lineage': str(final_lineage) if str(final_lineage) else "",
                         'DOH': doh_value,  # Keep DOH as raw value
                         'Ratio_or_THC_CBD': ratio_text,  # Use the processed ratio_text for all product types

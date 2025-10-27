@@ -6178,15 +6178,28 @@ const TagManager = {
         
         console.log('Setting up Mac-like fast filter event listeners...');
         
+        // Detect Windows platform for optimized performance
+        const isWindows = navigator.platform.toLowerCase().includes('win') || 
+                         navigator.userAgent.toLowerCase().includes('windows');
+        
         // Ultra-fast debounced filter update (Mac-like speed)
         const fastFilterUpdate = debounce(async (filterType, value) => {
-            console.log(`🔥 fastFilterUpdate called for ${filterType}: ${value}`);
-            // Skip complex operations for speed
-            await this.updateFilterOptions();
-            this.applyFilters();
-            this.renderActiveFilters();
+            console.log(`🔥 fastFilterUpdate called for ${filterType}: ${value} (Windows: ${isWindows})`);
+            
+            // Windows: Skip rendering active filters for speed
+            if (isWindows) {
+                await this.updateFilterOptions();
+                this.applyFilters();
+                // Skip renderActiveFilters() for Windows to improve performance
+            } else {
+                // Mac: Full rendering
+                await this.updateFilterOptions();
+                this.applyFilters();
+                this.renderActiveFilters();
+            }
+            
             console.log(`🔥 fastFilterUpdate completed for ${filterType}`);
-        }, 50); // Much faster debounce (50ms vs 150ms)
+        }, isWindows ? 25 : 50); // Even faster debounce on Windows (25ms vs 50ms)
         
         filterIds.forEach(filterId => {
             const filterElement = document.getElementById(filterId);

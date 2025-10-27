@@ -2143,7 +2143,7 @@ class JSONMatcher:
                     price = estimated_price
                     logging.info(f"💰 Estimated price '{price}' for '{product_name}' based on type and weight")
                 else:
-                    price = "25"  # Final fallback
+                    price = ""  # Final fallback - NO DEFAULT PRICE
             
             strain = str(item.get("strain_name", item.get("strain", ""))).strip()
             
@@ -2163,7 +2163,7 @@ class JSONMatcher:
                 'Product Type*': product_type,
                 'Weight*': weight or '1',
                 'Units': weight_units or 'g',
-                'Price*': price or '25',  # Use actual price from JSON or default
+                'Price*': price or '',  # NO DEFAULT PRICE
                 'THC test result': '',
                 'CBD test result': '',
                 'Product Strain': strain,
@@ -2226,7 +2226,7 @@ class JSONMatcher:
             elif json_item and json_item.get("price"):
                 excel_price = str(json_item.get("price", "")).strip()
             else:
-                excel_price = safe_row_get(excel_row, 'Price*') or safe_row_get(excel_row, 'Price') or '25'
+                excel_price = safe_row_get(excel_row, 'Price*') or safe_row_get(excel_row, 'Price') or ''  # NO DEFAULT PRICE
             
             # Get weight with JSON override and fallback
             if json_item and json_item.get("unit_weight"):
@@ -7033,7 +7033,7 @@ class JSONMatcher:
             
         except Exception as e:
             logging.error(f"Error creating tag from database info for '{primary_product_name}': {e}")
-            # Fallback to basic tag creation
+            # Fallback to basic tag creation - NO DEFAULT PRICE
             return {
                 'Product Name*': primary_product_name,
                 'ProductName': primary_product_name,
@@ -7042,7 +7042,7 @@ class JSONMatcher:
                 'Vendor': vendor,
                 'Source': 'JSON Match',  # Changed back to 'JSON Match' for proper frontend detection
                 'Product Type*': 'Unknown',
-                'Price': '25',
+                'Price': '',  # NO DEFAULT PRICE - let it be missing so we can identify the issue
                 'Weight*': '1 g',
                 'Units': 'g',
                 'Quantity*': '1'
@@ -7894,7 +7894,7 @@ class JSONMatcher:
                 'Vendor': vendor,
                 'Source': 'Educated Guess (Fallback)',
                 'Product Type*': 'Unknown',
-                'Price': '25',
+                'Price': '',  # NO DEFAULT PRICE - let it be missing so we can identify the issue
                 'Weight*': '1 g',
                 'Units': 'g',
                 'Quantity*': '1'

@@ -37,6 +37,20 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}?v={{ cache_bust }}">
   <!-- Windows Performance Optimizations CSS -->
   <link rel="stylesheet" href="{{ url_for('static', filename='css/windows-performance.css') }}?v={{ cache_bust }}">
+  
+  <!-- PC Performance Optimization - Load if on Windows -->
+  <script>
+    // Detect Windows platform and load PC performance CSS
+    if (navigator.platform.toLowerCase().includes('win') || 
+        navigator.userAgent.toLowerCase().includes('windows')) {
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = "{{ url_for('static', filename='css/pc-performance.css') }}?v={{ cache_bust }}";
+      document.head.appendChild(link);
+      console.log('PC performance optimization loaded for Windows');
+    }
+  </script>
+  
   <link rel="icon" type="image/x-icon" href="/favicon.ico">
   <link rel="alternate icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css">
