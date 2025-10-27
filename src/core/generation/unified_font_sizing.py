@@ -60,7 +60,7 @@ def _load_font_sizing_config():
                     'description': [(5, 34), (20, 32), (30, 28), (40, 26), (60, 24), (70, 22), (80, 20), (90, 18), (float('inf'), 16)],
                     'brand': [(10, 16), (15, 14), (25, 12), (35, 11), (float('inf'), 10)],
                     'price': [(2, 36), (3, 30), (float('inf'), 26)],  # $1/$11 = 36pt, $111+ = 30pt
-                    'lineage': [(60, 18), (float('inf'), 14)],  # Larger, more readable lineage font sizes
+                    'lineage': [(10, 18), (30, 16), (float('inf'), 14)],  # Max 18pt for lineage to prevent 20pt sizing
                     'ratio': [(10, 14), (20, 12), (30, 9), (float('inf'), 9)],
                     'thc_cbd': [(10, 12), (float('inf'), 12)],
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
