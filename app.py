@@ -4543,7 +4543,7 @@ def _extract_price_from_database_product(product):
                 if price_str:
                     return price_str
     
-    # Return empty string if no price found - no default price
+    # Return empty string if no price found - use actual data only
     return ''
 
 def _create_desc_and_weight(product_name, weight_units):
@@ -5957,26 +5957,33 @@ def process_database_product_for_api(db_product):
             processed_product['WeightUnits'] = combined_weight
             processed_product['weightWithUnits'] = combined_weight
     
-    # Create DescAndWeight field if missing or empty
-    desc_and_weight = processed_product.get('DescAndWeight', '')
-    if not desc_and_weight or desc_and_weight == '' or str(desc_and_weight).strip() == '':
-        product_name = processed_product.get('Product Name*', processed_product.get('Product Name', ''))
-        weight_units = processed_product.get('CombinedWeight', '')
-        
-        # CRITICAL FIX: Use Product Name* and let _create_desc_and_weight handle the cleaning
-        # The _create_desc_and_weight function will automatically remove "by Vendor" patterns
-        if product_name and weight_units and weight_units != 'N/A':
-            processed_product['DescAndWeight'] = _create_desc_and_weight(product_name, weight_units)
-        elif product_name:
-            # Clean it manually if no weight
-            import re
-            description = str(product_name).strip()
-            if " by " in description:
-                description = description.split(" by ")[0].strip()
-            description = re.sub(r' - [\d.].*$', '', description)
-            processed_product['DescAndWeight'] = description
-        else:
-            processed_product['DescAndWeight'] = 'N/A'
+    # Create DescAndWeight field - always regenerate to ensure it has weight
+    product_name = processed_product.get('Product Name*', processed_product.get('Product Name', ''))
+    weight_units = processed_product.get('CombinedWeight', '')
+    
+    # CRITICAL FIX: Always regenerate DescAndWeight to ensure it includes weight
+    # If CombinedWeight is missing or N/A, try to extract from product name
+    if not weight_units or weight_units == '' or weight_units == 'N/A':
+        # Try to extract weight from product name (e.g., "Gelato Distillate Cartridge - 1g")
+        import re
+        weight_match = re.search(r' - ([\d.]+[a-z]+)', str(product_name))
+        if weight_match:
+            weight_units = weight_match.group(1)
+            processed_product['CombinedWeight'] = weight_units
+    
+    # Now create DescAndWeight with weight included
+    if product_name and weight_units and weight_units != 'N/A':
+        processed_product['DescAndWeight'] = _create_desc_and_weight(product_name, weight_units)
+    elif product_name:
+        # If still no weight, just use the cleaned product name
+        import re
+        description = str(product_name).strip()
+        if " by " in description:
+            description = description.split(" by ")[0].strip()
+        description = re.sub(r' - [\d.].*$', '', description)
+        processed_product['DescAndWeight'] = description
+    else:
+        processed_product['DescAndWeight'] = 'N/A'
     
     return processed_product
 
