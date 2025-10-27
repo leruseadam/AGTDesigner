@@ -717,6 +717,15 @@ def get_product_database(store_name=None):
         # Use store-specific database for better matching
         db_filename = f'product_database_{store_name}.db'
         db_path = os.path.join(current_dir, 'uploads', db_filename)
+        
+        # CRITICAL FIX: Fallback to main database if store-specific database doesn't exist
+        if not os.path.exists(db_path):
+            logging.warning(f"Store-specific database not found: {db_path}, falling back to main database")
+            db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
+            # Use store name from main database if available
+            if not os.path.exists(db_path):
+                logging.error(f"Main database also not found: {db_path}")
+        
         _product_database = ProductDatabase(db_path)
         _product_database._store_name = store_name
         # Force database initialization to ensure it's loaded
@@ -1539,7 +1548,7 @@ def get_session_product_database():
     try:
         if not hasattr(app, '_product_database'):
             from src.core.data.product_database import ProductDatabase
-            # CRITICAL FIX: Use the main product_database.db file
+            # CRITICAL FIX: Use the main product_database.db file (has 8,825 Bothell products)
             db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
             
             # Fallback to AGT_Bothell database if main doesn't exist
@@ -1547,7 +1556,9 @@ def get_session_product_database():
                 db_path = os.path.join(current_dir, 'uploads', 'product_database_AGT_Bothell.db')
             
             app._product_database = ProductDatabase(db_path)
-            logging.info(f"Created new ProductDatabase instance for session at {db_path}")
+            app._product_database._store_name = 'AGT_Bothell'  # Set store name for Bothell
+            app._product_database.init_database()  # Ensure database is initialized
+            logging.info(f"Created new ProductDatabase instance for session at {db_path} with store: AGT_Bothell")
         return app._product_database
     except Exception as e:
         logging.error(f"Error getting session product database: {e}")
