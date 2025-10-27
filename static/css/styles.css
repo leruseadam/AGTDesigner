@@ -2443,64 +2443,19 @@ img, video, canvas, svg {
     text-shadow: none !important;
   }
   
-  /* Lineage-specific option styling with white text and colored backgrounds */
-  .lineage-dropdown option[value="SATIVA"], .form-select.lineage-dropdown option[value="SATIVA"] {
-    background: rgba(237, 65, 35, 0.9) !important;
-    color: white !important;
-    font-weight: 600 !important;
-  }
-  
-  .lineage-dropdown option[value="INDICA"], .form-select.lineage-dropdown option[value="INDICA"] {
-    background: rgba(160, 132, 232, 0.9) !important;
-    color: white !important;
-    font-weight: 600 !important;
-  }
-  
-  .lineage-dropdown option[value="HYBRID"], .form-select.lineage-dropdown option[value="HYBRID"] {
-    background: rgba(0, 153, 0, 0.9) !important;  /* Green for HYBRID */
-    color: white !important;
-    font-weight: 600 !important;
-  }
-  
-  .lineage-dropdown option[value="HYBRID/SATIVA"], .form-select.lineage-dropdown option[value="HYBRID/SATIVA"] {
-    background: rgba(237, 65, 35, 0.9) !important;
-    color: white !important;
-    font-weight: 600 !important;
-  }
-  
-  .lineage-dropdown option[value="HYBRID/INDICA"], .form-select.lineage-dropdown option[value="HYBRID/INDICA"] {
-    background: rgba(153, 0, 255, 0.9) !important;  /* Purple for HYBRID/INDICA (matches INDICA) */
-    color: white !important;
-    font-weight: 600 !important;
-  }
-  
-  .lineage-dropdown option[value="CBD"], .form-select.lineage-dropdown option[value="CBD"] {
-    background: rgba(241, 194, 50, 0.9) !important;
-    color: white !important;
-    font-weight: 600 !important;
-  }
-  
-  .lineage-dropdown option[value="CBD_BLEND"], .form-select.lineage-dropdown option[value="CBD_BLEND"] {
-    background: rgba(241, 194, 50, 0.9) !important;
-    color: white !important;
-    font-weight: 600 !important;
-  }
-  
-  .lineage-dropdown option[value="MIXED"], .form-select.lineage-dropdown option[value="MIXED"] {
-    background: rgba(0, 33, 245, 0.9) !important;
-    color: white !important;
-    font-weight: 600 !important;
-  }
-  
-  .lineage-dropdown option[value="PARA"], .form-select.lineage-dropdown option[value="PARA"] {
-    background: rgba(255, 192, 203, 0.9) !important;
-    color: white !important;
-    font-weight: 600 !important;
-  }
-  
+  /* Lineage-specific option styling - simple black text on white background */
+  .lineage-dropdown option[value="SATIVA"], .form-select.lineage-dropdown option[value="SATIVA"],
+  .lineage-dropdown option[value="INDICA"], .form-select.lineage-dropdown option[value="INDICA"],
+  .lineage-dropdown option[value="HYBRID"], .form-select.lineage-dropdown option[value="HYBRID"],
+  .lineage-dropdown option[value="HYBRID/SATIVA"], .form-select.lineage-dropdown option[value="HYBRID/SATIVA"],
+  .lineage-dropdown option[value="HYBRID/INDICA"], .form-select.lineage-dropdown option[value="HYBRID/INDICA"],
+  .lineage-dropdown option[value="CBD"], .form-select.lineage-dropdown option[value="CBD"],
+  .lineage-dropdown option[value="CBD_BLEND"], .form-select.lineage-dropdown option[value="CBD_BLEND"],
+  .lineage-dropdown option[value="MIXED"], .form-select.lineage-dropdown option[value="MIXED"],
+  .lineage-dropdown option[value="PARA"], .form-select.lineage-dropdown option[value="PARA"],
   .lineage-dropdown option[value="PARAPHERNALIA"], .form-select.lineage-dropdown option[value="PARAPHERNALIA"] {
-    background: rgba(255, 192, 203, 0.9) !important;
-    color: white !important;
+    background: white !important;
+    color: black !important;
     font-weight: 600 !important;
   }
   
