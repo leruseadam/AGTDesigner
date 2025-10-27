@@ -5120,15 +5120,12 @@ def generate_labels():
                         db_count = cursor.fetchone()[0]
                         logging.info(f"Database has {db_count} products")
                         
-                        # CRITICAL FIX: If database is completely empty, bypass it and use Excel data
-                        if db_count == 0:
-                            logging.warning(f"⚠️ DATABASE IS EMPTY - BYPASSING DATABASE VALIDATION")
+                        # CRITICAL FIX: If database is nearly empty, bypass it and use Excel data
+                        if db_count < 100:
+                            logging.warning(f"⚠️ DATABASE HAS ONLY {db_count} PRODUCTS - BYPASSING DATABASE VALIDATION")
                             logging.info(f"⚠️ Using Excel data directly for all {len(valid_selected_tags)} selected tags")
                             has_database = False
                             # Don't try to use database, will fall through to Excel processing below
-                        elif db_count < 10:
-                            logging.info(f"Database has {db_count} products - continuing with database")
-                        # Only bypass if completely empty, otherwise use the database
                     except Exception as db_check_error:
                         logging.warning(f"Could not check database count: {db_check_error}")
                         has_database = False
@@ -5918,40 +5915,13 @@ def process_database_product_for_api(db_product):
     desc_and_weight = processed_product.get('DescAndWeight', '')
     if not desc_and_weight or desc_and_weight == '' or str(desc_and_weight).strip() == '':
         product_name = processed_product.get('Product Name*', processed_product.get('Product Name', ''))
-        raw_description = processed_product.get('Description', product_name)  # Use description if available, fallback to product name
-        
-        # CRITICAL FIX: Clean description to remove "by Vendor" patterns and weight information
-        import re
-        cleaned_description = str(raw_description).strip()
-        # Remove " by " patterns
-        if " by " in cleaned_description:
-            cleaned_description = cleaned_description.split(" by ")[0].strip()
-        # Remove weight information (patterns like " - 1g", " - .5g")
-        cleaned_description = re.sub(r' - [\d.].*$', '', cleaned_description)
-        cleaned_description = cleaned_description.strip()
-        
-        # Update the Description field in processed_product
-        processed_product['Description'] = cleaned_description
-        
+        description = processed_product.get('Description', product_name)  # Use description if available, fallback to product name
         weight_units = processed_product.get('CombinedWeight', '')
         
-        # CRITICAL FIX: If weight_units is empty, try to create it from Weight* and Units
-        if not weight_units or weight_units == '' or str(weight_units).strip() == '' or str(weight_units) == 'N/A':
-            weight_value = processed_product.get('Weight*', '')
-            units_value = processed_product.get('Units', '')
-            if weight_value and units_value:
-                weight_units = f"{weight_value}{units_value}"
-        
-        # CRITICAL FIX: If still no weight, use default '1g' for cartridge/concentrate products
-        if not weight_units or weight_units == '' or str(weight_units).strip() == '' or str(weight_units) == 'N/A':
-            product_type = str(processed_product.get('Product Type*', '')).lower()
-            if 'cartridge' in product_type or 'concentrate' in product_type or 'distillate' in str(processed_product.get('Product Name*', '')).lower():
-                weight_units = '1g'
-        
-        if cleaned_description and weight_units and weight_units != 'N/A':
-            processed_product['DescAndWeight'] = _create_desc_and_weight(cleaned_description, weight_units)
-        elif cleaned_description:
-            processed_product['DescAndWeight'] = cleaned_description
+        if description and weight_units and weight_units != 'N/A':
+            processed_product['DescAndWeight'] = _create_desc_and_weight(description, weight_units)
+        elif description:
+            processed_product['DescAndWeight'] = str(description).strip()
         else:
             processed_product['DescAndWeight'] = 'N/A'
     

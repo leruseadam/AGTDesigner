@@ -1231,14 +1231,13 @@ class ProductDatabase:
         try:
             self.init_database()  # Ensure DB is initialized
             logger.info(f"Starting to store Excel data with {len(df)} rows from {source_file}")
-            
+
             if df is None or df.empty:
                 logger.warning("No data to store - DataFrame is empty")
                 return {'stored': 0, 'updated': 0, 'errors': 0, 'message': 'No data to store'}
-            
-            # TEMPORARILY DISABLE JSON match filtering to test database storage
-            # filtered_df = self._filter_json_matched_tags(df)
-            filtered_df = df.copy()  # Use all data without filtering
+
+            # Restore JSON match filtering to match local version
+            filtered_df = self._filter_json_matched_tags(df)
 
             # CRITICAL NORMALIZATION: map common column aliases used by different upload paths
             try:
@@ -1277,35 +1276,25 @@ class ProductDatabase:
                         filtered_df[required_col] = ''
             except Exception as norm_err:
                 logger.warning(f"Column normalization failed: {norm_err}")
-            
-            print(f"🔍 DEBUG: Database storage - Original rows: {len(df)}, Filtered rows: {len(filtered_df)}")
-            print(f"🔍 DEBUG: Database storage - Columns: {list(filtered_df.columns)}")
-            
-            # if filtered_df.empty:
-            #     logger.warning("All data was filtered out as JSON matched tags - nothing to store")
-            #     return {
-            #         'stored': 0, 
-            #         'updated': 0, 
-            #         'errors': 0, 
-            #         'excluded_json_matches': len(df),
-            #         'message': f'All {len(df)} rows were JSON matched tags - excluded from database storage'
-            #     }
-            
+
+            print(f" DEBUG: Database storage - Original rows: {len(df)}, Filtered rows: {len(filtered_df)}")
+            print(f" DEBUG: Database storage - Columns: {list(filtered_df.columns)}")
+
             # Initialize duplicate tracking for this upload
             self._current_upload_products = set()
-            
+
             stored_count = 0
             updated_count = 0
             skipped_duplicates = 0
             error_count = 0
             errors = []
-            
+
             # Process each row in the filtered DataFrame
-            print(f"🔍 DEBUG: Starting to process {len(filtered_df)} rows for database storage")
+            print(f" DEBUG: Starting to process {len(filtered_df)} rows for database storage")
             for index, row in filtered_df.iterrows():
                 try:
-                    if index % 100 == 0:  # Log every 100 rows
-                        print(f"🔍 DEBUG: Processing row {index}/{len(filtered_df)}")
+                    if index % 100 == 0:
+                        print(f"\u001f DEBUG: Processing row {index}/{len(filtered_df)}")
                     # Convert row to dictionary and handle NaN values
                     row_dict = {}
                     for col in filtered_df.columns:
@@ -1314,15 +1303,27 @@ class ProductDatabase:
                             row_dict[col] = None
                         else:
                             row_dict[col] = str(value).strip() if isinstance(value, str) else value
-                    
-                    # Map to database columns correctly
+
+                    # Log raw Excel values for key fields
+                    logger.info(f"[EXCEL DEBUG] Row {index}: Product Name*='{row_dict.get('Product Name*', '')}', Product Type*='{row_dict.get('Product Type*', '')}', Vendor/Supplier*='{row_dict.get('Vendor/Supplier*', '')}', Vendor='{row_dict.get('Vendor', '')}', Product Brand='{row_dict.get('Product Brand', '')}'")
+
+                    # Only use fallback if column is missing, not if present but empty
                     product_data = {
                         'Product Name*': row_dict.get('Product Name*', ''),
-                        'Product Type*': self._ensure_crucial_value(row_dict.get('Product Type*', ''), 'Unknown', 'Product Type'),
+                        'Product Type*': row_dict['Product Type*'] if 'Product Type*' in row_dict else 'Unknown',
                         'Lineage': row_dict.get('Lineage', ''),
-                        'Vendor/Supplier*': self._ensure_crucial_value(row_dict.get('Vendor/Supplier*', row_dict.get('Vendor', '')), 'Unknown Vendor', 'Vendor'),
-                        'Vendor': self._ensure_crucial_value(row_dict.get('Vendor', row_dict.get('Vendor/Supplier*', '')), 'Unknown Vendor', 'Vendor'),
-                        'Product Brand': self._ensure_crucial_value(row_dict.get('Product Brand', ''), 'Unknown Brand', 'Product Brand'),
+                        'Vendor/Supplier*': row_dict['Vendor/Supplier*'] if 'Vendor/Supplier*' in row_dict else 'Unknown Vendor',
+                        'Vendor': row_dict['Vendor'] if 'Vendor' in row_dict else 'Unknown Vendor',
+                        'Product Brand': row_dict['Product Brand'] if 'Product Brand' in row_dict else 'Unknown Brand',
+                    }
+
+                    # Log when fallback/default values are used
+                    for key, fallback in [('Product Type*', 'Unknown'), ('Vendor/Supplier*', 'Unknown Vendor'), ('Vendor', 'Unknown Vendor'), ('Product Brand', 'Unknown Brand')]:
+                        if key not in row_dict:
+                            logger.warning(f"[FALLBACK DEBUG] Row {index}: Using fallback for '{key}' -> '{fallback}'")
+
+                    # Build product_data dictionary with all fields
+                    product_data.update({
                         'Description': self._process_description(
                             row_dict.get('Product Name*', ''), 
                             row_dict.get('Description', '')
@@ -1366,7 +1367,54 @@ class ProductDatabase:
                         'Product Tags (comma separated)': row_dict.get('Product Tags (comma separated)', ''),
                         'Image URL': row_dict.get('Image URL', ''),
                         'Ingredients': row_dict.get('Ingredients', ''),
-                        # Additional columns for comprehensive Excel data matching
+                        'Total THC': row_dict.get('Total THC', ''),
+                        'THCA': row_dict.get('THC Content', ''),
+                        'CBDA': row_dict.get('Total CBD', ''),
+                        'CBN': row_dict.get('CBN', ''),
+                        'Ratio_or_THC_CBD': row_dict.get('Ratio_or_THC_CBD', ''),
+                        'Vendor/Supplier*': row_dict.get('Vendor/Supplier*', ''),
+                        'Vendor/Supplier': row_dict.get('Vendor/Supplier', ''),
+                        'Product Name*': row_dict.get('Product Name*', ''),
+                        'Product Name': row_dict.get('Product Name', ''),
+                        'Quantity Received*': row_dict.get('Quantity Received*', ''),
+                        'WeightWithUnits': row_dict.get('WeightWithUnits', ''),
+                        'WeightUnits': row_dict.get('WeightUnits', ''),
+                        'ProductBrand': row_dict.get('ProductBrand', ''),
+                        'ProductBrandCenter': row_dict.get('ProductBrandCenter', ''),
+                        'THC_CBD': row_dict.get('THC_CBD', ''),
+                        'THC': row_dict.get('THC', ''),
+                        'CBD': row_dict.get('CBD', ''),
+                        'AI': self._calculate_ai_value(row_dict),
+                        'AJ': row_dict.get('THC Content', ''),
+                        'AK': self._calculate_ak_value(row_dict),
+                        'Source': row_dict.get('Source', f'Excel Import - {source_file}' if source_file else 'Excel Import'),
+                        'Date Added': row_dict.get('Date Added', datetime.now().isoformat()),
+                        'A-Bisabolol (mg/g)': row_dict.get('A-Bisabolol (mg/g)', ''),
+                        'A-Humulene (mg/g)': row_dict.get('A-Humulene (mg/g)', ''),
+                        'A-Maaliene (mg/g)': row_dict.get('A-Maaliene (mg/g)', ''),
+                        'A-Myrcene (mg/g)': row_dict.get('A-Myrcene (mg/g)', ''),
+                        'A-Pinene (mg/g)': row_dict.get('A-Pinene (mg/g)', ''),
+                        'B-Caryophyllene (mg/g)': row_dict.get('B-Caryophyllene (mg/g)', ''),
+                        'B-Myrcene (mg/g)': row_dict.get('B-Myrcene (mg/g)', ''),
+                        'B-Pinene (mg/g)': row_dict.get('B-Pinene (mg/g)', ''),
+                        'Bisabolol (mg/g)': row_dict.get('Bisabolol (mg/g)', ''),
+                        'Borneol (mg/g)': row_dict.get('Borneol (mg/g)', ''),
+                        'Camphene (mg/g)': row_dict.get('Camphene (mg/g)', ''),
+                        'Camphor (mg/g)': row_dict.get('Camphor (mg/g)', ''),
+                        'Carene (mg/g)': row_dict.get('Carene (mg/g)', ''),
+                        'Carvacrol (mg/g)': row_dict.get('Carvacrol (mg/g)', ''),
+                        'Carvone (mg/g)': row_dict.get('Carvone (mg/g)', ''),
+                        'Caryophyllene (mg/g)': row_dict.get('Caryophyllene (mg/g)', ''),
+                        'Cedrol (mg/g)': row_dict.get('Cedrol (mg/g)', ''),
+                        'Citral (mg/g)': row_dict.get('Citral (mg/g)', ''),
+                        'Citronellol (mg/g)': row_dict.get('Citronellol (mg/g)', ''),
+                        'Cymene (mg/g)': row_dict.get('Cymene (mg/g)', ''),
+                        'Delta-3-Carene (mg/g)': row_dict.get('Delta-3-Carene (mg/g)', ''),
+                        # ... add any additional columns as needed
+                    })
+
+                    # Log final product data being stored
+                    logger.info(f"[STORE DEBUG] Row {index}: Final product_data={product_data}")
                         'Total THC': row_dict.get('Total THC', ''),
                         'THCA': row_dict.get('THC Content', ''),
                         'CBDA': row_dict.get('Total CBD', ''),

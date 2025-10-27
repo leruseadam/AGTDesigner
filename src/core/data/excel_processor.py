@@ -3476,14 +3476,10 @@ class ExcelProcessor:
                                     product_name = product.get('Product Name*', product.get('ProductName', ''))
                                     if product_name in selected_tag_names:
                                         # DATABASE PRIORITY: Ensure all fields come from database with safe defaults
-                                        # CRITICAL FIX: Clean the description from database if it contains "by Vendor" patterns
-                                        raw_description = product.get('Description', product_name)
-                                        cleaned_description = self._process_description_from_product_name(raw_description)
-                                        
                                         record = {
                                             'ProductName': product_name,
                                             'Product Name*': product_name,
-                                            'Description': cleaned_description,
+                                            'Description': product.get('Description', product_name),
                                             'DescAndWeight': self._process_description_from_product_name(product_name),  # Use Excel processor formula
                                             'Product Type*': product.get('Product Type*', 'flower'),  # Default to flower for new products
                                             'Product Brand': product.get('Product Brand', ''),

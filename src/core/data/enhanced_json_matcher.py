@@ -1140,124 +1140,50 @@ class EnhancedJSONMatcher:
                     json_item = item
                     logging.debug(f"🎯 DATABASE PRIORITY: Better match found at index {i}: '{item_name}' (score: {total_score:.3f})")
         
-        # CRITICAL FIX: If no good match found, still use first JSON item but with lower confidence
+        # GUARANTEE: If no good match found (low confidence), use JSON item for all template-required columns
         if not json_item and json_items:
             json_item = json_items[0]
-            best_match_score = 0.1  # Low confidence fallback
+            best_match_score = 0.05  # Very low confidence fallback
             json_item_name = (json_item.get('product_name') or json_item.get('inventory_name') or 'UNKNOWN')
-            logging.info(f"🔄 DATABASE PRIORITY: No good match found, using first JSON item '{json_item_name}' as fallback")
-            
+            logging.info(f"🔄 DATABASE PRIORITY: No good match found, using fallback JSON item '{json_item_name}' for guaranteed tag")
         if not json_item:
-            logging.warning("🔄 DATABASE PRIORITY: No JSON item available for match")
+            logging.warning("🔄 DATABASE PRIORITY: No JSON item available for guaranteed tag")
             return product_dict
-            
-        # Create database-priority product: 100% database data
-        db_priority_product = dict(product_dict)  # Start with database match - this is our complete data source
-        
-        logging.info(f"� DATABASE PRIORITY: Using 100% database-derived information for '{product_name}'")
-        logging.debug(f"💽 DATABASE PRIORITY: Database product contains {len(db_priority_product)} fields")
-        
-        # IMPORTANT: NO JSON data merging - all information comes from database
-        # JSON is only used for matching purposes, not for data extraction
-        
-        # CRITICAL FIX: Use database weight data, don't override with defaults
-        # Only set defaults for fields that are truly missing, not for weight data
-        critical_fields = {
-            'Price': '25.00',  # Default price if missing
-            'THC test result': '0.00',  # Default THC if missing
-            'CBD test result': '0.00',  # Default CBD if missing
-            'Quantity*': '1',  # Default quantity if missing
-            'Product Type*': 'Unknown',  # Default type if missing
-            'Lineage': 'MIXED',  # Default lineage if missing
-        }
-        
-        # CRITICAL FIX: Preserve database weight data - don't override with defaults
-        if db_priority_product.get('Weight*'):
-            logging.info(f"✅ DATABASE WEIGHT PRESERVED: {db_priority_product.get('Weight*')}{db_priority_product.get('Units', 'g')} for '{product_name}'")
-            logging.info(f"🔍 MATCHED DB PRODUCT: '{db_priority_product.get('Product Name*', 'N/A')}'")
-        else:
-            logging.warning(f"⚠️ NO DATABASE WEIGHT: Product '{product_name}' has no weight data in database")
-            logging.warning(f"🔍 MATCHED DB PRODUCT: '{db_priority_product.get('Product Name*', 'N/A')}'")
-            logging.warning(f"🔍 DEBUG: Available fields in db_priority_product: {list(db_priority_product.keys())}")
-            logging.warning(f"🔍 DEBUG: Weight-related fields: Weight*='{db_priority_product.get('Weight*', 'None')}', Units='{db_priority_product.get('Units', 'None')}', CombinedWeight='{db_priority_product.get('CombinedWeight', 'None')}'")
-            # Only set default weight if truly missing from database
-            critical_fields['Weight*'] = '1'
-            critical_fields['Units'] = 'g'
-        
-        # SPECIAL HANDLING FOR PRE-ROLL PRODUCTS: Use JointRatio instead of Weight* 
-        product_type = (db_priority_product.get('Product Type*') or '').lower().strip()
-        is_preroll = 'pre-roll' in product_type or 'infused pre-roll' in product_type
-        
-        logging.info(f"🔍 ENHANCED MATCHER DEBUG: Product '{db_priority_product.get('Product Name*', 'N/A')}' Type: '{product_type}' Is Pre-roll: {is_preroll}")
-        
-        if is_preroll:
-            # For pre-roll products, preserve JointRatio and update Weight* for display
-            joint_ratio = db_priority_product.get('JointRatio', '').strip()
-            logging.info(f"🔍 PRE-ROLL JOINT RATIO: Found '{joint_ratio}' for product '{db_priority_product.get('Product Name*', 'N/A')}'")
-            if joint_ratio and joint_ratio not in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
-                # Preserve JointRatio field and set Weight* for display compatibility
-                db_priority_product['Weight*'] = joint_ratio
-                # Ensure JointRatio field is explicitly preserved for template processing
-                db_priority_product['JointRatio'] = joint_ratio
-                logging.info(f"🚬 PRE-ROLL FIXED: Using JointRatio '{joint_ratio}' as Weight* for {product_type}")
-            else:
-                # Default JointRatio if missing - preserve both fields
-                default_ratio = '0.5g x 2 Pack'
-                db_priority_product['JointRatio'] = default_ratio
-                db_priority_product['Weight*'] = default_ratio
-                logging.debug(f"🚬 PRE-ROLL PRIORITY: Set default JointRatio '{default_ratio}' for {product_type}")
-        
-        filled_defaults = 0
-        for field, default_value in critical_fields.items():
-            current_value = db_priority_product.get(field)
-            if not current_value or str(current_value).strip() in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
-                db_priority_product[field] = default_value
-                filled_defaults += 1
-                logging.debug(f"� DATABASE PRIORITY: Set default for {field} = '{default_value}'")
-        
-        if filled_defaults > 0:
-            logging.info(f"� DATABASE PRIORITY: Applied {filled_defaults} default values for missing database fields")
-                
-        # CRITICAL FIX: Ensure weight data is properly formatted for template generation
-        if db_priority_product.get('Weight*'):
-            weight_value = str(db_priority_product.get('Weight*', '')).strip()
-            units_value = str(db_priority_product.get('Units', 'g')).strip()
-            
-            # CRITICAL FIX: Check if weight_value already contains units to avoid duplication
-            if weight_value and units_value:
-                # Check if weight_value already ends with the units (e.g., "0.5oz" already contains "oz")
-                if weight_value.lower().endswith(units_value.lower()):
-                    # Weight already has units, use as-is
-                    clean_weight = weight_value
-                else:
-                    # Weight doesn't have units, add them
-                    clean_weight = f"{weight_value}{units_value}"
-            else:
-                clean_weight = weight_value or ''
-            
-            # CRITICAL FIX: Remove any existing duplication in WeightUnits field
-            existing_weight_units = str(db_priority_product.get('WeightUnits', '')).strip()
-            if existing_weight_units:
-                # Check if WeightUnits already contains a clean weight format
-                import re
-                # Pattern to match weight formats like "3.4oz", "1616.0g", "22.0oz"
-                weight_pattern = r'^(\d+(?:\.\d+)?)(oz|g|mg|kg|lb|lbs)$'
-                match = re.match(weight_pattern, existing_weight_units, re.IGNORECASE)
-                if match:
-                    # WeightUnits is already clean, use it
-                    clean_weight = existing_weight_units
-                    logging.info(f"✅ USING CLEAN WEIGHTUNITS: {clean_weight} for '{product_name}'")
-                else:
-                    # WeightUnits has duplication, try to fix specific patterns from the labels
-                    # Handle patterns like: "0.50.5oz", "1010.0g", "0.220.22g", "0.220.22oz"
-                    
-                    # Pattern 1: Decimal duplication like "0.50.5oz" -> "0.5oz"
-                    decimal_dup_pattern = r'^(\d+\.\d{1,2})\1(oz|g|mg|kg|lb|lbs)$'
-                    match1 = re.match(decimal_dup_pattern, existing_weight_units, re.IGNORECASE)
-                    if match1:
-                        clean_weight = f"{match1.group(1)}{match1.group(2)}"
-                        logging.info(f"✅ FIXED DECIMAL DUPLICATION: '{existing_weight_units}' -> '{clean_weight}' for '{product_name}'")
-                    else:
+        fallback_mode = best_match_score <= 0.05
+        if fallback_mode and json_item:
+            # Map JSON fields to expected template columns
+            merged_product = {}
+            # Name
+            merged_product['Product Name*'] = json_item.get('product_name') or json_item.get('inventory_name') or json_item.get('name') or ''
+            # Price
+            merged_product['Price'] = json_item.get('price') or json_item.get('retail_price') or json_item.get('unit_price') or json_item.get('sale_price') or ''
+            # Type
+            merged_product['Type'] = json_item.get('type') or json_item.get('category') or json_item.get('product_type') or ''
+            # Lineage
+            merged_product['Lineage'] = json_item.get('lineage') or json_item.get('strain') or ''
+            # Vendor
+            merged_product['Vendor'] = json_item.get('vendor') or json_item.get('brand') or ''
+            # Weight
+            merged_product['Weight*'] = json_item.get('weight') or json_item.get('Weight') or json_item.get('weight_with_units') or json_item.get('size') or ''
+            # Units
+            merged_product['Units'] = json_item.get('units') or json_item.get('WeightUnits') or json_item.get('weight_units') or ''
+            # Barcode
+            merged_product['Barcode'] = json_item.get('barcode') or json_item.get('SKU') or ''
+            # Category
+            merged_product['Category'] = json_item.get('category') or ''
+            # SubType
+            merged_product['SubType'] = json_item.get('subtype') or json_item.get('SubType') or ''
+            # Description
+            merged_product['Description'] = json_item.get('description') or json_item.get('notes') or ''
+            # JointRatio (for pre-rolls)
+            merged_product['JointRatio'] = json_item.get('JointRatio') or ''
+            # Add fallback marker and meta
+            merged_product['Source'] = 'JSON Fallback'
+            merged_product['Match_Confidence'] = f"{best_match_score:.3f}"
+            merged_product['Match_Algorithm'] = 'Fallback'
+            logging.info(f"🟡 FALLBACK TAG: Mapped JSON columns for non-database-matched tag '{json_item.get('product_name', '')}'")
+            return merged_product
+        # ...existing code...
                         # Pattern 2: Integer duplication like "1010.0g" -> "10.0g"
                         integer_dup_pattern = r'^(\d+)\1\.0(oz|g|mg|kg|lb|lbs)$'
                         match2 = re.match(integer_dup_pattern, existing_weight_units, re.IGNORECASE)
