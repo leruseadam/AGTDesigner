@@ -5012,8 +5012,17 @@ def generate_labels():
                         valid_selected_tags = found_names
                         invalid_selected_tags = [tag for tag in normalized_tags if tag not in matched_original_tags]
                         
-                        # CRITICAL FIX: If database is empty, accept all tags as valid
-                        if len(valid_selected_tags) == 0:
+                        # CRITICAL FIX: If any tags are missing from database, validate them against Excel
+                        if invalid_selected_tags:
+                            logging.info(f"⚠️ {len(invalid_selected_tags)} tags not found in database, checking Excel data...")
+                            excel_valid, excel_invalid = _validate_tags_against_excel(excel_processor, invalid_selected_tags)
+                            if excel_valid:
+                                valid_selected_tags.extend(excel_valid)
+                                logging.info(f"✅ Added {len(excel_valid)} tags from Excel data")
+                                invalid_selected_tags = excel_invalid
+                        
+                        # CRITICAL FIX: If database is completely empty, accept all tags as valid
+                        if len(valid_selected_tags) == 0 and len(normalized_tags) > 0:
                             logging.warning("⚠️ DATABASE APPEARS EMPTY - Accepting all tags as valid")
                             valid_selected_tags = normalized_tags
                             invalid_selected_tags = []
