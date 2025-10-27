@@ -1522,6 +1522,7 @@ class ProductDatabase:
                     
                     # Store the product in database
                     # Get the count before to determine if it's new or updated
+                    conn = self._get_connection()
                     cursor_temp = conn.cursor()
                     cursor_temp.execute("SELECT COUNT(*) FROM products")
                     count_before = cursor_temp.fetchone()[0]
