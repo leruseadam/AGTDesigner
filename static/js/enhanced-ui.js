@@ -98,19 +98,31 @@ async function handleFiles(files) {
       });
       const data = await response.json();
       
-      if (response.ok) {
-        // File uploaded successfully, now poll for processing status
-        const filename = data.filename;
-        console.log(`File uploaded: ${filename}, polling for processing status...`);
+      if (response.ok && data.success) {
+        // File uploaded successfully - data is already processed synchronously
+        console.log(`File uploaded successfully: ${data.filename}, rows: ${data.rows}`);
         console.log('Upload response data:', data);
         
-        // Update splash screen status
-        if (typeof TagManager !== 'undefined' && TagManager.updateExcelLoadingStatus) {
-          TagManager.updateExcelLoadingStatus('Processing file...');
+        // Hide splash screen immediately since processing is done
+        if (typeof TagManager !== 'undefined' && TagManager.hideExcelLoadingSplash) {
+          TagManager.hideExcelLoadingSplash();
         }
         
-        // Start polling for upload status
-        pollUploadStatus(filename);
+        // Clear UI state for fresh data
+        if (typeof TagManager !== 'undefined') {
+          TagManager.clearUIStateForNewFile(true); // Preserve filters
+        }
+        
+        // Fetch new data immediately
+        console.log('Fetching updated data...');
+        await Promise.all([
+          TagManager.fetchAndUpdateAvailableTags(),
+          TagManager.fetchAndUpdateSelectedTags(),
+          TagManager.fetchAndPopulateFilters()
+        ]);
+        
+        // Show success
+        showToast("success", `Upload successful! ${data.rows} rows processed.`);
         
         // Add animation class to file path container
         if (filePathContainer) {
