@@ -113,13 +113,9 @@ async function handleFiles(files) {
           TagManager.clearUIStateForNewFile(true); // Preserve filters
         }
         
-        // Fetch new data immediately
-        console.log('Fetching updated data...');
-        await Promise.all([
-          TagManager.fetchAndUpdateAvailableTags(),
-          TagManager.fetchAndUpdateSelectedTags(),
-          TagManager.fetchAndPopulateFilters()
-        ]);
+        // Fetch new data immediately by reloading the page
+        console.log('Upload successful! Reloading page to show new data...');
+        window.location.reload();
         
         // Show success
         showToast("success", `Upload successful! ${data.rows} rows processed.`);
