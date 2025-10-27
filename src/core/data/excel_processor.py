@@ -3858,7 +3858,7 @@ class ExcelProcessor:
                         'Description': description,
                         'WeightUnits': record.get('JointRatio', '') if product_type in {"pre-roll", "infused pre-roll"} else self._format_weight_units(record, excel_priority=True),
                         'ProductBrand': product_brand,
-                        'Price': str(record.get('Price*', '')).strip() if record.get('Price*') and str(record.get('Price*', '')).strip() else str(record.get('Price', '')).strip(),
+                        'Price': str(record.get('Price*', '')).strip() if record.get('Price*') and str(record.get('Price*', '')).strip() else (str(record.get('Price', '')).strip() if record.get('Price') and str(record.get('Price', '')).strip() else '25'),
                         'Lineage': str(final_lineage) if str(final_lineage) else "",
                         'DOH': doh_value,  # Keep DOH as raw value
                         'Ratio_or_THC_CBD': self._construct_thc_cbd_field(ai_value, ak_value, product_type) if product_type in classic_types else ratio_text,  # Use THC_CBD for classic types, ratio for non-classic
