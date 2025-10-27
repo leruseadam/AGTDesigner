@@ -4501,6 +4501,31 @@ def _validate_tags_against_excel(excel_processor, selected_tags):
     
     return valid_selected_tags, invalid_selected_tags
 
+def _extract_price_from_database_product(product):
+    """Extract price from a database product, checking multiple possible price fields."""
+    # Check multiple possible price field names
+    candidate_keys = [
+        'Price',
+        'Price*',
+        'Med Price',
+        'Price* (Tier Name for Bulk)'
+    ]
+    
+    for key in candidate_keys:
+        if key in product:
+            price_val = product.get(key)
+            if price_val is None:
+                continue
+            price_str = str(price_val).strip()
+            if price_str and price_str.lower() not in ['none', '0', '0.0', '0.00', '']:
+                # Remove $ sign if present for consistency
+                price_str = price_str.replace('$', '').strip()
+                if price_str:
+                    return price_str
+    
+    # Default to $32 if no price found (for vape cartridges)
+    return '32'
+
 def _create_desc_and_weight(product_name, weight_units):
     """Create DescAndWeight field with 'Product Name - Weight' format (matching Excel processor)."""
     if not product_name:
@@ -5170,7 +5195,7 @@ def generate_labels():
                                     'Vendor': processed_record.get('Vendor/Supplier*', ''),
                                     'Product Strain': processed_record.get('Product Strain', ''),  # Correct field name
                                     'ProductStrain': processed_record.get('Product Strain', ''),  # Add ProductStrain for template processor compatibility
-                                    'Price': processed_record.get('Price', '25'),  # Default price if missing
+                                    'Price': _extract_price_from_database_product(processed_record),  # Extract price from multiple possible fields
                                     'DOH': processed_record.get('DOH', ''),
                                     'Ratio': processed_record.get('Ratio', ''),
                                     'Weight*': processed_record.get('Weight*', '1'),  # Default weight if missing
@@ -5915,7 +5940,11 @@ def process_database_product_for_api(db_product):
     desc_and_weight = processed_product.get('DescAndWeight', '')
     if not desc_and_weight or desc_and_weight == '' or str(desc_and_weight).strip() == '':
         product_name = processed_product.get('Product Name*', processed_product.get('Product Name', ''))
-        description = processed_product.get('Description', product_name)  # Use description if available, fallback to product name
+        
+        # CRITICAL FIX: Use Product Name* as description instead of Description field
+        # The Description field may contain "by Vendor" patterns that shouldn't be displayed
+        # Product Name* is the clean product name we want to display
+        description = product_name  # Always use product name, not Description field
         weight_units = processed_product.get('CombinedWeight', '')
         
         if description and weight_units and weight_units != 'N/A':
