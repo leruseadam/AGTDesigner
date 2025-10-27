@@ -3,6 +3,7 @@ import json
 import urllib.request
 import logging
 import time
+import traceback
 from datetime import datetime
 from difflib import SequenceMatcher
 from typing import List, Dict, Set, Optional, Tuple, Any
@@ -155,7 +156,7 @@ TYPE_OVERRIDES = {
 
 
 # Helper: Extract cannabinoid values from lab_result_data
-CANNABINOID_TYPES = ["thc", "thca", "cbd", "cbda", "total-cannabinoids"]
+CANNABINOID_TYPES = ["thc", "thca", "cbd", "cbda", "cbg", "cbga", "cbn", "cbna", "total-cannabinoids"]
 
 def map_inventory_type_to_product_type(inventory_type, inventory_category=None, product_name=None):
     """
@@ -318,6 +319,19 @@ def extract_cannabinoids(lab_result_data):
     if not isinstance(potency, list):
         potency = []
     
+    # Map cannabinoid types to database field names
+    cannabinoid_field_map = {
+        "thc": "THC test result",
+        "thca": "THCA test result",
+        "cbd": "CBD test result",
+        "cbda": "CBDA test result",
+        "total-cannabinoids": "Total Cannabinoids",
+        "cbg": "CBG",
+        "cbn": "CBN",
+        "cbga": "CBGA",
+        "cbna": "CBNA"
+    }
+    
     for c in potency:
         if not isinstance(c, dict):
             continue
@@ -330,18 +344,30 @@ def extract_cannabinoids(lab_result_data):
             # Convert value to float and validate
             try:
                 float_value = float(value)
-                # Handle percentage conversion (e.g., 100.000 -> 100.0)
-                if unit == "pct" and float_value > 1:
-                    # Some labs report percentages as 100.000 instead of 1.000
-                    if float_value > 100:
-                        float_value = float_value / 100
-                elif unit == "mg" and float_value > 1000:
-                    # Convert mg to g if needed
-                    float_value = float_value / 1000
                 
-                result[ctype] = round(float_value, 1)  # Round to 1 decimal place
-            except (ValueError, TypeError):
-                logging.warning(f"Invalid cannabinoid value: {value} for type {ctype}")
+                # CRITICAL FIX: Handle Cultivera's per mille format (e.g., 1000 = 100%)
+                # When unit is "pct" and value is > 1 and < 100, it's likely a percentage
+                # When value is > 100, it might be per mille (divided by 10)
+                if unit == "pct":
+                    if float_value > 100:
+                        # Per mille format: divide by 10 (e.g., 1000 -> 100%)
+                        float_value = float_value / 10.0
+                    # If value is between 1-100, keep as is
+                elif unit == "mg" or unit == "mille":
+                    # Convert mg to percentage if needed (for very large values)
+                    if float_value > 1000:
+                        float_value = float_value / 10.0
+                
+                # Map to database field name
+                db_field_name = cannabinoid_field_map.get(ctype, ctype)
+                result[db_field_name] = round(float_value, 1)  # Round to 1 decimal place
+                
+                # Also store the lowercase version for backward compatibility
+                result[ctype] = round(float_value, 1)
+                
+                logging.info(f"🔬 Extracted cannabinoid: {ctype} = {float_value} ({unit}) -> {db_field_name}")
+            except (ValueError, TypeError) as e:
+                logging.warning(f"Invalid cannabinoid value: {value} for type {ctype}: {e}")
                 continue
     
     # Extract additional lab data

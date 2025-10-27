@@ -914,6 +914,7 @@ ENHANCED_JSON_FIELD_MAP = {
     "strain_name": "Product Strain",  # Cultivera uses strain_name
     "product_type": "Product Type*",
     "inventory_type": "Product Type*",  # Cultivera uses inventory_type
+    "inventory_category": "Category",  # Cultivera inventory_category (EndProduct, IntermediateProduct, etc.)
     "sku": "Internal Product Identifier",
     "batch_number": "Batch Number",
     "lot_number": "Lot Number",
@@ -929,6 +930,36 @@ ENHANCED_JSON_FIELD_MAP = {
     "package_date": "Accepted Date",
     "lineage": "Lineage"
 }
+
+def extract_potency_from_lab_data(lab_result_data: Dict) -> Dict[str, float]:
+    """Extract THC, CBD, and other cannabinoid data from Cultivera lab_result_data structure."""
+    if not lab_result_data or not isinstance(lab_result_data, dict):
+        return {}
+    
+    potency_data = {}
+    
+    try:
+        # Cultivera potency array format
+        potency = lab_result_data.get('potency', [])
+        if isinstance(potency, list):
+            for item in potency:
+                if isinstance(item, dict):
+                    type_name = item.get('type', '').lower()
+                    value = item.get('value', 0)
+                    unit = item.get('unit', '')
+                    
+                    # Store the value, adjusting for percentage vs per mille
+                    if unit.lower() == 'pct':
+                        potency_data[type_name] = float(value)
+                    elif unit.lower() == 'mg' or unit.lower() == 'mille':
+                        # Convert mg to percentage if needed (e.g., 1000 mg/100g = 10%)
+                        potency_data[type_name] = float(value) / 10.0
+                    else:
+                        potency_data[type_name] = float(value)
+    except Exception as e:
+        logging.warning(f"Error extracting potency from lab_data: {e}")
+    
+    return potency_data
 
 class EnhancedJSONMatcher:
     """
