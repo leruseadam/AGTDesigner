@@ -5503,6 +5503,19 @@ const TagManager = {
         }
     },
 
+    showUploadSuccessSplash(rows) {
+        const splash = document.getElementById('excelLoadingSplash');
+        const filenameElement = document.getElementById('excelLoadingFilename');
+        const statusElement = document.getElementById('excelLoadingStatus');
+        
+        if (splash && filenameElement && statusElement) {
+            filenameElement.textContent = 'Upload successful!';
+            statusElement.textContent = `${rows} rows processed. Page will reload now.`;
+            splash.style.display = 'flex';
+            splash.style.background = 'rgba(40, 167, 69, 0.95)'; // Green background for success
+        }
+    },
+
     // Action splash screen for clear/undo operations
     showActionSplash(message) {
         // Create splash if it doesn't exist

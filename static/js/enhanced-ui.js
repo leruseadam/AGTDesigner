@@ -143,14 +143,18 @@ async function handleFiles(files) {
           TagManager.clearUIStateForNewFile(true); // Preserve filters
         }
         
-        // Show success message
+        // Show success message with splash screen
         console.log('✅ Upload successful! Reloading page to show new data...');
-        alert(`Upload successful! ${data.rows} rows processed. Reloading...`);
+        
+        // Show success splash instead of alert
+        if (typeof TagManager !== 'undefined' && TagManager.showUploadSuccessSplash) {
+          TagManager.showUploadSuccessSplash(data.rows);
+        }
         
         // Reload page after a short delay
         setTimeout(() => {
           window.location.reload();
-        }, 1000);
+        }, 2000);
         
         // Add animation class to file path container
         if (filePathContainer) {
