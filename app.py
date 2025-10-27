@@ -4115,13 +4115,31 @@ def clear_store():
 
 @app.route('/api/check-store-required', methods=['GET'])
 def check_store_required():
-    """Always default to AGT_Bothell - no store selection required."""
+    """Check if store selection is required for the current IP address."""
     try:
-        # Always return AGT_Bothell as the default store
+        ip_address = get_client_ip()
+        
+        # Check if there's a valid store selection for this IP
+        with _ip_store_lock:
+            if ip_address in _ip_store_selections:
+                store_data = _ip_store_selections[ip_address]
+                # Check if the selection is still valid (not expired)
+                if datetime.now() - datetime.fromisoformat(store_data['timestamp']) < timedelta(hours=12):
+                    # User has a valid store selection
+                    return jsonify({
+                        'success': True,
+                        'requires_store': False,
+                        'store': store_data['store']
+                    })
+                else:
+                    # Selection expired, remove it
+                    del _ip_store_selections[ip_address]
+        
+        # No valid store selection found - require store selection
         return jsonify({
             'success': True,
-            'store_required': False,
-            'store': 'AGT_Bothell'
+            'requires_store': True,
+            'store': None
         })
         
     except Exception as e:

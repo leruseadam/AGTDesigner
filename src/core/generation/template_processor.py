@@ -3022,25 +3022,26 @@ class TemplateProcessor:
         text_stripped = text.strip()
         is_all_caps = (text_stripped.isupper() and any(c.isalpha() for c in text_stripped))
         is_short_wordy = (len(text_stripped) <= 14 and all(ch.isalpha() or ch.isspace() or ch in ['&','-','/'] for ch in text_stripped))
-        
-        # CRITICAL FIX: Check for lineage content (HYBRID, SATIVA, INDICA, etc.)
-        lineage_keywords = ['hybrid', 'sativa', 'indica', 'hybrid/sativa', 'hybrid/indica', 'sativa/indica']
-        if any(keyword in text_lower for keyword in lineage_keywords):
-            self.logger.debug(f"🎯 LINEAGE CLASSIFIED: '{text_stripped}' classified as lineage (will use 14-20pt font)")
-            return 'lineage'
-        
+
         # Check for prices (contain $ symbol)
         if '$' in text:
             return 'price'
-        
+
         # Check for THC/CBD percentage content (contains % sign)
         if '%' in text or any(keyword in text_lower for keyword in ['thc:', 'cbd:', 'total thc', 'total cbd']):
             return 'thc_cbd'
-        
+
         # Check for weight/ratio content (contains oz, g, mg, or : for ratios)
         if any(keyword in text_lower for keyword in ['oz', 'gram', 'mg', 'ml']) or ':' in text:
             return 'ratio'
-        
+
+        # CRITICAL FIX: Check for classic lineage values BEFORE brand detection
+        # Classic lineage values should use 'lineage' field type (14-20pt) not 'brand' (10-16pt)
+        classic_lineages = ['hybrid/sativa', 'hybrid/indica', 'sativa', 'indica', 'hybrid', 'cbd', 'mixed']
+        if text_stripped.upper() in [lineage.upper() for lineage in classic_lineages]:
+            self.logger.debug(f"🎯 CLASSIC LINEAGE DETECTED: '{text_stripped}' classified as lineage")
+            return 'lineage'
+
         # Check for well-known brand names that should be visible
         # Only classify as 'brand' if we're CERTAIN it's a brand name that should be visible
         well_known_brands = ['constellation', 'mary jones', 'skagit organics', 'artizen', 'sitka', 'raven', 'grassroots', 'pruf cultivar', 'lil ray', 'green revolution']
