@@ -374,6 +374,7 @@ class TagsTable {
       const tag = TagManager.state.tags.find(t => t['Product Name*'] === tagName);
       if (tag) {
         tag.lineage = newLineage;
+        tag.Lineage = newLineage; // Also update Lineage field for JSON matched tags
         console.log(`📝 Updated tag in TagManager.state.tags`);
       }
       
@@ -381,7 +382,24 @@ class TagsTable {
       const originalTag = TagManager.state.originalTags.find(t => t['Product Name*'] === tagName);
       if (originalTag) {
         originalTag.lineage = newLineage;
+        originalTag.Lineage = newLineage; // Also update Lineage field for JSON matched tags
         console.log(`📝 Updated tag in TagManager.state.originalTags`);
+      }
+      
+      // CRITICAL FIX: For JSON matched tags, update the database lineage value
+      // Check if this is a JSON matched tag
+      const isJsonMatched = tag && (tag.Source === 'JSON Match' || (tag.Source && tag.Source.includes('JSON')));
+      if (isJsonMatched) {
+        console.log(`🔄 This is a JSON matched tag, updating Lineage field`);
+        // For JSON matched tags, we need to also update the Lineage field specifically
+        if (tag) {
+          tag.Lineage = newLineage;
+          tag.lineage = newLineage;
+        }
+        if (originalTag) {
+          originalTag.Lineage = newLineage;
+          originalTag.lineage = newLineage;
+        }
       }
       
       // CRITICAL FIX: Don't fetch from backend - just update the local selected tag if it exists
@@ -397,6 +415,8 @@ class TagsTable {
             if (lineageSelect) {
               lineageSelect.value = newLineage;
             }
+            // Update the data-lineage attribute for CSS coloring
+            tagElement.setAttribute('data-lineage', newLineage);
             console.log(`✅ Updated lineage in selected tag UI for ${tagName}`);
           }
         });
