@@ -2057,10 +2057,8 @@ class TemplateProcessor:
         """
         Ultra-optimized post-processing for maximum performance.
         """
-        # Performance optimization: Skip expensive processing for large documents
-        if len(doc.tables) > 10:
-            self.logger.warning(f"Skipping expensive post-processing for large document with {len(doc.tables)} tables")
-            return doc
+        # CRITICAL FIX: Always perform post-processing on all documents regardless of size
+        # This ensures all formatting, marker cleanup, and styling steps are executed
         
         # Clean up DOH cells before processing to ensure proper image positioning
         try:
