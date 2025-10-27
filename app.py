@@ -858,7 +858,7 @@ def create_app():
     else:
         logging.warning("Flask-Session not available, using default session handling")
     
-    # Enable CORS for specific origins only (security fix)
+    # Enable CORS for all routes to allow uploads
     allowed_origins = [
         'https://www.agtpricetags.com',  # Your actual domain
         'https://agtpricetags.com',
@@ -868,7 +868,10 @@ def create_app():
         'http://127.0.0.1:5001',
         'https://adamcordova.pythonanywhere.com'  # PythonAnywhere domain
     ]
-    CORS(app, resources={r"/api/*": {"origins": allowed_origins}})
+    # Enable CORS for all routes, not just /api/*
+    CORS(app, resources={
+        r"/*": {"origins": allowed_origins}
+    })
     
     # Check if we're in development mode
     development_mode = app.config.get('DEVELOPMENT_MODE', False)
