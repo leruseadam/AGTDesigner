@@ -5935,6 +5935,19 @@ def process_database_product_for_api(db_product):
         
         weight_units = processed_product.get('CombinedWeight', '')
         
+        # CRITICAL FIX: If weight_units is empty, try to create it from Weight* and Units
+        if not weight_units or weight_units == '' or str(weight_units).strip() == '' or str(weight_units) == 'N/A':
+            weight_value = processed_product.get('Weight*', '')
+            units_value = processed_product.get('Units', '')
+            if weight_value and units_value:
+                weight_units = f"{weight_value}{units_value}"
+        
+        # CRITICAL FIX: If still no weight, use default '1g' for cartridge/concentrate products
+        if not weight_units or weight_units == '' or str(weight_units).strip() == '' or str(weight_units) == 'N/A':
+            product_type = str(processed_product.get('Product Type*', '')).lower()
+            if 'cartridge' in product_type or 'concentrate' in product_type or 'distillate' in str(processed_product.get('Product Name*', '')).lower():
+                weight_units = '1g'
+        
         if cleaned_description and weight_units and weight_units != 'N/A':
             processed_product['DescAndWeight'] = _create_desc_and_weight(cleaned_description, weight_units)
         elif cleaned_description:
