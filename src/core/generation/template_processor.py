@@ -1024,13 +1024,13 @@ class TemplateProcessor:
                                                         was_processed = True
                                                         break
                                             
-                                            # Only clean markers if the paragraph wasn't processed by font sizing
-                                            if not was_processed:
-                                                for run in para.runs:
-                                                    if marker_pattern.search(run.text):
-                                                        run.text = marker_pattern.sub('', run.text)
-                                                    if prefix_pattern.search(run.text):
-                                                        run.text = prefix_pattern.sub('', run.text)
+                                            # CRITICAL FIX: Always clean markers regardless of font sizing processing
+                                            # This ensures DESC_START, DESC_END, PRICE_START, PRICE_END are always removed
+                                            for run in para.runs:
+                                                if marker_pattern.search(run.text):
+                                                    run.text = marker_pattern.sub('', run.text)
+                                                if prefix_pattern.search(run.text):
+                                                    run.text = prefix_pattern.sub('', run.text)
                                     except Exception as cell_error:
                                         self.logger.warning(f"Skipping cell due to error during marker cleanup: {cell_error}")
                                         continue
@@ -1055,8 +1055,10 @@ class TemplateProcessor:
                             was_processed = True
                             break
                 
-                # Only clean markers if the paragraph wasn't processed by font sizing
-                if not was_processed:
+                # CRITICAL FIX: Always clean markers regardless of font sizing processing
+                # This ensures DESC_START, DESC_END, PRICE_START, PRICE_END are always removed
+                # (Removed was_processed check)
+                if True:
                     for run in para.runs:
                         if marker_pattern.search(run.text):
                             run.text = marker_pattern.sub('', run.text)
