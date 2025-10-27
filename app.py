@@ -4531,17 +4531,25 @@ def _extract_price_from_database_product(product):
         'Price* (Tier Name for Bulk)'
     ]
     
+    # Also check keys with 'Price' in them (case-insensitive)
+    for key in list(product.keys()):
+        if 'price' in key.lower() and key not in candidate_keys:
+            candidate_keys.append(key)
+    
     for key in candidate_keys:
         if key in product:
             price_val = product.get(key)
             if price_val is None:
                 continue
             price_str = str(price_val).strip()
-            if price_str and price_str.lower() not in ['none', '0', '0.0', '0.00', '']:
+            if price_str and price_str.lower() not in ['none', '0', '0.0', '0.00', '', 'nan']:
                 # Remove $ sign if present for consistency
                 price_str = price_str.replace('$', '').strip()
                 if price_str:
+                    logging.info(f"💰 Found price '{price_str}' in field '{key}' for product '{product.get('Product Name*', '')}'")
                     return price_str
+    
+    logging.warning(f"⚠️ No price found in product: '{product.get('Product Name*', '')}' - Available keys: {list(product.keys())}")
     
     # If no price found, try to get average from similar products
     try:
@@ -4558,6 +4566,7 @@ def _extract_price_from_database_product(product):
                     price_val = inferred['price']
                     try:
                         price_float = float(price_val)
+                        logging.info(f"💰 Using inferred price '{price_float}' from similar products for '{product_name}'")
                         return str(int(price_float)) if price_float.is_integer() else str(price_float)
                     except (ValueError, TypeError):
                         pass
