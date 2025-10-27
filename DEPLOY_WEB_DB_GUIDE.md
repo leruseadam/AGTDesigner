@@ -52,7 +52,16 @@ conn.close()
 EOF
 ```
 
-### Step 3: Deploy Latest Code
+### Step 3: Deploy Latest Code (IMPORTANT!)
+
+**Check current code version first:**
+```bash
+cd ~/AGTDesigner
+git log --oneline -1
+# Should show: 5dfb64b7 Fix missing price issue
+```
+
+**If not on latest version:**
 
 ```bash
 cd ~/AGTDesigner

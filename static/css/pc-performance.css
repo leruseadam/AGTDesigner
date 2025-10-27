@@ -1,9 +1,23 @@
 /* PC Performance Optimizations - Remove expensive styling from filter dropdowns */
 
+/* Ultra-smooth rendering optimizations for PC */
+* {
+    /* Enable hardware acceleration for smoother rendering */
+    -webkit-transform: translateZ(0);
+    -moz-transform: translateZ(0);
+    -ms-transform: translateZ(0);
+    transform: translateZ(0);
+    
+    /* Optimize rendering performance */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
 /* Remove expensive backdrop-filter effects from filter dropdowns on PC */
 .sticky-filter-bar .form-select,
 .sticky-filter-bar .compact-filter,
-.filter-bar select {
+.filter-bar select,
+select {
     /* Remove expensive backdrop-filter for faster rendering */
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
@@ -16,6 +30,10 @@
     
     /* Simplify background to solid color for better performance */
     background: rgba(42, 32, 64, 0.98) !important;
+    
+    /* Optimize rendering for smooth performance */
+    will-change: auto !important;
+    contain: layout style paint !important;
 }
 
 /* Remove hover effects from filter dropdowns */
@@ -88,4 +106,63 @@
 .compact-filter option:hover {
     /* Remove transitions */
     transition: none !important;
+}
+
+/* Optimize tag rendering for smoother performance */
+.tag-item,
+.tag-row,
+.vendor-section,
+.brand-section,
+.product-type-section,
+.weight-section {
+    /* Optimize rendering */
+    contain: layout style !important;
+    will-change: auto !important;
+    
+    /* Remove expensive transitions for smooth performance */
+    transition: none !important;
+}
+
+/* Optimize dropdown rendering */
+select,
+select option {
+    /* Optimize rendering performance */
+    contain: layout style paint !important;
+    will-change: auto !important;
+}
+
+/* Disable all transitions globally for smooth performance on PC */
+* {
+    animation-duration: 0s !important;
+    animation-delay: 0s !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+}
+
+/* Optimize scroll performance */
+.tag-list,
+.tag-list-container,
+.glass-card {
+    /* Smooth scrolling optimization */
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: auto !important;
+    
+    /* Remove expensive shadows */
+    box-shadow: none !important;
+}
+
+/* Optimize background rendering */
+.glass-card,
+.filter-bar,
+.sticky-filter-bar,
+.horizontal-filter-bar {
+    /* Remove expensive backdrop filters */
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    
+    /* Solid backgrounds for better performance */
+    background: rgba(45, 34, 58, 0.98) !important;
+    
+    /* Remove expensive shadows */
+    box-shadow: none !important;
 }

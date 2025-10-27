@@ -1,7 +1,7 @@
 # Price Investigation Results
 
 ## Problem
-Missing prices were defaulting to `$25` on the web version, making it hard to identify which products actually had missing price data.
+Missing prices in the source Excel data were defaulting to `$25`, making it hard to identify which products actually had missing price data. Products with intentionally set prices (e.g., $32, $25) are correct and come from the database.
 
 ## Root Cause
 Multiple fallback points in the code were using `'25'` as a default price value when actual price data was missing:
@@ -26,7 +26,8 @@ Multiple fallback points in the code were using `'25'` as a default price value 
    - Added check to skip products with no name (prevents empty labels)
 
 ## Impact
-- Missing prices will now be empty instead of showing `$25`
+- Missing prices in source data will now be empty instead of showing `$25`
+- Products with prices in the database (e.g., $32, $25) will show correctly
 - Logs will show exactly which products have missing prices
 - Makes it easy to identify data quality issues
 
@@ -34,7 +35,12 @@ Multiple fallback points in the code were using `'25'` as a default price value 
 1. **Data Source** → Excel/Database → Extract price from `Price*` or `Price` field
 2. **Processing** → Pass through to records with NO default
 3. **Generation** → Format price if present, leave empty if not
-4. **Rendering** → Show empty price (easy to spot)
+4. **Rendering** → Show price if present, show empty if missing (easy to spot)
+
+## What This Means
+- ✅ Products with prices set to $32, $25, etc. will show correctly
+- ✅ Products with missing prices in source data will show as empty (not $25)
+- ✅ Makes it obvious which products need price data added
 
 ## Next Steps
 1. Test locally - should show empty prices when data is missing
