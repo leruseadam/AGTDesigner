@@ -247,9 +247,16 @@
       console.log('Store selected:', storeValue);
       
       // Close the modal
-      const modal = bootstrap.Modal.getInstance(document.getElementById('storeSelectionModal'));
-      if (modal) {
-        modal.hide();
+      const modalElement = document.getElementById('storeSelectionModal');
+      if (modalElement) {
+        const modal = bootstrap.Modal.getInstance(modalElement);
+        if (modal) {
+          modal.hide();
+          // Dispose of the modal instance after hiding
+          setTimeout(() => {
+            modal.dispose();
+          }, 300);
+        }
       }
       
       // Set the store via API
@@ -277,6 +284,9 @@
       });
     }
     
+    // Make selectStore globally available
+    window.selectStore = selectStore;
+    
     function showStoreSelectionModal() {
       try {
         console.log('=== SHOWING STORE SELECTION MODAL ===');
@@ -297,8 +307,20 @@
           return;
         }
         
-        console.log('Creating Bootstrap modal instance...');
-        const modal = new bootstrap.Modal(modalElement);
+        // Try to get existing instance first
+        let modal = bootstrap.Modal.getInstance(modalElement);
+        
+        // If no instance exists, create a new one
+        if (!modal) {
+          console.log('Creating new Bootstrap modal instance...');
+          modal = new bootstrap.Modal(modalElement, {
+            backdrop: 'static',
+            keyboard: false
+          });
+        } else {
+          console.log('Using existing Bootstrap modal instance');
+        }
+        
         console.log('Calling modal.show()...');
         modal.show();
         console.log('✅ Store selection modal shown successfully');
