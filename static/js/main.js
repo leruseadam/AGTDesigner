@@ -5951,7 +5951,7 @@ const TagManager = {
             
             console.log('🚀 Sending lightning upload request...');
             
-            const uploadResponse = await fetch('/upload-lightning', {
+            const uploadResponse = await fetch('/upload', {
                 method: 'POST',
                 body: formData
             });
@@ -5963,27 +5963,8 @@ const TagManager = {
                 throw new Error(uploadData.error || 'Lightning upload failed');
             }
             
-            // Phase 2: Background processing
-            this.updateUploadUI(`🔄 Processing ${file.name}...`);
-            console.log('🔄 Starting background processing...');
-            
-            const processResponse = await fetch('/process-lightning', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    file_path: uploadData.file_path,
-                    filename: uploadData.filename
-                })
-            });
-            
-            const processData = await processResponse.json();
-            console.log('✅ Processing response:', processData);
-            
-            if (!processResponse.ok) {
-                throw new Error(processData.error || 'Processing failed');
-            }
+            // Upload complete, no need for separate processing step
+            const processData = uploadData;
             
             // Success!
             this.updateUploadUI(`✅ ${file.name} ready!`, 'File processed successfully', 'success');
