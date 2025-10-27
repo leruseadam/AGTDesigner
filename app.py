@@ -4565,8 +4565,9 @@ def _create_desc_and_weight(product_name, weight_units):
     # Get weight units, clean them up
     weight = str(weight_units).strip() if weight_units else ''
     if weight and weight.lower() not in ['nan', 'none', 'null', '']:
-        # Combine product name and weight with regular hyphen and space
-        return f"{description} - {weight}"
+        # Combine product name and weight with hyphen staying with weight (space after hyphen)
+        # Use same format as Excel processor: -\u00A0 (hyphen + non-breaking space)
+        return f"{description} -\u00A0{weight}"
     else:
         # Just return the product name if no weight
         return description
