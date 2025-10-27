@@ -1183,28 +1183,9 @@ class EnhancedJSONMatcher:
             merged_product['Match_Algorithm'] = 'Fallback'
             logging.info(f"🟡 FALLBACK TAG: Mapped JSON columns for non-database-matched tag '{json_item.get('product_name', '')}'")
             return merged_product
-        # ...existing code...
-                        # Pattern 2: Integer duplication like "1010.0g" -> "10.0g"
-                        integer_dup_pattern = r'^(\d+)\1\.0(oz|g|mg|kg|lb|lbs)$'
-                        match2 = re.match(integer_dup_pattern, existing_weight_units, re.IGNORECASE)
-                        if match2:
-                            clean_weight = f"{match2.group(1)}.0{match2.group(2)}"
-                            logging.info(f"✅ FIXED INTEGER DUPLICATION: '{existing_weight_units}' -> '{clean_weight}' for '{product_name}'")
-                        else:
-                            # Pattern 3: Mixed duplication like "0.220.22g" -> "0.22g"
-                            mixed_dup_pattern = r'^(\d+\.\d+)\1(oz|g|mg|kg|lb|lbs)$'
-                            match3 = re.match(mixed_dup_pattern, existing_weight_units, re.IGNORECASE)
-                            if match3:
-                                clean_weight = f"{match3.group(1)}{match3.group(2)}"
-                                logging.info(f"✅ FIXED MIXED DUPLICATION: '{existing_weight_units}' -> '{clean_weight}' for '{product_name}'")
-                            else:
-                                # Use our constructed clean_weight as fallback
-                                logging.info(f"✅ FIXING DUPLICATED WEIGHTUNITS: '{existing_weight_units}' -> '{clean_weight}' for '{product_name}'")
-            
-            db_priority_product['WeightUnits'] = clean_weight
-            db_priority_product['WeightWithUnits'] = clean_weight
-            db_priority_product['CombinedWeight'] = clean_weight
-            logging.info(f"✅ WEIGHT FORMATTED: {clean_weight} for '{product_name}'")
+        
+        # Continue with database priority mode - use database product with JSON matching info
+        db_priority_product = product_dict.copy()
         
         # CRITICAL: Add metadata about the database priority approach
         db_priority_product['Source'] = 'Database Priority (100% DB)'
