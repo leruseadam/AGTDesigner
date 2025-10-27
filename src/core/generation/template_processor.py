@@ -3023,6 +3023,12 @@ class TemplateProcessor:
         is_all_caps = (text_stripped.isupper() and any(c.isalpha() for c in text_stripped))
         is_short_wordy = (len(text_stripped) <= 14 and all(ch.isalpha() or ch.isspace() or ch in ['&','-','/'] for ch in text_stripped))
         
+        # CRITICAL FIX: Check for lineage content (HYBRID, SATIVA, INDICA, etc.)
+        lineage_keywords = ['hybrid', 'sativa', 'indica', 'hybrid/sativa', 'hybrid/indica', 'sativa/indica']
+        if any(keyword in text_lower for keyword in lineage_keywords):
+            self.logger.debug(f"🎯 LINEAGE CLASSIFIED: '{text_stripped}' classified as lineage (will use 14-20pt font)")
+            return 'lineage'
+        
         # Check for prices (contain $ symbol)
         if '$' in text:
             return 'price'
