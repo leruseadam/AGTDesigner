@@ -4416,7 +4416,7 @@
         <div class="row mb-1 mt-0 fade-in" style="animation-delay: 0.2s;">
           <div class="col-lg-2 mb-1">
             <div class="modern-upload-bar" style="display: inline-flex; align-items: center; min-height: 28px; padding: 0.25rem 0.5rem; border-radius: 10px; background: rgba(45,34,58,0.85);">
-              <button type="button" class="upload-btn-modern d-flex align-items-center justify-content-center" onclick="console.log('Upload button clicked'); document.getElementById('fileInput').click();" aria-label="Upload Excel file" style="padding:0.15rem 0.6rem; font-size:0.82rem;">
+              <button type="button" class="upload-btn-modern d-flex align-items-center justify-content-center" id="uploadTriggerBtn" aria-label="Upload Excel file" style="padding:0.15rem 0.6rem; font-size:0.82rem;">
                 <svg class="me-2" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                   <polyline points="7 10 12 15 17 10"></polyline>
@@ -6396,7 +6396,7 @@
       console.log('=== DEBUG COMPLETE ===');
     });
   </script>
-  <script src="{{ url_for('static', filename='js/enhanced-ui.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/enhanced-ui.js') }}?v={{ cache_bust }}"></script>
   <script src="{{ url_for('static', filename='js/generation-splash.js') }}"></script>
   <script src="{{ url_for('static', filename='js/drag-and-drop-manager.js') }}"></script>
   <script src="{{ url_for('static', filename='js/lava-lamp.js') }}"></script>
@@ -11461,5 +11461,77 @@
     }
   </script>
 
+  <!-- EMERGENCY UPLOAD FIX - Inline handler to bypass cache issues -->
+  <script>
+  (function() {
+    console.log('🚨 EMERGENCY UPLOAD FIX: Initializing...');
+
+    function setupUpload() {
+      const fileInput = document.getElementById('fileInput');
+      if (!fileInput) {
+        console.error('🚨 EMERGENCY: fileInput not found!');
+        setTimeout(setupUpload, 100);
+        return;
+      }
+
+      console.log('🚨 EMERGENCY: Found fileInput, attaching handler');
+
+      // Remove all existing handlers by replacing the element
+      const newFileInput = fileInput.cloneNode(true);
+      fileInput.parentNode.replaceChild(newFileInput, fileInput);
+
+      const finalFileInput = document.getElementById('fileInput');
+
+      finalFileInput.addEventListener('change', async function(e) {
+        console.log('🚨 EMERGENCY: Change event fired!');
+        console.log('Files:', e.target.files);
+
+        if (!e.target.files || e.target.files.length === 0) {
+          console.log('🚨 EMERGENCY: No files selected');
+          return;
+        }
+
+        const file = e.target.files[0];
+        console.log('🚨 EMERGENCY: Uploading file:', file.name);
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+          const response = await fetch('/upload', {
+            method: 'POST',
+            body: formData
+          });
+
+          const data = await response.json();
+          console.log('🚨 EMERGENCY: Upload response:', data);
+
+          if (response.ok && data.success) {
+            alert(`Upload successful! ${data.rows} rows processed. Page will reload now.`);
+            setTimeout(() => window.location.reload(), 1000);
+          } else {
+            alert('Upload failed: ' + (data.error || 'Unknown error'));
+          }
+        } catch (error) {
+          console.error('🚨 EMERGENCY: Upload error:', error);
+          alert('Upload failed: ' + error.message);
+        }
+      });
+
+      console.log('🚨 EMERGENCY: Handler attached successfully!');
+      window.emergencyTestUpload = function() {
+        console.log('🚨 EMERGENCY: Test function called');
+        finalFileInput.click();
+      };
+      console.log('🚨 EMERGENCY: Run window.emergencyTestUpload() to test');
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', setupUpload);
+    } else {
+      setupUpload();
+    }
+  })();
+  </script>
   </body>
 </html> 
