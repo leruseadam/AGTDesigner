@@ -2404,8 +2404,11 @@ const TagManager = {
             this.state.selectedTags = new Set(this.state.persistentSelectedTags);
             console.log('Updated selectedTags set:', this.state.selectedTags);
             
-            // Call the main handler
-            this.handleTagSelection(e, tag);
+            // Call the main handler - find the current tag object from state
+            const currentTag = this.state.tags.find(t => t && t['Product Name*'] === displayName) ||
+                              this.state.originalTags.find(t => t && t['Product Name*'] === displayName) ||
+                              tag; // fallback to original tag
+            this.handleTagSelection(e, currentTag);
         };
         
         // Store the handler on the element itself so we can reference it later
