@@ -4543,7 +4543,28 @@ def _extract_price_from_database_product(product):
                 if price_str:
                     return price_str
     
-    # Return empty string if no price found - use actual data only
+    # If no price found, try to get average from similar products
+    try:
+        from src.core.data.product_database import get_product_database
+        product_db = get_product_database()
+        if product_db:
+            product_name = product.get('Product Name*', product.get('ProductName', ''))
+            vendor = product.get('Vendor/Supplier*', product.get('Vendor', ''))
+            brand = product.get('Product Brand', product.get('brand', ''))
+            if product_name:
+                # Use the existing method to make educated guess from similar products
+                inferred = product_db._make_educated_guess_from_similar_products(product_name, vendor, brand)
+                if inferred and 'price' in inferred:
+                    price_val = inferred['price']
+                    try:
+                        price_float = float(price_val)
+                        return str(int(price_float)) if price_float.is_integer() else str(price_float)
+                    except (ValueError, TypeError):
+                        pass
+    except Exception as e:
+        logging.warning(f"Error trying to infer price from similar products: {e}")
+    
+    # Return empty string if no price found
     return ''
 
 def _create_desc_and_weight(product_name, weight_units):
