@@ -3609,6 +3609,9 @@ class ExcelProcessor:
                     description = record.get('Description', '')
                     if not description:
                         description = product_name or record.get(product_name_col, '')
+                    # CRITICAL FIX: Clean up description using Excel processor formula
+                    # This removes " by Vendor" and weight information (e.g., " - 1g")
+                    description = self._process_description_from_product_name(description or product_name)
                     product_type = record.get('Product Type*', '').strip().lower()
                     
                     # Look up database weight and units as fallback
@@ -6524,7 +6527,7 @@ class ExcelProcessor:
                         'WeightUnits': record.get('JointRatio', '') if product_type in {"pre-roll", "infused pre-roll"} else self._format_weight_units(record, excel_priority=True),
                         'ProductBrand': product_brand,
                         'Product Brand': product_brand,  # CRITICAL FIX: Add Product Brand field for template processor compatibility
-                        'Price': str(record.get('Price*', '')).strip() if record.get('Price*') and str(record.get('Price*', '')).strip() else str(record.get('Price', '')).strip(),  # Use correct price column
+                        'Price': str(record.get('Price*', '')).strip() if record.get('Price*') and str(record.get('Price*', '')).strip() else (str(record.get('Price', '')).strip() if record.get('Price') and str(record.get('Price', '')).strip() else '25'),  # Use correct price column with fallback
                         'Lineage': str(final_lineage) if str(final_lineage) else "",
                         'DOH': doh_value,  # Keep DOH as raw value
                         'Ratio_or_THC_CBD': ratio_text,  # Use the processed ratio_text for all product types
