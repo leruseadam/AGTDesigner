@@ -5103,15 +5103,34 @@ def generate_labels():
                 # Store context removed - using single database
                 product_db = get_product_database()
                 if product_db:
-                    # ENHANCED: Replace JSON matched tags with database data
-                    logging.info(f"Original valid_selected_tags: {valid_selected_tags}")
-                    enhanced_tags = _replace_json_tags_with_database_data(valid_selected_tags, product_db)
-                    logging.info(f"Enhanced {len(valid_selected_tags)} tags with database data, result: {len(enhanced_tags)} tags")
+                    # Check if database is empty
+                    try:
+                        conn = product_db._get_connection()
+                        cursor = conn.cursor()
+                        cursor.execute("SELECT COUNT(*) FROM products")
+                        db_count = cursor.fetchone()[0]
+                        logging.info(f"Database has {db_count} products")
+                        
+                        # CRITICAL FIX: If database is nearly empty, bypass it and use Excel data
+                        if db_count < 100:
+                            logging.warning(f"⚠️ DATABASE HAS ONLY {db_count} PRODUCTS - BYPASSING DATABASE VALIDATION")
+                            logging.info(f"⚠️ Using Excel data directly for all {len(valid_selected_tags)} selected tags")
+                            has_database = False
+                            # Don't try to use database, will fall through to Excel processing below
+                    except Exception as db_check_error:
+                        logging.warning(f"Could not check database count: {db_check_error}")
+                        has_database = False
                     
-                    # Get products from database using the enhanced tags
-                    logging.info(f"Looking up products for enhanced tags: {enhanced_tags}")
-                    db_records = product_db.get_products_by_names(enhanced_tags)
-                    logging.info(f"Found {len(db_records)} database records")
+                    if has_database:
+                        # ENHANCED: Replace JSON matched tags with database data
+                        logging.info(f"Original valid_selected_tags: {valid_selected_tags}")
+                        enhanced_tags = _replace_json_tags_with_database_data(valid_selected_tags, product_db)
+                        logging.info(f"Enhanced {len(valid_selected_tags)} tags with database data, result: {len(enhanced_tags)} tags")
+                        
+                        # Get products from database using the enhanced tags
+                        logging.info(f"Looking up products for enhanced tags: {enhanced_tags}")
+                        db_records = product_db.get_products_by_names(enhanced_tags)
+                        logging.info(f"Found {len(db_records)} database records")
                     if db_records:
                         # Filter out products with None or empty ProductName
                         valid_db_records = [record for record in db_records if record.get('Product Name*') and record.get('Product Name*') != 'None']
@@ -5130,69 +5149,69 @@ def generate_labels():
                                 
                                 # CRITICAL FIX: Use process_database_product_for_api to ensure consistent DescAndWeight creation
                                 processed_record = process_database_product_for_api(db_record)
-                            
+                                
                                 # Map database fields to template fields (using correct field names from database)
                                 record = {
                                     'Product Name*': processed_record.get('Product Name*', ''),
-                                'ProductName': processed_record.get('Product Name*', ''),  # Add ProductName for Excel processor compatibility
-                                'ProductType': processed_record.get('Product Type*', ''),
-                                'Lineage': processed_record.get('Lineage', 'MIXED'),
-                                'ProductBrand': processed_record.get('Product Brand', ''),
-                                'Product Brand': processed_record.get('Product Brand', ''),  # Add Product Brand for template processor compatibility
-                                'Vendor': processed_record.get('Vendor/Supplier*', ''),
-                                'Product Strain': processed_record.get('Product Strain', ''),  # Correct field name
-                                'ProductStrain': processed_record.get('Product Strain', ''),  # Add ProductStrain for template processor compatibility
-                                'Price': processed_record.get('Price', '25'),  # Default price if missing
-                                'DOH': processed_record.get('DOH', ''),
-                                'Ratio': processed_record.get('Ratio', ''),
-                                'Weight*': processed_record.get('Weight*', '1'),  # Default weight if missing
-                                'Units': processed_record.get('Units', 'g'),  # Default units if missing
-                                'WeightUnits': processed_record.get('CombinedWeight', f"{processed_record.get('Weight*', '1')}{processed_record.get('Units', 'g')}"),  # Use processed CombinedWeight
-                                'CombinedWeight': processed_record.get('CombinedWeight', f"{processed_record.get('Weight*', '1')}{processed_record.get('Units', 'g')}"),  # Use processed CombinedWeight
-                                # CRITICAL FIX: Use processed DescAndWeight from process_database_product_for_api
-                                'Description': processed_record.get('DescAndWeight', processed_record.get('Product Name*', '')),  # Use processed DescAndWeight
-                                'DescAndWeight': processed_record.get('DescAndWeight', f"{processed_record.get('Product Name*', '')} - {processed_record.get('CombinedWeight', '1g')}"),  # Use processed DescAndWeight
-                                'THC test result': processed_record.get('THC test result', ''),
-                                'CBD test result': processed_record.get('CBD test result', ''),
-                                'Test result unit (% or mg)': processed_record.get('Test result unit (% or mg)', '%'),  # Default to % if missing
-                                'Quantity*': processed_record.get('Quantity*', '1'),  # Default quantity if missing
-                                'Concentrate Type': processed_record.get('Concentrate Type', ''),  # Correct field name
-                                'JointRatio': _calculate_joint_ratio_for_record(processed_record),
-                                'Ratio_or_THC_CBD': processed_record.get('Ratio_or_THC_CBD', ''),
-                                'State': processed_record.get('State', 'active'),  # Default state if missing
-                                'Is Sample? (yes/no)': processed_record.get('Is Sample? (yes/no)', 'no'),  # Default sample status
-                                'Is MJ product?(yes/no)': processed_record.get('Is MJ product?(yes/no)', 'yes'),  # Default MJ product status
-                                'Discountable? (yes/no)': processed_record.get('Discountable? (yes/no)', 'yes'),  # Default discountable status
-                                'Room*': processed_record.get('Room*', 'Default'),  # Default room if missing
-                                'Batch Number': processed_record.get('Batch Number', ''),  # Correct field name
-                                'Lot Number': processed_record.get('Lot Number', ''),  # Correct field name
-                                'Barcode*': processed_record.get('Barcode*', ''),  # Correct field name
-                                'Medical Only (Yes/No)': processed_record.get('Medical Only (Yes/No)', ''),  # Correct field name
-                                'Med Price': processed_record.get('Med Price', ''),  # Correct field name
-                                'Expiration Date(YYYY-MM-DD)': processed_record.get('Expiration Date(YYYY-MM-DD)', ''),  # Correct field name
-                                'Is Archived? (yes/no)': processed_record.get('Is Archived? (yes/no)', 'no'),  # Default archived status
-                                'THC Per Serving': processed_record.get('THC Per Serving', ''),  # Correct field name
-                                'Allergens': processed_record.get('Allergens', ''),  # Correct field name
-                                'Solvent': processed_record.get('Solvent', ''),  # Correct field name
-                                'Accepted Date': processed_record.get('Accepted Date', ''),  # Correct field name
-                                'Internal Product Identifier': processed_record.get('Internal Product Identifier', ''),  # Correct field name
-                                'Product Tags (comma separated)': processed_record.get('Product Tags (comma separated)', ''),  # Correct field name
-                                'Image URL': processed_record.get('Image URL', ''),  # Correct field name
-                                'Ingredients': processed_record.get('Ingredients', ''),  # Correct field name
-                                'Description_Complexity': processed_record.get('Description_Complexity', ''),  # Correct field name
-                                'Total THC': processed_record.get('Total THC', ''),
-                                'THCA': processed_record.get('THCA', ''),
-                                'CBDA': processed_record.get('CBDA', ''),
-                                'CBN': processed_record.get('CBN', ''),
-                                # Add missing fields for template processor compatibility
-                                'THC': processed_record.get('THC', ''),
-                                'CBD': processed_record.get('CBD', ''),
-                                'AI': processed_record.get('Total THC', ''),  # Map Total THC to AI field for template processor
-                                'AJ': processed_record.get('THCA', ''),  # Map THCA to AJ field for template processor
-                                'AK': processed_record.get('CBDA', ''),  # Map CBDA to AK field for template processor
-                                'Quantity Received*': processed_record.get('Quantity Received*', ''),
-                                'Barcode': processed_record.get('Barcode*', ''),
-                                'Quantity': processed_record.get('Quantity*', '1')
+                                    'ProductName': processed_record.get('Product Name*', ''),  # Add ProductName for Excel processor compatibility
+                                    'ProductType': processed_record.get('Product Type*', ''),
+                                    'Lineage': processed_record.get('Lineage', 'MIXED'),
+                                    'ProductBrand': processed_record.get('Product Brand', ''),
+                                    'Product Brand': processed_record.get('Product Brand', ''),  # Add Product Brand for template processor compatibility
+                                    'Vendor': processed_record.get('Vendor/Supplier*', ''),
+                                    'Product Strain': processed_record.get('Product Strain', ''),  # Correct field name
+                                    'ProductStrain': processed_record.get('Product Strain', ''),  # Add ProductStrain for template processor compatibility
+                                    'Price': processed_record.get('Price', '25'),  # Default price if missing
+                                    'DOH': processed_record.get('DOH', ''),
+                                    'Ratio': processed_record.get('Ratio', ''),
+                                    'Weight*': processed_record.get('Weight*', '1'),  # Default weight if missing
+                                    'Units': processed_record.get('Units', 'g'),  # Default units if missing
+                                    'WeightUnits': processed_record.get('CombinedWeight', f"{processed_record.get('Weight*', '1')}{processed_record.get('Units', 'g')}"),  # Use processed CombinedWeight
+                                    'CombinedWeight': processed_record.get('CombinedWeight', f"{processed_record.get('Weight*', '1')}{processed_record.get('Units', 'g')}"),  # Use processed CombinedWeight
+                                    # CRITICAL FIX: Use processed DescAndWeight from process_database_product_for_api
+                                    'Description': processed_record.get('DescAndWeight', processed_record.get('Product Name*', '')),  # Use processed DescAndWeight
+                                    'DescAndWeight': processed_record.get('DescAndWeight', f"{processed_record.get('Product Name*', '')} - {processed_record.get('CombinedWeight', '1g')}"),  # Use processed DescAndWeight
+                                    'THC test result': processed_record.get('THC test result', ''),
+                                    'CBD test result': processed_record.get('CBD test result', ''),
+                                    'Test result unit (% or mg)': processed_record.get('Test result unit (% or mg)', '%'),  # Default to % if missing
+                                    'Quantity*': processed_record.get('Quantity*', '1'),  # Default quantity if missing
+                                    'Concentrate Type': processed_record.get('Concentrate Type', ''),  # Correct field name
+                                    'JointRatio': _calculate_joint_ratio_for_record(processed_record),
+                                    'Ratio_or_THC_CBD': processed_record.get('Ratio_or_THC_CBD', ''),
+                                    'State': processed_record.get('State', 'active'),  # Default state if missing
+                                    'Is Sample? (yes/no)': processed_record.get('Is Sample? (yes/no)', 'no'),  # Default sample status
+                                    'Is MJ product?(yes/no)': processed_record.get('Is MJ product?(yes/no)', 'yes'),  # Default MJ product status
+                                    'Discountable? (yes/no)': processed_record.get('Discountable? (yes/no)', 'yes'),  # Default discountable status
+                                    'Room*': processed_record.get('Room*', 'Default'),  # Default room if missing
+                                    'Batch Number': processed_record.get('Batch Number', ''),  # Correct field name
+                                    'Lot Number': processed_record.get('Lot Number', ''),  # Correct field name
+                                    'Barcode*': processed_record.get('Barcode*', ''),  # Correct field name
+                                    'Medical Only (Yes/No)': processed_record.get('Medical Only (Yes/No)', ''),  # Correct field name
+                                    'Med Price': processed_record.get('Med Price', ''),  # Correct field name
+                                    'Expiration Date(YYYY-MM-DD)': processed_record.get('Expiration Date(YYYY-MM-DD)', ''),  # Correct field name
+                                    'Is Archived? (yes/no)': processed_record.get('Is Archived? (yes/no)', 'no'),  # Default archived status
+                                    'THC Per Serving': processed_record.get('THC Per Serving', ''),  # Correct field name
+                                    'Allergens': processed_record.get('Allergens', ''),  # Correct field name
+                                    'Solvent': processed_record.get('Solvent', ''),  # Correct field name
+                                    'Accepted Date': processed_record.get('Accepted Date', ''),  # Correct field name
+                                    'Internal Product Identifier': processed_record.get('Internal Product Identifier', ''),  # Correct field name
+                                    'Product Tags (comma separated)': processed_record.get('Product Tags (comma separated)', ''),  # Correct field name
+                                    'Image URL': processed_record.get('Image URL', ''),  # Correct field name
+                                    'Ingredients': processed_record.get('Ingredients', ''),  # Correct field name
+                                    'Description_Complexity': processed_record.get('Description_Complexity', ''),  # Correct field name
+                                    'Total THC': processed_record.get('Total THC', ''),
+                                    'THCA': processed_record.get('THCA', ''),
+                                    'CBDA': processed_record.get('CBDA', ''),
+                                    'CBN': processed_record.get('CBN', ''),
+                                    # Add missing fields for template processor compatibility
+                                    'THC': processed_record.get('THC', ''),
+                                    'CBD': processed_record.get('CBD', ''),
+                                    'AI': processed_record.get('Total THC', ''),  # Map Total THC to AI field for template processor
+                                    'AJ': processed_record.get('THCA', ''),  # Map THCA to AJ field for template processor
+                                    'AK': processed_record.get('CBDA', ''),  # Map CBDA to AK field for template processor
+                                    'Quantity Received*': processed_record.get('Quantity Received*', ''),
+                                    'Barcode': processed_record.get('Barcode*', ''),
+                                    'Quantity': processed_record.get('Quantity*', '1')
                             }
                             print(f"DEBUG: Database record processed - DescAndWeight: '{record.get('DescAndWeight', '')}' (from processed: '{processed_record.get('DescAndWeight', '')}')")
                             print(f"DEBUG: THC/CBD values - THC: '{processed_record.get('THC test result', '')}', CBD: '{processed_record.get('CBD test result', '')}', Unit: '{processed_record.get('Test result unit (% or mg)', '')}'")
