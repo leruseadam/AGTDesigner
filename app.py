@@ -4523,8 +4523,8 @@ def _extract_price_from_database_product(product):
                 if price_str:
                     return price_str
     
-    # Default to $32 if no price found (for vape cartridges)
-    return '32'
+    # Return empty string if no price found - no default price
+    return ''
 
 def _create_desc_and_weight(product_name, weight_units):
     """Create DescAndWeight field with 'Product Name - Weight' format (matching Excel processor)."""
