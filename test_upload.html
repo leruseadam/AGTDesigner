@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Upload Test</title>
+</head>
+<body>
+    <h1>Excel Upload Test</h1>
+    <input type="file" id="fileInput" accept=".xlsx,.xls">
+    <button onclick="testUpload()">Upload</button>
+    <div id="result"></div>
+
+    <script>
+    async function testUpload() {
+        const fileInput = document.getElementById('fileInput');
+        const file = fileInput.files[0];
+        
+        if (!file) {
+            document.getElementById('result').textContent = 'No file selected';
+            return;
+        }
+        
+        console.log('File selected:', file.name, 'Size:', file.size);
+        
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        try {
+            console.log('Sending upload request to /upload...');
+            const response = await fetch('/upload', {
+                method: 'POST',
+                body: formData
+            });
+            
+            console.log('Response status:', response.status);
+            const data = await response.json();
+            console.log('Response data:', data);
+            
+            document.getElementById('result').textContent = JSON.stringify(data, null, 2);
+        } catch (error) {
+            console.error('Upload error:', error);
+            document.getElementById('result').textContent = 'Error: ' + error.message;
+        }
+    }
+    </script>
+</body>
+</html>
+

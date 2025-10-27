@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Upload Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .log { background: #f0f0f0; padding: 10px; margin: 10px 0; border-left: 3px solid #007bff; }
+        .error { border-left-color: #dc3545; background: #ffe0e0; }
+        .success { border-left-color: #28a745; background: #e0ffe0; }
+    </style>
+</head>
+<body>
+    <h1>Excel Upload Debug Test</h1>
+    <input type="file" id="fileInput" accept=".xlsx,.xls">
+    <button onclick="testUpload()">Upload File</button>
+    <div id="logs"></div>
+
+    <script>
+    function log(message, type = 'info') {
+        const logsDiv = document.getElementById('logs');
+        const logEntry = document.createElement('div');
+        logEntry.className = `log ${type}`;
+        logEntry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+        logsDiv.appendChild(logEntry);
+        console.log(message);
+    }
+
+    async function testUpload() {
+        const fileInput = document.getElementById('fileInput');
+        const file = fileInput.files[0];
+
+        if (!file) {
+            log('❌ No file selected', 'error');
+            return;
+        }
+
+        log(`📁 File selected: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            log('🚀 Sending upload request to /upload...');
+            const startTime = Date.now();
+
+            const response = await fetch('/upload', {
+                method: 'POST',
+                body: formData
+            });
+
+            const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+            log(`📡 Response received in ${elapsed}s - Status: ${response.status} ${response.statusText}`);
+
+            const data = await response.json();
+            log(`📦 Response data: ${JSON.stringify(data, null, 2)}`);
+
+            if (response.ok && data.success) {
+                log(`✅ Upload successful! ${data.rows} rows processed`, 'success');
+                log('🔄 Page will reload in 2 seconds to show new data...');
+
+                setTimeout(() => {
+                    log('🔄 Reloading now...');
+                    window.location.reload();
+                }, 2000);
+            } else {
+                log(`❌ Upload failed: ${data.error || 'Unknown error'}`, 'error');
+            }
+        } catch (error) {
+            log(`❌ Upload error: ${error.message}`, 'error');
+            log(`❌ Error details: ${error.stack}`, 'error');
+        }
+    }
+    </script>
+</body>
+</html>

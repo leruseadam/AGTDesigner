@@ -1776,6 +1776,12 @@ def debug_template():
 def generation_splash():
     """Serve the generation splash screen."""
     return render_template('generation-splash.html')
+
+@app.route('/test_upload.html')
+def test_upload():
+    """Test upload page"""
+    return open('test_upload.html').read()
+
 @app.route('/upload', methods=['POST'])
 def upload_file():
     """Optimized file upload - saves file quickly then processes in background"""
@@ -1861,7 +1867,12 @@ def upload_file():
                                 logging.info(f"[BACKGROUND] Database storage result: {result}")
                         except Exception as db_error:
                             logging.warning(f"[BACKGROUND] Database storage failed: {db_error}")
-                        
+
+                        # CRITICAL FIX: Invalidate the global processor cache so page reload gets fresh data
+                        global _excel_processor
+                        _excel_processor = None
+                        logging.info("[BACKGROUND] Cleared Excel processor cache to force reload of new file on next request")
+
                         update_processing_status(original_filename, 'ready')
                         logging.info(f"[BACKGROUND] Processing complete for {original_filename}")
                     else:
@@ -1898,24 +1909,29 @@ def upload_file():
             if success:
                 row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
                 logging.info(f"File loaded successfully: {row_count} rows")
-                
+
                 # Store in database for persistence
                 try:
                     from src.core.data.product_database import get_product_database
                     # Store context removed - using single database
                     product_db = get_product_database()
-                    
+
                     if product_db and hasattr(product_db, 'store_excel_data'):
                         logging.info(f"Storing {row_count} products in database...")
                         result = product_db.store_excel_data(processor.df, file_path)
                         logging.info(f"Database storage result: {result}")
                     else:
                         logging.warning("Database storage not available")
-                        
+
                 except Exception as db_error:
                     logging.warning(f"Database storage failed (non-fatal): {db_error}")
                     # Continue anyway - file is still loaded in processor
-                
+
+                # CRITICAL FIX: Invalidate the global processor cache so page reload gets fresh data
+                global _excel_processor
+                _excel_processor = None
+                logging.info("Cleared Excel processor cache to force reload of new file on next request")
+
                 update_processing_status(file.filename, 'ready')
             else:
                 logging.error("File load returned False")

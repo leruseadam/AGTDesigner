@@ -1,61 +1,88 @@
 // Enhanced UI JavaScript
 // This file contains all the enhanced UI functionality
 
-// Enhanced file upload with drag and drop
+// Immediately attach handlers - page should already be loaded
+console.log('🔧 Enhanced UI: Loading...');
 const fileDropZone = document.getElementById('fileDropZone');
 const fileInput = document.getElementById('fileInput');
 const currentFileInfo = document.getElementById('currentFileInfo');
 const currentFile = document.getElementById('currentFile');
 
-// Drag and drop handlers
-if (fileDropZone) {
-  ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-    fileDropZone.addEventListener(eventName, preventDefaults, false);
-  });
-}
+console.log('📝 File elements found:', {
+  fileDropZone: !!fileDropZone,
+  fileInput: !!fileInput,
+  currentFileInfo: !!currentFileInfo,
+  currentFile: !!currentFile
+});
 
-function preventDefaults(e) {
-  e.preventDefault();
-  e.stopPropagation();
-}
+  // Drag and drop handlers
+  if (fileDropZone) {
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+      fileDropZone.addEventListener(eventName, preventDefaults, false);
+    });
+  }
 
-if (fileDropZone) {
-  ['dragenter', 'dragover'].forEach(eventName => {
-    fileDropZone.addEventListener(eventName, highlight, false);
-  });
+  function preventDefaults(e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
 
-  ['dragleave', 'drop'].forEach(eventName => {
-    fileDropZone.addEventListener(eventName, unhighlight, false);
-  });
-}
+  if (fileDropZone) {
+    ['dragenter', 'dragover'].forEach(eventName => {
+      fileDropZone.addEventListener(eventName, highlight, false);
+    });
 
-function highlight(e) {
-  fileDropZone.classList.add('dragover');
-}
+    ['dragleave', 'drop'].forEach(eventName => {
+      fileDropZone.addEventListener(eventName, unhighlight, false);
+    });
+  }
 
-function unhighlight(e) {
-  fileDropZone.classList.remove('dragover');
-}
+  function highlight(e) {
+    fileDropZone.classList.add('dragover');
+  }
 
-if (fileDropZone) {
-  fileDropZone.addEventListener('drop', handleDrop, false);
-}
+  function unhighlight(e) {
+    fileDropZone.classList.remove('dragover');
+  }
 
-function handleDrop(e) {
-  const dt = e.dataTransfer;
-  const files = dt.files;
-  handleFiles(files);
-}
+  if (fileDropZone) {
+    fileDropZone.addEventListener('drop', handleDrop, false);
+  }
+
+  function handleDrop(e) {
+    const dt = e.dataTransfer;
+    const files = dt.files;
+    handleFiles(files);
+  }
 
 if (fileInput) {
-  fileInput.addEventListener('change', function() {
-    handleFiles(this.files);
+  console.log('✅ Attaching change listener to fileInput');
+  fileInput.addEventListener('change', function(e) {
+    console.log('🔄 File input change event fired');
+    if (e.target.files && e.target.files.length > 0) {
+      handleFiles(e.target.files);
+    }
+  });
+} else {
+  console.error('❌ fileInput element not found!');
+}
+
+// Also try to attach via main.js handler as backup
+if (fileInput && window.TagManager) {
+  console.log('✅ Attaching TagManager upload handler as backup');
+  fileInput.addEventListener('change', function(e) {
+    if (e.target.files && e.target.files.length > 0 && window.TagManager.uploadFile) {
+      console.log('🔄 Calling TagManager.uploadFile as backup');
+      window.TagManager.uploadFile(e.target.files[0]);
+    }
   });
 }
 
 async function handleFiles(files) {
+  console.log('📁 handleFiles called with:', files.length, 'files');
   if (files.length > 0) {
     const file = files[0];
+    console.log('📄 File selected:', file.name, 'size:', file.size);
     if (currentFile) currentFile.textContent = file.name;
     if (currentFileInfo) currentFileInfo.style.display = 'block';
     
@@ -92,11 +119,14 @@ async function handleFiles(files) {
         TagManager.clearUIStateForNewFile(true); // Preserve filters during upload
       }
       
+      console.log('🚀 Sending upload request to /upload...');
       const response = await fetch('/upload', {
         method: 'POST',
         body: formData
       });
+      console.log('📡 Upload response status:', response.status);
       const data = await response.json();
+      console.log('📦 Upload response data:', data);
       
       if (response.ok && data.success) {
         // File uploaded successfully - data is already processed synchronously
@@ -113,12 +143,14 @@ async function handleFiles(files) {
           TagManager.clearUIStateForNewFile(true); // Preserve filters
         }
         
-        // Fetch new data immediately by reloading the page
-        console.log('Upload successful! Reloading page to show new data...');
-        window.location.reload();
+        // Show success message
+        console.log('✅ Upload successful! Reloading page to show new data...');
+        alert(`Upload successful! ${data.rows} rows processed. Reloading...`);
         
-        // Show success
-        showToast("success", `Upload successful! ${data.rows} rows processed.`);
+        // Reload page after a short delay
+        setTimeout(() => {
+          window.location.reload();
+        }, 1000);
         
         // Add animation class to file path container
         if (filePathContainer) {
