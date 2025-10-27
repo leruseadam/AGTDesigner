@@ -1,8 +1,30 @@
+// Detect Windows platform for optimizations
+const isWindows = navigator.platform.toLowerCase().includes('win') || 
+                 navigator.userAgent.toLowerCase().includes('windows');
+
+// Windows-specific performance optimizations
+if (isWindows) {
+    // Request continuous repainting for smoother animations
+    requestAnimationFrame(function continuousRepaint() {
+        requestAnimationFrame(continuousRepaint);
+    });
+    
+    // Optimize DOM operations for Windows
+    if (typeof document.documentElement.style.transition !== 'undefined') {
+        // Reduce repaints
+        document.body.style.transform = 'translateZ(0)';
+        document.body.style.willChange = 'contents';
+    }
+    
+    console.log('Windows performance optimizations enabled');
+}
+
 // Memory-optimized performance utilities
 const performanceUtils = {
-    // Memory-efficient debounce with cleanup
+    // Memory-efficient debounce with cleanup - optimized for Windows
     debounce(func, wait) {
         let timeout;
+        const optimizedWait = isWindows ? Math.max(wait * 0.5, 10) : wait; // Faster on Windows
         return function executedFunction(...args) {
             const later = () => {
                 clearTimeout(timeout);
@@ -10,20 +32,21 @@ const performanceUtils = {
                 func(...args);
             };
             clearTimeout(timeout);
-            timeout = setTimeout(later, wait);
+            timeout = setTimeout(later, optimizedWait);
         };
     },
     
-    // Memory-efficient throttle
+    // Memory-efficient throttle - optimized for Windows
     throttle(func, limit) {
         let inThrottle;
+        const optimizedLimit = isWindows ? Math.max(limit * 0.5, 10) : limit; // Faster on Windows
         return function() {
             const args = arguments;
             const context = this;
             if (!inThrottle) {
                 func.apply(context, args);
                 inThrottle = true;
-                setTimeout(() => inThrottle = false, limit);
+                setTimeout(() => inThrottle = false, optimizedLimit);
             }
         }
     },
@@ -1793,6 +1816,18 @@ const TagManager = {
 
     // Internal function that actually updates the available tags
     _updateAvailableTags(originalTags, filteredTags = null) {
+        // Windows optimization: Use requestAnimationFrame for smoother rendering
+        if (isWindows) {
+            requestAnimationFrame(() => {
+                this._performUpdateAvailableTags(originalTags, filteredTags);
+            });
+            return;
+        }
+        
+        this._performUpdateAvailableTags(originalTags, filteredTags);
+    },
+    
+    _performUpdateAvailableTags(originalTags, filteredTags = null) {
         console.log('_updateAvailableTags called with:', {
             originalTagsLength: originalTags ? originalTags.length : 0,
             filteredTagsLength: filteredTags ? filteredTags.length : 0,
@@ -1993,8 +2028,8 @@ const TagManager = {
             vendorCheckbox.className = 'select-all-checkbox me-2';
             vendorCheckbox.addEventListener('change', (e) => {
                 const isChecked = e.target.checked;
-                // Only iterate tag checkboxes within this vendor section
-                const checkboxes = vendorSection.querySelectorAll('input.tag-checkbox');
+                // Select ALL checkboxes (both select-all checkboxes and tag checkboxes) within this section
+                const checkboxes = vendorSection.querySelectorAll('input[type="checkbox"]');
                 checkboxes.forEach(checkbox => {
                     checkbox.checked = isChecked;
                     if (checkbox.classList.contains('tag-checkbox')) {
@@ -2069,33 +2104,33 @@ const TagManager = {
                 brandCheckbox.className = 'select-all-checkbox me-2';
             brandCheckbox.addEventListener('change', (e) => {
                 const isChecked = e.target.checked;
-                // Only iterate tag checkboxes within this brand section
-                const checkboxes = brandSection.querySelectorAll('input.tag-checkbox');
+                // Select ALL checkboxes (both select-all checkboxes and tag checkboxes) within this section
+                const checkboxes = brandSection.querySelectorAll('input[type="checkbox"]');
                 checkboxes.forEach(checkbox => {
-                        checkbox.checked = isChecked;
-                        if (checkbox.classList.contains('tag-checkbox')) {
-                            const tag = this.state.tags.find(t => t['Product Name*'] === checkbox.value);
-                            if (tag) {
-                                if (isChecked) {
-                                    if (!this.state.persistentSelectedTags.includes(tag['Product Name*'])) {
-                                        this.state.persistentSelectedTags.push(tag['Product Name*']);
-                                    }
-                                } else {
-                                    const index = this.state.persistentSelectedTags.indexOf(tag['Product Name*']);
-                                    if (index > -1) {
-                                        this.state.persistentSelectedTags.splice(index, 1);
-                                    }
+                    checkbox.checked = isChecked;
+                    if (checkbox.classList.contains('tag-checkbox')) {
+                        const tag = this.state.tags.find(t => t['Product Name*'] === checkbox.value);
+                        if (tag) {
+                            if (isChecked) {
+                                if (!this.state.persistentSelectedTags.includes(tag['Product Name*'])) {
+                                    this.state.persistentSelectedTags.push(tag['Product Name*']);
+                                }
+                            } else {
+                                const index = this.state.persistentSelectedTags.indexOf(tag['Product Name*']);
+                                if (index > -1) {
+                                    this.state.persistentSelectedTags.splice(index, 1);
                                 }
                             }
                         }
-                    });
-                    this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                    const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
-                        this.state.tags.find(t => t['Product Name*'] === name)
-                    ).filter(Boolean);
-                    this.updateSelectedTags(selectedTagObjects);
-                    this.efficientlyUpdateAvailableTagsDisplay();
+                    }
                 });
+                this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+                const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
+                    this.state.tags.find(t => t['Product Name*'] === name)
+                ).filter(Boolean);
+                this.updateSelectedTags(selectedTagObjects);
+                this.efficientlyUpdateAvailableTagsDisplay();
+            });
                 
                 brandHeader.appendChild(brandCheckbox);
                 brandHeader.appendChild(document.createTextNode(brand));
@@ -2145,8 +2180,8 @@ const TagManager = {
                     productTypeCheckbox.className = 'select-all-checkbox me-2';
                     productTypeCheckbox.addEventListener('change', (e) => {
                         const isChecked = e.target.checked;
-                        // Only iterate tag checkboxes within this product type section
-                        const checkboxes = productTypeSection.querySelectorAll('input.tag-checkbox');
+                        // Select ALL checkboxes (both select-all checkboxes and tag checkboxes) within this section
+                        const checkboxes = productTypeSection.querySelectorAll('input[type="checkbox"]');
                         checkboxes.forEach(checkbox => {
                             checkbox.checked = isChecked;
                             if (checkbox.classList.contains('tag-checkbox')) {
@@ -2221,8 +2256,8 @@ const TagManager = {
                         weightCheckbox.className = 'select-all-checkbox me-2';
                         weightCheckbox.addEventListener('change', (e) => {
                             const isChecked = e.target.checked;
-                            // Only iterate over tag checkboxes for speed
-                            const checkboxes = weightSection.querySelectorAll('input.tag-checkbox');
+                            // Select ALL checkboxes (both select-all checkboxes and tag checkboxes) within this section
+                            const checkboxes = weightSection.querySelectorAll('input[type="checkbox"]');
                             checkboxes.forEach(checkbox => {
                                 checkbox.checked = isChecked;
                                 if (checkbox.classList.contains('tag-checkbox')) {
@@ -2373,18 +2408,11 @@ const TagManager = {
             this.handleTagSelection(e, tag);
         };
         
-        // Bind change handler only for available tags. For selected tags we use a delegated handler.
-        if (!isForSelectedTags) {
-            checkbox.removeEventListener('change', handleCheckboxChange);
-            checkbox.addEventListener('change', handleCheckboxChange);
-        } else {
-            // For selected list, prevent any per-checkbox change handlers from firing
-            checkbox.addEventListener('change', (e) => {
-                if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
-                e.stopPropagation();
-                e.preventDefault();
-            }, { capture: true });
-        }
+        // Store the handler on the element itself so we can reference it later
+        checkbox._changeHandler = handleCheckboxChange;
+        
+        // Bind change handler for both available and selected tags
+        checkbox.addEventListener('change', handleCheckboxChange);
         
         // Ensure the checkbox is not disabled by drag-and-drop manager
         checkbox.style.pointerEvents = 'auto';
@@ -3243,14 +3271,15 @@ const TagManager = {
         if (currentTagCount === tags.length && tags.length > 0) {
             // Quick check: if we have the same number of tags and they're not empty, 
             // we might not need to update (this is a heuristic to avoid unnecessary updates)
-            const currentTagNames = Array.from(container.querySelectorAll('.tag-item')).map(el => 
+            const currentTagNames = new Set(Array.from(container.querySelectorAll('.tag-item')).map(el => 
                 el.querySelector('.tag-checkbox')?.value || el.getAttribute('data-tag-name')
-            ).filter(Boolean);
+            ).filter(Boolean));
             
-            const newTagNames = tags.map(tag => tag['Product Name*']).filter(Boolean);
+            const newTagNames = new Set(tags.map(tag => tag['Product Name*']).filter(Boolean));
             
-            if (currentTagNames.length === newTagNames.length && 
-                currentTagNames.every((name, index) => name === newTagNames[index])) {
+            // Use Set comparison to handle order differences
+            if (currentTagNames.size === newTagNames.size && 
+                [...currentTagNames].every(name => newTagNames.has(name))) {
                 console.log('updateSelectedTags: No changes detected, skipping update');
                 console.timeEnd('updateSelectedTags');
                 return;
@@ -3969,28 +3998,22 @@ const TagManager = {
                 cb.checked = !cb.checked;
                 cb.dispatchEvent(new Event('change', { bubbles: true }));
             });
-            // Capture-phase to intercept before individual checkbox handlers
+            // Capture-phase handler for checks only - let individual handlers handle unchecks
             container.addEventListener('change', (e) => {
                 const target = e.target;
                 if (!target || !target.matches('input[type="checkbox"].tag-checkbox')) return;
                 const tagName = target.value;
-                if (target.checked) return;
-                // Update state without triggering full re-render
-                const idx = this.state.persistentSelectedTags.indexOf(tagName);
-                if (idx > -1) this.state.persistentSelectedTags.splice(idx, 1);
-                this.state.selectedTags.delete(tagName);
-                // Remove DOM row
-                const row = target.closest('.tag-item, .tag-row');
-                if (row) row.remove();
-                // Update counts minimally
-                this.updateTagCount('selected', this.state.persistentSelectedTags.length);
-                // Stop this change from bubbling to any global listeners that might reload data
-                if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
-                e.stopPropagation();
-                e.preventDefault();
-                // Sync the corresponding checkbox in availableTags (if present) so Brand rows don't reflow
-                const availCb = document.querySelector(`#availableTags .tag-checkbox[value="${CSS.escape(tagName)}"]`);
-                if (availCb) availCb.checked = false;
+                if (target.checked) {
+                    // For checks, update state immediately to improve responsiveness
+                    const idx = this.state.persistentSelectedTags.indexOf(tagName);
+                    if (idx === -1) {
+                        this.state.persistentSelectedTags.push(tagName);
+                        this.state.selectedTags.add(tagName);
+                    }
+                    return;
+                }
+                // For unchecks, don't remove the row - let individual handlers handle it
+                // This ensures the individual handlers can run properly
             }, { capture: true });
             Object.defineProperty(container, '_hasDeselectionHandler', { value: true, enumerable: false });
         }
@@ -5826,6 +5849,32 @@ const TagManager = {
                 brandSelectAll.indeterminate = brandChecked.length > 0 && brandChecked.length < brandCheckboxes.length;
             }
         });
+        
+        // Update product type checkboxes
+        const productTypeSections = document.querySelectorAll('#availableTags .product-type-section');
+        productTypeSections.forEach(productTypeSection => {
+            const productTypeTagCheckboxes = productTypeSection.querySelectorAll('.tag-checkbox');
+            const productTypeChecked = productTypeSection.querySelectorAll('.tag-checkbox:checked');
+            const productTypeSelectAll = productTypeSection.querySelector('.select-all-checkbox');
+            
+            if (productTypeSelectAll && productTypeTagCheckboxes.length > 0) {
+                productTypeSelectAll.checked = productTypeChecked.length === productTypeTagCheckboxes.length;
+                productTypeSelectAll.indeterminate = productTypeChecked.length > 0 && productTypeChecked.length < productTypeTagCheckboxes.length;
+            }
+        });
+        
+        // Update weight checkboxes
+        const weightSections = document.querySelectorAll('#availableTags .weight-section');
+        weightSections.forEach(weightSection => {
+            const weightTagCheckboxes = weightSection.querySelectorAll('.tag-checkbox');
+            const weightChecked = weightSection.querySelectorAll('.tag-checkbox:checked');
+            const weightSelectAll = weightSection.querySelector('.select-all-checkbox');
+            
+            if (weightSelectAll && weightTagCheckboxes.length > 0) {
+                weightSelectAll.checked = weightChecked.length === weightTagCheckboxes.length;
+                weightSelectAll.indeterminate = weightChecked.length > 0 && weightChecked.length < weightTagCheckboxes.length;
+            }
+        });
     },
 
     // Initialize Select All checkbox with proper event listener
@@ -6199,7 +6248,7 @@ const TagManager = {
             }
             
             console.log(`🔥 fastFilterUpdate completed for ${filterType}`);
-        }, isWindows ? 25 : 50); // Even faster debounce on Windows (25ms vs 50ms)
+        }, isWindows ? 10 : 50); // Ultra-fast debounce on Windows (10ms vs 50ms)
         
         filterIds.forEach(filterId => {
             const filterElement = document.getElementById(filterId);
