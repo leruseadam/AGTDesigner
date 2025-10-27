@@ -6220,7 +6220,7 @@ const TagManager = {
     },
 
     setupFilterEventListeners() {
-        const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter', 'ratioFilter'];
+        const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
         
         console.log('Setting up Mac-like fast filter event listeners...');
         

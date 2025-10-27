@@ -362,12 +362,10 @@
     }
     
     function loadSavedStore() {
-      // Always default to Bothell upon loading
-      console.log('Setting default store to AGT_Bothell upon loading');
-      changeStore('AGT_Bothell');
-      updateCurrentStoreDisplay('AGT_Bothell');
+      // Check backend for current store status instead of defaulting to Bothell
+      console.log('Checking for saved store selection...');
       
-      // Also check backend for current store status
+      // Check backend for current store status
       updateStoreStatusFromBackend();
     }
     
@@ -379,16 +377,15 @@
             // Update the display
             updateCurrentStoreDisplay(data.store);
             updateStoreStatus(`Store: ${data.store.replace(/_/g, ' ')}`, 'active');
+            console.log('Store found in backend:', data.store);
           } else {
-            // No store set in backend, ensure Bothell is set
-            console.log('No store in backend, ensuring AGT_Bothell is set');
-            changeStore('AGT_Bothell');
+            // No store set in backend - will be handled by checkStoreRequired()
+            console.log('No store in backend - user will be prompted to select');
           }
         })
         .catch(error => {
-          console.log('Error checking backend, ensuring AGT_Bothell is set');
-          // Ensure Bothell is set as default
-          changeStore('AGT_Bothell');
+          console.log('Error checking backend for store:', error);
+          // Don't auto-set Bothell, let checkStoreRequired handle it
         });
     }
     
@@ -403,12 +400,17 @@
             console.log('Store selection required, showing modal');
             showStoreSelectionModal();
           } else {
+            // Store selection not required, load and display the existing store
             console.log('Store selection not required, current store:', data.store);
+            if (data.store) {
+              updateCurrentStoreDisplay(data.store);
+              updateStoreStatus(`Store: ${data.store.replace(/_/g, ' ')}`, 'active');
+            }
           }
         })
         .catch(error => {
           console.log('Error checking store requirement:', error);
-          // If there's an error, show modal as fallback
+          // If there's an error, show modal as fallback to require store selection
           showStoreSelectionModal();
         });
     }
@@ -4510,12 +4512,6 @@
                       <option value="All">All Products</option>
                     </select>
                   </div>
-                  <div>
-                    <label for="ratioFilter" class="filter-category-label mb-0">RATIO</label>
-                    <select id="ratioFilter" class="form-select form-select-sm compact-filter" aria-label="Filter by ratio" style="width: 100%;">
-                      <option value="All">All Ratios</option>
-                    </select>
-                  </div>
               </div>
             </div>
           </div>
@@ -6480,26 +6476,13 @@
               localStorage.setItem('selectedStore', data.store);
               console.log('Window load: Store sync completed');
             } else {
-              // No store in backend, default to Bothell
-              console.log('No store in backend, defaulting to AGT_Bothell');
-              changeStore('AGT_Bothell');
+              // No store in backend - will be handled by checkStoreRequired()
+              console.log('No store in backend - user will be prompted to select');
             }
           })
           .catch(error => {
             console.error('Error checking backend store:', error);
-            // Fallback to localStorage or default
-            const savedStore = localStorage.getItem('selectedStore');
-            if (savedStore) {
-              const displayElement = document.getElementById('currentStoreDisplay');
-              if (displayElement) {
-                displayElement.textContent = savedStore.replace(/_/g, ' ');
-                displayElement.style.color = '#4ade80';
-              }
-              updateStoreStatus(`Store: ${savedStore.replace(/_/g, ' ')}`, 'active');
-            } else {
-              console.log('No store saved, defaulting to AGT_Bothell');
-              changeStore('AGT_Bothell');
-            }
+            // Don't auto-set Bothell, let checkStoreRequired handle it
           });
       }, 1000);
       
@@ -6522,14 +6505,7 @@
         }
       }, 3000);
       
-      // Emergency fallback - default to Bothell after 3 seconds if still no store
-      setTimeout(() => {
-        const savedStore = localStorage.getItem('selectedStore');
-        if (!savedStore) {
-          console.log('Emergency fallback: No store saved after 3 seconds, defaulting to AGT_Bothell');
-          changeStore('AGT_Bothell');
-        }
-      }, 3000);
+      // No emergency fallback - let checkStoreRequired handle store selection
     });
     
     // Scroll to top on page show (handles back/forward navigation)
@@ -6537,11 +6513,7 @@
       scrollToTop();
     });
     
-    // Set Bothell as default store IMMEDIATELY - before DOMContentLoaded
-    console.log('Setting Bothell as default store IMMEDIATELY...');
-    updateCurrentStoreDisplay('AGT_Bothell');
-    updateStoreStatus('Store: AGT Bothell', 'active');
-    localStorage.setItem('selectedStore', 'AGT_Bothell');
+    // Don't set default store immediately - let checkStoreRequired handle it
 
     // CRITICAL FIX: Don't override TagManager from main.js - just extend it
     // The full TagManager with uploadFile method is defined in main.js
@@ -6798,11 +6770,10 @@
 
       }, 2000);
 
-      // Also set the store in backend
-      console.log('DOMContentLoaded: Setting Bothell as default store...');
-      changeStore('AGT_Bothell');
+      // Check for existing store selection in backend (don't auto-set Bothell)
+      console.log('DOMContentLoaded: Checking for existing store selection...');
       
-      // Also sync with backend to ensure consistency
+      // Sync with backend to ensure consistency
       fetch('/api/get-store')
         .then(response => {
           console.log('Store API response:', response);
@@ -6824,13 +6795,12 @@
             localStorage.setItem('selectedStore', data.store);
             console.log('Store sync completed successfully');
           } else {
-            console.log('No store in backend data, Bothell should be set as default');
+            console.log('No store in backend data - will be handled by checkStoreRequired()');
           }
         })
         .catch(error => {
           console.error('Error syncing store on DOMContentLoaded:', error);
-          // Ensure Bothell is still set as default even if backend check fails
-          changeStore('AGT_Bothell');
+          // Don't auto-set Bothell, let checkStoreRequired handle it
         });
       
       console.log('TagManager initialized, waiting for Bootstrap...');
@@ -6842,11 +6812,11 @@
         // Verify modal exists
         verifyModalExists();
         
-        // Load saved store selection
-        loadSavedStore();
-        
-        // Check if store selection is required
+        // First check if store selection is required (this handles showing the modal if needed)
         checkStoreRequired();
+        
+        // Then load saved store selection if one exists
+        loadSavedStore();
       }, 500);
       
       // Periodically check store status from backend
