@@ -79,7 +79,9 @@ class PerformanceMonitor:
         logger.info("Performance monitoring stopped")
     
     def _monitor_loop(self):
-        """Background monitoring loop."""
+        """Background monitoring loop (DISABLED for performance)."""
+        # Disable monitoring to prevent CPU usage
+        return
         while self._monitoring:
             try:
                 # Collect system metrics
@@ -138,24 +140,24 @@ class PerformanceMonitor:
                                  f"High memory usage: {latest_memory['used_percent']:.1f}%",
                                  ["Restart application", "Clear caches", "Optimize memory usage"])
         
-        # Check CPU usage
-        if self._cpu_usage:
-            latest_cpu = self._cpu_usage[-1]
-            if latest_cpu['cpu_percent'] > 80:
-                self._create_alert('high', 'cpu', 'cpu_percent',
-                                 latest_cpu['cpu_percent'], 80,
-                                 f"High CPU usage: {latest_cpu['cpu_percent']:.1f}%",
-                                 ["Optimize CPU-intensive operations", "Add more processing power"])
+        # Check CPU usage (DISABLED for performance)
+        # if self._cpu_usage:
+        #     latest_cpu = self._cpu_usage[-1]
+        #     if latest_cpu['cpu_percent'] > 80:
+        #         self._create_alert('high', 'cpu', 'cpu_percent',
+        #                          latest_cpu['cpu_percent'], 80,
+        #                          f"High CPU usage: {latest_cpu['cpu_percent']:.1f}%",
+        #                          ["Optimize CPU-intensive operations", "Add more processing power"])
         
-        # Check operation times
-        for operation, times in self._operation_times.items():
-            if times:
-                avg_time = sum(times) / len(times)
-                if avg_time > 5.0:  # 5 second threshold
-                    self._create_alert('medium', 'operation', operation,
-                                     avg_time, 5.0,
-                                     f"Slow operation {operation}: {avg_time:.2f}s average",
-                                     ["Optimize operation", "Add caching", "Use background processing"])
+        # Check operation times (DISABLED for performance)
+        # for operation, times in self._operation_times.items():
+        #     if times:
+        #         avg_time = sum(times) / len(times)
+        #         if avg_time > 5.0:  # 5 second threshold
+        #             self._create_alert('medium', 'operation', operation,
+        #                              avg_time, 5.0,
+        #                              f"Slow operation {operation}: {avg_time:.2f}s average",
+        #                              ["Optimize operation", "Add caching", "Use background processing"])
     
     def _create_alert(self, severity: str, component: str, metric: str, 
                      value: float, threshold: float, message: str, 
@@ -182,7 +184,8 @@ class PerformanceMonitor:
             except Exception as e:
                 logger.error(f"Alert handler failed: {e}")
         
-        logger.warning(f"Performance alert: {message}")
+        # DISABLED for performance - alerts were causing high CPU usage
+        # logger.warning(f"Performance alert: {message}")
     
     def _cleanup_old_data(self):
         """Cleanup old performance data."""
