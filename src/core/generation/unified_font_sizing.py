@@ -394,19 +394,11 @@ def get_font_size_by_marker(text, marker_type, template_type='vertical', scale_f
     # Determine base field type
     field_type = marker_to_field.get(base_marker, 'default')
 
-    # Non-classic rule: Lineage content represents center-brand; size as brand
+    # CRITICAL FIX: Always use 'lineage' field type for LINEAGE markers to get proper font sizes
+    # Previous logic incorrectly used 'brand' for double/mini/vertical which made lineage too small
     if base_marker in ('LINEAGE', 'LINEAGE_CENTER'):
-        try:
-            template_lower = str(template_type).lower()
-            if template_lower in ('double', 'mini', 'vertical'):
-                field_type = 'brand'
-            else:
-                # Use product_type when available
-                if product_type is not None and not is_classic_type(product_type):
-                    field_type = 'brand'
-        except Exception:
-            # If any issue determining classic/nonclassic, keep existing mapping
-            pass
+        field_type = 'lineage'  # Use lineage font sizing for all templates
+    
     return get_font_size(text, field_type, template_type, scale_factor, 'standard')
 
 def get_line_spacing_by_marker(marker_type, template_type='vertical'):
