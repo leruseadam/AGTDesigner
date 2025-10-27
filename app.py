@@ -5918,13 +5918,27 @@ def process_database_product_for_api(db_product):
     desc_and_weight = processed_product.get('DescAndWeight', '')
     if not desc_and_weight or desc_and_weight == '' or str(desc_and_weight).strip() == '':
         product_name = processed_product.get('Product Name*', processed_product.get('Product Name', ''))
-        description = processed_product.get('Description', product_name)  # Use description if available, fallback to product name
+        raw_description = processed_product.get('Description', product_name)  # Use description if available, fallback to product name
+        
+        # CRITICAL FIX: Clean description to remove "by Vendor" patterns and weight information
+        import re
+        cleaned_description = str(raw_description).strip()
+        # Remove " by " patterns
+        if " by " in cleaned_description:
+            cleaned_description = cleaned_description.split(" by ")[0].strip()
+        # Remove weight information (patterns like " - 1g", " - .5g")
+        cleaned_description = re.sub(r' - [\d.].*$', '', cleaned_description)
+        cleaned_description = cleaned_description.strip()
+        
+        # Update the Description field in processed_product
+        processed_product['Description'] = cleaned_description
+        
         weight_units = processed_product.get('CombinedWeight', '')
         
-        if description and weight_units and weight_units != 'N/A':
-            processed_product['DescAndWeight'] = _create_desc_and_weight(description, weight_units)
-        elif description:
-            processed_product['DescAndWeight'] = str(description).strip()
+        if cleaned_description and weight_units and weight_units != 'N/A':
+            processed_product['DescAndWeight'] = _create_desc_and_weight(cleaned_description, weight_units)
+        elif cleaned_description:
+            processed_product['DescAndWeight'] = cleaned_description
         else:
             processed_product['DescAndWeight'] = 'N/A'
     
