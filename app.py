@@ -5289,9 +5289,17 @@ def generate_labels():
         
         # Fallback to Excel data if database didn't provide records
         if not records and has_excel_data:
-            logging.info("LINEAGE DEBUG: Using Excel data for record generation (fallback)")
+            logging.info("🔍 Fallback: Using Excel data for record generation")
+            logging.info(f"🔍 Excel processor has {len(excel_processor.df)} rows")
+            logging.info(f"🔍 Selected tags for Excel fallback: {valid_selected_tags}")
+            
+            # CRITICAL FIX: Ensure selected tags are set on Excel processor
+            if valid_selected_tags:
+                excel_processor.selected_tags = valid_selected_tags
+                logging.info(f"🔍 Set selected_tags on Excel processor: {len(valid_selected_tags)} tags")
+            
             records = excel_processor.get_selected_records(template_type)
-            logging.debug(f"LINEAGE DEBUG: Records returned from get_selected_records: {len(records) if records else 0}")
+            logging.info(f"🔍 Records returned from get_selected_records: {len(records) if records else 0}")
             
             # CRITICAL FIX: If we have JSON matched products but no records, try to include them directly
             if not records and excel_processor.df is not None and 'Source' in excel_processor.df.columns:
