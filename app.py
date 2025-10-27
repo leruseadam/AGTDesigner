@@ -712,11 +712,19 @@ def get_product_database(store_name=None):
             logging.warning(f"Error getting current store selection: {e}")
             store_name = 'AGT_Bothell'  # Default fallback
     
-    if _product_database is None or (store_name and getattr(_product_database, '_store_name', None) != store_name):
+    # CRITICAL FIX: Always check if we need to reload the database for the current store
+    current_store_in_db = getattr(_product_database, '_store_name', None) if _product_database else None
+    needs_reload = _product_database is None or (store_name and current_store_in_db != store_name)
+    
+    logging.info(f"📦 Database load check: requested_store='{store_name}', current_store_in_db='{current_store_in_db}', needs_reload={needs_reload}")
+    
+    if needs_reload:
         from src.core.data.product_database import ProductDatabase
         # Use store-specific database for better matching
         db_filename = f'product_database_{store_name}.db'
         db_path = os.path.join(current_dir, 'uploads', db_filename)
+        
+        logging.info(f"📦 Loading database for store '{store_name}' from: {db_path}")
         
         # CRITICAL FIX: Fallback to main database if store-specific database doesn't exist
         if not os.path.exists(db_path):
@@ -730,7 +738,8 @@ def get_product_database(store_name=None):
         _product_database._store_name = store_name
         # Force database initialization to ensure it's loaded
         _product_database.init_database()
-        logging.info(f"ProductDatabase created and initialized for store '{store_name}' at: {db_path}")
+        logging.info(f"✅ ProductDatabase loaded for store '{store_name}' at: {db_path}")
+    
     return _product_database
 
 def get_json_matcher():
@@ -1547,22 +1556,10 @@ def get_session_json_matcher():
             return None
 
 def get_session_product_database():
-    """Get ProductDatabase instance for the current session."""
+    """Get ProductDatabase instance for the current session using current store selection."""
     try:
-        if not hasattr(app, '_product_database'):
-            from src.core.data.product_database import ProductDatabase
-            # CRITICAL FIX: Use the main product_database.db file (has 8,825 Bothell products)
-            db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
-            
-            # Fallback to AGT_Bothell database if main doesn't exist
-            if not os.path.exists(db_path):
-                db_path = os.path.join(current_dir, 'uploads', 'product_database_AGT_Bothell.db')
-            
-            app._product_database = ProductDatabase(db_path)
-            app._product_database._store_name = 'AGT_Bothell'  # Set store name for Bothell
-            app._product_database.init_database()  # Ensure database is initialized
-            logging.info(f"Created new ProductDatabase instance for session at {db_path} with store: AGT_Bothell")
-        return app._product_database
+        # Use the global get_product_database which handles store selection automatically
+        return get_product_database()
     except Exception as e:
         logging.error(f"Error getting session product database: {e}")
         return None
@@ -4041,9 +4038,11 @@ def set_store():
         cleanup_expired_store_selections()
         
         # Clear the global product database instance to force reload with new store
-        global _product_database
+        global _product_database, _excel_processor
         _product_database = None
-        logging.info(f"Cleared global product database instance for store change to: {store_value}")
+        # Also clear excel processor to force reload with new store's data
+        _excel_processor = None
+        logging.info(f"Cleared global product database and excel processor for store change to: {store_value}")
         
         return jsonify({
             'success': True,
@@ -8108,7 +8107,7 @@ def database_export():
         import tempfile
         import os
         
-        product_db = get_product_database('AGT_Bothell')
+        product_db = get_product_database()
         
         # Create temporary file
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
@@ -8155,7 +8154,7 @@ def database_view():
     try:
         import sqlite3
         
-        product_db = get_product_database('AGT_Bothell')
+        product_db = get_product_database()
         
         with sqlite3.connect(product_db.db_path) as conn:
             # Get strains
@@ -8190,7 +8189,7 @@ def database_view():
 def populate_missing_columns():
     """Populate missing columns in existing database products."""
     try:
-        product_db = get_product_database('AGT_Bothell')
+        product_db = get_product_database()
         result = product_db.populate_missing_columns()
         
         return jsonify(result)
@@ -8206,7 +8205,7 @@ def populate_missing_columns():
 def update_all_descriptions():
     """Update ALL Description column values with formula-created values from Product Name*."""
     try:
-        product_db = get_product_database('AGT_Bothell')
+        product_db = get_product_database()
         result = product_db.update_all_descriptions()
         
         return jsonify(result)
@@ -8222,7 +8221,7 @@ def update_all_descriptions():
 def update_all_product_strains():
     """Update all existing Product Strain column values using the _calculate_product_strain logic."""
     try:
-        product_db = get_product_database('AGT_Bothell')
+        product_db = get_product_database()
         result = product_db.update_all_product_strains()
         return jsonify(result)
     except Exception as e:
@@ -8233,7 +8232,7 @@ def update_all_product_strains():
 def update_all_ratio_or_thc_cbd():
     """Update all existing Ratio_or_THC_CBD column values using the _calculate_ratio_or_thc_cbd logic."""
     try:
-        product_db = get_product_database('AGT_Bothell')
+        product_db = get_product_database()
         result = product_db.update_all_ratio_or_thc_cbd()
         return jsonify(result)
     except Exception as e:
@@ -8244,7 +8243,7 @@ def update_all_ratio_or_thc_cbd():
 def update_all_joint_ratios():
     """Update all JointRatio values to remove ' x 1' suffix."""
     try:
-        product_db = get_product_database('AGT_Bothell')
+        product_db = get_product_database()
         result = product_db.update_all_joint_ratios()
         return jsonify(result)
     except Exception as e:
@@ -8407,7 +8406,7 @@ def database_health():
         import os
         from datetime import datetime
         
-        product_db = get_product_database('AGT_Bothell')
+        product_db = get_product_database()
         
         # CRITICAL DEBUG: Check database file status
         db_exists = os.path.exists(product_db.db_path)
@@ -8504,7 +8503,7 @@ def database_test():
         
         # Test 1: Check if we can get the database instance
         try:
-            product_db = get_product_database('AGT_Bothell')
+            product_db = get_product_database()
             logging.info(f"[DB-TEST] Successfully got ProductDatabase instance")
             logging.info(f"[DB-TEST] Database path: {product_db.db_path}")
         except Exception as e:
@@ -8842,7 +8841,7 @@ def force_database_storage():
             logging.info(f"[FORCE-STORAGE] Detected {json_match_count} JSON matched tags that will be excluded")
         
         # Store in database
-        product_db = get_product_database('AGT_Bothell')
+        product_db = get_product_database()
         logging.info(f"[FORCE-STORAGE] ProductDatabase obtained: {product_db}")
         
         if hasattr(product_db, 'store_excel_data'):
@@ -8879,7 +8878,7 @@ def get_database_storage_info():
     """Get information about database storage and JSON match exclusion."""
     try:
         excel_processor = get_excel_processor()
-        product_db = get_product_database('AGT_Bothell')
+        product_db = get_product_database()
         
         # Get current data info
         current_data_info = {}
@@ -8975,7 +8974,7 @@ def test_database_storage():
             logging.info(f"[TEST-STORAGE] Row {i}: {dict(row.head(5))}")  # Show first 5 columns
         
         # Store in database
-        product_db = get_product_database('AGT_Bothell')
+        product_db = get_product_database()
         logging.info(f"[TEST-STORAGE] ProductDatabase obtained: {product_db}")
         
         if hasattr(product_db, 'store_excel_data'):
@@ -9052,7 +9051,7 @@ def product_similarity():
         
         import sqlite3
         
-        product_db = get_product_database('AGT_Bothell')
+        product_db = get_product_database()
         
         with sqlite3.connect(product_db.db_path) as conn:
             # Get the base product
@@ -9135,7 +9134,7 @@ def advanced_search():
         
         import sqlite3
         
-        product_db = get_product_database('AGT_Bothell')
+        product_db = get_product_database()
         
         with sqlite3.connect(product_db.db_path) as conn:
             # Build dynamic query based on search criteria
@@ -9201,7 +9200,7 @@ def create_backup():
         import tempfile
         from datetime import datetime
         
-        product_db = get_product_database('AGT_Bothell')
+        product_db = get_product_database()
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         backup_filename = f"{backup_name}_{timestamp}.db"
         
@@ -9275,7 +9274,7 @@ def optimize_database():
     try:
         import sqlite3
         
-        product_db = get_product_database('AGT_Bothell')
+        product_db = get_product_database()
         
         with sqlite3.connect(product_db.db_path) as conn:
             # Analyze database
@@ -9311,7 +9310,7 @@ def trend_analysis():
         import sqlite3
         from datetime import datetime, timedelta
         
-        product_db = get_product_database('AGT_Bothell')
+        product_db = get_product_database()
         
         with sqlite3.connect(product_db.db_path) as conn:
             # Get product trends over time
@@ -9749,7 +9748,7 @@ def upload_product_database():
         
         # Initialize the product database with the new file
         try:
-            product_db = get_product_database('AGT_Bothell')
+            product_db = get_product_database()
             
             # CRITICAL FIX: Implement proper database import from Excel
             logging.info(f"Starting database import from {db_file_path}")
@@ -9920,7 +9919,7 @@ def get_product_database_file_info():
         modified_time = datetime.fromtimestamp(stat.st_mtime)
         
         # Get product database stats
-        product_db = get_product_database('AGT_Bothell')
+        product_db = get_product_database()
         db_stats = {}
         if hasattr(product_db, 'get_database_stats'):
             db_stats = product_db.get_database_stats()
@@ -12046,7 +12045,7 @@ def get_strain_product_count():
             return jsonify({'error': 'Missing strain_name'}), 400
         
         try:
-            product_db = get_product_database('AGT_Bothell')
+            product_db = get_product_database()
             if not product_db:
                 return jsonify({'error': 'Product database not available'}), 500
             
@@ -12080,7 +12079,7 @@ def get_strain_product_count():
 def get_all_strains():
     """Get all strains from the master database with their current lineages."""
     try:
-        product_db = get_product_database('AGT_Bothell')
+        product_db = get_product_database()
         if not product_db:
             return jsonify({'error': 'Product database not available'}), 500
         
@@ -12133,7 +12132,7 @@ def set_strain_lineage():
             return jsonify({'error': 'Missing lineage'}), 400
         
         try:
-            product_db = get_product_database('AGT_Bothell')
+            product_db = get_product_database()
             if not product_db:
                 return jsonify({'error': 'Product database not available'}), 500
             
@@ -12344,7 +12343,7 @@ def strain_search():
         if not excel_processor or excel_processor.df is None or excel_processor.df.empty:
             return jsonify({'error': 'No data available'}), 404
         
-        product_db = get_product_database('AGT_Bothell')
+        product_db = get_product_database()
         if not product_db:
             return jsonify({'error': 'Product database not available'}), 500
         
@@ -12455,7 +12454,7 @@ def bulk_update_lineage():
         if not excel_processor or excel_processor.df is None or excel_processor.df.empty:
             return jsonify({'error': 'No data available'}), 404
         
-        product_db = get_product_database('AGT_Bothell')
+        product_db = get_product_database()
         if not product_db:
             return jsonify({'error': 'Product database not available'}), 500
         
@@ -13690,7 +13689,7 @@ def test_upload_page():
 def add_missing_database_columns():
     """Add missing columns to existing database tables."""
     try:
-        product_db = get_product_database('AGT_Bothell')
+        product_db = get_product_database()
         product_db.add_missing_columns()
         return jsonify({'success': True, 'message': 'Missing columns added successfully'})
     except Exception as e:
@@ -14153,7 +14152,7 @@ def clear_performance_cache():
 def clear_database():
     """Clear the database for migration."""
     try:
-        product_db = get_product_database('AGT_Bothell')
+        product_db = get_product_database()
         
         # Clear products and strains tables
         conn = product_db._get_connection()
@@ -14183,7 +14182,7 @@ def import_strains():
         if not strains:
             return jsonify({"error": "No strains provided"}), 400
         
-        product_db = get_product_database('AGT_Bothell')
+        product_db = get_product_database()
         conn = product_db._get_connection()
         cursor = conn.cursor()
         
@@ -14229,7 +14228,7 @@ def import_products():
         if not products:
             return jsonify({"error": "No products provided"}), 400
         
-        product_db = get_product_database('AGT_Bothell')
+        product_db = get_product_database()
         conn = product_db._get_connection()
         cursor = conn.cursor()
         
@@ -14365,7 +14364,7 @@ def upload_database_chunk():
         # If this is the first chunk, start a new database file
         if chunk_num == 0:
             # Clear existing database
-            product_db = get_product_database('AGT_Bothell')
+            product_db = get_product_database()
             conn = product_db._get_connection()
             cursor = conn.cursor()
             cursor.execute("DELETE FROM products")
@@ -14403,7 +14402,7 @@ def upload_database_chunk():
             os.remove(temp_file.name)
             
             # Reinitialize the database
-            product_db = get_product_database('AGT_Bothell')
+            product_db = get_product_database()
             product_db.init_database()
             
             logging.info(f"Database successfully reconstructed from {total_chunks} chunks")
@@ -14431,7 +14430,7 @@ def apply_lineage_colors():
 def backfill_missing_values():
     """Backfill missing crucial values in existing database products."""
     try:
-        product_db = get_product_database('AGT_Bothell')
+        product_db = get_product_database()
         
         # Run the backfill process
         result = product_db.backfill_missing_crucial_values()
