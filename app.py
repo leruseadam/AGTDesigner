@@ -3959,16 +3959,18 @@ from datetime import datetime, timedelta
 _ip_store_selections = {}
 _ip_store_lock = threading.Lock()
 
-# Clear all store selections on application startup
-def clear_all_store_selections_on_startup():
-    """Clear all store selections when the application starts."""
-    global _ip_store_selections
-    with _ip_store_lock:
-        _ip_store_selections.clear()
-    logging.info("All store selections cleared on application startup")
+# Don't clear store selections on startup - preserve user selections
+# Store selections are only cleared when they expire (after 12 hours)
+# or when explicitly cleared by the user
+# def clear_all_store_selections_on_startup():
+#     """Clear all store selections when the application starts."""
+#     global _ip_store_selections
+#     with _ip_store_lock:
+#         _ip_store_selections.clear()
+#     logging.info("All store selections cleared on application startup")
 
-# Call this function when the application starts
-clear_all_store_selections_on_startup()
+# Call this function when the application starts - COMMENTED OUT TO PRESERVE SELECTIONS
+# clear_all_store_selections_on_startup()
 
 def get_client_ip():
     """Get the client's IP address."""
@@ -4031,6 +4033,9 @@ def set_store():
                 'timestamp': datetime.now().isoformat(),
                 'ip_address': ip_address
             }
+            logging.info(f"Store selection set for IP {ip_address}: {store_value}")
+            logging.info(f"Current store selections: {list(_ip_store_selections.keys())}")
+            logging.info(f"Total selections stored: {len(_ip_store_selections)}")
         
         # Cleanup expired selections periodically
         cleanup_expired_store_selections()
@@ -4039,8 +4044,6 @@ def set_store():
         global _product_database
         _product_database = None
         logging.info(f"Cleared global product database instance for store change to: {store_value}")
-        
-        logging.info(f"Store selection set for IP {ip_address}: {store_value}")
         
         return jsonify({
             'success': True,
@@ -4057,6 +4060,8 @@ def get_store():
     """Get the current store selection for the IP address."""
     try:
         ip_address = get_client_ip()
+        logging.info(f"Getting store for IP: {ip_address}")
+        logging.info(f"Current store selections: {list(_ip_store_selections.keys())}")
         
         # Check if there's a stored selection for this IP
         with _ip_store_lock:
@@ -4064,6 +4069,7 @@ def get_store():
                 store_data = _ip_store_selections[ip_address]
                 # Check if the selection is still valid (not expired)
                 if datetime.now() - datetime.fromisoformat(store_data['timestamp']) < timedelta(hours=12):
+                    logging.info(f"Found valid store selection: {store_data['store']}")
                     return jsonify({
                         'success': True,
                         'store': store_data['store'],
@@ -4071,13 +4077,14 @@ def get_store():
                     })
                 else:
                     # Remove expired selection
+                    logging.info(f"Store selection expired for IP {ip_address}")
                     del _ip_store_selections[ip_address]
         
-        # No valid selection found, return default
+        # No valid selection found, return no store
+        logging.info(f"No store found for IP {ip_address}")
         return jsonify({
             'success': True,
-            'store': 'AGT_Bothell',
-            'expires_at': (datetime.now() + timedelta(hours=12)).isoformat()
+            'store': None
         })
         
     except Exception as e:

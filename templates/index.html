@@ -244,40 +244,67 @@
     }
     
     function selectStore(storeValue) {
+      console.log('Store selected:', storeValue);
+      
       // Close the modal
       const modal = bootstrap.Modal.getInstance(document.getElementById('storeSelectionModal'));
       if (modal) {
         modal.hide();
       }
       
-      // Set the store
-      changeStore(storeValue);
-      
-      // Update the display
-      updateCurrentStoreDisplay(storeValue);
+      // Set the store via API
+      fetch('/api/set-store', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ store: storeValue })
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.success) {
+          console.log('Store set successfully:', storeValue);
+          // Refresh the page to reload with new store selection
+          window.location.reload();
+        } else {
+          console.error('Error setting store:', data.error);
+          alert('Error setting store. Please try again.');
+        }
+      })
+      .catch(error => {
+        console.error('Error setting store:', error);
+        alert('Error setting store. Please try again.');
+      });
     }
     
     function showStoreSelectionModal() {
       try {
-        console.log('Attempting to show store selection modal...');
+        console.log('=== SHOWING STORE SELECTION MODAL ===');
+        console.log('Bootstrap available:', typeof bootstrap !== 'undefined');
         
         // Check if Bootstrap is available
         if (typeof bootstrap === 'undefined') {
-          console.error('Bootstrap not available, cannot show modal');
+          console.error('❌ Bootstrap not available, cannot show modal');
+          console.log('Waiting 2 seconds and retrying...');
+          setTimeout(showStoreSelectionModal, 2000);
           return;
         }
         
         const modalElement = document.getElementById('storeSelectionModal');
+        console.log('Modal element found:', modalElement !== null);
         if (!modalElement) {
-          console.error('Store selection modal element not found');
+          console.error('❌ Store selection modal element not found');
           return;
         }
         
+        console.log('Creating Bootstrap modal instance...');
         const modal = new bootstrap.Modal(modalElement);
+        console.log('Calling modal.show()...');
         modal.show();
-        console.log('Store selection modal shown successfully');
+        console.log('✅ Store selection modal shown successfully');
       } catch (error) {
-        console.error('Error showing store selection modal:', error);
+        console.error('❌ Error showing store selection modal:', error);
+        console.error('Error details:', error.stack);
       }
     }
     
@@ -390,18 +417,21 @@
     }
     
     function checkStoreRequired() {
-      console.log('Checking if store selection is required...');
+      console.log('=== CHECKING STORE REQUIREMENT ===');
+      console.log('Bootstrap available:', typeof bootstrap !== 'undefined');
+      console.log('Modal element exists:', document.getElementById('storeSelectionModal') !== null);
+      
       fetch('/api/check-store-required')
         .then(response => response.json())
         .then(data => {
           console.log('Store requirement check response:', data);
           if (data.success && data.requires_store) {
             // Store selection is required, show modal
-            console.log('Store selection required, showing modal');
+            console.log('✅ Store selection REQUIRED - showing modal');
             showStoreSelectionModal();
           } else {
             // Store selection not required, load and display the existing store
-            console.log('Store selection not required, current store:', data.store);
+            console.log('✅ Store selection NOT required, current store:', data.store);
             if (data.store) {
               updateCurrentStoreDisplay(data.store);
               updateStoreStatus(`Store: ${data.store.replace(/_/g, ' ')}`, 'active');
@@ -409,8 +439,9 @@
           }
         })
         .catch(error => {
-          console.log('Error checking store requirement:', error);
+          console.error('❌ Error checking store requirement:', error);
           // If there's an error, show modal as fallback to require store selection
+          console.log('Showing modal as fallback due to error');
           showStoreSelectionModal();
         });
     }
@@ -6713,10 +6744,8 @@
     document.addEventListener('DOMContentLoaded', function () {
       console.log('DOM Content Loaded - initializing TagManager...');
       
-      // Ensure Bothell is still set as default store display
-      console.log('DOMContentLoaded: Ensuring Bothell display is set...');
-      updateCurrentStoreDisplay('AGT_Bothell');
-      updateStoreStatus('Store: AGT Bothell', 'active');
+      // Don't set default store - let checkStoreRequired handle it
+      console.log('DOMContentLoaded: Initializing TagManager...');
       
       TagManager.init();
       
@@ -6770,54 +6799,21 @@
 
       }, 2000);
 
-      // Check for existing store selection in backend (don't auto-set Bothell)
-      console.log('DOMContentLoaded: Checking for existing store selection...');
-      
-      // Sync with backend to ensure consistency
-      fetch('/api/get-store')
-        .then(response => {
-          console.log('Store API response:', response);
-          return response.json();
-        })
-        .then(data => {
-          console.log('Store API data:', data);
-          if (data.success && data.store) {
-            console.log('DOMContentLoaded: Backend store is', data.store);
-            // Update the display
-            const displayElement = document.getElementById('currentStoreDisplay');
-            if (displayElement) {
-              displayElement.textContent = data.store.replace(/_/g, ' ');
-              displayElement.style.color = '#4ade80';
-              console.log('Updated display element to:', data.store.replace(/_/g, ' '));
-            }
-            // Also update the store status
-            updateStoreStatus(`Store: ${data.store.replace(/_/g, ' ')}`, 'active');
-            localStorage.setItem('selectedStore', data.store);
-            console.log('Store sync completed successfully');
-          } else {
-            console.log('No store in backend data - will be handled by checkStoreRequired()');
-          }
-        })
-        .catch(error => {
-          console.error('Error syncing store on DOMContentLoaded:', error);
-          // Don't auto-set Bothell, let checkStoreRequired handle it
-        });
+      // Don't check for store here - let checkStoreRequired handle it after timeout
+      console.log('DOMContentLoaded: Waiting for Bootstrap to initialize store check...');
       
       console.log('TagManager initialized, waiting for Bootstrap...');
       
-      // Wait a bit for Bootstrap to be fully loaded
+      // Wait for Bootstrap to be fully loaded and DOM to be ready
       setTimeout(() => {
         console.log('Timeout completed, checking store selection...');
         
         // Verify modal exists
         verifyModalExists();
         
-        // First check if store selection is required (this handles showing the modal if needed)
+        // Check if store selection is required FIRST (this will show modal if needed)
         checkStoreRequired();
-        
-        // Then load saved store selection if one exists
-        loadSavedStore();
-      }, 500);
+      }, 1000);
       
       // Periodically check store status from backend
       setInterval(updateStoreStatusFromBackend, 30000); // Check every 30 seconds
