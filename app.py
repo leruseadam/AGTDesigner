@@ -5163,6 +5163,16 @@ def generate_labels():
                                 processed_record = process_database_product_for_api(db_record)
                                 
                                 # Map database fields to template fields (using correct field names from database)
+                                
+                                # CRITICAL FIX: Get price with multiple fallbacks
+                                price_value = processed_record.get('Price', '')
+                                if not price_value or str(price_value).strip() in ['', 'None', 'null', 'nan', 'NaN']:
+                                    price_value = processed_record.get('Med Price', '')
+                                if not price_value or str(price_value).strip() in ['', 'None', 'null', 'nan', 'NaN']:
+                                    price_value = processed_record.get('Price*', '')
+                                if not price_value or str(price_value).strip() in ['', 'None', 'null', 'nan', 'NaN']:
+                                    price_value = '25'  # Final fallback
+                                
                                 record = {
                                     'Product Name*': processed_record.get('Product Name*', ''),
                                     'ProductName': processed_record.get('Product Name*', ''),  # Add ProductName for Excel processor compatibility
@@ -5173,7 +5183,7 @@ def generate_labels():
                                     'Vendor': processed_record.get('Vendor/Supplier*', ''),
                                     'Product Strain': processed_record.get('Product Strain', ''),  # Correct field name
                                     'ProductStrain': processed_record.get('Product Strain', ''),  # Add ProductStrain for template processor compatibility
-                                    'Price': processed_record.get('Price', '25'),  # Default price if missing
+                                    'Price': price_value,
                                     'DOH': processed_record.get('DOH', ''),
                                     'Ratio': processed_record.get('Ratio', ''),
                                     'Weight*': processed_record.get('Weight*', '1'),  # Default weight if missing
@@ -6591,30 +6601,30 @@ def update_lineage():
                 
         except Exception as cache_error:
             logging.warning(f"Could not clear caches after lineage update: {cache_error}")
-            
-            # Optionally refresh dropdown cache to ensure lineage filter reflects changes
-            try:
-                if hasattr(excel_processor, '_cache_dropdown_values'):
-                    excel_processor._cache_dropdown_values()
-            except Exception:
-                pass
-            
-            # CRITICAL FIX: Verify the lineage change was applied
-            try:
-                # Test that the change was actually applied
-                updated_records = excel_processor.get_selected_records() if hasattr(excel_processor, 'selected_tags') and excel_processor.selected_tags else None
-                if updated_records:
-                    for record in updated_records:
-                        if record.get('ProductName') == tag_name or record.get('Product Name*') == tag_name:
-                            actual_lineage = record.get('Lineage', 'NOT_FOUND')
-                            logging.info(f"LINEAGE UPDATE: Verification - Product '{tag_name}' now has lineage '{actual_lineage}'")
+        
+        # CRITICAL FIX: Refresh dropdown cache to ensure lineage filter reflects changes
+        try:
+            if hasattr(excel_processor, '_cache_dropdown_values'):
+                excel_processor._cache_dropdown_values()
+                logging.info(f"✅ Refreshed dropdown cache to reflect lineage changes")
+        except Exception as cache_refresh_error:
+            logging.warning(f"Could not refresh dropdown cache: {cache_refresh_error}")
+        
+        # CRITICAL FIX: Verify the lineage change was applied
+        try:
+            # Check the DataFrame directly to verify the change
+            if excel_processor.df is not None:
+                for col in ['ProductName', 'Product Name*', 'Product Name']:
+                    if col in excel_processor.df.columns:
+                        mask = excel_processor.df[col] == tag_name
+                        if mask.any():
+                            actual_lineage = excel_processor.df.loc[mask, 'Lineage'].iloc[0]
+                            logging.info(f"✅ LINEAGE VERIFICATION: Product '{tag_name}' now has lineage '{actual_lineage}'")
                             break
-            except Exception as verify_error:
-                logging.warning(f"Could not verify lineage update: {verify_error}")
-            
-            return jsonify({'success': True, 'message': f'Lineage updated to {new_lineage}'})
-        else:
-            return jsonify({'error': 'Product not found'}), 404
+        except Exception as verify_error:
+            logging.warning(f"Could not verify lineage update: {verify_error}")
+        
+        return jsonify({'success': True, 'message': f'Lineage updated to {new_lineage}'})
             
     except Exception as e:
         logging.error(f"Error updating lineage: {e}")
