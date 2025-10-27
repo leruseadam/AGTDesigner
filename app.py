@@ -4501,6 +4501,26 @@ def _validate_tags_against_excel(excel_processor, selected_tags):
     
     return valid_selected_tags, invalid_selected_tags
 
+def _format_price_value(price_value):
+    """Format a price value with dollar sign."""
+    if not price_value or not str(price_value).strip():
+        return ''
+    
+    try:
+        # Remove $ and commas, convert to float
+        price_float = float(str(price_value).replace('$', '').replace(',', '').strip())
+        # Format with $ sign
+        if price_float.is_integer():
+            return f"${int(price_float)}"
+        else:
+            return f"${price_float:.2f}"
+    except (ValueError, TypeError):
+        # If it's not a valid number, just return as is if it has $, otherwise add $
+        price_str = str(price_value).strip()
+        if price_str.startswith('$'):
+            return price_str
+        return f"${price_str}" if price_str else ''
+
 def _extract_price_from_database_product(product):
     """Extract price from a database product, checking multiple possible price fields."""
     # Check multiple possible price field names
@@ -4545,8 +4565,8 @@ def _create_desc_and_weight(product_name, weight_units):
     # Get weight units, clean them up
     weight = str(weight_units).strip() if weight_units else ''
     if weight and weight.lower() not in ['nan', 'none', 'null', '']:
-        # Combine product name and weight with hyphen staying with weight (space after hyphen)
-        return f"{description} -\u00A0{weight}"
+        # Combine product name and weight with regular hyphen and space
+        return f"{description} - {weight}"
     else:
         # Just return the product name if no weight
         return description
@@ -5195,7 +5215,7 @@ def generate_labels():
                                     'Vendor': processed_record.get('Vendor/Supplier*', ''),
                                     'Product Strain': processed_record.get('Product Strain', ''),  # Correct field name
                                     'ProductStrain': processed_record.get('Product Strain', ''),  # Add ProductStrain for template processor compatibility
-                                    'Price': _extract_price_from_database_product(processed_record),  # Extract price from multiple possible fields
+                                    'Price': _format_price_value(_extract_price_from_database_product(processed_record)),  # Extract and format price
                                     'DOH': processed_record.get('DOH', ''),
                                     'Ratio': processed_record.get('Ratio', ''),
                                     'Weight*': processed_record.get('Weight*', '1'),  # Default weight if missing
