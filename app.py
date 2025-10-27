@@ -5120,12 +5120,15 @@ def generate_labels():
                         db_count = cursor.fetchone()[0]
                         logging.info(f"Database has {db_count} products")
                         
-                        # CRITICAL FIX: If database is nearly empty, bypass it and use Excel data
-                        if db_count < 100:
-                            logging.warning(f"⚠️ DATABASE HAS ONLY {db_count} PRODUCTS - BYPASSING DATABASE VALIDATION")
+                        # CRITICAL FIX: If database is completely empty, bypass it and use Excel data
+                        if db_count == 0:
+                            logging.warning(f"⚠️ DATABASE IS EMPTY - BYPASSING DATABASE VALIDATION")
                             logging.info(f"⚠️ Using Excel data directly for all {len(valid_selected_tags)} selected tags")
                             has_database = False
                             # Don't try to use database, will fall through to Excel processing below
+                        elif db_count < 10:
+                            logging.info(f"Database has {db_count} products - continuing with database")
+                        # Only bypass if completely empty, otherwise use the database
                     except Exception as db_check_error:
                         logging.warning(f"Could not check database count: {db_check_error}")
                         has_database = False
