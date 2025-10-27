@@ -6708,9 +6708,7 @@ def update_lineage():
             except Exception as verify_error:
                 logging.warning(f"Could not verify lineage update: {verify_error}")
             
-            return jsonify({'success': True, 'message': f'Lineage updated to {new_lineage}'})
-        else:
-            return jsonify({'error': 'Product not found'}), 404
+        return jsonify({'success': True, 'message': f'Lineage updated to {new_lineage}'})
             
     except Exception as e:
         logging.error(f"Error updating lineage: {e}")
