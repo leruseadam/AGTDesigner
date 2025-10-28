@@ -6251,7 +6251,7 @@ class TemplateProcessor:
                                                     'Price': 'price',
                                                     'Ratio_or_THC_CBD': 'thc_cbd',
                                                     'ProductBrand': 'brand',
-                                                    'Lineage': 'brand',  # CRITICAL FIX: Lineage field contains PRODUCTBRAND_CENTER content, use 'brand' sizing
+                                                    'Lineage': 'lineage',  # Use lineage font sizing for CBD/Lineage content
                                                     'ProductStrain': 'strain',
                                                     'ProductVendor': 'vendor',
                                                     'DOH': 'doh',
