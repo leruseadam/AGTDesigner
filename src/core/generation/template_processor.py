@@ -3408,14 +3408,14 @@ class TemplateProcessor:
                 
                 # Apply normal font sizing for other markers
                 for run in paragraph.runs:
-                    # Additional check for standalone cannabinoid text that might have slipped through
+                    # Additional check for standalone cannabinoid text that might have slipped through - treat as lineage
                     if (marker_data['content'] in run.text and 
                         len(marker_data['content'].strip()) <= 3 and
                         marker_data['content'].strip().upper() in ['CBD', 'THC', 'CBC', 'CBG', 'CBN'] and
                         not any(marker in run.text for marker in ['CBD_START', 'THC_START', 'CBC_START', 'CBG_START', 'CBN_START'])):
-                        # This is standalone cannabinoid text - use strain font sizing (1pt)
-                        strain_font_size = get_font_size_by_marker(marker_data['content'], 'PRODUCTSTRAIN', self.template_type, self.scale_factor)
-                        set_run_font_size(run, strain_font_size)
+                        # This is standalone cannabinoid text - use lineage font sizing, not strain
+                        lineage_font_size = get_font_size_by_marker(marker_data['content'], 'LINEAGE', self.template_type, self.scale_factor)
+                        set_run_font_size(run, lineage_font_size)
                     else:
                         set_run_font_size(run, get_font_size_by_marker(marker_data['content'], marker_name, self.template_type, self.scale_factor, product_type))
                 # Special handling for ProductVendor marker - now handled above with unified font sizing
