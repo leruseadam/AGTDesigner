@@ -4952,15 +4952,16 @@ class TemplateProcessor:
                                     continue
 
                                 # Check if this run contains standalone cannabinoid text
+                                # CRITICAL FIX: CBD lineage should use lineage font sizing, not strain
                                 if (run_text in standalone_cannabinoids and 
                                     len(run_text) <= 3 and
                                     not any(marker in run.text for marker in ['CBD_START', 'THC_START', 'CBC_START', 'CBG_START', 'CBN_START', 'CBD_END', 'THC_END', 'CBC_END', 'CBG_END', 'CBN_END'])):
                                     
-                                    # This is standalone cannabinoid text - force 1pt font size
+                                    # This is standalone cannabinoid text - use lineage font sizing for CBD
                                     from src.core.generation.unified_font_sizing import get_font_size_by_marker
-                                    strain_font_size = get_font_size_by_marker(run_text, 'PRODUCTSTRAIN', self.template_type, self.scale_factor)
-                                    run.font.size = strain_font_size
-                                    self.logger.info(f"DEBUG: Set standalone cannabinoid '{run_text}' to 1pt font size")
+                                    lineage_font_size = get_font_size_by_marker(run_text, 'LINEAGE', self.template_type, self.scale_factor)
+                                    run.font.size = lineage_font_size
+                                    self.logger.info(f"DEBUG: Set standalone cannabinoid '{run_text}' to lineage font size ({lineage_font_size})")
                                 
         except Exception as e:
             self.logger.error(f"Error ensuring standalone cannabinoid font sizing: {e}")
