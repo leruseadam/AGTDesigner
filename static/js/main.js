@@ -3197,6 +3197,14 @@ const TagManager = {
             this.updateTagLineageInUI(tagName, newLineage);
             console.log(`🎨 Updated UI elements for ${tagName}`);
 
+            // NEW: Instantly update all similar (same vendor + strain) across lists
+            try {
+                this.updateSimilarLineages(tagName, newLineage);
+                console.log('✅ Propagated lineage to similar items (vendor + strain)');
+            } catch (e) {
+                console.warn('Failed to update similar lineages locally:', e);
+            }
+
             // CRITICAL FIX: Update selected tags locally without backend fetch
             // This ensures the selected tags dropdowns reflect the current lineage values
             if (this.state.selectedTags.has(tagName)) {
@@ -3248,6 +3256,71 @@ const TagManager = {
                 lineageBadge.className = `badge lineage-badge ${this.getLineageColor(newLineage)}`;
             }
         }
+    },
+
+    // NEW: Update lineage for all items with the same vendor + strain immediately in UI/state
+    updateSimilarLineages(tagName, newLineage) {
+        // Find source tag info
+        const source = this.state.tags.find(t => (t['Product Name*'] || t.ProductName) === tagName);
+        if (!source) return;
+        const srcVendor = (source['Vendor/Supplier*'] || source['Vendor'] || source.vendor || '').toString().trim().toLowerCase();
+        // Prefer explicit strain columns
+        const srcStrain = (source['Product Strain'] || source['Strain Names'] || '').toString().trim().toLowerCase();
+        if (!srcVendor) return;
+
+        // Helper to normalize
+        const norm = v => (v || '').toString().trim().toLowerCase();
+        const isSimilar = (t) => {
+            const v = norm(t['Vendor/Supplier*'] || t['Vendor'] || t.vendor);
+            if (v !== srcVendor) return false;
+            const s = norm(t['Product Strain'] || t['Strain Names']);
+            // If we have a strain on the source, require match; otherwise vendor-only
+            return srcStrain ? (s === srcStrain) : true;
+        };
+
+        // Update state.tags and state.originalTags
+        this.state.tags.forEach(t => {
+            if (isSimilar(t)) {
+                t.lineage = newLineage;
+                t.Lineage = newLineage;
+            }
+        });
+        this.state.originalTags.forEach(t => {
+            if (isSimilar(t)) {
+                t.lineage = newLineage;
+                t.Lineage = newLineage;
+            }
+        });
+
+        // Update Available list UI badges
+        const availableItems = document.querySelectorAll('#availableTags .tag-item');
+        availableItems.forEach(el => {
+            const name = el.getAttribute('data-tag-name');
+            const tag = this.state.tags.find(t => (t['Product Name*'] || t.ProductName) === name);
+            if (tag && isSimilar(tag)) {
+                const badge = el.querySelector('.lineage-badge');
+                if (badge) {
+                    badge.textContent = newLineage;
+                    badge.className = `badge lineage-badge ${this.getLineageColor(newLineage)}`;
+                }
+            }
+        });
+
+        // Update Selected list UI badges and dropdowns
+        const selectedItems = document.querySelectorAll('#selectedTags .tag-item');
+        selectedItems.forEach(el => {
+            const name = el.getAttribute('data-tag-name') || (el.querySelector('.tag-checkbox')?.value);
+            const tag = this.state.tags.find(t => (t['Product Name*'] || t.ProductName) === name);
+            if (tag && isSimilar(tag)) {
+                const badge = el.querySelector('.lineage-badge');
+                if (badge) {
+                    badge.textContent = newLineage;
+                    badge.className = `badge lineage-badge ${this.getLineageColor(newLineage)}`;
+                }
+                const select = el.querySelector('.lineage-dropdown');
+                if (select) select.value = newLineage;
+            }
+        });
     },
 
     updateSelectedTags(tags) {

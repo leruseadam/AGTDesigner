@@ -6655,14 +6655,70 @@ def update_lineage():
         if not product_db:
             return jsonify({'error': 'Database not available'}), 500
         
-        # Update the product lineage directly in database
+        # NEW: Get the vendor for this product to update all products from same vendor
+        vendor = None
+        products_updated = 0
         try:
-            product_success = product_db.update_product_lineage(tag_name, new_lineage)
-            if product_success:
-                logging.info(f"✅ Updated product lineage in database: '{tag_name}' → '{new_lineage}'")
+            if excel_processor and excel_processor.df is not None:
+                # Find the product in the Excel DataFrame
+                mask = excel_processor.df['Product Name*'] == tag_name
+                if not mask.any():
+                        mask = excel_processor.df['ProductName'] == tag_name
+                
+                if mask is not None and mask.any():
+                    vendor = excel_processor.df.loc[mask, 'Vendor/Supplier*'].iloc[0]
+                    if not vendor or str(vendor).strip() == '' or str(vendor).lower() == 'nan':
+                        vendor = None
+                    else:
+                        vendor = str(vendor).strip()
+                        logging.info(f"Found vendor '{vendor}' for product '{tag_name}'")
+        except Exception as vendor_error:
+            logging.warning(f"Could not determine vendor for product '{tag_name}': {vendor_error}")
+        
+        # Update the product lineage directly in database - ALL products for same vendor+strain
+        try:
+            if vendor:
+                # Prefer updating all products that share the same strain for this vendor
+                # This covers multiple weights/types for the same strain
+                strain_name = excel_processor.get_strain_name_for_product(tag_name) if excel_processor else None
+                conn = product_db._get_connection()
+                cursor = conn.cursor()
+                if strain_name and str(strain_name).strip():
+                    cursor.execute('''
+                        UPDATE products
+                        SET "Lineage" = ?
+                        WHERE "Vendor/Supplier*" = ?
+                          AND strain_id = (
+                            SELECT id FROM strains WHERE normalized_name = (
+                              SELECT normalized_name FROM strains WHERE strain_name = ? LIMIT 1
+                            )
+                          )
+                    ''', (new_lineage, vendor, str(strain_name).strip()))
+                    conn.commit()
+                    products_updated = cursor.rowcount
+                    logging.info(f"✅ Updated {products_updated} products for vendor '{vendor}' and strain '{strain_name}' to lineage '{new_lineage}'")
+                else:
+                    # Fallback to product-name-level for this vendor (normalized name match)
+                    cursor.execute('''
+                        UPDATE products
+                        SET "Lineage" = ?
+                        WHERE "Vendor/Supplier*" = ?
+                          AND (normalized_name = (
+                                SELECT normalized_name FROM products WHERE "Product Name*" = ? LIMIT 1
+                              ) OR "Product Name*" = ?)
+                    ''', (new_lineage, vendor, tag_name, tag_name))
+                    conn.commit()
+                    products_updated = cursor.rowcount
+                    logging.info(f"✅ Updated {products_updated} vendor-matched products for normalized name of '{tag_name}' to '{new_lineage}'")
             else:
-                logging.warning(f"❌ Failed to update product lineage in database for '{tag_name}'")
-                return jsonify({'error': 'Failed to update lineage in database'}), 500
+                # Fallback: update just this specific product if vendor not found
+                product_success = product_db.update_product_lineage(tag_name, new_lineage)
+                if product_success:
+                    logging.info(f"✅ Updated product lineage in database: '{tag_name}' → '{new_lineage}'")
+                    products_updated = 1
+                else:
+                    logging.warning(f"❌ Failed to update product lineage in database for '{tag_name}'")
+                    return jsonify({'error': 'Failed to update lineage in database'}), 500
                 
             # Also update strain if available
             strain_name = excel_processor.get_strain_name_for_product(tag_name) if excel_processor else None
@@ -6675,12 +6731,39 @@ def update_lineage():
             logging.error(f"Error updating lineage in database: {db_error}")
             return jsonify({'error': f'Database update failed: {str(db_error)}'}), 500
         
-        # Now update the Excel processor DataFrame to reflect database changes
-        success = excel_processor.update_lineage_in_current_data(tag_name, new_lineage) if excel_processor else False
-        if success:
-            logging.info(f"✅ Updated lineage in Excel processor DataFrame")
-        else:
-            logging.warning(f"⚠️  Could not update Excel processor DataFrame (not critical - database is updated)")
+        # Now update the Excel processor DataFrame to reflect database changes - for all products vendor+strain
+        updated_count = 0
+        if excel_processor and excel_processor.df is not None:
+            if vendor:
+                # Update all products from this vendor in the DataFrame
+                try:
+                    vendor_mask = (excel_processor.df['Vendor/Supplier*'] == vendor)
+                    # Prefer matching by strain if present
+                    strain_col = 'Product Strain'
+                    df_strain_name = None
+                    try:
+                        df_strain_name = excel_processor.get_strain_name_for_product(tag_name)
+                    except Exception:
+                        df_strain_name = None
+                    if df_strain_name and strain_col in excel_processor.df.columns:
+                        mask = vendor_mask & (excel_processor.df[strain_col].astype(str).str.strip() == str(df_strain_name).strip())
+                    else:
+                        # Fallback: match by product normalized name proxy (Product Name*)
+                        mask = vendor_mask & (excel_processor.df['Product Name*'].astype(str) == str(tag_name))
+                    if mask.any():
+                        excel_processor.df.loc[mask, 'Lineage'] = new_lineage
+                        updated_count = int(mask.sum())
+                        logging.info(f"✅ Updated {updated_count} products for vendor '{vendor}' in Excel DataFrame")
+                except Exception as df_error:
+                    logging.warning(f"Could not update Excel DataFrame for vendor: {df_error}")
+            else:
+                # Fallback: update just this specific product
+                success = excel_processor.update_lineage_in_current_data(tag_name, new_lineage) if excel_processor else False
+                if success:
+                    logging.info(f"✅ Updated lineage in Excel processor DataFrame")
+                    updated_count = 1
+                else:
+                    logging.warning(f"⚠️  Could not update Excel processor DataFrame (not critical - database is updated)")
             
         # CRITICAL FIX: Aggressively clear ALL caches to force fresh data
         try:
@@ -6732,7 +6815,12 @@ def update_lineage():
             except Exception as verify_error:
                 logging.warning(f"Could not verify lineage update: {verify_error}")
             
-        return jsonify({'success': True, 'message': f'Lineage updated to {new_lineage}'})
+        return jsonify({
+            'success': True, 
+            'message': f'Lineage updated to {new_lineage} for {products_updated} product(s)',
+            'products_updated': products_updated,
+            'vendor': vendor if vendor else None
+        })
             
     except Exception as e:
         logging.error(f"Error updating lineage: {e}")
@@ -6857,6 +6945,72 @@ def batch_update_lineage():
                     logging.warning(f"Some lineage changes failed to persist to database")
             except Exception as db_error:
                 logging.error(f"Error persisting batch lineage changes to database: {db_error}")
+
+        # NEW: Vendor+strain-wide DB updates per change (covers all weights/types for that strain & vendor)
+        try:
+            product_db = get_product_database()
+            if product_db and changes_made:
+                conn = product_db._get_connection()
+                cursor = conn.cursor()
+                total_vendor_updates = 0
+                for change in changes_made:
+                    tag_name = change.get('tag_name')
+                    new_lineage = change.get('new')
+                    if not tag_name or not new_lineage:
+                        continue
+                    # Determine vendor and strain
+                    vendor_val = None
+                    strain_val = None
+                    try:
+                        # Prefer Excel DF for speed
+                        mask = excel_processor.df['ProductName'] == tag_name if 'ProductName' in excel_processor.df.columns else None
+                        if mask is None or not mask.any():
+                            mask = excel_processor.df['Product Name*'] == tag_name if 'Product Name*' in excel_processor.df.columns else None
+                        if mask is not None and mask.any():
+                            if 'Vendor/Supplier*' in excel_processor.df.columns:
+                                vendor_val = str(excel_processor.df.loc[mask, 'Vendor/Supplier*'].iloc[0] or '').strip()
+                            if 'Product Strain' in excel_processor.df.columns:
+                                strain_val = str(excel_processor.df.loc[mask, 'Product Strain'].iloc[0] or '').strip()
+                    except Exception:
+                        vendor_val = None
+                        strain_val = None
+                    # Fallback to DB product info
+                    if not vendor_val:
+                        try:
+                            info = product_db.get_product_info(tag_name)
+                            if info:
+                                vendor_val = str(info.get('vendor') or info.get('Vendor/Supplier*') or '').strip()
+                                strain_val = str(info.get('strain_name') or '').strip()
+                        except Exception:
+                            pass
+                    # Execute vendor+strain update when vendor exists
+                    if vendor_val:
+                        if strain_val:
+                            cursor.execute('''
+                                UPDATE products
+                                SET "Lineage" = ?
+                                WHERE "Vendor/Supplier*" = ?
+                                  AND strain_id = (
+                                    SELECT id FROM strains WHERE normalized_name = (
+                                      SELECT normalized_name FROM strains WHERE strain_name = ? LIMIT 1
+                                    )
+                                  )
+                            ''', (new_lineage, vendor_val, strain_val))
+                        else:
+                            # Fallback: vendor + normalized product name
+                            cursor.execute('''
+                                UPDATE products
+                                SET "Lineage" = ?
+                                WHERE "Vendor/Supplier*" = ?
+                                  AND (normalized_name = (
+                                        SELECT normalized_name FROM products WHERE "Product Name*" = ? LIMIT 1
+                                      ) OR "Product Name*" = ?)
+                            ''', (new_lineage, vendor_val, tag_name, tag_name))
+                        total_vendor_updates += cursor.rowcount
+                conn.commit()
+                logging.info(f"✅ Batch vendor updates applied to {total_vendor_updates} rows")
+        except Exception as vendor_batch_err:
+            logging.warning(f"Vendor-wide batch lineage updates failed: {vendor_batch_err}")
         
         # Note: Session excel processor updates removed for performance
         # Database is authoritative source for lineage data
@@ -6886,6 +7040,77 @@ def batch_update_lineage():
                         logging.info(f"Created new strain '{tag_name}' with lineage '{new_lineage}' in database")
         except Exception as db_error:
             logging.warning(f"Failed to update database for batch lineage changes: {db_error}")
+        
+        # NEW: Update the in-memory Excel processor DataFrame so UI built from Excel reflects changes
+        try:
+            if excel_processor and changes_made:
+                updated_count = 0
+                for change in changes_made:
+                    tag_name = change.get('tag_name')
+                    new_lineage = change.get('new')
+                    try:
+                        # Prefer vendor+strain mask update
+                        vendor_mask = None
+                        strain_mask = None
+                        if 'Vendor/Supplier*' in excel_processor.df.columns:
+                            # Determine vendor for this tag
+                            m = excel_processor.df['ProductName'] == tag_name if 'ProductName' in excel_processor.df.columns else None
+                            if m is None or not m.any():
+                                m = excel_processor.df['Product Name*'] == tag_name if 'Product Name*' in excel_processor.df.columns else None
+                            vendor_val = None
+                            strain_val = None
+                            if m is not None and m.any():
+                                vendor_val = str(excel_processor.df.loc[m, 'Vendor/Supplier*'].iloc[0] or '').strip()
+                                strain_val = str(excel_processor.df.loc[m, 'Product Strain'].iloc[0] or '').strip() if 'Product Strain' in excel_processor.df.columns else None
+                            if vendor_val:
+                                vendor_mask = (excel_processor.df['Vendor/Supplier*'] == vendor_val)
+                                if strain_val and 'Product Strain' in excel_processor.df.columns:
+                                    strain_mask = (excel_processor.df['Product Strain'].astype(str).str.strip() == strain_val)
+                        mask_to_update = None
+                        if vendor_mask is not None and strain_mask is not None:
+                            mask_to_update = vendor_mask & strain_mask
+                        elif vendor_mask is not None:
+                            # fallback vendor-only
+                            mask_to_update = vendor_mask
+                        if mask_to_update is not None and mask_to_update.any():
+                            excel_processor.df.loc[mask_to_update, 'Lineage'] = new_lineage
+                            updated_count += int(mask_to_update.sum())
+                        else:
+                            # Fallback single product
+                            if excel_processor.update_lineage_in_current_data(tag_name, new_lineage):
+                                updated_count += 1
+                    except Exception as _err:
+                        # Non-fatal; continue updating others
+                        pass
+                logging.info(f"Updated lineage in Excel processor DataFrame for {updated_count}/{len(changes_made)} items")
+        except Exception as e_df:
+            logging.warning(f"Could not update Excel DataFrame after batch lineage update: {e_df}")
+
+        # NEW: Clear caches like single-item update to avoid stale lineage on long lists
+        try:
+            cache_key = get_session_cache_key('available_tags')
+            cache.delete(cache_key)
+
+            full_excel_cache_key = session.get('full_excel_cache_key')
+            json_matched_cache_key = session.get('json_matched_cache_key')
+            if full_excel_cache_key:
+                cache.delete(full_excel_cache_key)
+            if json_matched_cache_key:
+                cache.delete(json_matched_cache_key)
+
+            for key in ['available_tags', 'selected_records', 'filtered_tags', 'tag_list']:
+                try:
+                    cache_key_to_clear = get_session_cache_key(key)
+                    cache.delete(cache_key_to_clear)
+                except Exception:
+                    pass
+
+            session['excel_processor_updated'] = time.time()
+            session['lineage_update_timestamp'] = time.time()
+            session.modified = True
+            logging.info("✅ BATCH LINEAGE UPDATE: Cleared caches and updated session timestamps")
+        except Exception as cache_error:
+            logging.warning(f"Could not clear caches after batch lineage update: {cache_error}")
         
         return jsonify({
             'success': True,
