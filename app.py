@@ -5431,6 +5431,14 @@ def generate_labels():
             records = excel_processor.get_selected_records(template_type)
             logging.info(f"🔍 Records returned from get_selected_records: {len(records) if records else 0}")
             
+            # CRITICAL: Log lineage values from recipient records to verify DataFrame updates took effect
+            if records:
+                logging.info(f"🔍 LINEAGE VERIFICATION - First 5 records:")
+                for i, record in enumerate(records[:5]):
+                    product_name = record.get('ProductName', record.get('Product Name*', 'Unknown'))
+                    lineage = record.get('Lineage', 'NOT_FOUND')
+                    logging.info(f"  Record {i+1}: '{product_name}' -> Lineage: '{lineage}'")
+            
             # CRITICAL FIX: If we have JSON matched products but no records, try to include them directly
             if not records and excel_processor.df is not None and 'Source' in excel_processor.df.columns:
                 json_matched_products = excel_processor.df[excel_processor.df['Source'] == 'JSON Match']
