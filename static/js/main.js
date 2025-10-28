@@ -6884,10 +6884,11 @@ const TagManager = {
         this.state._lastCleanup = now;
         
         // Clear large arrays when not needed
-        if (this.state.tags && this.state.tags.length > 1000) {
-            // Keep only essential data
-            this.state.tags = this.state.tags.slice(0, 100);
-        }
+        // REMOVED: 100 tag limit - no longer limiting to allow all tags to generate
+        // if (this.state.tags && this.state.tags.length > 1000) {
+        //     // Keep only essential data
+        //     this.state.tags = this.state.tags.slice(0, 100);
+        // }
         
         // Clear filter cache if it's large
         if (this.state.filterCache && JSON.stringify(this.state.filterCache).length > 100000) {
