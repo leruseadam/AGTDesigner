@@ -177,19 +177,31 @@ def optimized_lineage_assignment(df, product_types, lineages, classic_types):
     classic_mask = product_types.isin(classic_types)
     nonclassic_mask = ~classic_mask
     
-    # CRITICAL FIX: Enhanced CBD detection for classic types
+    # CRITICAL FIX: Enhanced CBD detection for classic types based on CBD test result column
+    # Check if CBD test result column exists and has non-zero values
+    cbd_from_column_mask = pd.Series([False] * len(df), index=df.index)
+    if 'CBD test result' in df.columns:
+        try:
+            cbd_values = pd.to_numeric(df['CBD test result'], errors='coerce')
+            cbd_from_column_mask = (cbd_values > 0) & (cbd_values.notna())
+        except Exception:
+            # If conversion fails, check for string indicators
+            cbd_str = df['CBD test result'].astype(str)
+            cbd_from_column_mask = cbd_str.str.contains(r'\bCBD\b|cbd', case=False, na=False)
+    
+    # Also check product name as fallback
     cbd_from_name_mask = pd.Series([False] * len(df), index=df.index)
     if 'Product Name*' in df.columns:
         product_names = df['Product Name*'].astype(str)
         cbd_from_name_mask = product_names.str.contains(r'\bCBD\b', case=False, na=False)
     
-    # For classic types with CBD in product name, assign CBD lineage (even if lineage exists)
+    # For classic types with CBD in column OR name, assign CBD lineage (even if lineage exists)
     # CRITICAL: Override existing lineage for CBD Classic products to ensure they show as CBD
-    classic_cbd_mask = classic_mask & cbd_from_name_mask
+    classic_cbd_mask = classic_mask & (cbd_from_column_mask | cbd_from_name_mask)
     result[classic_cbd_mask] = 'CBD'
     
     # Set default lineage for classic types with empty lineage (HYBRID) - but only if not CBD
-    classic_default_mask = classic_mask & empty_lineage_mask & ~cbd_from_name_mask
+    classic_default_mask = classic_mask & empty_lineage_mask & ~(cbd_from_column_mask | cbd_from_name_mask)
     result[classic_default_mask] = 'HYBRID'
     
     # Use Product Strain to determine lineage for ALL non-classic types (override existing lineage)
