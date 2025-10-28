@@ -183,9 +183,9 @@ def optimized_lineage_assignment(df, product_types, lineages, classic_types):
         product_names = df['Product Name*'].astype(str)
         cbd_from_name_mask = product_names.str.contains(r'\bCBD\b', case=False, na=False)
     
-    # For classic types with CBD in product name AND empty lineage, assign CBD lineage
-    # FIXED: Only assign CBD if lineage is empty, don't overwrite existing lineages
-    classic_cbd_mask = classic_mask & cbd_from_name_mask & empty_lineage_mask
+    # For classic types with CBD in product name, assign CBD lineage (even if lineage exists)
+    # CRITICAL: Override existing lineage for CBD Classic products to ensure they show as CBD
+    classic_cbd_mask = classic_mask & cbd_from_name_mask
     result[classic_cbd_mask] = 'CBD'
     
     # Set default lineage for classic types with empty lineage (HYBRID) - but only if not CBD
