@@ -3394,16 +3394,16 @@ class TemplateProcessor:
                             set_run_font_size(run, strain_font_size)
                     continue
                 
-                # Special handling for standalone CBD text - treat as strain placeholder (1pt font size)
+                # CRITICAL FIX: Standalone CBD text in Lineage field should use lineage font sizing, not strain
                 if marker_name in ('CBD', 'THC', 'CBC', 'CBG', 'CBN') and marker_data['content'].strip() in ['CBD', 'THC', 'CBC', 'CBG', 'CBN']:
                     for run in paragraph.runs:
-                        # Only apply strain font sizing to runs that contain standalone cannabinoid text
+                        # Only apply lineage font sizing to runs that contain standalone cannabinoid text in lineage context
                         if (marker_data['content'] in run.text and 
                             len(marker_data['content'].strip()) <= 3 and  # Short cannabinoid names only
                             marker_data['content'].strip().upper() in ['CBD', 'THC', 'CBC', 'CBG', 'CBN']):
-                            # Use unified font sizing system for standalone cannabinoid text (1pt font size)
-                            strain_font_size = get_font_size_by_marker(marker_data['content'], 'PRODUCTSTRAIN', self.template_type, self.scale_factor)
-                            set_run_font_size(run, strain_font_size)
+                            # Use unified font sizing system for standalone cannabinoid text as lineage field type
+                            lineage_font_size = get_font_size_by_marker(marker_data['content'], 'LINEAGE', self.template_type, self.scale_factor)
+                            set_run_font_size(run, lineage_font_size)
                     continue
                 
                 # Apply normal font sizing for other markers
