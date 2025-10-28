@@ -4931,7 +4931,8 @@ class TemplateProcessor:
 
     def _ensure_standalone_cannabinoid_font_sizing(self, doc):
         """
-        Ensure any standalone cannabinoid text (CBD, THC, CBC, CBG, CBN) uses 1pt font size.
+        Ensure any standalone cannabinoid text (CBD, THC, CBC, CBG, CBN) uses appropriate font sizing.
+        CBD text in Lineage field should use lineage font sizing, not strain.
         This runs at the very end to catch any standalone cannabinoid text that wasn't caught earlier.
         """
         try:
