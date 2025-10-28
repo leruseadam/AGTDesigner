@@ -2557,6 +2557,8 @@ const TagManager = {
         tagElement.dataset.brand = tag.brand;
         tagElement.dataset.productType = tag.productType;
         tagElement.dataset.weight = tag.weight;
+        // CRITICAL: Add data-tag-name so updateSimilarLineages can find and update these elements
+        tagElement.setAttribute('data-tag-name', displayName);
 
         // Make the entire tag element clickable to toggle checkbox (but only for available tags)
         // For selected tags, only allow checkbox clicking to toggle selection
@@ -2693,6 +2695,9 @@ const TagManager = {
             initialDohStatus = 'THC';
         } else if (dohValue === 'CBD') {
             initialDohStatus = 'CBD';
+        } else if (dohValue === 'NO' || dohValue === 'NONE') {
+            // Explicitly no DOH image
+            initialDohStatus = 'NONE';
         } 
         // Then check product type for High CBD/THC indicators (DOH High CBD, DOH High THC)
         else if (productTypeForImages.startsWith('high cbd') || productTypeForImages.includes('doh high cbd')) {
@@ -2871,7 +2876,7 @@ const TagManager = {
 
         // Add DOH options
         const dohOptions = [
-            { value: 'NONE', label: '' },
+            { value: 'NONE', label: 'no DOH' },
             { value: 'DOH', label: 'DOH' },
             { value: 'THC', label: 'THC' },
             { value: 'CBD', label: 'CBD' }
@@ -2887,6 +2892,9 @@ const TagManager = {
             currentDropdownStatus = 'THC';
         } else if (dohValue === 'CBD') {
             currentDropdownStatus = 'CBD';
+        } else if (dohValue === 'NO' || dohValue === 'NONE') {
+            // Explicitly no DOH image
+            currentDropdownStatus = 'NONE';
         } 
         // Then check product type for High CBD/THC indicators (DOH High CBD, DOH High THC)
         else if (productTypeForImages.startsWith('high cbd') || productTypeForImages.includes('doh high cbd')) {
@@ -2912,7 +2920,7 @@ const TagManager = {
         
         dohSelect.addEventListener('change', async (e) => {
             const newDohStatus = e.target.value;
-            const prevValue = currentDohStatus;
+            const prevValue = currentDropdownStatus;
             
             // Immediate UI feedback - update image first for responsiveness
             updateDohImage(newDohStatus);
@@ -2937,15 +2945,25 @@ const TagManager = {
                     })
                 });
                 
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+                    throw new Error(errorData.error || `Server returned ${response.status}`);
+                }
+                
                 const data = await response.json();
                 if (data.success) {
                     // On success, update tag DOH status in state
                     tag.DOH = newDohStatus;
                     tag.doh = newDohStatus;
+                    tag['DOH Compliant (Yes/No)'] = newDohStatus;
                     dohSelect.value = newDohStatus;
                     console.log(`✅ DOH status updated for "${displayName}" to: ${newDohStatus}`);
                     
                     // Image already updated above for immediate feedback
+                    
+                    // Update DOH in both available and selected tags displays
+                    this.updateDohInAllDisplays(displayName, newDohStatus);
+                    
                 } else {
                     // Revert image on failure
                     updateDohImage(prevValue);
@@ -3109,7 +3127,7 @@ const TagManager = {
                 // Tag remains visible in available list even after selection
             }
             
-            // If tag was unchecked in selected list, show it in available display
+            // If tag was unchecked in selected list, show it in available display and uncheck it
             if (!isChecked && e.target.closest('#selectedTags') && tag && tag['Product Name*']) {
                 // Find and show the tag in available list
                 const availableTagElement = document.querySelector(`#availableTags .tag-checkbox[value="${tag['Product Name*']}"]`);
@@ -3118,6 +3136,9 @@ const TagManager = {
                     if (tagElement) {
                         tagElement.style.display = 'block';
                     }
+                    // CRITICAL: Also uncheck the available tags checkbox
+                    availableTagElement.checked = false;
+                    console.log(`✅ Unchecked available tags checkbox for ${tag['Product Name*']}`);
                 }
                 
                 // Clear corresponding filters when tag is deselected
@@ -3235,25 +3256,140 @@ const TagManager = {
         }
     },
 
+    updateDohInAllDisplays(tagName, newDohStatus) {
+        // Update state for both tags and originalTags
+        this.state.tags.forEach(tag => {
+            if (tag['Product Name*'] === tagName) {
+                tag.DOH = newDohStatus;
+                tag.doh = newDohStatus;
+                tag['DOH Compliant (Yes/No)'] = newDohStatus;
+            }
+        });
+        
+        this.state.originalTags.forEach(tag => {
+            if (tag['Product Name*'] === tagName) {
+                tag.DOH = newDohStatus;
+                tag.doh = newDohStatus;
+                tag['DOH Compliant (Yes/No)'] = newDohStatus;
+            }
+        });
+        
+        // Update available tags display - find by tag name
+        const availableItems = document.querySelectorAll('#availableTags .tag-item');
+        availableItems.forEach(el => {
+            const checkbox = el.querySelector('.tag-checkbox');
+            const name = el.getAttribute('data-tag-name') || (checkbox ? checkbox.value : null);
+            if (name === tagName) {
+                // Update the DOH dropdown
+                const dohSelect = el.querySelector('.doh-dropdown');
+                if (dohSelect) {
+                    dohSelect.value = newDohStatus;
+                }
+                
+                // Update the DOH image
+                const imageContainer = el.querySelector('.doh-image-container');
+                if (imageContainer) {
+                    // Clear existing images
+                    while (imageContainer.firstChild) {
+                        imageContainer.removeChild(imageContainer.firstChild);
+                    }
+                    
+                    // Add appropriate image based on DOH status
+                    if (newDohStatus === 'CBD') {
+                        const img = document.createElement('img');
+                        img.src = '/static/img/HighCBD.png';
+                        img.alt = 'High CBD';
+                        img.title = 'High CBD Product';
+                        img.style.cssText = 'height:24px;width:auto;margin-left:6px;vertical-align:middle';
+                        imageContainer.appendChild(img);
+                    } else if (newDohStatus === 'THC') {
+                        const img = document.createElement('img');
+                        img.src = '/static/img/HighTHC.png';
+                        img.alt = 'High THC';
+                        img.title = 'High THC Product';
+                        img.style.cssText = 'height:24px;width:auto;margin-left:6px;vertical-align:middle';
+                        imageContainer.appendChild(img);
+                    } else if (newDohStatus === 'DOH') {
+                        const img = document.createElement('img');
+                        img.src = '/static/img/DOH.png';
+                        img.alt = 'DOH Compliant';
+                        img.title = 'DOH Compliant Product';
+                        img.style.cssText = 'height:21px;width:auto;margin-left:6px;vertical-align:middle';
+                        imageContainer.appendChild(img);
+                    }
+                    // NONE shows no image
+                }
+            }
+        });
+        
+        // Update selected tags display
+        const selectedItems = document.querySelectorAll('#selectedTags .tag-item');
+        selectedItems.forEach(el => {
+            const checkbox = el.querySelector('.tag-checkbox');
+            const name = checkbox ? checkbox.value : el.getAttribute('data-tag-name');
+            if (name === tagName) {
+                // Update the DOH dropdown
+                const dohSelect = el.querySelector('.doh-dropdown');
+                if (dohSelect) {
+                    dohSelect.value = newDohStatus;
+                }
+                
+                // Update the DOH image
+                const imageContainer = el.querySelector('.doh-image-container');
+                if (imageContainer) {
+                    // Clear existing images
+                    while (imageContainer.firstChild) {
+                        imageContainer.removeChild(imageContainer.firstChild);
+                    }
+                    
+                    // Add appropriate image based on DOH status
+                    if (newDohStatus === 'CBD') {
+                        const img = document.createElement('img');
+                        img.src = '/static/img/HighCBD.png';
+                        img.alt = 'High CBD';
+                        img.title = 'High CBD Product';
+                        img.style.cssText = 'height:24px;width:auto;margin-left:6px;vertical-align:middle';
+                        imageContainer.appendChild(img);
+                    } else if (newDohStatus === 'THC') {
+                        const img = document.createElement('img');
+                        img.src = '/static/img/HighTHC.png';
+                        img.alt = 'High THC';
+                        img.title = 'High THC Product';
+                        img.style.cssText = 'height:24px;width:auto;margin-left:6px;vertical-align:middle';
+                        imageContainer.appendChild(img);
+                    } else if (newDohStatus === 'DOH') {
+                        const img = document.createElement('img');
+                        img.src = '/static/img/DOH.png';
+                        img.alt = 'DOH Compliant';
+                        img.title = 'DOH Compliant Product';
+                        img.style.cssText = 'height:21px;width:auto;margin-left:6px;vertical-align:middle';
+                        imageContainer.appendChild(img);
+                    }
+                    // NONE shows no image
+                }
+            }
+        });
+        
+        console.log(`✅ Updated DOH display in all panels for "${tagName}" to "${newDohStatus}"`);
+    },
+
     // Optimized function to update only the specific tag's lineage in the UI
     updateTagLineageInUI(tagName, newLineage) {
-        // Update lineage badge in available tags
+        // Update lineage dropdown in available tags
         const availableTagElement = document.querySelector(`#availableTags [data-tag-name="${tagName}"]`);
         if (availableTagElement) {
-            const lineageBadge = availableTagElement.querySelector('.lineage-badge');
-            if (lineageBadge) {
-                lineageBadge.textContent = newLineage;
-                lineageBadge.className = `badge lineage-badge ${this.getLineageColor(newLineage)}`;
+            const lineageSelect = availableTagElement.querySelector('.lineage-dropdown');
+            if (lineageSelect) {
+                lineageSelect.value = newLineage;
             }
         }
 
-        // Update lineage badge in selected tags
+        // Update lineage dropdown in selected tags
         const selectedTagElement = document.querySelector(`#selectedTags [data-tag-name="${tagName}"]`);
         if (selectedTagElement) {
-            const lineageBadge = selectedTagElement.querySelector('.lineage-badge');
-            if (lineageBadge) {
-                lineageBadge.textContent = newLineage;
-                lineageBadge.className = `badge lineage-badge ${this.getLineageColor(newLineage)}`;
+            const lineageSelect = selectedTagElement.querySelector('.lineage-dropdown');
+            if (lineageSelect) {
+                lineageSelect.value = newLineage;
             }
         }
     },
@@ -3262,27 +3398,67 @@ const TagManager = {
     updateSimilarLineages(tagName, newLineage) {
         // Find source tag info
         const source = this.state.tags.find(t => (t['Product Name*'] || t.ProductName) === tagName);
-        if (!source) return;
+        if (!source) {
+            console.warn('updateSimilarLineages: Source tag not found for', tagName);
+            return;
+        }
         const srcVendor = (source['Vendor/Supplier*'] || source['Vendor'] || source.vendor || '').toString().trim().toLowerCase();
         // Prefer explicit strain columns
         const srcStrain = (source['Product Strain'] || source['Strain Names'] || '').toString().trim().toLowerCase();
-        if (!srcVendor) return;
+        console.log('updateSimilarLineages:', {tagName, vendor: srcVendor, strain: srcStrain});
+        if (!srcVendor) {
+            console.warn('updateSimilarLineages: No vendor found for', tagName);
+            return;
+        }
 
         // Helper to normalize
         const norm = v => (v || '').toString().trim().toLowerCase();
         const isSimilar = (t) => {
+            const tagProductName = t['Product Name*'] || t.ProductName || 'UNKNOWN';
             const v = norm(t['Vendor/Supplier*'] || t['Vendor'] || t.vendor);
-            if (v !== srcVendor) return false;
-            const s = norm(t['Product Strain'] || t['Strain Names']);
-            // If we have a strain on the source, require match; otherwise vendor-only
-            return srcStrain ? (s === srcStrain) : true;
+            
+            if (v !== srcVendor) {
+                console.log(`  ❌ ${tagProductName}: Vendor mismatch (${v} !== ${srcVendor})`);
+                return false;
+            }
+            
+            // Strategy: Match by strain if available, otherwise match by product base name
+            if (srcStrain) {
+                // We have a strain - match by strain
+                const s = norm(t['Product Strain'] || t['Strain Names'] || '');
+                const matches = s === srcStrain;
+                
+                if (matches) {
+                    console.log(`  ✅ ${tagProductName}: MATCH by strain (vendor: ${v}, strain: ${s})`);
+                } else {
+                    console.log(`  ❌ ${tagProductName}: Strain mismatch (${s} !== ${srcStrain})`);
+                }
+                return matches;
+            } else {
+                // No strain - match by product base name (everything before "by Vendor" or "- Weight")
+                const getProductBaseName = (fullName) => {
+                    return fullName.split(' by ')[0].split(' - ')[0].trim().toLowerCase();
+                };
+                const srcBaseName = getProductBaseName(tagName);
+                const tagBaseName = getProductBaseName(tagProductName);
+                const matches = srcBaseName === tagBaseName;
+                
+                if (matches) {
+                    console.log(`  ✅ ${tagProductName}: MATCH by product name (base: ${tagBaseName})`);
+                } else {
+                    console.log(`  ❌ ${tagProductName}: Product name mismatch (${tagBaseName} !== ${srcBaseName})`);
+                }
+                return matches;
+            }
         };
 
         // Update state.tags and state.originalTags
+        let tagsUpdated = 0;
         this.state.tags.forEach(t => {
             if (isSimilar(t)) {
                 t.lineage = newLineage;
                 t.Lineage = newLineage;
+                tagsUpdated++;
             }
         });
         this.state.originalTags.forEach(t => {
@@ -3291,36 +3467,84 @@ const TagManager = {
                 t.Lineage = newLineage;
             }
         });
+        console.log(`✅ Updated ${tagsUpdated} similar items in state`);
 
-        // Update Available list UI badges
+        // Update Available list UI dropdowns
+        let availableUpdated = 0;
         const availableItems = document.querySelectorAll('#availableTags .tag-item');
-        availableItems.forEach(el => {
-            const name = el.getAttribute('data-tag-name');
-            const tag = this.state.tags.find(t => (t['Product Name*'] || t.ProductName) === name);
-            if (tag && isSimilar(tag)) {
-                const badge = el.querySelector('.lineage-badge');
-                if (badge) {
-                    badge.textContent = newLineage;
-                    badge.className = `badge lineage-badge ${this.getLineageColor(newLineage)}`;
-                }
-            }
-        });
-
-        // Update Selected list UI badges and dropdowns
-        const selectedItems = document.querySelectorAll('#selectedTags .tag-item');
-        selectedItems.forEach(el => {
+        console.log(`🔍 Found ${availableItems.length} available tag items in DOM`);
+        availableItems.forEach((el, idx) => {
+            // Use same fallback logic as selected tags
             const name = el.getAttribute('data-tag-name') || (el.querySelector('.tag-checkbox')?.value);
+            console.log(`🔍 Available item ${idx}: data-tag-name="${name}"`);
             const tag = this.state.tags.find(t => (t['Product Name*'] || t.ProductName) === name);
             if (tag && isSimilar(tag)) {
-                const badge = el.querySelector('.lineage-badge');
-                if (badge) {
-                    badge.textContent = newLineage;
-                    badge.className = `badge lineage-badge ${this.getLineageColor(newLineage)}`;
-                }
                 const select = el.querySelector('.lineage-dropdown');
-                if (select) select.value = newLineage;
+                if (select) {
+                    select.value = newLineage;
+                    
+                    // Update the data-lineage attribute to change the color
+                    el.setAttribute('data-lineage', newLineage.toUpperCase());
+                    
+                    // Force a style recalculation to apply the new lineage color
+                    const originalDisplay = el.style.display;
+                    el.style.display = 'none';
+                    el.offsetHeight; // Trigger reflow
+                    el.style.display = originalDisplay;
+                    
+                    availableUpdated++;
+                    console.log(`  ✅ Updated dropdown and color for ${name}`);
+                } else {
+                    console.log(`  ⚠️ No dropdown found for ${name}`);
+                }
+            } else {
+                console.log(`  ⚠️ Tag not similar: ${name} (tag found: ${!!tag})`);
             }
         });
+        console.log(`✅ Updated ${availableUpdated} dropdowns in available tags`);
+
+        // Update Selected list UI dropdowns
+        let selectedUpdated = 0;
+        const selectedItems = document.querySelectorAll('#selectedTags .tag-item');
+        console.log(`🔍 Found ${selectedItems.length} selected tag items in DOM`);
+        selectedItems.forEach((el, idx) => {
+            const name = el.getAttribute('data-tag-name') || (el.querySelector('.tag-checkbox')?.value);
+            console.log(`🔍 Selected item ${idx}: data-tag-name="${name}"`);
+            const tag = this.state.tags.find(t => (t['Product Name*'] || t.ProductName) === name);
+            
+            if (tag) {
+                console.log(`  📋 Tag object found for "${name}":`, {
+                    vendor: tag['Vendor/Supplier*'] || tag['Vendor'] || tag.vendor,
+                    strain: tag['Product Strain'] || tag['Strain Names']
+                });
+            } else {
+                console.log(`  ⚠️ Tag object NOT found for "${name}"`);
+            }
+            
+            if (tag && isSimilar(tag)) {
+                const select = el.querySelector('.lineage-dropdown');
+                if (select) {
+                    select.value = newLineage;
+                    
+                    // Update the data-lineage attribute to change the color
+                    el.setAttribute('data-lineage', newLineage.toUpperCase());
+                    
+                    // Force a style recalculation to apply the new lineage color
+                    const originalDisplay = el.style.display;
+                    el.style.display = 'none';
+                    el.offsetHeight; // Trigger reflow
+                    el.style.display = originalDisplay;
+                    
+                    selectedUpdated++;
+                    console.log(`  ✅ Updated dropdown and color for ${name}`);
+                } else {
+                    console.log(`  ⚠️ No dropdown found for ${name}`);
+                }
+            } else {
+                console.log(`  ⚠️ Tag not similar: ${name} (tag found: ${!!tag})`);
+            }
+        });
+        console.log(`✅ Updated ${selectedUpdated} dropdowns in selected tags`);
     },
 
     updateSelectedTags(tags) {
@@ -5577,16 +5801,117 @@ const TagManager = {
     },
 
     showUploadSuccessSplash(rows) {
-        const splash = document.getElementById('excelLoadingSplash');
-        const filenameElement = document.getElementById('excelLoadingFilename');
-        const statusElement = document.getElementById('excelLoadingStatus');
-        
-        if (splash && filenameElement && statusElement) {
-            filenameElement.textContent = 'Upload successful!';
-            statusElement.textContent = `${rows} rows processed. Page will reload now.`;
-            splash.style.display = 'flex';
-            splash.style.background = 'rgba(40, 167, 69, 0.95)'; // Green background for success
+        // Hide the excel loading splash first
+        const oldSplash = document.getElementById('excelLoadingSplash');
+        if (oldSplash) {
+            oldSplash.style.display = 'none';
         }
+
+        // Create or get the success splash modal
+        let successSplash = document.getElementById('uploadSuccessSplash');
+        
+        if (!successSplash) {
+            successSplash = document.createElement('div');
+            successSplash.id = 'uploadSuccessSplash';
+            successSplash.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                display: none;
+                justify-content: center;
+                align-items: center;
+                z-index: 9999;
+                backdrop-filter: blur(10px);
+                -webkit-backdrop-filter: blur(10px);
+            `;
+            document.body.appendChild(successSplash);
+        }
+        
+        // Set content with cool success design
+        successSplash.innerHTML = `
+            <div style="position: relative; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center;">
+                <div class="success-background-pattern"></div>
+                
+                <div id="success-splash-container" style="position: relative; width: 500px; height: 400px; border-radius: 24px; overflow: hidden; background: linear-gradient(135deg, rgba(40, 167, 69, 0.95), rgba(76, 175, 80, 0.95)); border: 1px solid rgba(255, 255, 255, 0.3); box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1), 0 0 40px rgba(76, 175, 80, 0.4); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); z-index: 2;">
+                    <div class="success-content" style="position: relative; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 40px; color: white; text-align: center;">
+                        <div class="success-icon-container" style="position: relative; margin-bottom: 20px;">
+                            <div class="success-checkmark" style="width: 80px; height: 80px; background: rgba(255, 255, 255, 0.2); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 40px; box-shadow: 0 15px 35px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.2); animation: success-bounce 0.6s ease-in-out;">
+                                ✓
+                            </div>
+                        </div>
+                        
+                        <h1 style="color: #fff; font-weight: 900; letter-spacing: 2px; font-size: 2rem; margin-bottom: 12px; text-shadow: 0 4px 12px rgba(0,0,0,0.3), 0 2px 4px rgba(255,255,255,0.2);">UPLOAD SUCCESSFUL!</h1>
+                        <p style="color: rgba(255, 255, 255, 0.95); font-size: 1.1rem; font-weight: 600; letter-spacing: 1px; margin-bottom: 15px; text-shadow: 0 2px 8px rgba(0,0,0,0.3);">${rows || 0} rows processed</p>
+                        
+                        <div class="success-info" style="width: 100%; max-width: 300px; margin: 20px 0;">
+                            <div style="font-size: 0.9rem; font-weight: 500; opacity: 0.9; margin-bottom: 12px; text-shadow: 0 2px 6px rgba(0,0,0,0.2);">Reloading page to display new data...</div>
+                            <div class="success-progress-bar" style="width: 100%; height: 6px; background: rgba(255, 255, 255, 0.2); border-radius: 3px; overflow: hidden;">
+                                <div class="success-progress-fill" style="height: 100%; background: rgba(255, 255, 255, 0.9); border-radius: 3px; animation: success-progress 2s ease-in-out;"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="success-dots" style="display: flex; gap: 6px; justify-content: center; margin-top: 20px;">
+                            <div class="dot" style="width: 6px; height: 6px; border-radius: 50%; background: rgba(255, 255, 255, 0.8); animation: dot-pulse 1.4s ease-in-out infinite both;"></div>
+                            <div class="dot" style="width: 6px; height: 6px; border-radius: 50%; background: rgba(255, 255, 255, 0.8); animation: dot-pulse 1.4s ease-in-out infinite both; animation-delay: -0.18s;"></div>
+                            <div class="dot" style="width: 6px; height: 6px; border-radius: 50%; background: rgba(255, 255, 255, 0.8); animation: dot-pulse 1.4s ease-in-out infinite both; animation-delay: -0.36s;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <style>
+                .success-background-pattern {
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    background: radial-gradient(circle at 20% 50%, rgba(76, 175, 80, 0.1), transparent 50%),
+                                radial-gradient(circle at 80% 80%, rgba(40, 167, 69, 0.1), transparent 50%),
+                                radial-gradient(circle at 40% 20%, rgba(76, 175, 80, 0.05), transparent 50%);
+                    animation: success-pattern-shift 8s ease-in-out infinite;
+                }
+                
+                @keyframes success-pattern-shift {
+                    0%, 100% { transform: translate(0, 0); }
+                    50% { transform: translate(20px, 20px); }
+                }
+                
+                @keyframes success-bounce {
+                    0% { transform: scale(0) rotate(-180deg); opacity: 0; }
+                    50% { transform: scale(1.2) rotate(10deg); }
+                    70% { transform: scale(0.95) rotate(-5deg); }
+                    100% { transform: scale(1) rotate(0deg); opacity: 1; }
+                }
+                
+                @keyframes success-progress {
+                    0% { width: 0%; }
+                    100% { width: 100%; }
+                }
+                
+                @keyframes dot-pulse {
+                    0%, 80%, 100% { transform: scale(0); opacity: 0.5; }
+                    40% { transform: scale(1.2); opacity: 1; }
+                }
+                
+                @keyframes status-pulse {
+                    0%, 100% { opacity: 1; transform: scale(1); }
+                    50% { opacity: 0.5; transform: scale(0.8); }
+                }
+            </style>
+        `;
+        
+        // Show the splash
+        successSplash.style.display = 'flex';
+        
+        // Auto-hide and reload after animation
+        setTimeout(() => {
+            if (successSplash) {
+                successSplash.style.display = 'none';
+            }
+        }, 2200);
     },
 
     // Action splash screen for clear/undo operations
@@ -5642,6 +5967,7 @@ const TagManager = {
         // Show the modal with loading splash style
         splashModal.style.display = 'flex';
         splashModal.innerHTML = `
+            <div style="position: relative; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center;">
             <div class="background-pattern"></div>
             
             <div id="splash-container" style="position: relative; width: 500px; height: 350px; border-radius: 24px; overflow: hidden; background: rgba(22, 33, 62, 0.95); border: 1px solid rgba(0, 212, 170, 0.2); box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(0, 212, 170, 0.1); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); z-index: 2;">
@@ -5698,6 +6024,7 @@ const TagManager = {
                     </svg>
                     Exit
                 </button>
+            </div>
             </div>
             
             <style>
@@ -5814,6 +6141,7 @@ const TagManager = {
         // Show a simple text-based splash
         splashModal.style.display = 'flex';
         splashModal.innerHTML = `
+            <div style="display: flex; justify-content: center; align-items: center; width: 100%; height: 100%;">
             <div class="generation-splash-popup" style="background: rgba(22, 33, 62, 0.95); border-radius: 24px; padding: 40px; text-align: center; color: white; border: 1px solid rgba(0, 212, 170, 0.2); box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(0, 212, 170, 0.1);">
                 <h1 style="color: #fff; font-weight: 900; letter-spacing: 3px; font-size: 2.5rem; margin-bottom: 12px; text-shadow: 0 4px 12px rgba(0,0,0,0.5), 0 6px 20px rgba(0,0,0,0.4), 0 2px 4px rgba(160,132,232,0.4), 0 0 30px rgba(160,132,232,0.3); filter: drop-shadow(0 6px 12px rgba(0,0,0,0.4));">AGT DESIGNER</h1>
                 <p style="color: #fff; font-size: 1.2rem; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 20px; text-shadow: 0 3px 8px rgba(0,0,0,0.5), 0 4px 16px rgba(0,0,0,0.4), 0 2px 4px rgba(139,92,246,0.4), 0 0 20px rgba(139,92,246,0.3); filter: drop-shadow(0 3px 6px rgba(0,0,0,0.4));">AUTO-GENERATING TAG DESIGNER</p>
@@ -5836,6 +6164,7 @@ const TagManager = {
                 <style>
                     @keyframes progress { 0% { width: 0%; } 50% { width: 100%; } 100% { width: 0%; } }
                 </style>
+                </div>
             </div>
         `;
     },

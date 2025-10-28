@@ -6684,15 +6684,12 @@ def update_lineage():
                 conn = product_db._get_connection()
                 cursor = conn.cursor()
                 if strain_name and str(strain_name).strip():
+                    # Use Product Strain column directly for matching (more reliable than strain_id join)
                     cursor.execute('''
                         UPDATE products
                         SET "Lineage" = ?
-                        WHERE "Vendor/Supplier*" = ?
-                          AND strain_id = (
-                            SELECT id FROM strains WHERE normalized_name = (
-                              SELECT normalized_name FROM strains WHERE strain_name = ? LIMIT 1
-                            )
-                          )
+                        WHERE TRIM(LOWER("Vendor/Supplier*")) = TRIM(LOWER(?))
+                          AND TRIM(LOWER("Product Strain")) = TRIM(LOWER(?))
                     ''', (new_lineage, vendor, str(strain_name).strip()))
                     conn.commit()
                     products_updated = cursor.rowcount
@@ -6702,11 +6699,17 @@ def update_lineage():
                     cursor.execute('''
                         UPDATE products
                         SET "Lineage" = ?
-                        WHERE "Vendor/Supplier*" = ?
-                          AND (normalized_name = (
-                                SELECT normalized_name FROM products WHERE "Product Name*" = ? LIMIT 1
-                              ) OR "Product Name*" = ?)
-                    ''', (new_lineage, vendor, tag_name, tag_name))
+                        WHERE TRIM(LOWER("Vendor/Supplier*")) = TRIM(LOWER(?))
+                          AND (
+                                normalized_name = (
+                                    SELECT normalized_name FROM products 
+                                    WHERE TRIM(LOWER("Vendor/Supplier*")) = TRIM(LOWER(?))
+                                      AND "Product Name*" = ? 
+                                    LIMIT 1
+                                ) 
+                                OR "Product Name*" = ?
+                          )
+                    ''', (new_lineage, vendor, vendor, tag_name, tag_name))
                     conn.commit()
                     products_updated = cursor.rowcount
                     logging.info(f"✅ Updated {products_updated} vendor-matched products for normalized name of '{tag_name}' to '{new_lineage}'")
@@ -6737,7 +6740,10 @@ def update_lineage():
             if vendor:
                 # Update all products from this vendor in the DataFrame
                 try:
-                    vendor_mask = (excel_processor.df['Vendor/Supplier*'] == vendor)
+                    # Match vendor case-insensitively with trim
+                    vendor_series = excel_processor.df['Vendor/Supplier*'].astype(str).str.strip().str.lower()
+                    vendor_norm = str(vendor).strip().lower()
+                    vendor_mask = (vendor_series == vendor_norm)
                     # Prefer matching by strain if present
                     strain_col = 'Product Strain'
                     df_strain_name = None
@@ -6746,14 +6752,25 @@ def update_lineage():
                     except Exception:
                         df_strain_name = None
                     if df_strain_name and strain_col in excel_processor.df.columns:
-                        mask = vendor_mask & (excel_processor.df[strain_col].astype(str).str.strip() == str(df_strain_name).strip())
+                        strain_series = excel_processor.df[strain_col].astype(str).str.strip().str.lower()
+                        src_strain = str(df_strain_name).strip().lower()
+                        mask = vendor_mask & (strain_series == src_strain)
                     else:
                         # Fallback: match by product normalized name proxy (Product Name*)
                         mask = vendor_mask & (excel_processor.df['Product Name*'].astype(str) == str(tag_name))
                     if mask.any():
+                        # Debug: Log lineage values before update
+                        old_lineages = excel_processor.df.loc[mask, 'Lineage'].values.tolist()
+                        old_product_names = excel_processor.df.loc[mask, 'Product Name*'].values.tolist()
+                        logging.info(f"🔍 BEFORE UPDATE - Lineages for vendor '{vendor}': {list(zip(old_product_names, old_lineages))}")
+                        
                         excel_processor.df.loc[mask, 'Lineage'] = new_lineage
                         updated_count = int(mask.sum())
-                        logging.info(f"✅ Updated {updated_count} products for vendor '{vendor}' in Excel DataFrame")
+                        
+                        # Debug: Verify the update worked
+                        new_lineages = excel_processor.df.loc[mask, 'Lineage'].values.tolist()
+                        logging.info(f"✅ UPDATED {updated_count} products for vendor '{vendor}' in Excel DataFrame")
+                        logging.info(f"🔍 AFTER UPDATE - Lineages: {list(zip(old_product_names, new_lineages))}")
                 except Exception as df_error:
                     logging.warning(f"Could not update Excel DataFrame for vendor: {df_error}")
             else:
@@ -7129,15 +7146,26 @@ def update_doh():
     """Update DOH status for a specific product."""
     try:
         data = request.get_json()
-        tag_name = data.get('tag_name') or data.get('Product Name*')
-        new_doh = data.get('doh')
+        tag_name = data.get('tag_name') or data.get('product_name') or data.get('Product Name*')
+        new_doh = data.get('doh') or data.get('doh_status')
         
         if not tag_name or new_doh is None:
             return jsonify({'error': 'Missing tag_name or doh'}), 400
         
-        # Validate DOH values
-        if new_doh not in ['Yes', 'No']:
-            return jsonify({'error': 'DOH value must be "Yes" or "No"'}), 400
+        # Normalize DOH values - convert frontend values to backend format
+        # Frontend sends: 'NONE', 'DOH', 'THC', 'CBD'
+        # Backend stores: 'No' for NONE (no image), or the specific value (DOH/THC/CBD)
+        doh_storage_value = new_doh
+        
+        # If NONE is selected, store as 'No' to indicate no DOH image
+        if new_doh == 'NONE':
+            doh_storage_value = 'No'
+        # If DOH, THC, or CBD is selected, keep as is (will display appropriate image)
+        elif new_doh not in ['DOH', 'THC', 'CBD']:
+            # For backward compatibility, if old Yes/No values are sent, keep them
+            if new_doh not in ['Yes', 'No']:
+                return jsonify({'error': f'Invalid DOH value: {new_doh}. Must be "NONE", "DOH", "THC", "CBD", "Yes", or "No"'}), 400
+            doh_storage_value = new_doh
         
         # Get the excel processor from session
         excel_processor = get_excel_processor()
@@ -7151,25 +7179,48 @@ def update_doh():
         if not product_db:
             return jsonify({'error': 'Database not available'}), 500
         
-        # Update the product DOH directly in database
+        # Get vendor and brand from Excel data for more specific database update
+        vendor = None
+        brand = None
         try:
-            product_success = product_db.update_product_doh(tag_name, new_doh)
+            if excel_processor and excel_processor.df is not None:
+                # Check if required columns exist
+                if 'Product Name*' not in excel_processor.df.columns:
+                    logging.warning("Could not get vendor/brand: 'Product Name*' column not found in DataFrame")
+                else:
+                    # Find the product in Excel data
+                    mask = (excel_processor.df['Product Name*'].str.strip().str.upper() == tag_name.strip().upper())
+                    if mask.any():
+                        vendor = excel_processor.df.loc[mask, 'Vendor/Supplier*'].iloc[0] if 'Vendor/Supplier*' in excel_processor.df.columns else None
+                        brand = excel_processor.df.loc[mask, 'Product Brand'].iloc[0] if 'Product Brand' in excel_processor.df.columns else None
+                        logging.info(f"Found product in Excel: vendor={vendor}, brand={brand}")
+        except Exception as e:
+            logging.warning(f"Could not get vendor/brand from Excel data: {str(e)}")
+        
+        # Update the product DOH directly in database using normalized value
+        db_update_success = False
+        try:
+            product_success = product_db.update_product_doh(tag_name, doh_storage_value, vendor=vendor, brand=brand)
             if product_success:
-                logging.info(f"✅ Updated product DOH in database: '{tag_name}' → '{new_doh}'")
+                logging.info(f"✅ Updated product DOH in database: '{tag_name}' → '{doh_storage_value}' (original: '{new_doh}')")
+                db_update_success = True
             else:
-                logging.warning(f"❌ Failed to update product DOH in database for '{tag_name}'")
-                return jsonify({'error': 'Failed to update DOH in database'}), 500
+                logging.warning(f"⚠️  Could not find product in database to update DOH for '{tag_name}' - will try Excel update")
                         
         except Exception as db_error:
             logging.error(f"Error updating DOH in database: {db_error}")
-            return jsonify({'error': f'Database update failed: {str(db_error)}'}), 500
+            # Don't fail the whole request - continue with Excel update
         
-        # Now update the Excel processor DataFrame to reflect database changes
-        success = excel_processor.update_doh_in_current_data(tag_name, new_doh) if excel_processor else False
-        if success:
+        # Now update the Excel processor DataFrame (this should always work)
+        excel_update_success = excel_processor.update_doh_in_current_data(tag_name, doh_storage_value) if excel_processor else False
+        if excel_update_success:
             logging.info(f"✅ Updated DOH in Excel processor DataFrame")
         else:
-            logging.warning(f"⚠️  Could not update Excel processor DataFrame (not critical - database is updated)")
+            logging.warning(f"⚠️  Could not update Excel processor DataFrame for '{tag_name}'")
+        
+        # Only return error if Excel update failed (database update failure is ok)
+        if not excel_update_success:
+            return jsonify({'error': 'Failed to update DOH in Excel data'}), 500
         
         # CRITICAL FIX: Aggressively clear ALL caches to force fresh data
         try:
@@ -7201,7 +7252,7 @@ def update_doh():
         except Exception as cache_error:
             logging.warning(f"Could not clear caches after DOH update: {cache_error}")
         
-        return jsonify({'success': True, 'message': f'DOH updated to {new_doh}'})
+        return jsonify({'success': True, 'message': f'DOH updated to {doh_storage_value}', 'original_value': new_doh})
             
     except Exception as e:
         logging.error(f"Error updating DOH: {e}")
