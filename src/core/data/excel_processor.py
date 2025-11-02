@@ -484,15 +484,20 @@ def get_default_upload_file(store_name: Optional[str] = None) -> Optional[str]:
                     if filename.lower().endswith(('.xlsx', '.xls')) and not filename.startswith('~$'):
                         # If store_name is provided, filter by store name in filename
                         if store_name:
+                            # Extract the actual store name part (e.g., "Bothell" from "AGT_Bothell")
                             # Check if filename contains the store name (case insensitive, handle underscores/spaces)
+                            store_parts = store_name.replace('AGT_', '').replace('AGT ', '')
                             store_variants = [
-                                store_name,
-                                store_name.replace('_', ' '),
-                                store_name.replace('_', ''),
-                                store_name.lower(),
-                                store_name.upper()
+                                store_name,                    # Full name: AGT_Bothell
+                                store_name.replace('_', ' '),  # With space: AGT Bothell
+                                store_name.replace('_', ''),   # No separator: AGTBothell
+                                store_parts,                   # Just store: Bothell
+                                store_parts.lower(),           # Lowercase: bothell
+                                store_parts.upper(),           # Uppercase: BOTHELL
                             ]
-                            if not any(variant in filename for variant in store_variants):
+                            # Check case-insensitive
+                            filename_lower = filename.lower()
+                            if not any(variant.lower() in filename_lower for variant in store_variants):
                                 logger.debug(f"Skipping file (doesn't match store {store_name}): {filename}")
                                 continue
                         
