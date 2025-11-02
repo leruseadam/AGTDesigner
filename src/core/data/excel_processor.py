@@ -4908,10 +4908,11 @@ class ExcelProcessor:
         import gc
         gc.collect()
         
-        # Disable product database integration for faster loading
-        self._product_db_enabled = False
+        # CRITICAL FIX: Don't disable ProductDB - it's essential for matching!
+        # Keep _product_db_enabled = True (default)
+        # The performance cost is worth it for correct functionality
         
-        self.logger.info("[PYTHONANYWHERE-FAST] Applied PythonAnywhere optimizations")
+        self.logger.info("[PYTHONANYWHERE-FAST] Applied PythonAnywhere optimizations (ProductDB kept enabled)")
     
     def _minimal_pythonanywhere_processing(self, df: pd.DataFrame) -> pd.DataFrame:
         """Apply minimal processing for PythonAnywhere fast loading."""
@@ -4968,11 +4969,12 @@ class ExcelProcessor:
     
     def enable_pythonanywhere_mode(self, enable: bool = True):
         """Enable PythonAnywhere-specific optimizations."""
+        # CRITICAL FIX: Don't disable ProductDB - it's essential!
+        # ProductDB integration is needed for matching, lineage, etc.
+        # Keep _product_db_enabled = True regardless of mode
         if enable:
-            self._product_db_enabled = False  # Disable for faster loading
-            self.logger.info("[PYTHONANYWHERE-FAST] PythonAnywhere mode enabled")
+            self.logger.info("[PYTHONANYWHERE-FAST] PythonAnywhere mode enabled (ProductDB kept enabled)")
         else:
-            self._product_db_enabled = True
             self.logger.info("[PYTHONANYWHERE-FAST] PythonAnywhere mode disabled")
 
     def repair_missing_data_for_json_matches(self, json_matched_products):
