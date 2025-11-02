@@ -922,6 +922,7 @@ img, video, canvas, svg {
       padding: 16px 28px !important;
       font-size: 1.2rem !important;
       min-height: 60px !important;
+      height: 60px !important;
       min-width: 180px !important;
     }
   }
@@ -967,6 +968,7 @@ img, video, canvas, svg {
       padding: 14px 24px !important;
       font-size: 1.1rem !important;
       min-height: 54px !important;
+      height: 54px !important;
       min-width: 170px !important;
     }
   }
@@ -1012,6 +1014,7 @@ img, video, canvas, svg {
       padding: 12px 20px !important;
       font-size: 1rem !important;
       min-height: 52px !important;
+      height: 52px !important;
       min-width: 160px !important;
     }
   }
@@ -1057,6 +1060,7 @@ img, video, canvas, svg {
       padding: 10px 18px !important;
       font-size: 0.95rem !important;
       min-height: 48px !important;
+      height: 48px !important;
       min-width: 150px !important;
     }
   }
@@ -1102,6 +1106,7 @@ img, video, canvas, svg {
       padding: 11px 20px !important;
       font-size: 1rem !important;
       min-height: 50px !important;
+      height: 50px !important;
       min-width: 155px !important;
     }
   }
@@ -1147,6 +1152,7 @@ img, video, canvas, svg {
       padding: 12px 22px !important;
       font-size: 1.05rem !important;
       min-height: 54px !important;
+      height: 54px !important;
       min-width: 160px !important;
     }
   }
@@ -2125,14 +2131,48 @@ img, video, canvas, svg {
     font-size: 0.8rem !important;
   }
   
-  /* Generate button spacing */
-  .control-panel .btn-modern2 {
+  /* Generate button spacing - keep original size even when reusing header style */
+  .control-panel #generateBtn {
     margin: 0.2rem 0 !important;
     padding: 0.65rem !important;
     font-size: 1.1rem !important;
     font-weight: 800 !important;
-    box-shadow: 0 3px 10px rgba(33, 150, 243, 0.25), 0 6px 18px rgba(3, 169, 244, 0.15) !important;
+    box-shadow: 0 3px 10px rgba(160, 132, 232, 0.25), 0 6px 18px rgba(160, 132, 232, 0.15) !important;
     transition: all 0.2s ease-in-out !important;
+    height: unset !important;   /* override header button fixed height */
+    line-height: inherit !important; /* avoid compact vertical sizing */
+    min-width: unset !important; /* keep original width behavior */
+    border-radius: 12px !important; /* preserve original rounded shape */
+    /* Force header-style colors */
+    background: rgba(160, 132, 232, 0.9) !important;
+    border: 1px solid rgba(160, 132, 232, 0.6) !important;
+    color: #fff !important;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3) !important;
+  }
+
+  .control-panel #generateBtn:hover {
+    background: rgba(160, 132, 232, 1) !important;
+    border-color: rgba(160, 132, 232, 0.8) !important;
+    box-shadow: 0 4px 14px rgba(160, 132, 232, 0.35) !important;
+  }
+
+  /* Generate button themed like header buttons (color/border/hover) without size constraints */
+  .btn-generate-themed {
+    background: rgba(160, 132, 232, 0.9) !important;
+    backdrop-filter: blur(15px);
+    -webkit-backdrop-filter: blur(15px);
+    border: 1px solid rgba(160, 132, 232, 0.6) !important;
+    color: #fff !important;
+    border-radius: 12px !important;
+    box-shadow: 0 2px 8px rgba(160, 132, 232, 0.2) !important;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3) !important;
+  }
+
+  .btn-generate-themed:hover {
+    background: rgba(160, 132, 232, 1) !important;
+    border-color: rgba(160, 132, 232, 0.8) !important;
+    box-shadow: 0 4px 14px rgba(160, 132, 232, 0.35) !important;
+    transform: translateY(-1px);
   }
   
   /* JSON Tools section spacing */
@@ -3387,6 +3427,15 @@ img, video, canvas, svg {
     align-items: center;
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
+  }
+
+  .generation-splash-modal[style*="display: flex"],
+  .generation-splash-modal[style*="display:flex"] {
+    display: flex !important;
+  }
+
+  .generation-splash-modal:not([style*="display: none"]):not([style*="display:none"]) {
+    display: flex;
   }
 
   .generation-splash-popup {
@@ -8634,4 +8683,38 @@ img, video, canvas, svg {
     height: 45px;
     font-size: 18px;
   }
+}
+
+/* Center column spacing normalization (consistent, even gaps) */
+.control-panel {
+  /* visual styles remain elsewhere; this block standardizes spacing */
+}
+.control-panel .d-grid {
+  gap: 0.6rem !important; /* even, comfortable spacing between buttons */
+}
+.control-panel .btn {
+  margin-bottom: 0 !important; /* rely on grid gap for spacing */
+}
+.control-panel > div {
+  margin-bottom: 0.5rem !important; /* equal spacing between sections */
+}
+.control-panel .form-select-modern {
+  margin-bottom: 0.35rem !important; /* space below Template select */
+}
+.control-panel #generateBtn {
+  margin: 0.35rem 0 !important; /* balanced space above/below button */
+}
+
+/* Slightly lower the center column so it visually centers between the tag lists */
+[data-container-type="center"] {
+  margin-top: 8px !important; /* gentle downward nudge */
+}
+
+/* Scale-to-fit support */
+#mainContent {
+	transform-origin: top left;
+}
+
+html, body {
+	transform-origin: top left;
 }

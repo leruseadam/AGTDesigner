@@ -920,31 +920,57 @@ def process_chunk(args):
             if not product_name or product_name.lower() in ['', 'nan', 'none', 'null']:
                 logger.warning(f"⚠️  SKIPPING EMPTY PRODUCT at index {i}: No product name found")
                 continue
-            doh_value = str(row.get("DOH", "")).strip().upper()
-            if DEBUG_ENABLED:
-                logger.debug(f"Processing DOH value: {doh_value}")
+            
+            # Use only canonical DOH field for image decisions
+            doh_raw = str(row.get("DOH", "")).strip()
+            doh_compliant = ''
+            doh_lower = ''
+            
+            logger.info(f"🔍 DOH RAW VALUES for '{product_name}':")
+            logger.info(f"  row.get('DOH'): '{doh_raw}'")
+            logger.info(f"  row.get('DOH Compliant (Yes/No)'): '{doh_compliant}'")
+            logger.info(f"  row.get('doh'): '{doh_lower}'")
+            
+            doh_value = (doh_raw).upper()
+            logger.info(f"🔍 DOH PROCESSING: Product '{product_name}' - Combined value: '{doh_value}'")
             product_type = str(row.get("Product Type*", "")).strip().lower()
             if DEBUG_ENABLED:
                 logger.debug(f"Product type: {product_type}")
             
-            if doh_value == "YES":
-                # Use HighCBD.png if product_type starts with 'high cbd'
-                if product_type.startswith('high cbd'):
+            # Handle different DOH values: YES (legacy), DOH, THC, CBD, or NO/NONE
+            # Explicitly handle NO/NONE/FALSE/empty values first
+            # Also check the raw value before upper() conversion for "No"/"no"
+            raw_doh = (str(row.get("DOH", "")).strip())
+            if doh_value in ["NO", "NONE", "FALSE", ""] or raw_doh in ["No", "no", "NO", "NONE"]:
+                label_data["DOH"] = ""
+                logger.info(f"✅ DOH DECISION: Product '{product_name}' - NO DOH image (value: '{doh_value}' or '{raw_doh}')")
+            elif doh_value in ["YES", "DOH", "THC", "CBD"]:
+                # Map DOH value to appropriate image
+                if doh_value == "CBD" or (doh_value == "YES" and product_type.startswith('high cbd')):
+                    # Use High CBD image
                     high_cbd_image_path = resource_path(os.path.join("templates", "HighCBD.png"))
                     if DEBUG_ENABLED:
                         logger.debug(f"Using HighCBD image: {high_cbd_image_path}")
                     label_data["DOH"] = InlineImage(tpl, high_cbd_image_path, width=image_width)
+                elif doh_value == "THC":
+                    # Use High THC image
+                    high_thc_image_path = resource_path(os.path.join("templates", "HighTHC.png"))
+                    if DEBUG_ENABLED:
+                        logger.debug(f"Using HighTHC image: {high_thc_image_path}")
+                    label_data["DOH"] = InlineImage(tpl, high_thc_image_path, width=image_width)
                 else:
+                    # Use regular DOH image
                     doh_image_path = resource_path(os.path.join("templates", "DOH.png"))
                     if DEBUG_ENABLED:
                         logger.debug(f"Using DOH image: {doh_image_path}")
                     label_data["DOH"] = InlineImage(tpl, doh_image_path, width=image_width)
+                    logger.info(f"✅ DOH DECISION: Product '{product_name}' - Added DOH.png")
                 if DEBUG_ENABLED:
                     logger.debug(f"Created DOH image with width: {image_width}")
             else:
                 label_data["DOH"] = ""
                 if DEBUG_ENABLED:
-                    logger.debug("Skipping DOH image - value is not 'YES'")
+                    logger.debug(f"Skipping DOH image - value is '{doh_value}' (not DOH/THC/CBD)")
                 
             # --- Wrap all fields with markers ---
             # Updated price mapping to use correct field names
@@ -1094,25 +1120,62 @@ def process_chunk(args):
             is_edible = product_type in edible_types
             is_horizontal_or_double_or_vertical = orientation in {"horizontal", "double", "vertical"}
             
-            # For classic types, try to get the strain's canonical lineage from the database
-            if is_classic_type and product_strain:
-                # DEBUG: Processing classic type '{product_type}' with strain '{product_strain}'
+            # For classic types, try to get lineage from database (product-level FIRST, then strain-level)
+            if is_classic_type:
                 try:
-                    from src.core.data.product_database import get_product_database
-                    product_db = get_product_database()
-                    strain_info = product_db.get_strain_info(product_strain)
-                    # DEBUG: Strain info: {strain_info}
-                    if strain_info and strain_info.get('canonical_lineage'):
-                        lineage_val = strain_info['canonical_lineage'].upper()
-                        # DEBUG: Using database lineage: '{lineage_val}'
+                    # CRITICAL: Use store-specific database and check product-level lineage first
+                    from app import get_product_database, get_current_store_name
+                    store_name = get_current_store_name()
+                    product_db = get_product_database(store_name)
+                    
+                    # FIRST: Check for product-level lineage (preserves user changes to specific products)
+                    product_name = row.get('Product Name*', '') or row.get('ProductName', '')
+                    if product_name:
+                        db_product_lineage = product_db.get_product_lineage(product_name)
+                        if db_product_lineage and str(db_product_lineage).strip() not in ['', 'None', 'nan']:
+                            lineage_val = str(db_product_lineage).strip().upper()
+                            logger.debug(f"✅ DOCX LINEAGE: Using product-level lineage '{lineage_val}' for '{product_name}'")
+                        elif product_strain:
+                            # FALLBACK: Check strain-level lineage
+                            strain_info = product_db.get_strain_info(product_strain)
+                            if strain_info:
+                                preferred = (
+                                    strain_info.get('display_lineage') or
+                                    strain_info.get('sovereign_lineage') or
+                                    strain_info.get('canonical_lineage')
+                                )
+                                if preferred:
+                                    lineage_val = str(preferred).upper()
+                                    logger.debug(f"✅ DOCX LINEAGE: Using strain-level lineage '{lineage_val}' for '{product_name}' (strain: '{product_strain}')")
+                                else:
+                                    lineage_val = lineage_text.upper() if lineage_text else ""
+                            else:
+                                # Fallback to Excel lineage if no database lineage found
+                                lineage_val = lineage_text.upper() if lineage_text else ""
+                        else:
+                            lineage_val = lineage_text.upper() if lineage_text else ""
                     else:
-                        # Fallback to Excel lineage if no database lineage found
-                        lineage_val = lineage_text.upper() if lineage_text else ""
-                        # DEBUG: Using Excel lineage fallback: '{lineage_val}'
+                        # No product name, try strain-level only
+                        if product_strain:
+                            strain_info = product_db.get_strain_info(product_strain)
+                            if strain_info:
+                                preferred = (
+                                    strain_info.get('display_lineage') or
+                                    strain_info.get('sovereign_lineage') or
+                                    strain_info.get('canonical_lineage')
+                                )
+                                if preferred:
+                                    lineage_val = str(preferred).upper()
+                                else:
+                                    lineage_val = lineage_text.upper() if lineage_text else ""
+                            else:
+                                lineage_val = lineage_text.upper() if lineage_text else ""
+                        else:
+                            lineage_val = lineage_text.upper() if lineage_text else ""
                 except Exception as e:
                     # Fallback to Excel lineage if database lookup fails
                     lineage_val = lineage_text.upper() if lineage_text else ""
-                    # DEBUG: Using Excel lineage due to error: '{lineage_val}' (error: {e})
+                    logger.debug(f"⚠️ DOCX LINEAGE: Using Excel lineage '{lineage_val}' due to error: {e}")
             else:
                 # CRITICAL FIX: For ALL non-classic types (edibles, tinctures, gummies, etc.), 
                 # use brand name for Lineage, not the raw Excel lineage value

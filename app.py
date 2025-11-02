@@ -217,7 +217,7 @@ except ImportError:
 from docx import Document
 from docxtpl import DocxTemplate, InlineImage
 from io import BytesIO
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from functools import lru_cache
 import json  # Add this import
 from copy import deepcopy
@@ -304,6 +304,7 @@ import glob
 import subprocess
 from collections import defaultdict
 import shutil
+import pickle
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -342,6 +343,253 @@ RATE_LIMIT_MAX_REQUESTS = 100  # Max requests per minute per IP (increased for l
 
 # Simple in-memory rate limiter
 rate_limit_data = defaultdict(list)
+
+# ============================================================================
+# IP-based Store Selection System
+# ============================================================================
+
+# In-memory store for IP-based store selections (12-hour expiration)
+_ip_store_selections = {}
+_ip_store_lock = threading.Lock()
+_store_selections_file = 'sessions/store_selections.pkl'
+
+def is_store_selection_valid(ip_address, store_selection):
+    """Check if store selection is still valid (within 12 hours)."""
+    if not store_selection:
+        return False
+    
+    selection_time = store_selection.get('timestamp')
+    if not selection_time:
+        return False
+    
+    try:
+        selection_datetime = datetime.fromisoformat(selection_time)
+        expiration_time = selection_datetime + timedelta(hours=12)
+        return datetime.now() < expiration_time
+    except (ValueError, TypeError):
+        return False
+
+def save_store_selections():
+    """Save store selections to disk for persistence across restarts."""
+    try:
+        with _ip_store_lock:
+            os.makedirs('sessions', exist_ok=True)
+            with open(_store_selections_file, 'wb') as f:
+                pickle.dump(_ip_store_selections, f)
+            logging.debug(f"Saved {len(_ip_store_selections)} store selections to disk")
+    except Exception as e:
+        logging.warning(f"Failed to save store selections: {e}")
+
+def load_store_selections():
+    """Load store selections from disk."""
+    global _ip_store_selections
+    try:
+        if os.path.exists(_store_selections_file):
+            with open(_store_selections_file, 'rb') as f:
+                loaded = pickle.load(f)
+                # Only load non-expired selections
+                valid_selections = {}
+                for ip, data in loaded.items():
+                    if is_store_selection_valid(ip, data):
+                        valid_selections[ip] = data
+                _ip_store_selections = valid_selections
+                logging.info(f"Loaded {len(_ip_store_selections)} valid store selections from disk")
+                return True
+    except Exception as e:
+        logging.warning(f"Failed to load store selections: {e}")
+    return False
+
+# OPTION 1: Clear ALL store selections on server restart (uncomment to force selection every restart)
+def clear_all_on_startup():
+    """Clear all store selections when server restarts - forces users to select store every time."""
+    global _ip_store_selections
+    with _ip_store_lock:
+        count = len(_ip_store_selections)
+        _ip_store_selections.clear()
+    
+    # Delete the persistence file to prevent reload
+    try:
+        if os.path.exists(_store_selections_file):
+            os.remove(_store_selections_file)
+            logging.info(f"Deleted store selections file on startup")
+    except Exception as e:
+        logging.warning(f"Failed to delete store selections file: {e}")
+    
+    logging.info(f"Cleared all {count} store selections on server startup - users must select store")
+
+# OPTION 2: Load persisted selections and only clear expired ones (12-hour persistence)
+def load_and_cleanup_on_startup():
+    """Load persisted store selections and clear only expired ones."""
+    global _ip_store_selections
+    
+    # Load from disk
+    load_store_selections()
+    
+    # Clear expired ones
+    expired_count = 0
+    with _ip_store_lock:
+        expired_ips = []
+        for ip_address, store_selection in _ip_store_selections.items():
+            if not is_store_selection_valid(ip_address, store_selection):
+                expired_ips.append(ip_address)
+        
+        for ip_address in expired_ips:
+            del _ip_store_selections[ip_address]
+            expired_count += 1
+    
+    if expired_count > 0:
+        logging.info(f"Cleared {expired_count} expired store selection(s) on startup")
+        save_store_selections()  # Save after cleanup
+    else:
+        logging.info(f"Loaded {len(_ip_store_selections)} valid store selections from disk")
+
+# Choose which startup behavior you want:
+# Uncomment ONE of the following:
+
+# Force store selection on every server restart:
+clear_all_on_startup()
+
+# OR keep 12-hour persistence across restarts:
+# load_and_cleanup_on_startup()
+
+def get_client_ip():
+    """Get the client's IP address."""
+    if request.headers.get('X-Forwarded-For'):
+        return request.headers.get('X-Forwarded-For').split(',')[0].strip()
+    elif request.headers.get('X-Real-IP'):
+        return request.headers.get('X-Real-IP')
+    else:
+        return request.remote_addr
+
+def get_current_store_name():
+    """Get the current store name for the requesting client. Returns None if no valid selection."""
+    try:
+        ip_address = get_client_ip()
+        with _ip_store_lock:
+            if ip_address in _ip_store_selections:
+                store_data = _ip_store_selections[ip_address]
+                # Check if the selection is still valid (not expired)
+                if is_store_selection_valid(ip_address, store_data):
+                    return store_data['store']
+                else:
+                    # Remove expired selection
+                    del _ip_store_selections[ip_address]
+        # No store selection found - return None (caller must handle)
+        return None
+    except Exception as e:
+        logging.warning(f"Error getting current store name: {e}")
+        return None
+
+def has_store_selection():
+    """Check if current IP has a valid store selection."""
+    try:
+        # Quick check: if we're outside request context, return False immediately
+        from flask import has_request_context
+        if not has_request_context():
+            return False
+        
+        ip_address = get_client_ip()
+        
+        # Fast path: check without lock first
+        if ip_address not in _ip_store_selections:
+            return False
+        
+        # Only acquire lock if we found a potential match
+        with _ip_store_lock:
+            if ip_address in _ip_store_selections:
+                store_data = _ip_store_selections[ip_address]
+                return is_store_selection_valid(ip_address, store_data)
+        
+        return False
+    except Exception as e:
+        # Silently fail outside request context
+        return False
+
+def cleanup_expired_store_selections():
+    """Remove expired store selections."""
+    current_time = datetime.now()
+    expired_ips = []
+    
+    with _ip_store_lock:
+        for ip_address, store_selection in _ip_store_selections.items():
+            if not is_store_selection_valid(ip_address, store_selection):
+                expired_ips.append(ip_address)
+        
+        for ip_address in expired_ips:
+            del _ip_store_selections[ip_address]
+    
+    # Save to disk after cleanup if any were removed
+    if expired_ips:
+        save_store_selections()
+
+def extract_store_from_filename(filename):
+    """Extract store name from filename if present. Handles variations like spaces, underscores, case."""
+    if not filename:
+        return None
+    
+    filename_upper = filename.upper()
+    # Normalize filename by replacing underscores and spaces for matching
+    filename_normalized = filename_upper.replace('_', ' ').replace('-', ' ')
+    
+    # Store mappings: (search_pattern, proper_store_name)
+    # Check both with "AGT" prefix and without (just store name)
+    store_patterns = [
+        # With AGT prefix
+        ('AGT BOTHELL', 'AGT_Bothell'),
+        ('AGT_BOTHELL', 'AGT_Bothell'),
+        ('AGT BURIEN', 'AGT_Burien'),
+        ('AGT_BURIEN', 'AGT_Burien'),
+        ('AGT GOLDBAR', 'AGT_Goldbar'),
+        ('AGT_GOLDBAR', 'AGT_Goldbar'),
+        ('AGT LYNNWOOD', 'AGT_Lynnwood'),
+        ('AGT_LYNNWOOD', 'AGT_Lynnwood'),
+        ('AGT SEATTLE', 'AGT_Seattle'),
+        ('AGT_SEATTLE', 'AGT_Seattle'),
+        ('AGT SHORELINE', 'AGT_Shoreline'),
+        ('AGT_SHORELINE', 'AGT_Shoreline'),
+        ('AGT WALLA WALLA', 'AGT_Walla_Walla'),
+        ('AGT_WALLA_WALLA', 'AGT_Walla_Walla'),
+        ('AGT WALLAWALLA', 'AGT_Walla_Walla'),
+        # Without AGT prefix (just store name) - check these after AGT versions
+        ('BOTHELL', 'AGT_Bothell'),
+        ('BURIEN', 'AGT_Burien'),
+        ('GOLDBAR', 'AGT_Goldbar'),
+        ('LYNNWOOD', 'AGT_Lynnwood'),
+        ('SEATTLE', 'AGT_Seattle'),
+        ('SHORELINE', 'AGT_Shoreline'),
+        ('WALLA WALLA', 'AGT_Walla_Walla'),
+        ('WALLAWALLA', 'AGT_Walla_Walla'),
+    ]
+    
+    # Check for store name in filename (case insensitive, handles spaces/underscores)
+    for pattern, store_name in store_patterns:
+        pattern_normalized = pattern.replace('_', ' ').replace('-', ' ')
+        if pattern_normalized in filename_normalized or pattern in filename_upper:
+            return store_name
+    
+    return None
+
+def validate_excel_filename_for_store(filename, selected_store):
+    """
+    Validate that Excel filename contains store name and matches selected store.
+    Returns (is_valid, warning_message, detected_store)
+    """
+    if not filename:
+        return False, "Filename is required", None
+    
+    detected_store = extract_store_from_filename(filename)
+    
+    if not detected_store:
+        return False, f"Excel filename must contain a store name (e.g., 'AGT_Bothell', 'AGT_Burien', etc.). Found filename: {filename}", None
+    
+    if detected_store != selected_store:
+        return False, f"Store mismatch: Cannot upload {detected_store} Excel file to {selected_store}. Please select the correct store or use the correct Excel file.", detected_store
+    
+    return True, None, detected_store
+
+# ============================================================================
+# End of IP-based Store Selection System
+# ============================================================================
 
 def reset_excel_processor():
     """Reset the global ExcelProcessor to force reloading of the default file."""
@@ -404,7 +652,6 @@ def reset_excel_processor():
         logging.warning(f"Error clearing cache: {cache_error}")
     
     logging.info("Excel processor reset complete")
-
 def force_reload_excel_processor(new_file_path):
     """Force reload the Excel processor with a new file. ALWAYS clears old data completely."""
     global _excel_processor, _excel_processor_reset_flag
@@ -452,12 +699,11 @@ def force_reload_excel_processor(new_file_path):
         _excel_processor._last_loaded_file = new_file_path
         logging.info(f"Excel processor successfully loaded new file with full processing rules: {new_file_path}")
         logging.info(f"New DataFrame shape: {_excel_processor.df.shape if _excel_processor.df is not None else 'None'}")
-        
         # CRITICAL FIX: Ensure dropdown cache is populated after successful file load
         if hasattr(_excel_processor, '_cache_dropdown_values'):
             try:
                 _excel_processor._cache_dropdown_values()
-                logging.info(f"Successfully populated dropdown cache with {len(_excel_processor.dropdown_cache)} filter options")
+                logging.info(f"Successfully populated dropdown cache from session uploaded file")
                 # Log the strain count specifically
                 if 'strain' in _excel_processor.dropdown_cache:
                     strain_count = len(_excel_processor.dropdown_cache['strain'])
@@ -468,13 +714,14 @@ def force_reload_excel_processor(new_file_path):
                 logging.error(f"Failed to populate dropdown cache: {e}")
         else:
             logging.warning("ExcelProcessor does not have _cache_dropdown_values method")
-            
     else:
         logging.error(f"Failed to load new file in Excel processor: {new_file_path}")
         # CRITICAL FIX: Don't create empty DataFrame - this causes the "no strains" issue
         # Instead, try to load a default file as fallback
         from src.core.data.excel_processor import get_default_upload_file
-        default_file = get_default_upload_file()
+        # Get store-specific default file
+        selected_store = get_current_store_name() if has_store_selection() else None
+        default_file = get_default_upload_file(selected_store)
         if default_file and os.path.exists(default_file):
             logging.info(f"Attempting to load default file as fallback: {default_file}")
             fallback_success = _excel_processor.load_file(default_file)
@@ -580,8 +827,9 @@ def get_excel_processor():
                     else:
                         # OPTIMIZATION: Skip default file loading on startup for faster app loading
                         if not _excel_processor_reset_flag and not DISABLE_STARTUP_FILE_LOADING:
-                            # Try to load the default file
-                            default_file = get_default_upload_file()
+                            # Try to load the default file for the selected store
+                            selected_store = get_current_store_name() if has_store_selection() else None
+                            default_file = get_default_upload_file(selected_store)
                             if default_file and os.path.exists(default_file):
                                 logging.info(f"Loading default file in get_excel_processor: {default_file}")
                                 # Use fast loading mode for better performance
@@ -633,7 +881,8 @@ def get_excel_processor():
                     logging.warning(f"Error checking session for uploaded file: {session_error}")
                     # OPTIMIZATION: Skip default file loading on startup for faster app loading
                     if not _excel_processor_reset_flag and not DISABLE_STARTUP_FILE_LOADING:
-                        default_file = get_default_upload_file()
+                        selected_store = get_current_store_name() if has_store_selection() else None
+                        default_file = get_default_upload_file(selected_store)
                         if default_file and os.path.exists(default_file):
                             logging.info(f"Loading default file in get_excel_processor: {default_file}")
                             success = _excel_processor.load_file(default_file)
@@ -687,74 +936,104 @@ def get_excel_processor():
             logging.error(f"Failed to create fallback ExcelProcessor: {fallback_error}")
             # Return None and let the calling code handle it
             return None
-
+    # Ensure no stray indentation or orphaned blocks before function definition
 def get_product_database(store_name=None):
     """Lazy load ProductDatabase to avoid startup delay."""
     global _product_database
     
-    # If no store_name provided, get the current store selection
+    # Always require a store_name
     if store_name is None:
-        try:
-            ip_address = get_client_ip()
-            with _ip_store_lock:
-                if ip_address in _ip_store_selections:
-                    store_data = _ip_store_selections[ip_address]
-                    # Check if the selection is still valid (not expired)
-                    if datetime.now() - datetime.fromisoformat(store_data['timestamp']) < timedelta(hours=12):
-                        store_name = store_data['store']
-                    else:
-                        # Remove expired selection
-                        del _ip_store_selections[ip_address]
-                        store_name = 'AGT_Bothell'  # Default fallback
-                else:
-                    store_name = 'AGT_Bothell'  # Default fallback
-        except Exception as e:
-            logging.warning(f"Error getting current store selection: {e}")
-            store_name = 'AGT_Bothell'  # Default fallback
-    
-    # CRITICAL FIX: Always check if we need to reload the database for the current store
+        raise ValueError("Store name must be provided for product database access.")
+
+    # Only use store-specific database, never fallback to generic db
+    db_filename = f'product_database_{store_name}.db'
+    db_path = os.path.join(current_dir, 'uploads', db_filename)
+    if not os.path.exists(db_path):
+        raise FileNotFoundError(f"Store-specific database not found: {db_path}")
+
+    # Check if reload is needed
     current_store_in_db = getattr(_product_database, '_store_name', None) if _product_database else None
-    needs_reload = _product_database is None or (store_name and current_store_in_db != store_name)
-    
-    logging.info(f"📦 Database load check: requested_store='{store_name}', current_store_in_db='{current_store_in_db}', needs_reload={needs_reload}")
-    
+    current_db_path = getattr(_product_database, 'db_path', None) if _product_database else None
+    needs_reload = (_product_database is None or current_store_in_db != store_name or current_db_path != db_path)
+
+    logging.info(f"📦 Database load check: requested_store='{store_name}', current_store_in_db='{current_store_in_db}', current_db_path='{current_db_path}', expected_db_path='{db_path}', needs_reload={needs_reload}")
+
     if needs_reload:
         from src.core.data.product_database import ProductDatabase
-        # Use store-specific database for better matching
-        db_filename = f'product_database_{store_name}.db'
-        db_path = os.path.join(current_dir, 'uploads', db_filename)
-        
         logging.info(f"📦 Loading database for store '{store_name}' from: {db_path}")
-        
-        # CRITICAL FIX: Fallback to main database if store-specific database doesn't exist
-        if not os.path.exists(db_path):
-            logging.warning(f"Store-specific database not found: {db_path}, falling back to main database")
-            db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
-            # Use store name from main database if available
-            if not os.path.exists(db_path):
-                logging.error(f"Main database also not found: {db_path}")
-        
         _product_database = ProductDatabase(db_path)
         _product_database._store_name = store_name
-        # Force database initialization to ensure it's loaded
+        if _product_database.db_path != db_path:
+            logging.warning(f"ProductDatabase db_path mismatch: {_product_database.db_path} != {db_path}")
+        logging.info(f"✅ ProductDatabase created with db_path: {_product_database.db_path}")
         _product_database.init_database()
-        logging.info(f"✅ ProductDatabase loaded for store '{store_name}' at: {db_path}")
-    
+        if os.path.exists(db_path):
+            logging.info(f"✅ ProductDatabase loaded for store '{store_name}' at: {db_path}")
+
     return _product_database
 
-def get_json_matcher():
-    """Lazy load regular JSONMatcher with Excel-priority to avoid startup delay."""
-    global _json_matcher
-    if _json_matcher is None:
-        try:
-            # Use regular JSON matcher with Excel-priority (not Enhanced)
-            from src.core.data.json_matcher import JSONMatcher
-            _json_matcher = JSONMatcher(get_excel_processor())
-            logging.info("Regular JSON Matcher initialized successfully (Excel-priority)")
-        except ImportError as e:
-            logging.error(f"Regular JSON Matcher not available: {e}")
-            _json_matcher = None
-    return _json_matcher
+# Local override: always try to use the Bothell DB file if present
+def _get_bothell_product_db():
+    try:
+        from src.core.data.product_database import ProductDatabase
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        # Helper: find most recent valid Bothell DB in uploads
+        def _find_best_bothell_db(base_dir: str) -> str:
+            import glob, os, sqlite3
+            candidates = []
+            # Prefer explicit AGT_Bothell naming
+            patterns = [
+                os.path.join(base_dir, 'uploads', 'product_database_AGT_Bothell*.db'),
+                os.path.join(base_dir, 'uploads', 'product_database*.db'),
+                os.path.join(base_dir, 'bothell_products.db')
+            ]
+            for pattern in patterns:
+                for path in glob.glob(pattern):
+                    try:
+                        with sqlite3.connect(path) as conn:
+                            cur = conn.cursor()
+                            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+                            has_products = cur.fetchone() is not None
+                            if has_products:
+                                mtime = os.path.getmtime(path)
+                                candidates.append((mtime, path))
+                    except Exception:
+                        continue
+            if not candidates:
+                return ''
+            candidates.sort(reverse=True)
+            return candidates[0][1]
+        def has_required_tables(db_path: str) -> bool:
+            import sqlite3
+            try:
+                with sqlite3.connect(db_path) as conn:
+                    cur = conn.cursor()
+                    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+                    has_products = cur.fetchone() is not None
+                    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='strains'")
+                    has_strains = cur.fetchone() is not None
+                    return has_products or has_strains
+            except Exception:
+                return False
+        # Preferred: best (most recent) valid Bothell DB
+        best = _find_best_bothell_db(current_dir)
+        if best:
+            from src.core.data.product_database import ProductDatabase
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            # Always use Bothell store-specific database
+            db_filename = 'product_database_AGT_Bothell.db'
+            db_path = os.path.join(current_dir, 'uploads', db_filename)
+            if not os.path.exists(db_path):
+                logging.warning(f"Bothell store database not found: {db_path}")
+                return None
+            product_db = ProductDatabase(db_path)
+            product_db._store_name = 'AGT_Bothell'
+            product_db.init_database()
+            return product_db
+        return None
+    except Exception as e:
+        logging.error(f"Error in _get_bothell_product_db: {e}")
+        return None
 
 def get_enhanced_ai_matcher():
     """Lazy load Enhanced AI Product Matcher."""
@@ -821,7 +1100,6 @@ def resource_path(relative_path):
     except Exception:
         base_path = current_dir
     return os.path.join(base_path, relative_path)
-
 def create_app():
     import flask
     app = flask.Flask(__name__, static_url_path='/static', static_folder='static')
@@ -1115,9 +1393,10 @@ def initialize_excel_processor():
             excel_processor.enable_product_db_integration(True)
             logging.info("Product database integration enabled by default")
         
-        # Try to load default file
+        # Try to load default file for the selected store
         from src.core.data.excel_processor import get_default_upload_file
-        default_file = get_default_upload_file()
+        selected_store = get_current_store_name() if has_store_selection() else None
+        default_file = get_default_upload_file(selected_store)
         
         if default_file and os.path.exists(default_file):
             logging.info(f"Loading default file on startup: {default_file}")
@@ -1293,7 +1572,6 @@ class LabelMakerApp:
             use_reloader=False,  # Disable reloader to prevent multiple restarts
             threaded=True  # Enable threading for better performance
         )
-
 # === SESSION-BASED HELPERS ===
 def get_session_excel_processor():
     """Get ExcelProcessor instance for the current session with proper error handling."""
@@ -1354,7 +1632,8 @@ def get_session_excel_processor():
             if not hasattr(g.excel_processor, 'df') or g.excel_processor.df is None or g.excel_processor.df.empty:
                 logging.info("CRITICAL FIX: ExcelProcessor DataFrame is empty, loading default file for JSON matching")
                 from src.core.data.excel_processor import get_default_upload_file
-                default_file = get_default_upload_file()
+                selected_store = get_current_store_name() if has_store_selection() else None
+                default_file = get_default_upload_file(selected_store)
                 if default_file and os.path.exists(default_file):
                     logging.info(f"CRITICAL FIX: Loading default file for JSON matching: {default_file}")
                     success = g.excel_processor.load_file(default_file)
@@ -1407,7 +1686,8 @@ def get_session_excel_processor():
             # Only load default file if no uploaded file exists
             if not hasattr(g.excel_processor, 'df') or g.excel_processor.df is None or g.excel_processor.df.empty:
                 from src.core.data.excel_processor import get_default_upload_file
-                default_file = get_default_upload_file()
+                selected_store = get_current_store_name() if has_store_selection() else None
+                default_file = get_default_upload_file(selected_store)
                 if default_file and os.path.exists(default_file):
                     logging.info(f"Loading default file for session: {default_file}")
                     success = g.excel_processor.load_file(default_file)
@@ -1558,8 +1838,9 @@ def get_session_json_matcher():
 def get_session_product_database():
     """Get ProductDatabase instance for the current session using current store selection."""
     try:
-        # Use the global get_product_database which handles store selection automatically
-        return get_product_database()
+        # Get the current store name and use it to get the database
+        store_name = get_current_store_name()
+        return get_product_database(store_name)
     except Exception as e:
         logging.error(f"Error getting session product database: {e}")
         return None
@@ -1686,6 +1967,15 @@ def index():
         # Reduced logging to prevent excessive log spam
         logging.info(f"Page load at {datetime.now().strftime('%H:%M:%S')}")
         
+        # Check if store selection is required
+        user_has_store = has_store_selection()
+        current_store = get_current_store_name() if user_has_store else None
+        
+        if not user_has_store:
+            logging.info("No store selection found - user must select store")
+        else:
+            logging.info(f"User has valid store selection: {current_store}")
+        
         # --- LIGHTWEIGHT PAGE LOAD (minimal work) ---
         cache_bust = str(int(time.time()))
         
@@ -1702,7 +1992,8 @@ def index():
         if uploaded_file:
             try:
                 from src.core.data.excel_processor import get_default_upload_file
-                default_file = get_default_upload_file()
+                selected_store = get_current_store_name() if has_store_selection() else None
+                default_file = get_default_upload_file(selected_store)
                 
                 if uploaded_file != default_file and os.path.exists(uploaded_file):
                     # Check if file is old (more than 1 hour)
@@ -1749,15 +2040,26 @@ def index():
         # This makes page loads much faster
         initial_data = None
         
+        # CRITICAL FIX: Pass uploaded filename to template so it persists on refresh
+        uploaded_filename = session.get('uploaded_filename', '')
+        
         logging.info("=== PAGE REFRESH COMPLETE ===")
-        return render_template('index.html', initial_data=initial_data, cache_bust=cache_bust)
+        return render_template('index.html', 
+                             initial_data=initial_data, 
+                             cache_bust=cache_bust,
+                             user_has_store=user_has_store,
+                             current_store=current_store,
+                             uploaded_filename=uploaded_filename)
         
     except Exception as e:
         logging.error(f"Error in index route: {str(e)}")
         logging.error(f"Index route traceback: {traceback.format_exc()}")
-        # Ensure cache_bust is always available
+        # Ensure cache_bust and store variables are always available
         cache_bust = str(int(time.time()))
-        return render_template('index.html', error=str(e), cache_bust=cache_bust)
+        user_has_store = False
+        current_store = None
+        uploaded_filename = ''
+        return render_template('index.html', error=str(e), cache_bust=cache_bust, user_has_store=user_has_store, current_store=current_store, uploaded_filename=uploaded_filename)
 
 @app.route('/splash')
 def splash():
@@ -1778,7 +2080,6 @@ def generation_splash():
 def test_upload():
     """Test upload page"""
     return open('test_upload.html').read()
-
 @app.route('/upload', methods=['POST'])
 def upload_file():
     """Optimized file upload - saves file quickly then processes in background"""
@@ -1786,6 +2087,14 @@ def upload_file():
     
     try:
         logging.info("=== UPLOAD START ===")
+        
+        # CRITICAL: Require store selection before upload
+        if not has_store_selection():
+            logging.error("Upload attempted without store selection")
+            return jsonify({'error': 'Please select a store before uploading files'}), 400
+        
+        # Get current store selection
+        selected_store = get_current_store_name()
         
         # Validate request
         if 'file' not in request.files:
@@ -1797,11 +2106,26 @@ def upload_file():
             logging.error("Empty file or filename")
             return jsonify({'error': 'No file selected'}), 400
         
-        logging.info(f"Uploading: {file.filename}")
+        logging.info(f"Uploading: {file.filename} for store: {selected_store}")
         
         # Validate extension
         if not file.filename.lower().endswith(('.xlsx', '.xls')):
             return jsonify({'error': 'Only Excel files allowed'}), 400
+        
+        # Validate filename contains store name and matches selected store
+        is_valid, warning_msg, detected_store = validate_excel_filename_for_store(file.filename, selected_store)
+        
+        if not is_valid:
+            logging.error(f"Filename validation failed: {warning_msg}")
+            return jsonify({
+                'error': warning_msg,
+                'filename': file.filename,
+                'selected_store': selected_store,
+                'detected_store': detected_store
+            }), 400
+        
+        # Initialize warning tracking variables
+        warning_to_return = warning_msg if warning_msg else None
         
         # Create uploads directory
         import os
@@ -1855,8 +2179,9 @@ def upload_file():
                         
                         # Store in database
                         try:
-                            from src.core.data.product_database import get_product_database
-                            product_db = get_product_database()
+                            # Use the selected_store from outer scope
+                            store_name = selected_store
+                            product_db = get_product_database(store_name)
                             
                             if product_db and hasattr(product_db, 'store_excel_data'):
                                 logging.info(f"[BACKGROUND] Storing {row_count} products in database...")
@@ -1890,12 +2215,17 @@ def upload_file():
             upload_time = time.time() - start_time
             logging.info(f"=== UPLOAD COMPLETE (background processing started): {upload_time:.3f}s ===")
             
-            return jsonify({
+            response_data = {
                 'success': True,
                 'message': 'File uploaded, processing in background',
                 'filename': file.filename,
                 'processing': True
-            })
+            }
+            if warning_to_return:
+                response_data['warning'] = warning_to_return
+                response_data['detected_store'] = detected_store
+                response_data['selected_store'] = selected_store
+            return jsonify(response_data)
             
         else:
             # Local development: Process synchronously for immediate feedback
@@ -1909,12 +2239,12 @@ def upload_file():
 
                 # Store in database for persistence
                 try:
-                    from src.core.data.product_database import get_product_database
-                    # Store context removed - using single database
-                    product_db = get_product_database()
+                    # CRITICAL: Use the selected_store from validation above
+                    store_name = selected_store
+                    product_db = get_product_database(store_name)
 
                     if product_db and hasattr(product_db, 'store_excel_data'):
-                        logging.info(f"Storing {row_count} products in database...")
+                        logging.info(f"Storing {row_count} products in database for store {store_name}...")
                         result = product_db.store_excel_data(processor.df, file_path)
                         logging.info(f"Database storage result: {result}")
                     else:
@@ -1938,12 +2268,17 @@ def upload_file():
             upload_time = time.time() - start_time
             logging.info(f"=== UPLOAD COMPLETE: {upload_time:.3f}s ===")
             
-            return jsonify({
+            response_data = {
                 'success': True,
                 'message': 'File uploaded and processed',
                 'filename': file.filename,
                 'rows': row_count
-            })
+            }
+            if warning_to_return:
+                response_data['warning'] = warning_to_return
+                response_data['detected_store'] = detected_store
+                response_data['selected_store'] = selected_store
+            return jsonify(response_data)
         
     except Exception as e:
         logging.error(f"Upload failed: {e}")
@@ -1958,12 +2293,32 @@ def upload_file_streaming():
     try:
         start_time = time.time()
         
+        # CRITICAL: Require store selection before upload
+        if not has_store_selection():
+            logging.error("Upload attempted without store selection")
+            return jsonify({'error': 'Please select a store before uploading files'}), 400
+        
+        # Get current store selection
+        selected_store = get_current_store_name()
+        
         if 'file' not in request.files:
             return jsonify({'error': 'No file provided'}), 400
         
         file = request.files['file']
         if file.filename == '':
             return jsonify({'error': 'No file selected'}), 400
+        
+        # Validate filename contains store name and matches selected store
+        is_valid, warning_msg, detected_store = validate_excel_filename_for_store(file.filename, selected_store)
+        
+        if not is_valid:
+            logging.error(f"Filename validation failed: {warning_msg}")
+            return jsonify({
+                'error': warning_msg,
+                'filename': file.filename,
+                'selected_store': selected_store,
+                'detected_store': detected_store
+            }), 400
         
         # Generate unique filename
         filename = secure_filename(file.filename)
@@ -2165,12 +2520,19 @@ def process_small_file_optimized(temp_path: str, filename: str, start_time: floa
         else:
             logging.error(f"Small file optimization error: {e}")
         return jsonify({'error': str(e)}), 500
-
 @app.route('/upload-pythonanywhere', methods=['POST'])
 def upload_file_simple_pythonanywhere():
     """OPTIMIZED upload endpoint with increased row limits and better performance"""
     try:
         logging.info("=== OPTIMIZED PYTHONANYWHERE UPLOAD START ===")
+        
+        # CRITICAL: Require store selection before upload
+        if not has_store_selection():
+            logging.error("Upload attempted without store selection")
+            return jsonify({'error': 'Please select a store before uploading files'}), 400
+        
+        # Get current store selection
+        selected_store = get_current_store_name()
         
         if 'file' not in request.files:
             return jsonify({'error': 'No file uploaded'}), 400
@@ -2181,6 +2543,18 @@ def upload_file_simple_pythonanywhere():
         
         if not file.filename.lower().endswith('.xlsx'):
             return jsonify({'error': 'Only .xlsx files are allowed'}), 400
+        
+        # Validate filename contains store name and matches selected store
+        is_valid, warning_msg, detected_store = validate_excel_filename_for_store(file.filename, selected_store)
+        
+        if not is_valid:
+            logging.error(f"Filename validation failed: {warning_msg}")
+            return jsonify({
+                'error': warning_msg,
+                'filename': file.filename,
+                'selected_store': selected_store,
+                'detected_store': detected_store
+            }), 400
         
         # Sanitize filename
         sanitized_filename = sanitize_filename(file.filename)
@@ -2259,10 +2633,11 @@ def upload_file_simple_pythonanywhere():
                     logging.warning("[UPLOAD] ExcelProcessor does not have _store_upload_in_database method")
                     # Try alternative database storage method
                     try:
-                        # Store context removed - using single database
-                        product_db = get_product_database()
+                        # CRITICAL: Get the correct store-specific database
+                        store_name = get_current_store_name()
+                        product_db = get_product_database(store_name)
                         if hasattr(product_db, 'store_excel_data'):
-                            logging.info("[UPLOAD] Using ProductDatabase.store_excel_data method...")
+                            logging.info(f"[UPLOAD] Using ProductDatabase.store_excel_data method for store {store_name}...")
                             storage_result = product_db.store_excel_data(processor.df, temp_path)
                             logging.info(f"[UPLOAD] ✅ Alternative database storage completed: {storage_result}")
                     except Exception as db_error:
@@ -2302,6 +2677,14 @@ def upload_file_simple():
     try:
         logging.info("=== SIMPLE UPLOAD REQUEST START ===")
         
+        # CRITICAL: Require store selection before upload
+        if not has_store_selection():
+            logging.error("Upload attempted without store selection")
+            return jsonify({'error': 'Please select a store before uploading files'}), 400
+        
+        # Get current store selection
+        selected_store = get_current_store_name()
+        
         if 'file' not in request.files:
             logging.error("No file uploaded")
             return jsonify({'error': 'No file uploaded'}), 400
@@ -2314,6 +2697,18 @@ def upload_file_simple():
         if not file.filename.lower().endswith('.xlsx'):
             logging.error(f"Invalid file type: {file.filename}")
             return jsonify({'error': 'Only .xlsx files are allowed'}), 400
+        
+        # Validate filename contains store name and matches selected store
+        is_valid, warning_msg, detected_store = validate_excel_filename_for_store(file.filename, selected_store)
+        
+        if not is_valid:
+            logging.error(f"Filename validation failed: {warning_msg}")
+            return jsonify({
+                'error': warning_msg,
+                'filename': file.filename,
+                'selected_store': selected_store,
+                'detected_store': detected_store
+            }), 400
         
         # Check file size
         file.seek(0, 2)  # Seek to end
@@ -2924,7 +3319,8 @@ def process_excel_background(filename, temp_path):
                 try:
                     logging.info("[BG] Attempting alternative database storage with ProductDatabase")
                     # Store context removed - using single database
-                    product_db = get_product_database()
+                    store_name = get_current_store_name()
+                    product_db = get_product_database(store_name)
                     logging.info(f"[BG] ProductDatabase obtained: {product_db}")
                     
                     if hasattr(product_db, 'store_excel_data'):
@@ -3087,7 +3483,6 @@ def process_excel_background(filename, temp_path):
                 logging.info("[BG] Skipping session/g context clear - not in request context (background thread)")
         except Exception as session_error:
             logging.warning(f"[BG] Error clearing session/g context: {session_error}")
-        
         # Update processing status to success
         update_processing_status(filename, 'ready')
         logging.info(f"[BG] ===== BACKGROUND PROCESSING COMPLETE =====")
@@ -3238,6 +3633,14 @@ def upload_lightning():
         logging.info("=== LIGHTNING UPLOAD START ===")
         start_time = time.time()
         
+        # CRITICAL: Require store selection before upload
+        if not has_store_selection():
+            logging.error("Upload attempted without store selection")
+            return jsonify({'error': 'Please select a store before uploading files'}), 400
+        
+        # Get current store selection
+        selected_store = get_current_store_name()
+        
         # Validate file upload
         if 'file' not in request.files:
             return jsonify({'error': 'No file uploaded'}), 400
@@ -3248,6 +3651,18 @@ def upload_lightning():
         
         if not file.filename.lower().endswith('.xlsx'):
             return jsonify({'error': 'Only .xlsx files are allowed'}), 400
+        
+        # Validate filename contains store name and matches selected store
+        is_valid, warning_msg, detected_store = validate_excel_filename_for_store(file.filename, selected_store)
+        
+        if not is_valid:
+            logging.error(f"Filename validation failed: {warning_msg}")
+            return jsonify({
+                'error': warning_msg,
+                'filename': file.filename,
+                'selected_store': selected_store,
+                'detected_store': detected_store
+            }), 400
         
         # Quick file size check
         file.seek(0, 2)
@@ -3498,9 +3913,27 @@ def get_template_settings_api():
     except Exception as e:
         logging.error(f"Error getting template settings: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/current-db', methods=['GET'])
+def current_db_info():
+    """Return the currently selected product database path and store for debugging."""
+    try:
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
+        import os
+        db_path = getattr(product_db, 'db_path', 'unknown') if product_db else 'unavailable'
+        store = getattr(product_db, '_store_name', 'unknown') if product_db else 'unavailable'
+        size = os.path.getsize(db_path) if db_path and os.path.exists(db_path) else 0
+        return jsonify({
+            'db_path': db_path,
+            'store': store,
+            'size_bytes': size
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 # Add undo/clear support for tag moves and filters
 from flask import session
-
 # Helper: maintain an undo stack in session
 UNDO_STACK_KEY = 'undo_stack'
 
@@ -3948,65 +4381,6 @@ def get_session_stats():
         logging.error(f"Error getting session stats: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-# IP-based Store Selection System
-import hashlib
-from datetime import datetime, timedelta
-
-# In-memory store for IP-based store selections (12-hour expiration)
-_ip_store_selections = {}
-_ip_store_lock = threading.Lock()
-
-# Don't clear store selections on startup - preserve user selections
-# Store selections are only cleared when they expire (after 12 hours)
-# or when explicitly cleared by the user
-# def clear_all_store_selections_on_startup():
-#     """Clear all store selections when the application starts."""
-#     global _ip_store_selections
-#     with _ip_store_lock:
-#         _ip_store_selections.clear()
-#     logging.info("All store selections cleared on application startup")
-
-# Call this function when the application starts - COMMENTED OUT TO PRESERVE SELECTIONS
-# clear_all_store_selections_on_startup()
-
-def get_client_ip():
-    """Get the client's IP address."""
-    if request.headers.get('X-Forwarded-For'):
-        return request.headers.get('X-Forwarded-For').split(',')[0].strip()
-    elif request.headers.get('X-Real-IP'):
-        return request.headers.get('X-Real-IP')
-    else:
-        return request.remote_addr
-
-def is_store_selection_valid(ip_address, store_selection):
-    """Check if store selection is still valid (within 12 hours)."""
-    if not store_selection:
-        return False
-    
-    selection_time = store_selection.get('timestamp')
-    if not selection_time:
-        return False
-    
-    try:
-        selection_datetime = datetime.fromisoformat(selection_time)
-        expiration_time = selection_datetime + timedelta(hours=12)
-        return datetime.now() < expiration_time
-    except (ValueError, TypeError):
-        return False
-
-def cleanup_expired_store_selections():
-    """Remove expired store selections."""
-    current_time = datetime.now()
-    expired_ips = []
-    
-    with _ip_store_lock:
-        for ip_address, store_selection in _ip_store_selections.items():
-            if not is_store_selection_valid(ip_address, store_selection):
-                expired_ips.append(ip_address)
-        
-        for ip_address in expired_ips:
-            del _ip_store_selections[ip_address]
-
 @app.route('/api/set-store', methods=['POST'])
 def set_store():
     """Set store selection for the current IP address."""
@@ -4037,12 +4411,44 @@ def set_store():
         # Cleanup expired selections periodically
         cleanup_expired_store_selections()
         
+        # Save to disk for persistence across restarts
+        save_store_selections()
+        
+        # CRITICAL: Clear session data from previous store
+        session.pop('file_path', None)
+        session.pop('uploaded_filename', None)
+        session.pop('upload_timestamp', None)
+        session.pop('selected_tags', None)
+        logging.info(f"🧹 Cleared session data for store change")
+        
         # Clear the global product database instance to force reload with new store
         global _product_database, _excel_processor
         _product_database = None
         # Also clear excel processor to force reload with new store's data
         _excel_processor = None
-        logging.info(f"Cleared global product database and excel processor for store change to: {store_value}")
+        logging.info(f"✅ Cleared global product database and excel processor for store change to: {store_value}")
+        
+        # CRITICAL: Load the store-specific default file immediately
+        try:
+            from src.core.data.excel_processor import get_default_upload_file
+            logging.info(f"🔄 Loading default file for newly selected store: {store_value}")
+            default_file = get_default_upload_file(store_value)
+            if default_file:
+                # Get a fresh processor instance
+                processor = get_excel_processor()
+                if processor:
+                    success = processor.load_file(default_file)
+                    if success:
+                        logging.info(f"✅ Successfully loaded default file for {store_value}: {default_file}")
+                    else:
+                        logging.warning(f"⚠️ Failed to load default file for {store_value}: {default_file}")
+                else:
+                    logging.warning(f"⚠️ Could not get excel processor for {store_value}")
+            else:
+                logging.info(f"ℹ️ No default file found for {store_value} - user will need to upload one")
+        except Exception as load_error:
+            logging.error(f"❌ Error loading default file for {store_value}: {load_error}")
+            # Don't fail the store selection if file loading fails
         
         return jsonify({
             'success': True,
@@ -4103,6 +4509,8 @@ def clear_store():
             if ip_address in _ip_store_selections:
                 del _ip_store_selections[ip_address]
                 logging.info(f"Store selection cleared for IP {ip_address}")
+                # Save to disk after clearing
+                save_store_selections()
             else:
                 logging.info(f"No store selection found for IP {ip_address}")
         
@@ -4124,32 +4532,44 @@ def check_store_required():
     """Check if store selection is required for the current IP address."""
     try:
         ip_address = get_client_ip()
+        logging.info(f"Check store required for IP: {ip_address}")
+        logging.info(f"Store selections in memory: {list(_ip_store_selections.keys())}")
         
-        # Check if there's a valid store selection for this IP
-        with _ip_store_lock:
-            if ip_address in _ip_store_selections:
-                store_data = _ip_store_selections[ip_address]
-                # Check if the selection is still valid (not expired)
-                if datetime.now() - datetime.fromisoformat(store_data['timestamp']) < timedelta(hours=12):
-                    # User has a valid store selection
-                    return jsonify({
-                        'success': True,
-                        'requires_store': False,
-                        'store': store_data['store']
-                    })
-                else:
-                    # Selection expired, remove it
-                    del _ip_store_selections[ip_address]
+        # Check if there's a selection for this IP
+        has_selection = has_store_selection()
+        logging.info(f"has_store_selection() returned: {has_selection}")
         
-        # No valid store selection found - require store selection
-        return jsonify({
-            'success': True,
-            'requires_store': True,
-            'store': None
-        })
+        if not has_selection:
+            logging.info(f"No store selection found for IP {ip_address}, requiring selection")
+            return jsonify({
+                'success': True,
+                'requires_store': True,
+                'store': None
+            })
+        
+        # Get the current store (should not be None if has_store_selection returned True)
+        current_store = get_current_store_name()
+        logging.info(f"get_current_store_name() returned: {current_store}")
+        
+        if current_store:
+            logging.info(f"Store found for IP {ip_address}: {current_store}")
+            return jsonify({
+                'success': True,
+                'requires_store': False,
+                'store': current_store
+            })
+        else:
+            # Edge case: has_store_selection returned True but get_current_store_name returned None
+            logging.warning(f"Edge case: has_selection={has_selection} but current_store={current_store}")
+            return jsonify({
+                'success': True,
+                'requires_store': True,
+                'store': None
+            })
         
     except Exception as e:
         logging.error(f"Error checking store requirement: {str(e)}")
+        logging.error(traceback.format_exc())
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/clear-session', methods=['POST'])
@@ -4204,7 +4624,8 @@ def debug_database():
         
         # Test database connection
         try:
-            test_db = get_product_database()
+            store_name = get_current_store_name()
+            test_db = get_product_database(store_name)
             db_info['connection_test'] = {
                 'success': True,
                 'db_path': test_db.db_path,
@@ -4473,7 +4894,6 @@ def _extract_product_name_from_full_name(full_name):
             # No weight information, return the name as-is
             return name.strip()
         return name.strip()
-
 # Removed duplicate function - using the more sophisticated version at line 3839
 
 def _validate_tags_against_excel(excel_processor, selected_tags):
@@ -4607,8 +5027,8 @@ def _extract_price_from_database_product(product):
     
     # If no price found, try to get average from similar products
     try:
-        from src.core.data.product_database import get_product_database
-        product_db = get_product_database()
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         if product_db:
             product_name = product.get('Product Name*', product.get('ProductName', ''))
             vendor = product.get('Vendor/Supplier*', product.get('Vendor', ''))
@@ -4849,7 +5269,8 @@ def generate_labels():
             # Ensure data is loaded - try to reload default file if needed
             if excel_processor.df is None:
                 from src.core.data.excel_processor import get_default_upload_file
-                default_file = get_default_upload_file()
+                selected_store = get_current_store_name() if has_store_selection() else None
+                default_file = get_default_upload_file(selected_store)
                 if default_file:
                     excel_processor.load_file(default_file)
         
@@ -4948,9 +5369,35 @@ def generate_labels():
         # If no Excel data, try to load the default inventory file
         if not has_excel_data:
             try:
-                default_file = "uploads/A Greener Today - Bothell_inventory_08-29-2025  8_38 PM.xlsx"
-                logging.info(f"Loading default Excel file: {default_file}")
-                excel_processor.load_file(default_file)
+                # Try to load a store-specific default file if available
+                store_name = get_current_store_name()
+                if store_name:
+                    # Try store-specific file first
+                    store_display = store_name.replace('_', ' ').replace('AGT ', '')
+                    default_file = f"uploads/A Greener Today - {store_display}_inventory*.xlsx"
+                    import glob
+                    matching_files = glob.glob(default_file)
+                    if matching_files:
+                        # Use most recent file
+                        default_file = max(matching_files, key=os.path.getmtime)
+                        logging.info(f"Loading store-specific default Excel file: {default_file}")
+                        excel_processor.load_file(default_file)
+                    else:
+                        # Fallback to get_default_upload_file which searches for store-specific file
+                        from src.core.data.excel_processor import get_default_upload_file
+                        selected_store = get_current_store_name() if has_store_selection() else None
+                        default_file = get_default_upload_file(selected_store)
+                        if default_file and os.path.exists(default_file):
+                            logging.info(f"Loading default Excel file for {selected_store}: {default_file}")
+                            excel_processor.load_file(default_file)
+                else:
+                    # No store selected, skip default file loading (requires store selection)
+                    from src.core.data.excel_processor import get_default_upload_file
+                    selected_store = get_current_store_name() if has_store_selection() else None
+                    default_file = get_default_upload_file(selected_store)
+                    if default_file and os.path.exists(default_file):
+                        logging.info(f"Loading default Excel file for {selected_store}: {default_file}")
+                        excel_processor.load_file(default_file)
                 has_excel_data = excel_processor.df is not None and not excel_processor.df.empty
                 if has_excel_data:
                     logging.info(f"Successfully loaded default Excel file with {len(excel_processor.df)} records")
@@ -4961,9 +5408,9 @@ def generate_labels():
         
         # Check if database is available
         try:
-            from src.core.data.product_database import get_product_database
             # Store context removed - using single database
-            product_db = get_product_database()
+            store_name = get_current_store_name()
+            product_db = get_product_database(store_name)
             if product_db:
                 # Test if database has data
                 conn = product_db._get_connection()
@@ -4974,7 +5421,6 @@ def generate_labels():
                 logging.info(f"Database has {count} products")
         except Exception as e:
             logging.warning(f"Could not check database: {e}")
-        
         if not has_excel_data and not has_database:
             logging.error("No data loaded in Excel processor or database")
             return jsonify({'error': 'No data loaded. Please upload an Excel file or ensure database is populated.'}), 400
@@ -5088,8 +5534,9 @@ def generate_labels():
             
             # Always try database validation, but use fuzzy matching for JSON sessions
             try:
-                from src.core.data.product_database import get_product_database
-                product_db = get_product_database()
+                # Get current store selection or default to Bothell for backward compatibility
+                store_name = get_current_store_name() or 'AGT_Bothell'
+                product_db = get_product_database(store_name)
                 if product_db:
                     logging.info("Attempting to validate selected tags against database...")
                     
@@ -5238,9 +5685,26 @@ def generate_labels():
         if has_database:
             logging.info("Using database for record generation (preferred source)")
             try:
-                from src.core.data.product_database import get_product_database
-                # Store context removed - using single database
-                product_db = get_product_database()
+                # CRITICAL: Use the app-level get_product_database, not the module-level one
+                # This ensures we use the same database instance that was updated
+                # Get current store selection or default to Bothell for backward compatibility
+                store_name = get_current_store_name() or 'AGT_Bothell'
+                product_db = get_product_database(store_name)
+                if product_db:
+                    # LOG: Check DOH values in database for first selected tag
+                    if selected_tags_from_request and len(selected_tags_from_request) > 0:
+                        first_tag = selected_tags_from_request[0]
+                        conn = product_db._get_connection()
+                        cursor = conn.cursor()
+                        cursor.execute('SELECT "DOH", "DOH Compliant (Yes/No)", "Product Name*" FROM products WHERE normalized_name = ?', (product_db._normalize_product_name(first_tag),))
+                        row = cursor.fetchone()
+                        if row:
+                            logging.info(f"🔍 DOH in database for {first_tag}: DOH='{row[0]}', Compliant='{row[1]}'")
+                        else:
+                            logging.info(f"🔍 Product {first_tag} not found in database")
+                    else:
+                        logging.info(f"🔍 No selected tags to check DOH values for")
+                
                 if product_db:
                     # Check if database is empty
                     try:
@@ -5284,7 +5748,9 @@ def generate_labels():
                             # Convert database records to the format expected by TemplateProcessor
                             records = []
                             for db_record in valid_db_records:
-                                logging.info(f"Processing database record: {db_record.get('Product Name*', '')} - Units: {db_record.get('Units', 'MISSING')}, Weight: {db_record.get('Weight*', 'MISSING')}")
+                                product_name_for_record = db_record.get('Product Name*', '')
+                                logging.info(f"Processing database record: {product_name_for_record} - Units: {db_record.get('Units', 'MISSING')}, Weight: {db_record.get('Weight*', 'MISSING')}")
+                                logging.info(f"🔍 DOH value in database record for {product_name_for_record}: DOH='{db_record.get('DOH', 'MISSING')}', Compliant='{db_record.get('DOH Compliant (Yes/No)', 'MISSING')}'")
                                 
                                 # CRITICAL FIX: Use process_database_product_for_api to ensure consistent DescAndWeight creation
                                 processed_record = process_database_product_for_api(db_record)
@@ -5302,6 +5768,7 @@ def generate_labels():
                                     'ProductStrain': processed_record.get('Product Strain', ''),  # Add ProductStrain for template processor compatibility
                                     'Price': _format_price_value(_extract_price_from_database_product(processed_record)),  # Extract and format price
                                     'DOH': processed_record.get('DOH', ''),
+                                    'DOH Compliant (Yes/No)': processed_record.get('DOH Compliant (Yes/No)', processed_record.get('DOH', '')),
                                     'Ratio': processed_record.get('Ratio', ''),
                                     'Weight*': processed_record.get('Weight*', '1'),  # Default weight if missing
                                     'Units': processed_record.get('Units', 'g'),  # Default units if missing
@@ -5360,20 +5827,32 @@ def generate_labels():
                         
                         # CRITICAL FIX: Override lineage from database if it has been updated
                         logging.info("LINEAGE OVERRIDE: Checking for updated lineage in database...")
+                        store_name = get_current_store_name()
+                        product_db = get_product_database(store_name)
+                        # Log which database path is being used for override
+                        override_db_path = getattr(product_db, 'db_path', 'Unknown')
+                        logging.info(f"🔄 LINEAGE OVERRIDE: Using database at {override_db_path} for store {store_name}")
                         for record in records:
-                            product_name = record.get('Product Name*', '')
+                            product_name = record.get('Product Name*', record.get('ProductName', ''))
                             if product_name:
                                 try:
                                     # Get the most up-to-date lineage from the database
-                                    product_db = get_product_database()
                                     if product_db:
                                         # Try to get lineage by product name first
                                         db_lineage = product_db.get_product_lineage(product_name)
                                         if db_lineage:
                                             original_lineage = record.get('Lineage', '')
-                                            if str(db_lineage).strip() != str(original_lineage).strip():
-                                                logging.info(f"LINEAGE OVERRIDE: '{product_name}' - Record: '{original_lineage}' -> Database: '{db_lineage}'")
-                                                record['Lineage'] = str(db_lineage).strip()
+                                            db_lineage_clean = str(db_lineage).strip().upper()
+                                            original_lineage_clean = str(original_lineage).strip().upper()
+                                            
+                                            # Always update to ensure database value is used
+                                            if db_lineage_clean != original_lineage_clean:
+                                                logging.info(f"LINEAGE OVERRIDE: '{product_name}' - Record: '{original_lineage}' -> Database: '{db_lineage_clean}'")
+                                                record['Lineage'] = db_lineage_clean
+                                            else:
+                                                logging.debug(f"LINEAGE SKIP: '{product_name}' - Already matches database: '{original_lineage_clean}'")
+                                                # Still update to ensure consistency
+                                                record['Lineage'] = db_lineage_clean
                                         else:
                                             # Try to get lineage by strain name
                                             product_strain = record.get('Product Strain', '')
@@ -5385,28 +5864,14 @@ def generate_labels():
                                                     if str(db_lineage).strip() != str(original_lineage).strip():
                                                         logging.info(f"LINEAGE OVERRIDE: '{product_name}' (strain: '{product_strain}') - Record: '{original_lineage}' -> Database: '{db_lineage}'")
                                                         record['Lineage'] = str(db_lineage).strip()
+                                                    else:
+                                                        logging.debug(f"LINEAGE SKIP: '{product_name}' - Strain lineage already matches: '{original_lineage}'")
                                 except Exception as e:
                                     logging.warning(f"Error checking lineage override for '{product_name}': {e}")
                         
-                        # FALLBACK: Override lineage from Excel processor if it has been updated
-                        if has_excel_data and excel_processor.df is not None and 'Lineage' in excel_processor.df.columns:
-                            logging.info("LINEAGE OVERRIDE: Checking for updated lineage in Excel processor as fallback...")
-                            for record in records:
-                                product_name = record.get('Product Name*', '')
-                                if product_name:
-                                    # Try different column names for product names
-                                    product_name_columns = ['ProductName', 'Product Name*', 'Product Name']
-                                    for col in product_name_columns:
-                                        if col in excel_processor.df.columns:
-                                            mask = excel_processor.df[col] == product_name
-                                            if mask.any():
-                                                excel_lineage = excel_processor.df.loc[mask, 'Lineage'].iloc[0]
-                                                if excel_lineage and str(excel_lineage).strip():
-                                                    original_lineage = record.get('Lineage', '')
-                                                    if str(excel_lineage).strip() != str(original_lineage).strip():
-                                                        logging.info(f"LINEAGE OVERRIDE: '{product_name}' - Database: '{original_lineage}' -> Excel: '{excel_lineage}'")
-                                                        record['Lineage'] = str(excel_lineage).strip()
-                                                break
+                        # NOTE: Removed Excel processor override - database lineage takes precedence
+                        # The old logic would incorrectly revert manual lineage changes back to the original Excel values.
+                        # Database lineage is now the authoritative source of truth after user updates.
                     else:
                         logging.warning("No database records found for selected tags, falling back to Excel data")
                         records = []
@@ -5416,7 +5881,6 @@ def generate_labels():
             except Exception as e:
                 logging.warning(f"Error getting records from database, falling back to Excel data: {e}")
                 records = []
-        
         # Fallback to Excel data if database didn't provide records
         if not records and has_excel_data:
             logging.info("🔍 Fallback: Using Excel data for record generation")
@@ -5438,6 +5902,69 @@ def generate_labels():
                     product_name = record.get('ProductName', record.get('Product Name*', 'Unknown'))
                     lineage = record.get('Lineage', 'NOT_FOUND')
                     logging.info(f"  Record {i+1}: '{product_name}' -> Lineage: '{lineage}'")
+            
+            # CRITICAL FIX: Apply database lineage override to ALL records (not just JSON matched)
+            # This ensures that any lineage updates saved to database will always be reflected in output
+            if records:
+                logging.info("LINEAGE OVERRIDE: Checking database for updated lineage values for all records...")
+                try:
+                    store_name = get_current_store_name()
+                    product_db = get_product_database(store_name)
+                    if product_db:
+                        # Log which database path is being used for override
+                        override_db_path = getattr(product_db, 'db_path', 'Unknown')
+                        logging.info(f"🔄 LINEAGE OVERRIDE (all records): Using database at {override_db_path} for store {store_name}")
+                        lineage_overrides_applied = 0
+                        for record in records:
+                            product_name = record.get('Product Name*', record.get('ProductName', ''))
+                            if not product_name:
+                                continue
+                            
+                            try:
+                                # Try to get lineage by product name from database
+                                db_lineage = product_db.get_product_lineage(product_name)
+                                if db_lineage:
+                                    original_lineage = record.get('Lineage', '')
+                                    db_lineage_clean = str(db_lineage).strip().upper()
+                                    original_lineage_clean = str(original_lineage).strip().upper()
+                                    
+                                    # Only update if different (case-insensitive comparison)
+                                    if db_lineage_clean != original_lineage_clean:
+                                        logging.info(f"LINEAGE OVERRIDE: '{product_name}' - Record: '{original_lineage}' -> Database: '{db_lineage_clean}'")
+                                        record['Lineage'] = db_lineage_clean
+                                        lineage_overrides_applied += 1
+                                    else:
+                                        # Verify they match (both clean)
+                                        record['Lineage'] = db_lineage_clean
+                                else:
+                                    # Try strain-level lookup as fallback
+                                    product_strain = record.get('Product Strain', '')
+                                    if product_strain and str(product_strain).strip():
+                                        strain_info = product_db.get_strain_info(str(product_strain).strip())
+                                        if strain_info and strain_info.get('canonical_lineage'):
+                                            db_lineage = strain_info['canonical_lineage']
+                                            original_lineage = record.get('Lineage', '')
+                                            db_lineage_clean = str(db_lineage).strip().upper()
+                                            original_lineage_clean = str(original_lineage).strip().upper()
+                                            
+                                            if db_lineage_clean != original_lineage_clean:
+                                                logging.info(f"LINEAGE OVERRIDE (strain): '{product_name}' (strain: '{product_strain}') - Record: '{original_lineage}' -> Database: '{db_lineage_clean}'")
+                                                record['Lineage'] = db_lineage_clean
+                                                lineage_overrides_applied += 1
+                                            else:
+                                                record['Lineage'] = db_lineage_clean
+                            except Exception as e:
+                                logging.warning(f"Error checking lineage override for product '{product_name}': {e}")
+                                continue
+                        
+                        if lineage_overrides_applied > 0:
+                            logging.info(f"✅ LINEAGE OVERRIDE: Applied {lineage_overrides_applied} database lineage updates to records")
+                        else:
+                            logging.debug("LINEAGE OVERRIDE: No lineage updates needed - all records match database")
+                except Exception as e:
+                    logging.warning(f"Error during lineage override check: {e}")
+                    import traceback
+                    logging.warning(traceback.format_exc())
             
             # CRITICAL FIX: If we have JSON matched products but no records, try to include them directly
             if not records and excel_processor.df is not None and 'Source' in excel_processor.df.columns:
@@ -5475,6 +6002,36 @@ def generate_labels():
                     
                     if records:
                         logging.info(f"CRITICAL FIX: Created {len(records)} records from JSON matched products")
+                        
+                        # Apply database lineage override to JSON matched records
+                        logging.info("LINEAGE OVERRIDE: Checking for updated lineage in database for JSON matched products...")
+                        for record in records:
+                            product_name = record.get('Product Name*', record.get('ProductName', ''))
+                            if product_name:
+                                try:
+                                    store_name = get_current_store_name()
+                                    product_db = get_product_database(store_name)
+                                    if product_db:
+                                        # Try to get lineage by product name
+                                        db_lineage = product_db.get_product_lineage(product_name)
+                                        if db_lineage:
+                                            original_lineage = record.get('Lineage', '')
+                                            if str(db_lineage).strip() != str(original_lineage).strip():
+                                                logging.info(f"LINEAGE OVERRIDE (JSON): '{product_name}' - Record: '{original_lineage}' -> Database: '{db_lineage}'")
+                                                record['Lineage'] = str(db_lineage).strip()
+                                        else:
+                                            # Try to get lineage by strain name
+                                            product_strain = record.get('Product Strain', '')
+                                            if product_strain:
+                                                strain_info = product_db.get_strain_info(product_strain)
+                                                if strain_info and strain_info.get('canonical_lineage'):
+                                                    db_lineage = strain_info['canonical_lineage']
+                                                    original_lineage = record.get('Lineage', '')
+                                                    if str(db_lineage).strip() != str(original_lineage).strip():
+                                                        logging.info(f"LINEAGE OVERRIDE (JSON): '{product_name}' (strain: '{product_strain}') - Record: '{original_lineage}' -> Database: '{db_lineage}'")
+                                                        record['Lineage'] = str(db_lineage).strip()
+                                except Exception as e:
+                                    logging.warning(f"Error checking lineage override for JSON product '{product_name}': {e}")
             
             # CRITICAL FIX: Log lineage values for debugging
             if records:
@@ -5574,6 +6131,82 @@ def generate_labels():
                 processor.chunk_size = max(len(records), 1000)
             logging.info(f"🔍 LABEL RENDER: Disabled chunking for template '{template_type}'")
 
+        # Apply DOH session overrides just before generation to guarantee latest UI choice wins
+        try:
+            overrides = session.get('doh_overrides') or {}
+            if overrides and isinstance(overrides, dict):
+                def _norm(n):
+                    try:
+                        from src.core.data.product_database import ProductDatabase
+                        return ProductDatabase()._normalize_product_name(n)
+                    except Exception:
+                        return str(n).lower().strip()
+                
+                # Helper to extract base name (remove " by Vendor - Weight" suffix)
+                import re
+                def _base_name(full_name):
+                    base = re.sub(r'\s+by\s+[^-]+(\s*-\s*\d+\s*\w+)?$', '', str(full_name), flags=re.IGNORECASE).strip()
+                    base = re.sub(r'\s*-\s*\d+\s*\w+$', '', base).strip()
+                    return base
+                
+                applied = 0
+                logging.info(f"🔍 DOH OVERRIDE CHECK: Checking {len(records)} records against {len(overrides)} override(s)")
+                for rec in records:
+                    name = rec.get('ProductName') or rec.get('Product Name*') or rec.get('product_name') or ''
+                    if not name:
+                        continue
+                    
+                    # Try multiple matching strategies
+                    full_norm = _norm(name)
+                    base_name_only = _base_name(name)
+                    base_norm = _norm(base_name_only)
+                    
+                    matched_key = None
+                    matched_val = None
+                    
+                    # Strategy 1: Full normalized name
+                    if full_norm in overrides:
+                        matched_key = full_norm
+                        matched_val = overrides[full_norm]
+                        logging.info(f"✅ DOH OVERRIDE MATCH (full): '{name}' → override key '{matched_key}' = '{matched_val}'")
+                    # Strategy 2: Base name only (without vendor/weight suffix)
+                    elif base_norm in overrides:
+                        matched_key = base_norm
+                        matched_val = overrides[base_norm]
+                        logging.info(f"✅ DOH OVERRIDE MATCH (base): '{name}' → base '{base_name_only}' → override key '{matched_key}' = '{matched_val}'")
+                    # Strategy 3: Any override key that's a substring of the normalized name
+                    else:
+                        for ov_key, ov_val in overrides.items():
+                            if ov_key in full_norm or full_norm in ov_key:
+                                matched_key = ov_key
+                                matched_val = ov_val
+                                logging.info(f"✅ DOH OVERRIDE MATCH (substring): '{name}' → override key '{matched_key}' = '{matched_val}'")
+                                break
+                    
+                    if matched_key and matched_val is not None:
+                        # Update all DOH-related fields to ensure consistent downstream behavior
+                        old_doh = rec.get('DOH', 'N/A')
+                        rec['DOH'] = matched_val
+                        rec['DOH Compliant (Yes/No)'] = matched_val
+                        rec['doh'] = matched_val
+                        applied += 1
+                        logging.info(f"✅ DOH OVERRIDE APPLIED: '{name}' DOH changed from '{old_doh}' → '{matched_val}'")
+                    else:
+                        logging.debug(f"🔍 DOH OVERRIDE: No match for '{name}' (tried: full='{full_norm}', base='{base_norm}')")
+                
+                logging.info(f"✅ DOH OVERRIDE SUMMARY: Applied {applied} override(s) to {len(records)} record(s)")
+        except Exception as ov_err:
+            logging.warning(f"Skipping DOH overrides application: {ov_err}")
+            import traceback
+            logging.error(f"DOH override error details: {traceback.format_exc()}")
+
+        # CRITICAL DEBUG: Log lineage values in records right before processing
+        logging.info(f"🔍 LINEAGE PRE-PROCESS CHECK: Verifying lineage values in all {len(records)} records before TemplateProcessor:")
+        for i, record in enumerate(records[:10]):  # Log first 10
+            product_name = record.get('ProductName', record.get('Product Name*', 'Unknown'))
+            lineage = record.get('Lineage', 'NOT_FOUND')
+            logging.info(f"  Record {i+1}: '{product_name}' -> Lineage: '{lineage}'")
+        
         final_doc = processor.process_records(records)
         if hasattr(final_doc, 'labels_rendered'):
             logging.info(f"🔍 LABEL RENDER: TemplateProcessor rendered {final_doc.labels_rendered} labels")
@@ -5737,7 +6370,6 @@ def get_dropdowns():
         return jsonify({'error': 'No data processor available'}), 500
     dropdowns = excel_processor.dropdown_cache
     return jsonify(dropdowns)
-
 def process_record(row, template_type, excel_processor):
     """Process a single Excel row and return a processed record."""
     try:
@@ -6084,10 +6716,12 @@ def process_database_product_for_api(db_product):
         processed_product['DescAndWeight'] = 'N/A'
     
     return processed_product
-
 @app.route('/api/available-tags', methods=['GET'])
 def get_available_tags():
     try:
+        # Optional: respect nocache flag to bypass cached results
+        nocache = request.args.get('nocache') in ('1', 'true', 'True')
+        prefer_db = request.args.get('prefer_db') in ('1', 'true', 'True')
         # Check memory before processing
         if not check_memory_limit():
             return jsonify({'error': 'Memory usage too high, please try again later'}), 503
@@ -6128,72 +6762,233 @@ def get_available_tags():
         logging.info("=== AVAILABLE TAGS REQUEST START ===")
         start_time = time.time()
         
+        # Log current database for this request
+        try:
+            store_name = get_current_store_name()
+            if store_name:
+                _dbg_db = get_product_database(store_name)
+                if _dbg_db:
+                    logging.info(f"📦 AVAILABLE-TAGS DB: path={getattr(_dbg_db, 'db_path', 'unknown')} store={getattr(_dbg_db, '_store_name', 'unknown')}")
+            else:
+                logging.warning("No store selected in available-tags request")
+        except Exception as _dbg_err:
+            logging.warning(f"DB-CHECK available-tags: error: {_dbg_err}")
+
         # Check for cached available tags first (JSON matched products)
+        # Skip cache entirely if prefer_db is set (we want fresh DB data)
         cache_key = get_session_cache_key('available_tags')
-        cached_tags = cache.get(cache_key)
-        if cached_tags:
+        cached_tags = cache.get(cache_key) if not prefer_db else None
+        if cached_tags and not nocache:
+            # Ensure cached tags' lineage matches database (prefer strain sovereign/canonical over product lineage)
+            try:
+                store_name = get_current_store_name()
+                product_db = get_product_database(store_name)
+                if product_db:
+                    lineage_cache = {}
+                    # Prepare connection once
+                    conn = product_db._get_connection()
+                    cur = conn.cursor()
+                    # Prefer joining strains by strain_name to avoid missing p.strain_id column
+                    lineage_query_join_by_name = '''
+                        SELECT s.canonical_lineage AS current_lineage
+                        FROM products p
+                        LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
+                        WHERE p."Product Name*" = ? OR p.normalized_name = ?
+                        ORDER BY p.id DESC
+                        LIMIT 1
+                    '''
+                    # Fallback: use product's own Lineage if strains table/column not available
+                    lineage_query_fallback = '''
+                        SELECT p."Lineage" AS current_lineage
+                        FROM products p
+                        WHERE p."Product Name*" = ? OR p.normalized_name = ?
+                        ORDER BY p.id DESC
+                        LIMIT 1
+                    '''
+                    logging.info(f"📦 LINEAGE-CACHE ALIGNMENT: path={getattr(product_db, 'db_path', 'unknown')} store={getattr(product_db, '_store_name', 'unknown')}")
+                    updated = 0
+                    for tag in cached_tags:
+                        try:
+                            name = tag.get('Product Name*') or tag.get('ProductName') or ''
+                            if not name:
+                                continue
+                            if name in lineage_cache:
+                                db_lin = lineage_cache[name]
+                            else:
+                                # Prefer strain-level lineage used by DOCX (sovereign -> canonical)
+                                # Match by exact product name or normalized name to avoid missing column errors
+                                try:
+                                    normalized = product_db._normalize_product_name(name)
+                                except Exception:
+                                    normalized = name.strip().lower()
+                                try:
+                                    cur.execute(lineage_query_join_by_name, (name, normalized))
+                                    row = cur.fetchone()
+                                except Exception:
+                                    # Join failed (e.g., missing columns) - fallback to product lineage
+                                    cur.execute(lineage_query_fallback, (name, normalized))
+                                    row = cur.fetchone()
+                                db_lin = row[0] if row else None
+                                lineage_cache[name] = db_lin
+                            if db_lin:
+                                db_lin_clean = str(db_lin).strip().upper()
+                                # Always expose DB lineage on stable fields the UI can prefer
+                                tag['currentLineage'] = db_lin_clean
+                                tag['canonical_lineage'] = db_lin_clean
+                                tag['Lineage'] = db_lin_clean
+                        except Exception as _loop_err:
+                            logging.debug(f"UI lineage alignment (cache) error for a tag: {_loop_err}")
+                    if updated:
+                        # Refresh cache with aligned data
+                        cache.set(cache_key, cached_tags, timeout=300)
+                        logging.info(f"🔄 UI LINEAGE ALIGNMENT (cache): Applied {updated} lineage overrides to cached tags")
+            except Exception as e:
+                logging.warning(f"UI lineage alignment (cache) skipped due to error: {e}")
+
             elapsed = (time.time() - start_time) * 1000
             logging.info(f"✅ Using {len(cached_tags)} cached available tags ({elapsed:.1f}ms)")
             return jsonify({
                 'tags': cached_tags,  # Frontend expects 'tags', not 'available_tags'
                 'total_count': len(cached_tags),
-                'source': 'cache'
+                'source': 'cache+db-lineage'
             })
         
-        logging.info("🔄 No cache found, building tag list...")
+        logging.info("🔄 Building tag list... (prefer_db={})".format(prefer_db))
         
-        # RESOURCE-EFFICIENT MODE: Only use Excel processor to reduce memory usage
+        # When prefer_db is set, skip Excel entirely and go straight to database
         all_tags = []
+        if not prefer_db:
+            # Try Excel processor first (lighter than database queries)
+            excel_processor = get_excel_processor()
+            if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
+                try:
+                    excel_tags = excel_processor.get_available_tags()
+                    all_tags.extend(excel_tags)
+                    logging.info(f"✅ Excel processor returned {len(excel_tags)} tags")
+                except Exception as e:
+                    logging.warning(f"Excel processor error: {e}")
         
-        # Try Excel processor first (lighter than database queries)
-        excel_processor = get_excel_processor()
-        if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
+        # If we have tags from Excel, prefer them but align lineage with database values
+        if all_tags and not prefer_db:
             try:
-                excel_tags = excel_processor.get_available_tags()
-                all_tags.extend(excel_tags)
-                logging.info(f"✅ Excel processor returned {len(excel_tags)} tags")
+                store_name = get_current_store_name()
+                if not store_name:
+                    logging.warning("No store selected, skipping lineage alignment")
+                    raise ValueError("No store selected")
+                product_db = get_product_database(store_name)
+                if product_db:
+                    # Build a small cache to reduce duplicate lookups in this batch
+                    lineage_cache = {}
+                    updated = 0
+                    conn = product_db._get_connection()
+                    cur = conn.cursor()
+                    # Skip alignment entirely if products table doesn't exist
+                    try:
+                        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+                        if not cur.fetchone():
+                            logging.warning("UI lineage alignment skipped: no 'products' table in DB")
+                            raise RuntimeError("no-products-table")
+                    except RuntimeError:
+                        raise
+                    # Prefer joining strains by strain_name to avoid missing p.strain_id column
+                    lineage_query_join_by_name = '''
+                        SELECT s.canonical_lineage AS current_lineage
+                        FROM products p
+                        LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
+                        WHERE p."Product Name*" = ? OR p.normalized_name = ?
+                        ORDER BY p.id DESC
+                        LIMIT 1
+                    '''
+                    # Fallback: use product's own Lineage if strains table/column not available
+                    lineage_query_fallback = '''
+                        SELECT p."Lineage" AS current_lineage
+                        FROM products p
+                        WHERE p."Product Name*" = ? OR p.normalized_name = ?
+                        ORDER BY p.id DESC
+                        LIMIT 1
+                    '''
+                    logging.info(f"📦 LINEAGE-BUILD ALIGNMENT: path={getattr(product_db, 'db_path', 'unknown')} store={getattr(product_db, '_store_name', 'unknown')}")
+                    for tag in all_tags:
+                        try:
+                            name = tag.get('Product Name*') or tag.get('ProductName') or ''
+                            if not name:
+                                continue
+                            if name in lineage_cache:
+                                db_lin = lineage_cache[name]
+                            else:
+                                # Prefer strain-level lineage used by DOCX (sovereign -> canonical)
+                                try:
+                                    normalized = product_db._normalize_product_name(name)
+                                except Exception:
+                                    normalized = name.strip().lower()
+                                try:
+                                    cur.execute(lineage_query_join_by_name, (name, normalized))
+                                    row = cur.fetchone()
+                                except Exception:
+                                    # Join failed (e.g., missing columns) - fallback to product lineage
+                                    cur.execute(lineage_query_fallback, (name, normalized))
+                                    row = cur.fetchone()
+                                db_lin = row[0] if row else None
+                                lineage_cache[name] = db_lin
+                            if db_lin:
+                                db_lin_clean = str(db_lin).strip().upper()
+                                # Always expose DB lineage on stable fields the UI can prefer
+                                tag['currentLineage'] = db_lin_clean
+                                tag['canonical_lineage'] = db_lin_clean
+                                if str(tag.get('Lineage','')).strip().upper() != db_lin_clean:
+                                    tag['Lineage'] = db_lin_clean
+                                    updated += 1
+                        except RuntimeError:
+                            # Bubble out to outer except to skip alignment
+                            raise
+                        except Exception as _loop_err:
+                            logging.debug(f"UI lineage alignment error for a tag: {_loop_err}")
+                    if updated:
+                        logging.info(f"🔄 UI LINEAGE ALIGNMENT: Applied {updated} database lineage overrides to Excel tags")
             except Exception as e:
-                logging.warning(f"Excel processor error: {e}")
-        
-        # If we have tags from Excel, use those and skip heavy database queries
-        if all_tags:
-            # Cache the results for faster subsequent requests
-            cache.set(cache_key, all_tags, timeout=300)  # Cache for 5 minutes
+                logging.warning(f"UI lineage alignment skipped due to error: {e}")
+
+            # Cache the results for faster subsequent requests (unless nocache requested)
+            if not nocache:
+                cache.set(cache_key, all_tags, timeout=300)  # Cache for 5 minutes
             elapsed = (time.time() - start_time) * 1000
-            logging.info(f"✅ Available tags (Excel-only) completed ({elapsed:.1f}ms)")
+            logging.info(f"✅ Available tags (Excel-aligned-to-DB) completed ({elapsed:.1f}ms)")
             
             return jsonify({
                 'tags': all_tags,
                 'total_count': len(all_tags),
-                'source': 'excel-only'
+                'source': 'excel+db-lineage'
             })
         
-        # Fallback: minimal database query if no Excel data
-        logging.info("🔄 No Excel data, trying minimal database query...")
+        # Database path (either because prefer_db is set, or Excel had no data)
+        logging.info("🔄 Building available tags from database...")
         
         # Store validation removed - using single database for all stores
         
         # Get products from both Excel processor and database
         all_tags = []
         
-        # 1. Get products from Excel processor (current uploaded file)
-        excel_processor = get_excel_processor()
+        # 1. Optionally get products from Excel (only if not prefer_db)
+        excel_processor = None
         excel_tags = []
-        if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
-            try:
-                excel_tags = excel_processor.get_available_tags()
-                logging.info(f"Excel processor returned {len(excel_tags)} tags")
-            except Exception as e:
-                logging.warning(f"Error getting Excel processor tags: {e}")
-                excel_tags = []
+        if not prefer_db:
+            excel_processor = get_excel_processor()
+            if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
+                try:
+                    excel_tags = excel_processor.get_available_tags()
+                    logging.info(f"Excel processor returned {len(excel_tags)} tags")
+                except Exception as e:
+                    logging.warning(f"Error getting Excel processor tags: {e}")
+                    excel_tags = []
         
         # 2. Get products from database
         database_tags = []
         try:
-            product_db = get_product_database()
+            store_name = get_current_store_name()
+            product_db = get_product_database(store_name)
             logging.info(f"Got product database: {product_db}")
             if product_db:
-                logging.info(f"Database path: {product_db.db_path}")
+                logging.info(f"📦 FRESH DB QUERY: path={product_db.db_path} store={getattr(product_db, '_store_name', 'unknown')}")
                 # Get all products from database
                 import sqlite3
                 import os
@@ -6226,17 +7021,38 @@ def get_available_tags():
                                     # Filter to only columns we want, excluding internal ones
                                     columns_to_query = [col for col in available_columns if col not in ['id', 'normalized_name', 'strain_id']]
                                     
-                                    # Build dynamic query
-                                    quoted_columns = ', '.join([f'"{col}"' for col in columns_to_query])
-                                    query = f'SELECT {quoted_columns} FROM products ORDER BY id DESC LIMIT 20000'
-                                    
-                                    main_cursor.execute(query)
-                                    rows = main_cursor.fetchall()
-                                    columns = columns_to_query
-                                    logging.info(f"Main database query returned {len(rows)} rows")
+                                    # Build dynamic query - join with strains to get canonical lineage
+                                    quoted_columns = ', '.join([f'p."{col}"' for col in columns_to_query])
+                                    query = f'''
+                                        SELECT {quoted_columns}, COALESCE(s.canonical_lineage, p."Lineage") AS preferred_lineage
+                                        FROM products p
+                                        LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
+                                        ORDER BY p.id DESC
+                                        LIMIT 20000
+                                    '''
+                                    try:
+                                        main_cursor.execute(query)
+                                        rows = main_cursor.fetchall()
+                                        columns = columns_to_query + ['preferred_lineage']
+                                        logging.info(f"Main database query with strain join returned {len(rows)} rows")
+                                    except Exception as join_err:
+                                        logging.warning(f"Main DB strain join failed, using fallback: {join_err}")
+                                        query = f'SELECT {quoted_columns}, p."Lineage" AS preferred_lineage FROM products p ORDER BY p.id DESC LIMIT 20000'
+                                        main_cursor.execute(query)
+                                        rows = main_cursor.fetchall()
+                                        columns = columns_to_query + ['preferred_lineage']
+                                        logging.info(f"Main database query (fallback) returned {len(rows)} rows")
                                     
                                     for row in rows:
                                         product_dict = dict(zip(columns, row))
+                                        # Set preferred lineage fields for UI
+                                        pref_lin = str(product_dict.get('preferred_lineage', '')).strip().upper()
+                                        if pref_lin:
+                                            product_dict['currentLineage'] = pref_lin
+                                            product_dict['canonical_lineage'] = pref_lin
+                                            if not product_dict.get('Lineage') or str(product_dict.get('Lineage', '')).strip().upper() != pref_lin:
+                                                product_dict['Lineage'] = pref_lin
+                                        product_dict.pop('preferred_lineage', None)
                                         # Convert to the format expected by the frontend
                                         database_tags.append(product_dict)
                                     
@@ -6256,17 +7072,43 @@ def get_available_tags():
                             # Filter to only columns we want, excluding internal ones
                             columns_to_query = [col for col in available_columns if col not in ['id', 'normalized_name', 'strain_id']]
                             
-                            # Build dynamic query
-                            quoted_columns = ', '.join([f'"{col}"' for col in columns_to_query])
-                            query = f'SELECT {quoted_columns} FROM products ORDER BY id DESC LIMIT 20000'
-                            
-                            cursor.execute(query)
-                            rows = cursor.fetchall()
-                            columns = columns_to_query
-                            logging.info(f"Database query returned {len(rows)} rows")
+                            # Build dynamic query - join with strains to get canonical lineage
+                            quoted_columns = ', '.join([f'p."{col}"' for col in columns_to_query])
+                            # Also try to get canonical_lineage from strains if available
+                            query = f'''
+                                SELECT {quoted_columns}, COALESCE(s.canonical_lineage, p."Lineage") AS preferred_lineage
+                                FROM products p
+                                LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
+                                ORDER BY p.id DESC
+                                LIMIT 20000
+                            '''
+                            try:
+                                cursor.execute(query)
+                                rows = cursor.fetchall()
+                                # Add preferred_lineage to columns list
+                                columns = columns_to_query + ['preferred_lineage']
+                                logging.info(f"Database query with strain join returned {len(rows)} rows")
+                            except Exception as join_err:
+                                # Fallback: query without strain join
+                                logging.warning(f"Strain join failed, using fallback query: {join_err}")
+                                query = f'SELECT {quoted_columns}, p."Lineage" AS preferred_lineage FROM products p ORDER BY p.id DESC LIMIT 20000'
+                                cursor.execute(query)
+                                rows = cursor.fetchall()
+                                columns = columns_to_query + ['preferred_lineage']
+                                logging.info(f"Database query (fallback) returned {len(rows)} rows")
                         
                             for row in rows:
                                 product_dict = dict(zip(columns, row))
+                                # Set preferred lineage fields for UI
+                                pref_lin = str(product_dict.get('preferred_lineage', '')).strip().upper()
+                                if pref_lin:
+                                    product_dict['currentLineage'] = pref_lin
+                                    product_dict['canonical_lineage'] = pref_lin
+                                    # Ensure Lineage field matches
+                                    if not product_dict.get('Lineage') or str(product_dict.get('Lineage', '')).strip().upper() != pref_lin:
+                                        product_dict['Lineage'] = pref_lin
+                                # Remove the temporary preferred_lineage field
+                                product_dict.pop('preferred_lineage', None)
                                 # Convert to the format expected by the frontend
                                 database_tags.append(product_dict)
                             
@@ -6285,50 +7127,83 @@ def get_available_tags():
             database_tags = []
         
         # 3. Combine and deduplicate products
-        # Use Excel processor products as primary (they have processed fields)
-        # Add database products that aren't already in Excel processor
-        excel_product_names = {tag.get('Product Name*', '') for tag in excel_tags}
-        logging.info(f"Excel product names set has {len(excel_product_names)} unique names")
-        
-        # Add Excel processor products first
-        all_tags.extend(excel_tags)
-        logging.info(f"Added {len(excel_tags)} Excel products to all_tags")
-        
-        # Add database products that aren't duplicates
-        added_db_count = 0
-        skipped_db_count = 0
-        for db_tag in database_tags:
-            product_name = db_tag.get('Product Name*', '')
-            if product_name and product_name not in excel_product_names:
+        if prefer_db:
+            # When prefer_db=1, use ONLY database tags
+            logging.info(f"PREFER_DB mode: Using {len(database_tags)} database tags exclusively")
+            for db_tag in database_tags:
                 # Process database product to ensure it has proper weight formatting
                 processed_db_tag = process_database_product_for_api(db_tag)
-                
-                # CRITICAL FIX: Debug weight fields for concentrate products
-                if 'concentrate' in str(processed_db_tag.get('Product Type*', '')).lower() or 'wax' in str(processed_db_tag.get('Product Name*', '')).lower():
-                    logging.info(f"DEBUG: Concentrate product weight fields - {product_name}: WeightWithUnits={processed_db_tag.get('WeightWithUnits')}, WeightUnits={processed_db_tag.get('WeightUnits')}, CombinedWeight={processed_db_tag.get('CombinedWeight')}")
-                
                 all_tags.append(processed_db_tag)
-                added_db_count += 1
-            else:
-                skipped_db_count += 1
+            logging.info(f"PREFER_DB: Added {len(all_tags)} products from database")
+        else:
+            # Normal mode: Use Excel processor products as primary (they have processed fields)
+            # Add database products that aren't already in Excel processor
+            excel_product_names = {tag.get('Product Name*', '') for tag in excel_tags}
+            logging.info(f"Excel product names set has {len(excel_product_names)} unique names")
+            
+            # Add Excel processor products first
+            all_tags.extend(excel_tags)
+            logging.info(f"Added {len(excel_tags)} Excel products to all_tags")
+            
+            # Add database products that aren't duplicates
+            added_db_count = 0
+            skipped_db_count = 0
+            for db_tag in database_tags:
+                product_name = db_tag.get('Product Name*', '')
+                if product_name and product_name not in excel_product_names:
+                    # Process database product to ensure it has proper weight formatting
+                    processed_db_tag = process_database_product_for_api(db_tag)
+                    
+                    # CRITICAL FIX: Debug weight fields for concentrate products
+                    if 'concentrate' in str(processed_db_tag.get('Product Type*', '')).lower() or 'wax' in str(processed_db_tag.get('Product Name*', '')).lower():
+                        logging.info(f"DEBUG: Concentrate product weight fields - {product_name}: WeightWithUnits={processed_db_tag.get('WeightWithUnits')}, WeightUnits={processed_db_tag.get('WeightUnits')}, CombinedWeight={processed_db_tag.get('CombinedWeight')}")
+                    
+                    all_tags.append(processed_db_tag)
+                    added_db_count += 1
+                else:
+                    skipped_db_count += 1
+            
+            logging.info(f"Database products: {added_db_count} added, {skipped_db_count} skipped as duplicates")
+            logging.info(f"Combined total: {len(all_tags)} products ({len(excel_tags)} from Excel, {len(database_tags)} from database)")
         
-        logging.info(f"Database products: {added_db_count} added, {skipped_db_count} skipped as duplicates")
-        logging.info(f"Combined total: {len(all_tags)} products ({len(excel_tags)} from Excel, {len(database_tags)} from database)")
-        
-        # Cache the results for faster subsequent requests
-        if all_tags:
+        # Cache the results for faster subsequent requests (unless nocache requested)
+        if all_tags and not nocache:
             cache.set(cache_key, all_tags, timeout=300)  # Cache for 5 minutes
             logging.info(f"✅ Cached {len(all_tags)} tags for future requests")
         
+        # Debug summary: ensure DB-aligned fields present
+        try:
+            sample = all_tags[:5]
+            dbg = [
+                {
+                    'name': (t.get('Product Name*') or t.get('ProductName') or ''),
+                    'currentLineage': t.get('currentLineage'),
+                    'canonical_lineage': t.get('canonical_lineage'),
+                    'Lineage': t.get('Lineage'),
+                } for t in sample
+            ]
+            logging.info(f"LINEAGE UI DEBUG (final): samples={dbg}")
+            aligned_count = sum(1 for t in all_tags if t.get('currentLineage'))
+            logging.info(f"LINEAGE UI DEBUG (final): aligned_count={aligned_count}/{len(all_tags)}")
+        except Exception:
+            pass
+
         # Return the combined tags in the format expected by frontend
         elapsed = (time.time() - start_time) * 1000
         logging.info(f"✅ Available tags request completed ({elapsed:.1f}ms)")
         
-        return jsonify({
+        resp = jsonify({
             'tags': all_tags,  # Frontend expects 'tags' property
             'total_count': len(all_tags),
             'source': 'fresh'
         })
+        try:
+            # Disable caching at proxy/browser level for this response
+            resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+            resp.headers['Pragma'] = 'no-cache'
+        except Exception:
+            pass
+        return resp
         
     except Exception as e:
         elapsed = (time.time() - start_time) * 1000 if 'start_time' in locals() else 0
@@ -6340,6 +7215,15 @@ def get_available_tags():
             excel_processor = get_excel_processor()
             if excel_processor and excel_processor.df is not None and not excel_processor.df.empty:
                 basic_tags = excel_processor.get_available_tags()
+                # Ensure lineage fields exist so UI falls back gracefully
+                try:
+                    for tag in basic_tags:
+                        lin = str(tag.get('Lineage', tag.get('lineage', ''))).strip().upper()
+                        if lin:
+                            tag['currentLineage'] = tag.get('currentLineage') or lin
+                            tag['canonical_lineage'] = tag.get('canonical_lineage') or lin
+                except Exception:
+                    pass
                 logging.info(f"🔄 Fallback: returning {len(basic_tags)} tags from Excel only")
                 return jsonify({
                     'tags': basic_tags,
@@ -6377,20 +7261,20 @@ def get_selected_tags():
                     logging.error("Failed to load uploaded file from session")
                     return jsonify({'error': 'Failed to load uploaded file'}), 500
         elif excel_processor.df is None or excel_processor.df.empty:
-            processing_files = [f for f, status in processing_status.items() if status == 'processing']
-            if processing_files:
-                return jsonify({'error': 'File is still being processed. Please wait...'}), 202
-            from src.core.data.excel_processor import get_default_upload_file
-            default_file = get_default_upload_file()
-            if default_file and os.path.exists(default_file):
-                logging.info(f"Attempting to load default file for selected tags: {default_file}")
-                success = excel_processor.load_file(default_file)
-                if not success:
-                    logging.warning("Failed to load default data file for selected tags, returning empty array")
-                    return jsonify([])
-            else:
-                logging.info("No default file found for selected tags, returning empty array")
+            g.excel_processor._cache_dropdown_values()
+            return jsonify({'error': 'File is still being processed. Please wait...'}), 202
+        from src.core.data.excel_processor import get_default_upload_file
+        selected_store = get_current_store_name() if has_store_selection() else None
+        default_file = get_default_upload_file(selected_store)
+        if default_file and os.path.exists(default_file):
+            logging.info(f"Attempting to load default file for selected tags: {default_file}")
+            success = excel_processor.load_file(default_file)
+            if not success:
+                logging.warning("Failed to load default data file for selected tags, returning empty array")
                 return jsonify([])
+        else:
+            logging.info("No default file found for selected tags, returning empty array")
+            return jsonify([])
         
         # Get the selected tags - return full dictionary objects
         selected_tags = excel_processor.selected_tags
@@ -6450,7 +7334,6 @@ def get_selected_tags():
     except Exception as e:
         logging.error(f"Error getting selected tags: {str(e)}")
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/selected-tags', methods=['POST'])
 def set_selected_tags():
     """Set selected tags in the backend."""
@@ -6659,29 +7542,61 @@ def update_lineage():
         
         # CRITICAL FIX: Update database FIRST, then update Excel processor from database
         # This ensures database is the source of truth
-        product_db = get_product_database()
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         if not product_db:
             return jsonify({'error': 'Database not available'}), 500
+        
+        # Log which database is being used for update
+        db_path = getattr(product_db, 'db_path', 'Unknown')
+        logging.info(f"🔄 LINEAGE UPDATE: Using database at {db_path}")
         
         # NEW: Get the vendor for this product to update all products from same vendor
         vendor = None
         products_updated = 0
         try:
             if excel_processor and excel_processor.df is not None:
-                # Find the product in the Excel DataFrame
-                mask = excel_processor.df['Product Name*'] == tag_name
-                if not mask.any():
-                        mask = excel_processor.df['ProductName'] == tag_name
+                # Determine which product name column exists
+                product_name_col = None
+                if 'ProductName' in excel_processor.df.columns:
+                    product_name_col = 'ProductName'
+                elif 'Product Name*' in excel_processor.df.columns:
+                    product_name_col = 'Product Name*'
                 
-                if mask is not None and mask.any():
-                    vendor = excel_processor.df.loc[mask, 'Vendor/Supplier*'].iloc[0]
-                    if not vendor or str(vendor).strip() == '' or str(vendor).lower() == 'nan':
-                        vendor = None
+                if not product_name_col:
+                    logging.warning(f"Neither 'ProductName' nor 'Product Name*' column found")
+                else:
+                    # Find the product in the Excel DataFrame
+                    mask = excel_processor.df[product_name_col] == tag_name
+                    if not mask.any():
+                        mask = excel_processor.df[product_name_col].str.contains(tag_name, case=False, na=False)
+                    
+                    if mask is not None and mask.any():
+                        # Support multiple possible vendor column names
+                        vendor_cols = [
+                            'Vendor/Supplier*', 'Vendor', 'vendor', 'Vendor/Supplier',
+                            'Supplier', 'Vendor Name', 'VendorName'
+                        ]
+                        existing_vendor_cols = [c for c in vendor_cols if c in excel_processor.df.columns]
+                        if existing_vendor_cols:
+                            vendor = excel_processor.df.loc[mask, existing_vendor_cols[0]].iloc[0]
+                        else:
+                            vendor = None
+                        if not vendor or str(vendor).strip() == '' or str(vendor).lower() == 'nan':
+                            logging.warning(f"Found product '{tag_name}' but vendor was empty or invalid")
+                            vendor = None
+                        else:
+                            vendor = str(vendor).strip()
+                            logging.info(f"Found vendor '{vendor}' for product '{tag_name}'")
                     else:
-                        vendor = str(vendor).strip()
-                        logging.info(f"Found vendor '{vendor}' for product '{tag_name}'")
+                        logging.warning(f"Could not find product '{tag_name}' in Excel DataFrame")
+                        logging.debug(f"Available columns: {excel_processor.df.columns.tolist()}")
+                        # Try to find a similar product name for debugging
+                        if product_name_col:
+                            sample_products = excel_processor.df[product_name_col].head(10).tolist()
+                            logging.debug(f"Sample product names: {sample_products}")
         except Exception as vendor_error:
-            logging.warning(f"Could not determine vendor for product '{tag_name}': {vendor_error}")
+            logging.error(f"Exception while determining vendor for product '{tag_name}': {vendor_error}", exc_info=True)
         
         # Update the product lineage directly in database - ALL products for same vendor+strain
         try:
@@ -6702,6 +7617,20 @@ def update_lineage():
                     conn.commit()
                     products_updated = cursor.rowcount
                     logging.info(f"✅ Updated {products_updated} products for vendor '{vendor}' and strain '{strain_name}' to lineage '{new_lineage}'")
+
+                    # Also set sovereign lineage at the strain level to keep UI/DOCX consistent
+                    try:
+                        cursor.execute('''
+                            UPDATE strains
+                            SET sovereign_lineage = ?, updated_at = CURRENT_TIMESTAMP
+                            WHERE TRIM(LOWER(strain_name)) = TRIM(LOWER(?))
+                        ''', (new_lineage, str(strain_name).strip()))
+                        conn.commit()
+                        logging.info(f"🌿 Set sovereign lineage for strain '{strain_name}' to '{new_lineage}'")
+                    except Exception as se:
+                        logging.warning(f"Could not set sovereign lineage for '{strain_name}': {se}")
+                    # Do not close shared connection; just close cursor
+                    cursor.close()
                 else:
                     # Fallback to product-name-level for this vendor (normalized name match)
                     cursor.execute('''
@@ -6721,37 +7650,133 @@ def update_lineage():
                     conn.commit()
                     products_updated = cursor.rowcount
                     logging.info(f"✅ Updated {products_updated} vendor-matched products for normalized name of '{tag_name}' to '{new_lineage}'")
+                    # Do not close shared connection; just close cursor
+                    cursor.close()
+
+                    # EXTRA PROPAGATION: if no explicit strain, also update by intelligent root tokens among vendor's products
+                    try:
+                        base_name = str(tag_name).split(' by ')[0]
+                        import re
+                        # Remove trailing weight and common promo suffixes
+                        base_name_clean = re.sub(r"\s*-\s*\d+(?:\.\d+)?\s*(?:g|gram|grams|mg|oz|ounce|ounces|pk|pack|packs)?$","", base_name, flags=re.IGNORECASE)
+                        tokens = re.split(r"[^a-zA-Z0-9'+]+", base_name_clean.strip().lower())
+                        stop_words = {"summer","super","sale","deal","promo","special","pack","pk","bundle","pre","roll","pre-roll","infused","mini","value"}
+                        core_tokens = [t for t in tokens if t and t not in stop_words]
+                        root1 = core_tokens[0] if core_tokens else ''
+                        root2 = core_tokens[1] if len(core_tokens) > 1 else ''
+                        if root1:
+                            cursor = conn.cursor()
+                            if root2:
+                                cursor.execute('''
+                                    UPDATE products
+                                    SET "Lineage" = ?
+                                    WHERE TRIM(LOWER("Vendor/Supplier*")) = TRIM(LOWER(?))
+                                      AND LOWER("Product Name*") LIKE '%' || LOWER(?) || '%'
+                                      AND LOWER("Product Name*") LIKE '%' || LOWER(?) || '%'
+                                ''', (new_lineage, vendor, root1, root2))
+                            else:
+                                cursor.execute('''
+                                    UPDATE products
+                                    SET "Lineage" = ?
+                                    WHERE TRIM(LOWER("Vendor/Supplier*")) = TRIM(LOWER(?))
+                                      AND (
+                                           LOWER("Product Name*") LIKE LOWER(?)
+                                        OR LOWER("Product Name*") LIKE LOWER(?)
+                                        OR LOWER("Product Name*") LIKE '%' || LOWER(?) || '%'
+                                      )
+                                ''', (new_lineage, vendor, f"{root1}%", f"{root1}-%", root1))
+                            conn.commit()
+                            extra_updated = cursor.rowcount
+                            logging.info(f"🔁 EXTRA PROPAGATION: Updated {extra_updated} products for vendor '{vendor}' using roots '{root1} {root2}'. New lineage '{new_lineage}'")
+                            cursor.close()
+                    except Exception as e:
+                        logging.warning(f"EXTRA PROPAGATION failed for '{tag_name}': {e}")
             else:
                 # Fallback: update just this specific product if vendor not found
-                product_success = product_db.update_product_lineage(tag_name, new_lineage)
-                if product_success:
-                    logging.info(f"✅ Updated product lineage in database: '{tag_name}' → '{new_lineage}'")
-                    products_updated = 1
+                # Try multiple approaches to find and update the product
+                conn = product_db._get_connection()
+                cursor = conn.cursor()
+                
+                # Try exact match first
+                cursor.execute('''
+                    UPDATE products
+                    SET "Lineage" = ?
+                    WHERE "Product Name*" = ?
+                ''', (new_lineage, tag_name))
+                rows_updated = cursor.rowcount
+                
+                # If that didn't work, try partial match
+                if rows_updated == 0:
+                        cursor.execute('''
+                            UPDATE products
+                            SET "Lineage" = ?
+                            WHERE "Product Name*" LIKE ?
+                        ''', (new_lineage, f'%{tag_name}%'))
+                        rows_updated = cursor.rowcount
+                        # Do not close shared connection; keep it open
+                        cursor.close()
+                
+                # If still no match, try with ProductName column
+                if rows_updated == 0:
+                    # Reopen connection since we closed it above
+                    conn = product_db._get_connection()
+                    cursor = conn.cursor()
+                    cursor.execute('''
+                        UPDATE products
+                        SET "Lineage" = ?
+                        WHERE "ProductName" = ? OR "ProductName" LIKE ?
+                    ''', (new_lineage, tag_name, f'%{tag_name}%'))
+                    rows_updated = cursor.rowcount
+                
+                conn.commit()
+                
+                # Do not close shared connection; just close cursor
+                cursor.close()
+                
+                if rows_updated > 0:
+                    logging.info(f"✅ Updated {rows_updated} product(s) lineage in database: '{tag_name}' → '{new_lineage}'")
+                    products_updated = rows_updated
                 else:
-                    logging.warning(f"❌ Failed to update product lineage in database for '{tag_name}'")
-                    return jsonify({'error': 'Failed to update lineage in database'}), 500
+                    logging.error(f"❌ Failed to update product lineage in database for '{tag_name}' - product not found")
+                    # Don't return 500 error - just warn and let the response continue
+                    # The lineage update might still work in the Excel processor
+                    products_updated = 0
                 
             # Also update strain if available
-            strain_name = excel_processor.get_strain_name_for_product(tag_name) if excel_processor else None
-            if strain_name and str(strain_name).strip():
-                success = excel_processor.update_lineage_in_database_enhanced(strain_name, new_lineage, is_strain=True)
-                if success:
-                    logging.info(f"✅ Updated strain lineage in database: '{strain_name}' → '{new_lineage}'")
+            try:
+                strain_name = excel_processor.get_strain_name_for_product(tag_name) if excel_processor else None
+                if strain_name and str(strain_name).strip():
+                    success = excel_processor.update_lineage_in_database_enhanced(strain_name, new_lineage, is_strain=True)
+                    if success:
+                        logging.info(f"✅ Updated strain lineage in database: '{strain_name}' → '{new_lineage}'")
+            except Exception as strain_error:
+                logging.warning(f"Could not update strain lineage: {strain_error}")
                         
         except Exception as db_error:
-            logging.error(f"Error updating lineage in database: {db_error}")
-            return jsonify({'error': f'Database update failed: {str(db_error)}'}), 500
-        
+            logging.error(f"Error updating lineage in database: {db_error}", exc_info=True)
+            import traceback
+            logging.error(f"Traceback: {traceback.format_exc()}")
+            # Don't return 500 error - continue to Excel processor update which might still work
+            products_updated = 0
         # Now update the Excel processor DataFrame to reflect database changes - for all products vendor+strain
         updated_count = 0
         if excel_processor and excel_processor.df is not None:
             if vendor:
                 # Update all products from this vendor in the DataFrame
                 try:
-                    # Match vendor case-insensitively with trim
-                    vendor_series = excel_processor.df['Vendor/Supplier*'].astype(str).str.strip().str.lower()
+                    # Match vendor case-insensitively with trim (support multiple columns)
+                    vendor_cols = [
+                        'Vendor/Supplier*', 'Vendor', 'vendor', 'Vendor/Supplier',
+                        'Supplier', 'Vendor Name', 'VendorName'
+                    ]
+                    existing_vendor_cols = [c for c in vendor_cols if c in excel_processor.df.columns]
+                    if not existing_vendor_cols:
+                        logging.warning('No vendor column found in Excel DataFrame during lineage update display sync')
+                        vendor_series = None
+                    else:
+                        vendor_series = excel_processor.df[existing_vendor_cols[0]].astype(str).str.strip().str.lower()
                     vendor_norm = str(vendor).strip().lower()
-                    vendor_mask = (vendor_series == vendor_norm)
+                    vendor_mask = (vendor_series == vendor_norm) if vendor_series is not None else None
                     # Prefer matching by strain if present
                     strain_col = 'Product Strain'
                     df_strain_name = None
@@ -6759,28 +7784,107 @@ def update_lineage():
                         df_strain_name = excel_processor.get_strain_name_for_product(tag_name)
                     except Exception:
                         df_strain_name = None
-                    if df_strain_name and strain_col in excel_processor.df.columns:
+                    if vendor_mask is not None and df_strain_name and strain_col in excel_processor.df.columns:
                         strain_series = excel_processor.df[strain_col].astype(str).str.strip().str.lower()
                         src_strain = str(df_strain_name).strip().lower()
                         mask = vendor_mask & (strain_series == src_strain)
+                        logging.info(f"✅ Using vendor+strain match for DataFrame update")
                     else:
                         # Fallback: match by product normalized name proxy (Product Name*)
-                        mask = vendor_mask & (excel_processor.df['Product Name*'].astype(str) == str(tag_name))
-                    if mask.any():
+                        # First determine which product name column exists
+                        product_name_col = None
+                        for col in ['Product Name*', 'ProductName', 'Product Name']:
+                            if col in excel_processor.df.columns:
+                                product_name_col = col
+                                break
+                        
+                        if product_name_col and vendor_mask is not None:
+                            mask = vendor_mask & (excel_processor.df[product_name_col].astype(str) == str(tag_name))
+                        else:
+                            mask = None
+                            logging.warning(f"Vendor mask or product name column not found (product_name_col='{product_name_col}')")
+                        
+                        if mask is None:
+                            logging.debug(f"Vendor mask was None, trying direct product name match")
+                        elif not mask.any():
+                            logging.debug(f"Vendor+product name match found no results")
+                    
+                    # If no matches found with vendor+strain or vendor+name, fallback to direct product name match (no vendor filter)
+                    if (mask is None) or (not mask.any()):
+                        logging.warning(f"No matches found with vendor filter, trying direct product name match for '{tag_name}'")
+                        try:
+                            # Use case-insensitive string comparison to handle any encoding issues
+                            name_fallback = excel_processor.df['Product Name*'].astype(str).str.strip().str.lower() == str(tag_name).strip().lower()
+                            if name_fallback.any():
+                                mask = name_fallback
+                                logging.info(f"✅ Found {name_fallback.sum()} match(es) using direct product name (case-insensitive)")
+                            else:
+                                logging.warning(f"Direct product name match also failed for '{tag_name}'")
+                                # EXTRA PROPAGATION IN DATAFRAME: match by root token within vendor
+                                try:
+                                    base_name = str(tag_name).split(' by ')[0]
+                                    import re
+                                    base_name_clean = re.sub(r"\s*-\s*\d+(?:\.\d+)?\s*(?:g|gram|grams|mg|oz|ounce|ounces|pk|pack|packs)?$","", base_name, flags=re.IGNORECASE).strip()
+                                    root_token = base_name_clean.split()[0] if base_name_clean else ''
+                                    if root_token and vendor_mask is not None:
+                                        pn_series = excel_processor.df['Product Name*'].astype(str).str.strip().str.lower()
+                                        root_mask = pn_series.str.startswith(root_token.lower())
+                                        mask = vendor_mask & root_mask
+                                        if mask.any():
+                                            logging.info(f"✅ EXTRA PROP DF: Matched {int(mask.sum())} rows by root token '{root_token}' for vendor '{vendor}'")
+                                except Exception as _e:
+                                    logging.debug(f"EXTRA PROP DF failed: {_e}")
+                        except Exception as e:
+                            logging.error(f"Error in direct product name match: {e}")
+                            name_fallback = None
+                            mask = name_fallback if name_fallback is not None else mask
+                    
+                    if mask is not None and mask.any():
                         # Debug: Log lineage values before update
-                        old_lineages = excel_processor.df.loc[mask, 'Lineage'].values.tolist()
-                        old_product_names = excel_processor.df.loc[mask, 'Product Name*'].values.tolist()
-                        logging.info(f"🔍 BEFORE UPDATE - Lineages for vendor '{vendor}': {list(zip(old_product_names, old_lineages))}")
-                        
-                        excel_processor.df.loc[mask, 'Lineage'] = new_lineage
-                        updated_count = int(mask.sum())
-                        
-                        # Debug: Verify the update worked
-                        new_lineages = excel_processor.df.loc[mask, 'Lineage'].values.tolist()
-                        logging.info(f"✅ UPDATED {updated_count} products for vendor '{vendor}' in Excel DataFrame")
-                        logging.info(f"🔍 AFTER UPDATE - Lineages: {list(zip(old_product_names, new_lineages))}")
+                        try:
+                            # Check if 'Lineage' column exists
+                            if 'Lineage' in excel_processor.df.columns:
+                                old_lineages = excel_processor.df.loc[mask, 'Lineage'].values.tolist()
+                            else:
+                                old_lineages = ['NOT_FOUND'] * mask.sum()
+                                logging.warning("Lineage column not found in DataFrame")
+                            
+                            # Check if 'Product Name*' column exists
+                            product_name_col = None
+                            for col in ['Product Name*', 'ProductName', 'Product Name']:
+                                if col in excel_processor.df.columns:
+                                    product_name_col = col
+                                    break
+                            
+                            if product_name_col:
+                                old_product_names = excel_processor.df.loc[mask, product_name_col].values.tolist()
+                                logging.info(f"🔍 BEFORE UPDATE - Lineages for vendor '{vendor}': {list(zip(old_product_names, old_lineages))}")
+                            else:
+                                logging.error("No product name column found in DataFrame")
+                                
+                            # Update the Lineage column
+                            if 'Lineage' in excel_processor.df.columns:
+                                excel_processor.df.loc[mask, 'Lineage'] = new_lineage
+                                updated_count = int(mask.sum())
+                                
+                                # Debug: Verify the update worked
+                                new_lineages = excel_processor.df.loc[mask, 'Lineage'].values.tolist()
+                                logging.info(f"✅ UPDATED {updated_count} products for vendor '{vendor}' in Excel DataFrame")
+                                if product_name_col:
+                                    logging.info(f"🔍 AFTER UPDATE - Lineages: {list(zip(old_product_names, new_lineages))}")
+                            else:
+                                logging.error("Cannot update - Lineage column not found in DataFrame")
+                                updated_count = 0
+                        except KeyError as key_err:
+                            logging.error(f"Column access error: {key_err}")
+                            logging.error(f"Available columns: {list(excel_processor.df.columns)}")
+                            updated_count = 0
+                    else:
+                        logging.warning("No DataFrame rows matched for lineage update; UI will rely on DB value during generation")
                 except Exception as df_error:
-                    logging.warning(f"Could not update Excel DataFrame for vendor: {df_error}")
+                    import traceback
+                    logging.error(f"❌ Could not update Excel DataFrame for vendor: {df_error}")
+                    logging.error(f"Full traceback: {traceback.format_exc()}")
             else:
                 # Fallback: update just this specific product
                 success = excel_processor.update_lineage_in_current_data(tag_name, new_lineage) if excel_processor else False
@@ -6816,6 +7920,18 @@ def update_lineage():
             session['lineage_update_timestamp'] = time.time()
             session.modified = True
             logging.info(f"✅ LINEAGE UPDATE: Cleared all caches and updated session timestamp")
+            
+            # CRITICAL: Force Excel processor to rebuild from database to ensure lineage consistency
+            try:
+                if excel_processor and excel_processor.df is not None:
+                    # Clear Excel processor's internal caches
+                    if hasattr(excel_processor, '_available_tags_cache'):
+                        excel_processor._available_tags_cache = None
+                    if hasattr(excel_processor, 'dropdown_cache'):
+                        excel_processor.dropdown_cache = {}
+                    logging.info(f"✅ LINEAGE UPDATE: Cleared Excel processor internal caches")
+            except Exception as e:
+                logging.warning(f"Could not clear Excel processor caches: {e}")
                 
         except Exception as cache_error:
             logging.warning(f"Could not clear caches after lineage update: {cache_error}")
@@ -6840,10 +7956,19 @@ def update_lineage():
             except Exception as verify_error:
                 logging.warning(f"Could not verify lineage update: {verify_error}")
             
+        # Report success if either database or Excel processor was updated
+        total_updated = products_updated + updated_count
+        
+        # Log summary of what was updated
+        if products_updated > 0:
+            logging.info(f"✅ LINEAGE UPDATE SUMMARY: Database updated {products_updated} product(s)")
+        if updated_count > 0:
+            logging.info(f"✅ LINEAGE UPDATE SUMMARY: Excel DataFrame updated {updated_count} product(s)")
+        
         return jsonify({
             'success': True, 
-            'message': f'Lineage updated to {new_lineage} for {products_updated} product(s)',
-            'products_updated': products_updated,
+            'message': f'Lineage updated to {new_lineage} for {total_updated} product(s) (DB: {products_updated}, Excel: {updated_count})',
+            'products_updated': total_updated,
             'vendor': vendor if vendor else None
         })
             
@@ -6862,8 +7987,8 @@ def update_strain_lineage():
             return jsonify({'error': 'Missing strain_name or lineage'}), 400
         
         try:
-            # Store context removed - using single database
-            product_db = get_product_database()
+            store_name = get_current_store_name()
+            product_db = get_product_database(store_name)
             if not product_db:
                 return jsonify({'error': 'Product database not available'}), 500
             
@@ -6973,7 +8098,8 @@ def batch_update_lineage():
 
         # NEW: Vendor+strain-wide DB updates per change (covers all weights/types for that strain & vendor)
         try:
-            product_db = get_product_database()
+            store_name = get_current_store_name()
+            product_db = get_product_database(store_name)
             if product_db and changes_made:
                 conn = product_db._get_connection()
                 cursor = conn.cursor()
@@ -7045,8 +8171,8 @@ def batch_update_lineage():
         
         # Force database persistence for batch lineage changes
         try:
-            # Store context removed - using single database
-            product_db = get_product_database()
+            store_name = get_current_store_name()
+            product_db = get_product_database(store_name)
             if product_db:
                 for change in changes_made:
                     tag_name = change['tag_name']
@@ -7110,7 +8236,6 @@ def batch_update_lineage():
                 logging.info(f"Updated lineage in Excel processor DataFrame for {updated_count}/{len(changes_made)} items")
         except Exception as e_df:
             logging.warning(f"Could not update Excel DataFrame after batch lineage update: {e_df}")
-
         # NEW: Clear caches like single-item update to avoid stale lineage on long lists
         try:
             cache_key = get_session_cache_key('available_tags')
@@ -7154,10 +8279,15 @@ def update_doh():
     """Update DOH status for a specific product."""
     try:
         data = request.get_json()
+        logging.info(f"🔍 DOH API RECEIVED: Full request data: {data}")
+
         tag_name = data.get('tag_name') or data.get('product_name') or data.get('Product Name*')
         new_doh = data.get('doh') or data.get('doh_status')
-        
+
+        logging.info(f"🔍 DOH API PARSED: tag_name='{tag_name}', new_doh='{new_doh}'")
+
         if not tag_name or new_doh is None:
+            logging.error(f"❌ DOH API ERROR: Missing parameters - tag_name='{tag_name}', new_doh='{new_doh}'")
             return jsonify({'error': 'Missing tag_name or doh'}), 400
         
         # Normalize DOH values - convert frontend values to backend format
@@ -7175,6 +8305,10 @@ def update_doh():
                 return jsonify({'error': f'Invalid DOH value: {new_doh}. Must be "NONE", "DOH", "THC", "CBD", "Yes", or "No"'}), 400
             doh_storage_value = new_doh
         
+        # CRITICAL FIX: Ensure we never store None, always use 'No' as the empty state
+        if doh_storage_value is None or doh_storage_value == 'None' or str(doh_storage_value).lower() == 'none':
+            doh_storage_value = 'No'
+        
         # Get the excel processor from session
         excel_processor = get_excel_processor()
         if not excel_processor or excel_processor.df is None:
@@ -7183,7 +8317,8 @@ def update_doh():
         # Update the DOH in the current data
         # CRITICAL FIX: Update database FIRST, then update Excel processor from database
         # This ensures database is the source of truth (same pattern as lineage updates)
-        product_db = get_product_database()
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         if not product_db:
             return jsonify({'error': 'Database not available'}), 500
         
@@ -7210,10 +8345,11 @@ def update_doh():
         try:
             product_success = product_db.update_product_doh(tag_name, doh_storage_value, vendor=vendor, brand=brand)
             if product_success:
-                logging.info(f"✅ Updated product DOH in database: '{tag_name}' → '{doh_storage_value}' (original: '{new_doh}')")
+                logging.info(f"✅ DOH API UPDATE: Updated product DOH in database: '{tag_name}' → '{doh_storage_value}' (frontend sent: '{new_doh}')")
+                logging.info(f"🔍 DOH API UPDATE: For DOCX generation, this product should {'INCLUDE' if doh_storage_value in ['DOH', 'THC', 'CBD', 'Yes'] else 'EXCLUDE'} DOH image")
                 db_update_success = True
             else:
-                logging.warning(f"⚠️  Could not find product in database to update DOH for '{tag_name}' - will try Excel update")
+                logging.warning(f"⚠️ DOH API UPDATE: Could not find product in database to update DOH for '{tag_name}' - will try Excel update")
                         
         except Exception as db_error:
             logging.error(f"Error updating DOH in database: {db_error}")
@@ -7226,11 +8362,30 @@ def update_doh():
         else:
             logging.warning(f"⚠️  Could not update Excel processor DataFrame for '{tag_name}'")
         
+        # Persist a session-scoped override so generation always reflects the latest user choice
+        try:
+            import re
+            overrides = session.get('doh_overrides', {})
+            norm_key = product_db._normalize_product_name(tag_name)
+            # Also extract base name (remove " by Vendor - Weight" suffix) for flexible matching
+            base_name = re.sub(r'\s+by\s+[^-]+(\s*-\s*\d+\s*\w+)?$', '', str(tag_name), flags=re.IGNORECASE).strip()
+            base_name = re.sub(r'\s*-\s*\d+\s*\w+$', '', base_name).strip()
+            base_norm_key = product_db._normalize_product_name(base_name) if base_name != tag_name else norm_key
+            
+            overrides[norm_key] = doh_storage_value
+            if base_norm_key != norm_key:
+                overrides[base_norm_key] = doh_storage_value
+            session['doh_overrides'] = overrides
+            session.modified = True
+            logging.info(f"✅ DOH API UPDATE: Saved session override for '{tag_name}' → '{doh_storage_value}' (keys: '{norm_key}', '{base_norm_key}')")
+        except Exception as ov_err:
+            logging.warning(f"Could not save DOH override in session: {ov_err}")
+
         # Only return error if Excel update failed (database update failure is ok)
         if not excel_update_success:
             return jsonify({'error': 'Failed to update DOH in Excel data'}), 500
         
-        # CRITICAL FIX: Aggressively clear ALL caches to force fresh data
+        # CRITICAL FIX: Aggressively clear ALL caches to force fresh data AND reload DataFrame
         try:
             # Clear session-specific caches
             cache_key = get_session_cache_key('available_tags')
@@ -7250,6 +8405,10 @@ def update_doh():
                     cache.delete(cache_key_to_clear)
                 except:
                     pass
+            
+            # IMPORTANT: Do NOT reload the Excel file here. Reloading from disk would discard the
+            # in-memory DOH change (not yet persisted back to disk), causing generation to use stale values.
+            # Keeping the updated DataFrame in memory ensures DOCX reflects the user's toggle immediately.
             
             # Update session to force refresh
             session['excel_processor_updated'] = time.time()
@@ -7446,7 +8605,8 @@ def get_web_filter_options():
         excel_processor = get_session_excel_processor()
         if excel_processor.df is None or excel_processor.df.empty:
             from src.core.data.excel_processor import get_default_upload_file
-            default_file = get_default_upload_file()
+            selected_store = get_current_store_name() if has_store_selection() else None
+            default_file = get_default_upload_file(selected_store)
             if default_file and os.path.exists(default_file):
                 if ENHANCED_LOGGING_AVAILABLE:
                     enhanced_logger.log_info(f"Attempting to load default file for web filter options", 
@@ -7520,7 +8680,6 @@ def get_web_filter_options():
         else:
             logging.error(f"Error in web filter options: {str(e)}")
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/filter-options', methods=['GET', 'POST'])
 def get_filter_options():
     """Get filter options for dropdowns with enhanced error logging and performance optimizations"""
@@ -7567,7 +8726,8 @@ def get_filter_options():
         excel_processor = get_session_excel_processor()
         if excel_processor.df is None or excel_processor.df.empty:
             from src.core.data.excel_processor import get_default_upload_file
-            default_file = get_default_upload_file()
+            selected_store = get_current_store_name() if has_store_selection() else None
+            default_file = get_default_upload_file(selected_store)
             if default_file and os.path.exists(default_file):
                 if ENHANCED_LOGGING_AVAILABLE:
                     enhanced_logger.log_info(f"Attempting to load default file for filter options", 
@@ -7701,7 +8861,8 @@ def debug_weight_formatting():
         excel_processor = get_session_excel_processor()
         if excel_processor.df is None or excel_processor.df.empty:
             from src.core.data.excel_processor import get_default_upload_file
-            default_file = get_default_upload_file()
+            selected_store = get_current_store_name() if has_store_selection() else None
+            default_file = get_default_upload_file(selected_store)
             if default_file and os.path.exists(default_file):
                 logging.info(f"Attempting to load default file for debug-weight-formatting: {default_file}")
                 success = excel_processor.load_file(default_file)
@@ -7799,7 +8960,8 @@ def database_stats():
     try:
         # Get current store from session
         # Store context removed - using single database
-        product_db = get_product_database()
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         
         # Ensure database is initialized
         if not product_db._initialized:
@@ -7814,17 +8976,8 @@ def database_stats():
             if not test_cursor.fetchone():
                 logging.error(f"Products table not found in database at {product_db.db_path}")
                 # If store-specific database doesn't have products table, fall back to main database
-                logging.info(f"Falling back to main database")
-                # Create main database instance directly (don't clear the global variable!)
-                from src.core.data.product_database import ProductDatabase
-                main_db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
-                product_db = ProductDatabase(main_db_path)
-                if not product_db._initialized:
-                    product_db.init_database()
-                # Update the global reference to use the main database
-                global _product_database
-                _product_database = product_db
-                # Test main database
+                logging.info(f"Not falling back to main database; honoring store selection '{getattr(_product_database, '_store_name', 'unknown')}'.")
+                # Re-test using store-specific DB only
                 test_conn = sqlite3.connect(product_db.db_path)
                 test_cursor = test_conn.cursor()
                 test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
@@ -7950,7 +9103,8 @@ def database_schema():
     """Get database schema information for debugging."""
     try:
         # Store context removed - using single database
-        product_db = get_product_database()
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         
         import sqlite3
         with sqlite3.connect(product_db.db_path) as conn:
@@ -7990,9 +9144,6 @@ def database_schema():
     except Exception as e:
         logging.error(f"Error getting database schema: {str(e)}")
         return jsonify({'error': str(e)}), 500
-
-
-
 @app.route('/api/database-vendor-stats', methods=['GET'])
 def database_vendor_stats():
     """Get detailed vendor and brand statistics from the product database."""
@@ -8005,7 +9156,8 @@ def database_vendor_stats():
         
         # Try to get any available database (don't hardcode store name)
         try:
-            product_db = get_product_database()
+            store_name = get_current_store_name()
+            product_db = get_product_database(store_name)
         except Exception as e:
             logging.error(f"Failed to get product database: {e}")
             return jsonify({
@@ -8028,17 +9180,8 @@ def database_vendor_stats():
             if not test_cursor.fetchone():
                 logging.error(f"Products table not found in database at {product_db.db_path}")
                 # If store-specific database doesn't have products table, fall back to main database
-                logging.info("Falling back to main database for vendor stats")
-                # Create main database instance directly (don't clear the global variable!)
-                from src.core.data.product_database import ProductDatabase
-                main_db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
-                product_db = ProductDatabase(main_db_path)
-                if not product_db._initialized:
-                    product_db.init_database()
-                # Update the global reference to use the main database
-                global _product_database
-                _product_database = product_db
-                # Test main database
+                logging.info("Not falling back to main database; honoring current store selection")
+                # Re-test using the current store-specific database only
                 test_conn = sqlite3.connect(product_db.db_path)
                 test_cursor = test_conn.cursor()
                 test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
@@ -8391,7 +9534,8 @@ def database_export():
         import tempfile
         import os
         
-        product_db = get_product_database()
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         
         # Create temporary file
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
@@ -8438,7 +9582,8 @@ def database_view():
     try:
         import sqlite3
         
-        product_db = get_product_database()
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         
         with sqlite3.connect(product_db.db_path) as conn:
             # Get strains
@@ -8473,7 +9618,8 @@ def database_view():
 def populate_missing_columns():
     """Populate missing columns in existing database products."""
     try:
-        product_db = get_product_database()
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         result = product_db.populate_missing_columns()
         
         return jsonify(result)
@@ -8489,7 +9635,8 @@ def populate_missing_columns():
 def update_all_descriptions():
     """Update ALL Description column values with formula-created values from Product Name*."""
     try:
-        product_db = get_product_database()
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         result = product_db.update_all_descriptions()
         
         return jsonify(result)
@@ -8500,12 +9647,12 @@ def update_all_descriptions():
             'success': False,
             'error': f'Failed to update descriptions: {str(e)}'
         }), 500
-
 @app.route('/api/update-all-product-strains', methods=['POST'])
 def update_all_product_strains():
     """Update all existing Product Strain column values using the _calculate_product_strain logic."""
     try:
-        product_db = get_product_database()
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         result = product_db.update_all_product_strains()
         return jsonify(result)
     except Exception as e:
@@ -8516,7 +9663,8 @@ def update_all_product_strains():
 def update_all_ratio_or_thc_cbd():
     """Update all existing Ratio_or_THC_CBD column values using the _calculate_ratio_or_thc_cbd logic."""
     try:
-        product_db = get_product_database()
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         result = product_db.update_all_ratio_or_thc_cbd()
         return jsonify(result)
     except Exception as e:
@@ -8527,7 +9675,8 @@ def update_all_ratio_or_thc_cbd():
 def update_all_joint_ratios():
     """Update all JointRatio values to remove ' x 1' suffix."""
     try:
-        product_db = get_product_database()
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         result = product_db.update_all_joint_ratios()
         return jsonify(result)
     except Exception as e:
@@ -8571,7 +9720,8 @@ def database_analytics():
         
         # Try to get any available database (don't hardcode store name)
         try:
-            product_db = get_product_database()
+            store_name = get_current_store_name()
+            product_db = get_product_database(store_name)
         except Exception as e:
             logging.error(f"Failed to get product database for analytics: {e}")
             return jsonify({
@@ -8690,7 +9840,8 @@ def database_health():
         import os
         from datetime import datetime
         
-        product_db = get_product_database()
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         
         # CRITICAL DEBUG: Check database file status
         db_exists = os.path.exists(product_db.db_path)
@@ -8787,7 +9938,8 @@ def database_test():
         
         # Test 1: Check if we can get the database instance
         try:
-            product_db = get_product_database()
+            store_name = get_current_store_name()
+            product_db = get_product_database(store_name)
             logging.info(f"[DB-TEST] Successfully got ProductDatabase instance")
             logging.info(f"[DB-TEST] Database path: {product_db.db_path}")
         except Exception as e:
@@ -8837,7 +9989,8 @@ def database_test():
 def database_status():
     """Get basic database status and information."""
     try:
-        product_db = get_product_database()  # Use main product_database.db
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)  # Use main product_database.db
         
         # Check if database file exists
         db_exists = os.path.exists(product_db.db_path)
@@ -8891,7 +10044,8 @@ def get_database_products():
     """Get products from the database for the editor."""
     try:
         # Store context removed - using single database
-        product_db = get_product_database()
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         
         # Ensure we have a usable database; fallback to main DB if products table missing or empty
         try:
@@ -9125,7 +10279,8 @@ def force_database_storage():
             logging.info(f"[FORCE-STORAGE] Detected {json_match_count} JSON matched tags that will be excluded")
         
         # Store in database
-        product_db = get_product_database()
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         logging.info(f"[FORCE-STORAGE] ProductDatabase obtained: {product_db}")
         
         if hasattr(product_db, 'store_excel_data'):
@@ -9162,7 +10317,8 @@ def get_database_storage_info():
     """Get information about database storage and JSON match exclusion."""
     try:
         excel_processor = get_excel_processor()
-        product_db = get_product_database()
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         
         # Get current data info
         current_data_info = {}
@@ -9258,7 +10414,8 @@ def test_database_storage():
             logging.info(f"[TEST-STORAGE] Row {i}: {dict(row.head(5))}")  # Show first 5 columns
         
         # Store in database
-        product_db = get_product_database()
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         logging.info(f"[TEST-STORAGE] ProductDatabase obtained: {product_db}")
         
         if hasattr(product_db, 'store_excel_data'):
@@ -9321,7 +10478,6 @@ def test_database_storage():
         </body>
         </html>
         """
-
 @app.route('/api/product-similarity', methods=['POST'])
 def product_similarity():
     """Find similar products based on various criteria."""
@@ -9335,7 +10491,8 @@ def product_similarity():
         
         import sqlite3
         
-        product_db = get_product_database()
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         
         with sqlite3.connect(product_db.db_path) as conn:
             # Get the base product
@@ -9418,7 +10575,8 @@ def advanced_search():
         
         import sqlite3
         
-        product_db = get_product_database()
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         
         with sqlite3.connect(product_db.db_path) as conn:
             # Build dynamic query based on search criteria
@@ -9484,7 +10642,8 @@ def create_backup():
         import tempfile
         from datetime import datetime
         
-        product_db = get_product_database()
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         backup_filename = f"{backup_name}_{timestamp}.db"
         
@@ -9558,7 +10717,8 @@ def optimize_database():
     try:
         import sqlite3
         
-        product_db = get_product_database()
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         
         with sqlite3.connect(product_db.db_path) as conn:
             # Analyze database
@@ -9594,7 +10754,8 @@ def trend_analysis():
         import sqlite3
         from datetime import datetime, timedelta
         
-        product_db = get_product_database()
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         
         with sqlite3.connect(product_db.db_path) as conn:
             # Get product trends over time
@@ -9795,7 +10956,6 @@ def cache_status():
     except Exception as e:
         logging.error(f"Error getting cache status: {str(e)}")
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/temp-files-status', methods=['GET'])
 def temp_files_status():
     """Get information about temporary files that can be cleaned up."""
@@ -10022,17 +11182,14 @@ def upload_product_database():
         if file_size > app.config['MAX_CONTENT_LENGTH']:
             return jsonify({'error': f'File too large. Maximum size is {app.config["MAX_CONTENT_LENGTH"] / (1024*1024):.1f} MB'}), 400
         
-        # Create product database folder
-        db_folder = os.path.join(current_dir, 'uploads', 'product_database')
-        os.makedirs(db_folder, exist_ok=True)
-        
-        # Save the file
-        db_file_path = os.path.join(db_folder, 'product_database.xlsx')
+        # Save the file directly in uploads directory
+        db_file_path = os.path.join(current_dir, 'uploads', 'product_database.xlsx')
         file.save(db_file_path)
         
         # Initialize the product database with the new file
         try:
-            product_db = get_product_database()
+            store_name = get_current_store_name()
+            product_db = get_product_database(store_name)
             
             # CRITICAL FIX: Implement proper database import from Excel
             logging.info(f"Starting database import from {db_file_path}")
@@ -10132,18 +11289,14 @@ def upload_product_database():
                     
                     # Add product to database with mapped column names
                     result = product_db.add_or_update_product(mapped_data)
-                    if result:
-                        stored_count += 1
-                    
-                    # Add strain if available (use original column names for strain)
-                    if 'Product Strain' in product_data and product_data['Product Strain']:
-                        strain_result = product_db.add_or_update_strain(
-                            product_data['Product Strain'],
-                            product_data.get('Lineage', 'UNKNOWN')
-                        )
-                        if strain_result:
-                            strains_count += 1
-                            
+                    if best:
+                        product_db = ProductDatabase(best)
+                        product_db._store_name = 'AGT_Bothell'
+                        product_db.init_database()
+                        return product_db
+                    return None
+                    if strain_result:
+                        strains_count += 1
                 except Exception as row_error:
                     logging.warning(f"Error processing row {index}: {row_error}")
                     import traceback
@@ -10188,8 +11341,7 @@ def upload_product_database():
 def get_product_database_file_info():
     """Get information about the current product database file."""
     try:
-        db_folder = os.path.join(current_dir, 'uploads', 'product_database')
-        db_file_path = os.path.join(db_folder, 'product_database.xlsx')
+        db_file_path = os.path.join(current_dir, 'uploads', 'product_database.xlsx')
         
         if not os.path.exists(db_file_path):
             return jsonify({
@@ -10203,7 +11355,8 @@ def get_product_database_file_info():
         modified_time = datetime.fromtimestamp(stat.st_mtime)
         
         # Get product database stats
-        product_db = get_product_database()
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         db_stats = {}
         if hasattr(product_db, 'get_database_stats'):
             db_stats = product_db.get_database_stats()
@@ -10226,8 +11379,7 @@ def get_product_database_file_info():
 def download_product_database():
     """Download the current product database Excel file."""
     try:
-        db_folder = os.path.join(current_dir, 'uploads', 'product_database')
-        db_file_path = os.path.join(db_folder, 'product_database.xlsx')
+        db_file_path = os.path.join(current_dir, 'uploads', 'product_database.xlsx')
         
         if not os.path.exists(db_file_path):
             return jsonify({'error': 'Product database file not found'}), 404
@@ -10271,7 +11423,6 @@ def enable_product_db():
     except Exception as e:
         logging.error(f"Error enabling product DB: {str(e)}")
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/product-db/settings', methods=['POST'])
 def save_product_db_settings():
     """Save product database integration settings."""
@@ -10436,7 +11587,8 @@ def json_match():
         
         # Perform JSON matching with Product Database integration
         # CRITICAL FIX: Use simplified matching approach to ensure all products are processed with complete data
-        matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=True)
+        # DEFAULT: No deduplication - one label per JSON entry (user can manually remove duplicates if needed)
+        matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=True, deduplicate=False)
         logging.info(f"JSON matching (simplified approach) returned {len(matched_products) if matched_products else 0} products")
 
         # CRITICAL DEBUG: Log what we actually got back
@@ -10562,14 +11714,14 @@ def json_match():
         
         # Handle empty results gracefully
         if not matched_products:
-            logging.info("No products matched - likely due to strict vendor isolation or no matching products in database")
+            logging.info("No products matched - check if product database has matching products")
             return jsonify({
                 'success': True,
                 'matched_count': 0,
                 'matched_names': [],
                 'available_tags': [],
                 'selected_tags': [],
-                'message': 'No products matched. This may be due to strict vendor isolation - only products from the same vendor are matched.'
+                'message': 'No products matched. This may indicate that the product database does not have matching products, or the product names in the JSON do not match database entries.'
             }), 200
 
         # CRITICAL FIX: Return matched products directly as available tags
@@ -10762,7 +11914,6 @@ def json_inventory():
     except Exception as e:
         logging.error(f"Error processing JSON inventory: {str(e)}")
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/json-clear', methods=['POST'])
 def json_clear():
     """Clear JSON matches and reset to original state."""
@@ -11228,7 +12379,6 @@ def debug_file_load():
     except Exception as e:
         logging.error(f"Error in debug file load: {e}")
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/clear-upload-status', methods=['POST'])
 def clear_upload_status():
     """Clear all upload processing statuses (for debugging)."""
@@ -11664,7 +12814,8 @@ def diagnostic_check():
         
         # Test database connection
         try:
-            product_db = get_product_database()
+            store_name = get_current_store_name()
+            product_db = get_product_database(store_name)
             if product_db:
                 diagnostic_info['database_connection'] = 'OK'
                 diagnostic_info['database_path'] = product_db.db_path
@@ -11707,7 +12858,6 @@ def diagnostic_check():
             'error': str(e),
             'timestamp': datetime.now().isoformat()
         }), 500
-
 @app.route('/api/available-tags-lite', methods=['GET'])
 def get_available_tags_lite():
     """Ultra-lightweight version of available-tags for resource-constrained environments."""
@@ -11804,11 +12954,12 @@ def get_initial_data():
         if excel_processor.df is None:
             logging.info("No data loaded - attempting to load default file")
             from src.core.data.excel_processor import get_default_upload_file
-            default_file = get_default_upload_file()
+            selected_store = get_current_store_name() if has_store_selection() else None
+            default_file = get_default_upload_file(selected_store)
             
             if default_file:
                 try:
-                    logging.info(f"Loading default file: {os.path.basename(default_file)}")
+                    logging.info(f"Loading default file for {selected_store}: {os.path.basename(default_file)}")
                     excel_processor.load_file(default_file)
                     excel_processor._last_loaded_file = default_file
                     logging.info(f"Default file loaded successfully")
@@ -12198,7 +13349,6 @@ def get_strain_analysis(product_id):
     except Exception as e:
         logging.error(f"Error analyzing strain for product {product_id}: {e}")
         return jsonify({'success': False, 'message': str(e)})
-
 @app.route('/api/library/export', methods=['GET'])
 def export_library_data():
     """Export library data as CSV."""
@@ -12329,7 +13479,8 @@ def get_strain_product_count():
             return jsonify({'error': 'Missing strain_name'}), 400
         
         try:
-            product_db = get_product_database()
+            store_name = get_current_store_name()
+            product_db = get_product_database(store_name)
             if not product_db:
                 return jsonify({'error': 'Product database not available'}), 500
             
@@ -12363,7 +13514,8 @@ def get_strain_product_count():
 def get_all_strains():
     """Get all strains from the master database with their current lineages."""
     try:
-        product_db = get_product_database()
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         if not product_db:
             return jsonify({'error': 'Product database not available'}), 500
         
@@ -12416,7 +13568,8 @@ def set_strain_lineage():
             return jsonify({'error': 'Missing lineage'}), 400
         
         try:
-            product_db = get_product_database()
+            store_name = get_current_store_name()
+            product_db = get_product_database(store_name)
             if not product_db:
                 return jsonify({'error': 'Product database not available'}), 500
             
@@ -12475,7 +13628,12 @@ def set_strain_lineage():
 
 @app.route('/api/vendor-strain-browser', methods=['GET'])
 def vendor_strain_browser():
-    """Get organized data for vendor and strain browsing in the lineage editor using Excel data."""
+    """Get organized data for vendor and strain browsing in the lineage editor.
+
+    Lineage values are sourced from the product database (sovereign_lineage preferred,
+    then canonical_lineage) to match DOCX generation behavior. Excel is used only for
+    counts and grouping when convenient.
+    """
     try:
         excel_processor = get_excel_processor()
         if not excel_processor or excel_processor.df is None or excel_processor.df.empty:
@@ -12517,6 +13675,12 @@ def vendor_strain_browser():
         # Sort vendors by total products
         vendors_data.sort(key=lambda x: x['total_products'], reverse=True)
         
+        # Prepare database access for lineage resolution
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
+        db_conn = product_db._get_connection() if product_db else None
+        db_cursor = db_conn.cursor() if db_conn else None
+
         # Get strains with vendor/brand/lineage info
         strains_data = []
         strain_groups = df.groupby(strain_col)
@@ -12524,8 +13688,30 @@ def vendor_strain_browser():
         for strain_name, group in strain_groups:
             if pd.isna(strain_name) or str(strain_name).strip() == '':
                 continue
-                
-            current_lineage = group['Lineage'].iloc[0] if 'Lineage' in group.columns else 'Unknown'
+
+            # Resolve lineage from DB to ensure UI matches DOCX generation
+            db_current_lineage = None
+            db_canonical_lineage = None
+            db_sovereign_lineage = None
+            if db_cursor:
+                try:
+                    db_cursor.execute(
+                        '''
+                        SELECT canonical_lineage as current_lineage,
+                               canonical_lineage,
+                               sovereign_lineage
+                        FROM strains
+                        WHERE strain_name = ?
+                        ''', (str(strain_name).strip(),)
+                    )
+                    row = db_cursor.fetchone()
+                    if row:
+                        db_current_lineage, db_canonical_lineage, db_sovereign_lineage = row
+                except Exception as _e:
+                    # Fall back silently to Excel lineage if DB lookup fails
+                    pass
+
+            current_lineage = (db_current_lineage or (group['Lineage'].iloc[0] if 'Lineage' in group.columns else 'Unknown'))
             product_count = len(group)
             vendor_count = group['Vendor/Supplier*'].nunique()
             brand_count = group['Product Brand'].nunique() if 'Product Brand' in group.columns else 0
@@ -12534,9 +13720,9 @@ def vendor_strain_browser():
             
             strains_data.append({
                 'strain_name': str(strain_name).strip(),
-                'current_lineage': str(current_lineage).strip(),
-                'canonical_lineage': str(current_lineage).strip(),
-                'sovereign_lineage': None,
+                'current_lineage': str(current_lineage or '').strip() or 'MIXED',
+                'canonical_lineage': str(db_canonical_lineage or current_lineage or '').strip() or 'MIXED',
+                'sovereign_lineage': (db_sovereign_lineage if db_sovereign_lineage not in [None, ''] else None),
                 'product_count': int(product_count),
                 'vendor_count': int(vendor_count),
                 'brand_count': int(brand_count),
@@ -12556,7 +13742,28 @@ def vendor_strain_browser():
             if pd.isna(strain_name) or str(strain_name).strip() == '':
                 continue
                 
-            current_lineage = group['Lineage'].iloc[0] if 'Lineage' in group.columns else 'Unknown'
+            # Resolve lineage from DB to ensure UI matches DOCX generation
+            db_current_lineage = None
+            db_canonical_lineage = None
+            db_sovereign_lineage = None
+            if db_cursor:
+                try:
+                    db_cursor.execute(
+                        '''
+                        SELECT canonical_lineage as current_lineage,
+                               canonical_lineage,
+                               sovereign_lineage
+                        FROM strains
+                        WHERE strain_name = ?
+                        ''', (str(strain_name).strip(),)
+                    )
+                    row = db_cursor.fetchone()
+                    if row:
+                        db_current_lineage, db_canonical_lineage, db_sovereign_lineage = row
+                except Exception as _e:
+                    pass
+
+            current_lineage = (db_current_lineage or (group['Lineage'].iloc[0] if 'Lineage' in group.columns else 'Unknown'))
             product_count = len(group)
             brand_count = group['Product Brand'].nunique() if 'Product Brand' in group.columns else 0
             brands = ', '.join(group['Product Brand'].unique()) if 'Product Brand' in group.columns else 'N/A'
@@ -12564,9 +13771,9 @@ def vendor_strain_browser():
             vendor_strains_data.append({
                 'vendor': vendor,
                 'strain_name': str(strain_name).strip(),
-                'current_lineage': str(current_lineage).strip(),
-                'canonical_lineage': str(current_lineage).strip(),
-                'sovereign_lineage': None,
+                'current_lineage': str(current_lineage or '').strip() or 'MIXED',
+                'canonical_lineage': str(db_canonical_lineage or current_lineage or '').strip() or 'MIXED',
+                'sovereign_lineage': (db_sovereign_lineage if db_sovereign_lineage not in [None, ''] else None),
                 'product_count': int(product_count),
                 'brand_count': int(brand_count),
                 'brands': brands,
@@ -12611,7 +13818,6 @@ def vendor_strain_browser():
     except Exception as e:
         logging.error(f"Error in vendor-strain-browser: {str(e)}")
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/strain-search', methods=['POST'])
 def strain_search():
     """Search strains with filtering and pagination."""
@@ -12627,7 +13833,8 @@ def strain_search():
         if not excel_processor or excel_processor.df is None or excel_processor.df.empty:
             return jsonify({'error': 'No data available'}), 404
         
-        product_db = get_product_database()
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         if not product_db:
             return jsonify({'error': 'Product database not available'}), 500
         
@@ -12738,7 +13945,8 @@ def bulk_update_lineage():
         if not excel_processor or excel_processor.df is None or excel_processor.df.empty:
             return jsonify({'error': 'No data available'}), 404
         
-        product_db = get_product_database()
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         if not product_db:
             return jsonify({'error': 'Product database not available'}), 500
         
@@ -13084,7 +14292,6 @@ def serve_lineage_editor_styling_test():
 def serve_enhanced_lineage_editor_test():
     """Serve the enhanced lineage editor test page."""
     return send_from_directory('.', 'test_enhanced_lineage_editor.html')
-
 @app.route('/test_lineage_editor_direct')
 def test_lineage_editor_direct():
     """Test the lineage editor directly."""
@@ -13172,6 +14379,14 @@ def upload_file_optimized():
         if not check_rate_limit(client_ip):
             return jsonify({'error': 'Rate limit exceeded. Please wait before uploading another file.'}), 429
         
+        # CRITICAL: Require store selection before upload
+        if not has_store_selection():
+            logging.error("Upload attempted without store selection")
+            return jsonify({'error': 'Please select a store before uploading files'}), 400
+        
+        # Get current store selection
+        selected_store = get_current_store_name()
+        
         logging.info("=== ULTRA-FAST UPLOAD REQUEST START ===")
         start_time = time.time()
         
@@ -13194,6 +14409,18 @@ def upload_file_optimized():
         if not file.filename.lower().endswith('.xlsx'):
             logging.error(f"Invalid file type: {file.filename}")
             return jsonify({'error': 'Only .xlsx files are allowed'}), 400
+        
+        # Validate filename contains store name and matches selected store
+        is_valid, warning_msg, detected_store = validate_excel_filename_for_store(file.filename, selected_store)
+        
+        if not is_valid:
+            logging.error(f"Filename validation failed: {warning_msg}")
+            return jsonify({
+                'error': warning_msg,
+                'filename': file.filename,
+                'selected_store': selected_store,
+                'detected_store': detected_store
+            }), 400
         
         # Sanitize filename to prevent path traversal (security fix)
         sanitized_filename = sanitize_filename(file.filename)
@@ -13320,6 +14547,14 @@ def upload_file_fast():
         start_time = time.time()
         logging.info("=== UPLOAD-FAST REQUEST START ===")
         
+        # CRITICAL: Require store selection before upload
+        if not has_store_selection():
+            logging.error("Upload attempted without store selection")
+            return jsonify({'error': 'Please select a store before uploading files'}), 400
+        
+        # Get current store selection
+        selected_store = get_current_store_name()
+        
         # Check if file is present
         if 'file' not in request.files:
             logging.error("No file provided in request")
@@ -13334,8 +14569,19 @@ def upload_file_fast():
         
         # Validate file type
         if not file.filename.lower().endswith(('.xlsx', '.xls')):
-            logging.error(f"Invalid file type: {file.filename}")
-            return jsonify({'error': 'Invalid file type. Please upload an Excel file.'}), 400
+            return jsonify({'error': 'Only Excel files allowed'}), 400
+        
+        # Validate filename contains store name and matches selected store
+        is_valid, warning_msg, detected_store = validate_excel_filename_for_store(file.filename, selected_store)
+        
+        if not is_valid:
+            logging.error(f"Filename validation failed: {warning_msg}")
+            return jsonify({
+                'error': warning_msg,
+                'filename': file.filename,
+                'selected_store': selected_store,
+                'detected_store': detected_store
+            }), 400
         
         # Create uploads directory if it doesn't exist
         uploads_dir = Path('uploads')
@@ -13556,7 +14802,6 @@ def test_available_tags_debug():
             'error': str(e),
             'steps': debug_info.get('steps', [])
         })
-
 @app.route('/api/upload-database-file', methods=['POST'])
 def upload_database_file():
     """Upload a database file directly to replace the existing database"""
@@ -13578,12 +14823,8 @@ def upload_database_file():
         if file_size > 500 * 1024 * 1024:  # 500MB limit
             return jsonify({'error': 'File too large. Maximum size is 500 MB'}), 400
         
-        # Create database directory
-        db_dir = os.path.join(current_dir, 'uploads', 'product_database')
-        os.makedirs(db_dir, exist_ok=True)
-        
-        # Save the database file
-        db_file_path = os.path.join(db_dir, 'product_database.db')
+        # Save the database file directly in uploads directory
+        db_file_path = os.path.join(current_dir, 'uploads', 'product_database.db')
         file.save(db_file_path)
         
         # Verify the database file
@@ -13632,12 +14873,8 @@ def setup_database_endpoint():
         import sqlite3
         from datetime import datetime
         
-        # Create database directory
-        db_dir = os.path.join(current_dir, 'uploads', 'product_database')
-        os.makedirs(db_dir, exist_ok=True)
-        
-        # Database file path
-        db_file_path = os.path.join(db_dir, 'product_database.db')
+        # Database file path - save directly in uploads directory
+        db_file_path = os.path.join(current_dir, 'uploads', 'product_database.db')
         
         # Create a new database with sample data
         conn = sqlite3.connect(db_file_path)
@@ -13812,7 +15049,8 @@ def setup_database_endpoint():
 def cleanup_duplicate_products_endpoint():
     """Clean up duplicate products in the database"""
     try:
-        product_db = get_product_database()
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         
         if not hasattr(product_db, 'cleanup_duplicate_products'):
             return jsonify({
@@ -13973,7 +15211,8 @@ def test_upload_page():
 def add_missing_database_columns():
     """Add missing columns to existing database tables."""
     try:
-        product_db = get_product_database()
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         product_db.add_missing_columns()
         return jsonify({'success': True, 'message': 'Missing columns added successfully'})
     except Exception as e:
@@ -14005,7 +15244,6 @@ def get_product_db_status():
             'priority': 'ERROR - Failed to check status',
             'message': f'Error: {str(e)}'
         }), 500
-
 @app.route('/api/json-match/diagnose', methods=['POST'])
 def diagnose_json_matching():
     """Diagnose JSON matching issues and show Product Database priority status."""
@@ -14436,7 +15674,8 @@ def clear_performance_cache():
 def clear_database():
     """Clear the database for migration."""
     try:
-        product_db = get_product_database()
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         
         # Clear products and strains tables
         conn = product_db._get_connection()
@@ -14466,7 +15705,8 @@ def import_strains():
         if not strains:
             return jsonify({"error": "No strains provided"}), 400
         
-        product_db = get_product_database()
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         conn = product_db._get_connection()
         cursor = conn.cursor()
         
@@ -14501,7 +15741,6 @@ def import_strains():
     except Exception as e:
         logging.error(f"Error importing strains: {e}")
         return jsonify({"error": str(e)}), 500
-
 @app.route('/api/import-products', methods=['POST'])
 def import_products():
     """Import products from migration data."""
@@ -14512,7 +15751,8 @@ def import_products():
         if not products:
             return jsonify({"error": "No products provided"}), 400
         
-        product_db = get_product_database()
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         conn = product_db._get_connection()
         cursor = conn.cursor()
         
@@ -14648,7 +15888,8 @@ def upload_database_chunk():
         # If this is the first chunk, start a new database file
         if chunk_num == 0:
             # Clear existing database
-            product_db = get_product_database()
+            store_name = get_current_store_name()
+            product_db = get_product_database(store_name)
             conn = product_db._get_connection()
             cursor = conn.cursor()
             cursor.execute("DELETE FROM products")
@@ -14686,7 +15927,8 @@ def upload_database_chunk():
             os.remove(temp_file.name)
             
             # Reinitialize the database
-            product_db = get_product_database()
+            store_name = get_current_store_name()
+            product_db = get_product_database(store_name)
             product_db.init_database()
             
             logging.info(f"Database successfully reconstructed from {total_chunks} chunks")
@@ -14714,7 +15956,8 @@ def apply_lineage_colors():
 def backfill_missing_values():
     """Backfill missing crucial values in existing database products."""
     try:
-        product_db = get_product_database()
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         
         # Run the backfill process
         result = product_db.backfill_missing_crucial_values()
@@ -14897,7 +16140,6 @@ def enhanced_json_match():
         import traceback
         traceback.print_exc()
         return jsonify({'error': f'Enhanced JSON matching failed: {str(e)}'}), 500
-
 @app.route('/api/json-match/ai-enhanced', methods=['POST'])
 def ai_enhanced_json_match():
     """AI-enhanced JSON matching with machine learning."""
@@ -15261,7 +16503,8 @@ def fix_descriptions():
         
         # Get the product database instance
                     # Store context removed - using single database
-        product_db = get_product_database()
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         if not product_db:
             return jsonify({'error': 'Product database not available'}), 500
         
@@ -15285,7 +16528,6 @@ def fix_descriptions():
     except Exception as e:
         logging.error(f"Error in fix descriptions: {str(e)}")
         return jsonify({'error': f'Failed to fix descriptions: {str(e)}'}), 500
-
 @app.route('/api/backfill-units', methods=['POST'])
 def backfill_units():
     """Backfill Units data in database from Excel files."""
@@ -15446,7 +16688,8 @@ def identify_bad_descriptions():
     """Identify all description values that don't meet Product Name transformation criteria."""
     try:
                     # Store context removed - using single database
-        product_db = get_product_database()
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         
         # Get the list of bad descriptions
         result = product_db.identify_bad_descriptions()
@@ -15473,7 +16716,8 @@ def fix_description_format():
     """Fix Description field format to extract just product name from 'Product Name by Vendor - Weight' format."""
     try:
                     # Store context removed - using single database
-        product_db = get_product_database()
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         
         # Run the original fix
         result = product_db.fix_description_format()

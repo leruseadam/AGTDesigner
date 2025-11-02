@@ -130,6 +130,7 @@ class ProductDatabase:
                         "Product Strain" TEXT,
                         "Quantity*" TEXT,
                         "DOH" TEXT,
+                        "DOH Compliant (Yes/No)" TEXT,
                         "Concentrate Type" TEXT,
                         "Ratio" TEXT,
                         "JointRatio" TEXT,

@@ -408,10 +408,14 @@ def batch_lineage_database_update(processor, df):
     except Exception as e:
         processor.logger.error(f"Error in batch lineage database update: {e}")
 
-def get_default_upload_file() -> Optional[str]:
+def get_default_upload_file(selected_store: Optional[str] = None) -> Optional[str]:
     """
     Returns the path to the most recent "A Greener Today" Excel file.
     STANDARDIZED for both local and PythonAnywhere environments.
+    STORE-AWARE: Only returns files matching the selected store to prevent cross-store contamination.
+    
+    Args:
+        selected_store: The currently selected store (e.g., 'AGT_Lynnwood'). If None, attempts to get from app context.
     """
     import os
     from pathlib import Path
@@ -430,6 +434,26 @@ def get_default_upload_file() -> Optional[str]:
     if DISABLE_DEFAULT_FOR_TESTING or DISABLE_DEFAULT_FOR_PERFORMANCE or DISABLE_STARTUP_FILE_LOADING:
         logger.info("Default file loading disabled for testing/performance optimization")
         return None
+    
+    # CRITICAL: Get the selected store if not provided
+    if selected_store is None:
+        try:
+            import app
+            # Check if store selection exists before trying to get it
+            if hasattr(app, 'has_store_selection') and app.has_store_selection():
+                selected_store = app.get_current_store_name()
+                logger.info(f"✅ Auto-detected selected store: {selected_store}")
+            else:
+                logger.warning("⚠️ No store selection available - skipping default file load")
+                logger.warning("User must select a store before default files will load")
+                return None
+        except Exception as e:
+            logger.warning(f"❌ Could not detect selected store: {e}")
+            # Don't load any default file if we can't determine the store
+            logger.warning("Skipping default file load - no store selection available")
+            return None
+    
+    logger.info(f"🔍 Looking for default file matching store: {selected_store}")
     
     # Get the current working directory and home directory
     current_dir = os.getcwd()
@@ -461,6 +485,47 @@ def get_default_upload_file() -> Optional[str]:
     search_locations.extend(standard_paths)
     logger.debug("STANDARDIZED: Searching uploads folder first, then Downloads for both environments")
     
+    # Helper function to extract store from filename (same logic as app.py)
+    def extract_store_from_filename(filename):
+        if not filename:
+            return None
+        
+        filename_upper = filename.upper()
+        filename_normalized = filename_upper.replace('_', ' ').replace('-', ' ')
+        
+        store_patterns = [
+            ('AGT BOTHELL', 'AGT_Bothell'),
+            ('AGT_BOTHELL', 'AGT_Bothell'),
+            ('AGT BURIEN', 'AGT_Burien'),
+            ('AGT_BURIEN', 'AGT_Burien'),
+            ('AGT GOLDBAR', 'AGT_Goldbar'),
+            ('AGT_GOLDBAR', 'AGT_Goldbar'),
+            ('AGT LYNNWOOD', 'AGT_Lynnwood'),
+            ('AGT_LYNNWOOD', 'AGT_Lynnwood'),
+            ('AGT SEATTLE', 'AGT_Seattle'),
+            ('AGT_SEATTLE', 'AGT_Seattle'),
+            ('AGT SHORELINE', 'AGT_Shoreline'),
+            ('AGT_SHORELINE', 'AGT_Shoreline'),
+            ('AGT WALLA WALLA', 'AGT_Walla_Walla'),
+            ('AGT_WALLA_WALLA', 'AGT_Walla_Walla'),
+            ('AGT WALLAWALLA', 'AGT_Walla_Walla'),
+            ('BOTHELL', 'AGT_Bothell'),
+            ('BURIEN', 'AGT_Burien'),
+            ('GOLDBAR', 'AGT_Goldbar'),
+            ('LYNNWOOD', 'AGT_Lynnwood'),
+            ('SEATTLE', 'AGT_Seattle'),
+            ('SHORELINE', 'AGT_Shoreline'),
+            ('WALLA WALLA', 'AGT_Walla_Walla'),
+            ('WALLAWALLA', 'AGT_Walla_Walla'),
+        ]
+        
+        for pattern, store_name in store_patterns:
+            pattern_normalized = pattern.replace('_', ' ').replace('-', ' ')
+            if pattern_normalized in filename_normalized or pattern in filename_upper:
+                return store_name
+        
+        return None
+    
     # Find all Excel files (not just "A Greener Today")
     excel_files = []
     
@@ -474,6 +539,17 @@ def get_default_upload_file() -> Optional[str]:
                     if filename.lower().endswith(('.xlsx', '.xls')) and not filename.startswith('~$'):
                         file_path = os.path.join(location, filename)
                         if os.path.isfile(file_path):
+                            # CRITICAL: Check if file matches selected store
+                            file_store = extract_store_from_filename(filename)
+                            
+                            # Log all files found for debugging
+                            logger.info(f"📄 Found file: {filename} → Store: {file_store}")
+                            
+                            # Skip files that don't match the selected store
+                            if file_store != selected_store:
+                                logger.warning(f"⏭️  SKIPPING {filename} - belongs to {file_store}, but {selected_store} is selected")
+                                continue
+                            
                             mod_time = os.path.getmtime(file_path)
                             file_size = os.path.getsize(file_path)
                             
@@ -485,7 +561,7 @@ def get_default_upload_file() -> Optional[str]:
                             # Skip files that are too small (likely corrupted)
                             if file_size > 1000:  # Minimum 1KB
                                 excel_files.append((file_path, filename, mod_time, file_size, priority))
-                                logger.debug(f"Found Excel file: {filename} (modified: {mod_time}, size: {file_size:,} bytes, priority: {priority})")
+                                logger.debug(f"Found matching Excel file for {selected_store}: {filename} (modified: {mod_time}, size: {file_size:,} bytes, priority: {priority})")
                             else:
                                 logger.debug(f"Skipping small file (likely corrupted): {filename} (size: {file_size:,} bytes)")
             except Exception as e:
@@ -494,16 +570,18 @@ def get_default_upload_file() -> Optional[str]:
             logger.warning(f"Location does not exist: {location}")
     
     if not excel_files:
-        logger.warning("No Excel files found in any search location")
-        logger.info("Please upload an Excel file using the file upload feature")
+        logger.warning(f"❌ No Excel files found for store {selected_store} in any search location")
+        logger.info(f"Please upload an Excel file for {selected_store} using the file upload feature")
         return None
     
     # Sort by filename priority (A Greener Today), then modification time
     excel_files.sort(key=lambda x: (x[4], x[2]), reverse=True)
     
-    # Return the highest priority, most recent file
+    # Return the highest priority, most recent file for the selected store
     best_file_path, best_filename, best_mod_time, best_file_size, best_priority = excel_files[0]
-    logger.info(f"Found best Excel file: {best_filename} (modified: {best_mod_time}, size: {best_file_size:,} bytes, priority: {best_priority})")
+    logger.info(f"✅ Selected default file for {selected_store}: {best_filename}")
+    logger.info(f"   Modified: {best_mod_time}, Size: {best_file_size:,} bytes, Priority: {best_priority}")
+    logger.info(f"   Full path: {best_file_path}")
     return best_file_path
 
 def _complexity(text):
@@ -893,7 +971,14 @@ class ExcelProcessor:
                     time.sleep(0.1)
                     
                     from .product_database import ProductDatabase
+                    # CRITICAL: Use the store-specific database to ensure lineage is preserved
                     product_db = ProductDatabase(store_name=self._store_name)
+                    self.logger.info(f"[ProductDB] Background integration using database for store: {self._store_name}")
+                    
+                    # CRITICAL: Load lineage from database into DataFrame BEFORE processing
+                    # This ensures we preserve existing lineage when storing back to database
+                    self.logger.info("[ProductDB] Loading lineage from database before background integration...")
+                    self._load_lineage_from_database()
                     
                     # Add retry logic for database locking issues
                     max_retries = 3
@@ -916,6 +1001,19 @@ class ExcelProcessor:
                         # Process batch with retry logic for database locking
                         for _, row in batch_df.iterrows():
                             row_dict = row.to_dict()
+                            
+                            # CRITICAL: Ensure row_dict has lineage from DataFrame (which was loaded from DB)
+                            # The DataFrame lineage should already be loaded from database, but double-check
+                            product_name = row_dict.get('Product Name*', '') or row_dict.get('ProductName', '')
+                            if product_name and ('Lineage' not in row_dict or not row_dict.get('Lineage') or str(row_dict.get('Lineage', '')).strip() in ['', 'nan', 'none', 'null', 'None', 'NaN']):
+                                # Try to get lineage from database for this specific product
+                                try:
+                                    db_lineage = product_db.get_product_lineage(product_name)
+                                    if db_lineage and str(db_lineage).strip() not in ['', 'nan', 'none', 'null', 'None', 'NaN']:
+                                        row_dict['Lineage'] = str(db_lineage).strip()
+                                        self.logger.debug(f"[ProductDB] Preserved lineage '{db_lineage}' for product '{product_name}' in background integration")
+                                except Exception as e:
+                                    self.logger.debug(f"[ProductDB] Could not get lineage from database for '{product_name}': {e}")
                             
                             # Only process classic types through the strain database
                             product_type = row_dict.get('Product Type*', '').strip().lower()
@@ -992,7 +1090,12 @@ class ExcelProcessor:
             self.logger.error(f"[ProductDB] Failed to schedule background integration: {e}")
     
     def _load_lineage_from_database(self):
-        """Load lineage data from database to ensure changes persist after reload."""
+        """Load lineage data from database to ensure changes persist after reload.
+        
+        This loads lineage from TWO sources:
+        1. Strain-level lineage from strains table (by strain name)
+        2. Product-level lineage from products table (by product name) - CRITICAL for user changes
+        """
         if not ENABLE_LINEAGE_PERSISTENCE:
             return
             
@@ -1000,75 +1103,267 @@ class ExcelProcessor:
             from .product_database import ProductDatabase
             product_db = ProductDatabase(store_name=self._store_name)
             
-            if not hasattr(self, 'df') or self.df is None or 'Product Strain' not in self.df.columns:
+            if not hasattr(self, 'df') or self.df is None:
                 return
             
-            self.logger.info("[ProductDB] Loading lineage data from database...")
+            self.logger.info("[ProductDB] Loading lineage data from database (both strain and product level)...")
             
-            # Get all unique strain names from the loaded data
-            strain_names = self.df['Product Strain'].dropna().unique()
-            strain_names = [str(name).strip() for name in strain_names if str(name).strip()]
+            # Check if we have product name column
+            product_name_cols = ['Product Name*', 'ProductName', 'Product Name']
+            product_name_col = None
+            for col in product_name_cols:
+                if col in self.df.columns:
+                    product_name_col = col
+                    break
+            
+            if not product_name_col:
+                self.logger.debug("[ProductDB] No product name column found, skipping lineage load")
+                return
             
             lineage_updates = 0
             
-            for strain_name in strain_names:
+            # CRITICAL FIX: Load product-level lineage FIRST (this preserves user changes to specific products)
+            # Normalize all product names and create a mapping
+            normalized_to_indices = {}
+            for idx in self.df.index:
                 try:
-                    strain_info = product_db.get_strain_info(strain_name)
-                    if strain_info and strain_info.get('sovereign_lineage'):
-                        # Update lineage in the dataframe for this strain
-                        strain_mask = self.df['Product Strain'] == strain_name
-                        if strain_mask.any():
-                            db_lineage = strain_info['sovereign_lineage']
-                            
-                            # CRITICAL FIX: Be more conservative with edible lineage assignments
-                            # Don't override edible lineage assignments with database values unless they're explicitly high-CBD
-                            edible_types = {"edible (solid)", "edible (liquid)", "high cbd edible liquid", "tincture", "topical", "capsule"}
-                            
-                            for idx in self.df[strain_mask].index:
-                                product_type = self.df.loc[idx, 'Product Type*']
-                                product_name = self.df.loc[idx, 'ProductName'] if 'ProductName' in self.df.columns else ''
+                    product_name = str(self.df.loc[idx, product_name_col]).strip()
+                    if product_name and product_name.lower() not in ['', 'nan', 'none']:
+                        normalized_name = product_db._normalize_product_name(product_name)
+                        if normalized_name not in normalized_to_indices:
+                            normalized_to_indices[normalized_name] = []
+                        normalized_to_indices[normalized_name].append(idx)
+                except Exception as e:
+                    continue
+            
+            # Bulk query database for all product-level lineages at once
+            conn = product_db._get_connection()
+            cursor = conn.cursor()
+            db_lineage_map = {}
+            
+            # Query in batches to avoid SQL parameter limits
+            normalized_names_list = list(normalized_to_indices.keys())
+            batch_size = 500
+            
+            for i in range(0, len(normalized_names_list), batch_size):
+                batch_names = normalized_names_list[i:i + batch_size]
+                placeholders = ','.join(['?'] * len(batch_names))
+                
+                try:
+                    cursor.execute(f'''
+                        SELECT normalized_name, "Lineage" FROM products 
+                        WHERE normalized_name IN ({placeholders})
+                          AND "Lineage" IS NOT NULL AND "Lineage" != ''
+                    ''', batch_names)
+                    
+                    results = cursor.fetchall()
+                    for normalized_name, db_lineage in results:
+                        if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
+                            db_lineage_map[normalized_name] = str(db_lineage).strip()
+                except Exception as e:
+                    self.logger.warning(f"[ProductDB] Batch product lineage query failed: {e}")
+                    continue
+            
+            # Update DataFrame with product-level lineage from database
+            for normalized_name, db_lineage in db_lineage_map.items():
+                if normalized_name in normalized_to_indices:
+                    for idx in normalized_to_indices[normalized_name]:
+                        try:
+                            # Update lineage in DataFrame if it exists
+                            if 'Lineage' in self.df.columns:
+                                # Ensure category exists before assignment if Lineage is categorical
+                                if hasattr(self.df['Lineage'], 'cat'):
+                                    if db_lineage not in self.df['Lineage'].cat.categories:
+                                        self.df['Lineage'] = self.df['Lineage'].cat.add_categories([db_lineage])
+                                self.df.loc[idx, 'Lineage'] = db_lineage
+                                lineage_updates += 1
+                                self.logger.debug(f"[ProductDB] Loaded product-level lineage '{db_lineage}' for product at index {idx}")
+                        except Exception as e:
+                            self.logger.warning(f"[ProductDB] Failed to update lineage for index {idx}: {e}")
+            
+            cursor.close()
+            
+            # ALSO load strain-level lineage for products that don't have product-level lineage
+            if 'Product Strain' in self.df.columns:
+                # Get all unique strain names from the loaded data
+                strain_names = self.df['Product Strain'].dropna().unique()
+                strain_names = [str(name).strip() for name in strain_names if str(name).strip()]
+                
+                for strain_name in strain_names:
+                    try:
+                        strain_info = product_db.get_strain_info(strain_name)
+                        if strain_info and strain_info.get('sovereign_lineage'):
+                            # Update lineage in the dataframe for this strain (only for products without product-level lineage)
+                            strain_mask = self.df['Product Strain'] == strain_name
+                            if strain_mask.any():
+                                db_lineage = strain_info['sovereign_lineage']
                                 
-                                # Check if this is an edible product
-                                if product_type and product_type.strip().lower() in edible_types:
-                                    # For edibles, only use database lineage if it's explicitly high-CBD
-                                    if (db_lineage == 'CBD' and 
-                                        (product_type.strip().lower() == "high cbd edible liquid" or
-                                         (product_name and 'CBD' in product_name.upper() and 
-                                          any(word in product_name.upper() for word in ['HIGH', 'PURE', 'ISOLATE'])))):
-                                        # This is an explicitly high-CBD edible, use database lineage
-                                        self.df.loc[idx, 'Lineage'] = db_lineage
-                                        lineage_updates += 1
-                                        self.logger.debug(f"[ProductDB] Loaded lineage for high-CBD edible '{strain_name}': {db_lineage}")
-                                    else:
-                                        # Regular edible, keep MIXED lineage instead of database CBD
-                                        if db_lineage == 'CBD':
-                                            # Ensure MIXED category exists before assignment
-                                            if 'MIXED' not in self.df['Lineage'].cat.categories:
-                                                self.df['Lineage'] = self.df['Lineage'].cat.add_categories(['MIXED'])
-                                            self.df.loc[idx, 'Lineage'] = 'MIXED'
-                                            self.logger.debug(f"[ProductDB] Override: Regular edible '{strain_name}' kept MIXED instead of database CBD")
+                                # CRITICAL FIX: Be more conservative with edible lineage assignments
+                                # Don't override edible lineage assignments with database values unless they're explicitly high-CBD
+                                edible_types = {"edible (solid)", "edible (liquid)", "high cbd edible liquid", "tincture", "topical", "capsule"}
+                                
+                                for idx in self.df[strain_mask].index:
+                                    # Skip if this product already has lineage from product-level query
+                                    product_name = str(self.df.loc[idx, product_name_col]).strip() if product_name_col in self.df.columns else ''
+                                    if product_name:
+                                        normalized_name_check = product_db._normalize_product_name(product_name)
+                                        if normalized_name_check in db_lineage_map:
+                                            continue  # Already loaded from product-level query
+                                    
+                                    product_type = self.df.loc[idx, 'Product Type*']
+                                    
+                                    # Check if this is an edible product
+                                    if product_type and product_type.strip().lower() in edible_types:
+                                        # For edibles, only use database lineage if it's explicitly high-CBD
+                                        if (db_lineage == 'CBD' and 
+                                            (product_type.strip().lower() == "high cbd edible liquid" or
+                                             (product_name and 'CBD' in str(product_name).upper() and 
+                                              any(word in str(product_name).upper() for word in ['HIGH', 'PURE', 'ISOLATE'])))):
+                                            # This is an explicitly high-CBD edible, use database lineage
+                                            if 'Lineage' in self.df.columns:
+                                                if hasattr(self.df['Lineage'], 'cat'):
+                                                    if db_lineage not in self.df['Lineage'].cat.categories:
+                                                        self.df['Lineage'] = self.df['Lineage'].cat.add_categories([db_lineage])
+                                                self.df.loc[idx, 'Lineage'] = db_lineage
+                                                lineage_updates += 1
+                                                self.logger.debug(f"[ProductDB] Loaded strain-level lineage for high-CBD edible '{strain_name}': {db_lineage}")
                                         else:
-                                            # Ensure category exists before assignment
-                                            if db_lineage not in self.df['Lineage'].cat.categories:
-                                                self.df['Lineage'] = self.df['Lineage'].cat.add_categories([db_lineage])
+                                            # Regular edible, keep MIXED lineage instead of database CBD
+                                            if db_lineage == 'CBD':
+                                                if 'Lineage' in self.df.columns:
+                                                    if hasattr(self.df['Lineage'], 'cat'):
+                                                        if 'MIXED' not in self.df['Lineage'].cat.categories:
+                                                            self.df['Lineage'] = self.df['Lineage'].cat.add_categories(['MIXED'])
+                                                    self.df.loc[idx, 'Lineage'] = 'MIXED'
+                                                    self.logger.debug(f"[ProductDB] Override: Regular edible '{strain_name}' kept MIXED instead of database CBD")
+                                            else:
+                                                if 'Lineage' in self.df.columns:
+                                                    if hasattr(self.df['Lineage'], 'cat'):
+                                                        if db_lineage not in self.df['Lineage'].cat.categories:
+                                                            self.df['Lineage'] = self.df['Lineage'].cat.add_categories([db_lineage])
+                                                    self.df.loc[idx, 'Lineage'] = db_lineage
+                                                    lineage_updates += 1
+                                    else:
+                                        # Non-edible product, use database lineage as before
+                                        if 'Lineage' in self.df.columns:
+                                            if hasattr(self.df['Lineage'], 'cat'):
+                                                if db_lineage not in self.df['Lineage'].cat.categories:
+                                                    self.df['Lineage'] = self.df['Lineage'].cat.add_categories([db_lineage])
                                             self.df.loc[idx, 'Lineage'] = db_lineage
                                             lineage_updates += 1
-                                else:
-                                    # Non-edible product, use database lineage as before
-                                    self.df.loc[idx, 'Lineage'] = db_lineage
-                                    lineage_updates += 1
-                                    
-                            self.logger.debug(f"[ProductDB] Loaded lineage for '{strain_name}': {strain_info['sovereign_lineage']}")
-                except Exception as e:
-                    self.logger.warning(f"[ProductDB] Failed to load lineage for strain '{strain_name}': {e}")
+                                            
+                                self.logger.debug(f"[ProductDB] Loaded strain-level lineage for '{strain_name}': {strain_info['sovereign_lineage']}")
+                    except Exception as e:
+                        self.logger.warning(f"[ProductDB] Failed to load lineage for strain '{strain_name}': {e}")
             
             if lineage_updates > 0:
-                self.logger.info(f"[ProductDB] Loaded {lineage_updates} lineage updates from database")
+                self.logger.info(f"[ProductDB] Loaded {lineage_updates} lineage updates from database (product and strain level)")
             else:
                 self.logger.debug("[ProductDB] No lineage updates loaded from database")
                 
         except Exception as e:
             self.logger.error(f"[ProductDB] Failed to load lineage from database: {e}")
+    
+    def _load_doh_from_database(self):
+        """Load DOH values from database to ensure user changes persist after restart."""
+        try:
+            from .product_database import ProductDatabase
+            product_db = ProductDatabase(store_name=self._store_name)
+            
+            if not hasattr(self, 'df') or self.df is None:
+                return
+            
+            # Check if we have product name column
+            product_name_cols = ['Product Name*', 'ProductName', 'Product Name']
+            product_name_col = None
+            for col in product_name_cols:
+                if col in self.df.columns:
+                    product_name_col = col
+                    break
+            
+            if not product_name_col:
+                self.logger.debug("[ProductDB] No product name column found, skipping DOH load")
+                return
+            
+            self.logger.info("[ProductDB] Loading DOH values from database...")
+            
+            # Normalize all product names and create a mapping
+            # Use a dictionary to map normalized names to DataFrame indices
+            normalized_to_indices = {}
+            for idx in self.df.index:
+                try:
+                    product_name = str(self.df.loc[idx, product_name_col]).strip()
+                    if product_name and product_name.lower() not in ['', 'nan', 'none']:
+                        normalized_name = product_db._normalize_product_name(product_name)
+                        if normalized_name not in normalized_to_indices:
+                            normalized_to_indices[normalized_name] = []
+                        normalized_to_indices[normalized_name].append(idx)
+                except Exception as e:
+                    continue
+            
+            if not normalized_to_indices:
+                self.logger.debug("[ProductDB] No valid product names found, skipping DOH load")
+                return
+            
+            # Bulk query database for all DOH values at once
+            doh_updates = 0
+            conn = product_db._get_connection()
+            cursor = conn.cursor()
+            
+            # Create a mapping of normalized_name -> DOH value from database
+            db_doh_map = {}
+            
+            # Query in batches to avoid SQL parameter limits
+            normalized_names_list = list(normalized_to_indices.keys())
+            batch_size = 500  # SQLite supports up to 999 parameters per query
+            
+            for i in range(0, len(normalized_names_list), batch_size):
+                batch_names = normalized_names_list[i:i + batch_size]
+                placeholders = ','.join(['?'] * len(batch_names))
+                
+                try:
+                    cursor.execute(f'''
+                        SELECT normalized_name, "DOH" FROM products 
+                        WHERE normalized_name IN ({placeholders})
+                    ''', batch_names)
+                    
+                    results = cursor.fetchall()
+                    for normalized_name, db_doh in results:
+                        if db_doh and str(db_doh).strip() not in ['', 'None', 'nan']:
+                            db_doh_map[normalized_name] = db_doh
+                except Exception as e:
+                    self.logger.warning(f"[ProductDB] Batch DOH query failed: {e}")
+                    continue
+            
+            cursor.close()
+            
+            # Update DataFrame with DOH values from database
+            for normalized_name, db_doh in db_doh_map.items():
+                if normalized_name in normalized_to_indices:
+                    for idx in normalized_to_indices[normalized_name]:
+                        try:
+                            # Update DOH in DataFrame if it exists
+                            if 'DOH' in self.df.columns:
+                                current_doh = self.df.loc[idx, 'DOH']
+                                # Only update if different (avoid unnecessary updates)
+                                if str(current_doh).strip() != str(db_doh).strip():
+                                    self.df.loc[idx, 'DOH'] = db_doh
+                                    doh_updates += 1
+                            
+                            # Also update DOH Compliant (Yes/No) if it exists
+                            if 'DOH Compliant (Yes/No)' in self.df.columns:
+                                self.df.loc[idx, 'DOH Compliant (Yes/No)'] = db_doh
+                        except Exception as e:
+                            self.logger.debug(f"[ProductDB] Failed to update DOH for product at index {idx}: {e}")
+                            continue
+            
+            if doh_updates > 0:
+                self.logger.info(f"[ProductDB] Loaded {doh_updates} DOH updates from database")
+            else:
+                self.logger.debug("[ProductDB] No DOH updates loaded from database")
+                
+        except Exception as e:
+            self.logger.error(f"[ProductDB] Failed to load DOH from database: {e}")
     
     def enable_product_db_integration(self, enable: bool = True):
         """Enable or disable product database integration."""
@@ -2750,12 +3045,21 @@ class ExcelProcessor:
             except ImportError:
                 self.logger.debug("psutil not available for memory monitoring")
             
+            # Load lineage data from database FIRST to ensure changes persist
+            # This must happen before any database storage to preserve existing lineage
+            self._load_lineage_from_database()
+            
             # --- Product/Strain Database Integration (Background Processing) ---
             # Re-enabled to ensure lineage changes persist after reload
+            # NOTE: This runs AFTER _load_lineage_from_database() so the DataFrame
+            # has the latest lineage from database before storing back
             self._schedule_product_db_integration()
             
-            # Load lineage data from database to ensure changes persist
-            self._load_lineage_from_database()
+            # DISABLED: DOH, Price, and Product Type (High THC/CBD) must always come from Excel
+            # Excel is the source of truth for these fields and should always overwrite database values
+            # Previously, _load_doh_from_database() would load database values and overwrite Excel values
+            # which violated the requirement that Excel data takes precedence
+            # self._load_doh_from_database()
             
             # Cache the processed file
             self._file_cache[cache_key] = self.df.copy()
@@ -3416,6 +3720,7 @@ class ExcelProcessor:
                         logger.warning(f"CRITICAL FIX: No direct matches found for any of the {len(selected_tag_names)} selected tags")
             
             # CRITICAL FIX: If still no matches, try to get products from database directly
+            # NOTE: Excel values for DOH, Price, and Product Type always take priority
             if not canonical_selected:
                 logger.warning("CRITICAL FIX: No matches found in DataFrame, trying to get products from database...")
                 try:
@@ -3428,6 +3733,7 @@ class ExcelProcessor:
                         if db_products:
                             logger.info(f"CRITICAL FIX: Found {len(db_products)} products in database")
                             # Create records from database products
+                            # EXCEL PRIORITY: Database values are used as fallback only
                             records = []
                             for product in db_products:
                                 if isinstance(product, dict):
@@ -3438,24 +3744,29 @@ class ExcelProcessor:
                                             'Product Name*': product_name,
                                             'Description': product.get('Description', product_name),
                                             'DescAndWeight': self._process_description_from_product_name(product_name),
-                                            'Product Type*': product.get('Product Type*', 'flower'),  # Default to flower for new products
+                                            # EXCEL PRIORITY: Product Type (High THC/CBD) from database
+                                            # This will be overwritten if Excel has this data
+                                            'Product Type*': product.get('Product Type*', 'flower'),
                                             'Product Brand': product.get('Product Brand', ''),
                                             'Product Strain': product.get('Product Strain', ''),
                                             'Lineage': product.get('Lineage', 'HYBRID'),  # Default to HYBRID
                                             'Vendor': product.get('Vendor/Supplier*', product.get('Vendor', '')),
-                                            'Price': product.get('Price', ''),  # Database uses 'Price' field
-                                            'Price*': product.get('Price', ''),  # Also set Price* for compatibility
+                                            # EXCEL PRIORITY: Price from database (fallback only)
+                                            'Price': product.get('Price', ''),
+                                            'Price*': product.get('Price', ''),
                                             'Weight*': product.get('Weight*', ''),
                                             'Quantity*': product.get('Quantity*', '1'),
                                             'Units': product.get('Units', 'g'),
                                             'THC test result': product.get('THC test result', ''),
                                             'CBD test result': product.get('CBD test result', ''),
                                             'Test result unit (% or mg)': product.get('Test result unit (% or mg)', '%'),
+                                            # EXCEL PRIORITY: DOH from database (fallback only)
                                             'DOH': product.get('DOH', ''),
+                                            'DOH Compliant (Yes/No)': product.get('DOH', ''),
                                             'Source': 'Database'
                                         }
                                         records.append(record)
-                                        logger.info(f"CRITICAL FIX: Created database record for '{product_name}'")
+                                        logger.info(f"🔍 DOH EXCEL PROCESSOR: Created database record for '{product_name}' with DOH='{product.get('DOH', '')}', Price='{product.get('Price', '')}', Product Type='{product.get('Product Type*', '')}'")
                             
                             if records:
                                 logger.info(f"CRITICAL FIX: Created {len(records)} records from database")
@@ -3481,36 +3792,40 @@ class ExcelProcessor:
                         json_matched_products = cache.get(json_matched_cache_key)
                         if json_matched_products:
                             logger.info(f"CRITICAL FIX: Found {len(json_matched_products)} JSON matched products in cache")
-                            # Create records directly from cached JSON matched products with DATABASE PRIORITY
+                            # Create records directly from cached JSON matched products
+                            # EXCEL PRIORITY: These values are from database/cache and will be overwritten if Excel has data
                             records = []
                             for product in json_matched_products:
                                 if isinstance(product, dict):
                                     product_name = product.get('Product Name*', product.get('ProductName', ''))
                                     if product_name in selected_tag_names:
-                                        # DATABASE PRIORITY: Ensure all fields come from database with safe defaults
+                                        # EXCEL PRIORITY: Database/cache values used as fallback only
                                         record = {
                                             'ProductName': product_name,
                                             'Product Name*': product_name,
                                             'Description': product.get('Description', product_name),
                                             'DescAndWeight': self._process_description_from_product_name(product_name),  # Use Excel processor formula
-                                            'Product Type*': product.get('Product Type*', 'flower'),  # Default to flower for new products
+                                            # EXCEL PRIORITY: Product Type (High THC/CBD) from cache (fallback only)
+                                            'Product Type*': product.get('Product Type*', 'flower'),
                                             'Product Brand': product.get('Product Brand', ''),
                                             'Product Strain': product.get('Product Strain', ''),
                                             'Lineage': product.get('Lineage', 'HYBRID'),  # Default to HYBRID
                                             'Vendor': product.get('Vendor/Supplier*', product.get('Vendor', '')),
-                                            'Price': product.get('Price', ''),  # Database uses 'Price' field
-                                            'Price*': product.get('Price', ''),  # Also set Price* for compatibility
+                                            # EXCEL PRIORITY: Price from cache (fallback only)
+                                            'Price': product.get('Price', ''),
+                                            'Price*': product.get('Price', ''),
                                             'Weight*': product.get('Weight*', ''),
                                             'Quantity*': product.get('Quantity*', '1'),
                                             'Units': product.get('Units', 'g'),
                                             'THC test result': product.get('THC test result', ''),
                                             'CBD test result': product.get('CBD test result', ''),
                                             'Test result unit (% or mg)': product.get('Test result unit (% or mg)', '%'),
+                                            # EXCEL PRIORITY: DOH from cache (fallback only)
                                             'DOH': product.get('DOH', ''),
                                             'Source': product.get('Source', 'JSON Cache')
                                         }
                                         records.append(record)
-                                        logger.info(f"CRITICAL FIX: Created cache record for '{product_name}'")
+                                        logger.info(f"CRITICAL FIX: Created cache record for '{product_name}' with DOH='{product.get('DOH', '')}', Price='{product.get('Price', '')}', Product Type='{product.get('Product Type*', '')}')")
                             
                             if records:
                                 logger.info(f"CRITICAL FIX: Created {len(records)} records from cached products")
@@ -3584,6 +3899,14 @@ class ExcelProcessor:
             records = filtered_df.to_dict('records')
             logger.debug(f"Converted to {len(records)} records")
             
+            # Debug: Log DOH values for ALL records (not just first 3)
+            logger.info(f"🔍 DOH RECORD RETRIEVAL: Logging DOH values for all {len(records)} records:")
+            for i, record in enumerate(records):
+                record_name = record.get('Product Name*', 'Unknown')
+                doh_value = record.get('DOH', 'NOT_FOUND')
+                doh_compliant = record.get('DOH Compliant (Yes/No)', 'NOT_FOUND')
+                logger.info(f"🔍 DOH RECORD RETRIEVAL #{i+1}: '{record_name}' -> DOH='{doh_value}', DOH Compliant='{doh_compliant}'")
+            
             # Sort records by lineage order, then by the order they appear in selected_tags
             lineage_order = [
                 'SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA',
@@ -3626,7 +3949,9 @@ class ExcelProcessor:
                     description = self._process_description_from_product_name(description or product_name)
                     product_type = record.get('Product Type*', '').strip().lower()
                     
-                    # Look up database weight and units as fallback
+                    # Look up database weight and units as fallback ONLY
+                    # EXCEL PRIORITY: DOH, Price, and Product Type are NEVER taken from database
+                    # They always come from Excel when Excel data exists
                     db_weight = ''
                     db_units = ''
                     try:
@@ -3636,6 +3961,8 @@ class ExcelProcessor:
                             db_products = product_db.get_products_by_names([product_name])
                             if db_products and len(db_products) > 0:
                                 db_product = db_products[0]
+                                # ONLY get weight and units from database as fallback
+                                # DOH, Price, and Product Type are from Excel only
                                 db_weight = db_product.get('Weight*', '')
                                 db_units = db_product.get('Units', '')
                                 logger.debug(f"Found database weight/units for '{product_name}': {db_weight}/{db_units}")
@@ -4727,24 +5054,43 @@ class ExcelProcessor:
         """Update DOH status for a specific product in the current data."""
         try:
             if self.df is None:
-                self.logger.error("No data loaded")
+                self.logger.error("❌ DOH EXCEL UPDATE: No data loaded")
                 return False
-            
+
             # Find the tag in the DataFrame and update its DOH status
-            self.logger.info(f"Looking for tag: '{tag_name}' to update DOH to: '{new_doh}'")
-            
+            self.logger.info(f"🔍 DOH EXCEL UPDATE: Looking for tag: '{tag_name}' to update DOH to: '{new_doh}'")
+
             # Try different column names for product names
             product_name_columns = ['ProductName', 'Product Name*', 'Product Name']
             mask = None
-            
+
             for col in product_name_columns:
                 if col in self.df.columns:
+                    # First try exact match
                     mask = self.df[col] == tag_name
+                    self.logger.info(f"🔍 DOH EXCEL UPDATE: Checking column '{col}' for exact '{tag_name}', found {mask.sum()} matches")
                     if mask.any():
                         break
-            
+                    # Fallback: normalized comparison to handle non-breaking hyphens/case/extra spaces
+                    try:
+                        normalized_tag = normalize_name(tag_name)
+                        normalized_series = self.df[col].astype(str).map(normalize_name)
+                        norm_mask = normalized_series == normalized_tag
+                        self.logger.info(f"🔍 DOH EXCEL UPDATE: Checking column '{col}' for normalized '{normalized_tag}', found {norm_mask.sum()} matches")
+                        if norm_mask.any():
+                            mask = norm_mask
+                            break
+                    except Exception as norm_err:
+                        self.logger.warning(f"DOH EXCEL UPDATE: Normalized compare failed on column '{col}': {norm_err}")
+
             if mask is None or not mask.any():
-                self.logger.error(f"Tag '{tag_name}' not found in any product name column")
+                self.logger.error(f"❌ DOH EXCEL UPDATE: Tag '{tag_name}' not found in any product name column")
+                self.logger.error(f"❌ DOH EXCEL UPDATE: Available columns: {list(self.df.columns)}")
+                # Show first 5 product names for debugging
+                for col in product_name_columns:
+                    if col in self.df.columns:
+                        self.logger.error(f"❌ DOH EXCEL UPDATE: Sample product names in column '{col}': {list(self.df[col])[:5]}")
+                        break
                 return False
             
             # Get the original DOH status for logging
@@ -4769,10 +5115,14 @@ class ExcelProcessor:
                 updated_count += 1
             
             if updated_count > 0:
-                self.logger.info(f"Successfully updated DOH for '{tag_name}' from '{original_doh}' to '{new_doh}' ({updated_count} columns updated)")
+                self.logger.info(f"✅ DOH EXCEL UPDATE: Successfully updated DOH for '{tag_name}' from '{original_doh}' to '{new_doh}' ({updated_count} columns updated)")
+                # Verify the update worked
+                if 'DOH' in self.df.columns:
+                    verify_value = self.df.loc[mask, 'DOH'].iloc[0]
+                    self.logger.info(f"✅ DOH EXCEL UPDATE: Verified - DataFrame now has DOH='{verify_value}' for '{tag_name}'")
                 return True
             else:
-                self.logger.error(f"No DOH columns found to update for '{tag_name}'")
+                self.logger.error(f"❌ DOH EXCEL UPDATE: No DOH columns found to update for '{tag_name}'")
                 return False
                 
         except Exception as e:
@@ -6230,18 +6580,18 @@ class ExcelProcessor:
             # This prevents writing to different database files in different environments
             try:
                 # Try to get the global database instance first
-                from app import get_product_database
-                product_db = get_product_database()
-                logger.info("Using global product database instance")
-            except ImportError:
-                # Fallback to creating a new instance if app module not available
-                from src.core.data.product_database import ProductDatabase
-                import os
-                current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-                db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
+                from app import get_product_database, get_current_store_name
+                store_name = get_current_store_name()
+                product_db = get_product_database(store_name)
+                logger.info(f"Using global product database instance for store: {store_name}")
+            except (ImportError, RuntimeError):
+                # Fallback to creating a new instance if app module not available or no request context
+                from src.core.data.product_database import ProductDatabase, get_database_path
+                store_name = getattr(self, '_store_name', 'AGT_Bothell')
+                db_path = get_database_path(store_name)
                 product_db = ProductDatabase(db_path)
                 product_db.init_database()
-                logger.info(f"Created new product database instance at: {db_path}")
+                logger.info(f"Created new product database instance for store {store_name} at: {db_path}")
             
             logger.info(f"Starting database storage for Excel upload: {len(df)} rows from {source_file}")
             

@@ -23,7 +23,8 @@ const getUniqueLineages = () => {
 };
 
 function createTagRow(tag) {
-    const lineage = tag.Lineage || tag.lineage || 'MIXED';
+  // Always use normalized 'Lineage' field from backend if present
+  const lineage = tag.Lineage || tag.lineage || tag.currentLineage || tag.canonical_lineage || 'MIXED';
     const dohStatus = tag.DOH || tag['DOH Compliant (Yes/No)'] || 'No';
     
     // For JSON matched tags and educated guess tags, prioritize the original display information over derived product names
@@ -59,8 +60,10 @@ function createTagRow(tag) {
                 <div class="d-flex align-items-center">
                     <select class="form-select form-select-sm doh-dropdown doh-dropdown-mini" 
                             onchange="TagsTable.handleDohChange(this, '${tagName}')">
-                        <option value="Yes" ${dohStatus === 'Yes' ? 'selected' : ''}>Yes</option>
-                        <option value="No" ${dohStatus === 'No' ? 'selected' : ''}>No</option>
+                        <option value="NONE" ${(!dohStatus || dohStatus === 'No' || dohStatus === 'NONE') ? 'selected' : ''}>None</option>
+                        <option value="DOH" ${dohStatus === 'DOH' || dohStatus === 'Yes' ? 'selected' : ''}>DOH</option>
+                        <option value="THC" ${dohStatus === 'THC' ? 'selected' : ''}>THC</option>
+                        <option value="CBD" ${dohStatus === 'CBD' ? 'selected' : ''}>CBD</option>
                     </select>
                 </div>
             </td>
@@ -104,7 +107,8 @@ class TagsTable {
 
   // Render a tag row as a div with an inline dropdown for lineage and DOH
   static createTagRow(tag, isSelected = false) {
-    const lineage = tag.Lineage || tag.lineage || 'MIXED';
+  // Always use normalized 'Lineage' field from backend if present
+  const lineage = tag.Lineage || tag.lineage || tag.currentLineage || tag.canonical_lineage || 'MIXED';
     const dohStatus = tag.DOH || tag['DOH Compliant (Yes/No)'] || 'No';
     console.log('DOH Status for tag:', tag['Product Name*'] || tag.ProductName, '=', dohStatus); // Debug log
     
@@ -184,10 +188,12 @@ class TagsTable {
       return `<option value="${lin}" ${selected}>${displayName}</option>`;
     }).join('');
 
-    // DOH dropdown options
+    // DOH dropdown options - map stored values to display values
     const dohDropdownOptions = [
-      `<option value="Yes" ${dohStatus === 'Yes' ? 'selected' : ''}>Yes</option>`,
-      `<option value="No" ${dohStatus === 'No' ? 'selected' : ''}>No</option>`
+      `<option value="NONE" ${(!dohStatus || dohStatus === 'No' || dohStatus === 'NONE') ? 'selected' : ''}>None</option>`,
+      `<option value="DOH" ${dohStatus === 'DOH' || dohStatus === 'Yes' ? 'selected' : ''}>DOH</option>`,
+      `<option value="THC" ${dohStatus === 'THC' ? 'selected' : ''}>THC</option>`,
+      `<option value="CBD" ${dohStatus === 'CBD' ? 'selected' : ''}>CBD</option>`
     ].join('');
     
     // Debug: Log DOH dropdown creation
@@ -271,32 +277,50 @@ class TagsTable {
         body: JSON.stringify({ tag_name: tagName, doh: newDohStatus })
       });
       
+      const data = await response.json();
+      
       if (!response.ok) {
-        const error = await response.json();
-        console.error(`❌ API Error: ${error.error || "Failed to update DOH"}`);
-        throw new Error(error.error || "Failed to update DOH");
+        console.error(`❌ API Error: ${data.error || "Failed to update DOH"}`);
+        throw new Error(data.error || "Failed to update DOH");
       }
-
-      // Update the local UI
-      tagRow.dataset.doh = newDohStatus;
+      
+      if (!data.success) {
+        console.error(`❌ Update failed: ${data.message || data.error || "Unknown error"}`);
+        throw new Error(data.message || data.error || "Failed to update DOH status");
+      }
+      
+      // CRITICAL: Normalize DOH value for storage (backend stores 'No' for 'NONE', but UI shows 'NONE')
+      // Map UI dropdown value to storage value: NONE -> No, everything else stays the same
+      const normalizedDoh = newDohStatus === 'NONE' ? 'No' : newDohStatus;
+      
+      // Update the local UI dataset
+      tagRow.dataset.doh = newDohStatus; // Keep UI showing the dropdown value
       
       // Show success message
-      console.log(`✅ Successfully updated DOH for ${tagName} (${oldDohStatus} → ${newDohStatus})`);
+      console.log(`✅ Successfully updated DOH for ${tagName} (${oldDohStatus} → ${newDohStatus}), stored as: ${normalizedDoh}`);
       
-      // Update the tag in TagManager state if it exists
+      // Update the tag in TagManager state if it exists - use normalized value for storage
       if (typeof TagManager !== 'undefined' && TagManager.state) {
         const tag = TagManager.state.tags?.find(t => t['Product Name*'] === tagName);
         if (tag) {
-          tag.DOH = newDohStatus;
-          tag['DOH Compliant (Yes/No)'] = newDohStatus;
-          console.log(`📝 Updated tag DOH in TagManager.state.tags`);
+          tag.DOH = normalizedDoh;
+          tag.doh = normalizedDoh;
+          tag['DOH Compliant (Yes/No)'] = normalizedDoh;
+          console.log(`📝 Updated tag DOH in TagManager.state.tags to: ${normalizedDoh}`);
         }
         
         const originalTag = TagManager.state.originalTags?.find(t => t['Product Name*'] === tagName);
         if (originalTag) {
-          originalTag.DOH = newDohStatus;
-          originalTag['DOH Compliant (Yes/No)'] = newDohStatus;
-          console.log(`📝 Updated tag DOH in TagManager.state.originalTags`);
+          originalTag.DOH = normalizedDoh;
+          originalTag.doh = normalizedDoh;
+          originalTag['DOH Compliant (Yes/No)'] = normalizedDoh;
+          console.log(`📝 Updated tag DOH in TagManager.state.originalTags to: ${normalizedDoh}`);
+        }
+        
+        // Update DOH in all displays (available and selected tags)
+        if (typeof TagManager.updateDohInAllDisplays === 'function') {
+          TagManager.updateDohInAllDisplays(tagName, newDohStatus);
+          console.log(`📝 Propagated DOH update to all displays`);
         }
       }
 
@@ -347,90 +371,35 @@ class TagsTable {
         throw new Error(error.error || "Failed to update lineage");
       }
 
-      // Update the local UI
-      if (tagRow) {
-        tagRow.dataset.lineage = newLineage;
-        // Force a style recalculation to apply the new lineage color
-        const originalDisplay = tagRow.style.display;
-        tagRow.style.display = 'none';
-        tagRow.offsetHeight; // Trigger reflow
-        tagRow.style.display = originalDisplay;
-      } else {
-        const tagItem = selectElement.closest(".tag-item");
-        if (tagItem) {
-          tagItem.dataset.lineage = newLineage;
-          // Force a style recalculation to apply the new lineage color
-          const originalDisplay = tagItem.style.display;
-          tagItem.style.display = 'none';
-          tagItem.offsetHeight; // Trigger reflow
-          tagItem.style.display = originalDisplay;
-        }
-      }
-      
       // Show success message
+      const result = await response.json();
       console.log(`✅ Successfully updated lineage for ${tagName} (${oldLineage} → ${newLineage})`);
 
-      // Update the tag in TagManager state without refreshing the entire list
-      const tag = TagManager.state.tags.find(t => t['Product Name*'] === tagName);
-      if (tag) {
-        tag.lineage = newLineage;
-        tag.Lineage = newLineage; // Also update Lineage field for JSON matched tags
-        console.log(`📝 Updated tag in TagManager.state.tags`);
+      // Always fetch latest tags from backend to ensure UI matches backend normalization
+      if (typeof TagManager !== 'undefined' && typeof TagManager.fetchAndUpdateAvailableTags === 'function') {
+        await TagManager.fetchAndUpdateAvailableTags();
+        console.log('✅ Refreshed available tags from backend after lineage update');
       }
-      
-      // Update the tag in original tags as well
-      const originalTag = TagManager.state.originalTags.find(t => t['Product Name*'] === tagName);
-      if (originalTag) {
-        originalTag.lineage = newLineage;
-        originalTag.Lineage = newLineage; // Also update Lineage field for JSON matched tags
-        console.log(`📝 Updated tag in TagManager.state.originalTags`);
-      }
-      
-      // CRITICAL FIX: For JSON matched tags, update the database lineage value
-      // Check if this is a JSON matched tag
-      const isJsonMatched = tag && (tag.Source === 'JSON Match' || (tag.Source && tag.Source.includes('JSON')));
-      if (isJsonMatched) {
-        console.log(`🔄 This is a JSON matched tag, updating Lineage field`);
-        // For JSON matched tags, we need to also update the Lineage field specifically
-        if (tag) {
-          tag.Lineage = newLineage;
-          tag.lineage = newLineage;
-        }
-        if (originalTag) {
-          originalTag.Lineage = newLineage;
-          originalTag.lineage = newLineage;
-        }
-      }
-      
-      // CRITICAL FIX: Don't fetch from backend - just update the local selected tag if it exists
-      if (TagManager.state.selectedTags.has(tagName)) {
-        console.log(`🔄 Updating local selected tag for ${tagName} - no backend fetch needed`);
-        // Find the tag in the selected tags list and update its lineage
-        const selectedTagsList = document.querySelectorAll('#selectedTags .tag-item');
-        selectedTagsList.forEach(tagElement => {
-          const tagData = tagElement.dataset;
-          if (tagData.productName === tagName) {
-            // Update the lineage in the tag element
-            const lineageSelect = tagElement.querySelector('.lineage-dropdown');
-            if (lineageSelect) {
-              lineageSelect.value = newLineage;
-            }
-            // Update the data-lineage attribute for CSS coloring
-            tagElement.setAttribute('data-lineage', newLineage);
-            console.log(`✅ Updated lineage in selected tag UI for ${tagName}`);
-          }
-        });
+      if (typeof TagManager !== 'undefined' && typeof TagManager.fetchAndUpdateSelectedTags === 'function') {
+        await TagManager.fetchAndUpdateSelectedTags();
+        console.log('✅ Refreshed selected tags from backend after lineage update');
       }
 
-      // CRITICAL FIX: Don't refresh available tags - just update the UI directly
-      // This prevents the available tags list from being wiped when lineage changes
-      console.log('✅ Lineage updated successfully - skipping full refresh to preserve available tags');
+      // Optionally, show brief visual feedback
+      selectElement.style.backgroundColor = '#d4edda';
+      setTimeout(() => {
+        selectElement.style.backgroundColor = '';
+      }, 500);
 
     } catch (error) {
       console.error('Error updating lineage:', error);
-              console.error("Failed to update lineage:", error.message);
+      console.error("Failed to update lineage:", error.message);
       // Revert the select element to the old value
       selectElement.value = oldLineage;
+      selectElement.style.backgroundColor = '#f8d7da';
+      setTimeout(() => {
+        selectElement.style.backgroundColor = '';
+      }, 1000);
     }
   }
 
@@ -583,6 +552,12 @@ class TagsTable {
     container.querySelectorAll('.tag-checkbox').forEach(checkbox => {
       checkbox.addEventListener('change', function(e) {
         try {
+          // CRITICAL FIX: Don't process during deselection to prevent filter clearing
+          if (TagManager.state.isProcessingDeselection) {
+            console.log('🚫 TagsTable: Skipping checkbox handler - currently processing deselection');
+            return;
+          }
+          
           if (this.checked) {
             TagManager.state.selectedTags.add(this.value);
           } else {
@@ -622,6 +597,13 @@ class TagsTable {
                 console.log('Found checkbox handler, triggering update');
                 // Don't trigger the handler, just ensure UI consistency
               }
+              
+              // Immediately update hierarchical checkboxes after unchecking
+              requestAnimationFrame(() => {
+                if (TagManager.updateSelectAllCheckboxes) {
+                  TagManager.updateSelectAllCheckboxes();
+                }
+              });
             } else {
               console.warn(`⚠️ Could not find available tags checkbox for: ${tagName}`);
             }
@@ -644,31 +626,9 @@ class TagsTable {
       });
     });
 
-    // Add click listeners to tag items to toggle checkboxes
+    // Require explicit checkbox clicks; do not toggle selection on tag body clicks
     container.querySelectorAll('.tag-item').forEach(tagItem => {
-      tagItem.addEventListener('click', function(e) {
-        try {
-          // Don't trigger if clicking on the checkbox itself or lineage dropdown
-          if (e.target.classList.contains('tag-checkbox') || 
-              e.target.classList.contains('lineage-dropdown') || 
-              e.target.closest('.lineage-dropdown')) {
-            return;
-          }
-          
-          // Find the checkbox within this tag item
-          const checkbox = this.querySelector('.tag-checkbox');
-          if (checkbox) {
-            // Toggle and let change bubble so TagManager state sync runs
-            checkbox.checked = !checkbox.checked;
-            checkbox.dispatchEvent(new Event('change', { bubbles: true }));
-          }
-        } catch (error) {
-          console.error('Error in tag item click handler:', error);
-          // Prevent the error from causing the page to exit
-          e.preventDefault();
-          e.stopPropagation();
-        }
-      });
+      tagItem.style.cursor = 'default';
       
       // Add right-click context menu for strain lineage editing
       tagItem.addEventListener('contextmenu', function(e) {

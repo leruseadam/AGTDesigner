@@ -779,6 +779,9 @@ const AppLoadingSplash = {
             setTimeout(() => {
                 mainContent.classList.add('loaded');
                 mainContent.style.opacity = '1';
+                if (window.scaleAppToFit) {
+                    try { window.scaleAppToFit(); } catch (e) { console.warn('scaleAppToFit error', e); }
+                }
             }, 100);
         }
         
@@ -824,8 +827,9 @@ const AppLoadingSplash = {
 
 const TagManager = {
     state: {
-        selectedTags: new Set(), // Memory-efficient Set
-        persistentSelectedTags: new Set(), // Memory-efficient Set
+        selectedTags: new Set(),
+        isProcessingDeselection: false, // Flag to prevent filter updates during deselection
+        persistentSelectedTags: [], // Array to maintain order
         initialized: false,
         filters: {},
         loading: false,
@@ -958,14 +962,36 @@ const TagManager = {
                         filterElement.value = currentValue;
                     }
                 } else {
-                    filterElement.value = '';
+                    // CRITICAL FIX: Only clear filter if it's not a valid current value that the user selected
+                    if (currentValue && currentValue.trim() !== '') {
+                        console.log(`⚠️ Filter value "${currentValue}" not in sorted values, keeping it anyway`);
+                        const option = document.createElement('option');
+                        option.value = currentValue;
+                        option.textContent = currentValue;
+                        option.style.color = '#666';
+                        filterElement.appendChild(option);
+                        filterElement.value = currentValue;
+                    } else {
+                        filterElement.value = '';
+                    }
                 }
             } else {
                 // Only restore if value is still valid (for explicit filter clearing)
                 if (currentValue && sortedValues.includes(currentValue)) {
                     filterElement.value = currentValue;
                 } else {
-                    filterElement.value = '';
+                    // CRITICAL FIX: Only clear filter if it's not a valid current value that the user selected
+                    if (currentValue && currentValue.trim() !== '') {
+                        console.log(`⚠️ Filter value "${currentValue}" not in sorted values (explicit), keeping it anyway`);
+                        const option = document.createElement('option');
+                        option.value = currentValue;
+                        option.textContent = currentValue;
+                        option.style.color = '#666';
+                        filterElement.appendChild(option);
+                        filterElement.value = currentValue;
+                    } else {
+                        filterElement.value = '';
+                    }
                 }
             }
         });
@@ -973,6 +999,15 @@ const TagManager = {
 
     async updateFilterOptions() {
         try {
+            console.log('🔍 updateFilterOptions() called');
+            console.trace('Call stack for updateFilterOptions');
+            
+            // CRITICAL FIX: Don't update filter options during tag deselection to prevent clearing user's filters
+            if (this.state.isProcessingDeselection) {
+                console.log('🚫 SKIPPING updateFilterOptions - currently processing deselection');
+                return;
+            }
+            
             // Fast path: skip if no original options (Mac-like speed)
             if (!this.state.originalFilterOptions.vendor) {
                 return;
@@ -1031,7 +1066,7 @@ const TagManager = {
                 
                 // Check lineage filter - only apply if not empty and not "All"
                 if (currentFilters.lineage && currentFilters.lineage.trim() !== '' && currentFilters.lineage.toLowerCase() !== 'all') {
-                    const tagLineage = (tag.Lineage || tag.lineage || '').toString().trim();
+                    const tagLineage = (tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '').toString().trim();
                     if (tagLineage.toLowerCase() !== currentFilters.lineage.toLowerCase()) {
                         return false;
                     }
@@ -1121,7 +1156,9 @@ const TagManager = {
                     const normalizedType = normalizeProductType(productType);
                     if (normalizedType) availableOptions.productType.add(normalizedType);
                 }
-                if (tag.Lineage || tag.lineage) availableOptions.lineage.add((tag.Lineage || tag.lineage || '').toString().trim());
+                if (tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage) {
+                    availableOptions.lineage.add((tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '').toString().trim());
+                }
                 // CRITICAL FIX: Check all possible weight field variations for options generation
                 if (tag['Weight*'] || tag.weight || tag.weightWithUnits || tag.WeightWithUnits || tag.WeightUnits || tag.CombinedWeight) {
                     // Always use the combined value for display and filtering - check all possible sources
@@ -1207,7 +1244,20 @@ const TagManager = {
                     if (currentValue && sortedOptions.includes(currentValue)) {
                         filterElement.value = currentValue;
                     } else {
-                        filterElement.value = '';
+                        // CRITICAL FIX: Only clear filter if it's not a valid current value that the user selected
+                        // Don't clear just because it's not in the filtered options - preserve user's intent
+                        if (currentValue && currentValue.trim() !== '') {
+                            console.log(`⚠️ Filter value "${currentValue}" not in filtered options, keeping it anyway`);
+                            // Add the current value back if it's not empty and user has selected it
+                            const option = document.createElement('option');
+                            option.value = currentValue;
+                            option.textContent = currentValue;
+                            option.style.color = '#666'; // Gray out to indicate it's not currently available
+                            filterElement.appendChild(option);
+                            filterElement.value = currentValue;
+                        } else {
+                            filterElement.value = '';
+                        }
                     }
                 }
             });
@@ -1219,6 +1269,9 @@ const TagManager = {
 
     applyFilters() {
         console.log('🔍 applyFilters() called');
+        console.trace('Call stack for applyFilters');
+        // Preserve scroll position when filters are applied
+        const savedScroll = this._saveAvailableScrollPosition();
         // Fast path: show all if no filters (Mac-like speed)
         const vendorFilter = document.getElementById('vendorFilter')?.value || '';
         const brandFilter = document.getElementById('brandFilter')?.value || '';
@@ -1242,6 +1295,10 @@ const TagManager = {
             this.state.filterCache = null;
             this.debouncedUpdateAvailableTags(this.state.originalTags, null);
             this.renderActiveFilters();
+            // Restore scroll after filter update
+            requestAnimationFrame(() => {
+                this._restoreAvailableScrollPosition(savedScroll);
+            });
             return;
         }
         
@@ -1262,6 +1319,10 @@ const TagManager = {
             // Always pass original tags to preserve persistent selections
             this.debouncedUpdateAvailableTags(this.state.originalTags, this.state.filterCache.result);
             this.renderActiveFilters();
+            // Restore scroll after filter update
+            requestAnimationFrame(() => {
+                this._restoreAvailableScrollPosition(savedScroll);
+            });
             return;
         }
         
@@ -1315,7 +1376,7 @@ const TagManager = {
             
             // Check lineage filter - only apply if not empty and not "All"
             if (lineageFilter && lineageFilter.trim() !== '' && lineageFilter.toLowerCase() !== 'all') {
-                const tagLineage = (tag.Lineage || tag.lineage || '').toString().trim();
+                const tagLineage = (tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '').toString().trim();
                 if (tagLineage.toLowerCase() !== lineageFilter.toLowerCase()) {
                     return false;
                 }
@@ -1426,6 +1487,10 @@ const TagManager = {
         
         this.updateSelectedTags(selectedTagObjects);
         this.renderActiveFilters();
+        // Restore scroll after filter update
+        requestAnimationFrame(() => {
+            this._restoreAvailableScrollPosition(savedScroll);
+        });
     },
 
     handleSearch(listId, searchInputId) {
@@ -1624,7 +1689,7 @@ const TagManager = {
             const productType = VALID_PRODUCT_TYPES.includes(normalizedProductType.toLowerCase())
               ? normalizedProductType.split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' ')
               : 'Unknown Type';
-            const lineage = tag.lineage || tag['Lineage'] || 'MIXED';
+            const lineage = tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || 'MIXED';
             const weight = (tag.weight || tag['Weight*'] || tag['Weight'] || tag['WeightUnits'] || '').toString().trim();
             // CRITICAL FIX: Ensure weightWithUnits is properly populated from multiple possible sources
             const weightWithUnits = (tag.weightWithUnits || tag.WeightWithUnits || tag.WeightUnits || 
@@ -1760,6 +1825,12 @@ const TagManager = {
 
     // Debounced version of updateAvailableTags to prevent multiple rapid calls
     debouncedUpdateAvailableTags: debounce(function(originalTags, filteredTags = null) {
+        // CRITICAL FIX: Don't update available tags during deselection
+        if (this.state.isProcessingDeselection) {
+            console.log('🚫 SKIPPING debouncedUpdateAvailableTags - currently processing deselection');
+            return;
+        }
+        
         // Reduced logging to prevent console spam
         // console.log('debouncedUpdateAvailableTags called with:', {
         //     originalTagsLength: originalTags ? originalTags.length : 0,
@@ -1782,6 +1853,63 @@ const TagManager = {
         });
     }, 300),
 
+    // Helpers to preserve scroll position of the available list across re-renders
+    _saveAvailableScrollPosition() {
+        const container = document.getElementById('availableTags');
+        if (!container) return null;
+        const scrollTop = container.scrollTop;
+        let anchorName = null;
+        const items = container.querySelectorAll('.tag-item');
+        for (const item of items) {
+            if (item.offsetTop >= scrollTop) {
+                anchorName = item.getAttribute('data-tag-name');
+                break;
+            }
+        }
+        return { scrollTop, anchorName };
+    },
+    _restoreAvailableScrollPosition(saved) {
+        if (!saved) return;
+        const container = document.getElementById('availableTags');
+        if (!container) return;
+        
+        // Try immediate restoration first
+        container.scrollTop = saved.scrollTop;
+        
+        // Then try after first paint with anchor fallback
+        requestAnimationFrame(() => {
+            container.scrollTop = saved.scrollTop;
+            // Try anchor-based restoration if direct scroll didn't work well
+            if (saved.anchorName) {
+                const el = container.querySelector(`.tag-item[data-tag-name="${CSS.escape(saved.anchorName)}"]`);
+                if (el) {
+                    const currentScroll = container.scrollTop;
+                    const targetScroll = el.offsetTop;
+                    // If we're significantly off, use anchor
+                    if (Math.abs(currentScroll - saved.scrollTop) > 50 || Math.abs(currentScroll - targetScroll) < Math.abs(currentScroll - saved.scrollTop)) {
+                        container.scrollTop = targetScroll;
+                    }
+                }
+            }
+        });
+        
+        // Final attempt after a delay for slower DOM updates
+        setTimeout(() => {
+            const currentScroll = container.scrollTop;
+            if (Math.abs(currentScroll - saved.scrollTop) > 100) {
+                // Still far off, try again
+                container.scrollTop = saved.scrollTop;
+                // Final anchor attempt
+                if (saved.anchorName) {
+                    const el = container.querySelector(`.tag-item[data-tag-name="${CSS.escape(saved.anchorName)}"]`);
+                    if (el) {
+                        container.scrollTop = el.offsetTop;
+                    }
+                }
+            }
+        }, 150);
+    },
+
     // CRITICAL FIX: Render JSON matched tags directly without any filtering or organization
     renderJsonMatchedTags(tags) {
         console.log('CRITICAL FIX: Rendering JSON matched tags directly, count:', tags.length);
@@ -1791,6 +1919,8 @@ const TagManager = {
             console.error('Available tags container not found');
             return;
         }
+        // Preserve scroll position during re-render
+        const savedScroll = this._saveAvailableScrollPosition();
 
         // Clear existing content
         availableTagsContainer.innerHTML = '';
@@ -1806,6 +1936,8 @@ const TagManager = {
         });
 
         availableTagsContainer.appendChild(tagList);
+        // Restore previous scroll position
+        this._restoreAvailableScrollPosition(savedScroll);
         
         // Add event listeners
         this.updateSelectAllCheckboxes();
@@ -1839,6 +1971,8 @@ const TagManager = {
             console.error('Available tags container not found');
             return;
         }
+        // Preserve scroll position during re-render
+        const savedScroll = this._saveAvailableScrollPosition();
 
         const tags = filteredTags || originalTags;
         if (!tags || tags.length === 0) {
@@ -1875,6 +2009,9 @@ const TagManager = {
         
         // Clear existing content
         availableTagsContainer.innerHTML = '';
+        // Schedule scroll restoration after rebuild
+        const restoreScrollAfterBuild = () => this._restoreAvailableScrollPosition(savedScroll);
+        setTimeout(restoreScrollAfterBuild, 0);
 
         // Create organized structure with filter headers but no collapsible functionality
         const tagList = document.createElement('div');
@@ -1998,6 +2135,8 @@ const TagManager = {
         
         // Ensure Select All checkbox is properly initialized
         this.initializeSelectAllCheckbox();
+            // Restore previous scroll position
+            this._restoreAvailableScrollPosition(savedScroll);
             return;
         }
         
@@ -2027,6 +2166,7 @@ const TagManager = {
             vendorCheckbox.type = 'checkbox';
             vendorCheckbox.className = 'select-all-checkbox me-2';
             vendorCheckbox.addEventListener('change', (e) => {
+                const savedScroll = this._saveAvailableScrollPosition();
                 const isChecked = e.target.checked;
                 // Select ALL checkboxes (both select-all checkboxes and tag checkboxes) within this section
                 const checkboxes = vendorSection.querySelectorAll('input[type="checkbox"]');
@@ -2054,6 +2194,12 @@ const TagManager = {
                 ).filter(Boolean);
                 this.updateSelectedTags(selectedTagObjects);
                 this.efficientlyUpdateAvailableTagsDisplay();
+                // Use double requestAnimationFrame to ensure it happens after all updates, including updateSelectAllCheckboxes
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                        this._restoreAvailableScrollPosition(savedScroll);
+                    });
+                });
             });
             
             vendorHeader.appendChild(vendorCheckbox);
@@ -2103,6 +2249,7 @@ const TagManager = {
                 brandCheckbox.type = 'checkbox';
                 brandCheckbox.className = 'select-all-checkbox me-2';
             brandCheckbox.addEventListener('change', (e) => {
+                const savedScroll = this._saveAvailableScrollPosition();
                 const isChecked = e.target.checked;
                 // Select ALL checkboxes (both select-all checkboxes and tag checkboxes) within this section
                 const checkboxes = brandSection.querySelectorAll('input[type="checkbox"]');
@@ -2130,9 +2277,13 @@ const TagManager = {
                 ).filter(Boolean);
                 this.updateSelectedTags(selectedTagObjects);
                 this.efficientlyUpdateAvailableTagsDisplay();
+                // Restore scroll after all DOM updates complete
+                requestAnimationFrame(() => {
+                    this._restoreAvailableScrollPosition(savedScroll);
+                });
             });
-                
-                brandHeader.appendChild(brandCheckbox);
+            
+            brandHeader.appendChild(brandCheckbox);
                 brandHeader.appendChild(document.createTextNode(brand));
                 brandHeader.appendChild(document.createElement('span')).className = 'collapse-icon ms-auto';
                 
@@ -2179,6 +2330,7 @@ const TagManager = {
                     productTypeCheckbox.type = 'checkbox';
                     productTypeCheckbox.className = 'select-all-checkbox me-2';
                     productTypeCheckbox.addEventListener('change', (e) => {
+                        const savedScroll = this._saveAvailableScrollPosition();
                         const isChecked = e.target.checked;
                         // Select ALL checkboxes (both select-all checkboxes and tag checkboxes) within this section
                         const checkboxes = productTypeSection.querySelectorAll('input[type="checkbox"]');
@@ -2206,6 +2358,10 @@ const TagManager = {
                         ).filter(Boolean);
                         this.updateSelectedTags(selectedTagObjects);
                         this.efficientlyUpdateAvailableTagsDisplay();
+                        // Restore scroll after all DOM updates complete
+                        requestAnimationFrame(() => {
+                            this._restoreAvailableScrollPosition(savedScroll);
+                        });
                     });
                     
                     typeHeader.appendChild(productTypeCheckbox);
@@ -2255,6 +2411,7 @@ const TagManager = {
                         weightCheckbox.type = 'checkbox';
                         weightCheckbox.className = 'select-all-checkbox me-2';
                         weightCheckbox.addEventListener('change', (e) => {
+                            const savedScroll = this._saveAvailableScrollPosition();
                             const isChecked = e.target.checked;
                             // Select ALL checkboxes (both select-all checkboxes and tag checkboxes) within this section
                             const checkboxes = weightSection.querySelectorAll('input[type="checkbox"]');
@@ -2282,6 +2439,10 @@ const TagManager = {
                             ).filter(Boolean);
                             this.updateSelectedTags(selectedTagObjects);
                             this.efficientlyUpdateAvailableTagsDisplay();
+                            // Restore scroll after all DOM updates complete
+                            requestAnimationFrame(() => {
+                                this._restoreAvailableScrollPosition(savedScroll);
+                            });
                         });
                         
                         weightHeader.appendChild(weightCheckbox);
@@ -2315,6 +2476,9 @@ const TagManager = {
         });
 
         availableTagsContainer.appendChild(tagList);
+
+        // Restore previous scroll position after full rebuild
+        this._restoreAvailableScrollPosition(savedScroll);
 
         // Add event listeners
         this.updateSelectAllCheckboxes();
@@ -2358,6 +2522,12 @@ const TagManager = {
             console.log('Event type:', e.type);
             console.log('Event bubbles:', e.bubbles);
             console.log('Event cancelable:', e.cancelable);
+            
+            // CRITICAL FIX: Prevent event handling during deselection to avoid triggering filter updates
+            if (this.state.isProcessingDeselection) {
+                console.log('🚫 Skipping checkbox handler - currently processing deselection');
+                return;
+            }
             
             // Prevent event handling during drag operations
             if (e.target.hasAttribute('data-reordering') || e.target.hasAttribute('data-drag-disabled')) {
@@ -2442,6 +2612,22 @@ const TagManager = {
             console.log('=== TAG CHECKBOX MOUSEDOWN EVENT ===');
             console.log('Tag checkbox mousedown:', displayName);
             console.log('Event target:', e.target);
+            console.log('Checkbox checked state:', e.target.checked);
+            console.log('closest #selectedTags:', e.target.closest('#selectedTags'));
+            
+            // CRITICAL FIX: Set flag BEFORE checkbox state changes if this is a deselection
+            const isInSelectedTags = e.target.closest('#selectedTags') !== null;
+            const willBeUnchecked = e.target.checked && !isInSelectedTags; // Clicking on checked box in available tags
+            const isUncheckingInSelected = isInSelectedTags && e.target.checked; // Clicking on checked box in selected tags
+            
+            console.log('isInSelectedTags:', isInSelectedTags);
+            console.log('isUncheckingInSelected:', isUncheckingInSelected);
+            
+            if (isUncheckingInSelected) {
+                console.log('🚫 Setting isProcessingDeselection flag ON mousedown');
+                this.state.isProcessingDeselection = true;
+                console.log('🚫 Flag set to:', this.state.isProcessingDeselection);
+            }
         };
         
         // Remove any existing event listeners to prevent duplicates
@@ -2467,13 +2653,8 @@ const TagManager = {
         // Set data-lineage attribute for CSS coloring on both row and tagElement
         // CRITICAL FIX: For JSON matched tags, prioritize the Lineage field from the matched database data
         let lineage;
-        if (isJsonMatched) {
-            // For JSON matched tags, use the Lineage field from the matched database data
-            lineage = tag.Lineage || tag.lineage || 'MIXED';
-        } else {
-            // For regular tags, use the standard fallback with comprehensive field checking
-            lineage = tag.lineage || tag.Lineage || tag['Lineage*'] || tag.currentLineage || tag.canonical_lineage || 'MIXED';
-        }
+        // Always prefer processed lineage provided by backend alignment
+        lineage = tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || tag['Lineage*'] || 'MIXED';
         
         // DEBUG: Log lineage resolution for selected tags
         if (isForSelectedTags) {
@@ -2560,42 +2741,8 @@ const TagManager = {
         // CRITICAL: Add data-tag-name so updateSimilarLineages can find and update these elements
         tagElement.setAttribute('data-tag-name', displayName);
 
-        // Make the entire tag element clickable to toggle checkbox (but only for available tags)
-        // For selected tags, only allow checkbox clicking to toggle selection
-        if (!isForSelectedTags) {
-            tagElement.style.cursor = 'pointer';
-            tagElement.addEventListener('click', (e) => {
-                try {
-                    // Don't trigger if clicking on the checkbox itself, lineage dropdown, or DOH dropdown
-                    if (e.target === checkbox || e.target.classList.contains('lineage-select') || 
-                        e.target.closest('.lineage-select') || e.target.classList.contains('lineage-dropdown') ||
-                        e.target.closest('.lineage-dropdown') || e.target.classList.contains('doh-select') ||
-                        e.target.closest('.doh-select') || e.target.classList.contains('doh-dropdown') ||
-                        e.target.closest('.doh-dropdown')) {
-                        return;
-                    }
-                    
-                    // Prevent if drag operation is in progress
-                    if (checkbox.hasAttribute('data-reordering') || checkbox.hasAttribute('data-drag-disabled')) {
-                        console.log('Ignoring tag element click during drag operation');
-                        return;
-                    }
-                    
-                    // Toggle the checkbox
-                    checkbox.checked = !checkbox.checked;
-                    // Trigger the change event
-                    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
-                } catch (error) {
-                    console.error('Error in tag element click handler:', error);
-                    // Prevent the error from causing the page to exit
-                    e.preventDefault();
-                    e.stopPropagation();
-                }
-            });
-        } else {
-            // For selected tags, only allow checkbox clicking to toggle selection
-            tagElement.style.cursor = 'default';
-        }
+        // Require explicit checkbox clicks for selection; do not toggle on tag body clicks
+        tagElement.style.cursor = 'default';
 
         const tagInfo = document.createElement('div');
         tagInfo.className = 'tag-info flex-grow-1 d-flex align-items-center';
@@ -2913,10 +3060,19 @@ const TagManager = {
             dohSelect.appendChild(optionElement);
         });
 
-        // Prevent DOH dropdown clicks from bubbling up to tag element (optimized)
-        dohSelect.addEventListener('click', (e) => {
+        // Prevent DOH dropdown interactions from triggering drag/sort on parent
+        // Stop propagation on multiple pointer events to ensure the native select opens reliably
+        const stopPropagation = (e) => {
             e.stopPropagation();
-        }, { passive: true }); // Use passive listener for better performance
+        };
+        dohSelect.addEventListener('click', stopPropagation, { passive: true });
+        dohSelect.addEventListener('mousedown', stopPropagation);
+        dohSelect.addEventListener('pointerdown', stopPropagation);
+        dohSelect.addEventListener('touchstart', stopPropagation, { passive: true });
+        // Make sure pointer events are enabled on the select element
+        if (dohSelect.style && dohSelect.style.pointerEvents === 'none') {
+            dohSelect.style.pointerEvents = 'auto';
+        }
         
         dohSelect.addEventListener('change', async (e) => {
             const newDohStatus = e.target.value;
@@ -2953,15 +3109,17 @@ const TagManager = {
                 const data = await response.json();
                 if (data.success) {
                     // On success, update tag DOH status in state
-                    tag.DOH = newDohStatus;
-                    tag.doh = newDohStatus;
-                    tag['DOH Compliant (Yes/No)'] = newDohStatus;
-                    dohSelect.value = newDohStatus;
-                    console.log(`✅ DOH status updated for "${displayName}" to: ${newDohStatus}`);
+                    // CRITICAL: Map NONE to No for storage
+                    const normalizedDoh = newDohStatus === 'NONE' ? 'No' : newDohStatus;
+                    tag.DOH = normalizedDoh;
+                    tag.doh = normalizedDoh;
+                    tag['DOH Compliant (Yes/No)'] = normalizedDoh;
+                    dohSelect.value = newDohStatus;  // Keep dropdown showing NONE even though we store No
+                    console.log(`✅ DOH status updated for "${displayName}" to: ${normalizedDoh} (frontend dropdown: ${newDohStatus})`);
                     
                     // Image already updated above for immediate feedback
                     
-                    // Update DOH in both available and selected tags displays
+                    // Update DOH in both available and selected tags displays - use NONE for UI dropdown display
                     this.updateDohInAllDisplays(displayName, newDohStatus);
                     
                 } else {
@@ -3020,6 +3178,12 @@ const TagManager = {
         console.log('Event:', e);
         console.log('Tag:', tag);
         
+        // CRITICAL FIX: Don't process selection changes during deselection to prevent filter clearing
+        if (this.state.isProcessingDeselection) {
+            console.log('🚫 SKIPPING handleTagSelection - currently processing deselection');
+            return;
+        }
+        
         // Ignore changes during drag-and-drop reordering
         if (e.target.hasAttribute('data-reordering') || e.target.hasAttribute('data-drag-disabled')) {
             console.log('Ignoring tag selection change during drag operation');
@@ -3047,6 +3211,12 @@ const TagManager = {
         }
         
         this.tagSelectionTimeout = setTimeout(() => {
+            // CRITICAL: Check flag again inside timeout to prevent filter clearing
+            if (this.state.isProcessingDeselection) {
+                console.log('🚫 SKIPPING setTimeout in handleTagSelection - currently processing deselection');
+                return;
+            }
+            
             // Update select all checkbox states after tag selection changes
             this.updateSelectAllCheckboxes();
             
@@ -3129,16 +3299,57 @@ const TagManager = {
             
             // If tag was unchecked in selected list, show it in available display and uncheck it
             if (!isChecked && e.target.closest('#selectedTags') && tag && tag['Product Name*']) {
-                // Find and show the tag in available list
-                const availableTagElement = document.querySelector(`#availableTags .tag-checkbox[value="${tag['Product Name*']}"]`);
+                // Flag should already be set by mousedown handler, but set it here as backup
+                if (!this.state.isProcessingDeselection) {
+                    console.log('🚫 Backup: Setting isProcessingDeselection flag in handleTagSelection');
+                    this.state.isProcessingDeselection = true;
+                }
+                
+                // Robust lookup for the corresponding available tag checkbox
+                const originalName = tag['Product Name*'];
+                const nonBreakingHyphenName = originalName.replace(/-/g, '\u2011');
+                const withoutBySuffix = originalName.replace(/ by [^-]*$/i, '').replace(/ by [^-]+(?= -)/i, '');
+                const candidates = [
+                    originalName,
+                    nonBreakingHyphenName,
+                    withoutBySuffix,
+                    withoutBySuffix.replace(/-/g, '\u2011')
+                ].filter(Boolean);
+
+                let availableTagElement = null;
+                for (const candidate of candidates) {
+                    availableTagElement = document.querySelector(`#availableTags .tag-checkbox[value="${candidate}"]`);
+                    if (availableTagElement) break;
+                }
+                if (!availableTagElement) {
+                    // Fallback: try data-tag-name selector which mirrors the display name
+                    for (const candidate of candidates) {
+                        const el = document.querySelector(`#availableTags [data-tag-name="${candidate}"] input.tag-checkbox`);
+                        if (el) { availableTagElement = el; break; }
+                    }
+                }
                 if (availableTagElement) {
                     const tagElement = availableTagElement.closest('.tag-item');
-                    if (tagElement) {
-                        tagElement.style.display = 'block';
+                    if (tagElement) tagElement.style.display = 'block';
+                    // Also uncheck the available tags checkbox
+                    // Ensure the tag is removed from persistentSelectedTags (should already be done, but double-check)
+                    const idx = this.state.persistentSelectedTags.indexOf(originalName);
+                    if (idx > -1) {
+                        this.state.persistentSelectedTags.splice(idx, 1);
                     }
-                    // CRITICAL: Also uncheck the available tags checkbox
+                    // Update selectedTags set to match
+                    this.state.selectedTags.delete(originalName);
+                    // Uncheck the checkbox
                     availableTagElement.checked = false;
-                    console.log(`✅ Unchecked available tags checkbox for ${tag['Product Name*']}`);
+                    console.log(`✅ Unchecked available tags checkbox for ${originalName}`);
+                    
+                    // Immediately update hierarchical checkboxes after unchecking
+                    // Use requestAnimationFrame to ensure DOM is updated first
+                    requestAnimationFrame(() => {
+                        this.updateSelectAllCheckboxes();
+                    });
+                } else {
+                    console.warn('⚠️ Could not locate matching available tag checkbox for deselection:', originalName);
                 }
                 
                 // Clear corresponding filters when tag is deselected
@@ -3152,7 +3363,18 @@ const TagManager = {
                     this.syncDeselectionWithBackend(tag['Product Name*']);
                 }
             }
-        }, 50); // 50ms debounce delay for individual tag selection
+            
+            // Update hierarchical checkboxes (vendor, brand, product type, weight) to reflect deselection
+            this.updateSelectAllCheckboxes();
+            
+            // Clear flag after a longer delay to allow any debounced updates to complete
+            if (!isChecked && tag && tag['Product Name*']) {
+                setTimeout(() => {
+                    this.state.isProcessingDeselection = false;
+                    console.log('✅ Clearing isProcessingDeselection flag after delay');
+                }, 3000);
+            }
+        }, 100); // 100ms debounce delay for individual tag selection
     },
 
     updateTagLineage(tag, lineage) {
@@ -3257,20 +3479,23 @@ const TagManager = {
     },
 
     updateDohInAllDisplays(tagName, newDohStatus) {
+        // CRITICAL: Normalize NONE to No for state storage
+        const normalizedDoh = newDohStatus === 'NONE' ? 'No' : newDohStatus;
+        
         // Update state for both tags and originalTags
         this.state.tags.forEach(tag => {
             if (tag['Product Name*'] === tagName) {
-                tag.DOH = newDohStatus;
-                tag.doh = newDohStatus;
-                tag['DOH Compliant (Yes/No)'] = newDohStatus;
+                tag.DOH = normalizedDoh;
+                tag.doh = normalizedDoh;
+                tag['DOH Compliant (Yes/No)'] = normalizedDoh;
             }
         });
         
         this.state.originalTags.forEach(tag => {
             if (tag['Product Name*'] === tagName) {
-                tag.DOH = newDohStatus;
-                tag.doh = newDohStatus;
-                tag['DOH Compliant (Yes/No)'] = newDohStatus;
+                tag.DOH = normalizedDoh;
+                tag.doh = normalizedDoh;
+                tag['DOH Compliant (Yes/No)'] = normalizedDoh;
             }
         });
         
@@ -3375,8 +3600,30 @@ const TagManager = {
 
     // Optimized function to update only the specific tag's lineage in the UI
     updateTagLineageInUI(tagName, newLineage) {
+        // Helper to safely select an element by data-tag-name, handling quotes and special chars
+        const findTagElement = (containerSelector, name) => {
+            const safe = (window.CSS && CSS.escape) ? CSS.escape(name) : null;
+            if (safe) {
+                try {
+                    const el = document.querySelector(`${containerSelector} [data-tag-name="${safe}"]`);
+                    if (el) return el;
+                } catch (e) {
+                    // Fall through to manual search
+                }
+            }
+            // Fallback: manual search when name contains quotes or CSS.escape not available
+            const candidates = document.querySelectorAll(`${containerSelector} .tag-item`);
+            for (const el of candidates) {
+                const dataName = el.getAttribute('data-tag-name');
+                const checkbox = el.querySelector('.tag-checkbox');
+                const cbValue = checkbox ? checkbox.value : null;
+                if (dataName === name || cbValue === name) return el;
+            }
+            return null;
+        };
+
         // Update lineage dropdown in available tags
-        const availableTagElement = document.querySelector(`#availableTags [data-tag-name="${tagName}"]`);
+        const availableTagElement = findTagElement('#availableTags', tagName);
         if (availableTagElement) {
             const lineageSelect = availableTagElement.querySelector('.lineage-dropdown');
             if (lineageSelect) {
@@ -3385,7 +3632,7 @@ const TagManager = {
         }
 
         // Update lineage dropdown in selected tags
-        const selectedTagElement = document.querySelector(`#selectedTags [data-tag-name="${tagName}"]`);
+        const selectedTagElement = findTagElement('#selectedTags', tagName);
         if (selectedTagElement) {
             const lineageSelect = selectedTagElement.querySelector('.lineage-dropdown');
             if (lineageSelect) {
@@ -3404,7 +3651,16 @@ const TagManager = {
         }
         const srcVendor = (source['Vendor/Supplier*'] || source['Vendor'] || source.vendor || '').toString().trim().toLowerCase();
         // Prefer explicit strain columns
-        const srcStrain = (source['Product Strain'] || source['Strain Names'] || '').toString().trim().toLowerCase();
+        // Support multiple possible keys for strain across datasets
+        const srcStrain = (
+            source['Product Strain'] ||
+            source['Strain Names'] ||
+            source['ProductStrain'] ||
+            source.productStrain ||
+            source['Strain'] ||
+            source.strain ||
+            ''
+        ).toString().trim().toLowerCase();
         console.log('updateSimilarLineages:', {tagName, vendor: srcVendor, strain: srcStrain});
         if (!srcVendor) {
             console.warn('updateSimilarLineages: No vendor found for', tagName);
@@ -3425,7 +3681,16 @@ const TagManager = {
             // Strategy: Match by strain if available, otherwise match by product base name
             if (srcStrain) {
                 // We have a strain - match by strain
-                const s = norm(t['Product Strain'] || t['Strain Names'] || '');
+                // Support multiple possible keys for strain across datasets
+                const s = norm(
+                    t['Product Strain'] ||
+                    t['Strain Names'] ||
+                    t['ProductStrain'] ||
+                    t.productStrain ||
+                    t['Strain'] ||
+                    t.strain ||
+                    ''
+                );
                 const matches = s === srcStrain;
                 
                 if (matches) {
@@ -3896,10 +4161,11 @@ const TagManager = {
                 
                 this.updateSelectedTags(selectedTagObjects);
                 
-                // FIXED: Don't filter out selected tags from available tags - keep all items visible
+                // FIXED: Use efficient update instead of full rebuild to preserve filters and scroll
                 // This allows users to see all available options even after making selections
                 console.log('FIXED: Not filtering out selected tags - keeping all items visible in available list');
-                this._updateAvailableTags(this.state.originalTags, this.state.originalTags);
+                this.efficientlyUpdateAvailableTagsDisplay();
+                // Scroll is already preserved since we're not rebuilding the list
             });
             
             // Add collapse/expand icon (will be placed to the right of the vendor name)
@@ -4154,6 +4420,7 @@ const TagManager = {
                         weightCheckbox.type = 'checkbox';
                         weightCheckbox.className = 'select-all-checkbox me-2';
                         weightCheckbox.addEventListener('change', (e) => {
+                            const savedScroll = this._saveAvailableScrollPosition();
                             const isChecked = e.target.checked;
                             // Only iterate tag checkboxes for performance
                             const checkboxes = weightSection.querySelectorAll('input.tag-checkbox');
@@ -4189,6 +4456,10 @@ const TagManager = {
                             
                             // Use efficient update instead of rebuilding entire DOM
                             this.efficientlyUpdateAvailableTagsDisplay();
+                            // Restore scroll after all DOM updates complete
+                            requestAnimationFrame(() => {
+                                this._restoreAvailableScrollPosition(savedScroll);
+                            });
                         });
                         
                         // Add collapse/expand icon (to the right of the weight)
@@ -4282,23 +4553,9 @@ const TagManager = {
         this.updateTagCount('selected', fullTags.length);
         console.timeEnd('updateSelectedTags');
 
-        // Attach a delegated change handler to handle deselection within selectedTags
-        // Install a single delegated deselection handler once (idempotent)
+        // Attach delegated change handler once (idempotent)
         if (!container._hasDeselectionHandler) {
-            // Toggle by clicking anywhere on the row (not on dropdowns)
-            container.addEventListener('click', (e) => {
-                const t = e.target;
-                // Ignore clicks on lineage dropdowns
-                if (t.closest('.lineage-dropdown')) return;
-                const row = t.closest('.tag-item, .tag-row');
-                if (!row) return;
-                const cb = row.querySelector('input[type="checkbox"].tag-checkbox');
-                if (!cb) return;
-                if (t === cb) return; // checkbox itself will emit change
-                cb.checked = !cb.checked;
-                cb.dispatchEvent(new Event('change', { bubbles: true }));
-            });
-            // Capture-phase handler for checks only - let individual handlers handle unchecks
+            // Only respond to actual checkbox changes; do not toggle on row clicks
             container.addEventListener('change', (e) => {
                 const target = e.target;
                 if (!target || !target.matches('input[type="checkbox"].tag-checkbox')) return;
@@ -4388,6 +4645,61 @@ const TagManager = {
                 TagManager.updateTagCheckboxes();
             });
         });
+
+        // No full list refresh to preserve scroll/selection
+    },
+
+    // Bulk update DOH for selected (or currently visible if none selected)
+    async bulkUpdateDohForSelected(newDohStatus) {
+        const normalizedDoh = newDohStatus === 'NONE' ? 'No' : newDohStatus;
+        // Prefer persistent selected tags; if none, operate on currently visible available tags
+        let targets = [...(this.state.persistentSelectedTags || [])];
+        if (targets.length === 0) {
+            const visible = Array.from(document.querySelectorAll('#availableTags .tag-item'))
+                .map(el => el.getAttribute('data-tag-name') || (el.querySelector('.tag-checkbox')?.value))
+                .filter(Boolean);
+            targets = visible;
+        }
+        if (!targets || targets.length === 0) return;
+        console.log(`🔧 Bulk DOH update for ${targets.length} item(s) -> ${normalizedDoh}`);
+
+        // Process with small concurrency to avoid overloading the backend
+        const concurrency = 4;
+        let index = 0;
+        const worker = async () => {
+            while (index < targets.length) {
+                const name = targets[index++];
+                try {
+                    const resp = await fetch('/api/update-doh', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ product_name: name, doh_status: newDohStatus })
+                    });
+                    if (!resp.ok) {
+                        const err = await resp.json().catch(() => ({}));
+                        throw new Error(err.error || `HTTP ${resp.status}`);
+                    }
+                    // Reflect in local state/UI
+                    this.updateDohInAllDisplays(name, newDohStatus);
+                    // Update in-memory objects directly
+                    this.state.tags.forEach(t => {
+                        if (t['Product Name*'] === name) {
+                            t.DOH = normalizedDoh; t.doh = normalizedDoh; t['DOH Compliant (Yes/No)'] = normalizedDoh;
+                        }
+                    });
+                    this.state.originalTags.forEach(t => {
+                        if (t['Product Name*'] === name) {
+                            t.DOH = normalizedDoh; t.doh = normalizedDoh; t['DOH Compliant (Yes/No)'] = normalizedDoh;
+                        }
+                    });
+                } catch (e) {
+                    console.warn(`DOH bulk update failed for ${name}:`, e.message);
+                }
+            }
+        };
+        const workers = Array.from({ length: Math.min(concurrency, targets.length) }, () => worker());
+        await Promise.all(workers);
+        console.log('✅ Bulk DOH update complete');
     },
 
     updateTagCheckboxes() {
@@ -4425,6 +4737,8 @@ const TagManager = {
     async fetchAndUpdateAvailableTags() {
         try {
             console.log('=== fetchAndUpdateAvailableTags START ===');
+            // Preserve current scroll/anchor so refreshes don't jump the list
+            const savedScroll = this._saveAvailableScrollPosition();
             
             // Rate limiting: prevent rapid successive calls
             const now = Date.now();
@@ -4459,14 +4773,17 @@ const TagManager = {
             
             // Only skip if we have actual JSON matched data, not just persistent tags
             if (hasJsonMatchedData || hasJsonMatchedInOriginal || jsonMatchedCount > 0) {
-                console.log('Skipping fetchAndUpdateAvailableTags - JSON matched data detected, preserving current state');
-                console.log('=== fetchAndUpdateAvailableTags END (SKIPPED) ===');
-                return true;
+                console.log('JSON matched data detected: preserving selections but still fetching fresh tags to align lineage');
+                // Realign any currently-rendered items before fetch
+                if (Array.isArray(this.state.tags) && this.state.tags.length > 0) {
+                    try { this.alignDisplayedLineagesWithTags(); } catch (e) { /* noop */ }
+                }
+                // DO NOT return; continue to fetch to pull DB-aligned lineage for regular tags
             }
             
             console.log('Fetching available tags...');
             const timestamp = Date.now();
-            const response = await fetch(`/api/available-tags?t=${timestamp}`);
+            const response = await fetch(`/api/available-tags?t=${timestamp}&nocache=1&prefer_db=1`);
             console.log('Available tags response status:', response.status);
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -4489,6 +4806,7 @@ const TagManager = {
                 this.state.tags = [];
                 this.state.originalTags = [];
                 this._updateAvailableTags([]);
+                this._restoreAvailableScrollPosition(savedScroll);
                 return false;
             }
             
@@ -4497,15 +4815,30 @@ const TagManager = {
                 this.state.tags = [];
                 this.state.originalTags = [];
                 this._updateAvailableTags([]);
+                this._restoreAvailableScrollPosition(savedScroll);
                 return false;
             }
             
             console.log(`Fetched ${tags.length} available tags`);
+
+            // Normalize lineage fields so UI consistently prefers processed lineage
+            const normalizeLineageFields = (tag) => {
+                try {
+                    const lin = (tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '').toString().trim();
+                    if (lin) {
+                        if (!tag.currentLineage) tag.currentLineage = lin;
+                        if (!tag.canonical_lineage) tag.canonical_lineage = lin;
+                        if (!tag.Lineage) tag.Lineage = lin;
+                    }
+                } catch (e) { /* noop */ }
+                return tag;
+            };
+            tags = tags.map(normalizeLineageFields);
             
             // Debug: Check lineage data for first few tags
             console.log('Sample lineage data:');
             tags.slice(0, 5).forEach(tag => {
-                console.log(`  ${tag['Product Name*']}: lineage=${tag.lineage}, Lineage=${tag.Lineage}`);
+                console.log(`  ${tag['Product Name*']}: currentLineage=${tag.currentLineage}, canonical_lineage=${tag.canonical_lineage}, Lineage=${tag.Lineage}, lineage=${tag.lineage}`);
             });
             
             // Clear existing state and set new data
@@ -4532,6 +4865,7 @@ const TagManager = {
             
             // Update the UI with new tags
             this._updateAvailableTags(tags);
+            this._restoreAvailableScrollPosition(savedScroll);
             
             // Update tag counts
             this.updateTagCount('available', tags.length);
@@ -4726,11 +5060,13 @@ const TagManager = {
         }, 100);
 
         // Initialize drag and drop manager
-        setTimeout(() => {
-            if (window.dragAndDropManager) {
-                window.dragAndDropManager.setupTagDragAndDrop();
-            }
-        }, 200);
+        // NOTE: Removed early initialization - drag-and-drop will be initialized after tags are loaded
+        // by fetchAndUpdateSelectedTags() to avoid "Found 0 total tag rows" warnings
+        // setTimeout(() => {
+        //     if (window.dragAndDropManager) {
+        //         window.dragAndDropManager.setupTagDragAndDrop();
+        //     }
+        // }, 200);
 
         // JSON matching is now handled by the modal - removed old above-tags-list logic
         
@@ -5191,15 +5527,24 @@ const TagManager = {
         const productName = tag['Product Name*'] || tag.ProductName || tag.displayName;
         if (!productName) return;
         
-        // Find all tag elements with this product name
-        const tagElements = document.querySelectorAll(`[data-tag-name="${productName}"], .tag-item`);
+        // Find all tag elements robustly without using an attribute selector that may break on quotes
+        const candidates = document.querySelectorAll('.tag-item');
+        const tagElements = Array.from(candidates).filter(el => {
+            const dataName = el.getAttribute('data-tag-name');
+            const checkbox = el.querySelector('.tag-checkbox');
+            const cbValue = checkbox ? checkbox.value : null;
+            if (dataName === productName || cbValue === productName) return true;
+            // Fallback to comparing visible name text
+            const tagNameElement = el.querySelector('.tag-name, .product-name');
+            return tagNameElement && tagNameElement.textContent.trim() === productName;
+        });
         
         tagElements.forEach(tagElement => {
             // Check if this is the right tag element by comparing the product name
             const tagNameElement = tagElement.querySelector('.tag-name, .product-name');
             if (tagNameElement && tagNameElement.textContent.trim() === productName) {
                 // Update the data-lineage attribute which triggers CSS color changes
-                const lineage = tag.lineage || tag.Lineage;
+                const lineage = tag.Lineage || tag.lineage;
                 if (lineage) {
                     tagElement.dataset.lineage = lineage.toUpperCase();
                 }
@@ -5207,6 +5552,31 @@ const TagManager = {
                 // Also update the color in the tag object
                 tag.color = color;
             }
+        });
+    },
+
+    // Ensure visible tag elements reflect the lineage stored in state.tags
+    alignDisplayedLineagesWithTags() {
+        const tagMap = new Map();
+        (this.state.tags || []).forEach(t => {
+            const name = t['Product Name*'] || t.ProductName || t.displayName;
+            if (!name) return;
+            const lineage = (t.Lineage || t.lineage || '').toString().trim().toUpperCase();
+            if (lineage) tagMap.set(name, lineage);
+        });
+
+        if (tagMap.size === 0) return;
+
+        const elements = document.querySelectorAll('.tag-item');
+        elements.forEach(el => {
+            const tagNameEl = el.querySelector('.tag-name, .product-name');
+            const checkbox = el.querySelector('.tag-checkbox');
+            const name = (tagNameEl && tagNameEl.textContent.trim()) || (checkbox && checkbox.value) || el.getAttribute('data-tag-name');
+            if (!name) return;
+            const lineage = tagMap.get(name);
+            if (!lineage) return;
+            // Update dataset lineage to drive CSS
+            el.dataset.lineage = lineage;
         });
     },
 
@@ -5251,11 +5621,26 @@ const TagManager = {
     },
 
     getLineageColorFromOptimizedRules(inputLineage) {
-        // BACKEND RULES IMPLEMENTATION: Match optimized_lineage_assignment() from excel_processor.py
-        
+        // Prefer explicit lineage provided by backend (DB/UI) when valid
+        const normalizedInput = (inputLineage || '').toString().trim().toUpperCase();
+        const explicitValues = new Set(['SATIVA','INDICA','HYBRID','HYBRID/SATIVA','HYBRID/INDICA','CBD','MIXED']);
+        if (explicitValues.has(normalizedInput)) {
+            const lineageColors = {
+                'SATIVA': 'var(--lineage-sativa)',
+                'INDICA': 'var(--lineage-indica)', 
+                'HYBRID': 'var(--lineage-hybrid)',
+                'HYBRID/SATIVA': 'var(--lineage-hybrid-sativa)',
+                'HYBRID/INDICA': 'var(--lineage-hybrid-indica)',
+                'CBD': 'var(--lineage-cbd)',
+                'MIXED': 'var(--lineage-mixed)'
+            };
+            return lineageColors[normalizedInput] || 'var(--lineage-mixed)';
+        }
+
+        // BACKEND RULES IMPLEMENTATION: Match optimized_lineage_assignment() from excel_processor.py when no explicit lineage
         // Get tag data if available for Product Type and Product Strain analysis
         const tagData = this.getCurrentTagData();
-        let finalLineage = inputLineage;
+        let finalLineage = normalizedInput;
         
         if (tagData) {
             // Use the comprehensive backend rules function
@@ -6222,8 +6607,17 @@ const TagManager = {
 
     // Update select all checkboxes state
     updateSelectAllCheckboxes() {
-        // FIXED: Don't filter out hidden elements since we're not hiding any elements anymore
+        // CRITICAL: First sync all available tag checkboxes with persistentSelectedTags state
         const availableCheckboxes = document.querySelectorAll('#availableTags .tag-checkbox');
+        availableCheckboxes.forEach(checkbox => {
+            const tagName = checkbox.value;
+            const shouldBeChecked = this.state.persistentSelectedTags.includes(tagName);
+            if (checkbox.checked !== shouldBeChecked) {
+                checkbox.checked = shouldBeChecked;
+            }
+        });
+        
+        // FIXED: Don't filter out hidden elements since we're not hiding any elements anymore
         const checkedCheckboxes = document.querySelectorAll('#availableTags .tag-checkbox:checked');
         
         // Update global select all for available tags
@@ -6633,6 +7027,13 @@ const TagManager = {
         // Ultra-fast debounced filter update (Mac-like speed)
         const fastFilterUpdate = debounce(async (filterType, value) => {
             console.log(`🔥 fastFilterUpdate called for ${filterType}: ${value} (Windows: ${isWindows})`);
+            console.trace('Call stack for fastFilterUpdate');
+            
+            // CRITICAL FIX: Don't update filters during deselection
+            if (this.state.isProcessingDeselection) {
+                console.log('🚫 SKIPPING fastFilterUpdate - currently processing deselection');
+                return;
+            }
             
             // Windows: Skip rendering active filters for speed
             if (isWindows) {
@@ -6646,6 +7047,21 @@ const TagManager = {
                 this.renderActiveFilters();
             }
             
+            // Special case: DOH filter used as a bulk setter to persist "No"
+            try {
+                if (filterType === 'doh') {
+                    const dohValueUpper = (value || '').toString().trim().toUpperCase();
+                    // Treat "No"/empty/NONE as removing the DOH image and persisting 'No'
+                    if (dohValueUpper === 'NONE' || dohValueUpper === 'NO' || dohValueUpper === '') {
+                        await this.bulkUpdateDohForSelected('NONE');
+                    } else if (dohValueUpper === 'DOH' || dohValueUpper === 'THC' || dohValueUpper === 'CBD') {
+                        await this.bulkUpdateDohForSelected(dohValueUpper);
+                    }
+                }
+            } catch (bulkErr) {
+                console.warn('Bulk DOH update from filter failed:', bulkErr);
+            }
+
             console.log(`🔥 fastFilterUpdate completed for ${filterType}`);
         }, isWindows ? 10 : 50); // Ultra-fast debounce on Windows (10ms vs 50ms)
         
@@ -7115,101 +7531,15 @@ const TagManager = {
 
     clearFiltersForDeselectedTag(tag) {
         /**
-         * Clear filters that match the deselected tag's properties.
-         * This ensures that when a tag is deselected, the corresponding
-         * filters in Current Inventory are also cleared.
+         * This function is intentionally disabled to prevent filters from being
+         * cleared when deselecting tags, which was causing users to lose their
+         * filter state and have to start over.
          */
-        console.log('Clearing filters for deselected tag:', tag['Product Name*']);
-        
-        let filtersCleared = false;
-        
-        // Check and clear vendor filter if it matches the deselected tag
-        const vendorFilter = document.getElementById('vendorFilter');
-        if (vendorFilter && vendorFilter.value && vendorFilter.value.trim() !== '') {
-            const tagVendor = (tag.Vendor || tag.vendor || '').toString().trim();
-            if (tagVendor.toLowerCase() === vendorFilter.value.toLowerCase()) {
-                console.log(`Clearing vendor filter: ${vendorFilter.value} (matches deselected tag)`);
-                vendorFilter.value = '';
-                filtersCleared = true;
-            }
-        }
-        
-        // Check and clear brand filter if it matches the deselected tag
-        const brandFilter = document.getElementById('brandFilter');
-        if (brandFilter && brandFilter.value && brandFilter.value.trim() !== '') {
-            const tagBrand = (tag['Product Brand'] || tag.productBrand || '').toString().trim();
-            if (tagBrand.toLowerCase() === brandFilter.value.toLowerCase()) {
-                console.log(`Clearing brand filter: ${brandFilter.value} (matches deselected tag)`);
-                brandFilter.value = '';
-                filtersCleared = true;
-            }
-        }
-        
-        // Check and clear product type filter if it matches the deselected tag
-        const productTypeFilter = document.getElementById('productTypeFilter');
-        if (productTypeFilter && productTypeFilter.value && productTypeFilter.value.trim() !== '') {
-            const tagProductType = (tag['Product Type*'] || tag.productType || '').toString().trim();
-            if (tagProductType.toLowerCase() === productTypeFilter.value.toLowerCase()) {
-                console.log(`Clearing product type filter: ${productTypeFilter.value} (matches deselected tag)`);
-                productTypeFilter.value = '';
-                filtersCleared = true;
-            }
-        }
-        
-        // Check and clear lineage filter if it matches the deselected tag
-        const lineageFilter = document.getElementById('lineageFilter');
-        if (lineageFilter && lineageFilter.value && lineageFilter.value.trim() !== '') {
-            const tagLineage = (tag.Lineage || tag.lineage || '').toString().trim();
-            if (tagLineage.toLowerCase() === lineageFilter.value.toLowerCase()) {
-                console.log(`Clearing lineage filter: ${lineageFilter.value} (matches deselected tag)`);
-                lineageFilter.value = '';
-                filtersCleared = true;
-            }
-        }
-        
-        // Check and clear weight filter if it matches the deselected tag
-        const weightFilter = document.getElementById('weightFilter');
-        if (weightFilter && weightFilter.value && weightFilter.value.trim() !== '') {
-            // CRITICAL FIX: Check all possible weight field variations when clearing filters
-            const tagWeight = (tag.WeightUnits || tag.WeightWithUnits || tag.weightWithUnits || 
-                             tag.CombinedWeight || tag.weightUnits || '').toString().trim();
-            if (tagWeight.toLowerCase() === weightFilter.value.toLowerCase()) {
-                console.log(`Clearing weight filter: ${weightFilter.value} (matches deselected tag)`);
-                weightFilter.value = '';
-                filtersCleared = true;
-            }
-        }
-        
-        // Check and clear DOH filter if it matches the deselected tag
-        const dohFilter = document.getElementById('dohFilter');
-        if (dohFilter && dohFilter.value && dohFilter.value.trim() !== '') {
-            const tagDoh = (tag.DOH || tag.doh || '').toString().toUpperCase();
-            const filterDoh = dohFilter.value.toUpperCase();
-            if (tagDoh === filterDoh) {
-                console.log(`Clearing DOH filter: ${dohFilter.value} (matches deselected tag)`);
-                dohFilter.value = '';
-                filtersCleared = true;
-            }
-        }
-        
-        // Check and clear High CBD filter if it matches the deselected tag
-        const highCbdFilter = document.getElementById('highCbdFilter');
-        if (highCbdFilter && highCbdFilter.value && highCbdFilter.value.trim() !== '') {
-            const tagProductType = (tag['Product Type*'] || tag.productType || '').toString().toLowerCase();
-            const filterHighCbd = highCbdFilter.value.toLowerCase();
-            if (tagProductType.startsWith('high cbd') && filterHighCbd === 'yes') {
-                console.log(`Clearing High CBD filter: ${highCbdFilter.value} (matches deselected tag)`);
-                highCbdFilter.value = '';
-                filtersCleared = true;
-            }
-        }
-        
-        // If any filters were cleared, apply the updated filters to refresh the inventory
-        if (filtersCleared) {
-            console.log('Filters cleared, applying updated filters to refresh inventory...');
-            this.applyFilters();
-            this.renderActiveFilters();
-        }
+        console.log('🚫 SKIPPING filter clearing for deselected tag:', tag['Product Name*']);
+        console.log('🚫 Filter clearing is DISABLED - should not affect filters');
+        console.log('🚫 If filters are being cleared, the issue is coming from elsewhere');
+        // Functionality removed to preserve user's filter state when deselecting tags
+        return; // Explicit return
     },
 
     ensureProperScrolling() {
@@ -7311,10 +7641,10 @@ const TagManager = {
     
     // Clear unused data
     clearUnusedData() {
-        // Clear original tags if we have processed them
-        if (this.state.originalTags && this.state.originalTags.length > 0) {
-            this.state.originalTags = [];
-        }
+        // DON'T clear originalTags - filters need it!
+        // if (this.state.originalTags && this.state.originalTags.length > 0) {
+        //     this.state.originalTags = [];
+        // }
         
         // Clear filter cache
         this.state.filterCache = null;

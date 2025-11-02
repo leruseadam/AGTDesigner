@@ -133,6 +133,22 @@ async function handleFiles(files) {
         console.log(`File uploaded successfully: ${data.filename}, rows: ${data.rows}`);
         console.log('Upload response data:', data);
         
+        // Check for store mismatch warning
+        if (data.warning) {
+          console.warn('⚠️ Store mismatch warning:', data.warning);
+          // Show warning alert to user
+          const warningMsg = `${data.warning}\n\nSelected Store: ${data.selected_store}\nDetected in Filename: ${data.detected_store}`;
+          if (confirm(warningMsg + '\n\nDo you want to continue anyway?')) {
+            // User confirmed, continue with upload
+          } else {
+            // User cancelled, don't reload
+            if (typeof TagManager !== 'undefined' && TagManager.hideExcelLoadingSplash) {
+              TagManager.hideExcelLoadingSplash();
+            }
+            return;
+          }
+        }
+        
         // Hide splash screen immediately since processing is done
         if (typeof TagManager !== 'undefined' && TagManager.hideExcelLoadingSplash) {
           TagManager.hideExcelLoadingSplash();
@@ -147,9 +163,9 @@ async function handleFiles(files) {
         console.log('✅ Upload successful! Reloading page to show new data...');
         
         // Show success splash instead of alert
-        if (typeof TagManager !== 'undefined' && TagManager.showUploadSuccessSplash) {
-          TagManager.showUploadSuccessSplash(data.rows);
-        }
+        // if (typeof TagManager !== 'undefined' && TagManager.showUploadSuccessSplash) {
+        //   TagManager.showUploadSuccessSplash(data.rows);
+        // }
         
         // Reload page after a short delay
         setTimeout(() => {
@@ -176,7 +192,13 @@ async function handleFiles(files) {
         if (typeof TagManager !== 'undefined' && TagManager.hideExcelLoadingSplash) {
           TagManager.hideExcelLoadingSplash();
         }
-        showToast("error", data.error || 'Upload failed');
+        // Show detailed error message if available
+        const errorMsg = data.error || 'Upload failed';
+        if (data.filename && data.selected_store) {
+          showToast("error", `${errorMsg}\nFilename: ${data.filename}\nSelected Store: ${data.selected_store}`);
+        } else {
+          showToast("error", errorMsg);
+        }
       }
     } catch (error) {
       console.error('Upload error:', error);
@@ -612,6 +634,186 @@ document.addEventListener('DOMContentLoaded', function() {
   
   // Welcome animation removed - redundant with splash screen
 });
+
+// Scale the entire app to fit within the viewport
+(function() {
+  // Brute-force global zoom/transform fallback that always shows a change
+  function applyGlobalZoom(scale) {
+    const s = Math.max(0.6, Math.min(1, Number(scale) || 1));
+    const html = document.documentElement;
+    const body = document.body;
+    // Prefer zoom where available (Chrome/Edge)
+    try { html.style.setProperty('zoom', String(s), 'important'); } catch(_) {}
+    try { body.style.setProperty('zoom', String(s), 'important'); } catch(_) {}
+    // Transform fallback (Safari/Firefox)
+    const transformVal = `scale(${s})`;
+    const widthVal = `${(100 / s).toFixed(4)}%`;
+    const heightVal = `${(100 / s).toFixed(4)}%`;
+    body.style.setProperty('transform', transformVal, 'important');
+    body.style.setProperty('-webkit-transform', transformVal, 'important');
+    body.style.setProperty('transform-origin', 'top left', 'important');
+    body.style.setProperty('-webkit-transform-origin', 'top left', 'important');
+    body.style.setProperty('width', widthVal, 'important');
+    body.style.setProperty('height', heightVal, 'important');
+    html.setAttribute('data-app-scale', String(s));
+  }
+
+  function scaleAppToFit() {
+    const main = document.getElementById('mainContent');
+    const page = document.body;
+    if (!main || !page) return;
+
+    // Temporarily reset transform to measure full, natural page size
+    const prevTransformMain = main.style.transform;
+    const prevTransformBody = page.style.transform;
+    const prevWidthBody = page.style.width;
+    const prevHeightBody = page.style.height;
+    main.style.transform = 'none';
+    page.style.transform = 'none';
+    page.style.width = '';
+    page.style.height = '';
+
+    // Compute a visual bounding box of visible, non-fixed children within main content
+    const container = main;
+    const visibleChildren = Array.from(container.querySelectorAll(':scope > *'))
+      .filter(el => el.offsetParent !== null && getComputedStyle(el).position !== 'fixed');
+
+    let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+    visibleChildren.forEach(el => {
+      const r = el.getBoundingClientRect();
+      const docLeft = r.left + window.scrollX;
+      const docTop = r.top + window.scrollY;
+      const docRight = r.right + window.scrollX;
+      const docBottom = r.bottom + window.scrollY;
+      left = Math.min(left, docLeft);
+      top = Math.min(top, docTop);
+      right = Math.max(right, docRight);
+      bottom = Math.max(bottom, docBottom);
+    });
+
+    // Fallback if nothing matched
+    if (!isFinite(left) || !isFinite(top) || !isFinite(right) || !isFinite(bottom)) {
+      const r = container.getBoundingClientRect();
+      left = r.left + window.scrollX;
+      top = r.top + window.scrollY;
+      right = r.right + window.scrollX;
+      bottom = r.bottom + window.scrollY;
+    }
+
+    const contentWidth = Math.max(1, right - left);
+    const contentHeight = Math.max(1, bottom - top);
+
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    if (!contentWidth || !contentHeight || !vw || !vh) {
+      main.style.transform = prevTransformMain;
+      page.style.transform = prevTransformBody;
+      page.style.width = prevWidthBody;
+      page.style.height = prevHeightBody;
+      return;
+    }
+
+    let scale = Math.min(vw / contentWidth, vh / contentHeight);
+    if (!isFinite(scale) || scale <= 0) scale = 1;
+    scale = Math.min(scale, 1);
+
+    // Apply to body with width/height compensation so layout reflows to fit
+    const applyScaleToBody = (s) => {
+      page.style.transform = `scale(${s})`;
+      page.style.transformOrigin = 'top left';
+      page.style.width = `${(100 / s).toFixed(4)}%`;
+      page.style.height = `${(100 / s).toFixed(4)}%`;
+    };
+
+    let appliedScale = scale;
+    const minScale = 0.6;
+    const step = 0.05;
+    while (appliedScale >= minScale) {
+      applyScaleToBody(appliedScale);
+      const r = main.getBoundingClientRect();
+      if (r.width <= vw && r.height <= vh) break;
+      appliedScale = Math.max(minScale, +(appliedScale - step).toFixed(3));
+      if (appliedScale === minScale) {
+        applyScaleToBody(appliedScale);
+        break;
+      }
+    }
+
+    // Hide scrollbars for a cleaner fit
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
+
+    // Expose current scale for quick verification in DevTools
+    document.documentElement.setAttribute('data-app-scale', String(appliedScale));
+
+    // If still no visible change and scale ~1, force a visible 0.9 once
+    if (appliedScale >= 0.995) {
+      applyGlobalZoom(0.9);
+    }
+  }
+
+  // Expose for other scripts
+  window.scaleAppToFit = scaleAppToFit;
+
+  // Apply on ready (after content becomes visible), and on resize/orientation
+  document.addEventListener('DOMContentLoaded', function() {
+    const main = document.getElementById('mainContent');
+    if (!main) return;
+
+    const tryApply = () => {
+      const visible = main.offsetParent !== null || getComputedStyle(main).opacity !== '0';
+      if (visible) {
+        requestAnimationFrame(scaleAppToFit);
+      } else {
+        setTimeout(tryApply, 200);
+      }
+    };
+    tryApply();
+  });
+
+  // Ensure after full load (fonts/images) we re-calc
+  window.addEventListener('load', () => {
+    requestAnimationFrame(scaleAppToFit);
+    setTimeout(scaleAppToFit, 0);
+    setTimeout(scaleAppToFit, 250);
+    // Ensure visible change regardless
+    setTimeout(() => {
+      if ((document.documentElement.getAttribute('data-app-scale') || '1') === '1') {
+        applyGlobalZoom(0.9);
+      }
+    }, 400);
+  });
+
+  let resizeTimer;
+  window.addEventListener('resize', () => {
+    cancelAnimationFrame(resizeTimer);
+    resizeTimer = requestAnimationFrame(scaleAppToFit);
+  });
+  window.addEventListener('orientationchange', () => setTimeout(scaleAppToFit, 0));
+})();
+
+// Expose manual control in console
+window.setAppScale = function(s) {
+  const n = Number(s);
+  if (!isFinite(n)) return;
+  (function(){
+    const html = document.documentElement;
+    const body = document.body;
+    try { html.style.setProperty('zoom', String(n), 'important'); } catch(_) {}
+    try { body.style.setProperty('zoom', String(n), 'important'); } catch(_) {}
+    const t = `scale(${n})`;
+    const w = `${(100 / n).toFixed(4)}%`;
+    const h = `${(100 / n).toFixed(4)}%`;
+    body.style.setProperty('transform', t, 'important');
+    body.style.setProperty('-webkit-transform', t, 'important');
+    body.style.setProperty('transform-origin', 'top left', 'important');
+    body.style.setProperty('-webkit-transform-origin', 'top left', 'important');
+    body.style.setProperty('width', w, 'important');
+    body.style.setProperty('height', h, 'important');
+    html.setAttribute('data-app-scale', String(n));
+  })();
+};
 
 // Toast notification function
 function showToast(type, message) {

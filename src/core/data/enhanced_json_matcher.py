@@ -1775,13 +1775,13 @@ class EnhancedJSONMatcher:
             from .product_database import ProductDatabase
             import os
             
-            # Use the correct database path - prioritize AGT_Bothell database
-            current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-            db_path = os.path.join(current_dir, 'uploads', 'product_database_AGT_Bothell.db')
+            # Try to get store name from ExcelProcessor if available
+            store_name = 'AGT_Bothell'  # Default
+            if self.excel_processor and hasattr(self.excel_processor, '_store_name'):
+                store_name = self.excel_processor._store_name
             
-            # Fallback to main database if AGT_Bothell doesn't exist
-            if not os.path.exists(db_path):
-                db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
+            # Use store-specific database path
+            db_path = get_database_path(store_name)
             
             if os.path.exists(db_path):
                 product_db = ProductDatabase(db_path)

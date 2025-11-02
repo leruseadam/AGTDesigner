@@ -76,29 +76,109 @@
   <script>
     console.log('Defining global functions early in head...');
     
-    // CRITICAL: Set Bothell as default store IMMEDIATELY - this runs before any other code
-    (function() {
-      console.log('IMMEDIATE: Setting Bothell as default store...');
-      // Set localStorage immediately
-      localStorage.setItem('selectedStore', 'AGT_Bothell');
+    // REMOVED: No longer defaulting to Bothell - user must select store first
+    // Store selection is now required and handled by checkStoreRequired()
+    
+    // Define selectStore function EARLY so it's available when modal loads
+    window.selectStore = function(storeValue) {
+      console.log('Store selected:', storeValue);
       
-      // Try to update display immediately if elements exist
-      setTimeout(function() {
-        const displayElement = document.getElementById('currentStoreDisplay');
-        if (displayElement) {
-          displayElement.textContent = 'AGT Bothell';
-          displayElement.style.color = '#4ade80';
-          console.log('IMMEDIATE: Set display to AGT Bothell');
+      // Set the store via API
+      fetch('/api/set-store', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ store: storeValue })
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.success) {
+          console.log('Store set successfully:', storeValue);
+          
+          // Hide modal and show main content
+          const modalElement = document.getElementById('storeSelectionModal');
+          if (modalElement) {
+            modalElement.style.display = 'none';
+            modalElement.classList.remove('show');
+          }
+          // Remove backdrop
+          const backdrop = document.getElementById('storeModalBackdrop') || document.querySelector('.modal-backdrop');
+          if (backdrop) {
+            backdrop.remove();
+          }
+          document.body.classList.remove('modal-open');
+          document.body.style.overflow = '';
+          
+          // Show main content
+          const mainContent = document.getElementById('mainContent');
+          if (mainContent) {
+            mainContent.style.display = 'block';
+            mainContent.classList.add('store-selected');
+            setTimeout(() => mainContent.classList.add('loaded'), 100);
+          }
+          
+          // Update store display
+          if (typeof updateCurrentStoreDisplay === 'function') {
+            updateCurrentStoreDisplay(storeValue);
+          }
+          if (typeof updateStoreStatus === 'function') {
+            updateStoreStatus(`Store: ${storeValue.replace(/_/g, ' ')}`, 'active');
+          }
+          
+          // Clear existing data for new store
+          clearExistingData();
+          
+          // Show loading message
+          if (window.Toast && typeof window.Toast.show === 'function') {
+            window.Toast.show('info', `Switching to ${storeValue.replace(/_/g, ' ')}...`);
+          }
+          
+          // Refresh tag data for the new store
+          if (window.TagManager) {
+            console.log('Reloading tags for new store...');
+            // Call checkForExistingData which will fetch tags from the new store
+            if (typeof window.TagManager.checkForExistingData === 'function') {
+              window.TagManager.checkForExistingData().then(() => {
+                console.log('Tags reloaded for new store');
+                // Check if tags were loaded
+                if (window.TagManager.state.tags && window.TagManager.state.tags.length > 0) {
+                  if (window.Toast && typeof window.Toast.show === 'function') {
+                    window.Toast.show('success', `Loaded ${window.TagManager.state.tags.length} products for ${storeValue.replace(/_/g, ' ')}`);
+                  }
+                } else {
+                  // No data for this store
+                  if (window.Toast && typeof window.Toast.show === 'function') {
+                    window.Toast.show('warning', `No data found for ${storeValue.replace(/_/g, ' ')}. Please upload an Excel file with "${storeValue}" in the filename.`);
+                  }
+                }
+              }).catch(err => {
+                console.error('Error reloading tags:', err);
+                if (window.Toast && typeof window.Toast.show === 'function') {
+                  window.Toast.show('error', 'Failed to load data for new store. Please try uploading a file.');
+                }
+              });
+            } else if (typeof window.TagManager.fetchAndUpdateAvailableTags === 'function') {
+              window.TagManager.fetchAndUpdateAvailableTags();
+            }
+          }
+          
+          // Don't reload - just update the UI
+          // The backend has the new store, so future API calls will use the correct store
+          console.log('Store selection complete - UI updated without reload');
+        } else {
+          console.error('Error setting store:', data.error);
+          alert('Error setting store. Please try again.');
         }
-        
-        const statusElement = document.getElementById('storeStatus');
-        if (statusElement) {
-          statusElement.textContent = 'Store: AGT Bothell';
-          statusElement.className = 'store-status active';
-          console.log('IMMEDIATE: Set status to AGT Bothell');
-        }
-      }, 100);
-    })();
+      })
+      .catch(error => {
+        console.error('Error setting store:', error);
+        alert('Error setting store. Please try again.');
+      });
+    };
+    
+    // Don't add backdrop by default - let checkStoreRequired add it only if needed
+    // This prevents the backdrop from appearing when a store is already selected
     
     // VIEWPORT NORMALIZATION FOR CONSISTENT SCALING
     // This ensures viewport units behave identically across local and web environments
@@ -243,67 +323,49 @@
       });
     }
     
-    function selectStore(storeValue) {
-      console.log('Store selected:', storeValue);
-      
-      // Close the modal
-      const modalElement = document.getElementById('storeSelectionModal');
-      if (modalElement) {
-        const modal = bootstrap.Modal.getInstance(modalElement);
-        if (modal) {
-          modal.hide();
-          // Dispose of the modal instance after hiding
-          setTimeout(() => {
-            modal.dispose();
-          }, 300);
-        }
-      }
-      
-      // Set the store via API
-      fetch('/api/set-store', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ store: storeValue })
-      })
-      .then(response => response.json())
-      .then(data => {
-        if (data.success) {
-          console.log('Store set successfully:', storeValue);
-          // Refresh the page to reload with new store selection
-          window.location.reload();
-        } else {
-          console.error('Error setting store:', data.error);
-          alert('Error setting store. Please try again.');
-        }
-      })
-      .catch(error => {
-        console.error('Error setting store:', error);
-        alert('Error setting store. Please try again.');
-      });
+    // selectStore is already defined globally in head - this is just a reference/override if needed
+    // The function is defined early in the head section to ensure it's available when modal loads
+    if (!window.selectStore) {
+      window.selectStore = function(storeValue) {
+        console.log('Store selected (fallback):', storeValue);
+        // Fallback implementation if somehow not defined
+        alert('Please refresh the page and try again.');
+      };
     }
-    
-    // Make selectStore globally available
-    window.selectStore = selectStore;
     
     function showStoreSelectionModal() {
       try {
         console.log('=== SHOWING STORE SELECTION MODAL ===');
         console.log('Bootstrap available:', typeof bootstrap !== 'undefined');
         
-        // Check if Bootstrap is available
-        if (typeof bootstrap === 'undefined') {
-          console.error('❌ Bootstrap not available, cannot show modal');
-          console.log('Waiting 2 seconds and retrying...');
-          setTimeout(showStoreSelectionModal, 2000);
-          return;
-        }
-        
         const modalElement = document.getElementById('storeSelectionModal');
         console.log('Modal element found:', modalElement !== null);
         if (!modalElement) {
-          console.error('❌ Store selection modal element not found');
+          console.error('❌ Store selection modal element not found - retrying in 500ms');
+          setTimeout(showStoreSelectionModal, 500);
+          return;
+        }
+        
+        // Check if Bootstrap is available
+        if (typeof bootstrap === 'undefined') {
+          console.error('❌ Bootstrap not available, using fallback method');
+          // Fallback: Show modal manually if Bootstrap isn't loaded
+          modalElement.style.display = 'block';
+          modalElement.classList.add('show');
+          modalElement.setAttribute('aria-hidden', 'false');
+          modalElement.setAttribute('aria-modal', 'true');
+          document.body.classList.add('modal-open');
+          document.body.style.overflow = 'hidden';
+          
+          // Add backdrop manually
+          if (!document.querySelector('.modal-backdrop')) {
+            const backdrop = document.createElement('div');
+            backdrop.className = 'modal-backdrop fade show';
+            backdrop.style.zIndex = '1040';
+            document.body.appendChild(backdrop);
+          }
+          
+          console.log('✅ Modal shown using fallback method');
           return;
         }
         
@@ -327,6 +389,19 @@
       } catch (error) {
         console.error('❌ Error showing store selection modal:', error);
         console.error('Error details:', error.stack);
+        // Fallback to manual show
+        try {
+          const modalElement = document.getElementById('storeSelectionModal');
+          if (modalElement) {
+            modalElement.style.display = 'block';
+            modalElement.classList.add('show');
+            modalElement.setAttribute('aria-hidden', 'false');
+            document.body.classList.add('modal-open');
+            console.log('✅ Modal shown using error fallback');
+          }
+        } catch (fallbackError) {
+          console.error('❌ Even fallback failed:', fallbackError);
+        }
       }
     }
     
@@ -407,8 +482,16 @@
         window.clearJsonMatches();
       }
       
+      // Clear tag lists if TagManager is available
+      if (window.TagManager && typeof window.TagManager.clearUIStateForNewFile === 'function') {
+        window.TagManager.clearUIStateForNewFile(true);
+      }
+      
       console.log('Cleared existing data for new store selection');
     }
+    
+    // Make clearExistingData globally available
+    window.clearExistingData = clearExistingData;
     
     function loadSavedStore() {
       // Check backend for current store status instead of defaulting to Bothell
@@ -440,31 +523,104 @@
     
     function checkStoreRequired() {
       console.log('=== CHECKING STORE REQUIREMENT ===');
-      console.log('Bootstrap available:', typeof bootstrap !== 'undefined');
-      console.log('Modal element exists:', document.getElementById('storeSelectionModal') !== null);
       
+      const modalElement = document.getElementById('storeSelectionModal');
+      const mainContent = document.getElementById('mainContent');
+      
+      console.log('Modal element exists:', modalElement !== null);
+      
+      if (!modalElement) {
+        console.error('❌ Modal element not found! Retrying in 500ms...');
+        setTimeout(checkStoreRequired, 500);
+        return;
+      }
+      
+      // Keep both hidden while checking backend
+      if (modalElement) {
+        modalElement.style.display = 'none';
+      }
+      if (mainContent) {
+        mainContent.style.display = 'none';
+      }
+      
+      console.log('Fetching store status from backend...');
       fetch('/api/check-store-required')
-        .then(response => response.json())
+        .then(response => {
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          return response.json();
+        })
         .then(data => {
-          console.log('Store requirement check response:', data);
-          if (data.success && data.requires_store) {
-            // Store selection is required, show modal
-            console.log('✅ Store selection REQUIRED - showing modal');
-            showStoreSelectionModal();
-          } else {
-            // Store selection not required, load and display the existing store
-            console.log('✅ Store selection NOT required, current store:', data.store);
-            if (data.store) {
-              updateCurrentStoreDisplay(data.store);
-              updateStoreStatus(`Store: ${data.store.replace(/_/g, ' ')}`, 'active');
+          console.log('✅ BACKEND RESPONSE:', JSON.stringify(data));
+          console.log('Conditions: success=' + data.success + ', requires_store=' + data.requires_store + ', store=' + data.store);
+          
+          // Clear logic: show content if user has a store, otherwise show modal
+          const userHasStore = (data.success && !data.requires_store && data.store);
+          console.log('USER HAS STORE?', userHasStore);
+          
+          if (userHasStore) {
+            // USER HAS STORE - Show content, hide modal
+            console.log('🎉 STORE FOUND:', data.store);
+            
+            updateCurrentStoreDisplay(data.store);
+            updateStoreStatus(`Store: ${data.store.replace(/_/g, ' ')}`, 'active');
+            
+            // Hide modal
+            if (modalElement) {
+              modalElement.style.display = 'none';
+              modalElement.classList.remove('show');
             }
+            
+            // Remove all backdrops
+            document.querySelectorAll('.modal-backdrop, #storeModalBackdrop').forEach(b => b.remove());
+            document.body.classList.remove('modal-open');
+            document.body.style.overflow = '';
+            
+            // Show content
+            if (mainContent) {
+              mainContent.style.display = 'block';
+              mainContent.classList.add('store-selected');
+              setTimeout(() => mainContent.classList.add('loaded'), 100);
+            }
+            
+            console.log('✅ Content shown, modal hidden');
+          } else {
+            // NO STORE - Show modal
+            console.log('⚠️ NO STORE - Showing modal');
+            
+            if (modalElement) {
+              modalElement.style.display = 'block';
+              modalElement.classList.add('show');
+              document.body.classList.add('modal-open');
+              document.body.style.overflow = 'hidden';
+              
+              // Add backdrop
+              if (!document.querySelector('.modal-backdrop')) {
+                const backdrop = document.createElement('div');
+                backdrop.id = 'storeModalBackdrop';
+                backdrop.className = 'modal-backdrop fade show';
+                backdrop.style.zIndex = '1040';
+                document.body.appendChild(backdrop);
+              }
+            }
+            
+            if (mainContent) {
+              mainContent.style.display = 'none';
+            }
+            
+            console.log('✅ Modal shown, content hidden');
           }
         })
         .catch(error => {
           console.error('❌ Error checking store requirement:', error);
           // If there's an error, show modal as fallback to require store selection
           console.log('Showing modal as fallback due to error');
-          showStoreSelectionModal();
+          if (typeof bootstrap === 'undefined') {
+            setTimeout(() => showStoreSelectionModal(), 500);
+          } else {
+            showStoreSelectionModal();
+          }
         });
     }
     
@@ -577,7 +733,7 @@
             vendor_brands: [] 
           })),
           fetchWithTimeout('/api/database-analytics').catch(e => ({ error: `Analytics: ${e.message}` })),
-          fetchWithTimeout('/api/available-tags').catch(e => { console.error('Available tags failed:', e); return []; })
+          fetchWithTimeout('/api/available-tags?prefer_db=1&nocache=1').catch(e => { console.error('Available tags failed:', e); return []; })
         ])
         .then((results) => {
           console.log('All promises settled:', results);
@@ -2117,6 +2273,18 @@
               uploadBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Uploading...';
               uploadBtn.disabled = true;
               uploadStatus.innerHTML = '<div class="alert alert-info">Uploading database file...</div>';
+
+              // Show Excel loading splash while uploading
+              try {
+                if (window.TagManager && typeof TagManager.showExcelLoadingSplash === 'function') {
+                  TagManager.showExcelLoadingSplash(file.name);
+                  if (typeof TagManager.updateExcelLoadingStatus === 'function') {
+                    TagManager.updateExcelLoadingStatus('Uploading database file...');
+                  }
+                }
+              } catch (e) {
+                console.warn('Excel splash not available:', e);
+              }
               
               fetch('/api/product-db/upload', {
                 method: 'POST',
@@ -2130,6 +2298,12 @@
               })
               .then(data => {
                 if (data.success) {
+                  // Update splash status on success
+                  try {
+                    if (window.TagManager && typeof TagManager.updateExcelLoadingStatus === 'function') {
+                      TagManager.updateExcelLoadingStatus('Upload complete. Refreshing statistics...');
+                    }
+                  } catch {}
                   uploadStatus.innerHTML = `
                     <div class="alert alert-success">
                       <i class="bi bi-check-circle me-2"></i>
@@ -2169,6 +2343,12 @@
                 // Reset button state
                 uploadBtn.innerHTML = originalBtnText;
                 uploadBtn.disabled = false;
+                // Hide splash after upload completes (on success we keep it briefly visible until stats refresh)
+                try {
+                  if (window.TagManager && typeof TagManager.hideExcelLoadingSplash === 'function') {
+                    TagManager.hideExcelLoadingSplash();
+                  }
+                } catch {}
               });
             };
             
@@ -4181,14 +4361,35 @@
       }
     }
 
-    /* Hide main content while loading */
+    /* Hide main content until store is selected */
     .main-content {
+      display: none !important;
+    }
+
+    .main-content.store-selected {
+      display: block !important;
       opacity: 0;
       transition: opacity 0.5s ease-in;
     }
 
-    .main-content.loaded {
+    .main-content.store-selected.loaded {
       opacity: 1;
+    }
+    
+    /* Store modal backdrop - ensure it's visible */
+    #storeSelectionModal.show {
+      display: block !important;
+    }
+    
+    /* Store modal backdrop */
+    #storeModalBackdrop {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.5);
+      z-index: 1040;
     }
 
     /* Sparkle animation for special thanks */
@@ -4302,8 +4503,8 @@
     </div>
   </div>
 
-  <!-- Main Content (initially hidden) -->
-  <div class="main-content" id="mainContent">
+  <!-- Main Content (hidden until store is selected) -->
+  <div class="main-content{% if user_has_store %} store-selected loaded{% endif %}" id="mainContent" style="{% if user_has_store %}display: block;{% else %}display: none;{% endif %}">
     <canvas id="lava-lamp-canvas" style="position:fixed;top:0;left:0;z-index:0;pointer-events:none;"></canvas>
     <!-- Psychedelic Background Effects -->
     <div class="psychedelic-orbs">
@@ -4361,7 +4562,7 @@
       <!-- Title and Subtitle centered above tag panels -->
 
       <div class="centerframe" style="width:100%; margin:0 auto; text-align:center; position:relative;">
-        <div style="display: flex; justify-content: center; align-items: center; margin-bottom: 4rem;">
+        <div style="display: flex; justify-content: center; align-items: center; margin-bottom: 1.25rem;">
           <div style="text-align: center; background: linear-gradient(135deg, rgba(45, 34, 58, 0.95) 0%, rgba(60, 45, 75, 0.9) 50%, rgba(45, 34, 58, 0.95) 100%); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 2px solid rgba(160, 132, 232, 0.4); border-radius: 20px; padding: 3rem 5rem; box-shadow: 0 8px 32px rgba(80, 40, 160, 0.25), 0 0 0 1px rgba(160, 132, 232, 0.1); max-width: 700px; position: relative; overflow: hidden;">
             <div style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: radial-gradient(circle at 30% 20%, rgba(160, 132, 232, 0.1) 0%, transparent 50%), radial-gradient(circle at 70% 80%, rgba(139, 92, 246, 0.08) 0%, transparent 50%); pointer-events: none;"></div>
             <div style="position: relative; z-index: 2;">
@@ -4376,47 +4577,12 @@
               </p>
             </div>
 
-            <!-- Database and Lineage Management Buttons -->
-            <div class="header-buttons-container mt-3 d-flex justify-content-center gap-3 flex-wrap">
-              <button class="btn btn-header-action" onclick="showProductDatabaseManager()" title="Open Data & Analytics">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                  <path d="M12 8v8"></path>
-                  <path d="M8 12h8"></path>
-                </svg>
-                Data & Analytics
-              </button>
-              <button class="btn btn-header-action" onclick="showDatabaseEditor()" title="Open Edit DB">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                </svg>
-                Edit DB
-              </button>
-              <button class="btn btn-header-action" onclick="openLineageEditor()" title="Open lineage editor for strain management">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
-                  <path d="M2 17l10 5 10-5"></path>
-                  <path d="M2 12l10 5 10-5"></path>
-                </svg>
-                Lineage Editor
-              </button>
-              <button class="btn btn-header-action" data-bs-toggle="modal" data-bs-target="#jsonMatchModal" title="Match products from JSON URL">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                  <polyline points="7 10 12 15 17 10"></polyline>
-                  <line x1="12" y1="15" x2="12" y2="3"></line>
-                </svg>
-                Match JSON
-              </button>
-            </div>
-
             <!-- Store Selection -->
             <div class="store-selection-container">
               <div class="d-flex align-items-center justify-content-center gap-3">
                 <div class="d-flex align-items-center gap-3">
                   <span class="store-label">Store:</span>
-                  <span class="current-store-display" id="currentStoreDisplay">No store selected</span>
+                  <span class="current-store-display" id="currentStoreDisplay" style="{% if user_has_store %}color: #4ade80;{% else %}color: #f87171;{% endif %}">{% if user_has_store and current_store %}{{ current_store|replace("_", " ") }}{% else %}No store selected{% endif %}</span>
                   <button class="btn btn-sm btn-outline-primary" onclick="showStoreSelectionModal()" title="Change store">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -4430,32 +4596,13 @@
                   <span style="font-size: 16px; font-weight: bold; color: white;">?</span>
                 </button>
               </div>
-              <div class="store-status text-center" id="storeStatus"></div>
             </div>
 
             <!-- IMMEDIATE STORE SETTING SCRIPT -->
             <script>
               // Set Bothell as default store IMMEDIATELY after elements are created
-              (function() {
-                console.log('INLINE: Setting Bothell as default store immediately...');
-                const displayElement = document.getElementById('currentStoreDisplay');
-                const statusElement = document.getElementById('storeStatus');
-                
-                if (displayElement) {
-                  displayElement.textContent = 'AGT Bothell';
-                  displayElement.style.color = '#4ade80';
-                  console.log('INLINE: Set display to AGT Bothell');
-                }
-                
-                if (statusElement) {
-                  statusElement.textContent = 'Store: AGT Bothell';
-                  statusElement.className = 'store-status active';
-                  console.log('INLINE: Set status to AGT Bothell');
-                }
-                
-                // Also set localStorage
-                localStorage.setItem('selectedStore', 'AGT_Bothell');
-              })();
+              // REMOVED: No longer auto-setting Bothell - user must select store first
+              // Store selection is now required and handled by checkStoreRequired()
             </script>
           </div>
         </div>
@@ -4481,7 +4628,7 @@
                   <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
                   <polyline points="9 9 15 9 15 15 9 15 9 9"></polyline>
                 </svg>
-                <span class="file-info-text" id="fileInfoText" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">No file selected</span>
+                <span class="file-info-text" id="fileInfoText" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{% if uploaded_filename %}{{ uploaded_filename }}{% else %}No file selected{% endif %}</span>
               </span>
               <!-- Auto check functionality removed -->
               <button class="btn btn-sm btn-outline-warning ms-2" onclick="clearStuckUploads()" title="Clear stuck uploads" style="font-size: 0.7rem; padding: 0.2rem 0.4rem;">
@@ -4623,7 +4770,7 @@
                   <option value="inventory">Inventory</option>
                 </select>
 
-                <button id="generateBtn" class="btn-modern2" title="Generate labels based on selected tags" onclick="TagManager.debouncedGenerate()">
+                <button id="generateBtn" class="btn-generate-themed" title="Generate labels based on selected tags" onclick="TagManager.debouncedGenerate()">
                   Generate Tags
                 </button>
 
@@ -4642,6 +4789,17 @@
               <div class="mb-3">
                 <label class="filter-label">Controls</label>
                 <div class="d-grid gap-2 w-100">
+                  <!-- Match JSON Button - Moved to top for easy access -->
+                  <button class="btn btn-glass btn-sm" data-bs-toggle="modal" data-bs-target="#jsonMatchModal" title="Match products from JSON URL" style="background: rgba(220, 53, 69, 0.2); border-color: rgba(220, 53, 69, 0.5);">
+                    <span class="icon-btn">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                      </svg>
+                      Match JSON
+                    </span>
+                  </button>
                   <button id="undo-move-btn" class="btn btn-glass btn-sm" title="Undo last move">
                   <span class="icon-btn">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -4669,65 +4827,45 @@
                     </svg>
                     Export Data
                   </span>
-                </button>
-                  <button class="btn btn-glass btn-sm" data-bs-toggle="modal" data-bs-target="#editTemplateModal" title="Edit template settings">
+                  </button>
+                </div>
+              </div>
+
+              <!-- Database and Lineage Management -->
+              <div class="mb-3">
+                <label class="filter-label">Database Tools</label>
+                <div class="d-grid gap-2">
+                  <button class="btn btn-glass btn-sm" onclick="showProductDatabaseManager()" title="Open Data & Analytics">
+                    <span class="icon-btn">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                        <path d="M12 8v8"></path>
+                        <path d="M8 12h8"></path>
+                      </svg>
+                      Data & Analytics
+                    </span>
+                  </button>
+                  <button class="btn btn-glass btn-sm" onclick="showDatabaseEditor()" title="Open Edit DB">
                     <span class="icon-btn">
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
                         <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
                       </svg>
-                      Edit Template
+                      Edit DB
+                    </span>
+                  </button>
+                  <button class="btn btn-glass btn-sm" onclick="openLineageEditor()" title="Open lineage editor for strain management">
+                    <span class="icon-btn">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+                        <path d="M2 17l10 5 10-5"></path>
+                        <path d="M2 12l10 5 10-5"></path>
+                      </svg>
+                      Lineage Editor
                     </span>
                   </button>
                 </div>
               </div>
-
-              <!-- JSON Tools -->
-              <div class="mb-3">
-                <label class="filter-label">JSON Tools</label>
-                <div class="d-grid gap-2">
-                  <button class="btn btn-glass btn-sm" data-bs-toggle="modal" data-bs-target="#jsonInventoryModal" title="Generate inventory slips from JSON">
-                    <span class="icon-btn">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                        <polyline points="14 2 14 8 20 8"></polyline>
-                        <line x1="16" y1="13" x2="8" y2="13"></line>
-                        <line x1="16" y1="17" x2="8" y2="17"></line>
-                        <polyline points="10 9 9 9 8 9"></polyline>
-                      </svg>
-                      JSON Inventory
-                    </span>
-                  </button>
-                  <button class="btn btn-glass btn-sm" onclick="openManualProductModal()" title="Manually add a new product">
-                    <span class="icon-btn">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M12 5v14M5 12h14"></path>
-                      </svg>
-                      Add Product
-                    </span>
-                  </button>
-                  <button class="btn btn-glass btn-sm" onclick="clearJsonMatches()" title="Clear JSON matches">
-                    <span class="icon-btn">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polyline points="3 6 5 6 21 6"></polyline>
-                        <path d="M19 6v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                      </svg>
-                      Clear JSON
-                    </span>
-                  </button>
-                  <button class="btn btn-glass btn-sm" id="jsonFilterToggleBtn" onclick="toggleJsonFilter()" title="Toggle between JSON matched items and full Excel list" style="display: none;">
-                    <span class="icon-btn">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M3 6h18"></path>
-                        <path d="M7 12h14"></path>
-                        <path d="M11 18h10"></path>
-                      </svg>
-                      <span id="jsonFilterToggleText">Toggle Filter</span>
-                    </span>
-                  </button>
-                </div>
-              </div>
-
 
             </div>
           </div>
@@ -4779,8 +4917,8 @@
 
   <!-- Modals -->
   
-  <!-- Store Selection Modal -->
-  <div class="modal fade" id="storeSelectionModal" tabindex="-1" aria-labelledby="storeSelectionModalLabel" data-bs-backdrop="static" data-bs-keyboard="false">
+  <!-- Store Selection Modal - Only shown if user doesn't have a store -->
+  <div class="modal fade {% if user_has_store %}{% else %}show{% endif %}" id="storeSelectionModal" tabindex="-1" aria-labelledby="storeSelectionModalLabel" data-bs-backdrop="static" data-bs-keyboard="false" style="{% if user_has_store %}display: none;{% else %}display: block;{% endif %} z-index: 1055;">
     <div class="modal-dialog modal-dialog-centered">
       <div class="modal-content glass-card">
         <div class="modal-header border-0">
@@ -4905,7 +5043,6 @@
                 <ul class="mb-0 small">
                   <li>Different templates work best for different label sizes</li>
                   <li>Export data to Excel for external record keeping</li>
-                  <li>Use the Edit Template button for advanced customization</li>
                   <li>Clear filters to see all available tags</li>
                 </ul>
               </div>
@@ -5037,239 +5174,6 @@
         <div class="modal-footer border-0">
           <button type="button" class="btn-close" data-bs-dismiss="modal" title="Close modal">Close</button>
           <button type="button" class="btn btn-primary" id="saveLineageBtn">Save changes</button>
-        </div>
-      </div>
-    </div>
-  </div>
-  
-  <!-- Edit Template Modal -->
-  <div class="modal fade" id="editTemplateModal" tabindex="-1" aria-labelledby="editTemplateModalLabel">
-    <div class="modal-dialog">
-      <div class="modal-content glass-card">
-        <div class="modal-header border-0">
-          <h5 class="modal-title" id="editTemplateModalLabel">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2 text-info">
-              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-            </svg>
-            Edit Template Settings
-          </h5>
-          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close edit template modal"></button>
-        </div>
-        <div class="modal-body">
-          <!-- Template Type Selection -->
-          <div class="mb-4">
-            <label class="filter-label">Template Type</label>
-            <select id="templateSelectModal" class="form-select form-select-modern" aria-label="Template">
-              <option value="horizontal">Horizontal</option>
-              <option value="vertical">Vertical</option>
-              <option value="mini">Mini</option>
-              <option value="double">Double</option>
-              <option value="inventory">Inventory</option>
-            </select>
-          </div>
-          
-          <!-- Font Settings -->
-          <div class="mb-4">
-            <label class="filter-label">Font Family</label>
-            <select id="fontSelectModal" class="form-select form-select-modern" aria-label="Font">
-              <option value="Arial">Arial</option>
-              <option value="Helvetica">Helvetica</option>
-              <option value="Times New Roman">Times New Roman</option>
-              <option value="Georgia">Georgia</option>
-              <option value="Verdana">Verdana</option>
-              <option value="Courier New">Courier New</option>
-              <option value="Impact">Impact</option>
-              <option value="Comic Sans MS">Comic Sans MS</option>
-              <option value="Calibri">Calibri</option>
-              <option value="Cambria">Cambria</option>
-              <option value="Candara">Candara</option>
-              <option value="Consolas">Consolas</option>
-              <option value="Constantia">Constantia</option>
-              <option value="Corbel">Corbel</option>
-              <option value="Franklin Gothic">Franklin Gothic</option>
-              <option value="Garamond">Garamond</option>
-              <option value="Lucida Console">Lucida Console</option>
-              <option value="Palatino">Palatino</option>
-              <option value="Tahoma">Tahoma</option>
-              <option value="Trebuchet MS">Trebuchet MS</option>
-            </select>
-          </div>
-          
-          <!-- Scale Factor -->
-          <div class="mb-4">
-            <label class="filter-label">Scale Factor</label>
-            <input type="number" id="scaleInputModal" class="form-control form-control-modern" 
-                   value="1.0" min="0.5" max="2.0" step="0.1" aria-label="Scale">
-            <div class="form-text">Adjust the scale factor for label sizing (0.5x to 2.0x)</div>
-          </div>
-          
-          <!-- Font Sizing Configuration -->
-          <div class="mb-4">
-            <label class="filter-label">Font Sizing Mode</label>
-            <select id="fontSizingModeModal" class="form-select form-select-modern" aria-label="Font Sizing Mode">
-              <option value="auto">Auto (Dynamic)</option>
-              <option value="fixed">Fixed Sizes</option>
-              <option value="custom">Custom Thresholds</option>
-            </select>
-            <div class="form-text">Choose how font sizes are calculated</div>
-          </div>
-          
-          <!-- Field-Specific Font Sizes -->
-          <div class="mb-4" id="fieldFontSizesSection" style="display: none;">
-            <label class="filter-label">Field-Specific Font Sizes</label>
-            <div class="row">
-              <div class="col-6">
-                <label class="form-label small">Description</label>
-                <input type="number" id="descriptionFontSize" class="form-control" value="16" min="6" max="48" style="min-width: 80px; width: 100%;">
-              </div>
-              <div class="col-6">
-                <label class="form-label small">Brand</label>
-                <input type="number" id="brandFontSize" class="form-control" value="14" min="6" max="48" style="min-width: 80px; width: 100%;">
-              </div>
-            </div>
-            <div class="row mt-2">
-              <div class="col-6">
-                <label class="form-label small">Price</label>
-                <input type="number" id="priceFontSize" class="form-control" value="18" min="6" max="48" style="min-width: 80px; width: 100%;">
-              </div>
-              <div class="col-6">
-                <label class="form-label small">Lineage</label>
-                <input type="number" id="lineageFontSize" class="form-control" value="12" min="6" max="48" style="min-width: 80px; width: 100%;">
-              </div>
-            </div>
-            <div class="row mt-2">
-              <div class="col-6">
-                <label class="form-label small">Ratio/THC-CBD</label>
-                <input type="number" id="ratioFontSize" class="form-control" value="10" min="6" max="48" style="min-width: 80px; width: 100%;">
-              </div>
-              <div class="col-6">
-                <label class="form-label small">Vendor</label>
-                <input type="number" id="vendorFontSize" class="form-control" value="8" min="6" max="48" style="min-width: 80px; width: 100%;">
-              </div>
-            </div>
-          </div>
-          
-          <!-- Layout Options -->
-          <div class="mb-4">
-            <label class="filter-label">Layout Options</label>
-            <div class="form-check">
-              <input class="form-check-input" type="checkbox" id="enableLineBreaksModal" checked>
-              <label class="form-check-label" for="enableLineBreaksModal">
-                Enable automatic line breaks
-              </label>
-            </div>
-            <div class="form-check">
-              <input class="form-check-input" type="checkbox" id="enableTextWrappingModal" checked>
-              <label class="form-check-label" for="enableTextWrappingModal">
-                Enable text wrapping
-              </label>
-            </div>
-            <div class="form-check">
-              <input class="form-check-input" type="checkbox" id="enableBoldTextModal">
-              <label class="form-check-label" for="enableBoldTextModal">
-                Use bold text for headers
-              </label>
-            </div>
-            <div class="form-check">
-              <input class="form-check-input" type="checkbox" id="enableItalicTextModal">
-              <label class="form-check-label" for="enableItalicTextModal">
-                Use italic text for descriptions
-              </label>
-            </div>
-          </div>
-          
-          <!-- Spacing Options -->
-          <div class="mb-4">
-            <label class="filter-label">Spacing Options</label>
-            <div class="row">
-              <div class="col-6">
-                <label class="form-label small">Line Spacing</label>
-                <select id="lineSpacingModal" class="form-select" style="min-width: 120px; width: 100%;">
-                  <option value="1.0">Single (1.0)</option>
-                  <option value="1.15">1.15</option>
-                  <option value="1.5">1.5</option>
-                  <option value="2.0">Double (2.0)</option>
-                  <option value="2.5">2.5</option>
-                </select>
-              </div>
-              <div class="col-6">
-                <label class="form-label small">Paragraph Spacing</label>
-                <select id="paragraphSpacingModal" class="form-select" style="min-width: 120px; width: 100%;">
-                  <option value="0">None (0pt)</option>
-                  <option value="6">6pt</option>
-                  <option value="12">12pt</option>
-                  <option value="18">18pt</option>
-                  <option value="24">24pt</option>
-                </select>
-              </div>
-            </div>
-          </div>
-          
-          <!-- Color Options -->
-          <div class="mb-4">
-            <label class="filter-label">Color Options</label>
-            <div class="row">
-              <div class="col-6">
-                <label class="form-label small">Text Color</label>
-                <input type="color" id="textColorModal" class="form-control" value="#000000" style="min-width: 80px; width: 100%; height: 40px;">
-              </div>
-              <div class="col-6">
-                <label class="form-label small">Background Color</label>
-                <input type="color" id="backgroundColorModal" class="form-control" value="#ffffff" style="min-width: 80px; width: 100%; height: 40px;">
-              </div>
-            </div>
-            <div class="row mt-2">
-              <div class="col-6">
-                <label class="form-label small">Header Color</label>
-                <input type="color" id="headerColorModal" class="form-control" value="#333333" style="min-width: 80px; width: 100%; height: 40px;">
-              </div>
-              <div class="col-6">
-                <label class="form-label small">Accent Color</label>
-                <input type="color" id="accentColorModal" class="form-control" value="#007bff" style="min-width: 80px; width: 100%; height: 40px;">
-              </div>
-            </div>
-          </div>
-          
-          <!-- Advanced Options -->
-          <div class="mb-4">
-            <label class="filter-label">Advanced Options</label>
-            <div class="form-check">
-              <input class="form-check-input" type="checkbox" id="enableAutoResizeModal" checked>
-              <label class="form-check-label" for="enableAutoResizeModal">
-                Auto-resize text to fit
-              </label>
-            </div>
-            <div class="form-check">
-              <input class="form-check-input" type="checkbox" id="enableSmartTruncationModal" checked>
-              <label class="form-check-label" for="enableSmartTruncationModal">
-                Smart text truncation
-              </label>
-            </div>
-            <div class="form-check">
-              <input class="form-check-input" type="checkbox" id="enableOptimizationModal">
-              <label class="form-check-label" for="enableOptimizationModal">
-                Enable performance optimization
-              </label>
-            </div>
-          </div>
-          
-          <!-- Template Preview -->
-          <div class="mb-4">
-            <label class="filter-label">Template Preview</label>
-            <div id="templatePreviewModal" class="border rounded p-3 bg-light" style="min-height: 100px;">
-              <div class="text-center text-muted">
-                <small>Preview will appear here</small>
-              </div>
-            </div>
-            <button type="button" class="btn btn-sm btn-outline-secondary mt-2" onclick="updateTemplatePreview()">
-              Refresh Preview
-            </button>
-          </div>
-        </div>
-        <div class="modal-footer border-0">
-          <button type="button" class="btn btn-glass" data-bs-dismiss="modal">Cancel</button>
-          <button type="button" class="btn btn-primary" id="saveTemplateBtn">Save Settings</button>
         </div>
       </div>
     </div>
@@ -6506,59 +6410,9 @@
     window.addEventListener('load', function () {
       scrollToTop();
       
-      // Sync store with backend and update display
-      setTimeout(() => {
-        console.log('Window load: Starting store sync...');
-        // First check what store the backend has
-        fetch('/api/get-store')
-          .then(response => response.json())
-          .then(data => {
-            console.log('Window load: Backend store data:', data);
-            if (data.success && data.store) {
-              console.log('Window load: Backend store:', data.store);
-              // Force update the display directly
-              const displayElement = document.getElementById('currentStoreDisplay');
-              if (displayElement) {
-                displayElement.textContent = data.store.replace(/_/g, ' ');
-                displayElement.style.color = '#4ade80';
-                console.log('Window load: Updated display to:', data.store.replace(/_/g, ' '));
-              }
-              // Also update the store status
-              updateStoreStatus(`Store: ${data.store.replace(/_/g, ' ')}`, 'active');
-              // Also save to localStorage for consistency
-              localStorage.setItem('selectedStore', data.store);
-              console.log('Window load: Store sync completed');
-            } else {
-              // No store in backend - will be handled by checkStoreRequired()
-              console.log('No store in backend - user will be prompted to select');
-            }
-          })
-          .catch(error => {
-            console.error('Error checking backend store:', error);
-            // Don't auto-set Bothell, let checkStoreRequired handle it
-          });
-      }, 1000);
-      
-      // Additional sync after 3 seconds to ensure it works
-      setTimeout(() => {
-        console.log('Delayed sync: Checking store again...');
-        const displayElement = document.getElementById('currentStoreDisplay');
-        if (displayElement && displayElement.textContent === 'No store selected') {
-          console.log('Delayed sync: Still showing no store, forcing update...');
-          fetch('/api/get-store')
-            .then(response => response.json())
-            .then(data => {
-              if (data.success && data.store) {
-                displayElement.textContent = data.store.replace(/_/g, ' ');
-                displayElement.style.color = '#4ade80';
-                updateStoreStatus(`Store: ${data.store.replace(/_/g, ' ')}`, 'active');
-                console.log('Delayed sync: Forced update to:', data.store.replace(/_/g, ' '));
-              }
-            });
-        }
-      }, 3000);
-      
-      // No emergency fallback - let checkStoreRequired handle store selection
+      // Don't sync store here - let checkStoreRequired() handle it
+      // This prevents old store selections from being restored
+      console.log('Window load: Skipping store sync - letting checkStoreRequired() handle it');
     });
     
     // Scroll to top on page show (handles back/forward navigation)
@@ -6586,7 +6440,7 @@
       
       loadAvailableTags: function() {
         console.log('Loading available tags from API...');
-        fetch('/api/available-tags')
+        fetch('/api/available-tags?prefer_db=1&nocache=1')
           .then(response => response.json())
           .then(data => {
             console.log('Available tags loaded:', data.tags.length);
@@ -6642,7 +6496,7 @@
               <small style="color: #666;">${tag.Vendor || 'Unknown Vendor'} - ${tag['Product Type*'] || tag.productType || 'Unknown Type'}</small>
             </div>
             <div class="d-flex align-items-center gap-2">
-              <span class="badge bg-secondary">${tag.Lineage || 'Unknown'}</span>
+              <span class="badge bg-secondary">${tag.currentLineage || tag.canonical_lineage || tag.Lineage || 'Unknown'}</span>
               <label style="font-weight: bold; color: red;">DOH:</label>
               <select class="doh-dropdown form-select form-select-sm" style="width: 100px;" 
                       onchange="TagManager.updateDohStatus('${productName}', this.value)">
@@ -6679,7 +6533,23 @@
             // Update local state
             const tag = this.state.tags.find(t => (t.ProductName || t['Product Name*']) === productName);
             if (tag) {
+              // Persist the raw value for compatibility (Yes/No/Pending/Unknown)
               tag.DOH = dohValue;
+              tag.doh = dohValue;
+              tag['DOH Compliant (Yes/No)'] = dohValue;
+            }
+
+            // Reflect change in UI images/dropdowns consistently with main.js behavior
+            // Map template values to UI status used by TagManager.updateDohInAllDisplays
+            // Yes -> DOH image; No/Pending/Unknown -> hide image
+            let uiDohStatus = 'NONE';
+            if ((dohValue || '').toUpperCase() === 'YES') {
+              uiDohStatus = 'DOH';
+            }
+
+            // Update all displays (available and selected lists)
+            if (typeof TagManager.updateDohInAllDisplays === 'function') {
+              TagManager.updateDohInAllDisplays(productName, uiDohStatus);
             }
           } else {
             console.error('Failed to update DOH status:', data.message);
@@ -6740,7 +6610,7 @@
         return new Promise((resolve, reject) => {
           // Reload available tags from the server
           console.log('🔄 Fetching fresh tags from /api/available-tags...');
-          fetch('/api/available-tags')
+          fetch('/api/available-tags?prefer_db=1&nocache=1')
             .then(response => {
               console.log('🔄 Response received:', response.status, response.ok);
               return response.json();
@@ -6819,23 +6689,22 @@
         }
       }, 1000);
 
-      }, 2000);
-
-      // Don't check for store here - let checkStoreRequired handle it after timeout
-      console.log('DOMContentLoaded: Waiting for Bootstrap to initialize store check...');
-      
-      console.log('TagManager initialized, waiting for Bootstrap...');
-      
-      // Wait for Bootstrap to be fully loaded and DOM to be ready
+      // Store check handled by backend template rendering
+      console.log('Store selection status from backend: {{ "has store" if user_has_store else "no store" }}');
+      {% if user_has_store %}
+      console.log('✅ Store already selected: {{ current_store }} - Content visible by default');
+      // Update the display immediately
       setTimeout(() => {
-        console.log('Timeout completed, checking store selection...');
-        
-        // Verify modal exists
-        verifyModalExists();
-        
-        // Check if store selection is required FIRST (this will show modal if needed)
-        checkStoreRequired();
-      }, 1000);
+        if (typeof updateCurrentStoreDisplay === 'function') {
+          updateCurrentStoreDisplay('{{ current_store }}');
+        }
+        if (typeof updateStoreStatus === 'function') {
+          updateStoreStatus('Store: {{ current_store|replace("_", " ") }}', 'active');
+        }
+      }, 100);
+      {% else %}
+      console.log('⚠️ No store selected - Modal visible by default');
+      {% endif %}
       
       // Periodically check store status from backend
       setInterval(updateStoreStatusFromBackend, 30000); // Check every 30 seconds
@@ -6911,208 +6780,6 @@
           }
         } catch (e) {}
       }
-      
-      // Edit Template Modal functionality
-      const editTemplateModal = document.getElementById('editTemplateModal');
-      const templateSelectModal = document.getElementById('templateSelectModal');
-      const scaleInputModal = document.getElementById('scaleInputModal');
-      const fontSelectModal = document.getElementById('fontSelectModal');
-      const fontSizingModeModal = document.getElementById('fontSizingModeModal');
-      const fieldFontSizesSection = document.getElementById('fieldFontSizesSection');
-      const templateSelect = document.getElementById('templateSelect');
-      const scaleInput = document.getElementById('scaleInput');
-      const fontSelect = document.getElementById('fontSelect');
-      const saveTemplateBtn = document.getElementById('saveTemplateBtn');
-      
-      // Font sizing mode change handler
-      if (fontSizingModeModal) {
-        fontSizingModeModal.addEventListener('change', function() {
-          if (this.value === 'fixed') {
-            fieldFontSizesSection.style.display = 'block';
-          } else {
-            fieldFontSizesSection.style.display = 'none';
-          }
-          updateTemplatePreview();
-        });
-      }
-      
-      // Update preview when any setting changes
-      function updateTemplatePreview() {
-        const preview = document.getElementById('templatePreviewModal');
-        if (!preview) {
-          console.error('Template preview container not found!');
-          return;
-        }
-        
-        // Get elements with null checks
-        const templateSelectModal = document.getElementById('templateSelectModal');
-        const scaleInputModal = document.getElementById('scaleInputModal');
-        const fontSelectModal = document.getElementById('fontSelectModal');
-        const fontSizingModeModal = document.getElementById('fontSizingModeModal');
-        
-        // Use fallback values if elements are not found
-        const templateType = templateSelectModal ? templateSelectModal.value : 'vertical';
-        const fontFamily = fontSelectModal ? fontSelectModal.value : 'Arial';
-        const scale = scaleInputModal ? scaleInputModal.value : '1.0';
-        const fontSizeMode = fontSizingModeModal ? fontSizingModeModal.value : 'auto';
-        
-        // Get font sizes for fixed mode
-        let brandSize = 14;
-        let descriptionSize = 16;
-        let priceSize = 18;
-        let lineageSize = 12;
-        
-        if (fontSizeMode === 'fixed') {
-          const brandElement = document.getElementById('brandFontSize');
-          const descriptionElement = document.getElementById('descriptionFontSize');
-          const priceElement = document.getElementById('priceFontSize');
-          const lineageElement = document.getElementById('lineageFontSize');
-          
-          if (brandElement) brandSize = brandElement.value || 14;
-          if (descriptionElement) descriptionSize = descriptionElement.value || 16;
-          if (priceElement) priceSize = priceElement.value || 18;
-          if (lineageElement) lineageSize = lineageElement.value || 12;
-        }
-        
-        let previewHtml = `
-          <div style="font-family: ${fontFamily}; transform: scale(${scale}); transform-origin: top left;">
-            <div style="border: 1px solid #ccc; padding: 8px; margin: 4px; background: white; border-radius: 4px;">
-              <div style="font-weight: bold; font-size: ${brandSize}px; color: #333; margin-bottom: 4px;">Sample Brand</div>
-              <div style="font-size: ${descriptionSize}px; color: #666; margin-bottom: 4px;">Sample Description Text</div>
-              <div style="font-size: ${priceSize}px; font-weight: bold; color: #007bff; margin-bottom: 4px;">$25.00</div>
-              <div style="font-size: ${lineageSize}px; color: #009900; text-transform: uppercase;">HYBRID</div>
-            </div>
-          </div>
-        `;
-        
-        preview.innerHTML = previewHtml;
-        console.log('Template preview updated successfully');
-      }
-      
-      // Add event listeners for preview updates
-      const previewElementIds = [
-        'templateSelectModal', 'scaleInputModal', 'fontSelectModal', 
-        'fontSizingModeModal', 'descriptionFontSize', 'brandFontSize', 
-        'priceFontSize', 'lineageFontSize', 'ratioFontSize', 'vendorFontSize'
-      ];
-      
-      previewElementIds.forEach(id => {
-        const element = document.getElementById(id);
-        if (element) {
-          element.addEventListener('change', updateTemplatePreview);
-          element.addEventListener('input', updateTemplatePreview);
-        }
-      });
-      
-      // When modal opens, sync values from main form and update preview
-      editTemplateModal.addEventListener('show.bs.modal', function () {
-        const templateSelectModal = document.getElementById('templateSelectModal');
-        const scaleInputModal = document.getElementById('scaleInputModal');
-        const fontSelectModal = document.getElementById('fontSelectModal');
-        const fontSizingModeModal = document.getElementById('fontSizingModeModal');
-        const templateSelect = document.getElementById('templateSelect');
-        const scaleInput = document.getElementById('scaleInput');
-        const fontSelect = document.getElementById('fontSelect');
-        
-        if (templateSelectModal && templateSelect) {
-          templateSelectModal.value = templateSelect.value;
-        }
-        if (scaleInputModal && scaleInput) {
-          scaleInputModal.value = scaleInput.value;
-        }
-        if (fontSelectModal && fontSelect) {
-          fontSelectModal.value = fontSelect.value;
-        }
-        
-        // Set default values for new fields
-        if (fontSizingModeModal) fontSizingModeModal.value = 'auto';
-        if (document.getElementById('lineSpacingModal')) document.getElementById('lineSpacingModal').value = '1.0';
-        if (document.getElementById('paragraphSpacingModal')) document.getElementById('paragraphSpacingModal').value = '0';
-        
-        // Update preview
-        setTimeout(updateTemplatePreview, 100);
-      });
-      
-      // When save button is clicked, sync values back to main form
-      saveTemplateBtn.addEventListener('click', function () {
-        templateSelect.value = templateSelectModal.value;
-        scaleInput.value = scaleInputModal.value;
-        fontSelect.value = fontSelectModal.value;
-        
-        // Save additional settings to localStorage for persistence
-        const templateSettings = {
-          templateType: templateSelectModal.value,
-          scale: scaleInputModal.value,
-          font: fontSelectModal.value,
-          fontSizeMode: fontSizingModeModal ? fontSizingModeModal.value : 'auto',
-          lineBreaks: document.getElementById('enableLineBreaksModal')?.checked || true,
-          textWrapping: document.getElementById('enableTextWrappingModal')?.checked || true,
-          boldHeaders: document.getElementById('enableBoldTextModal')?.checked || false,
-          italicDescriptions: document.getElementById('enableItalicTextModal')?.checked || false,
-          lineSpacing: document.getElementById('lineSpacingModal')?.value || '1.0',
-          paragraphSpacing: document.getElementById('paragraphSpacingModal')?.value || '0',
-          textColor: document.getElementById('textColorModal')?.value || '#000000',
-          backgroundColor: document.getElementById('backgroundColorModal')?.value || '#ffffff',
-          headerColor: document.getElementById('headerColorModal')?.value || '#333333',
-          accentColor: document.getElementById('accentColorModal')?.value || '#007bff',
-          autoResize: document.getElementById('enableAutoResizeModal')?.checked || true,
-          smartTruncation: document.getElementById('enableSmartTruncationModal')?.checked || true,
-          optimization: document.getElementById('enableOptimizationModal')?.checked || false,
-          fieldFontSizes: {
-            description: document.getElementById('descriptionFontSize')?.value || 16,
-            brand: document.getElementById('brandFontSize')?.value || 14,
-            price: document.getElementById('priceFontSize')?.value || 18,
-            lineage: document.getElementById('lineageFontSize')?.value || 12,
-            ratio: document.getElementById('ratioFontSize')?.value || 10,
-            vendor: document.getElementById('vendorFontSize')?.value || 8
-          }
-        };
-        
-        // Save to localStorage for persistence
-        localStorage.setItem('templateSettings', JSON.stringify(templateSettings));
-        
-        // Save to backend for generation
-        fetch('/api/template-settings', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(templateSettings)
-        })
-        .then(response => response.json())
-        .then(data => {
-          if (data.success) {
-            console.log('Template settings saved to backend');
-          } else {
-            console.warn('Failed to save template settings to backend:', data.error);
-          }
-        })
-        .catch(error => {
-          console.error('Error saving template settings to backend:', error);
-        });
-        
-        // Close the modal
-        const modal = bootstrap.Modal.getInstance(editTemplateModal);
-        modal.hide();
-        
-        // Show success message
-        showToast('Template settings saved successfully!', 'success');
-      });
-      
-      // Load saved settings when page loads
-      document.addEventListener('DOMContentLoaded', function() {
-        const savedSettings = localStorage.getItem('templateSettings');
-        if (savedSettings) {
-          try {
-            const settings = JSON.parse(savedSettings);
-            if (templateSelect) templateSelect.value = settings.templateType || 'vertical';
-            if (scaleInput) scaleInput.value = settings.scale || '1.0';
-            if (fontSelect) fontSelect.value = settings.font || 'Arial';
-          } catch (e) {
-            console.warn('Failed to load saved template settings:', e);
-          }
-        }
-      });
     });
 
     // Psychedelic morphing background animation
@@ -7528,7 +7195,7 @@
         fetch('/api/database-stats').then(r => r.json()),
         fetch('/api/database-view').then(r => r.json()),
         fetch('/api/database-vendor-stats').then(r => r.json()),
-        fetch('/api/available-tags').then(r => r.json())
+        fetch('/api/available-tags?prefer_db=1&nocache=1').then(r => r.json())
       ])
       .then(([stats, view, vendorStats, availableTags]) => {
         const totalProducts = availableTags.length;
@@ -9484,7 +9151,7 @@
           fetch('/api/database-stats').then(r => r.json()),
           fetch('/api/database-vendor-stats').then(r => r.json()),
           fetch('/api/database-analytics').then(r => r.json()).catch(() => ({})),
-          fetch('/api/available-tags').then(r => r.json())
+          fetch('/api/available-tags?prefer_db=1&nocache=1').then(r => r.json())
         ])
         .then(([stats, vendorStats, analytics, availableTags]) => {
           const totalProducts = availableTags.length;
@@ -11495,7 +11162,6 @@
           console.log('🚨 EMERGENCY: Upload response:', data);
 
           if (response.ok && data.success) {
-            alert(`Upload successful! ${data.rows} rows processed. Page will reload now.`);
             setTimeout(() => window.location.reload(), 1000);
           } else {
             alert('Upload failed: ' + (data.error || 'Unknown error'));

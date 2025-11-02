@@ -1036,22 +1036,25 @@ if (!window.dragAndDropManager) {
 }
 
 // Force reinitialize after DOM is fully loaded
-document.addEventListener('DOMContentLoaded', () => {
-    setTimeout(() => {
-        if (window.dragAndDropManager) {
-            console.log('Force reinitializing drag and drop after DOM load');
-            window.dragAndDropManager.reinitializeTagDragAndDrop();
-        }
-    }, 500);
-});
+// NOTE: Disabled early initialization - causes "Found 0 total tag rows" warnings
+// Drag-and-drop is properly initialized after tags load in fetchAndUpdateSelectedTags()
+// document.addEventListener('DOMContentLoaded', () => {
+//     setTimeout(() => {
+//         if (window.dragAndDropManager) {
+//             console.log('Force reinitializing drag and drop after DOM load');
+//             window.dragAndDropManager.reinitializeTagDragAndDrop();
+//         }
+//     }, 500);
+// });
 
 // Also reinitialize after a longer delay to catch any late-loading content
-setTimeout(() => {
-    if (window.dragAndDropManager) {
-        console.log('Delayed reinitialization of drag and drop');
-        window.dragAndDropManager.reinitializeTagDragAndDrop();
-    }
-}, 2000);
+// NOTE: Disabled - causes duplicate initialization warnings
+// setTimeout(() => {
+//     if (window.dragAndDropManager) {
+//         console.log('Delayed reinitialization of drag and drop');
+//         window.dragAndDropManager.reinitializeTagDragAndDrop();
+//     }
+// }, 2000);
 
 // Expose test function globally for debugging
 window.testDragAndDrop = () => {

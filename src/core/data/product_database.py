@@ -11,8 +11,21 @@ from functools import lru_cache
 import threading
 import os
 
-def get_database_path(store_name=None):
-    """Get the correct database path for ProductDatabase instances."""
+def get_database_path(store_name):
+    """Get the correct database path for ProductDatabase instances.
+    
+    Args:
+        store_name: Store name (required) - e.g., 'AGT_Bothell'
+    
+    Returns:
+        Path to store-specific database file
+    
+    Raises:
+        ValueError: If store_name is None or empty
+    """
+    if not store_name:
+        raise ValueError("store_name is required for database path. Store-specific databases are mandatory.")
+    
     # Get the current directory of this file
     current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
     uploads_dir = os.path.join(current_dir, 'uploads')
@@ -20,13 +33,9 @@ def get_database_path(store_name=None):
     # Create uploads directory if it doesn't exist
     os.makedirs(uploads_dir, exist_ok=True)
     
-    if store_name:
-        # Create store-specific database file
-        db_filename = f'product_database_{store_name}.db'
-        return os.path.join(uploads_dir, db_filename)
-    else:
-        # Default database for backward compatibility
-        return os.path.join(uploads_dir, 'product_database.db')
+    # Create store-specific database file
+    db_filename = f'product_database_{store_name}.db'
+    return os.path.join(uploads_dir, db_filename)
 
 logger = logging.getLogger(__name__)
 
@@ -71,9 +80,13 @@ class ProductDatabase:
     
     def __init__(self, db_path: str = None, store_name: str = None):
         if db_path is None:
+            if store_name is None:
+                raise ValueError("Either db_path or store_name must be provided. Store-specific databases are mandatory.")
             self.db_path = get_database_path(store_name)
+            self._store_name = store_name
         else:
             self.db_path = db_path
+            self._store_name = store_name
         self._connection_pool = {}
         self._cache = {}
         self._cache_lock = threading.Lock()
@@ -889,9 +902,11 @@ class ProductDatabase:
             # CRITICAL VALIDATION: Prevent blank entries from being added to database
             if not product_name or str(product_name).strip() == '':
                 self._rejected_blank_names += 1
-                # Only log every 10th rejection to reduce noise
-                if self._rejected_blank_names % 10 == 1:
-                    logger.debug(f"❌ REJECTED: Cannot add product with blank/empty product name (count: {self._rejected_blank_names})")
+                # Log only the first occurrence, then every 100th to avoid spam
+                if self._rejected_blank_names == 1 or self._rejected_blank_names % 100 == 1:
+                    logger.debug(
+                        f"❌ REJECTED: Cannot add product with blank/empty product name (count: {self._rejected_blank_names})"
+                    )
                 return None
             
             # Check for invalid values
@@ -1025,20 +1040,20 @@ class ProductDatabase:
                             product_data.get('Description', ''),
                             product_data.get('Ratio', '')
                         ),
-                        'Product Type*': product_data.get('Product Type*'),
+                        'Product Type*': product_data.get('Product Type*'),  # EXCEL PRIORITY: Excel Product Type (High THC/CBD) always overwrites DB
                         'Vendor/Supplier*': product_data.get('Vendor/Supplier*'),
                         'Product Brand': product_data.get('Product Brand'),
                         'Description': self._process_description(product_data.get('Product Name*', ''), product_data.get('Description', '')),
                         'Weight*': product_data.get('Weight*'),
                         'Units': product_data.get('Units'),
-                        'Price': product_data.get('Price'),
+                        'Price': product_data.get('Price'),  # EXCEL PRIORITY: Excel Price always overwrites DB
                         'Lineage': self._normalize_lineage(product_data.get('Lineage')),
                         'first_seen_date': current_date,
                         'last_seen_date': current_date,
                         'created_at': current_date,
                         'updated_at': current_date,
                         'Quantity*': product_data.get('Quantity*', ''),
-                        'DOH': product_data.get('DOH', ''),
+                        'DOH': product_data.get('DOH', ''),  # EXCEL PRIORITY: Excel DOH always overwrites DB
                         'Concentrate Type': product_data.get('Concentrate Type', ''),
                         'Ratio': product_data.get('Ratio', ''),
                         'JointRatio': product_data.get('JointRatio', ''),
@@ -1505,6 +1520,58 @@ class ProductDatabase:
                     # Track this product to prevent duplicates within the same upload
                     self._current_upload_products.add(duplicate_key)
                     
+                    # CRITICAL FIX: Preserve existing database lineage if Excel lineage is empty
+                    # Check if this product already exists in database and has lineage
+                    preserved_db_lineage = None
+                    excel_lineage = product_data.get('Lineage', '').strip() if product_data.get('Lineage') else ''
+                    
+                    # Only check database if Excel lineage is empty - this is the key preservation point
+                    if not excel_lineage or excel_lineage in ['', 'nan', 'none', 'null', 'None', 'NaN']:
+                        conn_check = self._get_connection()
+                        cursor_check = conn_check.cursor()
+                        
+                        # Try multiple lookup strategies to find existing product
+                        normalized_name = self._normalize_product_name(product_name)
+                        vendor = product_data.get('Vendor/Supplier*', '').strip() if product_data.get('Vendor/Supplier*') else ''
+                        
+                        # Strategy 1: Exact normalized name + vendor match
+                        cursor_check.execute('''
+                            SELECT "Lineage" FROM products 
+                            WHERE normalized_name = ? AND TRIM("Vendor/Supplier*") = ?
+                            LIMIT 1
+                        ''', (normalized_name, vendor))
+                        existing_lineage_result = cursor_check.fetchone()
+                        
+                        # Strategy 2: If no match, try by product name directly (case-insensitive)
+                        if not existing_lineage_result or not existing_lineage_result[0]:
+                            cursor_check.execute('''
+                                SELECT "Lineage" FROM products 
+                                WHERE TRIM(LOWER("Product Name*")) = TRIM(LOWER(?)) 
+                                  AND TRIM("Vendor/Supplier*") = ?
+                                LIMIT 1
+                            ''', (product_name, vendor))
+                            existing_lineage_result = cursor_check.fetchone()
+                        
+                        # Strategy 3: If still no match, try without vendor requirement
+                        if not existing_lineage_result or not existing_lineage_result[0]:
+                            cursor_check.execute('''
+                                SELECT "Lineage" FROM products 
+                                WHERE normalized_name = ?
+                                ORDER BY updated_at DESC
+                                LIMIT 1
+                            ''', (normalized_name,))
+                            existing_lineage_result = cursor_check.fetchone()
+                        
+                        if existing_lineage_result and existing_lineage_result[0]:
+                            db_lineage = str(existing_lineage_result[0]).strip()
+                            if db_lineage and db_lineage not in ['', 'nan', 'none', 'null', 'None', 'NaN']:
+                                preserved_db_lineage = db_lineage
+                                logger.info(f"✅ LINEAGE PRESERVATION: Found existing database lineage '{db_lineage}' for product '{product_name}' - will preserve (Excel had empty lineage)")
+                        else:
+                            logger.debug(f"⚠️ No existing lineage found in database for product '{product_name}' (Excel also has empty lineage)")
+                        
+                        cursor_check.close()
+                    
                     # Comprehensive smart normalization before storing in database
                     try:
                         from src.core.data.smart_excel_normalizer import smart_normalizer
@@ -1519,6 +1586,13 @@ class ProductDatabase:
                             logger.info(f"Fallback weight normalized product: {product_name}")
                         except Exception as e2:
                             logger.warning(f"Fallback weight normalization also failed for {product_name}: {e2}")
+                    
+                    # CRITICAL: Restore preserved database lineage AFTER normalization (normalization might have cleared it)
+                    if preserved_db_lineage:
+                        final_excel_lineage = product_data.get('Lineage', '').strip() if product_data.get('Lineage') else ''
+                        if not final_excel_lineage or final_excel_lineage in ['', 'nan', 'none', 'null', 'None', 'NaN']:
+                            product_data['Lineage'] = preserved_db_lineage
+                            logger.info(f"✅ RESTORED preserved database lineage '{preserved_db_lineage}' for product '{product_name}' after normalization")
                     
                     # Store the product in database
                     # Get the count before to determine if it's new or updated
@@ -2197,10 +2271,12 @@ class ProductDatabase:
                 updates = []
                 values = []
                 
-                if not doh or doh == 'None':
+                # CRITICAL FIX: Always use 'No' as the empty state, never None
+                # CRITICAL FIX: Always use 'No' as the empty state, never None or empty string
+                if not doh or doh == 'None' or doh is None or str(doh).strip() == '':
+                    doh = 'No'
                     updates.append('"DOH" = ?')
                     values.append('No')
-                    doh = 'No'  # Update the variable for later use
                 
                 if not concentrate_type or concentrate_type == 'None':
                     updates.append('"Concentrate Type" = ?')
@@ -3026,7 +3102,35 @@ class ProductDatabase:
             ai_value = self._calculate_ai_value(product_data)
             ak_value = self._calculate_ak_value(product_data)
             
-            # Update the product with new data - NEW DATA ALWAYS REPLACES OLD VALUES
+            # Update the product with new data
+            # CRITICAL FIX: Preserve existing non-empty Lineage from database; only update if incoming lineage is non-empty
+            incoming_lineage = self._normalize_lineage(product_data.get('Lineage'))
+            incoming_lineage_clean = str(incoming_lineage).strip() if incoming_lineage else ''
+            # Check if incoming lineage is valid (not empty/null)
+            has_valid_incoming_lineage = (incoming_lineage_clean and 
+                                        incoming_lineage_clean not in ['', 'nan', 'none', 'null', 'None', 'NaN'])
+            
+            # Get current database lineage to preserve it
+            cursor.execute('SELECT "Lineage" FROM products WHERE id = ?', (product_id,))
+            current_db_lineage = cursor.fetchone()
+            current_lineage = current_db_lineage[0] if current_db_lineage and current_db_lineage[0] else ''
+            current_lineage_clean = str(current_lineage).strip() if current_lineage else ''
+            has_existing_lineage = (current_lineage_clean and 
+                                  current_lineage_clean not in ['', 'nan', 'none', 'null', 'None', 'NaN'])
+            
+            # Determine final lineage: prefer incoming if valid, otherwise preserve existing
+            if has_valid_incoming_lineage:
+                final_lineage = incoming_lineage_clean
+                logger.info(f"✅ LINEAGE UPDATE: Using incoming lineage '{final_lineage}' for product ID {product_id}")
+            elif has_existing_lineage:
+                final_lineage = current_lineage_clean
+                logger.info(f"✅ LINEAGE PRESERVE: Preserving existing lineage '{final_lineage}' for product ID {product_id} (incoming was empty)")
+            else:
+                final_lineage = incoming_lineage_clean  # Even if empty, use it
+                logger.info(f"⚠️ LINEAGE EMPTY: No lineage to preserve for product ID {product_id}")
+            
+            # CRITICAL FIX: Excel values for DOH, Price, and Product Type always overwrite database
+            # These fields are the source of truth from Excel uploads
             cursor.execute('''
                 UPDATE products SET
                     "Product Type*" = ?,
@@ -3053,20 +3157,18 @@ class ProductDatabase:
                     "AI" = ?,
                     "AJ" = ?,
                     "AK" = ?,
-                    "Source" = ?,
-                    "Date Added" = ?,
                     "last_seen_date" = ?,
                     "updated_at" = ?
                 WHERE id = ?
             ''', (
-                product_data.get('Product Type*'),
-                self._normalize_lineage(product_data.get('Lineage')),
+                product_data.get('Product Type*'),  # Excel Product Type (High THC/CBD) overwrites DB
+                final_lineage,
                 product_data.get('Vendor/Supplier*'),
                 product_data.get('Product Brand'),
                 product_data.get('Description'),
                 product_data.get('Weight*'),
                 product_data.get('Units'),
-                product_data.get('Price'),
+                product_data.get('Price'),  # Excel Price overwrites DB
                 self._calculate_product_strain_original(
                     product_data.get('Product Type*', ''),
                     product_data.get('Product Name*', ''),
@@ -3074,7 +3176,7 @@ class ProductDatabase:
                     product_data.get('Ratio', '')
                 ),
                 product_data.get('Quantity*', ''),
-                product_data.get('DOH', ''),
+                product_data.get('DOH', ''),  # Excel DOH overwrites DB
                 product_data.get('Concentrate Type', ''),
                 product_data.get('Ratio', ''),
                 product_data.get('JointRatio', ''),
@@ -3088,14 +3190,13 @@ class ProductDatabase:
                 self._calculate_ai_value(product_data),
                 product_data.get('THC Content', ''),
                 self._calculate_ak_value(product_data),
-                product_data.get('Source', ''),
-                product_data.get('Date Added', current_date),
                 current_date,
                 current_date,
                 product_id
             ))
             
-            logger.info(f"Successfully updated product ID {product_id} with new Excel data (old values replaced)")
+            # CRITICAL: Ensure lineage change is logged (commit handled by caller)
+            logger.info(f"✅ Successfully updated product ID {product_id} with lineage '{final_lineage}'")
             
         except Exception as e:
             logger.error(f"Error updating existing product {product_id}: {e}")
@@ -3800,15 +3901,16 @@ class ProductDatabase:
                     logger.debug(f"Found vendor-specific lineage for {strain_name} + {brand}: {result[0]}")
                     return result[0]
                 
-                # Check products table for vendor/brand combination
+                # Check products table for vendor/brand combination without relying on missing strain_id
+                # Match by normalized Product Strain text to the requested strain
+                normalized_strain = self._normalize_strain_name(strain_name)
                 cursor.execute('''
                     SELECT p."Lineage" FROM products p
-                    WHERE p.strain_id = (
-                        SELECT id FROM strains WHERE normalized_name = ?
-                    ) AND p."Vendor/Supplier*" = ? AND p."Product Brand" = ?
+                    WHERE LOWER(TRIM(COALESCE(p."Product Strain", ''))) = ?
+                      AND p."Vendor/Supplier*" = ? AND p."Product Brand" = ?
                     ORDER BY p.id DESC
                     LIMIT 1
-                ''', (self._normalize_strain_name(strain_name), vendor, brand))
+                ''', (normalized_strain, vendor, brand))
                 
                 result = cursor.fetchone()
                 if result and result[0]:
@@ -3893,7 +3995,7 @@ class ProductDatabase:
             return {}
 
     def update_product_doh(self, product_name: str, new_doh: str, vendor: str = None, brand: str = None) -> bool:
-        """Update the DOH status for a product in the database."""
+        """Update the DOH status for a product in the database. Aggressively overwrites all matching products."""
         try:
             self.init_database()
             normalized_name = self._normalize_product_name(product_name)
@@ -3901,26 +4003,44 @@ class ProductDatabase:
             cursor = conn.cursor()
             current_date = datetime.now().isoformat()
             
-            # Update both DOH columns to be consistent
+            # Strategy 1: Most specific match (vendor + brand + normalized name)
             if vendor and brand:
                 cursor.execute('''
                     UPDATE products
                     SET "DOH" = ?, "DOH Compliant (Yes/No)" = ?, updated_at = ?
                     WHERE normalized_name = ? AND "Vendor/Supplier*" = ? AND "Product Brand" = ?
                 ''', (new_doh, new_doh, current_date, normalized_name, vendor, brand))
-                logger.info(f"Updated DOH for product '{product_name}' (vendor={vendor}, brand={brand}) to '{new_doh}'")
-            else:
+                rows_updated = cursor.rowcount
+                if rows_updated > 0:
+                    logger.info(f"✅ DOH UPDATE: Updated {rows_updated} product(s) matching '{product_name}' (vendor={vendor}, brand={brand}) → '{new_doh}'")
+            
+            # Strategy 2: Fallback to normalized name match (overwrite all variants)
+            if cursor.rowcount == 0 or not (vendor and brand):
                 cursor.execute('''
                     UPDATE products
                     SET "DOH" = ?, "DOH Compliant (Yes/No)" = ?, updated_at = ?
                     WHERE normalized_name = ?
                 ''', (new_doh, new_doh, current_date, normalized_name))
-                logger.info(f"Updated DOH for product '{product_name}' to '{new_doh}'")
+                rows_updated = cursor.rowcount
+                if rows_updated > 0:
+                    logger.info(f"✅ DOH UPDATE: Updated {rows_updated} product(s) matching normalized name '{normalized_name}' → '{new_doh}'")
+            
+            # Strategy 3: Fallback to exact product name match (case-insensitive)
+            if rows_updated == 0:
+                cursor.execute('''
+                    UPDATE products
+                    SET "DOH" = ?, "DOH Compliant (Yes/No)" = ?, updated_at = ?
+                    WHERE UPPER("Product Name*") = UPPER(?)
+                ''', (new_doh, new_doh, current_date, product_name))
+                rows_updated = cursor.rowcount
+                if rows_updated > 0:
+                    logger.info(f"✅ DOH UPDATE: Updated {rows_updated} product(s) matching exact name '{product_name}' → '{new_doh}'")
             
             conn.commit()
-            rows_updated = cursor.rowcount
+            
             if rows_updated == 0:
-                logger.warning(f"No product found in database to update DOH: '{product_name}' (vendor={vendor}, brand={brand})")
+                logger.warning(f"⚠️ DOH UPDATE: No product found in database to update DOH: '{product_name}' (vendor={vendor}, brand={brand})")
+            
             return rows_updated > 0
         except Exception as e:
             logger.error(f"Error updating product DOH for '{product_name}': {e}")

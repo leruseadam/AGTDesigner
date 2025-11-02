@@ -260,20 +260,61 @@ def process_doh_image(doh_value, product_type):
 
     try:
         logger.warning(f"process_doh_image called with doh_value='{doh_value}', product_type='{product_type}'")
-        if str(doh_value).upper() == 'YES':
+        doh_upper = str(doh_value).strip().upper() if doh_value else ''
+        
+        # Map DOH values to appropriate images
+        if doh_upper == 'CBD':
+            # High CBD image
+            high_cbd_image_path = resource_path(os.path.join("templates", "HighCBD.png"))
+            # Fallback to static path if template image is missing
+            try:
+                import os
+                if not os.path.exists(high_cbd_image_path):
+                    fallback_path = resource_path(os.path.join("static", "img", "HighCBD.png"))
+                    logger.warning(f"HighCBD.png not found in templates, falling back to: {fallback_path}")
+                    high_cbd_image_path = fallback_path
+            except Exception:
+                pass
+            logger.warning(f"Using HighCBD image for CBD value: {high_cbd_image_path}")
+            return high_cbd_image_path
+        elif doh_upper == 'THC':
+            # High THC image
+            high_thc_image_path = resource_path(os.path.join("templates", "HighTHC.png"))
+            # Fallback to static path if template image is missing
+            try:
+                import os
+                if not os.path.exists(high_thc_image_path):
+                    fallback_path = resource_path(os.path.join("static", "img", "HighTHC.png"))
+                    logger.warning(f"HighTHC.png not found in templates, falling back to: {fallback_path}")
+                    high_thc_image_path = fallback_path
+            except Exception:
+                pass
+            logger.warning(f"Using HighTHC image for THC value: {high_thc_image_path}")
+            return high_thc_image_path
+        elif doh_upper in ['YES', 'DOH']:
             # Get DOH image path
             doh_image_path = resource_path(os.path.join("templates", "DOH.png"))
             high_cbd_image_path = resource_path(os.path.join("templates", "HighCBD.png"))
 
             # Use HighCBD.png if product_type contains 'high cbd' (case-insensitive)
+            # This preserves legacy behavior for YES values
             if 'high cbd' in str(product_type).strip().lower():
+                # Fallback to static path if template image is missing
+                try:
+                    import os
+                    if not os.path.exists(high_cbd_image_path):
+                        fallback_path = resource_path(os.path.join("static", "img", "HighCBD.png"))
+                        logger.warning(f"HighCBD.png not found in templates, falling back to: {fallback_path}")
+                        high_cbd_image_path = fallback_path
+                except Exception:
+                    pass
                 logger.warning(f"Using HighCBD image for product type '{product_type}': {high_cbd_image_path}")
                 return high_cbd_image_path
             else:
                 logger.warning(f"Using DOH image for product type '{product_type}': {doh_image_path}")
                 return doh_image_path
         else:
-            logger.warning("Skipping DOH image - value is not 'YES'")
+            logger.warning(f"Skipping DOH image - value is '{doh_value}' (not YES/DOH/THC/CBD)")
             return ""
     except Exception as e:
         logger.error(f"Error processing DOH image path: {str(e)}")

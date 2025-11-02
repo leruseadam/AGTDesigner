@@ -788,6 +788,46 @@ class TemplateProcessor:
                                     strain_end_element.getparent().index(strain_end_element) + 1,
                                     new_text
                                 )
+                        
+                        # CRITICAL FIX: Add DescAndWeight after QR for product description + weight
+                        if '{{Label1.DescAndWeight}}' not in cell_text and 'DescAndWeight' not in cell_text:
+                            text_elements = list(tc.iter(qn('w:t')))
+                            qr_end_index = -1
+                            for i, t in enumerate(text_elements):
+                                if t.text and 'QR' in t.text:
+                                    for j in range(i, len(text_elements)):
+                                        if text_elements[j].text and '}}' in text_elements[j].text:
+                                            qr_end_index = j
+                                            break
+                            if qr_end_index >= 0:
+                                new_text = OxmlElement('w:t')
+                                new_text.text = f'\n{{{{Label{cnt}.DescAndWeight}}}}'
+                                qr_end_element = text_elements[qr_end_index]
+                                qr_end_element.getparent().insert(
+                                    qr_end_element.getparent().index(qr_end_element) + 1,
+                                    new_text
+                                )
+                        
+                        # CRITICAL FIX: Add Price after DescAndWeight
+                        if '{{Label1.Price}}' not in cell_text or 'Price' not in cell_text:
+                            text_elements = list(tc.iter(qn('w:t')))
+                            # Find where to insert Price - after DescAndWeight or QR
+                            insert_index = -1
+                            for i, t in enumerate(text_elements):
+                                if t.text and ('DescAndWeight' in t.text or 'QR' in t.text):
+                                    for j in range(i, len(text_elements)):
+                                        if text_elements[j].text and '}}' in text_elements[j].text:
+                                            insert_index = j
+                                            break
+                            if insert_index >= 0:
+                                new_text = OxmlElement('w:t')
+                                new_text.text = f'\n${{{{Label{cnt}.Price}}}}'
+                                insert_element = text_elements[insert_index]
+                                insert_element.getparent().insert(
+                                    insert_element.getparent().index(insert_element) + 1,
+                                    new_text
+                                )
+                        
                         for el in tc.xpath('./*'):
                             cell._tc.append(deepcopy(el))
                         product_idx += 1
@@ -1127,6 +1167,57 @@ class TemplateProcessor:
         
         # Fast dictionary copy
         label_context = dict(record)
+        
+        # CRITICAL FIX: Double-check lineage from database to ensure it's up-to-date
+        # This is a safety net to catch any cases where the record lineage wasn't updated
+        try:
+            product_name = record.get('ProductName', record.get('Product Name*', ''))
+            current_record_lineage = label_context.get('Lineage', '')
+            
+            # Always check database for most up-to-date lineage (product-level first, then strain-level)
+            if product_name:
+                from app import get_product_database, get_current_store_name
+                store_name = get_current_store_name()
+                product_db = get_product_database(store_name)
+                if product_db:
+                    # FIRST: Check product-level lineage (preserves user changes)
+                    db_lineage = product_db.get_product_lineage(product_name)
+                    
+                    # If no product-level lineage, check strain-level lineage
+                    if not db_lineage or str(db_lineage).strip() in ['', 'None', 'nan']:
+                        product_strain = record.get('Product Strain', '')
+                        if product_strain:
+                            strain_info = product_db.get_strain_info(product_strain)
+                            if strain_info:
+                                db_lineage = (
+                                    strain_info.get('display_lineage') or
+                                    strain_info.get('sovereign_lineage') or
+                                    strain_info.get('canonical_lineage') or
+                                    None
+                                )
+                    
+                    if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
+                        db_lineage_upper = str(db_lineage).strip().upper()
+                        if db_lineage_upper != str(current_record_lineage).strip().upper():
+                            # Database has a different lineage - use it
+                            self.logger.info(f"✅ LINEAGE DB CHECK: '{product_name}' - Record: '{current_record_lineage}' -> DB: '{db_lineage_upper}' (using DB)")
+                            label_context['Lineage'] = db_lineage_upper
+                        else:
+                            # Same lineage, but ensure it's uppercase for consistency
+                            label_context['Lineage'] = db_lineage_upper
+                    elif current_record_lineage:
+                        # No DB lineage, but record has one - keep it but ensure uppercase
+                        label_context['Lineage'] = str(current_record_lineage).strip().upper()
+        except Exception as e:
+            self.logger.debug(f"Could not check database lineage: {e}")
+        
+        # CRITICAL FIX: Force DOH to be read from the actual data source, not defaults
+        # If DOH is 'YES' but we updated it to 'No', use 'No' instead
+        # Check if DOH was explicitly set to No in our recent updates
+        if 'Source' in record and ('JSON Match' in record.get('Source', '') or 'Educated Guess' in record.get('Source', '')):
+            # This is a JSON-matched item - check if DOH was manually updated
+            # We need to preserve the user's DOH selection even for JSON matches
+            pass
 
         # Fast value cleaning - only process non-empty values
         for key, value in label_context.items():
@@ -1336,19 +1427,36 @@ class TemplateProcessor:
             label_context['DescAndWeight'] = wrap_with_marker(desc_and_weight, 'DESC')
 
         # Fast DOH image processing - only if needed
+        # IMPORTANT: Only use the canonical DOH field for image decisions
+        # Ignore legacy "DOH Compliant (Yes/No)" and any other variants
         doh_value = label_context.get('DOH', '')
         product_name = label_context.get('ProductName', 'Unknown')
-        
-        # CRITICAL DEBUG: Log DOH field processing
-        self.logger.info(f"DOH DEBUG: Product '{product_name}' - DOH field: '{doh_value}' (type: {type(doh_value)})")
-        
-        if doh_value and str(doh_value).strip().upper() == 'YES':
-            product_type = (label_context.get('ProductType') or 
-                          label_context.get('Product Type*') or 
-                          record.get('ProductType') or 
+
+        # CRITICAL DEBUG: Log DOH field processing with all possible sources
+        self.logger.info(f"🔍 DOH DOCX GENERATION: Product '{product_name}' - DOH field: '{doh_value}' from record")
+        self.logger.info(f"🔍 DOH DOCX GENERATION: Using only canonical DOH field: '{label_context.get('DOH', '')}'")
+        self.logger.info(f"🔍 DOH DOCX GENERATION: Record Source: '{record.get('Source', 'N/A')}'")
+        self.logger.info(f"🔍 DOH DOCX GENERATION: First 20 field keys in record: {list(record.keys())[:20]}")
+
+        # Handle different DOH values: YES (legacy), DOH, THC, CBD
+        doh_upper = str(doh_value).strip().upper() if doh_value else ''
+
+        # Explicitly handle NO/NONE/False values FIRST
+        # Also handle legacy "No" (capital N, lowercase o) which is what we store
+        if doh_upper in ['NO', 'NONE', 'FALSE', ''] or doh_value in ['No', 'no']:
+            label_context['DOH'] = ''
+            label_context['DOH_TEXT'] = ''
+            # Also clear other DOH-related fields
+            label_context['DOH Compliant (Yes/No)'] = ''
+            label_context['doh'] = ''
+            self.logger.info(f"✅ DOH DOCX GENERATION: Explicitly clearing DOH for '{product_name}' - value: '{doh_value}' (NO/NONE/FALSE) - NO IMAGE WILL BE ADDED")
+        elif doh_upper in ['YES', 'DOH', 'THC', 'CBD']:
+            product_type = (label_context.get('ProductType') or
+                          label_context.get('Product Type*') or
+                          record.get('ProductType') or
                           record.get('Product Type*') or '')
 
-            image_path = process_doh_image(doh_value, product_type)
+            image_path = process_doh_image(doh_upper, product_type)
             if image_path:
                 # Fast width selection - reduced by 1mm for all template types
                 width_map = {'mini': 8, 'double': 10, 'vertical': 13, 'horizontal': 13}
@@ -1356,17 +1464,17 @@ class TemplateProcessor:
                 label_context['DOH'] = InlineImage(doc, image_path, width=image_width)
                 # Ensure DOH image takes priority - clear any other DOH-related content
                 label_context['DOH_TEXT'] = ''  # Clear any text content
-                self.logger.info(f"DOH DEBUG: Created DOH image for '{product_name}'")
+                self.logger.info(f"✅ DOH DOCX GENERATION: Created DOH image for '{product_name}' with value '{doh_upper}' - IMAGE WILL BE ADDED: {image_path}")
             else:
                 label_context['DOH'] = ''
                 label_context['DOH_TEXT'] = ''
-                self.logger.info(f"DOH DEBUG: No image path found for '{product_name}'")
+                self.logger.info(f"⚠️ DOH DOCX GENERATION: No image path found for '{product_name}' - NO IMAGE WILL BE ADDED")
         else:
-            # For any DOH value other than "YES", leave it blank (don't display text)
-            # This ensures DOH="no" results in blank space, not "No" text
+            # For any DOH value other than "YES"/"DOH"/"THC"/"CBD", leave it blank (don't display text)
+            # This ensures DOH="no" or DOH="none" results in blank space, not text
             label_context['DOH'] = ''
             label_context['DOH_TEXT'] = ''
-            self.logger.info(f"DOH DEBUG: Clearing DOH for '{product_name}' - value: '{doh_value}' (not YES)")
+            self.logger.info(f"✅ DOH DOCX GENERATION: Clearing DOH for '{product_name}' - value: '{doh_value}' (not DOH/THC/CBD/YES) - NO IMAGE WILL BE ADDED")
         
         # CRITICAL: Lineage and ProductVendor logic for classic types
         # This implements the same logic that was in tag_generator
@@ -1457,34 +1565,50 @@ class TemplateProcessor:
             # For classic types, Lineage should show strain lineage and ProductVendor should show brand
             self.logger.debug(f"Processing classic type '{product_type}' for Lineage and ProductVendor")
             
-            # PRIORITY FIX: Use Excel lineage first (includes manual dropdown changes), then database fallback
+            # PRIORITY FIX: Use record lineage first (from database updates), then fallback to database
             lineage_val = ""
             
-            # PRIORITY 1: Use Excel lineage (includes manual dropdown changes from user)
+            # PRIORITY 1: Use lineage from record (includes manual dropdown changes and database updates)
+            # CRITICAL: Always use uppercase to ensure consistency
             if lineage_text and lineage_text.strip():
-                lineage_val = lineage_text.upper()
-                self.logger.debug(f"Using Excel lineage (includes manual changes): '{lineage_val}'")
-            elif product_strain:
-                # PRIORITY 2: Fallback to database lineage if no Excel lineage
+                lineage_val = str(lineage_text).strip().upper()
+                self.logger.info(f"✅ Using record lineage (from database/excel): '{lineage_val}' for '{product_name}'")
+            else:
+                # PRIORITY 2: Fallback to database lookup if record lineage is empty
+                self.logger.warning(f"⚠️ No lineage in record for '{product_name}', checking database...")
                 try:
-                    from src.core.data.product_database import get_product_database
-                    product_db = get_product_database()
-                    strain_info = product_db.get_strain_info(product_strain)
-                    if strain_info and strain_info.get('canonical_lineage'):
-                        lineage_val = strain_info['canonical_lineage'].upper()
-                        self.logger.debug(f"Using database lineage fallback: '{lineage_val}'")
-                    else:
-                        # PRIORITY 3: Default fallback
-                        lineage_val = ""
-                        self.logger.debug(f"No lineage found in Excel or database")
+                    from app import get_product_database, get_current_store_name
+                    store_name = get_current_store_name()
+                    product_db = get_product_database(store_name)
+                    
+                    # Try to get product-level lineage first (more specific, includes manual updates)
+                    product_name = record.get('Product Name*', record.get('ProductName', ''))
+                    db_lineage = None
+                    if product_name:
+                        db_lineage = product_db.get_product_lineage(product_name)
+                    if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
+                        lineage_val = str(db_lineage).strip().upper()
+                        self.logger.info(f"✅ Using database product lineage fallback: '{lineage_val}' for '{product_name}'")
+                    
+                    # If no product-level lineage, try strain-level
+                    if not lineage_val and product_strain:
+                        strain_info = product_db.get_strain_info(product_strain)
+                        if strain_info:
+                            preferred = (
+                                strain_info.get('display_lineage') or
+                                strain_info.get('sovereign_lineage') or
+                                strain_info.get('canonical_lineage')
+                            )
+                            if preferred:
+                                lineage_val = str(preferred).strip().upper()
+                                self.logger.info(f"✅ Using database strain lineage fallback: '{lineage_val}' for strain '{product_strain}'")
+                    
+                    if not lineage_val:
+                        self.logger.debug(f"No lineage found in record or database")
                 except Exception as e:
-                    # PRIORITY 3: Default fallback if database lookup fails
+                    # Default fallback if database lookup fails
                     lineage_val = ""
                     self.logger.debug(f"Using default fallback due to error: '{lineage_val}' (error: {e})")
-            else:
-                # No strain available, try Excel lineage
-                lineage_val = lineage_text.upper() if lineage_text else ""
-                self.logger.debug(f"No strain available, using Excel lineage: '{lineage_val}'")
             
             # CRITICAL FIX: Ensure classic types always have lineage data
             if not lineage_val or lineage_val.strip() == "":
