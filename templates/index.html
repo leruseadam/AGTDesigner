@@ -123,34 +123,39 @@
     // Don't add backdrop by default - let checkStoreRequired add it only if needed
     // This prevents the backdrop from appearing when a store is already selected
     
-    // UNIVERSAL VIEWPORT SETUP - Works on all devices (MacBook, PC, tablets, phones)
+    // VIEWPORT NORMALIZATION FOR CONSISTENT SCALING
+    // Works universally on all devices - MacBook Pro, PC, tablets, phones
     (function() {
       'use strict';
       
-      function updateViewportVariables() {
-        // Calculate viewport units for CSS
+      function normalizeViewport() {
         const vw = window.innerWidth / 100;
         const vh = window.innerHeight / 100;
         const vmin = Math.min(vw, vh);
         const vmax = Math.max(vw, vh);
         
-        // Set viewport CSS variables (used by styles.css)
+        // Set normalized viewport units as CSS custom properties
         document.documentElement.style.setProperty('--vw', vw + 'px');
         document.documentElement.style.setProperty('--vh', vh + 'px');
         document.documentElement.style.setProperty('--vmin', vmin + 'px');
         document.documentElement.style.setProperty('--vmax', vmax + 'px');
         
-        // Universal scaling - same for all environments (MacBook, PC, mobile, etc.)
+        // UNIVERSAL SCALING: Same for all environments
+        // No environment-specific adjustments - works everywhere
         document.documentElement.style.setProperty('--env-scale-factor', '1');
         document.documentElement.style.setProperty('--env-font-multiplier', '1');
+        
+        console.log(`Viewport: ${window.innerWidth}x${window.innerHeight}, vw=${vw}px, vh=${vh}px`);
       }
       
-      // Update on load and resize for responsive behavior
-      updateViewportVariables();
-      window.addEventListener('resize', updateViewportVariables);
-      window.addEventListener('orientationchange', updateViewportVariables);
+      // Run normalization on load and resize
+      normalizeViewport();
+      window.addEventListener('resize', normalizeViewport);
+      window.addEventListener('orientationchange', normalizeViewport);
       
-      console.log('✅ Universal viewport configured for all screen sizes');
+      // Re-normalize after a short delay to catch any late-loading elements
+      setTimeout(normalizeViewport, 100);
+      setTimeout(normalizeViewport, 500);
     })();
     
     // Define showDatabaseEditor function immediately to prevent errors
