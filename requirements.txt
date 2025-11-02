@@ -1,5 +1,12 @@
 # AGT Label Maker - Python Dependencies
-# Install on PythonAnywhere: pip3 install --user -r requirements.txt
+# 
+# RECOMMENDED: Use automated installation (applies docxcompose patch automatically)
+#   Local:         python3 install_requirements.py
+#   PythonAnywhere: python3 install_requirements.py
+#
+# MANUAL: pip3 install --user -r requirements.txt && python3 patch_docxcompose.py
+#
+# See INSTALLATION.md for details
 
 # Core Flask
 Flask>=2.3.0
@@ -16,7 +23,9 @@ xlrd>=2.0.1
 
 # Document Generation
 python-docx>=0.8.11
-docxcompose>=1.4.0
+# NOTE: Using fork until official release includes pkg_resources fix
+# Run 'python3 patch_docxcompose.py' after installation to apply the fix
+git+https://github.com/tvuotila/docxcompose.git
 Pillow>=10.0.0
 
 # QR Code Generation
