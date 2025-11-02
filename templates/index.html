@@ -81,7 +81,7 @@
     
     // Define selectStore function EARLY so it's available when modal loads
     window.selectStore = function(storeValue) {
-      console.log('Store selected:', storeValue);
+      console.log('✅ Store selected:', storeValue);
       
       // Set the store via API
       fetch('/api/set-store', {
@@ -94,78 +94,19 @@
       .then(response => response.json())
       .then(data => {
         if (data.success) {
-          console.log('Store set successfully:', storeValue);
+          console.log('✅ Store set successfully:', storeValue);
+          console.log('🔄 Reloading page to apply store change...');
           
-          // Hide modal and show main content
-          const modalElement = document.getElementById('storeSelectionModal');
-          if (modalElement) {
-            modalElement.style.display = 'none';
-            modalElement.classList.remove('show');
-          }
-          // Remove backdrop
-          const backdrop = document.getElementById('storeModalBackdrop') || document.querySelector('.modal-backdrop');
-          if (backdrop) {
-            backdrop.remove();
-          }
-          document.body.classList.remove('modal-open');
-          document.body.style.overflow = '';
-          
-          // Show main content
-          const mainContent = document.getElementById('mainContent');
-          if (mainContent) {
-            mainContent.style.display = 'block';
-            mainContent.classList.add('store-selected');
-            setTimeout(() => mainContent.classList.add('loaded'), 100);
-          }
-          
-          // Update store display
-          if (typeof updateCurrentStoreDisplay === 'function') {
-            updateCurrentStoreDisplay(storeValue);
-          }
-          if (typeof updateStoreStatus === 'function') {
-            updateStoreStatus(`Store: ${storeValue.replace(/_/g, ' ')}`, 'active');
-          }
-          
-          // Clear existing data for new store
-          clearExistingData();
-          
-          // Show loading message
+          // Show brief success message before reload
           if (window.Toast && typeof window.Toast.show === 'function') {
-            window.Toast.show('info', `Switching to ${storeValue.replace(/_/g, ' ')}...`);
+            window.Toast.show('success', `Switching to ${storeValue.replace(/_/g, ' ')}...`);
           }
           
-          // Refresh tag data for the new store
-          if (window.TagManager) {
-            console.log('Reloading tags for new store...');
-            // Call checkForExistingData which will fetch tags from the new store
-            if (typeof window.TagManager.checkForExistingData === 'function') {
-              window.TagManager.checkForExistingData().then(() => {
-                console.log('Tags reloaded for new store');
-                // Check if tags were loaded
-                if (window.TagManager.state.tags && window.TagManager.state.tags.length > 0) {
-                  if (window.Toast && typeof window.Toast.show === 'function') {
-                    window.Toast.show('success', `Loaded ${window.TagManager.state.tags.length} products for ${storeValue.replace(/_/g, ' ')}`);
-                  }
-                } else {
-                  // No data for this store
-                  if (window.Toast && typeof window.Toast.show === 'function') {
-                    window.Toast.show('warning', `No data found for ${storeValue.replace(/_/g, ' ')}. Please upload an Excel file with "${storeValue}" in the filename.`);
-                  }
-                }
-              }).catch(err => {
-                console.error('Error reloading tags:', err);
-                if (window.Toast && typeof window.Toast.show === 'function') {
-                  window.Toast.show('error', 'Failed to load data for new store. Please try uploading a file.');
-                }
-              });
-            } else if (typeof window.TagManager.fetchAndUpdateAvailableTags === 'function') {
-              window.TagManager.fetchAndUpdateAvailableTags();
-            }
-          }
-          
-          // Don't reload - just update the UI
-          // The backend has the new store, so future API calls will use the correct store
-          console.log('Store selection complete - UI updated without reload');
+          // CRITICAL FIX: Reload the page after store selection
+          // This ensures clean session state and proper data loading for the new store
+          setTimeout(() => {
+            window.location.reload();
+          }, 500); // Brief delay to show the toast message
         } else {
           console.error('Error setting store:', data.error);
           alert('Error setting store. Please try again.');
