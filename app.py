@@ -464,12 +464,20 @@ def get_client_ip():
 def get_current_store_name():
     """Get the current store name for the requesting client. Returns None if no valid selection."""
     try:
+        # CRITICAL FIX: Check Flask session first (more reliable on PythonAnywhere)
+        if session.get('selected_store'):
+            logging.debug(f"Returning store from session: {session.get('selected_store')}")
+            return session.get('selected_store')
+        
+        # Fallback to IP-based selection
         ip_address = get_client_ip()
         with _ip_store_lock:
             if ip_address in _ip_store_selections:
                 store_data = _ip_store_selections[ip_address]
                 # Check if the selection is still valid (not expired)
                 if is_store_selection_valid(ip_address, store_data):
+                    # Also save to session for consistency
+                    session['selected_store'] = store_data['store']
                     return store_data['store']
                 else:
                     # Remove expired selection
@@ -2088,13 +2096,21 @@ def upload_file():
     try:
         logging.info("=== UPLOAD START ===")
         
+        # DIAGNOSTIC: Log IP and session state
+        ip_address = get_client_ip()
+        session_store = session.get('selected_store')
+        logging.info(f"🔍 Upload diagnostics: IP={ip_address}, Session store={session_store}")
+        logging.info(f"🔍 Request headers: X-Forwarded-For={request.headers.get('X-Forwarded-For')}, X-Real-IP={request.headers.get('X-Real-IP')}, Remote-Addr={request.remote_addr}")
+        
         # CRITICAL: Require store selection before upload
         if not has_store_selection():
-            logging.error("Upload attempted without store selection")
+            logging.error(f"❌ Upload attempted without store selection - IP: {ip_address}, Session: {session_store}")
+            logging.error(f"❌ IP store selections: {list(_ip_store_selections.keys())}")
             return jsonify({'error': 'Please select a store before uploading files'}), 400
         
         # Get current store selection
         selected_store = get_current_store_name()
+        logging.info(f"✅ Store selection found: {selected_store}")
         
         # Validate request
         if 'file' not in request.files:
@@ -4397,7 +4413,11 @@ def set_store():
         if store_value not in valid_stores:
             return jsonify({'success': False, 'error': 'Invalid store selection'}), 400
         
-        # Store selection with timestamp
+        # CRITICAL FIX: Save to Flask session first (most reliable on PythonAnywhere)
+        session['selected_store'] = store_value
+        logging.info(f"✅ Store saved to session: {store_value}")
+        
+        # Also store in IP-based selection (backup method)
         with _ip_store_lock:
             _ip_store_selections[ip_address] = {
                 'store': store_value,
@@ -4414,12 +4434,12 @@ def set_store():
         # Save to disk for persistence across restarts
         save_store_selections()
         
-        # CRITICAL: Clear session data from previous store
+        # CRITICAL: Clear other session data from previous store (but keep selected_store!)
         session.pop('file_path', None)
         session.pop('uploaded_filename', None)
         session.pop('upload_timestamp', None)
         session.pop('selected_tags', None)
-        logging.info(f"🧹 Cleared session data for store change")
+        logging.info(f"🧹 Cleared session data for store change (kept selected_store)")
         
         # Clear the global product database instance to force reload with new store
         global _product_database, _excel_processor
