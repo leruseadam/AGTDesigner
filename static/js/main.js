@@ -1910,42 +1910,6 @@ const TagManager = {
         }, 150);
     },
 
-    // CRITICAL FIX: Render JSON matched tags directly without any filtering or organization
-    renderJsonMatchedTags(tags) {
-        console.log('CRITICAL FIX: Rendering JSON matched tags directly, count:', tags.length);
-        
-        const availableTagsContainer = document.getElementById('availableTags');
-        if (!availableTagsContainer) {
-            console.error('Available tags container not found');
-            return;
-        }
-        // Preserve scroll position during re-render
-        const savedScroll = this._saveAvailableScrollPosition();
-
-        // Clear existing content
-        availableTagsContainer.innerHTML = '';
-
-        // Create a simple list container
-        const tagList = document.createElement('div');
-        tagList.className = 'tag-list';
-
-        // Render each tag directly using the existing createTagElement function
-        tags.forEach((tag, index) => {
-            const tagElement = this.createTagElement(tag, false); // false = not for selected tags
-            tagList.appendChild(tagElement);
-        });
-
-        availableTagsContainer.appendChild(tagList);
-        // Restore previous scroll position
-        this._restoreAvailableScrollPosition(savedScroll);
-        
-        // Add event listeners
-        this.updateSelectAllCheckboxes();
-        this.initializeSelectAllCheckbox();
-        
-        console.log('CRITICAL FIX: Rendered', tags.length, 'JSON matched tags directly');
-    },
-
     // Internal function that actually updates the available tags
     _updateAvailableTags(originalTags, filteredTags = null) {
         // Windows optimization: Use requestAnimationFrame for smoother rendering
@@ -2094,27 +2058,17 @@ const TagManager = {
             console.log('Select All Available checkbox not found');
         }
 
-        // CRITICAL FIX: For JSON matched tags, skip organization entirely and render directly
-        const isJsonMatchedSession = tags.some(tag => tag.Source && tag.Source.includes('JSON Match'));
-        
+        // Organize tags by vendor, brand, product type, weight (works for both regular and JSON matched tags)
+        console.log('About to organize tags, tags length:', tags.length);
         let organizedTags;
-        if (isJsonMatchedSession) {
-            console.log('CRITICAL FIX: JSON matched session detected, skipping organization and rendering directly');
-            // For JSON matched tags, render them directly without organization
-            this.renderJsonMatchedTags(tags);
+        try {
+            organizedTags = this.organizeBrandCategories(tags);
+            console.log('Tags organized successfully, vendor count:', organizedTags.size);
+        } catch (error) {
+            console.error('Error organizing tags:', error);
+            // Fallback to simple list if organization fails
+            availableTagsContainer.innerHTML = '<div class="tag-entry">Error organizing tags: ' + error.message + '</div>';
             return;
-        } else {
-            // Organize tags by vendor, brand, product type, weight (but without collapsible functionality)
-            console.log('About to organize tags, tags length:', tags.length);
-            try {
-                organizedTags = this.organizeBrandCategories(tags);
-                console.log('Tags organized successfully, vendor count:', organizedTags.size);
-            } catch (error) {
-                console.error('Error organizing tags:', error);
-                // Fallback to simple list if organization fails
-                availableTagsContainer.innerHTML = '<div class="tag-entry">Error organizing tags: ' + error.message + '</div>';
-                return;
-            }
         }
         
         // Create vendor sections

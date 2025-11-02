@@ -2113,44 +2113,49 @@ class JSONMatcher:
                             # ENHANCED SCORING: Multi-factor matching with PRECISION FOCUS
                             score = 0.0
                             
-                            # 0. VENDOR FILTER: Prefer products from the JSON vendor but don't exclude others
+                            # 0. STRICT VENDOR FILTER: Only match products from same vendor (PROFESSIONAL-GRADE ACCURACY)
                             excel_vendor = cache_item.get('vendor', '').strip()
                             vendor_match_bonus = 0.0
                             if json_vendor_filter and excel_vendor:
-                                # Give bonus points for vendor match instead of filtering out non-matches
+                                # STRICT: Vendor MUST match for manifest matching (prevents false positives)
                                 if json_vendor_filter.lower() in excel_vendor.lower() or excel_vendor.lower() in json_vendor_filter.lower():
                                     vendor_match_bonus = 50.0  # Strong bonus for vendor match
                                     logging.debug(f"✓ Vendor match: '{json_vendor_filter}' matches '{excel_vendor}'")
                                 else:
-                                    # Still allow matching, just with lower score
-                                    logging.debug(f"⚠ Vendor mismatch: '{json_vendor_filter}' vs '{excel_vendor}' - still allowing match with reduced score")
+                                    # STRICT FILTER: Skip non-matching vendors entirely for manifest accuracy
+                                    logging.debug(f"❌ Vendor mismatch: '{json_vendor_filter}' vs '{excel_vendor}' - SKIPPING")
+                                    continue  # Skip this product entirely
                             
                             # 1. Exact name match (highest priority)
                             if product_name.lower() == excel_product_name:
                                 score += 200.0  # Very high score for exact match
                             
-                            # 2. STRICT word-by-word matching to prevent incorrect matches
+                            # 2. ULTRA-STRICT word-by-word matching for professional accuracy
                             else:
                                 # Check if key distinguishing words are present
                                 json_words = set(product_name.lower().split())
                                 excel_words = set(excel_product_name.split())
                                 
-                                # Critical distinguishing words that MUST match
+                                # EXPANDED: More critical words for better discrimination
                                 critical_words = {'cherry', 'cherries', 'chew', 'chews', 'freeze', 'dried', 'ball', 
                                                 'balls', 'chocolate', 'malt', 'dragon', 'assorted', 'fruit',
                                                 'watermelon', 'sour', 'apple', 'mixed', 'berry', 'cookies',
                                                 'cream', 'capsule', 'capsules', 'balm', 'squeeze', 'roll',
-                                                'tincture', 'single', 'dark', 'milk'}
+                                                'tincture', 'single', 'dark', 'milk', 'caramel', 'salted',
+                                                'guava', 'mango', 'tropical', 'bath', 'salt', 'jar', 'tube',
+                                                'revive', 'gold', 'max', 'xtra', 'lifted', 'chill', 'balance',
+                                                'relief', 'bite', 'bites', 'drops', 'drop'}
                                 
                                 # Check for critical word mismatches
                                 json_critical = json_words & critical_words
                                 excel_critical = excel_words & critical_words
                                 
                                 if json_critical and excel_critical:
-                                    # If both have critical words, they MUST overlap significantly
+                                    # STRICT: They MUST overlap significantly (raised from 60% to 80%)
                                     critical_overlap = len(json_critical & excel_critical) / max(len(json_critical), len(excel_critical))
-                                    if critical_overlap < 0.6:  # Less than 60% overlap of critical words
+                                    if critical_overlap < 0.8:  # Less than 80% overlap = different products
                                         score = 0  # Not a match - different products
+                                        logging.debug(f"❌ Critical word mismatch: {critical_overlap:.1%} overlap (need 80%) - SKIPPING")
                                         continue
                                 
                                 # 3. Partial name match only if words align
@@ -2192,8 +2197,24 @@ class JSONMatcher:
                             if product_type and excel_type and any(word in excel_type for word in product_type.lower().split()):
                                 score += 15.0
                             
-                            # 8. Weight matching - not available in cache
-                            # (Skip weight bonus for now)
+                            # 8. SIZE/PACK VALIDATION: Ensure pack size matches (10pack vs Single)
+                            json_has_10pack = '10pack' in product_name.lower() or '10pk' in product_name.lower()
+                            json_has_single = 'single' in product_name.lower()
+                            db_has_10pack = '10pack' in excel_product_name or '10pk' in excel_product_name or '100mg' in excel_product_name
+                            db_has_single = 'single' in excel_product_name or '10mg' in excel_product_name
+                            
+                            # STRICT: Pack size must match or be compatible
+                            if json_has_10pack and db_has_single:
+                                logging.debug(f"❌ Pack size mismatch: JSON has 10pack but DB has Single - SKIPPING")
+                                continue  # Skip incompatible pack sizes
+                            if json_has_single and db_has_10pack:
+                                logging.debug(f"❌ Pack size mismatch: JSON has Single but DB has 10pack - SKIPPING")
+                                continue  # Skip incompatible pack sizes
+                            
+                            # Bonus for matching pack size
+                            if (json_has_10pack and db_has_10pack) or (json_has_single and db_has_single):
+                                score += 30.0  # Pack size match bonus
+                                logging.debug(f"✓ Pack size match bonus")
                             
                             # Store best match
                             if score > best_score:
@@ -2212,9 +2233,9 @@ class JSONMatcher:
                             continue
                 
                 # If we found a good match, create a product
-                # PRECISION FIX: Higher threshold (50.0) to ensure accurate matches only
-                # This prevents "Cherry Fruit Chews" from matching to "Freeze Dried Cherries"
-                if best_match is not None and best_score >= 50.0:  # Stricter threshold for precision
+                # PROFESSIONAL-GRADE PRECISION: Very high threshold to prevent false positives
+                # 100.0+ = exact or near-exact match only (prevents "Gold Dragon Jar" → "Revive Bath Salt")
+                if best_match is not None and best_score >= 100.0:  # Ultra-strict for professional accuracy
                     try:
                         product = self._create_product_from_excel_match(best_match, item, global_vendor)
                         if product:
