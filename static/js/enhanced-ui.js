@@ -214,8 +214,10 @@ async function handleFiles(files) {
 }
 
 // Add smooth scrolling (but ONLY on Mac - Windows handles native scrolling better)
-const isWindows = /Windows|Win32|Win64/.test(navigator.userAgent);
-if (!isWindows) {
+if (typeof window.isWindows === 'undefined') {
+  window.isWindows = /Windows|Win32|Win64/.test(navigator.userAgent);
+}
+if (!window.isWindows) {
   document.querySelectorAll('.tag-list-container').forEach(container => {
     container.addEventListener('wheel', (e) => {
       e.preventDefault();

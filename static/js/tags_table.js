@@ -1,5 +1,11 @@
 // Classic types that should show "Lineage" instead of "Brand"
-const CLASSIC_TYPES = [
+if (typeof window.CLASSIC_TYPES === 'undefined') {
+  window.CLASSIC_TYPES = [
+    "flower", "pre-roll", "concentrate", "infused pre-roll", 
+    "solventless concentrate", "vape cartridge", "rso/co2 tankers"
+  ];
+}
+const CLASSIC_TYPES = window.CLASSIC_TYPES || [
     "flower", "pre-roll", "concentrate", "infused pre-roll", 
     "solventless concentrate", "vape cartridge", "rso/co2 tankers"
 ];
