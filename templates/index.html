@@ -81,7 +81,7 @@
     
     // Define selectStore function EARLY so it's available when modal loads
     window.selectStore = function(storeValue) {
-      console.log('✅ Store selected:', storeValue);
+      console.log('Store selected:', storeValue);
       
       // Set the store via API
       fetch('/api/set-store', {
@@ -95,18 +95,22 @@
       .then(data => {
         if (data.success) {
           console.log('✅ Store set successfully:', storeValue);
-          console.log('🔄 Reloading page to apply store change...');
           
-          // Show brief success message before reload
+          // Set flag to prevent modal from re-appearing during reload
+          sessionStorage.setItem('store_just_selected', 'true');
+          sessionStorage.setItem('selected_store', storeValue);
+          
+          // Show success message
           if (window.Toast && typeof window.Toast.show === 'function') {
             window.Toast.show('success', `Switching to ${storeValue.replace(/_/g, ' ')}...`);
           }
           
-          // CRITICAL FIX: Reload the page after store selection
-          // This ensures clean session state and proper data loading for the new store
+          // CRITICAL: Reload page after delay to sync session
+          // This ensures template variables (user_has_store) are updated
+          console.log('🔄 Reloading page in 1 second to sync session...');
           setTimeout(() => {
             window.location.reload();
-          }, 500); // Brief delay to show the toast message
+          }, 1000); // 1 second delay to ensure session cookie is saved
         } else {
           console.error('Error setting store:', data.error);
           alert('Error setting store. Please try again.');
@@ -4928,6 +4932,39 @@
       </div>
     </div>
   </div>
+  
+  <!-- ANTI-LOOP SAFEGUARD: Prevent modal from showing after reload -->
+  <script>
+    (function() {
+      // Check if store was just selected (flag set before reload)
+      if (sessionStorage.getItem('store_just_selected') === 'true') {
+        console.log('🛡️ Anti-loop safeguard: Store was just selected, ensuring modal stays hidden');
+        
+        // Clear the flag
+        sessionStorage.removeItem('store_just_selected');
+        
+        // Force hide the modal and cleanup
+        const modal = document.getElementById('storeSelectionModal');
+        if (modal) {
+          modal.style.display = 'none';
+          modal.classList.remove('show');
+          modal.setAttribute('aria-hidden', 'true');
+        }
+        
+        // Remove any backdrops
+        document.querySelectorAll('.modal-backdrop').forEach(b => b.remove());
+        document.body.classList.remove('modal-open');
+        document.body.style.overflow = '';
+        
+        // Ensure main content is visible
+        const mainContent = document.getElementById('mainContent');
+        if (mainContent) {
+          mainContent.style.display = 'block';
+        }
+      }
+    })();
+  </script>
+  
   <!-- Help Modal -->
   <div class="modal fade" id="helpModal" tabindex="-1" aria-labelledby="helpModalLabel">
     <div class="modal-dialog modal-lg">
