@@ -24,6 +24,7 @@ Then reload your web app from the PythonAnywhere dashboard.
 7. ✅ **JavaScript errors** - Fixed duplicate variable declarations
 8. ✅ **pkg_resources deprecation** - Protected until Nov 30, 2025 and beyond
 9. ✅ **ProductDB integration disabled** - Re-enabled for proper matching and lineage
+10. ✅ **Viewport sizing issues** - Universal responsive design for all devices
 
 ### Files Updated:
 - `app.py` - Session-based store selection, optimized endpoints
