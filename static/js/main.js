@@ -2678,43 +2678,33 @@ const TagManager = {
         const isNonclassic = !classicTypes.map(ct => ct.toLowerCase()).includes(productType.toLowerCase());
         
         if (isNonclassic) {
-            // CRITICAL FIX: For JSON matched products, trust the lineage that was already determined during matching
-            if (isJsonMatched) {
-                // For JSON matched products, use the lineage from the matched database data
-                // This ensures CBD Blend products get the correct yellow color
-                displayLineage = lineage; // Use the lineage from the matched database
-                console.log(`🎨 JSON MATCHED: Using database lineage "${lineage}" for nonclassic product "${displayName}"`);
+            // For ALL nonclassic products (JSON matched or not), use Product Strain logic
+            const productStrain = tag['Product Strain'] || tag.productStrain || tag.ProductStrain || '';
+            const strainStr = String(productStrain).toLowerCase();
+            
+            // CRITICAL: For non-classic types, always check Product Strain first
+            if (strainStr.includes('cbd blend')) {
+                // CBD Blend products get CBD lineage (yellow color)
+                displayLineage = 'CBD';
+                console.log(`🎨 NON-CLASSIC CBD BLEND: "${displayName}" → CBD (yellow)`);
+            } else if (strainStr.includes('cbn') || strainStr.includes('cbc') || strainStr.includes('cbg')) {
+                // CBN, CBC, CBG products get CBD lineage (yellow color)
+                displayLineage = 'CBD';
+                console.log(`🎨 NON-CLASSIC CBN/CBC/CBG: "${displayName}" → CBD (yellow)`);
+            } else if (strainStr.includes('paraphernalia')) {
+                displayLineage = 'PARAPHERNALIA'; // Pink color
+                console.log(`🎨 NON-CLASSIC PARA: "${displayName}" → PARAPHERNALIA (pink)`);
+            } else if (strainStr.includes('mixed') || !productStrain) {
+                displayLineage = 'MIXED'; // Blue color
+                console.log(`🎨 NON-CLASSIC MIXED: "${displayName}" → MIXED (blue)`);
             } else {
-                // For nonclassic products, use Product Strain to determine lineage
-                // UPDATED: Use the same conservative logic as backend
-                const productStrain = tag['Product Strain'] || tag.productStrain || tag.ProductStrain || '';
-                const strainStr = String(productStrain).toLowerCase();
-                
-                // Define edible types for more conservative CBD assignment
-                const edibleTypes = ['edible (solid)', 'edible (liquid)', 'high cbd edible liquid', 'tincture', 'topical', 'capsule'];
-                const isEdible = edibleTypes.includes(productType.toLowerCase());
-                
-                if (strainStr.includes('cbd blend')) {
-                    // CRITICAL FIX: CBD Blend products should ALWAYS get CBD lineage (yellow color)
-                    // regardless of product type - this ensures proper color display
+                // Check lineage field as fallback
+                if (lineage && lineage.toUpperCase() === 'CBD') {
                     displayLineage = 'CBD';
-                    console.log(`🎨 CBD BLEND FIX: Set lineage to CBD for ${displayName} (strain: ${productStrain})`);
-                } else if (strainStr.includes('cbn') || strainStr.includes('cbc') || strainStr.includes('cbg')) {
-                    // CBN, CBC, CBG products should get CBD lineage (yellow color)
-                    displayLineage = 'CBD';
-                } else if (strainStr.includes('paraphernalia')) {
-                    displayLineage = 'PARAPHERNALIA'; // Pink color
-                } else if (strainStr.includes('mixed')) {
-                    displayLineage = 'MIXED'; // Blue color
+                    console.log(`🎨 NON-CLASSIC from Lineage: "${displayName}" → CBD (yellow)`);
                 } else {
-                    // Check product name for CBN/CBC/CBG content
-                    const productName = (tag['Product Name*'] || tag.ProductName || '').toString().toUpperCase();
-                    if (productName.includes('CBN') || productName.includes('CBC') || productName.includes('CBG')) {
-                        displayLineage = 'CBD'; // CBN/CBC/CBG products get CBD lineage (yellow color)
-                    } else {
-                        // Default for nonclassic products without specific strain
-                        displayLineage = 'MIXED'; // Blue color
-                    }
+                    displayLineage = 'MIXED'; // Blue color default
+                    console.log(`🎨 NON-CLASSIC default: "${displayName}" → MIXED (blue)`);
                 }
             }
         }

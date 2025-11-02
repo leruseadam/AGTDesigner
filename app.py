@@ -11608,12 +11608,12 @@ def json_match():
                 # Convert matched products to DataFrame format
                 import pandas as pd
 
-                # Remove 'Source' field from matched products so they're not treated specially
-                for product in matched_products:
-                    if isinstance(product, dict):
-                        # Remove the Source marker - we want these treated like regular products
-                        product.pop('Source', None)
-                        product.pop('JSON_Source', None)
+                # CRITICAL: Keep 'Source' field so frontend can skip deduplication for JSON Match
+                # DO NOT remove Source - frontend needs it to preserve all 49 individual labels
+                # for product in matched_products:
+                #     if isinstance(product, dict):
+                #         product.pop('Source', None)
+                #         product.pop('JSON_Source', None)
 
                 # Create DataFrame from matched products
                 json_df = pd.DataFrame(matched_products)
