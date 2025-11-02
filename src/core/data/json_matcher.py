@@ -972,7 +972,8 @@ class JSONMatcher:
                 "vendor": vendor,
                 "product_type": str(row["Product Type*"] if "Product Type*" in row else ""),
                 "lineage": str(row["Lineage"] if "Lineage" in row else ""),
-                "strain": str(row["Product Strain"] if "Product Strain" in row else "")
+                "strain": str(row["Product Strain"] if "Product Strain" in row else ""),
+                "_db_product": row.to_dict() if hasattr(row, 'to_dict') else dict(row)  # CRITICAL: Store full row data
             }
             
             try:
@@ -2197,7 +2198,14 @@ class JSONMatcher:
                             # Store best match
                             if score > best_score:
                                 best_score = score
-                                best_match = cache_item.get('_db_product')  # Get the full product data
+                                # CRITICAL: Extract _db_product from cache_item
+                                if '_db_product' in cache_item:
+                                    best_match = cache_item['_db_product']
+                                    db_name_check = best_match.get('Product Name*', 'MISSING')
+                                    logging.debug(f"🎯 Extracted _db_product: '{db_name_check[:50]}'")
+                                else:
+                                    best_match = cache_item
+                                    logging.warning(f"⚠️  cache_item missing _db_product, using cache_item itself")
                                 logging.debug(f"🎯 New best match: JSON '{product_name}' → DB '{excel_product_name}' (score: {score:.1f})")
                                 
                         except Exception as e:
@@ -2644,6 +2652,9 @@ class JSONMatcher:
     def _create_product_from_excel_match(self, excel_row, json_item, global_vendor):
         """Create a product object from Excel row data, enhanced with JSON data."""
         try:
+            # excel_row is already the _db_product (extracted in fetch_and_match)
+            # No need to extract again
+            
             # Get quantity from various possible column names
             def safe_row_get(row, key, default=''):
                 try:
@@ -2677,9 +2688,12 @@ class JSONMatcher:
             # CRITICAL FIX: Use the ACTUAL database product name, not the transformed SKU name
             product_name = safe_row_get(excel_row, product_name_col, '') or safe_row_get(excel_row, 'Description', '')
             
-            # If the database product has no name, log warning
+            logging.info(f"🔍 PRODUCT NAME EXTRACTION: col='{product_name_col}', result='{product_name}'")
+            logging.info(f"🔍 excel_row['Product Name*'] = '{excel_row.get('Product Name*', 'KEY NOT FOUND') if isinstance(excel_row, dict) else 'NOT A DICT'}'")
+            
+            # If the database product has no name, use JSON name as absolute fallback
             if not product_name:
-                logging.warning(f"⚠️ Database product has no name - using fallback")
+                logging.warning(f"⚠️ Database product has no name - using JSON fallback")
                 product_name = str(json_item.get("product_name", "Unknown Product"))
             
             # Get vendor with fallback logic
