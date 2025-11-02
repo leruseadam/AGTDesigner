@@ -788,46 +788,6 @@ class TemplateProcessor:
                                     strain_end_element.getparent().index(strain_end_element) + 1,
                                     new_text
                                 )
-                        
-                        # CRITICAL FIX: Add DescAndWeight after QR for product description + weight
-                        if '{{Label1.DescAndWeight}}' not in cell_text and 'DescAndWeight' not in cell_text:
-                            text_elements = list(tc.iter(qn('w:t')))
-                            qr_end_index = -1
-                            for i, t in enumerate(text_elements):
-                                if t.text and 'QR' in t.text:
-                                    for j in range(i, len(text_elements)):
-                                        if text_elements[j].text and '}}' in text_elements[j].text:
-                                            qr_end_index = j
-                                            break
-                            if qr_end_index >= 0:
-                                new_text = OxmlElement('w:t')
-                                new_text.text = f'\n{{{{Label{cnt}.DescAndWeight}}}}'
-                                qr_end_element = text_elements[qr_end_index]
-                                qr_end_element.getparent().insert(
-                                    qr_end_element.getparent().index(qr_end_element) + 1,
-                                    new_text
-                                )
-                        
-                        # CRITICAL FIX: Add Price after DescAndWeight
-                        if '{{Label1.Price}}' not in cell_text or 'Price' not in cell_text:
-                            text_elements = list(tc.iter(qn('w:t')))
-                            # Find where to insert Price - after DescAndWeight or QR
-                            insert_index = -1
-                            for i, t in enumerate(text_elements):
-                                if t.text and ('DescAndWeight' in t.text or 'QR' in t.text):
-                                    for j in range(i, len(text_elements)):
-                                        if text_elements[j].text and '}}' in text_elements[j].text:
-                                            insert_index = j
-                                            break
-                            if insert_index >= 0:
-                                new_text = OxmlElement('w:t')
-                                new_text.text = f'\n${{{{Label{cnt}.Price}}}}'
-                                insert_element = text_elements[insert_index]
-                                insert_element.getparent().insert(
-                                    insert_element.getparent().index(insert_element) + 1,
-                                    new_text
-                                )
-                        
                         for el in tc.xpath('./*'):
                             cell._tc.append(deepcopy(el))
                         product_idx += 1
