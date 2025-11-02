@@ -2753,7 +2753,7 @@ class JSONMatcher:
                 'DOH': safe_row_get(excel_row, 'DOH'),  # CRITICAL: Include DOH from database
                 'Quantity*': quantity,
                 'Quantity': quantity,
-                'Source': 'Excel Match'
+                'Source': 'JSON Match'  # CRITICAL: Mark as JSON Match so frontend doesn't deduplicate
             }
             
             # DEBUG: Log the critical fields
