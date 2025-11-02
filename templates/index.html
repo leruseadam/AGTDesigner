@@ -105,12 +105,12 @@
             window.Toast.show('success', `Switching to ${storeValue.replace(/_/g, ' ')}...`);
           }
           
-          // CRITICAL: Reload page after delay to sync session
+          // CRITICAL: Reload page after brief delay to sync session
           // This ensures template variables (user_has_store) are updated
-          console.log('🔄 Reloading page in 1 second to sync session...');
+          console.log('🔄 Reloading page to sync session...');
           setTimeout(() => {
             window.location.reload();
-          }, 1000); // 1 second delay to ensure session cookie is saved
+          }, 300); // Brief 300ms delay to ensure session cookie is saved
         } else {
           console.error('Error setting store:', data.error);
           alert('Error setting store. Please try again.');

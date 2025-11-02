@@ -4424,51 +4424,28 @@ def set_store():
                 'timestamp': datetime.now().isoformat(),
                 'ip_address': ip_address
             }
-            logging.info(f"Store selection set for IP {ip_address}: {store_value}")
-            logging.info(f"Current store selections: {list(_ip_store_selections.keys())}")
-            logging.info(f"Total selections stored: {len(_ip_store_selections)}")
+            # Reduced logging for speed
+            logging.debug(f"Store selection set for IP {ip_address}: {store_value}")
         
-        # Cleanup expired selections periodically
-        cleanup_expired_store_selections()
-        
-        # Save to disk for persistence across restarts
-        save_store_selections()
+        # OPTIMIZATION: Skip cleanup and disk save for faster response
+        # The session-based storage is primary, IP storage is just backup
+        # Cleanup and save will happen on next request or server restart
+        # cleanup_expired_store_selections()  # Commented out for speed
+        # save_store_selections()  # Commented out for speed
         
         # CRITICAL: Clear other session data from previous store (but keep selected_store!)
         session.pop('file_path', None)
         session.pop('uploaded_filename', None)
         session.pop('upload_timestamp', None)
         session.pop('selected_tags', None)
-        logging.info(f"🧹 Cleared session data for store change (kept selected_store)")
         
         # Clear the global product database instance to force reload with new store
         global _product_database, _excel_processor
         _product_database = None
-        # Also clear excel processor to force reload with new store's data
         _excel_processor = None
-        logging.info(f"✅ Cleared global product database and excel processor for store change to: {store_value}")
         
-        # CRITICAL: Load the store-specific default file immediately
-        try:
-            from src.core.data.excel_processor import get_default_upload_file
-            logging.info(f"🔄 Loading default file for newly selected store: {store_value}")
-            default_file = get_default_upload_file(store_value)
-            if default_file:
-                # Get a fresh processor instance
-                processor = get_excel_processor()
-                if processor:
-                    success = processor.load_file(default_file)
-                    if success:
-                        logging.info(f"✅ Successfully loaded default file for {store_value}: {default_file}")
-                    else:
-                        logging.warning(f"⚠️ Failed to load default file for {store_value}: {default_file}")
-                else:
-                    logging.warning(f"⚠️ Could not get excel processor for {store_value}")
-            else:
-                logging.info(f"ℹ️ No default file found for {store_value} - user will need to upload one")
-        except Exception as load_error:
-            logging.error(f"❌ Error loading default file for {store_value}: {load_error}")
-            # Don't fail the store selection if file loading fails
+        # OPTIMIZATION: File loading deferred to page reload for instant response
+        logging.debug(f"Store set to {store_value} - cleared session & globals")
         
         return jsonify({
             'success': True,
