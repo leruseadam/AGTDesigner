@@ -2238,12 +2238,49 @@ class JSONMatcher:
                 # Scores 50-90: Use AI validation for extra verification
                 # This prevents incorrect matches like "Gold Dragon Jar" → "Bath Salt"
                 
-                # PROFESSIONAL-GRADE VALIDATION
+                # PROFESSIONAL-GRADE VALIDATION WITH STRICT NAME SIMILARITY
                 validated = False
+                
+                # CRITICAL FIX: Require that product names are actually similar, not just attributes
+                # This prevents matching "GSC Cartridge" → "Golden Pineapple Crystal" just because
+                # they have the same vendor, weight, and product type
+                name_similarity_required = False
+                if best_match is not None and best_score >= 50.0:
+                    # Calculate actual name similarity using fuzzy matching
+                    json_name = product_name.lower()
+                    db_name = str(best_match.get('Product Name*', '') or best_match.get('Description', '')).strip().lower()
+                    
+                    try:
+                        from fuzzywuzzy import fuzz
+                        name_similarity = fuzz.token_sort_ratio(json_name, db_name)
+                        
+                        # Require at least 70% name similarity for ANY match
+                        # This allows legitimate matches like:
+                        # - "Jet Fuel Gelato Vaporizer" → "Jet Fuel Gelato Live Resin" (75%+)
+                        # - "Wedding Cake Cartridge" → "Wedding Cake Live Resin" (75%+)
+                        # But prevents wrong matches like:
+                        # - "Jet Fuel Gelato" → "Bubblegum Gelato" (65%)
+                        if name_similarity < 70:
+                            logging.warning(f"🚫 REJECTED: Low name similarity ({name_similarity}%) - '{product_name}' vs '{db_name}'")
+                            best_match = None
+                            best_score = 0
+                        else:
+                            name_similarity_required = True
+                            logging.debug(f"✓ Name similarity check passed: {name_similarity}%")
+                    except ImportError:
+                        # If fuzzywuzzy not available, require exact or partial name match
+                        if json_name not in db_name and db_name not in json_name:
+                            # No overlap in names - reject
+                            logging.warning(f"🚫 REJECTED: No name overlap - '{product_name}' vs '{db_name}'")
+                            best_match = None
+                            best_score = 0
+                        else:
+                            name_similarity_required = True
+                
                 if best_match is not None and best_score >= 100.0:  # Very high confidence - auto-approve
                     validated = True
                     logging.info(f"✅ HIGH CONFIDENCE: Score {best_score:.1f} >= 100.0")
-                elif best_match is not None and best_score >= 50.0:
+                elif best_match is not None and best_score >= 50.0 and name_similarity_required:
                     # Medium confidence (50-100) - perform additional validation
                     json_name_str = product_name
                     db_name_str = str(best_match.get('Product Name*', '') or best_match.get('Description', '')).strip()
@@ -2382,14 +2419,17 @@ class JSONMatcher:
                 duplicate_count = 0
                 
                 for product in matched_products:
-                    # Create a unique key based on product name and key attributes
+                    # Create a unique key based on product name, price, weight, and vendor
+                    # This matches the deduplication criteria from memory
                     product_name = product.get('Product Name*', '')
                     weight = product.get('Weight*', '')
                     units = product.get('Units', '')
                     brand = product.get('Product Brand', '')
+                    vendor = product.get('Vendor/Supplier*', '')
+                    price = product.get('Price', '')
                     
-                    # Create unique key
-                    unique_key = f"{product_name}|{weight}|{units}|{brand}".lower()
+                    # Create unique key using name, price, weight, and vendor to prevent unwanted duplicates
+                    unique_key = f"{product_name}|{price}|{weight}|{units}|{vendor}".lower()
                     
                     if unique_key in unique_products:
                         # Duplicate found - increment quantity
@@ -2629,11 +2669,22 @@ class JSONMatcher:
             # ===== STEP 9: Calculate ratio =====
             ratio = self._calculate_ratio_for_json_product(product_type, item)
             
+            # ===== STEP 9.5: Standardize description format for consistency =====
+            # Ensure all descriptions use same format: "Product Name - Xg" (not "Xg" or "X.0g")
+            description = product_name
+            # Normalize weight format in description: "1.0g" → "1g", ensure hyphen separator
+            import re
+            # Remove existing weight patterns and re-add in standardized format
+            desc_clean = re.sub(r'\s*-?\s*\d+\.?\d*\s*g\s*$', '', description, flags=re.IGNORECASE)
+            desc_clean = re.sub(r'\s+', ' ', desc_clean).strip()
+            # Add standardized weight suffix
+            description = f"{desc_clean} - {weight}{weight_units}"
+            
             # ===== STEP 10: Build COMPLETE product with ALL required fields =====
             product = {
                 # Core identification
-                'Product Name*': product_name,
-                'Description': product_name,  # Same as Product Name*, NOT cleaned
+                'Product Name*': description,  # Use standardized format
+                'Description': description,    # Same as Product Name*
                 
                 # Vendor and brand
                 'Vendor': vendor if vendor else 'Unknown Vendor',
@@ -2798,12 +2849,24 @@ class JSONMatcher:
             else:
                 excel_units = safe_row_get(excel_row, 'Units') or 'g'
             
+            # Standardize description format for database-matched products
+            # Ensure format matches fallback products: "Product Name - Xg"
+            import re
+            description = product_name
+            # Remove existing weight patterns and re-add in standardized format
+            desc_clean = re.sub(r'\s*-?\s*\d+\.?\d*\s*g\s*$', '', description, flags=re.IGNORECASE)
+            # Remove "by Brand" suffix if present
+            desc_clean = re.sub(r'\s+by\s+[^-]+$', '', desc_clean, flags=re.IGNORECASE)
+            desc_clean = re.sub(r'\s+', ' ', desc_clean).strip()
+            # Add standardized weight suffix
+            standardized_name = f"{desc_clean} - {excel_weight}{excel_units}"
+            
             # Build product with essential fields - MATCH BACKUP VERSION FORMAT
-            # CRITICAL: Description = Product Name* (same value, not transformed)
+            # CRITICAL: Description = Product Name* (same value, standardized format)
             
             product = {
-                'Product Name*': product_name,
-                'Description': product_name,  # Same as Product Name*, NOT cleaned
+                'Product Name*': standardized_name,
+                'Description': standardized_name,  # Same as Product Name*, standardized format
                 'Vendor': vendor,
                 'Vendor/Supplier*': vendor,
                 'Product Brand': excel_brand,  # Use the improved brand extraction
@@ -3540,6 +3603,39 @@ class JSONMatcher:
                 lineage_counter = Counter(lineages)
                 most_common_lineage = lineage_counter.most_common(1)[0][0]
                 inferred_data['lineage'] = most_common_lineage
+            
+            # ENHANCED: Analyze descriptions and weights
+            descriptions = []
+            weights = []
+            
+            for product in similar_products:
+                # Get description
+                desc = product.get('description', '').strip()
+                if desc and desc.lower() not in ['unknown', 'nan', '', 'none']:
+                    descriptions.append(desc)
+                
+                # Get weight
+                weight_val = product.get('weight', '').strip()
+                if weight_val and weight_val.lower() not in ['unknown', 'nan', '', 'none']:
+                    weights.append(weight_val)
+            
+            # Infer description if we have similar product descriptions
+            if descriptions:
+                # Use the most common description, or if they're all unique, use the first one
+                from collections import Counter
+                desc_counter = Counter(descriptions)
+                most_common_desc = desc_counter.most_common(1)[0][0]
+                inferred_data['description'] = most_common_desc
+                logging.info(f"📝 Inferred description from {len(descriptions)} similar products")
+            
+            # Infer weight if we have similar product weights
+            if weights:
+                # Use the most common weight
+                from collections import Counter
+                weight_counter = Counter(weights)
+                most_common_weight = weight_counter.most_common(1)[0][0]
+                inferred_data['weight'] = most_common_weight
+                logging.info(f"⚖️  Inferred weight '{most_common_weight}' from similar products")
             
             return inferred_data
             
@@ -8601,6 +8697,45 @@ class JSONMatcher:
                     normalized_doh_value = 'THC'
                 elif str(doh_raw_value).upper() == 'CBD':
                     normalized_doh_value = 'CBD'
+            
+            # ENHANCED: Extrapolate missing data from similar products
+            # If we're missing critical data (price, weight, description), try to infer from similar products
+            inferred_data = {}
+            if not price or not weight or not description or description == product_name:
+                try:
+                    logging.info(f"🔍 Attempting to extrapolate missing data for '{product_name}' from similar products...")
+                    inferred_data = self._infer_from_similar_database_matches(
+                        product_name, vendor, brand, product_type, strain, weight
+                    )
+                    
+                    # Apply inferred data if missing
+                    if not price and inferred_data.get('price'):
+                        price = inferred_data['price']
+                        logging.info(f"💰 Extrapolated price: {price} from similar products")
+                    
+                    if not weight and inferred_data.get('weight'):
+                        weight = inferred_data['weight']
+                        logging.info(f"⚖️  Extrapolated weight: {weight} from similar products")
+                    
+                    if (not description or description == product_name) and inferred_data.get('description'):
+                        description = inferred_data['description']
+                        logging.info(f"📝 Extrapolated description: {description} from similar products")
+                    
+                    # Also use inferred brand, lineage, product type if missing
+                    if not brand and inferred_data.get('brand'):
+                        brand = inferred_data['brand']
+                        logging.info(f"🏷️  Extrapolated brand: {brand} from similar products")
+                    
+                    if lineage == "HYBRID" and inferred_data.get('lineage'):
+                        lineage = inferred_data['lineage']
+                        logging.info(f"🧬 Extrapolated lineage: {lineage} from similar products")
+                    
+                    if (not product_type or product_type == "Unknown Type") and inferred_data.get('product_type'):
+                        product_type = inferred_data['product_type']
+                        logging.info(f"📦 Extrapolated product type: {product_type} from similar products")
+                        
+                except Exception as infer_error:
+                    logging.warning(f"Could not extrapolate data from similar products: {infer_error}")
             
             # Create the faux tag
             tag = {

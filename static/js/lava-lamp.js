@@ -8,9 +8,41 @@
   }
 
   function resize() {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-    gl.viewport(0, 0, canvas.width, canvas.height);
+    // Get actual viewport dimensions
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const dpr = window.devicePixelRatio || 1;
+    
+    console.log('Viewport:', vw, 'x', vh, 'DPR:', dpr);
+    
+    // Set CSS dimensions to fill viewport
+    canvas.style.position = 'fixed';
+    canvas.style.top = '0px';
+    canvas.style.left = '0px';
+    canvas.style.right = '0px';
+    canvas.style.bottom = '0px';
+    canvas.style.width = vw + 'px';
+    canvas.style.height = vh + 'px';
+    canvas.style.zIndex = '-1';
+    canvas.style.pointerEvents = 'none';
+    canvas.style.margin = '0';
+    canvas.style.padding = '0';
+    canvas.style.border = 'none';
+    canvas.style.display = 'block';
+    canvas.style.background = 'transparent';
+    
+    // Set canvas internal resolution to match display size with device pixel ratio
+    const displayWidth = Math.floor(vw * dpr);
+    const displayHeight = Math.floor(vh * dpr);
+    
+    canvas.width = displayWidth;
+    canvas.height = displayHeight;
+    
+    // Update WebGL viewport to match canvas resolution
+    gl.viewport(0, 0, displayWidth, displayHeight);
+    
+    console.log('Canvas CSS:', vw, 'x', vh);
+    console.log('Canvas internal:', displayWidth, 'x', displayHeight);
   }
   window.addEventListener('resize', resize);
   resize();
@@ -96,40 +128,40 @@
       // Normalize color
       color = color / max(total, 0.001);
       
-             // Enhanced lighting with depth-based effects - more opaque
-       float alpha = smoothstep(0.8, 1.8, field);
+      // Enhanced lighting with depth-based effects - more opaque
+      float alpha = smoothstep(0.8, 1.8, field);
       
-             // Darker inner glow with depth (no white)
-       float innerGlow = smoothstep(1.8, 2.5, field);
-       float depthGlow = smoothstep(0.0, 0.5, depth);
-       color = mix(color, color * 1.5, innerGlow * 0.2 * (1.0 + depthGlow * 0.3));
+      // Darker inner glow with depth (no white)
+      float innerGlow = smoothstep(1.8, 2.5, field);
+      float depthGlow = smoothstep(0.0, 0.5, depth);
+      color = mix(color, color * 1.5, innerGlow * 0.2 * (1.0 + depthGlow * 0.3));
       
-             // Solid edges with minimal glow
-       float outerGlow = smoothstep(0.7, 1.1, field);
-       color = mix(color, color * 0.8, outerGlow * 0.2);
+      // Solid edges with minimal glow
+      float outerGlow = smoothstep(0.7, 1.1, field);
+      color = mix(color, color * 0.8, outerGlow * 0.2);
       
-             // Minimal surface detail - ultra slow and fluid
-       vec2 detailUV = uv * 0.02 + u_time * 0.00005; // Much slower and smoother
-       float surfaceDetail = fbm(detailUV) * 0.003; // Much smaller
-       color += vec3(surfaceDetail * 0.001); // Much smaller
-       
-       // Add depth-based shadows (darker and more solid)
-       float shadow = smoothstep(0.0, 0.3, depth) * 0.35; // Stronger shadows for solid look
-       color *= (1.0 - shadow);
-       
-       // No center light source - removed highlights
-       
-       // Minimal organic variation - ultra slow and fluid
-       float organicNoise = fbm(uv * 0.01 + u_time * 0.00002); // Much slower and smoother
-       color += vec3(organicNoise * 0.0005); // Much smaller
+      // Minimal surface detail - ultra slow and fluid
+      vec2 detailUV = uv * 0.02 + u_time * 0.00005; // Much slower and smoother
+      float surfaceDetail = fbm(detailUV) * 0.003; // Much smaller
+      color += vec3(surfaceDetail * 0.001); // Much smaller
       
-             // Ensure colors stay in lineage color range with darker constraints
-       color = clamp(color, vec3(0.02, 0.02, 0.02), vec3(0.8, 0.8, 0.8));
+      // Add depth-based shadows (darker and more solid)
+      float shadow = smoothstep(0.0, 0.3, depth) * 0.35; // Stronger shadows for solid look
+      color *= (1.0 - shadow);
       
-             // Remove transparency for solid opaque look
-       alpha = clamp(alpha, 0.0, 1.0);
-       
-       gl_FragColor = vec4(color, alpha * 0.95);
+      // No center light source - removed highlights
+      
+      // Minimal organic variation - ultra slow and fluid
+      float organicNoise = fbm(uv * 0.01 + u_time * 0.00002); // Much slower and smoother
+      color += vec3(organicNoise * 0.0005); // Much smaller
+      
+      // Ensure colors stay in lineage color range with darker constraints
+      color = clamp(color, vec3(0.02, 0.02, 0.02), vec3(0.8, 0.8, 0.8));
+      
+      // Remove transparency for solid opaque look
+      alpha = clamp(alpha, 0.0, 1.0);
+      
+      gl_FragColor = vec4(color, alpha * 0.95);
     }
   `;
 
@@ -269,14 +301,14 @@
         blob.startTime = t;
       }
       
-             // Add subtle depth variation - ultra slow and fluid
-       blob.depth += Math.sin(t * 0.0005 + i) * 0.000001; // Much slower and smoother
-       blob.depth = Math.max(0.3, Math.min(1.0, blob.depth));
-       
-       // Pulsing radius with organic variation - ultra slow and fluid
-       const pulse = Math.sin(t * 0.0008 + blob.pulsePhase + i) * 0.0002; // Much slower and smoother
-       const organicPulse = Math.cos(t * 0.0006 + i) * 0.0001; // Much slower and smoother
-       const radius = blob.radius + pulse + organicPulse;
+      // Add subtle depth variation - ultra slow and fluid
+      blob.depth += Math.sin(t * 0.0005 + i) * 0.000001; // Much slower and smoother
+      blob.depth = Math.max(0.3, Math.min(1.0, blob.depth));
+      
+      // Pulsing radius with organic variation - ultra slow and fluid
+      const pulse = Math.sin(t * 0.0008 + blob.pulsePhase + i) * 0.0002; // Much slower and smoother
+      const organicPulse = Math.cos(t * 0.0006 + i) * 0.0001; // Much slower and smoother
+      const radius = blob.radius + pulse + organicPulse;
       
       blobPos.push(blob.x * canvas.width, blob.y * canvas.height, radius * Math.min(canvas.width, canvas.height));
       blobVel.push(blob.vx * 100, blob.vy * 100, blob.depth);
@@ -284,10 +316,10 @@
       blob.lastUpdate = t;
     }
     
-              // Solid colors - no animation
-     const colors = baseColors.map((c, i) => {
-       return [c[0], c[1], c[2]]; // Use solid colors without any variation
-     });
+    // Solid colors - no animation
+    const colors = baseColors.map((c, i) => {
+      return [c[0], c[1], c[2]]; // Use solid colors without any variation
+    });
     
     gl.uniform3fv(u_colors, colors.flat());
     gl.uniform3fv(u_blobPos, blobPos);
@@ -319,4 +351,4 @@
   }
 
   animate();
-})(); 
+})();

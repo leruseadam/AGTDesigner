@@ -1,82 +1,155 @@
 /* ========================================
-   VIEWPORT NORMALIZATION FOR CONSISTENT SCALING
+   SIMPLIFIED VIEWPORT & RESPONSIVE DESIGN
    ======================================== */
 
-/* Normalize viewport units across all environments (local vs web) */
+/* Simple, consistent viewport variables */
 :root {
-  /* Standardize viewport calculations */
-  --viewport-width: 100vw;
-  --viewport-height: 100vh;
+  /* Basic color variables */
+  --text-primary: #ffffff;
+  --text-secondary: #e0d7ff;
+  --bg-primary: rgba(45, 34, 58, 0.95);
+  --bg-secondary: rgba(60, 45, 75, 0.9);
+  --accent-color: rgba(160, 132, 232, 1);
   
-  /* Normalized viewport units for consistent scaling */
-  --vw: 1vw;
-  --vh: 1vh;
-  --vmin: 1vmin;
-  --vmax: 1vmax;
+  /* Simple responsive sizing - Moderately increased for readability */
+  --base-font-size: 1.05rem;
+  --small-font-size: 0.95rem;
+  --large-font-size: 1.2rem;
   
-  /* Fallback values for environments with different viewport calculations */
-  --base-viewport-width: 1920px; /* Standard desktop width */
-  --base-viewport-height: 1080px; /* Standard desktop height */
+  /* Button sizing */
+  --btn-height: 38px;
+  --btn-padding: 0.55rem 1.1rem;
   
-  /* Normalized scaling factors */
-  --scale-factor: min(1vw, 1vh);
-  --responsive-scale: clamp(0.8, var(--scale-factor), 1.2);
+  /* Spacing */
+  --spacing-xs: 0.25rem;
+  --spacing-sm: 0.5rem;
+  --spacing-md: 1rem;
+  --spacing-lg: 1.5rem;
+  --spacing-xl: 2rem;
 }
 
-/* Ensure consistent viewport behavior across browsers and environments */
-@media screen {
-  :root {
-    /* Force consistent viewport unit calculations */
-    --vw: calc(100vw / 100);
-    --vh: calc(100vh / 100);
-    --vmin: calc(100vmin / 100);
-    --vmax: calc(100vmax / 100);
-  }
+/* Moderate scaling for better readability */
+html {
+  font-size: 16px; /* Standard base size */
+  width: 100%;
+  height: 100%;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+  /* Ensure no browser defaults interfere with fullscreen canvas */
+  box-sizing: border-box;
 }
 
-/* Override problematic clamp() functions with normalized equivalents */
-:root {
-  /* Normalized font sizing that works consistently across environments */
-  --font-scale-base: clamp(0.8, var(--vw) * 2, 1.2);
-  --font-scale-small: clamp(0.7, var(--vw) * 1.5, 1.0);
-  --font-scale-large: clamp(1.0, var(--vw) * 2.5, 1.5);
-  
-  /* Normalized button scaling */
-  --btn-scale: clamp(0.9, var(--vw) * 1.8, 1.1);
-  --btn-font-scale: clamp(0.8, var(--vw) * 1.6, 1.2);
-  
-  /* Environment-specific viewport fixes */
-  --env-scale-factor: 1;
-  --env-font-multiplier: 1;
+body {
+  font-size: 1rem;
+  line-height: 1.5;
+  width: 100%;
+  height: 100%;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+  /* Ensure body doesn't interfere with fullscreen canvas */
+  position: relative;
 }
 
-/* Detect and normalize for different environments */
-@media screen and (min-width: 1200px) {
-  :root {
-    /* Desktop normalization - ensure consistent scaling */
-    --env-scale-factor: 1;
-    --env-font-multiplier: 1;
-  }
+/* Moderate scaling for key UI elements */
+.tag-item, .tag-entry {
+  font-size: 0.95rem !important;
+  min-height: 36px !important;
 }
 
-@media screen and (max-width: 1199px) {
-  :root {
-    /* Tablet/mobile normalization */
-    --env-scale-factor: 0.9;
-    --env-font-multiplier: 1.1;
-  }
+.quick-start-guide, .help-text {
+  font-size: 0.95rem !important;
+  line-height: 1.5 !important;
 }
 
-/* Force consistent viewport behavior for all clamp() functions */
-:root {
-  /* Override the most problematic clamp functions with normalized versions */
-  --normalized-clamp-small: clamp(8px, calc(2 * var(--vw) * var(--env-font-multiplier)), 14px);
-  --normalized-clamp-medium: clamp(10px, calc(3 * var(--vw) * var(--env-font-multiplier)), 16px);
-  --normalized-clamp-large: clamp(12px, calc(4 * var(--vw) * var(--env-font-multiplier)), 20px);
-  
-  /* Button scaling normalization */
-  --normalized-btn-height: clamp(36px, calc(1.5 * var(--vh) * var(--env-scale-factor)), 72px);
-  --normalized-btn-font: clamp(0.8rem, calc(0.45 * var(--vw) + 0.45 * var(--vh)) * var(--env-font-multiplier), 1.15rem);
+.quick-start-guide h6 {
+  font-size: 1.1rem !important;
+  font-weight: 700 !important;
+}
+
+.quick-start-guide p, .quick-start-guide li, .quick-start-guide ol, .quick-start-guide ul {
+  font-size: 0.9rem !important;
+  line-height: 1.5 !important;
+}
+
+button, .btn {
+  font-size: 0.9rem !important;
+  padding: 0.5rem 1rem !important;
+  min-height: 38px !important;
+}
+
+.form-control, .form-select, input, select {
+  font-size: 0.9rem !important;
+  padding: 0.6rem 0.9rem !important;
+  min-height: 40px !important;
+}
+
+/* Scale up all labels and headers throughout app */
+label, .form-label {
+  font-size: 0.95rem !important;
+  font-weight: 600 !important;
+}
+
+/* Moderate header scaling */
+h1 { font-size: 2rem !important; font-weight: 800 !important; }
+h2 { font-size: 1.75rem !important; font-weight: 700 !important; }
+h3 { font-size: 1.5rem !important; font-weight: 700 !important; }
+h4 { font-size: 1.25rem !important; font-weight: 600 !important; }
+h5 { font-size: 1.1rem !important; font-weight: 600 !important; }
+h6 { font-size: 1rem !important; font-weight: 600 !important; }
+
+/* Moderate filter bar and dropdowns */
+.filter-bar, .filters-row {
+  font-size: 0.9rem !important;
+}
+
+.filter-bar select, .filter-bar .form-select, .filter-bar option {
+  font-size: 0.9rem !important;
+  padding: 0.5rem 0.75rem !important;
+  min-height: 38px !important;
+}
+
+/* Moderate list items */
+ul, ol, li {
+  font-size: 0.95rem !important;
+  line-height: 1.5 !important;
+}
+
+/* Moderate table text */
+table, .table {
+  font-size: 0.9rem !important;
+}
+
+td, th {
+  font-size: 0.9rem !important;
+  padding: 0.6rem !important;
+}
+
+/* Moderate placeholders */
+::placeholder {
+  font-size: 0.9rem !important;
+  opacity: 0.7;
+}
+
+/* All text inherits appropriately */
+p, span, div {
+  font-size: inherit;
+}
+
+/* Moderate card content */
+.card, .glass-card {
+  font-size: 0.95rem !important;
+}
+
+.card-title {
+  font-size: 1.2rem !important;
+  font-weight: 700 !important;
+}
+
+.card-body {
+  font-size: 0.95rem !important;
 }
 
 /* ========================================
@@ -122,6 +195,84 @@
   transition: opacity 0.1s ease;
 }
 
+/* JSON Match Modal specific improvements for readability */
+#jsonMatchModal .modal-body,
+#detailedJsonMatchModal .modal-body {
+  font-size: 1.125rem !important; /* Increased from 1.05rem - 18px */
+  padding: 1.5rem 2rem !important; /* Normal modal padding */
+}
+
+#jsonMatchModal .modal-body h6 {
+  font-size: 1.375rem !important; /* 22px - larger section headings */
+  font-weight: 600 !important;
+  margin-bottom: 1rem !important;
+}
+
+#jsonMatchModal .modal-body p {
+  font-size: 1.125rem !important; /* 18px */
+  line-height: 1.6 !important;
+}
+
+#jsonMatchModal .form-control,
+#detailedJsonMatchModal .form-control {
+  font-size: 1.125rem !important; /* Increased from 1.05rem - 18px */
+  min-height: 52px !important; /* Increased from 46px */
+  padding: 0.875rem 1.25rem !important; /* More padding */
+}
+
+#jsonMatchModal .form-label {
+  font-size: 1.125rem !important; /* 18px */
+  font-weight: 600 !important;
+  margin-bottom: 0.75rem !important;
+}
+
+#jsonMatchModal .btn {
+  font-size: 1.125rem !important; /* 18px */
+  padding: 0.875rem 1.75rem !important; /* Larger buttons */
+  min-height: 52px !important;
+}
+
+#matchedProductsList,
+#detailedJsonMatchModal .table {
+  font-size: 1rem !important;
+}
+
+#detailedJsonMatchModal .modal-dialog {
+  max-width: 90vw !important;
+}
+
+#detailedJsonMatchModal .table td,
+#detailedJsonMatchModal .table th {
+  padding: 0.85rem !important;
+  font-size: 1rem !important;
+  vertical-align: middle !important;
+}
+
+#detailedJsonMatchModal .btn {
+  font-size: 0.95rem !important;
+  padding: 0.5rem 1rem !important;
+}
+
+#matchedProductsList {
+  font-size: 1rem !important;
+  line-height: 1.6 !important;
+}
+
+#jsonMatchResults .alert {
+  font-size: 1.1rem !important;
+  padding: 1.25rem !important;
+}
+
+#jsonMatchResults #matchCount {
+  font-size: 1.3rem !important;
+  font-weight: 700 !important;
+}
+
+.modal-body .alert {
+  font-size: 1.05rem !important;
+  padding: 1rem 1.25rem !important;
+}
+
 /* Increase spacing between the Database / Lineage Editor / Match JSON buttons */
 .header-buttons-container,
 .header-buttons-container.d-flex,
@@ -138,6 +289,38 @@
 img, video, canvas, svg {
   max-width: 100%;
   height: auto;
+}
+
+/* Exception for lava lamp canvas - needs to be full screen */
+#lava-lamp-canvas {
+  display: block !important;
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  z-index: 0 !important;
+  pointer-events: none !important;
+  /* Fix for fullscreen canvas */
+  box-sizing: border-box !important;
+  overflow: hidden !important;
+}
+
+/* Override ANY canvas rules that might interfere */
+canvas#lava-lamp-canvas {
+  max-width: none !important;
+  max-height: none !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  transform: none !important;
+  object-fit: fill !important;
+  /* Ensure no shadows or borders affect positioning */
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  outline: none !important;
 }
 
 /* Prevent long tokens from forcing horizontal scroll */
@@ -309,40 +492,30 @@ img, video, canvas, svg {
     --center-panel-height: 90vh;     /* Height of center control panel (auto or specific px) */
   }
 
-  /* Responsive sizing variables for center column buttons (scales across monitors) */
+  /* Responsive sizing variables for center column buttons */
   :root {
-    /* Use normalized viewport units for consistent scaling across environments */
-    --center-btn-min-h: var(--normalized-btn-height);
-    --center-btn-font: var(--normalized-btn-font);
-    --center-btn-icon: clamp(12px, calc(0.55 * var(--vw) + 0.55 * var(--vh)) * var(--env-font-multiplier), 18px);
-    --center-btn-pad-v: clamp(0.5rem, calc(0.5 * var(--vh) + 0.25 * var(--vw)) * var(--env-scale-factor), 0.9rem);
-    --center-gap: clamp(0.4rem, calc(0.35 * var(--vh) + 0.35 * var(--vw)) * var(--env-scale-factor), 0.8rem);
+    --center-btn-min-h: 36px;
+    --center-btn-font: 0.9rem;
+    --center-btn-icon: 14px;
+    --center-btn-pad-v: 0.6rem;
+    --center-gap: 0.5rem;
   }
   
-  /* Maximize space for AGT Designer UI */
-  body, html {
-    margin: 0 !important;
+  /* Clean base layout for AGT Designer UI */
+  html, body {
+    margin: 0;
     padding: 0;
-    min-height: 100vh !important;
-    height: auto !important;
     width: 100%;
+    height: 100%;
     overflow-x: hidden;
-    overflow-y: auto !important;
+    overflow-y: auto;
   }
   
   body {
-    min-height: 100vh !important;
-    height: auto !important;
-    margin: 0 !important;
-    padding: 0 !important;
     color: var(--text-primary);
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-    overflow-x: hidden;
-    overflow-y: auto !important;
     position: relative;
     z-index: 1;
-    /* Ensure body can always scroll */
-    pointer-events: auto !important;
   }
   
   body::before {
@@ -352,19 +525,15 @@ img, video, canvas, svg {
     left: 0;
     width: 100%;
     height: 100%;
-    background: 
-      radial-gradient(circle at 20% 20%, #ff0066 0%, transparent 50%),
-      radial-gradient(circle at 80% 80%, #00ff88 0%, transparent 50%),
-      radial-gradient(circle at 40% 60%, #ff6600 0%, transparent 50%),
-      radial-gradient(circle at 60% 40%, #6600ff 0%, transparent 50%),
-      radial-gradient(circle at 10% 70%, #ffaa00 0%, transparent 50%),
-      radial-gradient(circle at 90% 30%, #00aaff 0%, transparent 50%),
-      radial-gradient(circle at 30% 90%, #ff0088 0%, transparent 50%),
-      radial-gradient(circle at 70% 10%, #88ff00 0%, transparent 50%),
-      radial-gradient(circle at 50% 50%, #ff0066 0%, transparent 60%),
-      linear-gradient(45deg, #1a0033, #330066, #6600cc, #9900ff);
-    background-size: 300% 300%, 250% 250%, 200% 200%, 350% 350%, 180% 180%, 280% 280%, 220% 220%, 320% 320%, 400% 400%, 100% 100%;
-    animation: trippyTieDye 30s ease-in-out infinite;
+    background: linear-gradient(135deg, 
+      #ff0066 0%, 
+      #ff3366 15%,
+      #ff6699 25%, 
+      #9966ff 45%,
+      #6633ff 60%,
+      #3300ff 75%,
+      #0033cc 90%,
+      #001a66 100%);
     z-index: -1;
   }
   
@@ -451,27 +620,18 @@ img, video, canvas, svg {
     }
   }
   
-  /* Clean Title Styling - Professional Look */
+  /* Clean Title Styling - Professional */
   .vibrant-title {
     color: #ffffff !important;
     font-family: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
-    font-weight: 800;
-    font-size: 3.2rem;
-    letter-spacing: -0.03em;
-    margin: 0 0 1.2rem 0 !important;
+    font-weight: 700 !important;
+    font-size: 2.2rem !important;
+    letter-spacing: -0.01em;
+    margin: 0 0 0.4rem 0 !important;
     text-align: center !important;
-    line-height: 1.05;
-    text-shadow: 
-      0 2px 4px rgba(0,0,0,0.3),
-      0 4px 8px rgba(0,0,0,0.2);
+    line-height: 1.1;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.3);
     position: relative;
-    /* Remove gradient effect - keep it simple white */
-    -webkit-text-fill-color: #ffffff;
-    background: none;
-    background-clip: unset;
-    -webkit-background-clip: unset;
-    /* Remove animation for cleaner look */
-    animation: none;
   }
   
   @keyframes titleGlow {
@@ -484,30 +644,30 @@ img, video, canvas, svg {
   }
   
   .vibrant-subtitle {
-    color: rgba(255, 255, 255, 0.9) !important;
+    color: rgba(255, 255, 255, 0.8) !important;
     font-family: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
-    font-size: 1.1rem;
-    font-weight: 500;
-    letter-spacing: 0.05em;
+    font-size: 0.8rem !important;
+    font-weight: 500 !important;
+    letter-spacing: 0.12em;
     text-align: center !important;
-    margin: 0 0 1.8rem 0 !important;
+    margin: 0 0 0.5rem 0 !important;
     line-height: 1.3;
     text-transform: uppercase;
-    text-shadow: 0 2px 4px rgba(0,0,0,0.4);
-    opacity: 0.95;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    opacity: 0.85;
     position: relative;
   }
   
   .copyright-text {
-    font-size: 0.8rem;
-    color: rgba(255, 255, 255, 0.6);
-    margin: 0 !important;
+    font-size: 0.7rem !important;
+    color: rgba(255, 255, 255, 0.65) !important;
+    margin: 0.25rem 0 0 0 !important;
     font-family: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
     font-weight: 400;
     letter-spacing: 0.02em;
     text-align: center;
     text-shadow: 0 1px 2px rgba(0,0,0,0.3);
-    opacity: 0.8;
+    opacity: 0.75;
   }
 
   /* Header Action Buttons */
@@ -620,45 +780,45 @@ img, video, canvas, svg {
     width: 100%;
   }
   
-  /* Store Selection Styling - Clean and Professional */
+  /* Store Selection Styling - Compact and Professional */
   .store-selection-container {
     background: rgba(30, 30, 60, 0.8);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
     border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 12px;
-    padding: 1rem 1.5rem;
-    margin: 1rem auto;
+    border-radius: 8px;
+    padding: 0.5rem 1rem;
+    margin: 0.5rem auto;
     max-width: 600px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
   }
   
   .store-label {
-    color: rgba(255, 255, 255, 0.8);
-    font-size: 0.9rem;
+    color: rgba(255, 255, 255, 0.85) !important;
+    font-size: 0.8rem !important;
     font-weight: 600;
-    letter-spacing: 0.5px;
-    margin-right: 0.5rem;
+    letter-spacing: 0.3px;
+    margin-right: 0.4rem;
   }
   
   .current-store-display {
     color: rgba(76, 175, 80, 0.9);
-    font-size: 1rem;
-    font-weight: 600;
-    letter-spacing: 0.3px;
-    margin-right: 0.75rem;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    font-size: 0.9rem !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.2px;
+    margin-right: 0.6rem;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
   }
   
   .store-selection-container .btn-outline-primary {
     background: rgba(255, 255, 255, 0.1);
     border: 1px solid rgba(255, 255, 255, 0.2);
     color: rgba(255, 255, 255, 0.9);
-    border-radius: 3px;
-    padding: 0.15rem 0.3rem;
-    font-size: 0.65rem;
-    font-weight: 500;
-    letter-spacing: 0.1px;
+    border-radius: 4px;
+    padding: 0.35rem 0.65rem !important;
+    font-size: 0.85rem !important;
+    font-weight: 600;
+    letter-spacing: 0.2px;
     transition: all 0.3s ease;
     display: inline-flex;
     align-items: center;
@@ -676,14 +836,14 @@ img, video, canvas, svg {
   }
   
   .store-selection-container .btn-outline-primary svg {
-    width: 14px;
-    height: 14px;
-    opacity: 0.8;
+    width: 16px;
+    height: 16px;
+    opacity: 0.9;
   }
   
   .store-status {
     color: rgba(255, 255, 255, 0.7);
-    font-size: 0.85rem;
+    font-size: 1rem;
     font-weight: 500;
     letter-spacing: 0.3px;
     margin-top: 0.5rem;
@@ -710,7 +870,7 @@ img, video, canvas, svg {
     justify-content: center;
     transition: all 0.3s ease;
     color: rgba(255, 255, 255, 0.9);
-    font-size: 0.65rem;
+    font-size: 0.8rem;
   }
   
   .big-glow-help-btn:hover {
@@ -728,20 +888,20 @@ img, video, canvas, svg {
     }
     
     .store-label {
-      font-size: 0.85rem;
+      font-size: 1rem;
     }
     
     .current-store-display {
-      font-size: 0.9rem;
+      font-size: 1.05rem;
     }
     
     .store-selection-container .btn-outline-primary {
       padding: 0.3rem 0.6rem;
-      font-size: 0.75rem;
+      font-size: 0.9rem;
     }
     
     .store-status {
-      font-size: 0.8rem;
+      font-size: 0.95rem;
     }
     
     .big-glow-help-btn {
@@ -769,24 +929,23 @@ img, video, canvas, svg {
   }
   
   
-  /* Glass Card Styling - Psychedelic */
+  /* Glass Card Styling - Professional and Clean */
   .glass-card {
     transition: all 0.3s cubic-bezier(0.4,0,0.2,1);
     box-shadow: 
-      0 12px 40px rgba(0,0,0,0.15), 
-      0 4px 16px rgba(160,132,232,0.1),
-      0 2px 8px rgba(160,132,232,0.08);
-    border-radius: 24px;
-    border: 2px solid rgba(160,132,232,0.2);
-    background: rgba(45, 34, 58, 0.85) !important;
+      0 4px 20px rgba(0,0,0,0.2), 
+      0 2px 8px rgba(160,132,232,0.15);
+    border-radius: 12px;
+    border: 1px solid rgba(160,132,232,0.25);
+    background: rgba(30, 30, 50, 0.95) !important;
     backdrop-filter: blur(20px) !important;
     -webkit-backdrop-filter: blur(20px) !important;
+    overflow: visible !important;
     position: relative;
     z-index: 2;
     margin-top: 0 !important;
     margin-bottom: 0.5rem !important;
-    padding-top: 1rem !important;
-    padding-bottom: 1rem !important;
+    padding: 1rem !important;
     /* Allow content to be visible and scrollable */
     overflow: visible;
     /* Ensure full width usage */
@@ -824,7 +983,7 @@ img, video, canvas, svg {
     padding: 6px 12px;
     border-radius: 8px;
     font-weight: 700 !important;
-    font-size: 0.85rem;
+    font-size: 1rem;
     transition: all 0.3s ease;
     box-shadow: 0 2px 12px 0 rgba(160,132,232,0.10), 0 0.5px 2px rgba(0,0,0,0.08);
     text-decoration: none;
@@ -858,24 +1017,26 @@ img, video, canvas, svg {
   }
   
   .btn-glass {
-    background: rgba(45, 34, 58, 0.8);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    border: 1px solid rgba(160, 132, 232, 0.18);
+    background: rgba(60, 60, 90, 0.6);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(160, 132, 232, 0.3);
     color: var(--text-primary);
-    padding: 6px 12px;
+    padding: 10px 16px;
     border-radius: 8px;
     font-weight: 500;
-    transition: all 0.3s ease;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
     /* Responsive sizing base */
-    min-height: 36px;
+    min-height: 42px;
     min-width: 80px;
   }
   
   .btn-glass:hover {
-    background: rgba(160, 132, 232, 0.10);
-    border-color: rgba(160, 132, 232, 0.25);
+    background: rgba(80, 80, 110, 0.7);
+    border-color: rgba(160, 132, 232, 0.5);
     color: var(--text-primary);
+    box-shadow: 0 4px 12px rgba(160, 132, 232, 0.25);
     transform: translateY(-1px);
   }
 
@@ -886,7 +1047,7 @@ img, video, canvas, svg {
     .btn-modern, .btn-modern2, .btn-modern3,
     .btn-glass {
       padding: 8px 16px !important;
-      font-size: 0.9rem !important;
+      font-size: 1.05rem !important;
       min-height: 44px !important;
       min-width: 100px !important;
       border-radius: 10px !important;
@@ -901,10 +1062,10 @@ img, video, canvas, svg {
     
     /* Control panel buttons on mobile */
     .control-panel .btn-glass {
-      padding: 10px 14px !important;
-      font-size: 0.85rem !important;
-      min-height: 48px !important;
-      min-width: 120px !important;
+      padding: 12px 16px !important;
+      font-size: 1.15rem !important;
+      min-height: 52px !important;
+      width: 100% !important;
     }
     
     /* Header buttons on mobile - removed conflicting styles */
@@ -912,18 +1073,19 @@ img, video, canvas, svg {
     /* Upload buttons on mobile */
     .upload-btn-modern {
       padding: 14px 24px !important;
-      font-size: 1.1rem !important;
+      font-size: 1.3rem !important;
       min-height: 56px !important;
       min-width: 160px !important;
     }
     
     /* Generate button on mobile */
     #generateBtn {
-      padding: 16px 28px !important;
-      font-size: 1.2rem !important;
-      min-height: 60px !important;
-      height: 60px !important;
-      min-width: 180px !important;
+      padding: 0.85rem 1.2rem !important;
+      font-size: 1.15rem !important;
+      height: 52px !important;
+      width: 75% !important;
+      max-width: 200px !important;
+      margin: 0 auto !important;
     }
   }
   
@@ -932,7 +1094,7 @@ img, video, canvas, svg {
     .btn-modern, .btn-modern2, .btn-modern3,
     .btn-glass {
       padding: 7px 14px !important;
-      font-size: 0.85rem !important;
+      font-size: 1rem !important;
       min-height: 40px !important;
       min-width: 90px !important;
       border-radius: 9px !important;
@@ -947,10 +1109,10 @@ img, video, canvas, svg {
     
     /* Control panel buttons on small tablets */
     .control-panel .btn-glass {
-      padding: 8px 12px !important;
-      font-size: 0.8rem !important;
-      min-height: 42px !important;
-      min-width: 110px !important;
+      padding: 10px 14px !important;
+      font-size: 1.1rem !important;
+      min-height: 48px !important;
+      width: 100% !important;
     }
     
     /* Header buttons on small tablets - removed conflicting styles */
@@ -958,18 +1120,19 @@ img, video, canvas, svg {
     /* Upload buttons on small tablets */
     .upload-btn-modern {
       padding: 12px 20px !important;
-      font-size: 1rem !important;
+      font-size: 1.15rem !important;
       min-height: 50px !important;
       min-width: 150px !important;
     }
     
     /* Generate button on small tablets */
     #generateBtn {
-      padding: 14px 24px !important;
-      font-size: 1.1rem !important;
-      min-height: 54px !important;
-      height: 54px !important;
-      min-width: 170px !important;
+      padding: 0.85rem 1.2rem !important;
+      font-size: 1.15rem !important;
+      height: 52px !important;
+      width: 75% !important;
+      max-width: 200px !important;
+      margin: 0 auto !important;
     }
   }
   
@@ -978,7 +1141,7 @@ img, video, canvas, svg {
     .btn-modern, .btn-modern2, .btn-modern3,
     .btn-glass {
       padding: 6px 12px !important;
-      font-size: 0.85rem !important;
+      font-size: 1rem !important;
       min-height: 38px !important;
       min-width: 85px !important;
       border-radius: 8px !important;
@@ -993,10 +1156,10 @@ img, video, canvas, svg {
     
     /* Control panel buttons on medium tablets */
     .control-panel .btn-glass {
-      padding: 7px 11px !important;
-      font-size: 0.75rem !important;
-      min-height: 40px !important;
-      min-width: 100px !important;
+      padding: 9px 13px !important;
+      font-size: 1.05rem !important;
+      min-height: 46px !important;
+      width: 100% !important;
     }
     
     /* Header buttons on medium tablets - removed conflicting styles */
@@ -1004,18 +1167,19 @@ img, video, canvas, svg {
     /* Upload buttons on medium tablets */
     .upload-btn-modern {
       padding: 10px 18px !important;
-      font-size: 0.95rem !important;
+      font-size: 1.1rem !important;
       min-height: 48px !important;
       min-width: 140px !important;
     }
     
     /* Generate button on medium tablets */
     #generateBtn {
-      padding: 12px 20px !important;
-      font-size: 1rem !important;
-      min-height: 52px !important;
+      padding: 0.85rem 1.2rem !important;
+      font-size: 1.15rem !important;
       height: 52px !important;
-      min-width: 160px !important;
+      width: 75% !important;
+      max-width: 200px !important;
+      margin: 0 auto !important;
     }
   }
   
@@ -1024,7 +1188,7 @@ img, video, canvas, svg {
     .btn-modern, .btn-modern2, .btn-modern3,
     .btn-glass {
       padding: 6px 12px !important;
-      font-size: 0.85rem !important;
+      font-size: 1rem !important;
       min-height: 36px !important;
       min-width: 80px !important;
       border-radius: 8px !important;
@@ -1039,10 +1203,10 @@ img, video, canvas, svg {
     
     /* Control panel buttons on large screens */
     .control-panel .btn-glass {
-      padding: 6px 10px !important;
-      font-size: 0.7rem !important;
-      min-height: 36px !important;
-      min-width: 90px !important;
+      padding: 10px 14px !important;
+      font-size: 1.1rem !important;
+      min-height: 46px !important;
+      width: 100% !important;
     }
     
     /* Header buttons on large screens - removed conflicting styles */
@@ -1050,18 +1214,19 @@ img, video, canvas, svg {
     /* Upload buttons on large screens */
     .upload-btn-modern {
       padding: 8px 16px !important;
-      font-size: 0.9rem !important;
+      font-size: 1.05rem !important;
       min-height: 44px !important;
       min-width: 130px !important;
     }
     
     /* Generate button on large screens */
     #generateBtn {
-      padding: 10px 18px !important;
-      font-size: 0.95rem !important;
-      min-height: 48px !important;
-      height: 48px !important;
-      min-width: 150px !important;
+      padding: 0.85rem 1.2rem !important;
+      font-size: 1.15rem !important;
+      height: 52px !important;
+      width: 75% !important;
+      max-width: 200px !important;
+      margin: 0 auto !important;
     }
   }
   
@@ -1070,7 +1235,7 @@ img, video, canvas, svg {
     .btn-modern, .btn-modern2, .btn-modern3,
     .btn-glass {
       padding: 7px 14px !important;
-      font-size: 0.9rem !important;
+      font-size: 1.05rem !important;
       min-height: 40px !important;
       min-width: 90px !important;
       border-radius: 9px !important;
@@ -1085,10 +1250,10 @@ img, video, canvas, svg {
     
     /* Control panel buttons on extra large screens */
     .control-panel .btn-glass {
-      padding: 7px 12px !important;
-      font-size: 0.75rem !important;
-      min-height: 38px !important;
-      min-width: 95px !important;
+      padding: 10px 14px !important;
+      font-size: 1.1rem !important;
+      min-height: 48px !important;
+      width: 100% !important;
     }
     
     /* Header buttons on extra large screens - removed conflicting styles */
@@ -1096,18 +1261,19 @@ img, video, canvas, svg {
     /* Upload buttons on extra large screens */
     .upload-btn-modern {
       padding: 9px 18px !important;
-      font-size: 0.95rem !important;
+      font-size: 1.1rem !important;
       min-height: 46px !important;
       min-width: 135px !important;
     }
     
     /* Generate button on extra large screens */
     #generateBtn {
-      padding: 11px 20px !important;
-      font-size: 1rem !important;
-      min-height: 50px !important;
-      height: 50px !important;
-      min-width: 155px !important;
+      padding: 0.85rem 1.2rem !important;
+      font-size: 1.15rem !important;
+      height: 52px !important;
+      width: 75% !important;
+      max-width: 200px !important;
+      margin: 0 auto !important;
     }
   }
   
@@ -1116,7 +1282,7 @@ img, video, canvas, svg {
     .btn-modern, .btn-modern2, .btn-modern3,
     .btn-glass {
       padding: 8px 16px !important;
-      font-size: 1rem !important;
+      font-size: 1.15rem !important;
       min-height: 44px !important;
       min-width: 100px !important;
       border-radius: 10px !important;
@@ -1131,10 +1297,10 @@ img, video, canvas, svg {
     
     /* Control panel buttons on ultra-wide screens */
     .control-panel .btn-glass {
-      padding: 8px 14px !important;
-      font-size: 0.8rem !important;
-      min-height: 42px !important;
-      min-width: 100px !important;
+      padding: 11px 16px !important;
+      font-size: 1rem !important;
+      min-height: 50px !important;
+      width: 100% !important;
     }
     
     /* Header buttons on ultra-wide screens - removed conflicting styles */
@@ -1142,18 +1308,19 @@ img, video, canvas, svg {
     /* Upload buttons on ultra-wide screens */
     .upload-btn-modern {
       padding: 10px 20px !important;
-      font-size: 1rem !important;
+      font-size: 1.15rem !important;
       min-height: 50px !important;
       min-width: 140px !important;
     }
     
     /* Generate button on ultra-wide screens */
     #generateBtn {
-      padding: 12px 22px !important;
-      font-size: 1.05rem !important;
-      min-height: 54px !important;
-      height: 54px !important;
-      min-width: 160px !important;
+      padding: 0.85rem 1.2rem !important;
+      font-size: 1.15rem !important;
+      height: 52px !important;
+      width: 75% !important;
+      max-width: 200px !important;
+      margin: 0 auto !important;
     }
   }
   
@@ -1195,13 +1362,13 @@ img, video, canvas, svg {
     -webkit-backdrop-filter: blur(10px);
     border: 1px solid rgba(160, 132, 232, 0.18);
     color: #fff !important;
-    border-radius: 10px;
-    padding: 10px 16px;
-    font-size: 1rem;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 1.1rem;
     font-weight: 500 !important;
     transition: border-color 0.2s, box-shadow 0.2s;
-    box-shadow: 0 1.5px 6px rgba(160,132,232,0.05);
-    text-shadow: 0 1px 3px rgba(0,0,0,0.3) !important;
+    box-shadow: 0 1px 4px rgba(160,132,232,0.05);
+    text-shadow: 0 1px 2px rgba(0,0,0,0.3) !important;
     
     /* Ensure consistent arrow across platforms */
     background-image: url('data:image/svg+xml;utf8,<svg fill="%23a084e8" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
@@ -1249,7 +1416,7 @@ img, video, canvas, svg {
     color: #2d223a !important;
     border-radius: 4px !important;
     padding: 6px 12px !important;
-    font-size: 0.9rem !important;
+    font-size: 1.05rem !important;
     font-weight: 500 !important;
     transition: all 0.3s ease !important;
     box-shadow: 
@@ -1311,7 +1478,7 @@ img, video, canvas, svg {
     left: 6px !important;
     top: 50% !important;
     transform: translateY(-50%) !important;
-    font-size: 0.75rem !important;
+    font-size: 0.9rem !important;
     opacity: 0.6 !important;
     pointer-events: none !important;
     z-index: 2 !important;
@@ -2071,13 +2238,33 @@ img, video, canvas, svg {
   .control-panel .btn {
     margin-bottom: 0.15rem !important;
     min-height: 32px !important;
-    font-size: 0.75rem !important;
+    font-size: 0.9rem !important;
     padding: 0.3rem 0.6rem !important;
   }
   
-  /* Ensure center panel sections have proper spacing - COMPACT */
+  /* Professional section spacing for center panel */
   .control-panel > div {
-    margin-bottom: 0.4rem !important;
+    margin-bottom: 1rem !important;
+    padding-bottom: 0.6rem !important;
+  }
+  
+  /* Add subtle divider between sections */
+  .control-panel > div:not(:last-child) {
+    border-bottom: 1px solid rgba(160, 132, 232, 0.2);
+  }
+  
+  /* Professional section headers */
+  .control-panel h5,
+  .control-panel .section-header {
+    font-size: 0.85rem !important;
+    font-weight: 600 !important;
+    letter-spacing: 2px !important;
+    text-transform: uppercase !important;
+    color: rgba(160, 132, 232, 0.8) !important;
+    text-align: center !important;
+    margin-bottom: 0.6rem !important;
+    margin-top: 0.4rem !important;
+    padding-bottom: 0.3rem !important;
   }
   
   /* Ensure center panel uses full available height */
@@ -2086,27 +2273,36 @@ img, video, canvas, svg {
     align-items: stretch !important;
   }
   
-  /* Ensure center panel content doesn't overflow */
+  /* Center panel grid alignment */
   .control-panel .d-grid {
     width: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
   }
   
-  /* Compact control panel buttons - EXTRA COMPACT */
-  .control-panel .btn-glass {
+  /* Legacy: Professional center column buttons - Replaced by .btn-control class */
+  /* Keep minimal fallback styles for backwards compatibility */
+  .control-panel .btn-glass:not(.btn-control) {
     padding: 0.6rem 1rem !important;
-    font-size: 1.3rem !important;
-    font-weight: 700 !important;
-    min-height: 45px !important;
-    margin-bottom: 0.15rem !important;
+    font-size: 0.85rem !important;
+    font-weight: 500 !important;
+    min-height: 40px !important;
+  }
+  
+  .control-panel .btn-glass:not(.btn-control):hover {
+    transform: translateY(-1px) !important;
   }
   
   .control-panel .btn-glass .icon-btn {
-    gap: 6px !important;
+    gap: 8px !important;
+    display: inline-flex !important;
+    align-items: center !important;
   }
   
   .control-panel .btn-glass svg {
-    width: var(--center-btn-icon) !important;
-    height: var(--center-btn-icon) !important;
+    width: 16px !important;
+    height: 16px !important;
   }
 
   /* Center column specific spacing reductions */
@@ -2123,73 +2319,156 @@ img, video, canvas, svg {
     line-height: 1 !important;
   }
   
-  /* Template select spacing */
+  /* Template select - Professional and Narrow */
   .control-panel .form-select-modern {
-    margin-bottom: 0 !important;
-    margin-top: 0 !important;
-    padding: 0.3rem 0.5rem !important;
-    font-size: 0.8rem !important;
+    margin: 0.25rem auto !important;
+    padding: 0.6rem 0.9rem !important;
+    font-size: 1rem !important;
+    width: 80% !important;
+    max-width: 240px !important;
+    border-radius: 8px !important;
+    display: block !important;
+    background: rgba(40, 40, 70, 0.6) !important;
+    border: 1px solid rgba(160, 132, 232, 0.3) !important;
   }
   
-  /* Generate button spacing - keep original size even when reusing header style */
+  /* Generate button - Professional and Prominent */
   .control-panel #generateBtn {
-    margin: 0.2rem 0 !important;
-    padding: 0.65rem !important;
-    font-size: 1.1rem !important;
-    font-weight: 800 !important;
-    box-shadow: 0 3px 10px rgba(160, 132, 232, 0.25), 0 6px 18px rgba(160, 132, 232, 0.15) !important;
+    margin: 0.2rem auto !important;
+    padding: 0.7rem 1.2rem !important;
+    font-size: 1.05rem !important;
+    width: 75% !important;
+    max-width: 200px !important;
+    display: block !important;
+    border-radius: 8px !important;
+    font-weight: 700 !important;
+    box-shadow: 0 3px 12px rgba(139, 92, 246, 0.4), 0 6px 20px rgba(139, 92, 246, 0.25) !important;
     transition: all 0.2s ease-in-out !important;
-    height: unset !important;   /* override header button fixed height */
-    line-height: inherit !important; /* avoid compact vertical sizing */
-    min-width: unset !important; /* keep original width behavior */
-    border-radius: 12px !important; /* preserve original rounded shape */
-    /* Force header-style colors */
-    background: rgba(160, 132, 232, 0.9) !important;
-    border: 1px solid rgba(160, 132, 232, 0.6) !important;
+    height: 52px !important;
+    line-height: 1.4 !important;
+    border-radius: 10px !important;
+    /* Vibrant purple gradient */
+    background: linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%) !important;
+    border: 1px solid rgba(139, 92, 246, 0.8) !important;
     color: #fff !important;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3) !important;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.4) !important;
   }
 
   .control-panel #generateBtn:hover {
-    background: rgba(160, 132, 232, 1) !important;
-    border-color: rgba(160, 132, 232, 0.8) !important;
-    box-shadow: 0 4px 14px rgba(160, 132, 232, 0.35) !important;
+    background: linear-gradient(135deg, #9F7AEA 0%, #8B5CF6 100%) !important;
+    border-color: rgba(159, 122, 234, 1) !important;
+    box-shadow: 0 5px 18px rgba(139, 92, 246, 0.5), 0 8px 28px rgba(139, 92, 246, 0.35) !important;
   }
 
   /* Generate button themed like header buttons (color/border/hover) without size constraints */
   .btn-generate-themed {
-    background: rgba(160, 132, 232, 0.9) !important;
+    background: linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%) !important;
     backdrop-filter: blur(15px);
     -webkit-backdrop-filter: blur(15px);
-    border: 1px solid rgba(160, 132, 232, 0.6) !important;
+    border: 1px solid rgba(139, 92, 246, 0.8) !important;
     color: #fff !important;
     border-radius: 12px !important;
-    box-shadow: 0 2px 8px rgba(160, 132, 232, 0.2) !important;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3) !important;
+    box-shadow: 0 3px 12px rgba(139, 92, 246, 0.4) !important;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.4) !important;
   }
 
   .btn-generate-themed:hover {
-    background: rgba(160, 132, 232, 1) !important;
-    border-color: rgba(160, 132, 232, 0.8) !important;
-    box-shadow: 0 4px 14px rgba(160, 132, 232, 0.35) !important;
-    transform: translateY(-1px);
+    background: linear-gradient(135deg, #9F7AEA 0%, #8B5CF6 100%) !important;
+    border-color: rgba(159, 122, 234, 1) !important;
+    box-shadow: 0 5px 18px rgba(139, 92, 246, 0.5) !important;
+    transform: translateY(-2px) scale(1.02);
   }
   
   /* JSON Tools section spacing */
   .control-panel .mb-3 {
-    margin-bottom: 0.6rem !important;
-    margin-top: 0.4rem !important;
+    margin-bottom: 0.5rem !important;
+    margin-top: 0.3rem !important;
   }
   
-  /* d-grid spacing in center column */
+  /* d-grid spacing in center column - Enhanced for better UX */
   .control-panel .d-grid {
-    gap: 0.15rem !important;
+    gap: 0.5rem !important;
   }
   
   /* Filter labels in center column */
   .control-panel .filter-label {
-    margin-bottom: 0.2rem !important;
-    font-size: 1.1rem !important;
+    margin-bottom: 0.6rem !important;
+    font-size: 0.85rem !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.5px !important;
+    text-transform: uppercase !important;
+    color: rgba(160, 132, 232, 0.9) !important;
+  }
+  
+  /* Enhanced Control Button Styling - Matching Generate Button */
+  /* High specificity to override media query rules */
+  .control-panel .btn-control,
+  .control-panel .btn-glass.btn-control,
+  .btn-control {
+    padding: 12px 14px !important;
+    font-size: 0.9rem !important;
+    font-weight: 600 !important;
+    min-height: 50px !important;
+    width: 75% !important;
+    max-width: 200px !important;
+    margin: 0 auto !important;
+    border-radius: 10px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    /* Match Generate button gradient */
+    background: linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%) !important;
+    backdrop-filter: blur(15px) !important;
+    -webkit-backdrop-filter: blur(15px) !important;
+    border: 1px solid rgba(139, 92, 246, 0.8) !important;
+    color: #fff !important;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.4) !important;
+    box-shadow: 0 3px 12px rgba(139, 92, 246, 0.4), 0 6px 20px rgba(139, 92, 246, 0.25) !important;
+  }
+  
+  .control-panel .btn-control:hover,
+  .control-panel .btn-glass.btn-control:hover,
+  .btn-control:hover {
+    background: linear-gradient(135deg, #9F7AEA 0%, #8B5CF6 100%) !important;
+    border-color: rgba(159, 122, 234, 1) !important;
+    color: #fff !important;
+    transform: translateY(-2px) scale(1.02) !important;
+    box-shadow: 0 5px 18px rgba(139, 92, 246, 0.5), 0 8px 28px rgba(139, 92, 246, 0.35) !important;
+  }
+  
+  .control-panel .btn-control:active,
+  .control-panel .btn-glass.btn-control:active,
+  .btn-control:active {
+    transform: translateY(0) scale(0.98) !important;
+    transition: transform 0.1s ease !important;
+  }
+  
+  .control-panel .btn-control .icon-btn,
+  .control-panel .btn-glass.btn-control .icon-btn,
+  .btn-control .icon-btn {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    width: 100% !important;
+    justify-content: center !important;
+  }
+  
+  .control-panel .btn-control svg,
+  .control-panel .btn-glass.btn-control svg,
+  .btn-control svg {
+    flex-shrink: 0 !important;
+    opacity: 0.95 !important;
+  }
+  
+  /* Section spacing improvements */
+  .control-panel > .mb-3 {
+    margin-bottom: 1.5rem !important;
+    margin-top: 0.75rem !important;
+  }
+  
+  .control-panel > .mb-3:first-of-type {
+    margin-top: 0 !important;
   }
 
   /* Center column container spacing */
@@ -2204,13 +2483,8 @@ img, video, canvas, svg {
     margin-bottom: 0 !important;
   }
   
-  /* Make buttons even more compact */
-  .control-panel .btn-sm {
-    padding: 0.55rem 0.8rem !important;
-    font-size: 1.2rem !important;
-    font-weight: 700 !important;
-    min-height: 42px !important;
-  }
+  /* Legacy button styles - replaced by .btn-control */
+  /* .control-panel .btn-sm styles are deprecated - use .btn-control instead */
   
   /* Tag items with dropdowns */
   .tag-row {
@@ -2246,9 +2520,10 @@ img, video, canvas, svg {
     gap: 10px !important; /* Increased from 8px */
     transition: all 0.3s ease;
     position: relative;
-    /* Ensure tag items stay within container */
-    width: 100%;
-    max-width: 95%;
+    /* Ensure tag items stay within container and fit properly */
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
     /* Allow content to be visible */
     overflow: visible;
     /* Make all tag text bold */
@@ -2378,12 +2653,12 @@ img, video, canvas, svg {
   }
   
   .tag-name {
-    font-size: 0.9rem !important;
-    line-height: 1.4 !important; /* Increased from 1.3 */
-    margin-right: 8px !important; /* Increased from 6px */
+    font-size: 0.95rem !important;
+    line-height: 1.4 !important;
+    margin-right: 8px !important;
     white-space: normal !important;
-    word-break: keep-all !important; /* Prevent word breaking */
-    overflow-wrap: anywhere !important; /* Allow breaking only at word boundaries */
+    word-break: break-word !important;
+    overflow-wrap: break-word !important;
     color: white !important;
     font-weight: 600 !important;
     text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5) !important;
@@ -2402,11 +2677,11 @@ img, video, canvas, svg {
   }
   
   .vendor-header, .brand-header, .product-type-header, .weight-header, .container-label {
-    font-size: 0.75rem !important;
-    font-weight: 600 !important;
-    letter-spacing: 0.06em !important;
+      font-size: 0.9rem !important;
+      font-weight: 700 !important;
+      letter-spacing: 0.08em !important;
     color: #e0d7ff !important;
-    padding: 1px 3px 1px 3px !important;
+      padding: 4px 6px !important;
     margin: 1px 0 2px 0 !important;
     text-transform: uppercase !important;
     background: rgba(160,132,232,0.08) !important;
@@ -2997,9 +3272,10 @@ img, video, canvas, svg {
   /* Filter section */
 .filter-label {
   font-size: 0.9rem;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--text-secondary);
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.4rem;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   display: block;
@@ -3076,18 +3352,18 @@ img, video, canvas, svg {
   
 
   
-  /* Control panel - COMPACT SPACING */
+  /* Control panel - IMPROVED SPACING FOR BETTER UX */
   .control-panel {
     background: rgba(45, 34, 58, 0.9);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
     border: 2px solid rgba(160, 132, 232, 0.25);
     border-radius: 16px;
-    padding: 0.75rem 0.75rem;
+    padding: 1.25rem 1rem;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.75rem;
     min-height: 400px;
     height: auto !important;
     max-height: none !important;
@@ -3441,7 +3717,9 @@ img, video, canvas, svg {
   .generation-splash-popup {
     background: rgba(22, 33, 62, 0.95);
     border-radius: 24px;
-    padding: 40px;
+    padding: 80px 100px; /* Increased from 60px for BIGGER splash */
+    max-width: 900px; /* Increased from 700px for BIGGER display */
+    width: 90%; /* Responsive width */
     box-shadow: 
       0 20px 40px rgba(0, 0, 0, 0.3),
       0 0 0 1px rgba(0, 212, 170, 0.1);
@@ -4704,13 +4982,15 @@ img, video, canvas, svg {
     gap: 4px !important;
   }
   .tag-name {
-    font-size: 0.85rem !important;
-    line-height: 1.3 !important;
+      font-size: 0.95rem !important;
+      line-height: 1.4 !important;
     white-space: normal !important;
     word-break: break-word !important;
     overflow-wrap: break-word !important;
     overflow: visible !important;
     text-overflow: clip !important;
+      flex: 1 1 auto !important;
+      min-width: 0 !important;
   }
   .lineage-dropdown,
   .lineage-dropdown-mini,
@@ -5125,29 +5405,27 @@ img, video, canvas, svg {
   }
 
   #generateBtn {
-    min-width: 150px !important;
-    max-width: 250px !important;
-    width: auto !important;
-    min-height: 50px !important;
-    height: 50px !important;
-    margin: 0.5rem auto 0 !important;
-    padding: 8px 16px !important;
-    font-size: 1.1em !important;
-    font-weight: 600 !important;
+    width: 75% !important;
+    max-width: 200px !important;
+    height: 52px !important;
+    margin: 0.2rem auto !important;
+    padding: 0.85rem 1.2rem !important;
+    font-size: 1rem !important;
+    font-weight: 700 !important;
     border-radius: 10px !important;
-    background: rgba(33, 150, 243, 0.9) !important;
+    background: linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%) !important;
     color: #fff !important;
-    box-shadow: 0 4px 15px rgba(33, 150, 243, 0.35), 0 8px 25px rgba(3, 169, 244, 0.2) !important;
-    border: 2px solid rgba(33, 150, 243, 0.7) !important;
-    letter-spacing: 0.3px !important;
-    transition: all 0.3s ease;
-    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 3px 12px rgba(139, 92, 246, 0.4), 0 6px 20px rgba(139, 92, 246, 0.25) !important;
+    border: 1px solid rgba(139, 92, 246, 0.8) !important;
+    letter-spacing: 0.02em !important;
+    transition: all 0.2s ease;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
   }
   #generateBtn:hover, #generateBtn:focus {
-    background: rgba(60, 45, 80, 0.95) !important;
-    border-color: rgba(160, 132, 232, 0.4) !important;
-    box-shadow: 0 6px 20px rgba(160, 132, 232, 0.35), 0 12px 30px rgba(80, 40, 160, 0.25) !important;
-    transform: translateY(-3px);
+    background: linear-gradient(135deg, #9F7AEA 0%, #8B5CF6 100%) !important;
+    border-color: rgba(159, 122, 234, 1) !important;
+    box-shadow: 0 5px 18px rgba(139, 92, 246, 0.5), 0 8px 28px rgba(139, 92, 246, 0.35) !important;
+    transform: translateY(-2px) scale(1.02);
     color: #fff !important;
     outline: none !important;
   }
@@ -5243,13 +5521,165 @@ img, video, canvas, svg {
     height: 15px !important;
   }
 
-  /* Modal cleanup and backdrop fixes */
+  /* Modal cleanup and backdrop fixes - FULL VIEWPORT */
   .modal-backdrop {
-    z-index: 1040;
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    min-width: 100vw !important;
+    min-height: 100vh !important;
+    max-width: 100vw !important;
+    max-height: 100vh !important;
+    z-index: 1040 !important;
+    background: rgba(0, 0, 0, 0.5) !important;
+    transform: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
   }
 
   .modal-backdrop.show {
-    opacity: 0.5;
+    opacity: 1 !important;
+  }
+  
+  .modal-backdrop.fade {
+    opacity: 1 !important;
+  }
+  
+  /* Ensure backdrop container doesn't restrict size */
+  body.modal-open {
+    overflow: hidden !important;
+  }
+  
+  body.modal-open .modal-backdrop {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+  }
+  
+  /* Fix modal shadow clipping issues */
+  .modal {
+    overflow: visible !important;
+    /* Add padding to prevent shadow clipping at viewport edges */
+    padding: 0 2rem !important;
+  }
+  
+  .modal-dialog {
+    overflow: visible !important;
+    margin: 2rem auto !important;
+  }
+  
+  /* Ensure proper spacing on smaller screens */
+  @media (max-width: 768px) {
+    .modal {
+      padding: 0 1rem !important;
+    }
+    
+    .modal-dialog {
+      margin: 1rem auto !important;
+    }
+  }
+  
+  /* Store Selection Modal - BIGGER size display */
+  #storeSelectionModal {
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    padding: 0.5rem !important;
+  }
+  
+  #storeSelectionModal .modal-dialog {
+    overflow: hidden !important;
+    filter: none !important;
+    margin: 1.75rem auto !important;
+    max-width: 900px !important;
+    width: auto !important;
+    height: auto !important;
+    position: relative !important;
+  }
+  
+  #storeSelectionModal .modal-content {
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3) !important;
+    border-radius: 12px !important;
+    margin: 0 !important;
+    height: auto !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+  }
+  
+  #storeSelectionModal .modal-body {
+    flex: 0 1 auto !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    -webkit-overflow-scrolling: touch !important;
+    max-height: calc(100vh - 300px) !important;
+  }
+  
+  #storeSelectionModal .modal-header,
+  #storeSelectionModal .modal-footer {
+    flex-shrink: 0 !important;
+  }
+
+  /* JSON Match Modal - Normal size display */
+  #jsonMatchModal {
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    padding: 0.5rem !important;
+  }
+  
+  #jsonMatchModal .modal-dialog {
+    overflow: hidden !important;
+    filter: none !important;
+    margin: 1.75rem auto !important;
+    max-width: 800px !important;
+    width: auto !important;
+    height: auto !important;
+    position: relative !important;
+  }
+  
+  #jsonMatchModal .modal-content {
+    overflow: hidden !important;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3) !important;
+    border-radius: 12px !important;
+    margin: 0 !important;
+    height: auto !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+  
+  #jsonMatchModal .modal-body {
+    flex: 0 1 auto !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    -webkit-overflow-scrolling: touch !important;
+    max-height: calc(100vh - 300px) !important;
+  }
+  
+  #jsonMatchModal .modal-header {
+    flex-shrink: 0 !important;
+    padding: 1.5rem 2rem !important; /* Normal modal padding */
+    border-bottom: 2px solid rgba(160, 132, 232, 0.3) !important;
+  }
+  
+  #jsonMatchModal .modal-header .modal-title {
+    font-size: 1.5rem !important; /* Normal modal title - 24px */
+    font-weight: 700 !important;
+    letter-spacing: -0.02em !important;
+  }
+  
+  #jsonMatchModal .modal-header svg {
+    width: 24px !important; /* Normal icon size */
+    height: 24px !important;
+  }
+  
+  #jsonMatchModal .modal-footer {
+    flex-shrink: 0 !important;
+    padding: 1rem 2rem !important;
   }
 
   /* Force modal backdrop cleanup */
@@ -5364,10 +5794,10 @@ img, video, canvas, svg {
     background-size: 200% 200%, 150% 150%, 180% 180%, 220% 220%, 100% 100%;
     animation: excelLoadingBackground 30s ease-in-out infinite;
     border: 1px solid rgba(160, 132, 232, 0.5);
-    border-radius: 20px;
-    padding: 40px;
+    border-radius: 24px; /* Increased from 20px */
+    padding: 80px 100px; /* Increased from 60px for BIGGER splash */
     text-align: center;
-    max-width: 500px;
+    max-width: 900px; /* Increased from 700px for BIGGER display */
     width: 90%;
     box-shadow: 
       0 20px 40px rgba(0, 0, 0, 0.4),
@@ -5382,13 +5812,15 @@ img, video, canvas, svg {
   }
 
   .excel-loading-icon {
-    margin-bottom: 20px;
+    margin-bottom: 30px; /* Increased from 20px */
     animation: excelIconPulse 4s ease-in-out infinite;
   }
 
   .excel-loading-icon svg {
+    width: 80px !important; /* Increased from 60px */
+    height: 80px !important; /* Increased from 60px */
     color: #00d4aa;
-    filter: drop-shadow(0 0 10px rgba(0, 212, 170, 0.5));
+    filter: drop-shadow(0 0 15px rgba(0, 212, 170, 0.6)); /* Enhanced glow */
   }
 
   @keyframes excelIconPulse {
@@ -5426,9 +5858,9 @@ img, video, canvas, svg {
   }
 
   .excel-loading-title {
-    font-size: 24px;
+    font-size: 32px; /* Increased from 24px */
     font-weight: 700;
-    margin-bottom: 20px;
+    margin-bottom: 24px; /* Increased from 20px */
     background: linear-gradient(135deg, #00d4aa, #ffffff);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -5436,29 +5868,29 @@ img, video, canvas, svg {
   }
 
   .excel-loading-subtitle {
-    font-size: 16px;
+    font-size: 20px; /* Increased from 16px */
     color: rgba(255, 255, 255, 0.8);
-    margin-bottom: 20px;
+    margin-bottom: 24px; /* Increased from 20px */
     font-weight: 500;
   }
 
 
   .excel-loading-status {
-    font-size: 14px;
+    font-size: 18px; /* Increased from 14px */
     color: rgba(255, 255, 255, 0.7);
-    margin-bottom: 20px;
+    margin-bottom: 24px; /* Increased from 20px */
     font-weight: 500;
   }
 
   .excel-loading-dots {
     display: flex;
-    gap: 8px;
+    gap: 12px; /* Increased from 8px */
     justify-content: center;
   }
 
   .excel-loading-dots span {
-    width: 8px;
-    height: 8px;
+    width: 12px; /* Increased from 8px */
+    height: 12px; /* Increased from 8px */
     background: #00d4aa;
     border-radius: 50%;
     animation: excelDotPulse 2.5s ease-in-out infinite;
@@ -5482,16 +5914,26 @@ img, video, canvas, svg {
   /* Responsive adjustments */
   @media (max-width: 768px) {
     .excel-loading-container {
-      padding: 30px 20px;
+      padding: 40px 30px; /* Increased from 30px 20px */
       margin: 20px;
+      max-width: 90vw; /* Ensure it fits on mobile */
     }
     
     .excel-loading-title {
-      font-size: 20px;
+      font-size: 28px; /* Increased from 20px - still large on mobile */
     }
     
     .excel-loading-subtitle {
-      font-size: 14px;
+      font-size: 18px; /* Increased from 14px */
+    }
+    
+    .excel-loading-status {
+      font-size: 16px;
+    }
+    
+    .generation-splash-popup {
+      padding: 50px 40px; /* Ensure generation splash is BIGGER on mobile too */
+      max-width: 90vw;
     }
   }
 
@@ -6785,10 +7227,11 @@ img, video, canvas, svg {
   .filter-label,
   h5.filter-label,
   .card-header .filter-label {
-    font-size: 1.2rem !important;
-    font-weight: 600 !important;
-    color: rgba(255, 255, 255, 1) !important;
-    margin-bottom: 0.25rem !important;
+    font-size: 0.9rem !important;
+    font-weight: 700 !important;
+    color: rgba(255, 255, 255, 0.85) !important;
+    margin-bottom: 0.3rem !important;
+    letter-spacing: 0.05em !important;
     text-transform: uppercase !important;
     letter-spacing: 0.6px !important;
     display: block !important;
@@ -7906,30 +8349,30 @@ img, video, canvas, svg {
     box-sizing: border-box;
   }
   
-  /* Font size adjustment classes - using normalized viewport units */
+  /* Font size adjustment classes */
   .font-size-auto {
-    font-size: clamp(var(--min-font-size), calc(2.5 * var(--vw) * var(--env-font-multiplier)), var(--max-font-size)) !important;
+    font-size: clamp(8px, 1rem, 20px) !important;
   }
   
   .font-size-small {
-    font-size: var(--normalized-clamp-small) !important;
+    font-size: clamp(8px, 0.875rem, 14px) !important;
   }
   
   .font-size-medium {
-    font-size: var(--normalized-clamp-medium) !important;
+    font-size: clamp(10px, 1rem, 16px) !important;
   }
   
   .font-size-large {
-    font-size: var(--normalized-clamp-large) !important;
+    font-size: clamp(12px, 1.125rem, 20px) !important;
   }
   
   .font-size-xlarge {
-    font-size: clamp(14px, calc(5 * var(--vw) * var(--env-font-multiplier)), var(--max-font-size)) !important;
+    font-size: clamp(14px, 1.25rem, 20px) !important;
   }
   
-  /* Responsive font sizing based on container width - using normalized viewport units */
+  /* Responsive font sizing based on container width */
   .responsive-text {
-    font-size: clamp(var(--min-font-size), calc(2.5 * var(--vw) * var(--env-font-multiplier)), var(--max-font-size)) !important;
+    font-size: clamp(8px, 1rem, 20px) !important;
     line-height: 1.2 !important;
     white-space: nowrap !important;
     overflow: hidden !important;
@@ -7938,28 +8381,28 @@ img, video, canvas, svg {
   
   /* Container-specific font sizing - using normalized viewport units */
   .tag-item .text-container {
-    font-size: var(--normalized-clamp-small) !important;
+    font-size: clamp(8px, 0.875rem, 14px) !important;
     max-width: calc(100% - 40px) !important;
     padding-right: 8px !important;
   }
   
   .vendor-header .text-container {
-    font-size: clamp(10px, calc(2.5 * var(--vw) * var(--env-font-multiplier)), 16px) !important;
+    font-size: clamp(10px, 0.9rem, 16px) !important;
     font-weight: 600 !important;
   }
   
   .brand-header .text-container {
-    font-size: clamp(9px, calc(2.2 * var(--vw) * var(--env-font-multiplier)), 15px) !important;
+    font-size: clamp(9px, 0.85rem, 15px) !important;
     font-weight: 500 !important;
   }
   
   .product-type-header .text-container {
-    font-size: var(--normalized-clamp-small) !important;
+    font-size: clamp(8px, 0.875rem, 14px) !important;
     font-weight: 500 !important;
   }
   
   .weight-header .text-container {
-    font-size: var(--normalized-clamp-small) !important;
+    font-size: clamp(8px, 0.875rem, 14px) !important;
     font-weight: 500 !important;
   }
   
@@ -8690,19 +9133,22 @@ img, video, canvas, svg {
   /* visual styles remain elsewhere; this block standardizes spacing */
 }
 .control-panel .d-grid {
-  gap: 0.6rem !important; /* even, comfortable spacing between buttons */
+  gap: 0.5rem !important; /* even, comfortable spacing between buttons */
 }
 .control-panel .btn {
   margin-bottom: 0 !important; /* rely on grid gap for spacing */
 }
 .control-panel > div {
-  margin-bottom: 0.5rem !important; /* equal spacing between sections */
+  margin-bottom: 0.3rem !important; /* equal spacing between sections */
 }
 .control-panel .form-select-modern {
   margin-bottom: 0.35rem !important; /* space below Template select */
 }
 .control-panel #generateBtn {
-  margin: 0.35rem 0 !important; /* balanced space above/below button */
+  margin: 0.2rem auto !important; /* balanced space above/below button, centered */
+  width: 75% !important;
+  max-width: 200px !important;
+  height: 52px !important;
 }
 
 /* Slightly lower the center column so it visually centers between the tag lists */
@@ -8710,11 +9156,169 @@ img, video, canvas, svg {
   margin-top: 8px !important; /* gentle downward nudge */
 }
 
-/* Scale-to-fit support */
-#mainContent {
-	transform-origin: top left;
+/* Scale-to-fit support - REMOVED transform-origin from html/body to fix canvas positioning */
+/* Transform-origin can break position:fixed elements like the lava lamp canvas */
+
+/* ========================================================================
+   FINAL OVERRIDE: Control Button Styling - Must be at end of file
+   ======================================================================== */
+.control-panel .btn-control,
+.control-panel .btn-glass.btn-control,
+.control-panel .d-grid .btn-control,
+.btn-control {
+  padding: 14px 16px !important;
+  font-size: 0.95rem !important;
+  font-weight: 600 !important;
+  min-height: 56px !important;
+  width: 90% !important;
+  max-width: 260px !important;
+  margin: 0 auto !important;
+  margin-bottom: 0 !important;
+  border-radius: 10px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  background: linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%) !important;
+  backdrop-filter: blur(15px) !important;
+  -webkit-backdrop-filter: blur(15px) !important;
+  border: 1px solid rgba(139, 92, 246, 0.8) !important;
+  color: #fff !important;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.4) !important;
+  box-shadow: 0 3px 12px rgba(139, 92, 246, 0.4), 0 6px 20px rgba(139, 92, 246, 0.25) !important;
 }
 
+.control-panel .btn-control:hover,
+.control-panel .btn-glass.btn-control:hover,
+.control-panel .d-grid .btn-control:hover,
+.btn-control:hover {
+  background: linear-gradient(135deg, #9F7AEA 0%, #8B5CF6 100%) !important;
+  border-color: rgba(159, 122, 234, 1) !important;
+  color: #fff !important;
+  transform: translateY(-2px) scale(1.02) !important;
+  box-shadow: 0 5px 18px rgba(139, 92, 246, 0.5), 0 8px 28px rgba(139, 92, 246, 0.35) !important;
+}
+
+.control-panel .btn-control:active,
+.control-panel .btn-glass.btn-control:active,
+.control-panel .d-grid .btn-control:active,
+.btn-control:active {
+  transform: translateY(0) scale(0.98) !important;
+  transition: transform 0.1s ease !important;
+}
+
+.control-panel .btn-control .icon-btn,
+.control-panel .btn-glass.btn-control .icon-btn,
+.btn-control .icon-btn {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  width: 100% !important;
+  justify-content: center !important;
+}
+
+.control-panel .btn-control svg,
+.control-panel .btn-glass.btn-control svg,
+.btn-control svg {
+  flex-shrink: 0 !important;
+  opacity: 0.95 !important;
+  width: 18px !important;
+  height: 18px !important;
+}
+
+/* ========================================
+   FULLSCREEN CANVAS FIX - FINAL OVERRIDE
+   ======================================== */
+
+/* CRITICAL: Ensure lava lamp canvas fills entire screen without any gaps or shadows */
+#lava-lamp-canvas {
+  display: block !important;
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  z-index: 0 !important;
+  pointer-events: none !important;
+  box-sizing: border-box !important;
+  overflow: hidden !important;
+  transform: none !important;
+  object-fit: cover !important;
+  /* Ensure no browser default spacing */
+  background: transparent !important;
+}
+
+/* Override any inherited styles that might affect canvas positioning */
+canvas#lava-lamp-canvas {
+  max-width: none !important;
+  max-height: none !important;
+  min-width: 100vw !important;
+  min-height: 100vh !important;
+  /* Force exact viewport dimensions */
+  width: 100vw !important;
+  height: 100vh !important;
+}
+
+/* ========================================
+   FULLSCREEN CANVAS FIX - ABSOLUTE POSITIONING
+   ======================================== */
+
+/* Ensure canvas fills entire viewport with absolute positioning */
+#lava-lamp-canvas,
+canvas#lava-lamp-canvas {
+  position: fixed !important;
+  top: 0px !important;
+  left: 0px !important;
+  right: 0px !important;
+  bottom: 0px !important;
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  z-index: -1 !important;
+  pointer-events: none !important;
+  display: block !important;
+  background: transparent !important;
+  max-width: none !important;
+  max-height: none !important;
+  min-width: 100% !important;
+  min-height: 100% !important;
+  transform: none !important;
+  object-fit: cover !important;
+  /* Force canvas to cover entire screen */
+  overflow: hidden !important;
+}
+
+/* Ensure body and html don't interfere */
 html, body {
-	transform-origin: top left;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow-x: visible !important;
+}
+
+/* Remove shadows from modals only - don't break responsive design */
+#storeSelectionModal .modal-content.glass-card {
+  box-shadow: 0 2px 10px rgba(0,0,0,0.1) !important;
+  border: 1px solid rgba(160, 132, 232, 0.3) !important;
+  background: rgba(30, 30, 50, 0.95) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  backdrop-filter: blur(20px) !important;
+}
+
+/* Remove shadows from store buttons */
+#storeSelectionModal .btn-store-option:hover {
+  box-shadow: 0 2px 8px rgba(160, 132, 232, 0.2) !important;
+  transform: translateY(-2px) !important;
 }

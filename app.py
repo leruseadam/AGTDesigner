@@ -1173,7 +1173,7 @@ def create_app():
 
     # Respect environment: disable template auto-reload to prevent force reloads
     app.config['TEMPLATES_AUTO_RELOAD'] = False
-    app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0 if development_mode else 31536000
+    app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0  # Always disable caching for development
     app.config['DEBUG'] = bool(app.config.get('DEBUG', development_mode))
     app.config['PROPAGATE_EXCEPTIONS'] = bool(development_mode)
     if development_mode:
@@ -11584,9 +11584,25 @@ def json_match():
         
         # Perform JSON matching with Product Database integration
         # CRITICAL FIX: Use simplified matching approach to ensure all products are processed with complete data
-        # DEFAULT: No deduplication - one label per JSON entry (user can manually remove duplicates if needed)
+        # DEDUPLICATION DISABLED: Preserve ALL items from JSON manifest (each item gets its own label)
+        # Note: If you want to merge duplicates, manually adjust quantities after import
         matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=True, deduplicate=False)
         logging.info(f"JSON matching (simplified approach) returned {len(matched_products) if matched_products else 0} products")
+        
+        # Sort matched products alphabetically by product name
+        if matched_products:
+            def get_sort_key(product):
+                """Extract product name for sorting, handling various field names."""
+                if isinstance(product, dict):
+                    name = (product.get('Product Name*', '') or 
+                           product.get('ProductName', '') or 
+                           product.get('Description', '') or 
+                           product.get('product_name', ''))
+                    return str(name).lower().strip()
+                return ''
+            
+            matched_products.sort(key=get_sort_key)
+            logging.info(f"✅ Sorted {len(matched_products)} matched products alphabetically")
 
         # CRITICAL DEBUG: Log what we actually got back
         if matched_products:
@@ -12006,6 +12022,19 @@ def json_match_detailed():
         # Use the Enhanced JSON Matcher to get database-enhanced results
         enhanced_matches = json_matcher.fetch_and_match(url)
         logging.info(f"Enhanced JSON Matcher returned {len(enhanced_matches) if enhanced_matches else 0} database-enhanced products")
+        
+        # Sort matched products alphabetically by product name
+        if enhanced_matches:
+            def get_sort_key(product):
+                if isinstance(product, dict):
+                    name = (product.get('Product Name*', '') or 
+                           product.get('ProductName', '') or 
+                           product.get('Description', '') or 
+                           product.get('product_name', ''))
+                    return str(name).lower().strip()
+                return ''
+            enhanced_matches.sort(key=get_sort_key)
+            logging.info(f"✅ Sorted {len(enhanced_matches)} enhanced matches alphabetically")
         
         detailed_matches = []
         high_confidence_matches = enhanced_matches or []  # All enhanced matches are high confidence
@@ -16082,6 +16111,25 @@ def enhanced_json_match():
                     'factors': match.match_factors if hasattr(match, 'match_factors') else {}
                 })
             
+            # Sort matched products alphabetically by product name
+            if matched_products:
+                def get_sort_key(product):
+                    if isinstance(product, dict):
+                        name = (product.get('Product Name*', '') or 
+                               product.get('ProductName', '') or 
+                               product.get('Description', '') or 
+                               product.get('product_name', ''))
+                        return str(name).lower().strip()
+                    return ''
+                
+                # Create a list of tuples (product, detail) for synchronized sorting
+                combined = list(zip(matched_products, match_details))
+                combined.sort(key=lambda x: get_sort_key(x[0]))
+                matched_products, match_details = zip(*combined) if combined else ([], [])
+                matched_products = list(matched_products)
+                match_details = list(match_details)
+                logging.info(f"✅ Sorted {len(matched_products)} enhanced matched products alphabetically")
+            
             processing_time = time.perf_counter() - start_time
             
             # Get performance report if available
@@ -16117,6 +16165,19 @@ def enhanced_json_match():
             # Fallback to original matching
             logging.info("Enhanced matcher not available, using original JSON matching")
             matched_products = json_matcher.fetch_and_match(url)
+            
+            # Sort matched products alphabetically by product name
+            if matched_products:
+                def get_sort_key(product):
+                    if isinstance(product, dict):
+                        name = (product.get('Product Name*', '') or 
+                               product.get('ProductName', '') or 
+                               product.get('Description', '') or 
+                               product.get('product_name', ''))
+                        return str(name).lower().strip()
+                    return ''
+                matched_products.sort(key=get_sort_key)
+                logging.info(f"✅ Sorted {len(matched_products)} matched products alphabetically (fallback)")
             
             response_data = {
                 'success': True,

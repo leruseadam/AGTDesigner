@@ -1654,7 +1654,11 @@ const TagManager = {
             if (isJsonMatched) {
                 // For JSON matched products, skip deduplication entirely
                 // The backend already ensures we have unique original JSON items
-                console.debug(`Preserving JSON matched product: ${tag['Original JSON Product Name'] || tag['Product Name*'] || 'Unknown'}`);
+                console.log(`✅ JSON MATCH: Preserving hierarchical organization for: ${tag['Product Name*'] || tag.ProductName || 'Unknown'}`);
+                console.log(`   Vendor: ${tag.vendor || tag['Vendor'] || tag['Vendor/Supplier*'] || 'Not Set'}`);
+                console.log(`   Brand: ${tag.productBrand || tag['Product Brand'] || tag.ProductBrand || 'Not Set'}`);
+                console.log(`   Type: ${tag.productType || tag['Product Type*'] || 'Not Set'}`);
+                console.log(`   Weight: ${tag.weightWithUnits || tag.weight || 'Not Set'}`);
                 return true;
             } else {
                 // For regular products, use the existing deduplication logic
@@ -1910,6 +1914,109 @@ const TagManager = {
         }, 150);
     },
 
+    // CRITICAL FIX: Render JSON matched tags with SAME HIERARCHY as Selected Tags
+    // Uses Vendor > Brand > Product Type > Weight organization
+    renderJsonMatchedTags(tags) {
+        console.log('✅ RENDERING JSON MATCHED TAGS WITH HIERARCHY, count:', tags.length);
+        
+        const availableTagsContainer = document.getElementById('availableTags');
+        if (!availableTagsContainer) {
+            console.error('Available tags container not found');
+            return;
+        }
+        // Preserve scroll position during re-render
+        const savedScroll = this._saveAvailableScrollPosition();
+
+        // Clear existing content
+        availableTagsContainer.innerHTML = '';
+
+        // FIXED: Use hierarchical organization (SAME AS SELECTED TAGS)
+        console.log('Organizing JSON matched tags hierarchically...');
+        const groupedTags = this.organizeBrandCategories(tags);
+        console.log('✅ JSON matched tags organized into hierarchy, vendor count:', groupedTags.size);
+
+        // Create hierarchical structure (same as regular available tags)
+        const tagList = document.createElement('div');
+        tagList.className = 'tag-list';
+
+        const sortedVendors = Array.from(groupedTags.entries())
+            .sort(([a], [b]) => (a || '').localeCompare(b || ''));
+
+        sortedVendors.forEach(([vendor, brandGroups]) => {
+            const vendorSection = document.createElement('div');
+            vendorSection.className = 'vendor-section mb-3';
+            
+            const vendorHeader = document.createElement('h5');
+            vendorHeader.className = 'vendor-header mb-2';
+            vendorHeader.textContent = vendor;
+            vendorSection.appendChild(vendorHeader);
+
+            const vendorContent = document.createElement('div');
+            vendorContent.className = 'vendor-content';
+            
+            const sortedBrands = Array.from(brandGroups.entries())
+                .sort(([a], [b]) => (a || '').localeCompare(b || ''));
+
+            sortedBrands.forEach(([brand, productTypeGroups]) => {
+                const brandSection = document.createElement('div');
+                brandSection.className = 'brand-section ms-3 mb-2';
+                
+                const brandHeader = document.createElement('h6');
+                brandHeader.className = 'brand-header mb-2';
+                brandHeader.textContent = brand;
+                brandSection.appendChild(brandHeader);
+
+                const sortedProductTypes = Array.from(productTypeGroups.entries())
+                    .sort(([a], [b]) => (a || '').localeCompare(b || ''));
+
+                sortedProductTypes.forEach(([productType, weightGroups]) => {
+                    const productTypeSection = document.createElement('div');
+                    productTypeSection.className = 'product-type-section ms-3 mb-2';
+                    
+                    const productTypeHeader = document.createElement('div');
+                    productTypeHeader.className = 'product-type-header mb-2';
+                    productTypeHeader.textContent = productType;
+                    productTypeSection.appendChild(productTypeHeader);
+
+                    const sortedWeights = Array.from(weightGroups.entries())
+                        .sort(([a], [b]) => (a || '').localeCompare(b || ''));
+
+                    sortedWeights.forEach(([weight, tagArray]) => {
+                        const weightSection = document.createElement('div');
+                        weightSection.className = 'weight-section ms-3 mb-2';
+                        
+                        const weightHeader = document.createElement('div');
+                        weightHeader.className = 'weight-header mb-1';
+                        weightHeader.textContent = weight;
+                        weightSection.appendChild(weightHeader);
+
+                        tagArray.forEach(tag => {
+                            const tagElement = this.createTagElement(tag, false);
+                            weightSection.appendChild(tagElement);
+                        });
+
+                        productTypeSection.appendChild(weightSection);
+                    });
+
+                    brandSection.appendChild(productTypeSection);
+                });
+
+                vendorContent.appendChild(brandSection);
+            });
+
+            vendorSection.appendChild(vendorContent);
+            tagList.appendChild(vendorSection);
+        });
+
+        availableTagsContainer.appendChild(tagList);
+        this._restoreAvailableScrollPosition(savedScroll);
+        
+        this.updateSelectAllCheckboxes();
+        this.initializeSelectAllCheckbox();
+        
+        console.log('✅ Rendered', tags.length, 'JSON matched tags with HIERARCHY (same as Selected Tags)');
+    },
+
     // Internal function that actually updates the available tags
     _updateAvailableTags(originalTags, filteredTags = null) {
         // Windows optimization: Use requestAnimationFrame for smoother rendering
@@ -2058,17 +2165,29 @@ const TagManager = {
             console.log('Select All Available checkbox not found');
         }
 
-        // Organize tags by vendor, brand, product type, weight (works for both regular and JSON matched tags)
-        console.log('About to organize tags, tags length:', tags.length);
+        // CRITICAL FIX: For JSON matched tags, skip organization entirely and render directly
+        const isJsonMatchedSession = tags.some(tag => tag.Source && tag.Source.includes('JSON Match'));
+        
         let organizedTags;
-        try {
-            organizedTags = this.organizeBrandCategories(tags);
-            console.log('Tags organized successfully, vendor count:', organizedTags.size);
-        } catch (error) {
-            console.error('Error organizing tags:', error);
-            // Fallback to simple list if organization fails
-            availableTagsContainer.innerHTML = '<div class="tag-entry">Error organizing tags: ' + error.message + '</div>';
+        if (isJsonMatchedSession) {
+            console.log('CRITICAL FIX: JSON matched session detected, skipping organization and rendering directly');
+            // For JSON matched tags, render them directly without organization
+            this.renderJsonMatchedTags(tags);
             return;
+        } else {
+            // Organize tags by vendor, brand, product type, weight (SAME HIERARCHY AS SELECTED TAGS)
+            // This ensures JSON matched tags and all tags use: Vendor > Brand > Product Type > Weight
+            console.log('About to organize tags, tags length:', tags.length);
+            try {
+                organizedTags = this.organizeBrandCategories(tags);
+                console.log('✅ CURRENT INVENTORY: Using same hierarchical organization as Selected Tags');
+                console.log('Tags organized successfully, vendor count:', organizedTags.size);
+            } catch (error) {
+                console.error('Error organizing tags:', error);
+                // Fallback to simple list if organization fails
+                availableTagsContainer.innerHTML = '<div class="tag-entry">Error organizing tags: ' + error.message + '</div>';
+                return;
+            }
         }
         
         // Create vendor sections
@@ -4046,8 +4165,10 @@ const TagManager = {
             return;
         }
 
-        // Organize tags into hierarchical groups (same as available tags)
+        // Organize tags into hierarchical groups (SAME HIERARCHY AS AVAILABLE TAGS)
+        // This ensures JSON matched tags and all tags use: Vendor > Brand > Product Type > Weight
         const groupedTags = this.organizeBrandCategories(fullTags);
+        console.log('✅ SELECTED TAGS: Using same hierarchical organization as Current Inventory');
         console.log('Grouped selected tags:', groupedTags);
 
         // Sort vendors alphabetically

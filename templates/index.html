@@ -4429,9 +4429,11 @@
     </div>
   </div>
 
+  <!-- Lava Lamp Canvas - Full Screen Background with FORCED STYLING -->
+  <canvas id="lava-lamp-canvas" style="position: fixed !important; top: 0px !important; left: 0px !important; right: 0px !important; bottom: 0px !important; width: 100% !important; height: 100% !important; margin: 0 !important; padding: 0 !important; border: none !important; outline: none !important; box-shadow: none !important; border-radius: 0 !important; z-index: -1 !important; pointer-events: none !important; display: block !important; background: transparent !important; max-width: none !important; max-height: none !important; min-width: 100% !important; min-height: 100% !important; transform: none !important; object-fit: cover !important;"></canvas>
+
   <!-- Main Content (hidden until store is selected) -->
   <div class="main-content{% if user_has_store %} store-selected loaded{% endif %}" id="mainContent" style="{% if user_has_store %}display: block;{% else %}display: none;{% endif %}">
-    <canvas id="lava-lamp-canvas" style="position:fixed;top:0;left:0;z-index:0;pointer-events:none;"></canvas>
     <!-- Psychedelic Background Effects -->
     <div class="psychedelic-orbs">
       <div class="orb"></div>
@@ -4714,11 +4716,11 @@
               <!-- Controls Section -->
               <div class="mb-3">
                 <label class="filter-label">Controls</label>
-                <div class="d-grid gap-2 w-100">
+                <div class="d-grid gap-3 w-100">
                   <!-- Match JSON Button - Moved to top for easy access -->
-                  <button class="btn btn-glass btn-sm" data-bs-toggle="modal" data-bs-target="#jsonMatchModal" title="Match products from JSON URL" style="background: rgba(220, 53, 69, 0.2); border-color: rgba(220, 53, 69, 0.5);">
+                  <button class="btn btn-glass btn-control" data-bs-toggle="modal" data-bs-target="#jsonMatchModal" title="Match products from JSON URL">
                     <span class="icon-btn">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                         <polyline points="7 10 12 15 17 10"></polyline>
                         <line x1="12" y1="15" x2="12" y2="3"></line>
@@ -4726,27 +4728,27 @@
                       Match JSON
                     </span>
                   </button>
-                  <button id="undo-move-btn" class="btn btn-glass btn-sm" title="Undo last move">
+                  <button id="undo-move-btn" class="btn btn-glass btn-control" title="Undo last move">
                   <span class="icon-btn">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <polyline points="1 4 1 10 7 10"></polyline>
                       <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
                     </svg>
                     Undo
                   </span>
                 </button>
-                    <button id="clear-filters-btn" class="btn btn-glass btn-sm" title="Clear selected tags and reset app">
+                    <button id="clear-filters-btn" class="btn btn-glass btn-control" title="Clear selected tags and reset app">
                       <span class="icon-btn">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                           <polyline points="3 6 5 6 21 6"></polyline>
                           <path d="M19 6v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
                         </svg>
                         Clear & Reset
                       </span>
                     </button>
-                <button class="btn btn-glass btn-sm" onclick="TagManager.downloadExcel()" title="Download selected tags as Excel file">
+                <button class="btn btn-glass btn-control" onclick="TagManager.downloadExcel()" title="Download selected tags as Excel file">
                   <span class="icon-btn">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                       <polyline points="7 10 12 15 17 10"></polyline>
                       <line x1="12" y1="15" x2="12" y2="3"></line>
@@ -4760,10 +4762,10 @@
               <!-- Database and Lineage Management -->
               <div class="mb-3">
                 <label class="filter-label">Database Tools</label>
-                <div class="d-grid gap-2">
-                  <button class="btn btn-glass btn-sm" onclick="showProductDatabaseManager()" title="Open Data & Analytics">
+                <div class="d-grid gap-3">
+                  <button class="btn btn-glass btn-control" onclick="showProductDatabaseManager()" title="Open Data & Analytics">
                     <span class="icon-btn">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
                         <path d="M12 8v8"></path>
                         <path d="M8 12h8"></path>
@@ -4771,18 +4773,18 @@
                       Data & Analytics
                     </span>
                   </button>
-                  <button class="btn btn-glass btn-sm" onclick="showDatabaseEditor()" title="Open Edit DB">
+                  <button class="btn btn-glass btn-control" onclick="showDatabaseEditor()" title="Open Edit DB">
                     <span class="icon-btn">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
                         <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
                       </svg>
                       Edit DB
                     </span>
                   </button>
-                  <button class="btn btn-glass btn-sm" onclick="openLineageEditor()" title="Open lineage editor for strain management">
+                  <button class="btn btn-glass btn-control" onclick="openLineageEditor()" title="Open lineage editor for strain management">
                     <span class="icon-btn">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
                         <path d="M2 17l10 5 10-5"></path>
                         <path d="M2 12l10 5 10-5"></path>
@@ -6307,7 +6309,7 @@
   <script src="{{ url_for('static', filename='js/enhanced-ui.js') }}?v={{ cache_bust }}"></script>
   <script src="{{ url_for('static', filename='js/generation-splash.js') }}"></script>
   <script src="{{ url_for('static', filename='js/drag-and-drop-manager.js') }}"></script>
-  <script src="{{ url_for('static', filename='js/lava-lamp.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/lava-lamp.js') }}?v={{ cache_bust }}"></script>
   <script src="{{ url_for('static', filename='js/debug_advanced_features.js') }}"></script>
   <script src="{{ url_for('static', filename='js/fix_template_preview.js') }}"></script>
   <script>

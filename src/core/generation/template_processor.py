@@ -867,6 +867,33 @@ class TemplateProcessor:
                 overall_order = [record.get('ProductName', 'Unknown') for record in records]
                 self.logger.info(f"Processing {len(records)} records in overall order: {overall_order}")
                 has_json_products = any(record.get('Source', '').startswith('JSON') or record.get('Source', '').startswith('Database Priority') for record in records)
+                
+                # DEDUPLICATION FIX: Remove exact duplicates even for JSON matched products
+                seen_products = set()
+                unique_records = []
+                duplicate_count = 0
+                
+                for record in records:
+                    # Create a unique key based on product name, price, and weight
+                    product_name = record.get('ProductName', 'Unknown')
+                    price = record.get('Price', '')
+                    weight = record.get('Weight', '') or record.get('NetWeight', '')
+                    vendor = record.get('Vendor', '') or record.get('ProductVendor', '')
+                    
+                    # Create deduplication key
+                    dedup_key = f"{product_name}|{price}|{weight}|{vendor}".lower().strip()
+                    
+                    if dedup_key not in seen_products:
+                        seen_products.add(dedup_key)
+                        unique_records.append(record)
+                    else:
+                        duplicate_count += 1
+                        self.logger.info(f"🗑️ DEDUPLICATION: Removing duplicate '{product_name}' (Price: {price}, Weight: {weight})")
+                
+                if duplicate_count > 0:
+                    self.logger.info(f"✅ DEDUPLICATION: Removed {duplicate_count} duplicate(s), {len(unique_records)} unique products remain")
+                    records = unique_records
+                
                 documents = []
                 # Process all records in a single chunk
                 chunk = records

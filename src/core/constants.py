@@ -103,9 +103,21 @@ GRID_LAYOUTS: Dict[str, Dict[str, int]] = {
 
 # Product type classifications
 CLASSIC_TYPES = {
-    "flower", "pre-roll", "concentrate",
-    "infused pre-roll", "solventless concentrate",
-    "vape cartridge", "rso/co2 tankers"
+    # Flower types
+    "flower", "bud",
+    
+    # Pre-roll types  
+    "pre-roll", "infused pre-roll", "preroll",
+    
+    # Concentrate types (all variations)
+    "concentrate", "solventless concentrate",
+    "live resin", "rosin", "wax", "shatter", "hash", "kief",
+    "butane extract", "distillate", "rso", "co2 extract",
+    "honey crystal", "liquid diamond", "caviar",
+    
+    # Vape types
+    "vape cartridge", "vape pen", "disposable",
+    "rso/co2 tankers"
 }
 
 # Valid lineage values for classic types
