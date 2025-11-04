@@ -3513,19 +3513,14 @@ class ProductDatabase:
             return ''  # Let the actual strain name be used
         
         # For non-classic types, determine if it's CBD or Mixed
+        # CRITICAL: CBD detection is ONLY based on product name/title
         import re
         
         # Check if product name contains CBD, CBG, CBC, or CBN
         name_contains_cbd = bool(re.search(r'\b(?:CBD|CBG|CBC|CBN)\b', product_name, re.IGNORECASE))
         
-        # Check if description contains CBD, CBG, CBC, or CBN, or ":"
-        desc_contains_cbd = bool(re.search(r'\b(?:CBD|CBG|CBC|CBN)\b', description, re.IGNORECASE)) or ':' in description
-        
-        # Check if ratio contains CBD, CBG, CBC, or CBN
-        ratio_contains_cbd = bool(re.search(r'\b(?:CBD|CBG|CBC|CBN)\b', ratio, re.IGNORECASE))
-        
-        # If any of these contain cannabinoids, set to "CBD Blend"
-        if name_contains_cbd or desc_contains_cbd or ratio_contains_cbd:
+        # If product name contains cannabinoids, set to "CBD Blend"
+        if name_contains_cbd:
             return "CBD Blend"
         
         # Otherwise, set to "Mixed"

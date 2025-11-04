@@ -837,7 +837,9 @@ def get_excel_processor():
                         if not _excel_processor_reset_flag and not DISABLE_STARTUP_FILE_LOADING:
                             # Try to load the default file for the selected store
                             selected_store = get_current_store_name() if has_store_selection() else None
+                            logging.info(f"🔍 TRACE get_excel_processor: Current store = {selected_store}")
                             default_file = get_default_upload_file(selected_store)
+                            logging.info(f"🔍 TRACE get_excel_processor: default_file = {default_file}")
                             if default_file and os.path.exists(default_file):
                                 logging.info(f"Loading default file in get_excel_processor: {default_file}")
                                 # Use fast loading mode for better performance
@@ -4413,6 +4415,13 @@ def set_store():
         if store_value not in valid_stores:
             return jsonify({'success': False, 'error': 'Invalid store selection'}), 400
         
+        # CHECK: Warn if switching stores
+        current_store = session.get('selected_store')
+        if current_store and current_store != store_value:
+            logging.warning(f"⚠️ STORE SWITCH DETECTED: {current_store} → {store_value}")
+            logging.warning(f"⚠️ Request from: {request.referrer or 'unknown'}")
+            logging.warning(f"⚠️ User agent: {request.headers.get('User-Agent', 'unknown')}")
+        
         # CRITICAL FIX: Save to Flask session first (most reliable on PythonAnywhere)
         session['selected_store'] = store_value
         logging.info(f"✅ Store saved to session: {store_value}")
@@ -4695,7 +4704,8 @@ def rebuild_3x3_grid_from_template(doc, template_path):
     tblPr.append(tblLayout)
     table._element.insert(0, tblPr)
     tblGrid = OxmlElement('w:tblGrid')
-    col_width_twips = str(int((3.4/3) * 1440))
+    # Each cell should be 3.4 inches wide (not divided by 3!)
+    col_width_twips = str(int(3.4 * 1440))  # Fixed: was incorrectly (3.4/3) * 1440
     for _ in range(3):
         gridCol = OxmlElement('w:gridCol')
         gridCol.set(qn('w:w'), col_width_twips)
@@ -5195,6 +5205,10 @@ def generate_labels():
         logging.info(f"Request URL: {request.url}")
         logging.info(f"Request headers: {dict(request.headers)}")
         
+        # TRACE: Check current store at start of generation
+        current_store_at_start = get_current_store_name()
+        logging.info(f"🔍 TRACE START: Current store = {current_store_at_start}")
+        
         # Rate limiting for label generation
         client_ip = request.remote_addr
         if not check_rate_limit(client_ip):
@@ -5234,8 +5248,14 @@ def generate_labels():
             logging.info(f"   - Sample tags: {selected_tags_from_request[:3]}")
         logging.debug(f"Selected tags from request: {selected_tags_from_request}")
         
+        # TRACE: Check store before getting excel_processor
+        logging.info(f"🔍 TRACE: Store before get_excel_processor = {get_current_store_name()}")
+        
         # Enable product DB integration for proper tag matching
         excel_processor = get_excel_processor()
+        
+        # TRACE: Check store after getting excel_processor
+        logging.info(f"🔍 TRACE: Store after get_excel_processor = {get_current_store_name()}")
         
         # CRITICAL DEBUG: Check if we have JSON matched products in the Excel DataFrame
         if excel_processor.df is not None and 'Source' in excel_processor.df.columns:
@@ -5258,18 +5278,30 @@ def generate_labels():
                     json_matched_products = excel_processor.df[json_mask].copy()
                     logging.info(f"CRITICAL FIX: Preserving {len(json_matched_products)} JSON matched products before reloading Excel data")
         
+        # TRACE: Check store before file loading
+        logging.info(f"🔍 TRACE: Store before file loading = {get_current_store_name()}")
+        
         # Only load file if not already loaded
         if file_path:
+            logging.info(f"🔍 TRACE: Loading specific file_path = {file_path}")
             if excel_processor._last_loaded_file != file_path or excel_processor.df is None or excel_processor.df.empty:
                 excel_processor.load_file(file_path)
+                logging.info(f"🔍 TRACE: Store after loading file_path = {get_current_store_name()}")
         else:
             # Ensure data is loaded - try to reload default file if needed
             if excel_processor.df is None:
                 from src.core.data.excel_processor import get_default_upload_file
                 selected_store = get_current_store_name() if has_store_selection() else None
+                logging.info(f"🔍 TRACE: Loading default file for store: {selected_store}")
                 default_file = get_default_upload_file(selected_store)
+                logging.info(f"🔍 TRACE: get_default_upload_file returned: {default_file}")
+                logging.info(f"🔍 TRACE: Store after get_default_upload_file = {get_current_store_name()}")
                 if default_file:
+                    logging.info(f"📂 TRACE: About to load default file: {default_file}")
                     excel_processor.load_file(default_file)
+                    logging.info(f"🔍 TRACE: Store after loading default file = {get_current_store_name()}")
+                else:
+                    logging.warning(f"⚠️ GENERATE: No default file found for store: {selected_store}")
         
         # CRITICAL FIX: Restore JSON matched products after reloading Excel data
         if json_matched_products is not None and excel_processor.df is not None:
@@ -6332,6 +6364,9 @@ def generate_labels():
         # Log final filename for debugging
         logging.debug(f"Generated filename: {filename} for {tag_count} tags")
 
+        # TRACE: Check store before returning file
+        logging.info(f"🔍 TRACE END: Current store before return = {get_current_store_name()}")
+        
         # Create response with explicit headers
         response = send_file(
             output_buffer,
@@ -6344,6 +6379,7 @@ def generate_labels():
         response = set_download_filename(response, filename)
         response.headers['Content-Type'] = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
         
+        logging.info(f"🔍 TRACE: Returning file, final store = {get_current_store_name()}")
         return response
 
     except Exception as e:

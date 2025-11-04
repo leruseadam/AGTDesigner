@@ -1261,12 +1261,14 @@ def enforce_fixed_cell_dimensions(table, template_type=None):
                             tcPr = cell._tc.get_or_add_tcPr()
                             
                             # Set cell width to exact value to prevent expansion
-                            tcW = tcPr.find(qn('w:tcW'))
-                            if tcW is None:
-                                tcW = OxmlElement('w:tcW')
-                                tcPr.append(tcW)
-                            tcW.set(qn('w:w'), '2880')  # Fixed width in twips (2.0 inches = 2880 twips)
-                            tcW.set(qn('w:type'), 'dxa')  # Fixed width type
+                            # ONLY set width if template_type was not provided (template-specific widths set above)
+                            if not template_type:
+                                tcW = tcPr.find(qn('w:tcW'))
+                                if tcW is None:
+                                    tcW = OxmlElement('w:tcW')
+                                    tcPr.append(tcW)
+                                tcW.set(qn('w:w'), '2880')  # Fixed width in twips (2.0 inches = 2880 twips)
+                                tcW.set(qn('w:type'), 'dxa')  # Fixed width type
                             
                             # Disable cell auto-sizing
                             tcFitText = tcPr.find(qn('w:tcFitText'))
@@ -1276,12 +1278,14 @@ def enforce_fixed_cell_dimensions(table, template_type=None):
                             tcFitText.set(qn('w:val'), '0')  # Disable fit text
                             
                             # Set cell height to exact value
-                            tcH = tcPr.find(qn('w:tcH'))
-                            if tcH is None:
-                                tcH = OxmlElement('w:tcH')
-                                tcPr.append(tcH)
-                            tcH.set(qn('w:w'), '1440')  # Fixed height in twips
-                            tcH.set(qn('w:hRule'), 'exact')  # Exact height rule
+                            # ONLY set height if template_type was not provided (template-specific heights set above)
+                            if not template_type:
+                                tcH = tcPr.find(qn('w:tcH'))
+                                if tcH is None:
+                                    tcH = OxmlElement('w:tcH')
+                                    tcPr.append(tcH)
+                                tcH.set(qn('w:w'), '1440')  # Fixed height in twips (1.0 inch)
+                                tcH.set(qn('w:hRule'), 'exact')  # Exact height rule
                             
                             # Process paragraphs in the cell to prevent text overflow
                             for paragraph in cell.paragraphs:

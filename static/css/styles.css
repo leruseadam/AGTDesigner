@@ -11,14 +11,14 @@
   --bg-secondary: rgba(60, 45, 75, 0.9);
   --accent-color: rgba(160, 132, 232, 1);
   
-  /* Simple responsive sizing - Moderately increased for readability */
-  --base-font-size: 1.05rem;
-  --small-font-size: 0.95rem;
-  --large-font-size: 1.2rem;
+  /* Simple responsive sizing - Significantly increased for better readability */
+  --base-font-size: 1.25rem;
+  --small-font-size: 1.15rem;
+  --large-font-size: 1.5rem;
   
   /* Button sizing */
-  --btn-height: 38px;
-  --btn-padding: 0.55rem 1.1rem;
+  --btn-height: 44px;
+  --btn-padding: 0.7rem 1.3rem;
   
   /* Spacing */
   --spacing-xs: 0.25rem;
@@ -28,9 +28,9 @@
   --spacing-xl: 2rem;
 }
 
-/* Moderate scaling for better readability */
+/* Larger scaling for better readability */
 html {
-  font-size: 16px; /* Standard base size */
+  font-size: 18px; /* Increased from 16px for bigger text */
   width: 100%;
   height: 100%;
   min-height: 100vh;
@@ -38,10 +38,14 @@ html {
   padding: 0;
   /* Ensure no browser defaults interfere with fullscreen canvas */
   box-sizing: border-box;
+  /* Enable smooth zoom scaling */
+  -webkit-text-size-adjust: 100%;
+  -moz-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {
-  font-size: 1rem;
+  font-size: 1.1rem;
   line-height: 1.5;
   width: 100%;
   height: 100%;
@@ -51,85 +55,162 @@ body {
   overflow-x: hidden;
   /* Ensure body doesn't interfere with fullscreen canvas */
   position: relative;
+  /* Ensure smooth zoom scaling */
+  -webkit-text-size-adjust: 100%;
+  -moz-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
-/* Moderate scaling for key UI elements */
+/* Global zoom responsiveness - all elements scale with browser zoom */
+* {
+  /* Ensure all elements respond to zoom by using relative units */
+  box-sizing: border-box;
+}
+
+/* MONITOR CONSISTENCY - Allow natural layout with reasonable max-width */
+.container,
+.container-fluid,
+.main-content,
+.centerframe {
+  max-width: 100% !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  padding-left: 1rem !important;
+  padding-right: 1rem !important;
+}
+
+/* Ensure rows have consistent spacing for alignment */
+.row.fade-in.g-1,
+.row.fade-in.g-2 {
+  margin-left: -0.5rem !important;
+  margin-right: -0.5rem !important;
+}
+
+/* Ensure the entire app stays centered and has breathing room */
+body > .container,
+body > .container-fluid {
+  max-width: 100% !important;
+  margin: 0 auto !important;
+}
+
+/* Ensure filter bar and tag lists align perfectly */
+[data-container-type="filter"] {
+  padding-left: 0.5rem !important;
+  padding-right: 0.5rem !important;
+}
+
+[data-container-type="available"] {
+  padding-left: 0.5rem !important;
+  padding-right: 0.25rem !important;
+  flex: 0 0 41.666667% !important;
+  max-width: 41.666667% !important;
+}
+
+[data-container-type="selected"] {
+  padding-left: 0.25rem !important;
+  padding-right: 0.5rem !important;
+  flex: 0 0 41.666667% !important;
+  max-width: 41.666667% !important;
+}
+
+[data-container-type="center"] {
+  padding-left: 0.25rem !important;
+  padding-right: 0.25rem !important;
+  flex: 0 0 16.666667% !important;
+  max-width: 16.666667% !important;
+}
+  
+/* Tag lists and containers - ensure they scale with zoom */
+.tag-list-container,
+.tag-item,
+.tag-row,
+[data-container-type="available"],
+[data-container-type="selected"],
+.glass-card,
+.card {
+  /* Use transform: scale for smooth zoom transitions */
+  transform-origin: top left;
+  /* Ensure proper zoom behavior */
+  zoom: reset;
+}
+
+/* Larger scaling for key UI elements - zoom responsive */
 .tag-item, .tag-entry {
-  font-size: 0.95rem !important;
-  min-height: 36px !important;
+  font-size: 1.1rem !important;
+  min-height: 2.625rem !important;
 }
 
 .quick-start-guide, .help-text {
-  font-size: 0.95rem !important;
+  font-size: 1.1rem !important;
   line-height: 1.5 !important;
 }
 
 .quick-start-guide h6 {
-  font-size: 1.1rem !important;
+  font-size: 1.3rem !important;
   font-weight: 700 !important;
 }
 
 .quick-start-guide p, .quick-start-guide li, .quick-start-guide ol, .quick-start-guide ul {
-  font-size: 0.9rem !important;
+  font-size: 1.05rem !important;
   line-height: 1.5 !important;
 }
 
 button, .btn {
-  font-size: 0.9rem !important;
-  padding: 0.5rem 1rem !important;
-  min-height: 38px !important;
+  font-size: 1.05rem !important;
+  padding: 0.65rem 1.2rem !important;
+  min-height: 44px !important;
 }
 
 .form-control, .form-select, input, select {
-  font-size: 0.9rem !important;
-  padding: 0.6rem 0.9rem !important;
-  min-height: 40px !important;
+  font-size: 1.05rem !important;
+  padding: 0.7rem 1rem !important;
+  min-height: 46px !important;
 }
 
 /* Scale up all labels and headers throughout app */
 label, .form-label {
-  font-size: 0.95rem !important;
+  font-size: 1.1rem !important;
   font-weight: 600 !important;
 }
 
-/* Moderate header scaling */
-h1 { font-size: 2rem !important; font-weight: 800 !important; }
-h2 { font-size: 1.75rem !important; font-weight: 700 !important; }
-h3 { font-size: 1.5rem !important; font-weight: 700 !important; }
-h4 { font-size: 1.25rem !important; font-weight: 600 !important; }
-h5 { font-size: 1.1rem !important; font-weight: 600 !important; }
-h6 { font-size: 1rem !important; font-weight: 600 !important; }
+/* Larger header scaling */
+h1 { font-size: 2.4rem !important; font-weight: 800 !important; }
+h2 { font-size: 2.1rem !important; font-weight: 700 !important; }
+h3 { font-size: 1.8rem !important; font-weight: 700 !important; }
+h4 { font-size: 1.5rem !important; font-weight: 600 !important; }
+h5 { font-size: 1.3rem !important; font-weight: 600 !important; }
+h6 { font-size: 1.15rem !important; font-weight: 600 !important; }
 
-/* Moderate filter bar and dropdowns */
+/* Larger filter bar and dropdowns */
 .filter-bar, .filters-row {
-  font-size: 0.9rem !important;
+  font-size: 1.05rem !important;
 }
 
 .filter-bar select, .filter-bar .form-select, .filter-bar option {
-  font-size: 0.9rem !important;
-  padding: 0.5rem 0.75rem !important;
-  min-height: 38px !important;
+  font-size: 1.05rem !important;
+  padding: 0.65rem 0.9rem !important;
+  min-height: 44px !important;
 }
 
-/* Moderate list items */
+/* Larger list items */
 ul, ol, li {
-  font-size: 0.95rem !important;
+  font-size: 1.1rem !important;
   line-height: 1.5 !important;
 }
 
-/* Moderate table text */
+/* Larger table text */
 table, .table {
-  font-size: 0.9rem !important;
+  font-size: 1.05rem !important;
 }
 
 td, th {
-  font-size: 0.9rem !important;
-  padding: 0.6rem !important;
+  font-size: 1.05rem !important;
+  padding: 0.7rem !important;
 }
 
-/* Moderate placeholders */
+/* Larger placeholders */
 ::placeholder {
-  font-size: 0.9rem !important;
+  font-size: 1.05rem !important;
   opacity: 0.7;
 }
 
@@ -138,18 +219,18 @@ p, span, div {
   font-size: inherit;
 }
 
-/* Moderate card content */
+/* Larger card content */
 .card, .glass-card {
-  font-size: 0.95rem !important;
+  font-size: 1.1rem !important;
 }
 
 .card-title {
-  font-size: 1.2rem !important;
+  font-size: 1.4rem !important;
   font-weight: 700 !important;
 }
 
 .card-body {
-  font-size: 0.95rem !important;
+  font-size: 1.1rem !important;
 }
 
 /* ========================================
@@ -234,7 +315,7 @@ p, span, div {
 
 #matchedProductsList,
 #detailedJsonMatchModal .table {
-  font-size: 1rem !important;
+  font-size: 1.15rem !important;
 }
 
 #detailedJsonMatchModal .modal-dialog {
@@ -244,17 +325,17 @@ p, span, div {
 #detailedJsonMatchModal .table td,
 #detailedJsonMatchModal .table th {
   padding: 0.85rem !important;
-  font-size: 1rem !important;
+  font-size: 1.15rem !important;
   vertical-align: middle !important;
 }
 
 #detailedJsonMatchModal .btn {
-  font-size: 0.95rem !important;
-  padding: 0.5rem 1rem !important;
+  font-size: 1.1rem !important;
+  padding: 0.65rem 1.2rem !important;
 }
 
 #matchedProductsList {
-  font-size: 1rem !important;
+  font-size: 1.15rem !important;
   line-height: 1.6 !important;
 }
 
@@ -480,13 +561,13 @@ canvas#lava-lamp-canvas {
     --lineage-mixed: rgba(0, 33, 245, 0.8);
     --lineage-para: rgba(255, 192, 203, 0.5);
     
-    /* Column Width Variables - Adjust these to change layout */
-    --canvas-max-width: 1720px;      /* shared width for filters + lists */
+    /* Column Width Variables - Flexible for natural layout */
+    --canvas-max-width: 100%;        /* Allow full width with padding */
     --filter-column-width: auto;      /* Bootstrap columns (1-12) - can use decimals */
     --center-column-width: 1.5;      /* Bootstrap columns (1-12) - can use decimals */
     --tag-list-column-width: 5.1;   /* Bootstrap columns (1-12) - can use decimals */
     
-    /* Height Variables - Adjust these to change heights */
+    /* Height Variables - Flexible for natural layout */
     --tag-list-height: 75vh;        /* Height of tag list containers */
     --filter-height: auto;           /* Height of filter bar (auto or specific px) */
     --center-panel-height: 90vh;     /* Height of center control panel (auto or specific px) */
@@ -620,18 +701,123 @@ canvas#lava-lamp-canvas {
     }
   }
   
-  /* Clean Title Styling - Professional */
+  /* Clean Title Styling - Professional & BIGGER */
   .vibrant-title {
     color: #ffffff !important;
     font-family: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
-    font-weight: 700 !important;
-    font-size: 2.2rem !important;
-    letter-spacing: -0.01em;
-    margin: 0 0 0.4rem 0 !important;
+    font-weight: 800 !important;
+    font-size: 4.3rem !important; /* Balanced size for good readability */
+    letter-spacing: -0.02em;
+    margin: 0 0 0.8rem 0 !important;
     text-align: center !important;
     line-height: 1.1;
-    text-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    text-shadow: 
+      0 4px 12px rgba(0,0,0,0.4),
+      0 8px 24px rgba(160, 132, 232, 0.3);
     position: relative;
+    animation: titleGlow 3s ease-in-out infinite alternate;
+  }
+  
+  /* Responsive Title Scaling */
+  @media (max-width: 768px) {
+    .vibrant-title {
+      font-size: 3rem !important;
+      margin: 0 0 0.6rem 0 !important;
+    }
+    
+    .vibrant-subtitle {
+      font-size: 1.35rem !important;
+      margin: 0 0 1rem 0 !important;
+    }
+  }
+  
+  @media (max-width: 480px) {
+    .vibrant-title {
+      font-size: 2.5rem !important;
+      margin: 0 0 0.5rem 0 !important;
+      padding: 0 1rem;
+    }
+    
+    .vibrant-subtitle {
+      font-size: 1.25rem !important;
+      margin: 0 0 0.8rem 0 !important;
+      padding: 0 1rem;
+    }
+  }
+
+  /* Filter Bar Improvements */
+  .sticky-filter-bar {
+    min-height: 60px;
+  }
+
+  .filter-item {
+    display: flex;
+    flex-direction: column;
+    min-width: 120px;
+    flex: 0 0 auto;
+  }
+
+  .filter-item label {
+    font-size: 0.95rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 0.25rem;
+  }
+
+  .filter-item .form-select {
+    font-size: 1.05rem;
+    min-width: 120px;
+  }
+
+  .modern-upload-bar {
+    border: 1px solid rgba(255, 255, 255, 0.2);
+  }
+
+  /* Responsive Filter Bar */
+  @media (max-width: 1200px) {
+    .sticky-filter-bar {
+      flex-wrap: wrap;
+      gap: 1rem !important;
+    }
+    
+    .filter-item {
+      min-width: 110px;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .sticky-filter-bar {
+      gap: 0.75rem !important;
+      padding: 1rem !important;
+    }
+    
+    .filter-item {
+      min-width: 100px;
+      flex: 1 1 auto;
+    }
+    
+    .modern-upload-bar {
+      min-width: 250px !important;
+      flex-wrap: wrap;
+    }
+  }
+
+  @media (max-width: 576px) {
+    .sticky-filter-bar {
+      flex-direction: column;
+      align-items: stretch !important;
+    }
+    
+    .filter-item {
+      min-width: unset;
+      width: 100%;
+    }
+    
+    .modern-upload-bar {
+      min-width: unset !important;
+      width: 100%;
+    }
   }
   
   @keyframes titleGlow {
@@ -644,22 +830,22 @@ canvas#lava-lamp-canvas {
   }
   
   .vibrant-subtitle {
-    color: rgba(255, 255, 255, 0.8) !important;
+    color: rgba(255, 255, 255, 0.9) !important;
     font-family: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
-    font-size: 0.8rem !important;
-    font-weight: 500 !important;
-    letter-spacing: 0.12em;
+    font-size: 1.5rem !important; /* Increased for better readability */
+    font-weight: 600 !important;
+    letter-spacing: 0.15em;
     text-align: center !important;
-    margin: 0 0 0.5rem 0 !important;
+    margin: 0 0 1.2rem 0 !important;
     line-height: 1.3;
     text-transform: uppercase;
-    text-shadow: 0 1px 3px rgba(0,0,0,0.3);
-    opacity: 0.85;
+    text-shadow: 0 2px 6px rgba(0,0,0,0.4);
+    opacity: 0.95;
     position: relative;
   }
   
   .copyright-text {
-    font-size: 0.7rem !important;
+    font-size: 0.9rem !important;
     color: rgba(255, 255, 255, 0.65) !important;
     margin: 0.25rem 0 0 0 !important;
     font-family: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
@@ -678,8 +864,8 @@ canvas#lava-lamp-canvas {
     border: 1px solid rgba(160, 132, 232, 0.6) !important;
     border-radius: 8px;
     color: #fff;
-    padding: 0.5rem 0.8rem;
-    font-size: 0.75rem;
+    padding: 0.65rem 1rem;
+    font-size: 0.95rem;
     font-weight: 600;
     letter-spacing: 0.1px;
     display: inline-flex;
@@ -929,23 +1115,24 @@ canvas#lava-lamp-canvas {
   }
   
   
-  /* Glass Card Styling - Professional and Clean */
+  /* Glass Card Styling - Professional and Clean with FINAL POLISH */
   .glass-card {
-    transition: all 0.3s cubic-bezier(0.4,0,0.2,1);
+    transition: all 0.4s cubic-bezier(0.4,0,0.2,1);
     box-shadow: 
-      0 4px 20px rgba(0,0,0,0.2), 
-      0 2px 8px rgba(160,132,232,0.15);
-    border-radius: 12px;
-    border: 1px solid rgba(160,132,232,0.25);
-    background: rgba(30, 30, 50, 0.95) !important;
-    backdrop-filter: blur(20px) !important;
-    -webkit-backdrop-filter: blur(20px) !important;
+      0 6px 32px rgba(0,0,0,0.25), 
+      0 4px 16px rgba(160,132,232,0.2),
+      inset 0 1px 0 rgba(255,255,255,0.1);
+    border-radius: 16px; /* Increased from 12px for softer look */
+    border: 1px solid rgba(160,132,232,0.3);
+    background: rgba(30, 30, 50, 0.96) !important;
+    backdrop-filter: blur(24px) saturate(1.2) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(1.2) !important;
     overflow: visible !important;
     position: relative;
     z-index: 2;
     margin-top: 0 !important;
     margin-bottom: 0.5rem !important;
-    padding: 1rem !important;
+    padding: 1.25rem !important; /* Slightly increased padding */
     /* Allow content to be visible and scrollable */
     overflow: visible;
     /* Ensure full width usage */
@@ -970,32 +1157,38 @@ canvas#lava-lamp-canvas {
   }
   
   .glass-card:hover {
-    box-shadow: 0 16px 48px rgba(160,132,232,0.13), 0 4px 24px rgba(0,0,0,0.13);
-    border-color: rgba(160,132,232,0.25);
-    transform: scale(1.008);
+    box-shadow: 
+      0 20px 64px rgba(160,132,232,0.18), 
+      0 8px 32px rgba(0,0,0,0.15),
+      inset 0 1px 0 rgba(255,255,255,0.15);
+    border-color: rgba(160,132,232,0.4);
+    transform: scale(1.01) translateY(-2px);
   }
   
-  /* Button Styling - Psychedelic */
+  /* Button Styling - FINAL POLISH */
   .btn-modern, .btn-modern2, .btn-modern3 {
     background: var(--primary-gradient);
     border: none;
     color: white !important;
-    padding: 6px 12px;
-    border-radius: 8px;
+    padding: 8px 16px; /* Slightly increased padding */
+    border-radius: 12px; /* Increased border radius for softer look */
     font-weight: 700 !important;
     font-size: 1rem;
-    transition: all 0.3s ease;
-    box-shadow: 0 2px 12px 0 rgba(160,132,232,0.10), 0 0.5px 2px rgba(0,0,0,0.08);
+    transition: all 0.4s cubic-bezier(0.4,0,0.2,1);
+    box-shadow: 
+      0 4px 16px rgba(160,132,232,0.15), 
+      0 2px 8px rgba(0,0,0,0.1),
+      inset 0 1px 0 rgba(255,255,255,0.2);
     text-decoration: none;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 3px;
+    gap: 4px;
     cursor: pointer;
     outline: none;
     position: relative;
-    text-shadow: 0 2px 4px rgba(0,0,0,0.4) !important;
-    letter-spacing: 0.3px !important;
+    text-shadow: 0 2px 6px rgba(0,0,0,0.5) !important;
+    letter-spacing: 0.4px !important;
     /* Responsive sizing base */
     min-height: 36px;
     min-width: 80px;
@@ -1006,9 +1199,12 @@ canvas#lava-lamp-canvas {
   }
   
   .btn-modern:hover, .btn-modern2:hover, .btn-modern3:hover {
-    filter: brightness(1.08) saturate(1.1);
-    box-shadow: 0 8px 32px rgba(160,132,232,0.13), 0 2px 12px rgba(0,0,0,0.10);
-    transform: translateY(-2px);
+    filter: brightness(1.1) saturate(1.15);
+    box-shadow: 
+      0 12px 40px rgba(160,132,232,0.2), 
+      0 4px 16px rgba(0,0,0,0.12),
+      inset 0 1px 0 rgba(255,255,255,0.25);
+    transform: translateY(-3px) scale(1.02);
   }
   
   .btn-modern:active, .btn-modern2:active, .btn-modern3:active {
@@ -1909,21 +2105,20 @@ canvas#lava-lamp-canvas {
     transform: scale(1.02);
   }
   
-  /* Tag list container - RESPONSIVE HEIGHT WITH SCROLLING */
+  /* Tag list container - RESPONSIVE HEIGHT WITH SCROLLING - ZOOM RESPONSIVE */
   .tag-list-container {
     background: rgba(45, 34, 58, 0.92);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
     border: 1px solid rgba(160, 132, 232, 0.18);
-    border-radius: 16px;
+    border-radius: 1rem;
     padding: 0.75rem !important;
     flex: 1;
-    min-width: 350px;
-    max-width: 450px;
+    width: 100% !important;
     /* Remove height restrictions to allow full expansion */
     height: auto !important;
     max-height: none !important;
-    min-height: 500px !important;
+    min-height: 31.25rem !important;
     overflow-y: visible !important;
     overflow-x: hidden !important;
     scrollbar-width: thin;
@@ -1976,26 +2171,26 @@ canvas#lava-lamp-canvas {
   }
   
   /* Ensure the columns are responsive */
-  .col-lg-4[data-container-type="available"],
-  .col-lg-4[data-container-type="selected"] {
+  .col-lg-5[data-container-type="available"],
+  .col-lg-5[data-container-type="selected"] {
     height: auto !important;
     max-height: none !important;
-    min-height: 600px !important;
+    min-height: 37.5rem !important;
+    width: 100% !important;
   }
 
-  /* Make the main containers narrower */
+  /* Make the main containers fill their column width */
   [data-container-type="available"],
   [data-container-type="selected"] {
-    flex: 0 0 auto !important;
-    max-width: 400px !important;
-    min-width: 350px !important;
-    width: 400px !important;
+    flex: 0 0 41.666667% !important;
+    max-width: 41.666667% !important;
+    width: 100% !important;
   }
   
-  /* Ensure tag list containers are responsive */
+  /* Ensure tag list containers are responsive - ZOOM RESPONSIVE */
   .tag-list-container {
     max-height: none !important;
-    min-height: 600px !important;
+    min-height: 37.5rem !important;
     height: auto !important;
     overflow-y: visible !important;
   }
@@ -2182,23 +2377,23 @@ canvas#lava-lamp-canvas {
     max-width: 100%;
     /* Allow content to be visible */
     overflow: visible;
-    margin-bottom: 12px !important; /* Added spacing */
+    margin-bottom: 0.75rem !important; /* Added spacing - zoom responsive */
   }
   
   .tag-list-container::-webkit-scrollbar {
-    width: 12px;
+    width: 0.75rem;
     background: rgba(45, 34, 58, 0.8);
   }
   
   .tag-list-container::-webkit-scrollbar-track {
     background: rgba(45, 34, 58, 0.5);
-    border-radius: 6px;
+    border-radius: 0.375rem;
   }
   
   .tag-list-container::-webkit-scrollbar-thumb {
     background: #a084e8;
-    border-radius: 6px;
-    border: 2px solid rgba(45, 34, 58, 0.8);
+    border-radius: 0.375rem;
+    border: 0.125rem solid rgba(45, 34, 58, 0.8);
   }
   
   .tag-list-container::-webkit-scrollbar-thumb:hover {
@@ -3271,7 +3466,7 @@ canvas#lava-lamp-canvas {
   
   /* Filter section */
 .filter-label {
-  font-size: 0.9rem;
+  font-size: 1.25rem;
   font-weight: 700;
   color: var(--text-secondary);
   margin-bottom: 0.4rem;
@@ -3529,8 +3724,8 @@ canvas#lava-lamp-canvas {
     }
     
     .tag-list-container {
-      /* Remove height restrictions to allow full content display on mobile */
-      min-height: 300px;
+      /* Remove height restrictions to allow full content display on mobile - ZOOM RESPONSIVE */
+      min-height: 18.75rem;
       max-height: none !important;
       height: auto !important;
       overflow-y: auto !important;
@@ -3717,8 +3912,8 @@ canvas#lava-lamp-canvas {
   .generation-splash-popup {
     background: rgba(22, 33, 62, 0.95);
     border-radius: 24px;
-    padding: 80px 100px; /* Increased from 60px for BIGGER splash */
-    max-width: 900px; /* Increased from 700px for BIGGER display */
+    padding: 100px 120px; /* Increased for much BIGGER splash */
+    max-width: 1100px; /* Increased from 900px for BIGGER display */
     width: 90%; /* Responsive width */
     box-shadow: 
       0 20px 40px rgba(0, 0, 0, 0.3),
@@ -3928,12 +4123,12 @@ canvas#lava-lamp-canvas {
       overflow-y: auto;
     }
     
-    /* Allow tag lists to expand more on wider screens */
+    /* Allow tag lists to expand more on wider screens - ZOOM RESPONSIVE */
     .tag-list-container {
       min-width: 0;
       width: 100%;
       /* Remove height restrictions to allow full content display */
-      min-height: 400px;
+      min-height: 25rem;
       max-height: none !important;
       height: auto !important;
       overflow-y: auto !important;
@@ -4198,45 +4393,6 @@ canvas#lava-lamp-canvas {
     color: #888 !important;
     font-style: italic !important;
     cursor: not-allowed !important;
-  }
-
-  /* Compact Filter Dropdowns */
-  .compact-filter {
-    font-size: 1rem;
-    padding: 6px 12px;
-    height: auto;
-    min-height: 38px;
-    line-height: 1.4;
-    border-radius: 6px;
-    background: rgba(45, 34, 58, 0.8);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    border: 1px solid rgba(160, 132, 232, 0.3);
-    color: #fff !important;
-    font-weight: 500 !important;
-    text-shadow: 0 1px 3px rgba(0,0,0,0.3) !important;
-    transition: all 0.3s ease;
-  }
-  
-  .compact-filter:focus {
-    background: rgba(45, 34, 58, 0.9);
-    border-color: rgba(160, 132, 232, 0.6);
-    box-shadow: 0 0 0 2px rgba(160, 132, 232, 0.2);
-    outline: none;
-  }
-  
-  .compact-filter:hover {
-    border-color: rgba(160, 132, 232, 0.5);
-    background: rgba(45, 34, 58, 0.9);
-  }
-  
-  .compact-filter option {
-    background: #2d223a;
-    color: #fff !important;
-    padding: 4px;
-    font-size: 0.75rem;
-    font-weight: 500 !important;
-    text-shadow: 0 1px 3px rgba(0,0,0,0.3) !important;
   }
 
   /* Compact Filter Card */
@@ -5793,11 +5949,11 @@ canvas#lava-lamp-canvas {
       linear-gradient(45deg, rgba(26, 0, 51, 0.9), rgba(51, 0, 102, 0.9), rgba(102, 0, 204, 0.9), rgba(153, 0, 255, 0.9));
     background-size: 200% 200%, 150% 150%, 180% 180%, 220% 220%, 100% 100%;
     animation: excelLoadingBackground 30s ease-in-out infinite;
+    padding: 80px 100px; /* Increased for BIGGER splash */
+    max-width: 900px; /* Increased container size */
     border: 1px solid rgba(160, 132, 232, 0.5);
     border-radius: 24px; /* Increased from 20px */
-    padding: 80px 100px; /* Increased from 60px for BIGGER splash */
     text-align: center;
-    max-width: 900px; /* Increased from 700px for BIGGER display */
     width: 90%;
     box-shadow: 
       0 20px 40px rgba(0, 0, 0, 0.4),
@@ -5812,13 +5968,13 @@ canvas#lava-lamp-canvas {
   }
 
   .excel-loading-icon {
-    margin-bottom: 30px; /* Increased from 20px */
+    margin-bottom: 40px; /* Increased for bigger spacing */
     animation: excelIconPulse 4s ease-in-out infinite;
   }
 
   .excel-loading-icon svg {
-    width: 80px !important; /* Increased from 60px */
-    height: 80px !important; /* Increased from 60px */
+    width: 100px !important; /* Increased from 80px */
+    height: 100px !important; /* Increased from 80px */
     color: #00d4aa;
     filter: drop-shadow(0 0 15px rgba(0, 212, 170, 0.6)); /* Enhanced glow */
   }
@@ -5858,9 +6014,9 @@ canvas#lava-lamp-canvas {
   }
 
   .excel-loading-title {
-    font-size: 32px; /* Increased from 24px */
+    font-size: 42px; /* Increased for better visibility */
     font-weight: 700;
-    margin-bottom: 24px; /* Increased from 20px */
+    margin-bottom: 28px; /* Increased spacing */
     background: linear-gradient(135deg, #00d4aa, #ffffff);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -5868,29 +6024,29 @@ canvas#lava-lamp-canvas {
   }
 
   .excel-loading-subtitle {
-    font-size: 20px; /* Increased from 16px */
+    font-size: 24px; /* Increased for better visibility */
     color: rgba(255, 255, 255, 0.8);
-    margin-bottom: 24px; /* Increased from 20px */
+    margin-bottom: 28px; /* Increased spacing */
     font-weight: 500;
   }
 
 
   .excel-loading-status {
-    font-size: 18px; /* Increased from 14px */
+    font-size: 22px; /* Increased for better visibility */
     color: rgba(255, 255, 255, 0.7);
-    margin-bottom: 24px; /* Increased from 20px */
+    margin-bottom: 28px; /* Increased spacing */
     font-weight: 500;
   }
 
   .excel-loading-dots {
     display: flex;
-    gap: 12px; /* Increased from 8px */
+    gap: 16px; /* Increased for bigger dots */
     justify-content: center;
   }
 
   .excel-loading-dots span {
-    width: 12px; /* Increased from 8px */
-    height: 12px; /* Increased from 8px */
+    width: 16px; /* Increased from 12px */
+    height: 16px; /* Increased from 12px */
     background: #00d4aa;
     border-radius: 50%;
     animation: excelDotPulse 2.5s ease-in-out infinite;
@@ -5914,25 +6070,25 @@ canvas#lava-lamp-canvas {
   /* Responsive adjustments */
   @media (max-width: 768px) {
     .excel-loading-container {
-      padding: 40px 30px; /* Increased from 30px 20px */
+      padding: 50px 40px; /* Increased for mobile */
       margin: 20px;
       max-width: 90vw; /* Ensure it fits on mobile */
     }
     
     .excel-loading-title {
-      font-size: 28px; /* Increased from 20px - still large on mobile */
+      font-size: 34px; /* Increased for mobile */
     }
     
     .excel-loading-subtitle {
-      font-size: 18px; /* Increased from 14px */
+      font-size: 22px; /* Increased for mobile */
     }
     
     .excel-loading-status {
-      font-size: 16px;
+      font-size: 20px;
     }
     
     .generation-splash-popup {
-      padding: 50px 40px; /* Ensure generation splash is BIGGER on mobile too */
+      padding: 60px 50px; /* Ensure generation splash is BIGGER on mobile too */
       max-width: 90vw;
     }
   }
@@ -6957,7 +7113,6 @@ canvas#lava-lamp-canvas {
       max-height: none !important;
       min-height: 700px !important;
       width: 100% !important;
-      max-width: none !important;
     }
     
     .glass-card.d-flex.flex-column {
@@ -6980,7 +7135,6 @@ canvas#lava-lamp-canvas {
       max-height: none !important;
       min-height: 600px !important;
       width: 100% !important;
-      max-width: none !important;
     }
     
     .glass-card.d-flex.flex-column {
@@ -7026,7 +7180,6 @@ canvas#lava-lamp-canvas {
       max-height: none !important;
       min-height: 480px !important;
       width: 100% !important;
-      max-width: none !important;
     }
     
     .glass-card.d-flex.flex-column {
@@ -8307,9 +8460,9 @@ canvas#lava-lamp-canvas {
   
   /* Base font sizing variables */
   :root {
-    --base-font-size: 12px;
-    --min-font-size: 8px;
-    --max-font-size: 24px;
+    --base-font-size: 14px;
+    --min-font-size: 10px;
+    --max-font-size: 28px;
     --line-height-ratio: 1.2;
     --word-spacing: 0.1em;
     --letter-spacing: 0.02em;
@@ -8351,28 +8504,28 @@ canvas#lava-lamp-canvas {
   
   /* Font size adjustment classes */
   .font-size-auto {
-    font-size: clamp(8px, 1rem, 20px) !important;
+    font-size: clamp(10px, 1.15rem, 22px) !important;
   }
   
   .font-size-small {
-    font-size: clamp(8px, 0.875rem, 14px) !important;
+    font-size: clamp(11px, 1.05rem, 18px) !important;
   }
   
   .font-size-medium {
-    font-size: clamp(10px, 1rem, 16px) !important;
+    font-size: clamp(12px, 1.15rem, 20px) !important;
   }
   
   .font-size-large {
-    font-size: clamp(12px, 1.125rem, 20px) !important;
+    font-size: clamp(14px, 1.3rem, 24px) !important;
   }
   
   .font-size-xlarge {
-    font-size: clamp(14px, 1.25rem, 20px) !important;
+    font-size: clamp(16px, 1.45rem, 26px) !important;
   }
   
   /* Responsive font sizing based on container width */
   .responsive-text {
-    font-size: clamp(8px, 1rem, 20px) !important;
+    font-size: clamp(10px, 1.15rem, 22px) !important;
     line-height: 1.2 !important;
     white-space: nowrap !important;
     overflow: hidden !important;
@@ -8381,56 +8534,56 @@ canvas#lava-lamp-canvas {
   
   /* Container-specific font sizing - using normalized viewport units */
   .tag-item .text-container {
-    font-size: clamp(8px, 0.875rem, 14px) !important;
+    font-size: clamp(10px, 1.05rem, 18px) !important;
     max-width: calc(100% - 40px) !important;
     padding-right: 8px !important;
   }
   
   .vendor-header .text-container {
-    font-size: clamp(10px, 0.9rem, 16px) !important;
+    font-size: clamp(12px, 1.05rem, 20px) !important;
     font-weight: 600 !important;
   }
   
   .brand-header .text-container {
-    font-size: clamp(9px, 0.85rem, 15px) !important;
+    font-size: clamp(11px, 1rem, 19px) !important;
     font-weight: 500 !important;
   }
   
   .product-type-header .text-container {
-    font-size: clamp(8px, 0.875rem, 14px) !important;
+    font-size: clamp(10px, 1.05rem, 18px) !important;
     font-weight: 500 !important;
   }
   
   .weight-header .text-container {
-    font-size: clamp(8px, 0.875rem, 14px) !important;
+    font-size: clamp(10px, 1.05rem, 18px) !important;
     font-weight: 500 !important;
   }
   
   /* Template-specific font sizing */
   .template-horizontal .text-container {
-    font-size: clamp(8px, 1.8vw, 12px) !important;
+    font-size: clamp(10px, 2vw, 15px) !important;
   }
   
   .template-vertical .text-container {
-    font-size: clamp(9px, 2.2vw, 14px) !important;
+    font-size: clamp(11px, 2.4vw, 17px) !important;
   }
   
   .template-mini .text-container {
-    font-size: clamp(7px, 1.5vw, 10px) !important;
+    font-size: clamp(9px, 1.8vw, 13px) !important;
   }
   
   .template-double .text-container {
-    font-size: clamp(8px, 2vw, 13px) !important;
+    font-size: clamp(10px, 2.2vw, 16px) !important;
   }
   
   /* Price and weight specific sizing */
   .price-text {
-    font-size: clamp(8px, 2.2vw, 16px) !important;
+    font-size: clamp(10px, 2.5vw, 20px) !important;
     font-weight: 600 !important;
   }
   
   .weight-text {
-    font-size: clamp(7px, 1.8vw, 12px) !important;
+    font-size: clamp(9px, 2vw, 15px) !important;
     font-weight: 500 !important;
   }
   
@@ -8462,36 +8615,36 @@ canvas#lava-lamp-canvas {
   
   @media (min-width: 201px) and (max-width: 300px) {
     .text-container {
-      font-size: clamp(8px, 2.5vw, 12px) !important;
+      font-size: clamp(10px, 2.8vw, 15px) !important;
     }
   }
   
   @media (min-width: 301px) and (max-width: 400px) {
     .text-container {
-      font-size: clamp(9px, 2.8vw, 14px) !important;
+      font-size: clamp(11px, 3.2vw, 17px) !important;
     }
   }
   
   @media (min-width: 401px) and (max-width: 500px) {
     .text-container {
-      font-size: clamp(10px, 3vw, 16px) !important;
+      font-size: clamp(12px, 3.4vw, 19px) !important;
     }
   }
   
   @media (min-width: 501px) {
     .text-container {
-      font-size: clamp(11px, 3.5vw, 18px) !important;
+      font-size: clamp(13px, 3.8vw, 21px) !important;
     }
   }
   
   /* Special handling for very long text */
   .text-container.long-text {
-    font-size: clamp(6px, 1.5vw, 10px) !important;
+    font-size: clamp(8px, 1.8vw, 13px) !important;
     letter-spacing: 0.01em !important;
   }
   
   .text-container.very-long-text {
-    font-size: clamp(5px, 1.2vw, 8px) !important;
+    font-size: clamp(7px, 1.5vw, 11px) !important;
     letter-spacing: 0.005em !important;
   }
   
@@ -9013,13 +9166,13 @@ canvas#lava-lamp-canvas {
 .metric-label {
   font-weight: 500;
   color: #666;
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .metric-value {
   font-weight: 600;
   color: #333;
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .performance-actions {
@@ -9030,8 +9183,8 @@ canvas#lava-lamp-canvas {
 
 .performance-actions .btn {
   flex: 1;
-  font-size: 12px;
-  padding: 6px 12px;
+  font-size: 14px;
+  padding: 8px 14px;
 }
 
 .performance-toggle-btn {
@@ -9083,7 +9236,7 @@ canvas#lava-lamp-canvas {
 
 .loading-text {
   color: #666;
-  font-size: 14px;
+  font-size: 16px;
 }
 
 @keyframes spin {
@@ -9321,4 +9474,55 @@ html, body {
 #storeSelectionModal .btn-store-option:hover {
   box-shadow: 0 2px 8px rgba(160, 132, 232, 0.2) !important;
   transform: translateY(-2px) !important;
+}
+
+#storeSelectionModal .btn-store-option {
+  pointer-events: auto !important;
+  cursor: pointer !important;
+  position: relative !important;
+  z-index: 1000 !important;
+}
+
+/* Filter Bar Row Structure */
+.filter-row {
+  width: 100%;
+}
+
+.filter-row:not(:last-child) {
+  margin-bottom: 12px;
+}
+
+/* Filter group styling */
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.filter-group .filter-label {
+  font-size: 1.15rem !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.5px !important;
+}
+
+.filter-group .form-select {
+  min-height: 40px !important;
+  padding: 0.6rem 2.5rem 0.6rem 0.85rem !important;
+  font-size: 0.95rem !important;
+}
+
+/* Compact filter selects */
+.compact-select {
+  font-size: 11px !important;
+  padding: 2px 6px !important;
+  height: 28px !important;
+  background: rgba(255, 255, 255, 0.1) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  color: #ffffff !important;
+}
+
+.compact-select:focus {
+  background: rgba(255, 255, 255, 0.15) !important;
+  border-color: rgba(160, 132, 232, 0.8) !important;
+  box-shadow: 0 0 0 0.1rem rgba(160, 132, 232, 0.25) !important;
 }

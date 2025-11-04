@@ -213,8 +213,8 @@ class GenerationSplash {
             
             #generation-splash-container {
                 position: relative;
-                width: 600px;
-                height: 400px;
+                width: 700px;
+                height: 450px;
                 border-radius: 24px;
                 overflow: hidden;
                 background: rgba(22, 33, 62, 0.95);
@@ -236,7 +236,7 @@ class GenerationSplash {
                 flex-direction: column;
                 justify-content: center;
                 align-items: center;
-                padding: 60px;
+                padding: 50px;
                 color: white;
                 text-align: center;
             }
@@ -503,7 +503,8 @@ class GenerationSplash {
                 #generation-splash-container {
                     transform: translateX(0);
                     width: 90vw;
-                    max-width: 600px;
+                    max-width: 700px;
+                    height: auto;
                 }
             }
             
@@ -511,7 +512,12 @@ class GenerationSplash {
                 #generation-splash-container {
                     transform: translateX(0);
                     width: 90vw;
-                    max-width: 500px;
+                    max-width: 600px;
+                    height: auto;
+                }
+                
+                .splash-content {
+                    padding: 40px !important;
                 }
             }
         `;

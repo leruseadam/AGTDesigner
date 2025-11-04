@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=5.0, user-scalable=yes">
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
@@ -79,7 +79,12 @@
     
     // Define selectStore function EARLY so it's available when modal loads
     window.selectStore = function(storeValue) {
-      console.log('Store selected:', storeValue);
+      console.log('=== STORE SELECTION CLICKED ===');
+      console.log('Store value:', storeValue);
+      
+      // Don't check if it's the same store - just always proceed
+      // This ensures the selection always works even if there's a mismatch
+      console.log('Processing store selection:', storeValue);
       
       // Set the store via API
       fetch('/api/set-store', {
@@ -87,10 +92,18 @@
         headers: {
           'Content-Type': 'application/json',
         },
+        credentials: 'same-origin',
         body: JSON.stringify({ store: storeValue })
       })
-      .then(response => response.json())
+      .then(response => {
+        console.log('Response status:', response.status);
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+      })
       .then(data => {
+        console.log('Response data:', data);
         if (data.success) {
           console.log('✅ Store set successfully:', storeValue);
           
@@ -107,16 +120,18 @@
           // This ensures template variables (user_has_store) are updated
           console.log('🔄 Reloading page to sync session...');
           setTimeout(() => {
+            console.log('Executing page reload NOW');
             window.location.reload();
-          }, 300); // Brief 300ms delay to ensure session cookie is saved
+          }, 500); // Increased to 500ms to ensure session cookie is saved
         } else {
-          console.error('Error setting store:', data.error);
-          alert('Error setting store. Please try again.');
+          console.error('❌ Error setting store:', data.error || 'Unknown error');
+          alert('Error setting store: ' + (data.error || 'Please try again.'));
         }
       })
       .catch(error => {
-        console.error('Error setting store:', error);
-        alert('Error setting store. Please try again.');
+        console.error('❌ Fetch error:', error);
+        console.error('Error stack:', error.stack);
+        alert('Error saving store selection: ' + error.message + '\nPlease check the console for details.');
       });
     };
     
@@ -140,16 +155,29 @@
         document.documentElement.style.setProperty('--vmin', vmin + 'px');
         document.documentElement.style.setProperty('--vmax', vmax + 'px');
         
-        // UNIVERSAL SCALING: Same for all environments
-        // No environment-specific adjustments - works everywhere
-        document.documentElement.style.setProperty('--env-scale-factor', '1');
-        document.documentElement.style.setProperty('--env-font-multiplier', '1');
+        // UNIVERSAL SCALING: Adapt to any screen size
+        // Calculate scale factor based on viewport width (1920px = baseline)
+        const baseWidth = 1920;
+        const scaleFactor = Math.min(Math.max(window.innerWidth / baseWidth, 0.5), 2);
+        document.documentElement.style.setProperty('--env-scale-factor', scaleFactor.toString());
+        document.documentElement.style.setProperty('--env-font-multiplier', scaleFactor.toString());
         
-        console.log(`Viewport: ${window.innerWidth}x${window.innerHeight}, vw=${vw}px, vh=${vh}px`);
+        // Ensure body fills viewport (only if body exists)
+        if (document.body) {
+          document.body.style.minHeight = '100vh';
+          document.body.style.minWidth = '100vw';
+        }
+        document.documentElement.style.minHeight = '100vh';
+        
+        console.log(`Viewport: ${window.innerWidth}x${window.innerHeight}, scale: ${scaleFactor.toFixed(2)}x`);
       }
       
-      // Run normalization on load and resize
-      normalizeViewport();
+      // Run normalization after DOM is loaded
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', normalizeViewport);
+      } else {
+        normalizeViewport();
+      }
       window.addEventListener('resize', normalizeViewport);
       window.addEventListener('orientationchange', normalizeViewport);
       
@@ -230,6 +258,7 @@
         headers: {
           'Content-Type': 'application/json',
         },
+        credentials: 'same-origin',
         body: JSON.stringify({ store: storeValue })
       })
       .then(response => response.json())
@@ -428,7 +457,9 @@
     }
     
     function updateStoreStatusFromBackend() {
-      fetch('/api/get-store')
+      fetch('/api/get-store', {
+        credentials: 'same-origin'
+      })
         .then(response => response.json())
         .then(data => {
           if (data.success && data.store) {
@@ -448,6 +479,13 @@
     }
     
     function checkStoreRequired() {
+      // Prevent multiple simultaneous calls
+      if (window.checkingStoreRequired) {
+        console.log('⚠️ checkStoreRequired already in progress, skipping...');
+        return;
+      }
+      window.checkingStoreRequired = true;
+      
       console.log('=== CHECKING STORE REQUIREMENT ===');
       
       const modalElement = document.getElementById('storeSelectionModal');
@@ -457,6 +495,7 @@
       
       if (!modalElement) {
         console.error('❌ Modal element not found! Retrying in 500ms...');
+        window.checkingStoreRequired = false;
         setTimeout(checkStoreRequired, 500);
         return;
       }
@@ -470,7 +509,9 @@
       }
       
       console.log('Fetching store status from backend...');
-      fetch('/api/check-store-required')
+      fetch('/api/check-store-required', {
+        credentials: 'same-origin'
+      })
         .then(response => {
           if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
@@ -547,6 +588,10 @@
           } else {
             showStoreSelectionModal();
           }
+        })
+        .finally(() => {
+          // Always reset the flag
+          window.checkingStoreRequired = false;
         });
     }
     
@@ -2592,9 +2637,10 @@
     /* Store Selection Modal Styles */
     .store-options-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 1rem;
-      margin-top: 1rem;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 1.2rem;
+      margin-top: 1.5rem;
+      width: 100%;
     }
     
     .btn-store-option {
@@ -2602,15 +2648,17 @@
       border: 2px solid rgba(160, 132, 232, 0.3);
       border-radius: 12px;
       color: #e0e0e0;
-      padding: 1.5rem 1rem;
+      padding: 1.8rem 2rem;
       transition: all 0.3s ease;
       backdrop-filter: blur(10px);
       -webkit-backdrop-filter: blur(10px);
       text-align: center;
-      min-height: 80px;
+      min-height: 90px;
       display: flex;
       align-items: center;
       justify-content: center;
+      width: 100%;
+      font-size: 1.1rem;
     }
     
     .btn-store-option:hover {
@@ -2629,18 +2677,19 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 0.25rem;
+      gap: 0.5rem;
     }
     
     .store-name {
-      font-weight: 600;
-      font-size: 1rem;
+      font-weight: 700;
+      font-size: 1.4rem;
       color: #ffffff;
+      letter-spacing: 0.5px;
     }
     
     .store-location {
-      font-size: 0.8rem;
-      color: #a0a0a0;
+      font-size: 1.1rem;
+      color: #b0b0b0;
       font-weight: 400;
     }
 
@@ -2679,6 +2728,145 @@
         letter-spacing: 0.3px;
         margin: 0;
       }
+    
+    /* Professional Checkbox Styling - High Specificity to Override Bootstrap */
+    input[type="checkbox"],
+    input[type="checkbox"].form-check-input,
+    .form-check input[type="checkbox"] {
+      appearance: none !important;
+      -webkit-appearance: none !important;
+      -moz-appearance: none !important;
+      width: 18px !important;
+      height: 18px !important;
+      border: 2px solid #64748b !important;
+      border-radius: 4px !important;
+      background: rgba(255, 255, 255, 0.1) !important;
+      backdrop-filter: blur(10px) !important;
+      -webkit-backdrop-filter: blur(10px) !important;
+      cursor: pointer;
+      position: relative;
+      transition: all 0.2s ease !important;
+      margin: 0 !important;
+      vertical-align: middle;
+      box-shadow: none !important;
+      /* Completely hide any default browser checkmarks */
+      background-image: none !important;
+      background-size: 0 !important;
+      outline: none !important;
+    }
+    
+    input[type="checkbox"]:hover,
+    input[type="checkbox"].form-check-input:hover,
+    .form-check input[type="checkbox"]:hover {
+      border-color: #a855f7 !important;
+      background: rgba(168, 85, 247, 0.1) !important;
+      transform: scale(1.05);
+    }
+    
+    input[type="checkbox"]:checked,
+    input[type="checkbox"].form-check-input:checked,
+    .form-check input[type="checkbox"]:checked {
+      background: linear-gradient(135deg, #a855f7 0%, #7c3aed 100%) !important;
+      border-color: #a855f7 !important;
+      box-shadow: 0 2px 8px rgba(168, 85, 247, 0.3) !important;
+      /* Force complete removal of any default checkmarks */
+      background-image: none !important;
+      background-size: 0 !important;
+      background-position: 0 !important;
+      background-repeat: no-repeat !important;
+      content: "" !important;
+    }
+    
+    input[type="checkbox"]:checked::before,
+    input[type="checkbox"].form-check-input:checked::before,
+    .form-check input[type="checkbox"]:checked::before {
+      content: "✓";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: white;
+      font-weight: bold;
+      font-size: 12px;
+      line-height: 1;
+    }
+    
+    input[type="checkbox"]:focus,
+    input[type="checkbox"].form-check-input:focus,
+    .form-check input[type="checkbox"]:focus {
+      outline: none !important;
+      border-color: #a855f7 !important;
+      box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.2) !important;
+    }
+
+    /* Additional overrides to completely remove any Bootstrap checkbox styling */
+    .form-check-input {
+      background-image: none !important;
+      background-size: 0 !important;
+      background-position: center !important;
+      background-repeat: no-repeat !important;
+    }
+
+    .form-check-input:checked {
+      background-image: none !important;
+      background-size: 0 !important;
+    }
+
+    .form-check-input:checked[type=checkbox] {
+      background-image: none !important;
+    }
+
+    /* Nuclear option - completely override any possible checkmark sources */
+    input[type="checkbox"]::after,
+    input[type="checkbox"]::before,
+    input[type="checkbox"].form-check-input::after,
+    .form-check input[type="checkbox"]::after {
+      content: "" !important;
+      display: none !important;
+    }
+
+    /* Ensure only our custom checkmark shows */
+    input[type="checkbox"]:checked::before,
+    input[type="checkbox"].form-check-input:checked::before,
+    .form-check input[type="checkbox"]:checked::before {
+      content: "✓" !important;
+      position: absolute !important;
+      top: 50% !important;
+      left: 50% !important;
+      transform: translate(-50%, -50%) !important;
+      color: white !important;
+      font-weight: bold !important;
+      font-size: 12px !important;
+      line-height: 1 !important;
+      display: block !important;
+      z-index: 999 !important;
+    }
+    
+    input[type="checkbox"]:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
+    input[type="checkbox"]:disabled:hover {
+      transform: none;
+      border-color: #64748b;
+      background: rgba(255, 255, 255, 0.1);
+    }
+    
+    /* Special styling for table checkboxes */
+    .table input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+    }
+    
+    /* Enhanced styling for strain checkboxes */
+    .strain-checkbox {
+      margin-right: 0.5rem;
+    }
+    
+    #selectAllCheckbox {
+      margin-right: 0.25rem;
+    }
     
     .database-modal .modal-content {
       background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
@@ -3956,6 +4144,68 @@
       z-index: -1;
       transition: background 2s ease;
     }
+    /* Enhanced Filter Bar Styling */
+    .enhanced-filter-bar {
+      background: linear-gradient(135deg, rgba(45, 34, 58, 0.98) 0%, rgba(60, 45, 75, 0.95) 100%);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 2px rgba(160, 132, 232, 0.5);
+      border: 2px solid rgba(160, 132, 232, 0.6) !important;
+    }
+    
+    .filter-group {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      flex: 1;
+      min-width: 0;
+    }
+    
+    .filter-label {
+      font-size: 13px;
+      font-weight: 700;
+      color: rgba(255, 255, 255, 0.95);
+      margin-bottom: 6px;
+      text-align: center;
+      letter-spacing: 0.8px;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      overflow: hidden;
+      width: 100%;
+      text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    }
+    
+    .filter-select {
+      background: rgba(255, 255, 255, 0.2) !important;
+      border: 2px solid rgba(160, 132, 232, 0.5) !important;
+      color: #fff !important;
+      font-size: 14px;
+      font-weight: 600;
+      padding: 8px 10px;
+      width: 100%;
+      border-radius: 8px;
+      min-height: 40px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      transition: all 0.2s ease;
+    }
+    
+    .filter-select:hover {
+      background: rgba(255, 255, 255, 0.25) !important;
+      border-color: rgba(160, 132, 232, 0.7) !important;
+      transform: translateY(-1px);
+      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+    }
+    
+    .filter-select:focus {
+      background: rgba(255, 255, 255, 0.25) !important;
+      border-color: rgba(160, 132, 232, 0.8) !important;
+      box-shadow: 0 0 0 3px rgba(160, 132, 232, 0.3), 0 6px 16px rgba(0, 0, 0, 0.4) !important;
+    }
+    
+    .filter-select option {
+      background: #2d223a !important;
+      color: #fff !important;
+      font-weight: 600;
+    }
+
     .sticky-filter-bar .form-label {
       margin-bottom: 2px !important;
       margin-top: 2px !important;
@@ -4500,7 +4750,7 @@
               <p class="vibrant-subtitle">
                 Auto-Generating Tag Designer
               </p>
-              <p class="copyright-text">
+              <p class="copyright-text" style="color: rgba(255, 255, 255, 0.9); font-weight: 500;">
                 ©2025 Created by Adam Cordova for A Greener Today
               </p>
             </div>
@@ -4538,114 +4788,100 @@
 
       <!-- Main Content Area -->
       <div class="w-100">
-        <!-- Upload bar positioned above filter column -->
-        <div class="row mb-1 mt-0 fade-in" style="animation-delay: 0.2s;">
-          <div class="col-lg-2 mb-1">
-            <div class="modern-upload-bar" style="display: inline-flex; align-items: center; min-height: 28px; padding: 0.25rem 0.5rem; border-radius: 10px; background: rgba(45,34,58,0.85);">
-              <input type="file" id="fileInput" accept=".xlsx" style="display:none;">
-              <button type="button" class="upload-btn-modern d-flex align-items-center justify-content-center" id="uploadTriggerBtn" onclick="var input = document.getElementById('fileInput'); if(input) input.click();" aria-label="Upload Excel file" style="padding:0.15rem 0.6rem; font-size:0.82rem; cursor: pointer;">
-                <svg class="me-2" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                  <polyline points="7 10 12 15 17 10"></polyline>
-                  <line x1="12" y1="15" x2="12" y2="3"></line>
-                </svg>
-                <span class="fw-bold">Upload</span>
-              </button>
-              <span class="file-info-modern d-flex align-items-center gap-1 ms-2" id="currentFileInfo" style="min-width:200px; max-width:none; font-size:0.82rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;">
-                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                  <polyline points="9 9 15 9 15 15 9 15 9 9"></polyline>
-                </svg>
-                <span class="file-info-text" id="fileInfoText" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{% if uploaded_filename %}{{ uploaded_filename }}{% else %}No file selected{% endif %}</span>
-              </span>
-              <!-- Auto check functionality removed -->
-              <button class="btn btn-sm btn-outline-warning ms-2" onclick="clearStuckUploads()" title="Clear stuck uploads" style="font-size: 0.7rem; padding: 0.2rem 0.4rem;">
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <circle cx="12" cy="12" r="10"></circle>
-                  <line x1="15" y1="9" x2="9" y2="15"></line>
-                  <line x1="9" y1="9" x2="15" y2="15"></line>
-                </svg>
-              </button>
-              <button class="btn btn-sm btn-outline-danger ms-1" onclick="emergencyLineageModalCleanup()" title="Emergency cleanup for stuck lineage editor" style="font-size: 0.7rem; padding: 0.2rem 0.4rem;">
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M3 6h18"></path>
-                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
-                  <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                </svg>
-              </button>
-              <!-- Manual auto upload trigger button removed -->
-            </div>
-          </div>
-        </div>
-
         <!-- Tag-list containers row (now includes filter bar for alignment) -->
-        <div class="row fade-in g-1" style="animation-delay: 0.4s; display: flex; justify-content: space-between;">
+        <div class="row fade-in g-2" style="animation-delay: 0.4s;">
           <!-- Filter Bar as a column -->
-          <div class="mb-1" data-container-type="filter" style="flex: 1; margin-right: 0.5rem;">
-              <div class="sticky-filter-bar d-flex flex-row align-items-center justify-content-between" style="height: auto; width: 100%; border-radius: 24px; padding: 1.5rem; margin: 0;">
-                                              <div class="d-flex flex-row gap-3" style="height: 100%; align-items: center;">
-                  <!-- Clear Filters Button -->
-                  <div class="mt-3">
-                    <button id="clearFiltersBtn" class="btn btn-sm w-100" onclick="TagManager.clearAllFilters()" title="Clear all filters and reset app" style="background: linear-gradient(135deg, rgba(220, 53, 69, 0.8), rgba(220, 53, 69, 0.6)); border: 1.5px solid rgba(220, 53, 69, 0.8); color: #fff; border-radius: 8px; font-size: 0.8rem; font-weight: 600; padding: 0.4rem 0.6rem; transition: all 0.3s ease; box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3);">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-1">
-                        <polyline points="3 6 5 6 21 6"></polyline>
-                        <path d="M19 6v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                      </svg>
-                      Clear & Reset
-                    </button>
+          <div class="col-12 mb-4" data-container-type="filter" style="padding-left: 0.5rem; padding-right: 0.5rem;">
+              <div class="enhanced-filter-bar d-flex align-items-center gap-3 p-4" style="background: rgba(45, 34, 58, 0.95); border-radius: 16px; backdrop-filter: blur(20px); border: 2px solid rgba(160, 132, 232, 0.6);">
+                  <!-- Left Side: Clear Button and Upload Section -->
+                  <div class="left-section d-flex flex-column gap-2" style="flex-shrink: 0;">
+                    <!-- File Path Display (Above buttons) -->
+                    <div class="file-path-display text-center">
+                      <span class="text-white" id="fileInfoText" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 600; display: block; padding: 4px 8px; background: rgba(255, 255, 255, 0.1); border-radius: 6px; border: 1px solid rgba(160, 132, 232, 0.3);">
+                        {% if uploaded_filename %}{{ uploaded_filename }}{% else %}No file uploaded{% endif %}
+                      </span>
+                    </div>
+                    <!-- Buttons Row -->
+                    <div class="buttons-row d-flex align-items-center gap-3">
+                      <!-- Clear Button -->
+                      <button id="clearFiltersBtn" class="btn btn-danger px-3 py-2" onclick="TagManager.clearAllFilters()" title="Clear all filters and reset app" style="font-weight: 700; box-shadow: 0 4px 12px rgba(0,0,0,0.3); white-space: nowrap; font-size: 14px; border-radius: 8px; min-width: 180px;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2">
+                          <polyline points="3 6 5 6 21 6"></polyline>
+                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
+                        </svg>
+                        Clear Filters
+                      </button>
+                      <!-- Upload Button -->
+                      <input type="file" id="fileInput" accept=".xlsx" style="display:none;">
+                      <button type="button" class="btn px-3 py-2" id="uploadTriggerBtn" onclick="var input = document.getElementById('fileInput'); if(input) input.click();" aria-label="Upload Excel file" style="font-weight: 700; box-shadow: 0 4px 12px rgba(0,0,0,0.3); white-space: nowrap; font-size: 14px; border-radius: 8px; min-width: 180px; background: linear-gradient(135deg, #a084e8 0%, #8b5cf6 100%); border: 2px solid #a084e8; color: white;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2">
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                          <polyline points="7 10 12 15 17 10"></polyline>
+                          <line x1="12" y1="15" x2="12" y2="3"></line>
+                        </svg>
+                        Upload Excel
+                      </button>
+                    </div>
                   </div>
-                  <div>
-                    <label for="vendorFilter" class="filter-category-label mb-0">VENDOR</label>
-                    <select id="vendorFilter" class="form-select form-select-sm compact-filter" aria-label="Filter by vendor" style="width: 100%;">
-                      <option value="All">All Vendors</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label for="brandFilter" class="filter-category-label mb-0">BRAND</label>
-                    <select id="brandFilter" class="form-select form-select-sm compact-filter" aria-label="Filter by brand" style="width: 100%;">
-                      <option value="All">All Brands</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label for="productTypeFilter" class="filter-category-label mb-0">PRODUCT TYPE</label>
-                    <select id="productTypeFilter" class="form-select form-select-sm compact-filter" aria-label="Filter by product type" style="width: 100%;">
-                      <option value="All">All Product Types</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label for="lineageFilter" class="filter-category-label mb-0">LINEAGE</label>
-                    <select id="lineageFilter" class="form-select form-select-sm compact-filter" aria-label="Filter by lineage" style="width: 100%;">
-                      <option value="All">All Lineages</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label for="weightFilter" class="filter-category-label mb-0">WEIGHT</label>
-                    <select id="weightFilter" class="form-select form-select-sm compact-filter" aria-label="Filter by weight" style="width: 100%;">
-                      <option value="All">All Weights</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label for="dohFilter" class="filter-category-label mb-0">DOH COMPLIANCE</label>
-                    <select id="dohFilter" class="form-select form-select-sm compact-filter" aria-label="Filter by DOH compliance" style="width: 100%;">
-                      <option value="All">All Products</option>
-                      <option value="Yes">DOH Compliant (Yes)</option>
-                      <option value="No">Not DOH Compliant (No)</option>
-                      <option value="Pending">DOH Status Pending</option>
-                      <option value="Unknown">DOH Status Unknown</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label for="highCbdFilter" class="filter-category-label mb-0">HIGH CBD</label>
-                    <select id="highCbdFilter" class="form-select form-select-sm compact-filter" aria-label="Filter by High CBD products" style="background: #2a2040; color: #fff; border-radius: 8px; border: 1.5px solid #a084e8; width: 100%;">
-                      <option value="All">All Products</option>
-                    </select>
+                  
+                  <!-- Center: Compact Filter Dropdowns Row -->
+                  <div class="filter-row d-flex align-items-center justify-content-center gap-3 flex-grow-1" style="width: 100%;">
+                    <div class="filter-group">
+                      <label for="vendorFilter" class="filter-label">VENDOR</label>
+                      <select id="vendorFilter" class="form-select filter-select" aria-label="Filter by vendor">
+                        <option value="All">All</option>
+                      </select>
+                    </div>
+                    <div class="filter-group">
+                      <label for="brandFilter" class="filter-label">BRAND</label>
+                      <select id="brandFilter" class="form-select filter-select" aria-label="Filter by brand">
+                        <option value="All">All</option>
+                      </select>
+                    </div>
+                    <div class="filter-group">
+                      <label for="productTypeFilter" class="filter-label">PRODUCT TYPE</label>
+                      <select id="productTypeFilter" class="form-select filter-select" aria-label="Filter by product type">
+                        <option value="All">All</option>
+                      </select>
+                    </div>
+                    <div class="filter-group">
+                      <label for="lineageFilter" class="filter-label">LINEAGE</label>
+                      <select id="lineageFilter" class="form-select filter-select" aria-label="Filter by lineage">
+                        <option value="All">All</option>
+                      </select>
+                    </div>
+                    <div class="filter-group">
+                      <label for="weightFilter" class="filter-label">WEIGHT</label>
+                      <select id="weightFilter" class="form-select filter-select" aria-label="Filter by weight">
+                        <option value="All">All</option>
+                      </select>
+                    </div>
+                    <div class="filter-group">
+                      <label for="dohFilter" class="filter-label">DOH COMPLIANCE</label>
+                      <select id="dohFilter" class="form-select filter-select" aria-label="Filter by DOH compliance">
+                        <option value="All">All</option>
+                        <option value="Yes">Yes</option>
+                        <option value="No">No</option>
+                        <option value="Pending">Pending</option>
+                        <option value="Unknown">Unknown</option>
+                      </select>
+                    </div>
+                    <div class="filter-group">
+                      <label for="highCbdFilter" class="filter-label">HIGH CBD</label>
+                      <select id="highCbdFilter" class="form-select filter-select" aria-label="Filter by High CBD products">
+                        <option value="All">All</option>
+                      </select>
+                    </div>
                   </div>
               </div>
-            </div>
           </div>
+        </div>
+        
+        <!-- Main Content Row -->
+        <div class="row fade-in g-2" style="animation-delay: 0.6s;">
           <!-- Available Tags -->
-          <div class="mb-1" data-container-type="available" style="flex: 1; margin-right: 0.5rem;">
-            <div class="glass-card d-flex flex-column">
+          <div class="col-lg-5 mb-2" data-container-type="available" style="padding-left: 0.5rem; padding-right: 0.25rem;">
+            <div class="glass-card d-flex flex-column h-100">
               <div class="card-header border-0 bg-transparent p-2">
                 <div class="d-flex justify-content-between align-items-center mb-2">
                   <h5 class="filter-label mb-0">CURRENT INVENTORY</h5>
@@ -4655,7 +4891,7 @@
                 </div>
               </div>
               <div class="card-body p-2 pt-0 d-flex flex-column flex-grow-1">
-                <div id="availableTags" class="tag-list-container">
+                <div id="availableTags" class="tag-list-container">>
                   <div class="tag-list">
                     <div class="d-flex align-items-center gap-3 mb-2">
                       <label class="d-flex align-items-center gap-2 cursor-pointer mb-0 select-all-container">
@@ -4684,13 +4920,13 @@
           </div>
           
           <!-- Center Column with Controls -->
-          <div class="mb-1 mt-0 d-flex flex-column justify-content-start align-items-center" style="flex: 1.3; margin-right: 0.5rem; padding-top: 0; margin-top: 0; padding-left: 0.5rem; padding-right: 0.5rem;" data-container-type="center">
+          <div class="col-lg-2 mb-2 mt-0 d-flex flex-column justify-content-start align-items-center" style="padding-top: 0; margin-top: 0; padding-left: 0.25rem; padding-right: 0.25rem;" data-container-type="center">
             <!-- Controls -->
             <div class="control-panel">
-              <!-- Controls Header -->
-              <div class="d-flex flex-column w-100">
+              <!-- Template Section -->
+              <div class="mb-3">
                 <label class="filter-label">Template</label>
-                <select id="templateSelect" class="form-select form-select-modern" aria-label="Template">
+                <select id="templateSelect" class="form-select form-select-modern" aria-label="Template" style="width: 70% !important; max-width: 200px !important; margin: 0 auto !important; display: block !important;">
                   <option value="horizontal">Horizontal</option>
                   <option value="vertical">Vertical</option>
                   <option value="mini">Mini</option>
@@ -4698,7 +4934,7 @@
                   <option value="inventory">Inventory</option>
                 </select>
 
-                <button id="generateBtn" class="btn-generate-themed" title="Generate labels based on selected tags" onclick="TagManager.debouncedGenerate()">
+                <button id="generateBtn" class="btn-generate-themed mt-2 w-100" title="Generate labels based on selected tags" onclick="TagManager.debouncedGenerate()" style="max-width: 100% !important; padding: 0.8rem 1.2rem !important; font-size: 1.05rem !important; font-weight: 700 !important;">
                   Generate Tags
                 </button>
 
@@ -4799,8 +5035,8 @@
           </div>
           
           <!-- Selected Tags -->
-          <div class="mb-2" data-container-type="selected" style="flex: 1; margin-right: 0.5rem;">
-            <div class="glass-card d-flex flex-column">
+          <div class="col-lg-5 mb-2" data-container-type="selected" style="padding-left: 0.25rem; padding-right: 0.5rem;">
+            <div class="glass-card d-flex flex-column h-100">
               <div class="card-header border-0 bg-transparent p-2">
                 <div class="d-flex justify-content-between align-items-center mb-2">
                   <h5 class="filter-label mb-0">SELECTED TAGS</h5>
@@ -4847,19 +5083,19 @@
   
   <!-- Store Selection Modal - Only shown if user doesn't have a store -->
   <div class="modal fade {% if user_has_store %}{% else %}show{% endif %}" id="storeSelectionModal" tabindex="-1" aria-labelledby="storeSelectionModalLabel" data-bs-backdrop="static" data-bs-keyboard="false" style="{% if user_has_store %}display: none;{% else %}display: block;{% endif %} z-index: 1055;">
-    <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-xl">
       <div class="modal-content glass-card">
-        <div class="modal-header border-0">
-          <h5 class="modal-title" id="storeSelectionModalLabel">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2 text-primary">
+        <div class="modal-header border-0" style="padding: 2.5rem 2.5rem 1.5rem;">
+          <h5 class="modal-title" id="storeSelectionModalLabel" style="font-size: 2.8rem; font-weight: 800; display: flex; align-items: center; color: #ffffff; letter-spacing: 1px; text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);">
+            <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="me-3 text-primary" style="filter: drop-shadow(0 2px 4px rgba(160, 132, 232, 0.4));">
               <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
               <polyline points="9 22 9 12 15 12 15 22"></polyline>
             </svg>
             Select Your Store
           </h5>
         </div>
-        <div class="modal-body text-center">
-          <p class="mb-4 text-light">Please select your store location to continue. This selection will be saved and remembered for future visits.</p>
+        <div class="modal-body text-center" style="padding: 1.5rem 2.5rem 2.5rem; max-height: 70vh; overflow-y: auto;">
+          <p class="mb-4 text-light" style="font-size: 1.2rem; font-weight: 500; color: rgba(255, 255, 255, 0.9);">Please select your store location to continue. This selection will be saved and remembered for future visits.</p>
           
           <div class="store-options-grid">
             <button class="btn btn-store-option" onclick="selectStore('AGT_Bothell')">
@@ -5143,7 +5379,7 @@
   <!-- Generation Splash Modal Overlay -->
   <div id="generationSplashModal" class="generation-splash-modal" style="display:none;">
     <div class="generation-splash-popup">
-      <canvas class="inner-canvas" id="generation-splash-canvas" style="width: 500px; height: 350px; border-radius: 10px; display: block;"></canvas>
+      <canvas class="inner-canvas" id="generation-splash-canvas" style="width: 700px; height: 450px; border-radius: 10px; display: block;"></canvas>
     </div>
   </div>
   <!-- CRITICAL: Override showDatabaseModal BEFORE main.js loads -->
@@ -6257,55 +6493,6 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="{{ url_for('static', filename='js/main.js') }}?v={{ cache_bust }}"></script>
   
-  <!-- Debug Script -->
-  <script>
-    // Debug script to test filter functionality
-    document.addEventListener('DOMContentLoaded', function() {
-      console.log('=== DEBUG FILTERS ===');
-      
-      // Check if filter elements exist
-      const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
-      
-      filterIds.forEach(filterId => {
-          const element = document.getElementById(filterId);
-          console.log(`${filterId}:`, element ? 'FOUND' : 'NOT FOUND');
-          if (element) {
-              console.log(`  - Value: "${element.value}"`);
-              console.log(`  - Options:`, element.options.length);
-          }
-      });
-      
-      // Test if we can attach event listeners
-      filterIds.forEach(filterId => {
-          const element = document.getElementById(filterId);
-          if (element) {
-              console.log(`Testing event listener for ${filterId}...`);
-              element.addEventListener('change', (e) => {
-                  console.log(`FILTER CHANGED: ${filterId} = "${e.target.value}"`);
-              });
-              console.log(`Event listener attached to ${filterId}`);
-          }
-      });
-      
-      // Test tag checkboxes
-      setTimeout(() => {
-        console.log('=== TESTING TAG CHECKBOXES ===');
-        const checkboxes = document.querySelectorAll('.tag-checkbox');
-        console.log(`Found ${checkboxes.length} tag checkboxes`);
-        
-        checkboxes.forEach((checkbox, index) => {
-            console.log(`Checkbox ${index}:`, checkbox.value, 'checked:', checkbox.checked);
-            checkbox.addEventListener('change', (e) => {
-                console.log(`TAG CHECKBOX CHANGED: ${checkbox.value} = ${e.target.checked}`);
-            });
-        });
-      }, 2000);
-      
-
-      
-      console.log('=== DEBUG COMPLETE ===');
-    });
-  </script>
   <script src="{{ url_for('static', filename='js/enhanced-ui.js') }}?v={{ cache_bust }}"></script>
   <script src="{{ url_for('static', filename='js/generation-splash.js') }}"></script>
   <script src="{{ url_for('static', filename='js/drag-and-drop-manager.js') }}"></script>
@@ -6601,6 +6788,60 @@
       console.log('DOMContentLoaded: Initializing TagManager...');
       
       TagManager.init();
+      
+      // CRITICAL: Check if store selection is required after TagManager is initialized
+      setTimeout(() => {
+        console.log('🔄 Checking store requirement after initialization...');
+        checkStoreRequired();
+      }, 500);
+      
+      // DEBUG: Add global click handler to track what's causing page reloads
+      document.addEventListener('click', function(e) {
+        const target = e.target;
+        const tagName = target.tagName.toLowerCase();
+        const targetInfo = `${tagName}${target.id ? '#' + target.id : ''}${target.className ? '.' + target.className.split(' ').join('.') : ''}`;
+        
+        // Log all button and link clicks
+        if (tagName === 'button' || tagName === 'a' || target.closest('button') || target.closest('a')) {
+          console.log('🔍 CLICK DEBUG:', targetInfo, 'target:', target);
+          
+          // Check if this is a form submission or navigation
+          const form = target.closest('form');
+          const isNavigation = target.href || (target.tagName === 'A');
+          
+          if (form) {
+            console.log('⚠️ FORM SUBMISSION detected:', form);
+          }
+          if (isNavigation) {
+            console.log('⚠️ NAVIGATION detected:', target.href);
+          }
+          
+          // Check if target has onclick that might cause reload
+          if (target.onclick || target.getAttribute('onclick')) {
+            console.log('⚠️ ONCLICK detected:', target.onclick || target.getAttribute('onclick'));
+          }
+          
+          // CRITICAL FIX: Prevent form submissions and navigations for action buttons
+          const button = target.closest('button') || (tagName === 'button' ? target : null);
+          const link = target.closest('a') || (tagName === 'a' ? target : null);
+          
+          if (button && button.type !== 'submit') {
+            // For non-submit buttons, prevent any form submission
+            const parentForm = button.closest('form');
+            if (parentForm) {
+              console.log('🚫 PREVENTING form submission for button:', button.id || button.className);
+              e.preventDefault();
+              e.stopPropagation();
+            }
+          }
+          
+          if (link && !link.href) {
+            // For links without href, prevent default behavior
+            console.log('🚫 PREVENTING default for link without href:', link.id || link.className);
+            e.preventDefault();
+          }
+        }
+      });
       
       // DOH FILTER FUNCTIONALITY - Make the DOH dropdown in filter bar work
       setTimeout(() => {
@@ -11148,5 +11389,51 @@
     }
   })();
   </script>
+  
+  <script>
+  // Trim filename to start from "A Greener Today" or similar pattern
+  (function() {
+    function trimFilename() {
+      const fileInfoElement = document.getElementById('fileInfoText');
+      if (fileInfoElement && fileInfoElement.textContent) {
+        let filename = fileInfoElement.textContent.trim();
+        
+        // Skip if no file uploaded
+        if (filename === 'No file uploaded') {
+          return;
+        }
+        
+        // Find patterns like "A Greener Today", "A_Greener_Today", etc.
+        const patterns = [
+          /A[\s_-]*Greener[\s_-]*Today/i,
+          /A[\s_]Greener[\s_]Today/i
+        ];
+        
+        for (const pattern of patterns) {
+          const match = filename.match(pattern);
+          if (match) {
+            // Get the substring starting from the match
+            const startIndex = match.index;
+            const trimmedFilename = filename.substring(startIndex);
+            fileInfoElement.textContent = trimmedFilename;
+            console.log('Trimmed filename:', trimmedFilename);
+            break;
+          }
+        }
+      }
+    }
+    
+    // Run on page load
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', trimFilename);
+    } else {
+      trimFilename();
+    }
+    
+    // Also run after a short delay to catch any dynamic updates
+    setTimeout(trimFilename, 500);
+  })();
+  </script>
+  
   </body>
 </html> 

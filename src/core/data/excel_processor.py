@@ -208,15 +208,12 @@ def optimized_lineage_assignment(df, product_types, lineages, classic_types):
     if 'Product Strain' in df.columns:
         product_strain = df['Product Strain'].astype(str)
         
-        # CBD Blend products -> CBD lineage (yellow) - override existing lineage
-        # But be more conservative with edibles
-        cbd_blend_mask = nonclassic_mask & (product_strain.str.contains('CBD Blend', case=False, na=False))
-        
-        # CRITICAL FIX: Also detect CBD from product names for non-classic types
+        # CRITICAL: For nonclassic types, CBD detection is ONLY based on product name/title
+        # Do NOT check Product Strain or Description - only the title matters
         nonclassic_cbd_from_name = nonclassic_mask & cbd_from_name_mask
         
-        # Combine CBD detection from both strain and product name for non-classic types
-        cbd_detection_mask = cbd_blend_mask | nonclassic_cbd_from_name
+        # Use ONLY product name for CBD detection in non-classic types
+        cbd_detection_mask = nonclassic_cbd_from_name
         
         # Define edible types for more conservative CBD assignment
         edible_types = {"edible (solid)", "edible (liquid)", "high cbd edible liquid", "tincture", "topical", "capsule"}
@@ -1898,10 +1895,10 @@ class ExcelProcessor:
                     
                     # For edibles, be more conservative about CBD lineage assignment
                     if edible_mask.any():
-                        # Only assign CBD lineage to edibles if they are explicitly CBD-focused
+                        # CRITICAL: CBD detection for nonclassic edibles is ONLY based on product name/title or explicit type
+                        # Only assign CBD lineage if product type is "high cbd edible liquid" OR CBD is in the title
                         cbd_edible_mask = (
                             (self.df["Product Type*"].str.strip().str.lower() == "high cbd edible liquid") |
-                            (self.df["Product Strain"].astype(str).str.lower().str.strip() == "cbd blend") |
                             (self.df[product_name_col].str.contains(r"\bCBD\b", case=False, na=False) if product_name_col else False)
                         )
                         
@@ -1921,19 +1918,18 @@ class ExcelProcessor:
                     non_edible_mask = ~edible_mask
                     non_edible_empty = non_classic_empty_mask & non_edible_mask
                     if non_edible_empty.any():
-                        # Check if non-edible non-classic products contain CBD-related content
+                        # CRITICAL: CBD detection for nonclassic types is ONLY based on product name/title
+                        # Do NOT check Description or Product Strain - only the title matters
                         cbd_content_mask = (
-                            self.df["Description"].str.contains(r"CBD|CBG|CBN|CBC", case=False, na=False) |
-                            (self.df[product_name_col].str.contains(r"CBD|CBG|CBN|CBC", case=False, na=False) if product_name_col else False) |
-                            (self.df["Product Strain"].astype(str).str.lower().str.strip() == "cbd blend")
+                            (self.df[product_name_col].str.contains(r"\bCBD\b", case=False, na=False) if product_name_col else False)
                         )
                         
-                        # Non-edible non-classic products with CBD content get CBD lineage
+                        # Non-edible non-classic products with CBD in title get CBD lineage
                         cbd_non_edible_empty = non_edible_empty & cbd_content_mask
                         if cbd_non_edible_empty.any():
                             self.df.loc[cbd_non_edible_empty, "Lineage"] = "CBD"
                         
-                        # Non-edible non-classic products without CBD content get MIXED lineage
+                        # Non-edible non-classic products without CBD in title get MIXED lineage
                         non_cbd_non_edible_empty = non_edible_empty & ~cbd_content_mask
                         if non_cbd_non_edible_empty.any():
                             self.df.loc[non_cbd_non_edible_empty, "Lineage"] = "MIXED"

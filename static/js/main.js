@@ -6414,147 +6414,176 @@ const TagManager = {
             return;
         }
         
-        // Show the modal with loading splash style
+        // Show centered, noticeable but clean notification
         splashModal.style.display = 'flex';
+        splashModal.style.alignItems = 'center';
+        splashModal.style.justifyContent = 'center';
+        splashModal.style.padding = '0';
+        splashModal.style.pointerEvents = 'auto';
+        
         splashModal.innerHTML = `
-            <div style="position: relative; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center;">
-            <div class="background-pattern"></div>
-            
-            <div id="splash-container" style="position: relative; width: 500px; height: 350px; border-radius: 24px; overflow: hidden; background: rgba(22, 33, 62, 0.95); border: 1px solid rgba(0, 212, 170, 0.2); box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(0, 212, 170, 0.1); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); z-index: 2;">
-                <div class="splash-content" style="position: relative; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 40px; color: white; text-align: center;">
-                    <div class="logo-container" style="position: relative; margin-bottom: 20px;">
-                        <div class="logo-icon" style="width: 60px; height: 60px; background: linear-gradient(135deg, #00d4aa, #0099cc); border-radius: 15px; display: flex; align-items: center; justify-content: center; font-size: 28px; box-shadow: 0 15px 35px rgba(0, 212, 170, 0.3), 0 0 0 1px rgba(0, 212, 170, 0.2); animation: logo-float 3s ease-in-out infinite; position: relative;">🏷️</div>
+            <div style="
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.4);
+                backdrop-filter: blur(4px);
+                -webkit-backdrop-filter: blur(4px);
+                animation: fadeIn 0.2s ease-out;
+            " onclick="event.target === this && TagManager.hideEnhancedGenerationSplash()">
+                <div style="
+                    position: absolute;
+                    top: 50%;
+                    left: 50%;
+                    transform: translate(-50%, -50%);
+                    background: white;
+                    border-radius: 16px;
+                    padding: 40px 50px;
+                    min-width: 400px;
+                    max-width: 500px;
+                    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                    animation: scaleIn 0.3s ease-out;
+                " onclick="event.stopPropagation()">
+                    
+                    <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 24px;">
+                        <div class="spinner" style="
+                            width: 32px;
+                            height: 32px;
+                            border: 3px solid rgba(0, 212, 170, 0.2);
+                            border-top-color: #00d4aa;
+                            border-radius: 50%;
+                            animation: spin 0.8s linear infinite;
+                            flex-shrink: 0;
+                        "></div>
+                        <div style="flex: 1;">
+                            <h2 style="
+                                font-size: 20px;
+                                font-weight: 700;
+                                color: #1a1a2e;
+                                margin: 0 0 6px 0;
+                            ">Generating Labels</h2>
+                            <div id="status-text" style="
+                                font-size: 14px;
+                                color: #666;
+                                transition: opacity 0.2s ease;
+                            ">Preparing templates...</div>
+                        </div>
                     </div>
                     
-                    <h1 class="app-title" style="color: #fff; font-weight: 900; letter-spacing: 3px; font-size: 2.5rem; margin-bottom: 12px; text-shadow: 0 4px 12px rgba(0,0,0,0.5), 0 6px 20px rgba(0,0,0,0.4), 0 2px 4px rgba(160,132,232,0.4), 0 0 30px rgba(160,132,232,0.3); filter: drop-shadow(0 6px 12px rgba(0,0,0,0.4));">AGT DESIGNER</h1>
-                    <p class="app-subtitle" style="color: #fff; font-size: 1.2rem; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 20px; text-shadow: 0 3px 8px rgba(0,0,0,0.5), 0 4px 16px rgba(0,0,0,0.4), 0 2px 4px rgba(139,92,246,0.4), 0 0 20px rgba(139,92,246,0.3); filter: drop-shadow(0 3px 6px rgba(0,0,0,0.4));">AUTO-GENERATING TAG DESIGNER</p>
-                    
-                    <div class="loading-container" style="width: 100%; max-width: 300px; margin-bottom: 20px;">
-                        <div class="loading-bar" style="width: 100%; height: 6px; background: rgba(255, 255, 255, 0.1); border-radius: 3px; overflow: hidden; margin-bottom: 15px; position: relative;">
-                            <div class="loading-progress" style="height: 100%; background: linear-gradient(90deg, #00d4aa, #0099cc, #00d4aa); border-radius: 3px; animation: loading-animation 3s ease-in-out infinite; position: relative;"></div>
-                        </div>
-                        <div class="loading-text" style="font-size: 14px; font-weight: 500; opacity: 0.8; margin-bottom: 15px; transition: opacity 0.3s ease;">Template: ${templateType.toUpperCase()}</div>
-                        <div class="loading-text" style="font-size: 14px; font-weight: 500; opacity: 0.8; margin-bottom: 15px; transition: opacity 0.3s ease;">Labels: ${labelCount}</div>
-                    </div>
-                    
-                    <div class="loading-dots" style="display: flex; gap: 6px; justify-content: center; margin-bottom: 15px;">
-                        <div class="dot" style="width: 6px; height: 6px; border-radius: 50%; background: rgba(0, 212, 170, 0.6); animation: dot-pulse 1.6s ease-in-out infinite both;"></div>
-                        <div class="dot" style="width: 6px; height: 6px; border-radius: 50%; background: rgba(0, 212, 170, 0.6); animation: dot-pulse 1.6s ease-in-out infinite both; animation-delay: -0.16s;"></div>
-                        <div class="dot" style="width: 6px; height: 6px; border-radius: 50%; background: rgba(0, 212, 170, 0.6); animation: dot-pulse 1.6s ease-in-out infinite both; animation-delay: -0.32s;"></div>
-                    </div>
-                    
-                    <!-- Copyright text matching title card -->
-                    <p style="font-size: 0.9rem; color: rgba(255, 255, 255, 0.8); margin-top: 0.5rem; font-weight: 500; letter-spacing: 1px; text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(160,132,232,0.3); opacity: 0.9; margin-bottom: 15px;">©2025 Created by Adam Cordova for A Greener Today</p>
-                    
-                    <div class="features" style="display: flex; gap: 20px; margin-top: 10px;">
-                        <div class="feature" style="text-align: center; opacity: 0.6;">
-                            <div class="feature-icon" style="font-size: 16px; margin-bottom: 4px;">⚡</div>
-                            <div class="feature-text" style="font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px;">Fast</div>
-                        </div>
-                        <div class="feature" style="text-align: center; opacity: 0.6;">
-                            <div class="feature-icon" style="font-size: 16px; margin-bottom: 4px;">🎯</div>
-                            <div class="feature-text" style="font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px;">Precise</div>
-                        </div>
-                        <div class="feature" style="text-align: center; opacity: 0.6;">
-                            <div class="feature-icon" style="font-size: 16px; margin-bottom: 4px;">🛡️</div>
-                            <div class="feature-text" style="font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px;">Reliable</div>
+                    <div style="
+                        background: rgba(0, 212, 170, 0.05);
+                        border-radius: 12px;
+                        padding: 16px 20px;
+                        margin-bottom: 24px;
+                    ">
+                        <div style="
+                            display: flex;
+                            justify-content: space-between;
+                            align-items: center;
+                            gap: 20px;
+                        ">
+                            <div>
+                                <div style="font-size: 12px; color: #888; margin-bottom: 4px;">Labels</div>
+                                <div style="font-size: 18px; font-weight: 600; color: #1a1a2e;">${labelCount}</div>
+                            </div>
+                            <div style="width: 1px; height: 30px; background: rgba(0, 0, 0, 0.1);"></div>
+                            <div>
+                                <div style="font-size: 12px; color: #888; margin-bottom: 4px;">Template</div>
+                                <div style="font-size: 18px; font-weight: 600; color: #1a1a2e;">${templateType}</div>
+                            </div>
                         </div>
                     </div>
+                    
+                    <div style="
+                        width: 100%;
+                        height: 4px;
+                        background: rgba(0, 212, 170, 0.15);
+                        border-radius: 2px;
+                        overflow: hidden;
+                        margin-bottom: 20px;
+                    ">
+                        <div style="
+                            height: 100%;
+                            background: linear-gradient(90deg, #00d4aa, #0099cc, #00d4aa);
+                            border-radius: 2px;
+                            animation: progress 2s ease-in-out infinite;
+                        "></div>
+                    </div>
+                    
+                    <button onclick="TagManager.hideEnhancedGenerationSplash()" style="
+                        width: 100%;
+                        background: transparent;
+                        border: 1px solid rgba(0, 0, 0, 0.1);
+                        color: #666;
+                        padding: 10px;
+                        border-radius: 8px;
+                        font-size: 13px;
+                        font-weight: 500;
+                        cursor: pointer;
+                        transition: all 0.2s ease;
+                    " onmouseover="this.style.background='rgba(0,0,0,0.03)'; this.style.borderColor='rgba(0,0,0,0.2)'" onmouseout="this.style.background='transparent'; this.style.borderColor='rgba(0,0,0,0.1)'">
+                        Cancel
+                    </button>
                 </div>
-                
-                <div class="version-badge" style="position: absolute; top: 15px; right: 15px; background: rgba(0, 212, 170, 0.15); padding: 4px 8px; border-radius: 8px; font-size: 10px; font-weight: 600; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(0, 212, 170, 0.2); color: #00d4aa;">v2.0.0</div>
-                <div class="status-indicator" style="position: absolute; top: 15px; left: 15px; display: flex; align-items: center; gap: 4px; background: rgba(0, 212, 170, 0.15); padding: 4px 8px; border-radius: 8px; font-size: 10px; font-weight: 600; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(0, 212, 170, 0.2); color: #00d4aa;">
-                    <div class="status-dot" style="width: 4px; height: 4px; border-radius: 50%; background: #00d4aa; animation: status-pulse 2s ease-in-out infinite;"></div>
-                    <span>Processing</span>
-                </div>
-                <button id="exitGenerationBtn" onclick="TagManager.hideEnhancedGenerationSplash()" style="position: absolute; bottom: 15px; right: 15px; background: rgba(220, 53, 69, 0.8); border: 1px solid rgba(220, 53, 69, 0.8); color: white; padding: 6px 12px; border-radius: 8px; font-size: 11px; font-weight: 600; cursor: pointer; transition: all 0.3s ease; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3);" onmouseover="this.style.background='rgba(220, 53, 69, 1)'; this.style.transform='scale(1.05)'" onmouseout="this.style.background='rgba(220, 53, 69, 0.8)'; this.style.transform='scale(1)'">
-                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;">
-                        <line x1="18" y1="6" x2="6" y2="18"></line>
-                        <line x1="6" y1="6" x2="18" y2="18"></line>
-                    </svg>
-                    Exit
-                </button>
-            </div>
             </div>
             
             <style>
-                .background-pattern {
-                    position: absolute;
-                    top: 0;
-                    left: 0;
-                    width: 100%;
-                    height: 100%;
-                    opacity: 0.1;
-                    background-image: 
-                        radial-gradient(circle at 20% 80%, #00d4aa 0%, transparent 50%),
-                        radial-gradient(circle at 80% 20%, #00d4aa 0%, transparent 50%),
-                        radial-gradient(circle at 40% 40%, #00d4aa 0%, transparent 50%);
-                    animation: background-shift 8s ease-in-out infinite;
+                @keyframes spin {
+                    to { transform: rotate(360deg); }
                 }
                 
-                @keyframes background-shift {
-                    0%, 100% { transform: scale(1) rotate(0deg); }
-                    50% { transform: scale(1.1) rotate(180deg); }
+                @keyframes fadeIn {
+                    from { opacity: 0; }
+                    to { opacity: 1; }
                 }
                 
-                @keyframes logo-float {
-                    0%, 100% { 
-                        transform: translateY(0px) scale(1);
+                @keyframes scaleIn {
+                    from {
+                        transform: translate(-50%, -50%) scale(0.9);
+                        opacity: 0;
                     }
-                    50% { 
-                        transform: translateY(-6px) scale(1.02);
-                    }
-                }
-                
-                @keyframes loading-animation {
-                    0% { width: 0%; }
-                    50% { width: 100%; }
-                    100% { width: 0%; }
-                }
-                
-                @keyframes dot-pulse {
-                    0%, 80%, 100% {
-                        transform: scale(0.8);
-                        opacity: 0.4;
-                    }
-                    40% {
-                        transform: scale(1.2);
+                    to {
+                        transform: translate(-50%, -50%) scale(1);
                         opacity: 1;
                     }
                 }
                 
-                @keyframes status-pulse {
-                    0%, 100% { opacity: 0.5; }
-                    50% { opacity: 1; }
+                @keyframes progress {
+                    0% { width: 0%; }
+                    50% { width: 100%; }
+                    100% { width: 0%; }
                 }
             </style>
         `;
         
-        // Start animated loading text
-        const loadingTexts = [
+        // Start animated status text
+        const statusTexts = [
             'Preparing templates...',
             'Processing data...',
             'Generating labels...',
+            'Applying formatting...',
             'Finalizing output...'
         ];
         
         let textIndex = 0;
-        const loadingTextElements = splashModal.querySelectorAll('.loading-text');
+        const statusTextElement = splashModal.querySelector('#status-text');
         
-        function updateLoadingText() {
-            if (loadingTextElements[1]) {
-                loadingTextElements[1].style.opacity = '0';
+        const updateStatusText = () => {
+            if (statusTextElement) {
+                statusTextElement.style.opacity = '0';
                 setTimeout(() => {
-                    loadingTextElements[1].textContent = loadingTexts[textIndex];
-                    loadingTextElements[1].style.opacity = '1';
-                    textIndex = (textIndex + 1) % loadingTexts.length;
-                }, 300);
+                    statusTextElement.textContent = statusTexts[textIndex];
+                    statusTextElement.style.opacity = '1';
+                    textIndex = (textIndex + 1) % statusTexts.length;
+                }, 200);
             }
-        }
+        };
         
-        // Update text every 1.5 seconds
-        this._loadingTextInterval = setInterval(updateLoadingText, 1500);
-        updateLoadingText(); // Start immediately
+        // Update text every 2 seconds
+        this._loadingTextInterval = setInterval(updateStatusText, 2000);
+        updateStatusText(); // Start immediately
     },
 
     hideEnhancedGenerationSplash() {
