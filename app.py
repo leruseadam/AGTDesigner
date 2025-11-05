@@ -819,19 +819,27 @@ def get_excel_processor():
                     from flask import session
                     try:
                         session_file_path = session.get('file_path')
+                        logging.info(f"🔍 DEBUG: Session file_path = {session_file_path}")
+                        logging.info(f"🔍 DEBUG: Session keys = {list(session.keys())}")
                     except RuntimeError:
                         # No active request context during startup
                         session_file_path = None
+                        logging.info("🔍 DEBUG: No request context, session_file_path = None")
+                    
                     if session_file_path and os.path.exists(session_file_path):
-                        logging.info(f"CRITICAL FIX: Found uploaded file in session: {session_file_path}")
+                        logging.info(f"✅ CRITICAL FIX: Found uploaded file in session: {session_file_path}")
                         # Load the uploaded file instead of clearing the DataFrame
                         success = _excel_processor.load_file(session_file_path)
                         if success:
                             _excel_processor._last_loaded_file = session_file_path
-                            logging.info(f"CRITICAL FIX: Successfully loaded session file: {session_file_path}")
+                            logging.info(f"✅ CRITICAL FIX: Successfully loaded session file: {session_file_path}")
+                            row_count = len(_excel_processor.df) if hasattr(_excel_processor, 'df') and _excel_processor.df is not None else 0
+                            logging.info(f"✅ Loaded {row_count} rows from session file")
                         else:
-                            logging.error(f"CRITICAL FIX: Failed to load session file: {session_file_path}")
+                            logging.error(f"❌ CRITICAL FIX: Failed to load session file: {session_file_path}")
                             _excel_processor.df = pd.DataFrame()  # Fallback to empty DataFrame
+                    elif session_file_path:
+                        logging.error(f"❌ Session file_path exists but file not found: {session_file_path}")
                     else:
                         # OPTIMIZATION: Skip default file loading on startup for faster app loading
                         if not _excel_processor_reset_flag and not DISABLE_STARTUP_FILE_LOADING:
@@ -1141,8 +1149,13 @@ def create_app():
     
     # Compression for better performance
     if Compress:
-        Compress(app)
-        logging.info("Flask-Compress enabled for better performance")
+        compress = Compress()
+        compress.init_app(app)
+        # Aggressive compression settings for web performance
+        app.config['COMPRESS_ALGORITHM'] = 'gzip'
+        app.config['COMPRESS_LEVEL'] = 6  # Balance between speed and compression
+        app.config['COMPRESS_MIN_SIZE'] = 500  # Compress responses over 500 bytes
+        logging.info("Flask-Compress enabled with aggressive settings for better performance")
     
     # Initialize session management
     if Session:
@@ -1165,6 +1178,28 @@ def create_app():
         'http://127.0.0.1:5001',
         'https://adamcordova.pythonanywhere.com'  # PythonAnywhere domain
     ]
+    # Add caching headers for static resources to improve performance
+    @app.after_request
+    def add_cache_headers(response):
+        """Add caching headers for static resources to improve web performance."""
+        # For static files (CSS, JS, images), use long cache times
+        if request.path.startswith('/static/'):
+            # Cache static files for 7 days (can be longer with version control)
+            response.cache_control.max_age = 604800  # 7 days in seconds
+            response.cache_control.public = True
+            # Add immutable flag for versioned resources
+            if 'v=' in request.query_string.decode():
+                response.cache_control.immutable = True
+        # For API endpoints, minimal caching
+        elif request.path.startswith('/api/'):
+            response.cache_control.max_age = 0
+            response.cache_control.no_cache = True
+        # For HTML pages, short cache with revalidation
+        elif response.content_type and 'text/html' in response.content_type:
+            response.cache_control.max_age = 300  # 5 minutes
+            response.cache_control.must_revalidate = True
+        return response
+    
     # Enable CORS for all routes, not just /api/*
     CORS(app, resources={
         r"/*": {"origins": allowed_origins}
@@ -1987,7 +2022,9 @@ def index():
             logging.info(f"User has valid store selection: {current_store}")
         
         # --- LIGHTWEIGHT PAGE LOAD (minimal work) ---
-        cache_bust = str(int(time.time()))
+        # PERFORMANCE FIX: Use static version for cache busting instead of timestamp
+        # This allows browser caching while still being able to force cache clear when needed
+        cache_bust = "v2.0.1"  # Only increment when files actually change
         
         # CRITICAL FIX: Don't clear uploaded file from session on page refresh
         # This was causing uploads to disappear when users refreshed the page
@@ -2065,7 +2102,7 @@ def index():
         logging.error(f"Error in index route: {str(e)}")
         logging.error(f"Index route traceback: {traceback.format_exc()}")
         # Ensure cache_bust and store variables are always available
-        cache_bust = str(int(time.time()))
+        cache_bust = "v2.0.1"  # Use static version for caching
         user_has_store = False
         current_store = None
         uploaded_filename = ''
@@ -2169,7 +2206,16 @@ def upload_file():
         session['upload_timestamp'] = timestamp
         session.modified = True
         
-        logging.info(f"Session updated: file_path={file_path}, filename={file.filename}, permanent={session.permanent}")
+        # CRITICAL: Force session save immediately
+        try:
+            from flask import session as flask_session
+            if hasattr(flask_session, 'save'):
+                flask_session.save()
+        except:
+            pass
+        
+        logging.info(f"✅ Session updated and saved: file_path={file_path}, filename={file.filename}, permanent={session.permanent}")
+        logging.info(f"✅ Session data: {dict(session)}")
         
         # Mark as processing
         update_processing_status(file.filename, 'processing')
@@ -2211,7 +2257,17 @@ def upload_file():
                         # CRITICAL FIX: Invalidate the global processor cache so page reload gets fresh data
                         global _excel_processor
                         _excel_processor = None
-                        logging.info("[BACKGROUND] Cleared Excel processor cache to force reload of new file on next request")
+                        logging.info("[BACKGROUND] ✅ Cleared Excel processor cache to force reload of new file on next request")
+                        
+                        # CRITICAL: Clear ALL caches to force complete refresh
+                        try:
+                            cache_keys_to_clear = ['available_tags', 'selected_tags', 'vendor_tags', 'initial_data']
+                            for key_base in cache_keys_to_clear:
+                                cache_key = get_session_cache_key(key_base)
+                                cache.delete(cache_key)
+                                logging.info(f"[BACKGROUND] ✅ Cleared cache: {key_base}")
+                        except Exception as cache_err:
+                            logging.warning(f"[BACKGROUND] Failed to clear cache: {cache_err}")
 
                         update_processing_status(original_filename, 'ready')
                         logging.info(f"[BACKGROUND] Processing complete for {original_filename}")
@@ -2275,7 +2331,21 @@ def upload_file():
                 # CRITICAL FIX: Invalidate the global processor cache so page reload gets fresh data
                 global _excel_processor
                 _excel_processor = None
-                logging.info("Cleared Excel processor cache to force reload of new file on next request")
+                logging.info("✅ Cleared Excel processor cache to force reload of new file on next request")
+                
+                # CRITICAL: Clear ALL caches to force complete refresh
+                try:
+                    cache_keys_to_clear = ['available_tags', 'selected_tags', 'vendor_tags', 'initial_data']
+                    for key_base in cache_keys_to_clear:
+                        cache_key = get_session_cache_key(key_base)
+                        cache.delete(cache_key)
+                        logging.info(f"✅ Cleared cache: {key_base}")
+                except Exception as cache_err:
+                    logging.warning(f"Failed to clear cache: {cache_err}")
+                
+                # CRITICAL: Verify session file path is set correctly
+                logging.info(f"✅ Session file_path after upload: {session.get('file_path')}")
+                logging.info(f"✅ Uploaded file saved at: {file_path}")
 
                 update_processing_status(file.filename, 'ready')
             else:
@@ -13202,7 +13272,7 @@ def get_lineage_suggestions():
 @app.route('/library')
 def library_browser():
     """Library browser page for viewing and editing master strain data."""
-    cache_bust = str(int(time.time()))
+    cache_bust = "v2.0.1"  # Use static version for caching
     return render_template('library_browser.html', cache_bust=cache_bust)
 
 @app.route('/api/library/products', methods=['GET'])

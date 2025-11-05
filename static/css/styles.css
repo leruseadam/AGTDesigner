@@ -71,7 +71,8 @@ body {
 .container,
 .container-fluid,
 .main-content,
-.centerframe {
+.centerframe,
+.row.fade-in.g-1 {
   max-width: 100% !important;
   margin-left: auto !important;
   margin-right: auto !important;
@@ -79,45 +80,11 @@ body {
   padding-right: 1rem !important;
 }
 
-/* Ensure rows have consistent spacing for alignment */
-.row.fade-in.g-1,
-.row.fade-in.g-2 {
-  margin-left: -0.5rem !important;
-  margin-right: -0.5rem !important;
-}
-
 /* Ensure the entire app stays centered and has breathing room */
 body > .container,
 body > .container-fluid {
   max-width: 100% !important;
   margin: 0 auto !important;
-}
-
-/* Ensure filter bar and tag lists align perfectly */
-[data-container-type="filter"] {
-  padding-left: 0.5rem !important;
-  padding-right: 0.5rem !important;
-}
-
-[data-container-type="available"] {
-  padding-left: 0.5rem !important;
-  padding-right: 0.25rem !important;
-  flex: 0 0 41.666667% !important;
-  max-width: 41.666667% !important;
-}
-
-[data-container-type="selected"] {
-  padding-left: 0.25rem !important;
-  padding-right: 0.5rem !important;
-  flex: 0 0 41.666667% !important;
-  max-width: 41.666667% !important;
-}
-
-[data-container-type="center"] {
-  padding-left: 0.25rem !important;
-  padding-right: 0.25rem !important;
-  flex: 0 0 16.666667% !important;
-  max-width: 16.666667% !important;
 }
   
 /* Tag lists and containers - ensure they scale with zoom */
@@ -2105,7 +2072,7 @@ canvas#lava-lamp-canvas {
     transform: scale(1.02);
   }
   
-  /* Tag list container - RESPONSIVE HEIGHT WITH SCROLLING - ZOOM RESPONSIVE */
+  /* Tag list container - SYMMETRICAL - fills column width */
   .tag-list-container {
     background: rgba(45, 34, 58, 0.92);
     backdrop-filter: blur(10px);
@@ -2171,20 +2138,26 @@ canvas#lava-lamp-canvas {
   }
   
   /* Ensure the columns are responsive */
-  .col-lg-5[data-container-type="available"],
-  .col-lg-5[data-container-type="selected"] {
+  .col-lg-4[data-container-type="available"],
+  .col-lg-4[data-container-type="selected"] {
     height: auto !important;
     max-height: none !important;
     min-height: 37.5rem !important;
-    width: 100% !important;
   }
 
-  /* Make the main containers fill their column width */
+  /* SYMMETRICAL - Make left and right columns equal width */
   [data-container-type="available"],
   [data-container-type="selected"] {
-    flex: 0 0 41.666667% !important;
-    max-width: 41.666667% !important;
-    width: 100% !important;
+    flex: 1 1 0 !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    width: auto !important;
+  }
+  
+  /* Center column stays fixed width */
+  [data-container-type="center"] {
+    flex: 0 0 auto !important;
+    width: auto !important;
   }
   
   /* Ensure tag list containers are responsive - ZOOM RESPONSIVE */
@@ -3293,15 +3266,15 @@ canvas#lava-lamp-canvas {
     cursor: pointer;
   }
   
-  /* Checkbox styling */
+  /* Checkbox styling - BIGGER for header checkboxes */
   .custom-checkbox,
   .brand-select-all {
-    width: 24px;
-    height: 24px;
+    width: 32px;
+    height: 32px;
     appearance: none;
     background: linear-gradient(145deg, rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0.1));
     border: 2px solid rgba(160, 132, 232, 0.7);
-    border-radius: 6px;
+    border-radius: 8px;
     cursor: pointer;
     position: relative;
     transition: all 0.3s ease;
@@ -3340,16 +3313,16 @@ canvas#lava-lamp-canvas {
     text-align: center;
     color: white;
     font-weight: bold;
-    font-size: 16px;
-    line-height: 20px;
+    font-size: 22px;
+    line-height: 28px;
     text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
   }
   
-  /* Tag checkbox styling */
+  /* Tag checkbox styling - BIGGER for better visibility */
   .tag-checkbox,
   input[type="checkbox"]:not(.custom-checkbox):not(.brand-select-all) {
-    width: 28px;
-    height: 28px;
+    width: 36px;
+    height: 36px;
     appearance: none;
     background: linear-gradient(145deg, rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0.1));
     border: 2px solid rgba(160, 132, 232, 0.7);
@@ -3361,7 +3334,7 @@ canvas#lava-lamp-canvas {
       0 2px 8px rgba(0, 0, 0, 0.3),
       0 1px 2px rgba(160, 132, 232, 0.2);
     position: relative;
-    margin-right: 12px;
+    margin-right: 14px;
   }
   
   .tag-checkbox:hover,
@@ -3393,8 +3366,8 @@ canvas#lava-lamp-canvas {
     text-align: center;
     color: white;
     font-weight: bold;
-    font-size: 18px;
-    line-height: 24px;
+    font-size: 24px;
+    line-height: 32px;
     text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
   }
   
@@ -3466,7 +3439,7 @@ canvas#lava-lamp-canvas {
   
   /* Filter section */
 .filter-label {
-  font-size: 1.25rem;
+  font-size: 1.05rem;
   font-weight: 700;
   color: var(--text-secondary);
   margin-bottom: 0.4rem;
@@ -3477,10 +3450,9 @@ canvas#lava-lamp-canvas {
   text-align: center;
 }
 
-  /* Select All checkbox styling */
+  /* Select All checkbox styling - no extra scaling needed, already 32px */
   #selectAllAvailable {
-    margin-right: 6px;
-    transform: scale(1.1);
+    margin-right: 8px;
     opacity: 1 !important;
     visibility: visible !important;
   }
@@ -8315,15 +8287,15 @@ canvas#lava-lamp-canvas {
     padding: 0 !important;
   }
   
-  /* Enhanced 3D checkbox styling */
+  /* Enhanced 3D checkbox styling - BIGGER */
   .tag-checkbox,
   input[type="checkbox"]:not(.custom-checkbox):not(.brand-select-all) {
-    width: 24px !important;
-    height: 24px !important;
+    width: 36px !important;
+    height: 36px !important;
     appearance: none !important;
     background: linear-gradient(145deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.1)) !important;
     border: 2px solid rgba(160, 132, 232, 0.8) !important;
-    border-radius: 6px !important;
+    border-radius: 8px !important;
     cursor: pointer !important;
     transition: all 0.3s ease !important;
     box-shadow: 
@@ -8359,16 +8331,16 @@ canvas#lava-lamp-canvas {
     transform: scale(1.1) translateZ(0) !important;
   }
   
-  /* Select All checkbox 3D styling */
+  /* Select All checkbox 3D styling - BIGGER */
   .select-all-checkbox,
   #selectAllAvailable,
   input[type="checkbox"].brand-select-all {
-    width: 24px !important;
-    height: 24px !important;
+    width: 32px !important;
+    height: 32px !important;
     appearance: none !important;
     background: linear-gradient(145deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.1)) !important;
     border: 2px solid rgba(160, 132, 232, 0.8) !important;
-    border-radius: 6px !important;
+    border-radius: 8px !important;
     cursor: pointer !important;
     transition: all 0.3s ease !important;
     pointer-events: auto !important;
@@ -9496,19 +9468,23 @@ html, body {
 .filter-group {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.5rem;
+  min-height: 75px;
 }
 
 .filter-group .filter-label {
-  font-size: 1.15rem !important;
+  font-size: 0.95rem !important;
   font-weight: 700 !important;
   letter-spacing: 0.5px !important;
+  line-height: 1.2 !important;
+  white-space: nowrap !important;
 }
 
 .filter-group .form-select {
-  min-height: 40px !important;
-  padding: 0.6rem 2.5rem 0.6rem 0.85rem !important;
+  min-height: 45px !important;
+  padding: 0.75rem 2.5rem 0.75rem 0.85rem !important;
   font-size: 0.95rem !important;
+  line-height: 1.5 !important;
 }
 
 /* Compact filter selects */

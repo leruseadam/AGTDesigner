@@ -4789,22 +4789,22 @@
       <!-- Main Content Area -->
       <div class="w-100">
         <!-- Tag-list containers row (now includes filter bar for alignment) -->
-        <div class="row fade-in g-2" style="animation-delay: 0.4s;">
+        <div class="row fade-in g-1" style="animation-delay: 0.4s;">
           <!-- Filter Bar as a column -->
-          <div class="col-12 mb-4" data-container-type="filter" style="padding-left: 0.5rem; padding-right: 0.5rem;">
-              <div class="enhanced-filter-bar d-flex align-items-center gap-3 p-4" style="background: rgba(45, 34, 58, 0.95); border-radius: 16px; backdrop-filter: blur(20px); border: 2px solid rgba(160, 132, 232, 0.6);">
+          <div class="col-12 mb-4" data-container-type="filter">
+              <div class="enhanced-filter-bar d-flex align-items-center gap-3 p-5" style="background: rgba(45, 34, 58, 0.95); border-radius: 16px; backdrop-filter: blur(20px); border: 2px solid rgba(160, 132, 232, 0.6); min-height: 140px;">
                   <!-- Left Side: Clear Button and Upload Section -->
-                  <div class="left-section d-flex flex-column gap-2" style="flex-shrink: 0;">
+                  <div class="left-section d-flex flex-column gap-3" style="flex-shrink: 0; min-height: 90px; justify-content: center;">
                     <!-- File Path Display (Above buttons) -->
                     <div class="file-path-display text-center">
-                      <span class="text-white" id="fileInfoText" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 600; display: block; padding: 4px 8px; background: rgba(255, 255, 255, 0.1); border-radius: 6px; border: 1px solid rgba(160, 132, 232, 0.3);">
+                      <span class="text-white" id="fileInfoText" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; display: block; padding: 8px 12px; background: rgba(255, 255, 255, 0.1); border-radius: 6px; border: 1px solid rgba(160, 132, 232, 0.3); min-height: 36px; line-height: 1.5;">
                         {% if uploaded_filename %}{{ uploaded_filename }}{% else %}No file uploaded{% endif %}
                       </span>
                     </div>
                     <!-- Buttons Row -->
                     <div class="buttons-row d-flex align-items-center gap-3">
                       <!-- Clear Button -->
-                      <button id="clearFiltersBtn" class="btn btn-danger px-3 py-2" onclick="TagManager.clearAllFilters()" title="Clear all filters and reset app" style="font-weight: 700; box-shadow: 0 4px 12px rgba(0,0,0,0.3); white-space: nowrap; font-size: 14px; border-radius: 8px; min-width: 180px;">
+                      <button id="clearFiltersBtn" class="btn btn-danger px-3 py-3" onclick="TagManager.clearAllFilters()" title="Clear all filters and reset app" style="font-weight: 700; box-shadow: 0 4px 12px rgba(0,0,0,0.3); white-space: nowrap; font-size: 14px; border-radius: 8px; min-width: 180px; min-height: 45px;">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2">
                           <polyline points="3 6 5 6 21 6"></polyline>
                           <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
@@ -4813,7 +4813,7 @@
                       </button>
                       <!-- Upload Button -->
                       <input type="file" id="fileInput" accept=".xlsx" style="display:none;">
-                      <button type="button" class="btn px-3 py-2" id="uploadTriggerBtn" onclick="var input = document.getElementById('fileInput'); if(input) input.click();" aria-label="Upload Excel file" style="font-weight: 700; box-shadow: 0 4px 12px rgba(0,0,0,0.3); white-space: nowrap; font-size: 14px; border-radius: 8px; min-width: 180px; background: linear-gradient(135deg, #a084e8 0%, #8b5cf6 100%); border: 2px solid #a084e8; color: white;">
+                      <button type="button" class="btn px-3 py-3" id="uploadTriggerBtn" onclick="var input = document.getElementById('fileInput'); if(input) input.click();" aria-label="Upload Excel file" style="font-weight: 700; box-shadow: 0 4px 12px rgba(0,0,0,0.3); white-space: nowrap; font-size: 14px; border-radius: 8px; min-width: 180px; min-height: 45px; background: linear-gradient(135deg, #a084e8 0%, #8b5cf6 100%); border: 2px solid #a084e8; color: white;">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2">
                           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                           <polyline points="7 10 12 15 17 10"></polyline>
@@ -4878,9 +4878,9 @@
         </div>
         
         <!-- Main Content Row -->
-        <div class="row fade-in g-2" style="animation-delay: 0.6s;">
+        <div class="d-flex gap-2 fade-in" style="animation-delay: 0.6s; width: 100%;">
           <!-- Available Tags -->
-          <div class="col-lg-5 mb-2" data-container-type="available" style="padding-left: 0.5rem; padding-right: 0.25rem;">
+          <div class="mb-2" data-container-type="available" style="flex: 1;">
             <div class="glass-card d-flex flex-column h-100">
               <div class="card-header border-0 bg-transparent p-2">
                 <div class="d-flex justify-content-between align-items-center mb-2">
@@ -4920,7 +4920,7 @@
           </div>
           
           <!-- Center Column with Controls -->
-          <div class="col-lg-2 mb-2 mt-0 d-flex flex-column justify-content-start align-items-center" style="padding-top: 0; margin-top: 0; padding-left: 0.25rem; padding-right: 0.25rem;" data-container-type="center">
+          <div class="mb-2 mt-0 d-flex flex-column justify-content-start align-items-center" style="flex: 0 0 auto; padding-left: 0.5rem; padding-right: 0.5rem;" data-container-type="center">
             <!-- Controls -->
             <div class="control-panel">
               <!-- Template Section -->
@@ -5035,7 +5035,7 @@
           </div>
           
           <!-- Selected Tags -->
-          <div class="col-lg-5 mb-2" data-container-type="selected" style="padding-left: 0.25rem; padding-right: 0.5rem;">
+          <div class="mb-2" data-container-type="selected" style="flex: 1;">
             <div class="glass-card d-flex flex-column h-100">
               <div class="card-header border-0 bg-transparent p-2">
                 <div class="d-flex justify-content-between align-items-center mb-2">
@@ -11364,7 +11364,21 @@
           console.log('🚨 EMERGENCY: Upload response:', data);
 
           if (response.ok && data.success) {
-            setTimeout(() => window.location.reload(), 1000);
+            console.log('✅ Upload successful, clearing all caches and reloading...');
+            
+            // Clear all frontend caches
+            if (window.TagManager && window.TagManager.clearCache) {
+              window.TagManager.clearCache();
+            }
+            
+            // Clear session storage
+            sessionStorage.clear();
+            
+            // Force hard reload with cache bust to ensure new products show up
+            setTimeout(() => {
+              // Add nocache parameter to force fresh data load
+              window.location.href = window.location.href.split('?')[0] + '?nocache=1&reload=true&t=' + Date.now();
+            }, 1500);
           } else {
             alert('Upload failed: ' + (data.error || 'Unknown error'));
           }

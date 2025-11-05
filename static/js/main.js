@@ -3510,6 +3510,25 @@ const TagManager = {
             } catch (e) {
                 console.warn('Failed to update similar lineages locally:', e);
             }
+            
+            // CRITICAL: Force backend cache refresh after lineage update
+            try {
+                // Fetch fresh data from backend to ensure lineage changes persist
+                console.log('🔄 Fetching fresh tag data after lineage update...');
+                const freshTagsResponse = await fetch('/api/available-tags?nocache=1&prefer_db=1&t=' + Date.now());
+                if (freshTagsResponse.ok) {
+                    const freshData = await freshTagsResponse.json();
+                    console.log(`✅ Refreshed ${freshData.tags?.length || 0} tags from backend after lineage update`);
+                    
+                    // Update state with fresh data to ensure persistence
+                    if (freshData.tags && freshData.tags.length > 0) {
+                        this.state.originalTags = freshData.tags;
+                        console.log('✅ Backend cache refreshed with new lineage data');
+                    }
+                }
+            } catch (refreshError) {
+                console.warn('Could not refresh backend cache:', refreshError);
+            }
 
             // CRITICAL FIX: Update selected tags locally without backend fetch
             // This ensures the selected tags dropdowns reflect the current lineage values
