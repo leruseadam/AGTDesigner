@@ -13089,16 +13089,57 @@ def get_initial_data():
             except Exception as e:
                 logging.debug(f"Could not read session file: {e}")
         
-        # If no existing data, return quickly
+        # If no existing data, try to load default file for the store
         if not has_existing_data:
-            elapsed = (datetime.now() - start_time).total_seconds()
-            logging.info(f"No data loaded - returning empty state in {elapsed:.3f}s")
-            return jsonify({
-                'success': False,
-                'message': 'No data currently loaded. Please upload an Excel file to begin.',
-                'ready_for_upload': True,
-                'store': selected_store or 'No store selected'
-            })
+            logging.info("No existing data - checking for default file...")
+            
+            # Only try to load default file if a store is selected
+            if selected_store:
+                from src.core.data.excel_processor import get_default_upload_file
+                import time
+                
+                try:
+                    # Quick check for default file (with timeout)
+                    file_start = time.time()
+                    default_file = get_default_upload_file(selected_store)
+                    file_search_time = time.time() - file_start
+                    logging.info(f"File search took {file_search_time:.3f}s")
+                    
+                    if default_file and file_search_time < 5.0:  # Only proceed if search was fast
+                        logging.info(f"Found default file: {os.path.basename(default_file)}")
+                        
+                        # Load the file (with timeout protection)
+                        try:
+                            excel_processor = get_excel_processor()
+                            load_start = time.time()
+                            excel_processor.load_file(default_file)
+                            load_time = time.time() - load_start
+                            excel_processor._last_loaded_file = default_file
+                            logging.info(f"Default file loaded in {load_time:.3f}s")
+                            
+                            # Now that we have data, get it
+                            has_existing_data = True
+                        except Exception as e:
+                            logging.error(f"Failed to load default file: {e}")
+                            # Fall through to return empty state
+                    else:
+                        if default_file:
+                            logging.warning(f"File search took too long ({file_search_time:.3f}s), skipping")
+                        else:
+                            logging.info(f"No default file found for {selected_store}")
+                except Exception as e:
+                    logging.error(f"Error during default file search: {e}")
+            
+            # If we still don't have data, return empty state
+            if not has_existing_data:
+                elapsed = (datetime.now() - start_time).total_seconds()
+                logging.info(f"No data loaded - returning empty state in {elapsed:.3f}s")
+                return jsonify({
+                    'success': False,
+                    'message': 'No data currently loaded. Please upload an Excel file to begin.',
+                    'ready_for_upload': True,
+                    'store': selected_store or 'No store selected'
+                })
         
         # If we have existing data, load it via excel_processor
         logging.info("Loading existing data from excel processor...")

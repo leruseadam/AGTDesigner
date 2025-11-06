@@ -5310,9 +5310,9 @@ const TagManager = {
         console.log('=== CHECK FOR EXISTING DATA FUNCTION CALLED ===');
         console.log('Checking for existing data... (attempt ' + (retryCount + 1) + ')');
         
-        // Reduced timeout to 10 seconds for better UX - if it takes longer, retry or skip
+        // 15 second timeout - allows time to load default files but still reasonable
         const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('Initialization timeout')), 10000); // 10 second timeout
+            setTimeout(() => reject(new Error('Initialization timeout')), 15000); // 15 second timeout
         });
         
         try {
