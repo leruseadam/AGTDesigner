@@ -467,14 +467,14 @@ canvas#lava-lamp-canvas {
   }
 }
 
-/* Direct overrides for fixed vh panels */
+/* Direct overrides for dynamic vh panels */
 @supports (height: 1svh) {
   #availableTags,
-  #selectedTags { height: 80svh !important; min-height: 80svh !important; }
+  #selectedTags { max-height: 80svh !important; min-height: 200px !important; height: auto !important; }
 }
 @supports (height: 1dvh) {
   #availableTags,
-  #selectedTags { height: 80dvh !important; min-height: 80dvh !important; }
+  #selectedTags { max-height: 80dvh !important; min-height: 200px !important; height: auto !important; }
 }
 
 /* Ensure main content respects dynamic viewport height */
@@ -1742,8 +1742,9 @@ canvas#lava-lamp-canvas {
   #availableTags {
     margin: 0 !important;
     padding: 0 !important;
-    height: 80vh !important;
-    min-height: 80vh !important;
+    max-height: 80vh !important;
+    min-height: 200px !important;
+    height: auto !important;
     overflow-y: auto !important;
     overflow-x: hidden !important;
     display: block !important;
@@ -1760,9 +1761,9 @@ canvas#lava-lamp-canvas {
   #selectedTags {
     margin: 0 !important;
     padding: 0 !important;
-    height: 80vh !important;
-    min-height: 80vh !important;
-    max-height: none !important;
+    max-height: 80vh !important;
+    min-height: 200px !important;
+    height: auto !important;
     overflow-y: auto !important;
     overflow-x: hidden !important;
     display: block !important;
