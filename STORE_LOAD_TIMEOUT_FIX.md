@@ -1,18 +1,15 @@
-# Store Load Timeout Fix
+# Store Load Timeout Fix - Version 2
 
 ## Problem
-After selecting a store, the app would sometimes fail to load, showing "Initialization timeout" in the console. The page would then fall back to test data instead of loading real product data.
+After selecting a store, the app would fail to load, showing "Initialization timeout" in the console. The page would then fall back to test data instead of loading real product data.
 
-## Root Cause
-When a store was selected:
-1. The page would reload to sync the session
-2. On reload, `TagManager.init()` would call `checkForExistingData()`
-3. `checkForExistingData()` would call `/api/initial-data`
-4. The backend would try to load a default Excel file for the selected store
-5. Loading the default file could take 30+ seconds, causing the frontend to timeout
-6. The app would fall back to test data, appearing broken to the user
+## Root Causes
+1. **Backend**: `get_excel_processor()` was being called even when no data existed, causing slow initialization
+2. **Backend**: Attempting to load default files that didn't exist or were too large
+3. **Frontend**: 30 second timeout was too long, making the app appear broken
+4. **Frontend**: No retry logic for transient failures
 
-## Solution
+## Solution - Version 2 (FAST PATH)
 
 ### Frontend Changes (`static/js/main.js`)
 
@@ -28,15 +25,20 @@ When a store was selected:
 
 ### Backend Changes (`app.py`)
 
-1. **Skip default file loading** - Instead of trying to load a potentially large default file on every initialization, return quickly with an empty state. Users can upload files explicitly.
+**Version 1 (Initial fix):**
+1. Skip default file loading on initialization
+2. Add timing logs
+3. Check for store selection before file operations
 
-2. **Better logging** - Added timing information to help diagnose slow operations:
-   - Log session ID and store selection
-   - Time file search operations
-   - Time file loading operations
-   - Log exception details
+**Version 2 (FAST PATH - Current):**
+1. **Check session file directly** - Before calling `get_excel_processor()`, check if session file exists and has data
+2. **Return immediately if no data** - Don't initialize excel_processor unnecessarily (saves 1-2 seconds)
+3. **Only call get_excel_processor() if data exists** - Lazy loading for better performance
+4. **Timing logs** - Track exactly how long the response takes (should be < 10ms when no data)
 
-3. **Early validation** - Check if store is selected before attempting any file operations
+This creates two paths:
+- **Fast path (no data)**: Check session file → return empty state in < 10ms
+- **Slow path (has data)**: Load excel_processor → return data in < 1s
 
 ## Testing
 
