@@ -54,47 +54,53 @@ class DragAndDropManager {
     }
 
     setupCheckboxProtection() {
-        // Prevent checkbox changes during drag operations
-        document.addEventListener('change', (e) => {
-            if (e.target.classList.contains('tag-checkbox') && this.isDragging) {
-                console.log('Preventing checkbox change during drag operation');
-                e.preventDefault();
-                e.stopPropagation();
-                e.stopImmediatePropagation();
+        // Prevent ALL checkbox interactions during drag operations with MAXIMUM protection
+        // This uses capture phase to intercept events before they reach the checkbox handlers
+        
+        const eventTypes = ['change', 'click', 'mousedown', 'mouseup', 'input'];
+        
+        eventTypes.forEach(eventType => {
+            document.addEventListener(eventType, (e) => {
+                // Check if we're dragging
+                if (!this.isDragging) return;
                 
-                // Restore the original checked state
-                const tagRow = e.target.closest('.tag-row');
-                if (tagRow && this.draggedElement === tagRow) {
-                    // Keep the checkbox checked since we're dragging a selected tag
-                    e.target.checked = true;
+                // Check if the event target is a checkbox or inside a tag item
+                const isCheckbox = e.target.classList.contains('tag-checkbox');
+                const isInTagItem = e.target.closest('.tag-item');
+                const isInTagRow = e.target.closest('.tag-row');
+                
+                // If it's a checkbox or inside a tag item/row during drag, block it completely
+                if (isCheckbox || (isInTagItem && isInTagRow)) {
+                    console.log(`🚫 BLOCKING ${eventType} event during drag operation on:`, e.target);
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.stopImmediatePropagation();
+                    
+                    // For checkbox changes, force the checkbox to stay checked
+                    if (isCheckbox && eventType === 'change') {
+                        const tagRow = e.target.closest('.tag-row');
+                        if (tagRow && this.draggedElement === tagRow) {
+                            // Keep the checkbox checked since we're dragging a selected tag
+                            setTimeout(() => {
+                                e.target.checked = true;
+                            }, 0);
+                        }
+                    }
+                    
+                    // For mousedown/click on checkboxes, force them to stay in their current state
+                    if (isCheckbox && (eventType === 'mousedown' || eventType === 'click')) {
+                        const currentState = e.target.checked;
+                        setTimeout(() => {
+                            e.target.checked = currentState;
+                        }, 0);
+                    }
+                    
+                    return false;
                 }
-                return false;
-            }
-        }, true);
+            }, true); // Use capture phase for maximum interception
+        });
         
-        // Prevent click events on checkboxes during drag
-        document.addEventListener('click', (e) => {
-            if (e.target.classList.contains('tag-checkbox') && this.isDragging) {
-                console.log('Preventing checkbox click during drag operation');
-                e.preventDefault();
-                e.stopPropagation();
-                e.stopImmediatePropagation();
-                return false;
-            }
-        }, true);
-        
-        // Prevent click events on tag items during drag
-        document.addEventListener('click', (e) => {
-            if (e.target.closest('.tag-item') && this.isDragging) {
-                console.log('Preventing tag item click during drag operation');
-                e.preventDefault();
-                e.stopPropagation();
-                e.stopImmediatePropagation();
-                return false;
-            }
-        }, true);
-        
-        // Remove verbose debugging listeners to avoid heavy console logging
+        console.log('✅ Enhanced checkbox protection installed for drag operations');
     }
 
     setupDragZone(selector) {
@@ -117,32 +123,60 @@ class DragAndDropManager {
     }
     
     addDragHandles(container) {
-        console.log('Adding drag handles to container:', container);
+        console.log('🔧 Adding drag handles to container:', container);
         
         // Check if we're in the middle of updating tags
         if (this.isUpdatingTags) {
-            console.log('Skipping drag handle addition due to ongoing tag updates');
+            console.log('⏸️ Skipping drag handle addition due to ongoing tag updates');
+            return;
+        }
+        
+        // Validate container
+        if (!container || !container.querySelectorAll) {
+            console.error('❌ Invalid container provided to addDragHandles');
             return;
         }
         
         // Remove existing handles
         const existingHandles = container.querySelectorAll('.drag-handle');
-        existingHandles.forEach(handle => handle.remove());
-        console.log(`Removed ${existingHandles.length} existing drag handles`);
+        existingHandles.forEach(handle => {
+            console.log('🗑️ Removing existing drag handle from:', handle.parentElement?.textContent?.trim().substring(0, 30));
+            handle.remove();
+        });
+        console.log(`✓ Removed ${existingHandles.length} existing drag handles`);
         
         // Add handles to all tag rows (the actual draggable containers)
         const allTagRows = container.querySelectorAll('.tag-row');
         const tagRows = Array.from(allTagRows).filter(row => row.querySelector('.tag-checkbox'));
-        console.log(`Found ${allTagRows.length} total tag rows, ${tagRows.length} with checkboxes`);
+        console.log(`📊 Found ${allTagRows.length} total tag rows, ${tagRows.length} with checkboxes`);
         
         if (tagRows.length === 0) {
-            console.warn('No tag rows with checkboxes found in container');
-            console.log('Available tag rows:', Array.from(allTagRows).map(row => ({
+            console.warn('⚠️ No tag rows with checkboxes found in container');
+            console.log('🔍 Available tag rows:', Array.from(allTagRows).slice(0, 3).map(row => ({
                 text: row.textContent.trim().substring(0, 50),
                 hasCheckbox: !!row.querySelector('.tag-checkbox'),
                 classes: row.className,
-                children: Array.from(row.children).map(child => child.className)
+                childrenClasses: Array.from(row.children).map(child => child.className).join(', ')
             })));
+            
+            // Try to find tag items instead if tag rows don't exist
+            const tagItems = container.querySelectorAll('.tag-item');
+            if (tagItems.length > 0) {
+                console.log(`🔍 Found ${tagItems.length} .tag-item elements instead, attempting to use their parents`);
+                const tagItemParents = Array.from(tagItems).map(item => item.parentElement).filter(Boolean);
+                if (tagItemParents.length > 0) {
+                    console.log(`✓ Using ${tagItemParents.length} tag item parents as tag rows`);
+                    // Use the parents as tag rows
+                    tagItemParents.forEach((parent, index) => {
+                        if (!parent.classList.contains('tag-row')) {
+                            parent.classList.add('tag-row');
+                        }
+                    });
+                    // Recursively call addDragHandles with the updated container
+                    setTimeout(() => this.addDragHandles(container), 50);
+                    return;
+                }
+            }
             return;
         }
         
@@ -161,13 +195,18 @@ class DragAndDropManager {
             }
             
             // Make sure tag row has relative positioning and proper padding
-            if (getComputedStyle(tagRow).position === 'static') {
-                tagRow.style.position = 'relative';
+            tagRow.style.position = 'relative';
+            
+            // Ensure proper padding for drag handle (increased to accommodate larger handle)
+            const currentPaddingLeft = parseInt(getComputedStyle(tagRow).paddingLeft) || 0;
+            if (currentPaddingLeft < 45) {
+                tagRow.style.paddingLeft = '45px';
             }
             
-            // Ensure proper padding for drag handle
-            if (!tagRow.style.paddingLeft || tagRow.style.paddingLeft === '0px') {
-                tagRow.style.paddingLeft = '32px';
+            // Ensure minimum height for better drag handle visibility
+            const currentHeight = parseInt(getComputedStyle(tagRow).height) || 0;
+            if (currentHeight < 40) {
+                tagRow.style.minHeight = '40px';
             }
             
             // Create drag handle with stronger styles
@@ -181,29 +220,32 @@ class DragAndDropManager {
             `;
             
             // Apply very strong inline styles to ensure they work
+            // Made more visible and easier to grab
             dragHandle.style.cssText = `
                 position: absolute !important;
                 left: 6px !important;
                 top: 50% !important;
                 transform: translateY(-50%) !important;
                 color: rgba(79, 172, 254, 1) !important;
-                opacity: 0.9 !important;
+                opacity: 1 !important;
                 transition: all 0.3s ease !important;
                 cursor: grab !important;
                 pointer-events: auto !important;
-                z-index: 1000 !important;
-                background: rgba(79, 172, 254, 0.25) !important;
+                z-index: 10000 !important;
+                background: rgba(79, 172, 254, 0.35) !important;
                 border-radius: 6px !important;
-                padding: 6px !important;
-                border: 2px solid rgba(79, 172, 254, 0.6) !important;
+                padding: 8px !important;
+                border: 2px solid rgba(79, 172, 254, 0.8) !important;
                 display: flex !important;
                 align-items: center !important;
                 justify-content: center !important;
-                width: 28px !important;
-                height: 28px !important;
+                width: 32px !important;
+                height: 32px !important;
                 box-shadow: 
-                    0 3px 8px rgba(79, 172, 254, 0.3),
-                    0 1px 3px rgba(0,0,0,0.2) !important;
+                    0 4px 12px rgba(79, 172, 254, 0.5),
+                    0 2px 6px rgba(0,0,0,0.3) !important;
+                min-width: 32px !important;
+                min-height: 32px !important;
             `;
             
             // Add enhanced hover effect with stronger styles
@@ -331,23 +373,54 @@ class DragAndDropManager {
         tagRow.style.transform = 'scale(1.02) rotate(1deg)';
         tagRow.style.boxShadow = '0 4px 12px rgba(79, 172, 254, 0.3)';
         
-        // Set dragging state
+        // Set dragging state FIRST before anything else
         this.isDragging = true;
         this.draggedElement = tagRow;
         
-        // Disable checkbox interactions during drag
+        // Mark the tag row as being dragged to prevent any modifications
+        tagRow.setAttribute('data-dragging', 'true');
+        
+        // Disable checkbox interactions during drag - MULTIPLE protections
         const checkboxElement = tagRow.querySelector('.tag-checkbox');
         if (checkboxElement) {
+            // Store original state
+            this.originalCheckboxState = checkboxElement.checked;
+            
+            // Disable pointer events
             checkboxElement.style.pointerEvents = 'none';
+            
+            // Add data attributes for protection
             checkboxElement.setAttribute('data-drag-disabled', 'true');
+            checkboxElement.setAttribute('data-reordering', 'true');
+            
+            // Prevent checkbox from being modified
+            Object.defineProperty(checkboxElement, 'checked', {
+                get: function() { return true; },
+                set: function(value) { 
+                    console.log('🚫 Attempted to change checkbox during drag, blocked!');
+                },
+                configurable: true
+            });
+            
+            console.log('✅ Checkbox fully protected during drag');
         }
         
-        // Disable click events on tag-item during drag to prevent conflicts
+        // Disable ALL interactions on tag-item during drag to prevent conflicts
         const tagItem = tagRow.querySelector('.tag-item');
         if (tagItem) {
             tagItem.style.pointerEvents = 'none';
             tagItem.setAttribute('data-drag-disabled', 'true');
         }
+        
+        // Protect the entire tag row from removal
+        const originalRemove = tagRow.remove;
+        tagRow.remove = function() {
+            console.error('🚫 BLOCKED attempt to remove tag during drag operation!');
+            console.trace();
+        };
+        
+        // Store the original remove function so we can restore it later
+        this.originalRemoveFunction = originalRemove;
         
         // Add global event listeners
         document.addEventListener('mousemove', this.boundHandleMouseMove);
@@ -415,11 +488,26 @@ class DragAndDropManager {
         document.removeEventListener('mousemove', this.boundHandleMouseMove);
         document.removeEventListener('mouseup', this.boundHandleMouseUp);
         
-        // Re-enable checkbox interactions
+        // Remove dragging marker
+        this.draggedElement.removeAttribute('data-dragging');
+        
+        // Re-enable checkbox interactions and restore original state
         const checkbox = this.draggedElement.querySelector('.tag-checkbox');
         if (checkbox) {
+            // Remove the property descriptor override
+            delete checkbox.checked;
+            
+            // Restore original checked state
+            if (this.originalCheckboxState !== undefined) {
+                checkbox.checked = this.originalCheckboxState;
+            }
+            
+            // Re-enable interactions
             checkbox.style.pointerEvents = '';
             checkbox.removeAttribute('data-drag-disabled');
+            checkbox.removeAttribute('data-reordering');
+            
+            console.log('✅ Checkbox protections removed, state restored to:', checkbox.checked);
         }
         
         // Re-enable tag-item interactions
@@ -427,6 +515,12 @@ class DragAndDropManager {
         if (tagItem) {
             tagItem.style.pointerEvents = '';
             tagItem.removeAttribute('data-drag-disabled');
+        }
+        
+        // Restore the original remove function
+        if (this.originalRemoveFunction) {
+            this.draggedElement.remove = this.originalRemoveFunction;
+            this.originalRemoveFunction = null;
         }
         
         // Reset visual state
@@ -860,20 +954,16 @@ class DragAndDropManager {
     }
 
     resetDragState() {
+        console.log('🔄 Resetting drag state...');
+        
+        // Set isDragging to false FIRST to stop event blocking
         this.isDragging = false;
-        this.draggedElement = null;
-        this.draggedElementText = null;
-        this.draggedElementId = null;
-        this.draggedElementSnapshot = null;
-        this.dragStartCoords = null;
-        this.targetPosition = null;
-        this.originalIndex = null;
-        this._isReordering = false;
         
         // Remove dragging class from any elements and re-enable checkboxes
-        const draggingElements = document.querySelectorAll('.tag-row.dragging');
+        const draggingElements = document.querySelectorAll('.tag-row.dragging, .tag-row[data-dragging="true"]');
         draggingElements.forEach(element => {
             element.classList.remove('dragging');
+            element.removeAttribute('data-dragging');
             element.style.transform = '';
             element.style.opacity = '';
             element.style.boxShadow = '';
@@ -883,12 +973,22 @@ class DragAndDropManager {
             element.style.border = '';
             element.style.transition = '';
             
-            // Re-enable checkbox interactions
+            // Re-enable checkbox interactions and remove property override
             const checkbox = element.querySelector('.tag-checkbox');
             if (checkbox) {
+                // Remove the property descriptor override
+                delete checkbox.checked;
+                
+                // Restore original state if available
+                if (this.originalCheckboxState !== undefined) {
+                    checkbox.checked = this.originalCheckboxState;
+                }
+                
                 checkbox.style.pointerEvents = 'auto';
                 checkbox.removeAttribute('data-drag-disabled');
                 checkbox.removeAttribute('data-reordering');
+                
+                console.log('✅ Checkbox restored for element');
             }
             
             // Re-enable tag-item interactions
@@ -898,7 +998,24 @@ class DragAndDropManager {
                 tagItem.removeAttribute('data-drag-disabled');
                 tagItem.removeAttribute('data-reordering');
             }
+            
+            // Restore the original remove function if it was overridden
+            if (this.originalRemoveFunction) {
+                element.remove = this.originalRemoveFunction;
+            }
         });
+        
+        // Clear all state variables
+        this.draggedElement = null;
+        this.draggedElementText = null;
+        this.draggedElementId = null;
+        this.draggedElementSnapshot = null;
+        this.dragStartCoords = null;
+        this.targetPosition = null;
+        this.originalIndex = null;
+        this._isReordering = false;
+        this.originalCheckboxState = undefined;
+        this.originalRemoveFunction = null;
         
         // Also re-enable any checkboxes that might have been disabled during drag
         const disabledCheckboxes = document.querySelectorAll('.tag-checkbox[data-drag-disabled="true"]');
@@ -1093,10 +1210,32 @@ window.checkDragHandles = () => {
 // Add a simple test for drop indicators
 window.forceReinitializeDragAndDrop = () => {
     if (window.dragAndDropManager) {
+        console.log('🔧 Forcing drag and drop reinitialization...');
         window.dragAndDropManager.reinitializeTagDragAndDrop();
+        
+        // Wait a bit and then check the results
+        setTimeout(() => {
+            const handles = document.querySelectorAll('#selectedTags .drag-handle');
+            const tagRows = document.querySelectorAll('#selectedTags .tag-row');
+            console.log(`✓ Status after reinitialization:`);
+            console.log(`  - Tag rows: ${tagRows.length}`);
+            console.log(`  - Drag handles: ${handles.length}`);
+            
+            if (handles.length > 0) {
+                console.log('✅ Drag and drop reinitialized successfully!');
+                // Test one handle
+                const firstHandle = handles[0];
+                const rect = firstHandle.getBoundingClientRect();
+                console.log(`  - First handle position: left=${rect.left}px, top=${rect.top}px, width=${rect.width}px, height=${rect.height}px`);
+                console.log(`  - First handle visible: ${rect.width > 0 && rect.height > 0 ? 'YES' : 'NO'}`);
+            } else {
+                console.error('❌ No drag handles found after reinitialization!');
+            }
+        }, 100);
+        
         return true;
     } else {
-        console.error('Drag and Drop Manager not available');
+        console.error('❌ Drag and Drop Manager not available');
         return false;
     }
 };
@@ -1175,4 +1314,82 @@ if (!document.getElementById('drag-drop-styles')) {
     styleElement.id = 'drag-drop-styles';
     styleElement.textContent = dragDropStyles;
     document.head.appendChild(styleElement);
-} 
+}
+
+// Add a comprehensive debug function
+window.debugDragAndDrop = () => {
+    console.log('🔍 ========== DRAG AND DROP DEBUG INFO ==========');
+    
+    // Check if manager exists
+    if (!window.dragAndDropManager) {
+        console.error('❌ DragAndDropManager not found!');
+        return;
+    }
+    console.log('✅ DragAndDropManager exists');
+    
+    // Check selected tags container
+    const container = document.querySelector('#selectedTags');
+    if (!container) {
+        console.error('❌ Selected tags container (#selectedTags) not found!');
+        return;
+    }
+    console.log('✅ Selected tags container found');
+    
+    // Check tag rows
+    const tagRows = container.querySelectorAll('.tag-row');
+    console.log(`📊 Tag rows found: ${tagRows.length}`);
+    
+    // Check tag items
+    const tagItems = container.querySelectorAll('.tag-item');
+    console.log(`📊 Tag items found: ${tagItems.length}`);
+    
+    // Check checkboxes
+    const checkboxes = container.querySelectorAll('.tag-checkbox');
+    console.log(`📊 Checkboxes found: ${checkboxes.length}`);
+    
+    // Check drag handles
+    const dragHandles = container.querySelectorAll('.drag-handle');
+    console.log(`📊 Drag handles found: ${dragHandles.length}`);
+    
+    if (dragHandles.length === 0) {
+        console.warn('⚠️ No drag handles found! Attempting to add them...');
+        window.forceReinitializeDragAndDrop();
+    } else {
+        // Check if handles are visible
+        let visibleHandles = 0;
+        dragHandles.forEach((handle, index) => {
+            const rect = handle.getBoundingClientRect();
+            const isVisible = rect.width > 0 && rect.height > 0;
+            if (isVisible) visibleHandles++;
+            
+            if (index < 3) { // Show details for first 3 handles
+                console.log(`  Handle ${index + 1}:`);
+                console.log(`    - Size: ${rect.width}×${rect.height}px`);
+                console.log(`    - Position: (${rect.left}, ${rect.top})`);
+                console.log(`    - Visible: ${isVisible ? 'YES ✅' : 'NO ❌'}`);
+                console.log(`    - Cursor: ${getComputedStyle(handle).cursor}`);
+                console.log(`    - Z-index: ${getComputedStyle(handle).zIndex}`);
+            }
+        });
+        console.log(`✓ ${visibleHandles}/${dragHandles.length} handles are visible`);
+        
+        if (visibleHandles === 0) {
+            console.error('❌ Drag handles exist but are not visible!');
+        } else {
+            console.log('✅ Drag handles are visible and ready to use!');
+        }
+    }
+    
+    // Check manager state
+    console.log('🔧 Manager state:');
+    console.log(`  - Initialized: ${window.dragAndDropManager.isInitialized}`);
+    console.log(`  - Currently dragging: ${window.dragAndDropManager.isDragging}`);
+    console.log(`  - Updating tags: ${window.dragAndDropManager.isUpdatingTags}`);
+    
+    console.log('🔍 ========== END DEBUG INFO ==========');
+    console.log('💡 TIP: You can call window.forceReinitializeDragAndDrop() to reinitialize drag and drop');
+};
+
+// Log helper message
+console.log('💡 Drag and Drop Debug Helper loaded! Use window.debugDragAndDrop() to check status');
+console.log('💡 Use window.forceReinitializeDragAndDrop() to force reinitialization'); 

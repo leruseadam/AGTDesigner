@@ -5135,11 +5135,8 @@ const TagManager = {
         this.initializeEmptyState();
         AppLoadingSplash.nextStep(); // Templates loaded
         
-        // Wait briefly for session to sync after store selection, then check for existing data
-        // This prevents race conditions where the session isn't ready yet
-        setTimeout(() => {
-            this.checkForExistingData();
-        }, 250);
+        // Check if there's already data loaded (e.g., from a previous session or default file)
+        this.checkForExistingData();
         
         // Ensure all filters default to 'All' on page load
         this.state.filters = {
@@ -5209,20 +5206,12 @@ const TagManager = {
                 if (splash && splash.style.display !== 'none') {
                     console.log('Emergency fix: hiding stuck splash screen');
                     splash.style.display = 'none';
-                }
-                
-                // CRITICAL FIX: Always ensure main content is visible
-                const mainContent = document.getElementById('mainContent');
-                if (mainContent) {
-                    const computedStyle = window.getComputedStyle(mainContent);
-                    if (computedStyle.display === 'none' || computedStyle.opacity === '0') {
-                        console.log('🚨 EMERGENCY: Main content still hidden, forcing display');
+                    const mainContent = document.getElementById('mainContent');
+                    if (mainContent) {
                         mainContent.style.display = 'block';
-                        mainContent.classList.add('loaded');
-                        mainContent.classList.add('store-selected');
                     }
                 }
-            }, 5000); // Check after 5 seconds
+            }, 20000); // 20 second emergency timeout
         });
     },
 
@@ -5314,24 +5303,19 @@ const TagManager = {
     },
 
     // Check if there's existing data and load it
-    async checkForExistingData(retryCount = 0) {
+    async checkForExistingData() {
         console.log('=== CHECK FOR EXISTING DATA FUNCTION CALLED ===');
-        console.log('Checking for existing data... (attempt ' + (retryCount + 1) + ')');
+        console.log('Checking for existing data...');
         
-        // Reduced timeout to 10 seconds for better UX - if it takes longer, retry or skip
+        // Add timeout protection - increased to 30 seconds for slower database queries
         const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('Initialization timeout')), 10000); // 10 second timeout
+            setTimeout(() => reject(new Error('Initialization timeout')), 30000); // 30 second timeout
         });
         
         try {
             // Use the new initial-data endpoint for faster loading with timeout
             const response = await Promise.race([
-                fetch('/api/initial-data', {
-                    credentials: 'same-origin', // Ensure cookies/session are sent
-                    headers: {
-                        'Cache-Control': 'no-cache' // Prevent caching issues
-                    }
-                }),
+                fetch('/api/initial-data'),
                 timeoutPromise
             ]);
             
@@ -5393,43 +5377,26 @@ const TagManager = {
                     AppLoadingSplash.stopAutoAdvance();
                     AppLoadingSplash.complete();
                     
-                    // DON'T load test data - let user upload a file or select a store
-                    // Show empty state instead
-                    console.log('Waiting for user to upload a file or select a store');
+                    // Load test data since no initial data was found
+                    this.loadTestData();
                     return;
                 }
             } else {
                 console.log('Initial data endpoint returned error:', response.status);
-                
-                // Retry once if we get a server error
-                if (response.status >= 500 && retryCount < 1) {
-                    console.log('Server error, retrying in 1 second...');
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                    return this.checkForExistingData(retryCount + 1);
-                }
-                
                 // Complete splash loading on error
                 AppLoadingSplash.stopAutoAdvance();
                 AppLoadingSplash.complete();
                 
-                // DON'T load test data on error - show empty state
-                console.log('Waiting for user to upload a file or select a store');
+                // Load test data since initial data failed
+                this.loadTestData();
                 return;
             }
         } catch (error) {
             console.log('Error loading initial data:', error.message);
             
-            // Handle timeout - retry once before giving up
-            if (error.message === 'Initialization timeout' && retryCount < 1) {
-                console.log('Initialization timed out, retrying once...');
-                AppLoadingSplash.updateProgress(45, 'Retrying connection...');
-                await new Promise(resolve => setTimeout(resolve, 500));
-                return this.checkForExistingData(retryCount + 1);
-            }
-            
-            // If we've exhausted retries or it's a different error
+            // Handle timeout specifically
             if (error.message === 'Initialization timeout') {
-                console.log('Initialization timed out after retries, proceeding with empty state');
+                console.log('Initialization timed out, proceeding with empty state');
                 AppLoadingSplash.updateProgress(100, 'Ready to upload files');
             }
             
@@ -5437,8 +5404,8 @@ const TagManager = {
             AppLoadingSplash.stopAutoAdvance();
             AppLoadingSplash.complete();
             
-            // DON'T load test data on timeout - show empty state
-            console.log('Waiting for user to upload a file or select a store');
+            // Load test data since initial data failed
+            this.loadTestData();
             return;
         }
         
