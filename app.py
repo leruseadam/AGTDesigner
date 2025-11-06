@@ -125,7 +125,7 @@ IS_PRODUCTION = os.environ.get('FLASK_ENV') == 'production' or IS_PYTHONANYWHERE
 # OPTIMIZATION: Disable startup file loading for faster app startup
 # Set to False to enable default file loading on startup
 # CRITICAL: Set to True to prevent adding blank products from default Excel file on every startup!
-DISABLE_STARTUP_FILE_LOADING = True  # Disable startup file loading for faster app initialization - users can upload files as needed
+DISABLE_STARTUP_FILE_LOADING = False  # Enable startup file loading with timeout protection - loads default file automatically
 
 # OPTIMIZATION: Enable lazy loading for faster app startup
 # Set to False to load files immediately
@@ -858,47 +858,82 @@ def get_excel_processor():
                     else:
                         # OPTIMIZATION: Skip default file loading on startup for faster app loading
                         if not _excel_processor_reset_flag and not DISABLE_STARTUP_FILE_LOADING:
-                            # Try to load the default file for the selected store
-                            selected_store = get_current_store_name() if has_store_selection() else None
-                            logging.info(f"🔍 TRACE get_excel_processor: Current store = {selected_store}")
-                            default_file = get_default_upload_file(selected_store)
-                            logging.info(f"🔍 TRACE get_excel_processor: default_file = {default_file}")
-                            if default_file and os.path.exists(default_file):
-                                logging.info(f"Loading default file in get_excel_processor: {default_file}")
-                                # Use fast loading mode for better performance
-                                success = _excel_processor.load_file(default_file)
-                                if success:
-                                    _excel_processor._last_loaded_file = default_file
-                                    # Optimize DataFrame
-                                    if _excel_processor.df is not None:
-                                        for col in ['Product Type*', 'Lineage', 'Product Brand', 'Vendor', 'Product Strain']:
-                                            canonical_col = get_canonical_field(col)
-                                            if canonical_col in _excel_processor.df.columns:
-                                                _excel_processor.df[canonical_col] = _excel_processor.df[canonical_col].astype('category')
+                            # Try to load the default file for the selected store with timeout protection
+                            import signal
+                            import time
+                            
+                            def timeout_handler(signum, frame):
+                                raise TimeoutError("File loading timed out")
+                            
+                            try:
+                                selected_store = get_current_store_name() if has_store_selection() else None
+                                logging.info(f"🔍 TRACE get_excel_processor: Current store = {selected_store}")
+                                
+                                # Set 5 second timeout for file search
+                                signal.signal(signal.SIGALRM, timeout_handler)
+                                signal.alarm(5)
+                                
+                                start_time = time.time()
+                                default_file = get_default_upload_file(selected_store)
+                                search_time = time.time() - start_time
+                                
+                                signal.alarm(0)  # Cancel alarm
+                                logging.info(f"🔍 TRACE get_excel_processor: default_file = {default_file} (found in {search_time:.2f}s)")
+                                
+                                if default_file and os.path.exists(default_file):
+                                    logging.info(f"Loading default file in get_excel_processor: {default_file}")
                                     
-                                    # CRITICAL FIX: Ensure dropdown cache is populated after successful file load
-                                    if hasattr(_excel_processor, '_cache_dropdown_values'):
-                                        try:
-                                            _excel_processor._cache_dropdown_values()
-                                            logging.info(f"Successfully populated dropdown cache in get_excel_processor")
-                                            # Log the strain count specifically
-                                            if 'strain' in _excel_processor.dropdown_cache:
-                                                strain_count = len(_excel_processor.dropdown_cache['strain'])
-                                                logging.info(f"Dropdown cache contains {strain_count} strains")
-                                            else:
-                                                logging.warning("No strain filter found in dropdown cache")
-                                        except Exception as e:
-                                            logging.error(f"Failed to populate dropdown cache in get_excel_processor: {e}")
+                                    # Set 5 second timeout for file loading
+                                    signal.alarm(5)
+                                    load_start = time.time()
+                                    success = _excel_processor.load_file(default_file)
+                                    load_time = time.time() - load_start
+                                    signal.alarm(0)  # Cancel alarm
+                                    
+                                    if success:
+                                        _excel_processor._last_loaded_file = default_file
+                                        logging.info(f"Default file loaded successfully in {load_time:.2f}s")
+                                        
+                                        # Optimize DataFrame
+                                        if _excel_processor.df is not None:
+                                            for col in ['Product Type*', 'Lineage', 'Product Brand', 'Vendor', 'Product Strain']:
+                                                canonical_col = get_canonical_field(col)
+                                                if canonical_col in _excel_processor.df.columns:
+                                                    _excel_processor.df[canonical_col] = _excel_processor.df[canonical_col].astype('category')
+                                        
+                                        # CRITICAL FIX: Ensure dropdown cache is populated after successful file load
+                                        if hasattr(_excel_processor, '_cache_dropdown_values'):
+                                            try:
+                                                _excel_processor._cache_dropdown_values()
+                                                logging.info(f"Successfully populated dropdown cache in get_excel_processor")
+                                                # Log the strain count specifically
+                                                if 'strain' in _excel_processor.dropdown_cache:
+                                                    strain_count = len(_excel_processor.dropdown_cache['strain'])
+                                                    logging.info(f"Dropdown cache contains {strain_count} strains")
+                                                else:
+                                                    logging.warning("No strain filter found in dropdown cache")
+                                            except Exception as e:
+                                                logging.error(f"Failed to populate dropdown cache in get_excel_processor: {e}")
+                                        else:
+                                            logging.warning("ExcelProcessor does not have _cache_dropdown_values method")
                                     else:
-                                        logging.warning("ExcelProcessor does not have _cache_dropdown_values method")
+                                        logging.error("Failed to load default file in get_excel_processor")
+                                        # Ensure df attribute exists even if loading failed
+                                        if not hasattr(_excel_processor, 'df'):
+                                            _excel_processor.df = pd.DataFrame()
                                 else:
-                                    logging.error("Failed to load default file in get_excel_processor")
-                                    # Ensure df attribute exists even if loading failed
+                                    logging.warning("No default file found in get_excel_processor")
+                                    # Ensure df attribute exists even if no default file
                                     if not hasattr(_excel_processor, 'df'):
                                         _excel_processor.df = pd.DataFrame()
-                            else:
-                                logging.warning("No default file found in get_excel_processor")
-                                # Ensure df attribute exists even if no default file
+                            except TimeoutError:
+                                signal.alarm(0)  # Cancel alarm
+                                logging.warning("File loading timed out - proceeding with empty state")
+                                if not hasattr(_excel_processor, 'df'):
+                                    _excel_processor.df = pd.DataFrame()
+                            except Exception as load_error:
+                                signal.alarm(0)  # Cancel alarm if exception occurred
+                                logging.error(f"Error loading default file: {load_error}")
                                 if not hasattr(_excel_processor, 'df'):
                                     _excel_processor.df = pd.DataFrame()
                         else:
@@ -912,34 +947,73 @@ def get_excel_processor():
                             _excel_processor_reset_flag = False
                 except Exception as session_error:
                     logging.warning(f"Error checking session for uploaded file: {session_error}")
-                    # OPTIMIZATION: Skip default file loading on startup for faster app loading
+                    # Load default file with timeout protection for faster app loading
                     if not _excel_processor_reset_flag and not DISABLE_STARTUP_FILE_LOADING:
-                        selected_store = get_current_store_name() if has_store_selection() else None
-                        default_file = get_default_upload_file(selected_store)
-                        if default_file and os.path.exists(default_file):
-                            logging.info(f"Loading default file in get_excel_processor: {default_file}")
-                            success = _excel_processor.load_file(default_file)
-                            if success:
-                                _excel_processor._last_loaded_file = default_file
-                                # CRITICAL FIX: Ensure dropdown cache is populated after successful file load
-                                if hasattr(_excel_processor, '_cache_dropdown_values'):
-                                    try:
-                                        _excel_processor._cache_dropdown_values()
-                                        logging.info(f"Successfully populated dropdown cache in get_excel_processor fallback")
-                                        # Log the strain count specifically
-                                        if 'strain' in _excel_processor.dropdown_cache:
-                                            strain_count = len(_excel_processor.dropdown_cache['strain'])
-                                            logging.info(f"Dropdown cache contains {strain_count} strains")
-                                        else:
-                                            logging.warning("No strain filter found in dropdown cache")
-                                    except Exception as e:
-                                        logging.error(f"Failed to populate dropdown cache in get_excel_processor fallback: {e}")
+                        import signal
+                        import time
+                        
+                        def timeout_handler(signum, frame):
+                            raise TimeoutError("File loading timed out")
+                        
+                        try:
+                            selected_store = get_current_store_name() if has_store_selection() else None
+                            
+                            # Set 5 second timeout for file search
+                            signal.signal(signal.SIGALRM, timeout_handler)
+                            signal.alarm(5)
+                            
+                            start_time = time.time()
+                            default_file = get_default_upload_file(selected_store)
+                            search_time = time.time() - start_time
+                            
+                            signal.alarm(0)  # Cancel alarm
+                            logging.info(f"File search completed in {search_time:.2f}s")
+                            
+                            if default_file and os.path.exists(default_file):
+                                logging.info(f"Loading default file in get_excel_processor: {default_file}")
+                                
+                                # Set 5 second timeout for file loading
+                                signal.alarm(5)
+                                load_start = time.time()
+                                success = _excel_processor.load_file(default_file)
+                                load_time = time.time() - load_start
+                                signal.alarm(0)  # Cancel alarm
+                                
+                                if success:
+                                    _excel_processor._last_loaded_file = default_file
+                                    logging.info(f"Default file loaded in {load_time:.2f}s")
+                                    
+                                    # CRITICAL FIX: Ensure dropdown cache is populated after successful file load
+                                    if hasattr(_excel_processor, '_cache_dropdown_values'):
+                                        try:
+                                            _excel_processor._cache_dropdown_values()
+                                            logging.info(f"Successfully populated dropdown cache in get_excel_processor fallback")
+                                            # Log the strain count specifically
+                                            if 'strain' in _excel_processor.dropdown_cache:
+                                                strain_count = len(_excel_processor.dropdown_cache['strain'])
+                                                logging.info(f"Dropdown cache contains {strain_count} strains")
+                                            else:
+                                                logging.warning("No strain filter found in dropdown cache")
+                                        except Exception as e:
+                                            logging.error(f"Failed to populate dropdown cache in get_excel_processor fallback: {e}")
+                                    else:
+                                        logging.warning("ExcelProcessor does not have _cache_dropdown_values method")
                                 else:
-                                    logging.warning("ExcelProcessor does not have _cache_dropdown_values method")
+                                    logging.warning("Failed to load default file")
+                                    if not hasattr(_excel_processor, 'df'):
+                                        _excel_processor.df = pd.DataFrame()
                             else:
+                                logging.info("No default file found")
                                 if not hasattr(_excel_processor, 'df'):
                                     _excel_processor.df = pd.DataFrame()
-                        else:
+                        except TimeoutError:
+                            signal.alarm(0)  # Cancel alarm
+                            logging.warning("File loading timed out - proceeding with empty state")
+                            if not hasattr(_excel_processor, 'df'):
+                                _excel_processor.df = pd.DataFrame()
+                        except Exception as load_error:
+                            signal.alarm(0)  # Cancel alarm if exception occurred
+                            logging.error(f"Error loading default file: {load_error}")
                             if not hasattr(_excel_processor, 'df'):
                                 _excel_processor.df = pd.DataFrame()
                     else:
@@ -13080,19 +13154,97 @@ def get_initial_data():
             excel_processor.df = None
             logging.info("Excel processor missing df attribute - set to None")
             
-        # If no data is loaded, return quickly instead of loading default file
-        # This makes initialization much faster - user can upload a file explicitly
+        # If no data is loaded, try to load default file BUT with timeout protection
         if excel_processor.df is None:
-            logging.info("No data loaded - returning empty state for faster initialization")
+            logging.info("No data loaded - attempting to load default file with timeout protection")
             
-            # Return empty state quickly instead of trying to load default file
-            # This prevents timeout issues and makes the app load faster
-            return jsonify({
-                'success': False,
-                'message': 'No data currently loaded. Please upload an Excel file to begin.',
-                'ready_for_upload': True,
-                'store': selected_store or 'No store selected'
-            })
+            # Check if store is properly set before trying to load file
+            if not selected_store:
+                logging.warning("No store selected, skipping default file load")
+                return jsonify({
+                    'success': False,
+                    'message': 'No store selected. Please select a store first.',
+                    'ready_for_upload': True
+                })
+            
+            from src.core.data.excel_processor import get_default_upload_file
+            import time
+            import signal
+            
+            # Define timeout handler
+            def timeout_handler(signum, frame):
+                raise TimeoutError("File loading timed out")
+            
+            try:
+                # Set 5 second timeout for file search
+                signal.signal(signal.SIGALRM, timeout_handler)
+                signal.alarm(5)
+                
+                start_time = time.time()
+                default_file = get_default_upload_file(selected_store)
+                search_time = time.time() - start_time
+                
+                signal.alarm(0)  # Cancel alarm
+                logging.info(f"File search took {search_time:.2f} seconds")
+                
+                if default_file:
+                    try:
+                        logging.info(f"Loading default file for {selected_store}: {os.path.basename(default_file)}")
+                        
+                        # Set 5 second timeout for file loading
+                        signal.alarm(5)
+                        load_start = time.time()
+                        excel_processor.load_file(default_file)
+                        load_time = time.time() - load_start
+                        signal.alarm(0)  # Cancel alarm
+                        
+                        excel_processor._last_loaded_file = default_file
+                        logging.info(f"Default file loaded successfully in {load_time:.2f} seconds")
+                    except TimeoutError:
+                        signal.alarm(0)  # Cancel alarm
+                        logging.error(f"File loading timed out after 5 seconds")
+                        return jsonify({
+                            'success': False,
+                            'message': f'File loading timed out. Please upload a file manually.',
+                            'ready_for_upload': True,
+                            'store': selected_store
+                        })
+                    except Exception as e:
+                        signal.alarm(0)  # Cancel alarm
+                        logging.error(f"Failed to load default file: {e}")
+                        logging.error(f"Exception traceback: {traceback.format_exc()}")
+                        return jsonify({
+                            'success': False,
+                            'message': f'Failed to load default file: {str(e)}',
+                            'ready_for_upload': True,
+                            'store': selected_store
+                        })
+                else:
+                    logging.warning(f"No default file found for store: {selected_store}")
+                    return jsonify({
+                        'success': False,
+                        'message': f'No recent file found for {selected_store}. Please upload a file.',
+                        'ready_for_upload': True,
+                        'store': selected_store
+                    })
+            except TimeoutError:
+                signal.alarm(0)  # Cancel alarm
+                logging.error(f"File search timed out after 5 seconds")
+                return jsonify({
+                    'success': False,
+                    'message': 'File search timed out. Please upload a file manually.',
+                    'ready_for_upload': True,
+                    'store': selected_store
+                })
+            except Exception as e:
+                signal.alarm(0)  # Cancel alarm if exception occurred
+                logging.error(f"Error during file loading: {e}")
+                return jsonify({
+                    'success': False,
+                    'message': f'Error loading file: {str(e)}',
+                    'ready_for_upload': True,
+                    'store': selected_store
+                })
         
         if hasattr(excel_processor, 'df') and excel_processor.df is not None:
             logging.info(f"Data loaded - DataFrame shape: {excel_processor.df.shape}")
