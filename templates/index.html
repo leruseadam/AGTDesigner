@@ -478,7 +478,7 @@
         });
     }
     
-    function checkStoreRequired() {
+    function checkStoreRequired(onStoreConfirmed) {
       // Prevent multiple simultaneous calls
       if (window.checkingStoreRequired) {
         console.log('⚠️ checkStoreRequired already in progress, skipping...');
@@ -552,6 +552,12 @@
             }
             
             console.log('✅ Content shown, modal hidden');
+            
+            // CRITICAL FIX: Call callback to initialize TagManager ONLY when store is confirmed
+            if (typeof onStoreConfirmed === 'function') {
+              console.log('🔄 Store confirmed, calling initialization callback...');
+              setTimeout(() => onStoreConfirmed(), 100);
+            }
           } else {
             // NO STORE - Show modal
             console.log('⚠️ NO STORE - Showing modal');
@@ -4878,9 +4884,9 @@
         </div>
         
         <!-- Main Content Row -->
-        <div class="d-flex gap-2 fade-in" style="animation-delay: 0.6s; width: 100%;">
+        <div class="d-flex fade-in" style="animation-delay: 0.6s; width: 100%; gap: 2.5rem; justify-content: center;">
           <!-- Available Tags -->
-          <div class="mb-2" data-container-type="available" style="flex: 1;">
+          <div class="mb-2" data-container-type="available" style="flex: 1; max-width: 28rem;">
             <div class="glass-card d-flex flex-column h-100">
               <div class="card-header border-0 bg-transparent p-2">
                 <div class="d-flex justify-content-between align-items-center mb-2">
@@ -4920,7 +4926,7 @@
           </div>
           
           <!-- Center Column with Controls -->
-          <div class="mb-2 mt-0 d-flex flex-column justify-content-start align-items-center" style="flex: 0 0 auto; padding-left: 0.5rem; padding-right: 0.5rem;" data-container-type="center">
+          <div class="mb-2 mt-0 d-flex flex-column justify-content-start align-items-center" style="flex: 0 0 auto;" data-container-type="center">
             <!-- Controls -->
             <div class="control-panel">
               <!-- Template Section -->
@@ -5035,7 +5041,7 @@
           </div>
           
           <!-- Selected Tags -->
-          <div class="mb-2" data-container-type="selected" style="flex: 1;">
+          <div class="mb-2" data-container-type="selected" style="flex: 1; max-width: 28rem;">
             <div class="glass-card d-flex flex-column h-100">
               <div class="card-header border-0 bg-transparent p-2">
                 <div class="d-flex justify-content-between align-items-center mb-2">
@@ -6570,231 +6576,68 @@
     
     // Don't set default store immediately - let checkStoreRequired handle it
 
-    // CRITICAL FIX: Don't override TagManager from main.js - just extend it
-    // The full TagManager with uploadFile method is defined in main.js
-    if (!window.TagManager) {
-      // Only define basic TagManager if main.js hasn't loaded yet
-      window.TagManager = {
-        state: {
-          tags: [],
-          originalTags: [],
-          persistentSelectedTags: []
-        },
+    // RELIABLE TAG MANAGER INITIALIZATION
+    // Wait for main.js to fully load before initializing
+    let tagManagerInitAttempts = 0;
+    const MAX_INIT_ATTEMPTS = 50; // 5 seconds max (50 * 100ms)
+    
+    function waitForTagManagerAndInit() {
+      tagManagerInitAttempts++;
       
-      init: function() {
-        console.log('TagManager.init() called');
-        this.loadAvailableTags();
-      },
-      
-      loadAvailableTags: function() {
-        console.log('Loading available tags from API...');
-        fetch('/api/available-tags?prefer_db=1&nocache=1')
-          .then(response => response.json())
-          .then(data => {
-            console.log('Available tags loaded:', data.tags.length);
-            this.state.tags = data.tags || [];
-            this.state.originalTags = [...this.state.tags];
-            this._updateAvailableTags();
-          })
-          .catch(error => {
-            console.error('Error loading tags:', error);
+      // Check if full TagManager from main.js is loaded
+      // The full TagManager has the createTagElement method
+      if (window.TagManager && typeof window.TagManager.createTagElement === 'function') {
+        console.log('✅ Full TagManager from main.js is loaded! Initializing...');
+        
+        // Wait for DOM and store, then init
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', function() {
+            initializeTagManagerSafely();
           });
-      },
-      
-      _updateAvailableTags: function(tags) {
-        console.log('_updateAvailableTags called with', (tags || this.state.tags).length, 'tags');
-        const tagsToUse = tags || this.state.tags;
-        const container = document.getElementById('availableTags');
-        if (!container) {
-          console.error('availableTags container not found');
-          return;
+        } else {
+          initializeTagManagerSafely();
         }
+      } else if (tagManagerInitAttempts < MAX_INIT_ATTEMPTS) {
+        // Keep waiting for main.js to load
+        console.log(`⏳ Waiting for main.js TagManager... attempt ${tagManagerInitAttempts}`);
+        setTimeout(waitForTagManagerAndInit, 100);
+      } else {
+        // Fallback: something went wrong with main.js loading
+        console.error('❌ Failed to load full TagManager from main.js after 5 seconds');
+        console.error('❌ This will cause tags to not load properly. Check browser console for script errors.');
         
-        console.log('Found availableTags container, rendering', tagsToUse.length, 'tags with DOH dropdowns');
-        
-        // Clear container
-        container.innerHTML = '';
-        
-        // Create tags with DOH dropdown
-        tagsToUse.forEach((tag, index) => {
-          console.log(`Creating tag element ${index + 1}:`, tag.ProductName || tag['Product Name*']);
-          const tagElement = this.createTagElement(tag);
-          container.appendChild(tagElement);
-        });
-        
-        console.log('Finished rendering', tagsToUse.length, 'tag elements with DOH dropdowns');
-      },
-      
-      createTagElement: function(tag) {
-        const tagDiv = document.createElement('div');
-        tagDiv.className = 'tag-item mb-3 p-3 border rounded';
-        tagDiv.style.backgroundColor = '#f0f8ff';
-        tagDiv.style.border = '3px solid #007bff';
-        
-        // Get DOH status - check multiple possible field names
-        const dohStatus = tag['DOH Compliant (Yes/No)'] || tag.DOH || tag.doh || 'Unknown';
-        const productName = tag.ProductName || tag['Product Name*'] || tag['Product Name'] || 'Unknown Product';
-        
-        console.log('Creating tag for:', productName, 'DOH status:', dohStatus);
-        
-        tagDiv.innerHTML = `
-          <div class="d-flex justify-content-between align-items-center">
-            <div>
-              <strong style="color: #000;">${productName}</strong><br>
-              <small style="color: #666;">${tag.Vendor || 'Unknown Vendor'} - ${tag['Product Type*'] || tag.productType || 'Unknown Type'}</small>
-            </div>
-            <div class="d-flex align-items-center gap-2">
-              <span class="badge bg-secondary">${tag.currentLineage || tag.canonical_lineage || tag.Lineage || 'Unknown'}</span>
-              <label style="font-weight: bold; color: red;">DOH:</label>
-              <select class="doh-dropdown form-select form-select-sm" style="width: 100px;" 
-                      onchange="TagManager.updateDohStatus('${productName}', this.value)">
-                <option value="Yes" ${dohStatus === 'Yes' ? 'selected' : ''}>Yes</option>
-                <option value="No" ${dohStatus === 'No' ? 'selected' : ''}>No</option>
-                <option value="Pending" ${dohStatus === 'Pending' ? 'selected' : ''}>Pending</option>
-                <option value="Unknown" ${dohStatus === 'Unknown' ? 'selected' : ''}>Unknown</option>
-              </select>
-              <button class="btn btn-sm btn-primary" onclick="TagManager.addToSelected('${productName}')">Add</button>
-            </div>
-          </div>
-        `;
-        
-        return tagDiv;
-      },
-      
-      updateDohStatus: function(productName, dohValue) {
-        console.log('Updating DOH status for:', productName, 'to:', dohValue);
-        
-        fetch('/api/update-doh', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            product_name: productName,
-            doh_status: dohValue
-          })
-        })
-        .then(response => response.json())
-        .then(data => {
-          if (data.success) {
-            console.log('DOH status updated successfully');
-            // Update local state
-            const tag = this.state.tags.find(t => (t.ProductName || t['Product Name*']) === productName);
-            if (tag) {
-              // Persist the raw value for compatibility (Yes/No/Pending/Unknown)
-              tag.DOH = dohValue;
-              tag.doh = dohValue;
-              tag['DOH Compliant (Yes/No)'] = dohValue;
-            }
-
-            // Reflect change in UI images/dropdowns consistently with main.js behavior
-            // Map template values to UI status used by TagManager.updateDohInAllDisplays
-            // Yes -> DOH image; No/Pending/Unknown -> hide image
-            let uiDohStatus = 'NONE';
-            if ((dohValue || '').toUpperCase() === 'YES') {
-              uiDohStatus = 'DOH';
-            }
-
-            // Update all displays (available and selected lists)
-            if (typeof TagManager.updateDohInAllDisplays === 'function') {
-              TagManager.updateDohInAllDisplays(productName, uiDohStatus);
-            }
-          } else {
-            console.error('Failed to update DOH status:', data.message);
-          }
-        })
-        .catch(error => {
-          console.error('Error updating DOH status:', error);
-        });
-      },
-      
-      addToSelected: function(productName) {
-        console.log('Adding to selected:', productName);
-        if (!this.state.persistentSelectedTags.includes(productName)) {
-          this.state.persistentSelectedTags.push(productName);
-          this._updateSelectedTags();
+        // Try to initialize anyway as last resort
+        if (window.TagManager && typeof window.TagManager.init === 'function') {
+          console.log('⚠️ Attempting to initialize with available TagManager...');
+          initializeTagManagerSafely();
         }
-      },
-      
-      _updateSelectedTags: function() {
-        console.log('_updateSelectedTags called with:', this.state.persistentSelectedTags.length, 'tags');
-        const container = document.getElementById('selectedTags');
-        if (container) {
-          container.innerHTML = this.state.persistentSelectedTags.map(name => 
-            `<span class="badge bg-primary me-1 mb-1">${name}</span>`
-          ).join('');
-        }
-      },
-      
-      clearAllFilters: function() {
-        console.log('Clearing all filters');
-        // Reset filters and reload tags
-        this._updateAvailableTags();
-      },
-      
-      debouncedGenerate: function() {
-        console.log('Generate button clicked');
-        // Implementation for generate functionality
-      },
-      
-      downloadExcel: function() {
-        console.log('Download Excel clicked');
-        // Implementation for Excel download
-      },
-      
-      updateSelectedTags: function(tags) {
-        console.log('updateSelectedTags called with:', tags);
-        this.state.persistentSelectedTags = tags || [];
-        this._updateSelectedTags();
-      },
-      
-      debouncedUpdateAvailableTags: function(tags) {
-        console.log('debouncedUpdateAvailableTags called');
-        this._updateAvailableTags(tags);
-      },
-      
-      refreshTagLists: function() {
-        console.log('🔄 refreshTagLists called - reloading tags after file upload');
-        return new Promise((resolve, reject) => {
-          // Reload available tags from the server
-          console.log('🔄 Fetching fresh tags from /api/available-tags...');
-          fetch('/api/available-tags?prefer_db=1&nocache=1')
-            .then(response => {
-              console.log('🔄 Response received:', response.status, response.ok);
-              return response.json();
-            })
-            .then(data => {
-              console.log('🔄 Tags refreshed after upload:', data.tags ? data.tags.length : 0, 'tags');
-              this.state.tags = data.tags || [];
-              this.state.originalTags = [...this.state.tags];
-              console.log('🔄 Calling _updateAvailableTags to refresh UI...');
-              this._updateAvailableTags();
-              console.log('🔄 Tag refresh complete!');
-              resolve(data);
-            })
-            .catch(error => {
-              console.error('❌ Error refreshing tags:', error);
-              reject(error);
-            });
-        });
       }
-    };
-    } // End of if (!window.TagManager)
-
-    document.addEventListener('DOMContentLoaded', function () {
-      console.log('DOM Content Loaded - initializing TagManager...');
+    }
+    
+    function initializeTagManagerSafely() {
+      console.log('🚀 initializeTagManagerSafely called');
       
-      // Don't set default store - let checkStoreRequired handle it
-      console.log('DOMContentLoaded: Initializing TagManager...');
-      
-      TagManager.init();
-      
-      // CRITICAL: Check if store selection is required after TagManager is initialized
+      // Check store FIRST before initializing tags
       setTimeout(() => {
-        console.log('🔄 Checking store requirement after initialization...');
-        checkStoreRequired();
-      }, 500);
-      
+        console.log('🔄 Checking store requirement BEFORE initializing TagManager...');
+        checkStoreRequired(function() {
+          // This callback only runs when store is confirmed
+          console.log('✅ Store confirmed! Initializing TagManager...');
+          
+          if (window.TagManager && typeof window.TagManager.init === 'function') {
+            TagManager.init();
+          } else {
+            console.error('❌ TagManager.init is not available');
+          }
+        });
+      }, 100);
+    }
+    
+    // Start waiting for TagManager to load
+    waitForTagManagerAndInit();
+    
+    // Additional DOM-ready setup
+    document.addEventListener('DOMContentLoaded', function() {
       // DEBUG: Add global click handler to track what's causing page reloads
       document.addEventListener('click', function(e) {
         const target = e.target;
