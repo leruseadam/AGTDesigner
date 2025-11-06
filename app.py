@@ -13066,6 +13066,11 @@ def get_initial_data():
         logging.info("=== INITIAL DATA REQUEST START ===")
         logging.info(f"Initial data request at {datetime.now().strftime('%H:%M:%S')}")
         
+        # Log session info to help debug
+        selected_store = get_current_store_name() if has_store_selection() else None
+        logging.info(f"Store from session: {selected_store}")
+        logging.info(f"Session ID: {session.get('_id', 'no session')}")
+        
         # Get the excel processor
         excel_processor = get_excel_processor()
         logging.info(f"Excel processor obtained: {excel_processor}")
@@ -13075,31 +13080,19 @@ def get_initial_data():
             excel_processor.df = None
             logging.info("Excel processor missing df attribute - set to None")
             
-        # If no data is loaded, try to load the default file
+        # If no data is loaded, return quickly instead of loading default file
+        # This makes initialization much faster - user can upload a file explicitly
         if excel_processor.df is None:
-            logging.info("No data loaded - attempting to load default file")
-            from src.core.data.excel_processor import get_default_upload_file
-            selected_store = get_current_store_name() if has_store_selection() else None
-            default_file = get_default_upload_file(selected_store)
+            logging.info("No data loaded - returning empty state for faster initialization")
             
-            if default_file:
-                try:
-                    logging.info(f"Loading default file for {selected_store}: {os.path.basename(default_file)}")
-                    excel_processor.load_file(default_file)
-                    excel_processor._last_loaded_file = default_file
-                    logging.info(f"Default file loaded successfully")
-                except Exception as e:
-                    logging.error(f"Failed to load default file: {e}")
-                    return jsonify({
-                        'success': False,
-                        'message': f'Failed to load default file: {str(e)}'
-                    })
-            else:
-                logging.warning("No default file found")
-                return jsonify({
-                    'success': False,
-                    'message': 'No default file found and no data currently loaded'
-                })
+            # Return empty state quickly instead of trying to load default file
+            # This prevents timeout issues and makes the app load faster
+            return jsonify({
+                'success': False,
+                'message': 'No data currently loaded. Please upload an Excel file to begin.',
+                'ready_for_upload': True,
+                'store': selected_store or 'No store selected'
+            })
         
         if hasattr(excel_processor, 'df') and excel_processor.df is not None:
             logging.info(f"Data loaded - DataFrame shape: {excel_processor.df.shape}")

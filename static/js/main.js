@@ -4696,10 +4696,46 @@ const TagManager = {
         document.dispatchEvent(new CustomEvent('updateSelectedTagsComplete'));
         
         // Also directly reinitialize drag and drop to ensure it's working
+        // Use multiple attempts with increasing delays to ensure it works
         if (window.dragAndDropManager) {
+            // First attempt - immediate
             setTimeout(() => {
-                console.log('Reinitializing drag and drop after updateSelectedTags');
+                console.log('🔧 [Attempt 1] Reinitializing drag and drop after updateSelectedTags');
                 window.dragAndDropManager.reinitializeTagDragAndDrop();
+                
+                // Log results
+                const handles = document.querySelectorAll('#selectedTags .drag-handle');
+                console.log(`✓ Found ${handles.length} drag handles after reinitialization`);
+                
+                // If no handles found, try again after a short delay
+                if (handles.length === 0) {
+                    console.warn('⚠️ No drag handles found, scheduling retry...');
+                    setTimeout(() => {
+                        console.log('🔧 [Attempt 2] Retrying drag and drop initialization');
+                        window.dragAndDropManager.reinitializeTagDragAndDrop();
+                        const retryHandles = document.querySelectorAll('#selectedTags .drag-handle');
+                        console.log(`✓ Found ${retryHandles.length} drag handles after retry`);
+                        
+                        // Final attempt if still no handles
+                        if (retryHandles.length === 0) {
+                            setTimeout(() => {
+                                console.log('🔧 [Attempt 3 - FINAL] Final drag and drop initialization attempt');
+                                window.dragAndDropManager.reinitializeTagDragAndDrop();
+                                const finalHandles = document.querySelectorAll('#selectedTags .drag-handle');
+                                console.log(`✓ Found ${finalHandles.length} drag handles after final attempt`);
+                                if (finalHandles.length === 0) {
+                                    console.error('❌ Drag handles failed to initialize after 3 attempts!');
+                                } else {
+                                    console.log('✅ Drag and drop successfully initialized!');
+                                }
+                            }, 500);
+                        } else {
+                            console.log('✅ Drag and drop successfully initialized on retry!');
+                        }
+                    }, 200);
+                } else {
+                    console.log('✅ Drag and drop successfully initialized!');
+                }
             }, 100);
         }
     },
@@ -5099,8 +5135,11 @@ const TagManager = {
         this.initializeEmptyState();
         AppLoadingSplash.nextStep(); // Templates loaded
         
-        // Check if there's already data loaded (e.g., from a previous session or default file)
-        this.checkForExistingData();
+        // Wait briefly for session to sync after store selection, then check for existing data
+        // This prevents race conditions where the session isn't ready yet
+        setTimeout(() => {
+            this.checkForExistingData();
+        }, 250);
         
         // Ensure all filters default to 'All' on page load
         this.state.filters = {
@@ -5267,11 +5306,11 @@ const TagManager = {
     },
 
     // Check if there's existing data and load it
-    async checkForExistingData() {
+    async checkForExistingData(retryCount = 0) {
         console.log('=== CHECK FOR EXISTING DATA FUNCTION CALLED ===');
-        console.log('Checking for existing data...');
+        console.log('Checking for existing data... (attempt ' + (retryCount + 1) + ')');
         
-        // Add timeout protection
+        // Reduced timeout to 10 seconds for better UX - if it takes longer, retry or skip
         const timeoutPromise = new Promise((_, reject) => {
             setTimeout(() => reject(new Error('Initialization timeout')), 10000); // 10 second timeout
         });
@@ -5279,7 +5318,12 @@ const TagManager = {
         try {
             // Use the new initial-data endpoint for faster loading with timeout
             const response = await Promise.race([
-                fetch('/api/initial-data'),
+                fetch('/api/initial-data', {
+                    credentials: 'same-origin', // Ensure cookies/session are sent
+                    headers: {
+                        'Cache-Control': 'no-cache' // Prevent caching issues
+                    }
+                }),
                 timeoutPromise
             ]);
             
@@ -5347,6 +5391,14 @@ const TagManager = {
                 }
             } else {
                 console.log('Initial data endpoint returned error:', response.status);
+                
+                // Retry once if we get a server error
+                if (response.status >= 500 && retryCount < 1) {
+                    console.log('Server error, retrying in 1 second...');
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    return this.checkForExistingData(retryCount + 1);
+                }
+                
                 // Complete splash loading on error
                 AppLoadingSplash.stopAutoAdvance();
                 AppLoadingSplash.complete();
@@ -5358,9 +5410,17 @@ const TagManager = {
         } catch (error) {
             console.log('Error loading initial data:', error.message);
             
-            // Handle timeout specifically
+            // Handle timeout - retry once before giving up
+            if (error.message === 'Initialization timeout' && retryCount < 1) {
+                console.log('Initialization timed out, retrying once...');
+                AppLoadingSplash.updateProgress(45, 'Retrying connection...');
+                await new Promise(resolve => setTimeout(resolve, 500));
+                return this.checkForExistingData(retryCount + 1);
+            }
+            
+            // If we've exhausted retries or it's a different error
             if (error.message === 'Initialization timeout') {
-                console.log('Initialization timed out, proceeding with empty state');
+                console.log('Initialization timed out after retries, proceeding with empty state');
                 AppLoadingSplash.updateProgress(100, 'Ready to upload files');
             }
             
