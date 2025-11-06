@@ -4696,46 +4696,10 @@ const TagManager = {
         document.dispatchEvent(new CustomEvent('updateSelectedTagsComplete'));
         
         // Also directly reinitialize drag and drop to ensure it's working
-        // Use multiple attempts with increasing delays to ensure it works
         if (window.dragAndDropManager) {
-            // First attempt - immediate
             setTimeout(() => {
-                console.log('🔧 [Attempt 1] Reinitializing drag and drop after updateSelectedTags');
+                console.log('Reinitializing drag and drop after updateSelectedTags');
                 window.dragAndDropManager.reinitializeTagDragAndDrop();
-                
-                // Log results
-                const handles = document.querySelectorAll('#selectedTags .drag-handle');
-                console.log(`✓ Found ${handles.length} drag handles after reinitialization`);
-                
-                // If no handles found, try again after a short delay
-                if (handles.length === 0) {
-                    console.warn('⚠️ No drag handles found, scheduling retry...');
-                    setTimeout(() => {
-                        console.log('🔧 [Attempt 2] Retrying drag and drop initialization');
-                        window.dragAndDropManager.reinitializeTagDragAndDrop();
-                        const retryHandles = document.querySelectorAll('#selectedTags .drag-handle');
-                        console.log(`✓ Found ${retryHandles.length} drag handles after retry`);
-                        
-                        // Final attempt if still no handles
-                        if (retryHandles.length === 0) {
-                            setTimeout(() => {
-                                console.log('🔧 [Attempt 3 - FINAL] Final drag and drop initialization attempt');
-                                window.dragAndDropManager.reinitializeTagDragAndDrop();
-                                const finalHandles = document.querySelectorAll('#selectedTags .drag-handle');
-                                console.log(`✓ Found ${finalHandles.length} drag handles after final attempt`);
-                                if (finalHandles.length === 0) {
-                                    console.error('❌ Drag handles failed to initialize after 3 attempts!');
-                                } else {
-                                    console.log('✅ Drag and drop successfully initialized!');
-                                }
-                            }, 500);
-                        } else {
-                            console.log('✅ Drag and drop successfully initialized on retry!');
-                        }
-                    }, 200);
-                } else {
-                    console.log('✅ Drag and drop successfully initialized!');
-                }
             }, 100);
         }
     },
@@ -5307,9 +5271,9 @@ const TagManager = {
         console.log('=== CHECK FOR EXISTING DATA FUNCTION CALLED ===');
         console.log('Checking for existing data...');
         
-        // Add timeout protection - increased to 30 seconds for slower database queries
+        // Add timeout protection
         const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('Initialization timeout')), 30000); // 30 second timeout
+            setTimeout(() => reject(new Error('Initialization timeout')), 10000); // 10 second timeout
         });
         
         try {

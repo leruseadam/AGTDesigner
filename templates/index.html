@@ -500,34 +500,19 @@
         return;
       }
       
-      // CRITICAL FIX: Don't hide main content - let tags load in background
-      // Just ensure modal is initially hidden while we check
+      // Keep both hidden while checking backend
       if (modalElement) {
         modalElement.style.display = 'none';
       }
-      // Show main content immediately - don't wait for store check
       if (mainContent) {
-        mainContent.style.display = 'block';
-        console.log('✅ Main content shown immediately to allow tags to load');
+        mainContent.style.display = 'none';
       }
       
       console.log('Fetching store status from backend...');
-      
-      // Safety timeout - if backend doesn't respond in 5 seconds, assume store is OK
-      const safetyTimeout = setTimeout(() => {
-        console.warn('⚠️ Store check timed out after 5 seconds - assuming store is set');
-        if (mainContent && mainContent.style.display === 'none') {
-          mainContent.style.display = 'block';
-          mainContent.classList.add('loaded');
-        }
-        window.checkingStoreRequired = false;
-      }, 5000);
-      
       fetch('/api/check-store-required', {
         credentials: 'same-origin'
       })
         .then(response => {
-          clearTimeout(safetyTimeout); // Clear timeout if we get a response
           if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
           }
@@ -601,7 +586,6 @@
           }
         })
         .catch(error => {
-          clearTimeout(safetyTimeout); // Clear timeout on error
           console.error('❌ Error checking store requirement:', error);
           // If there's an error, show modal as fallback to require store selection
           console.log('Showing modal as fallback due to error');
@@ -612,7 +596,6 @@
           }
         })
         .finally(() => {
-          clearTimeout(safetyTimeout); // Always clear timeout
           // Always reset the flag
           window.checkingStoreRequired = false;
         });
@@ -4575,12 +4558,6 @@
       opacity: 1;
     }
     
-    /* EMERGENCY FIX: Allow loaded class alone to show content */
-    .main-content.loaded {
-      display: block !important;
-      opacity: 1 !important;
-    }
-    
     /* Store modal backdrop - ensure it's visible */
     #storeSelectionModal.show {
       display: block !important;
@@ -4832,6 +4809,14 @@
                     </div>
                     <!-- Buttons Row -->
                     <div class="buttons-row d-flex align-items-center gap-3">
+                      <!-- Clear Button -->
+                      <button id="clearFiltersBtn" class="btn btn-danger px-3 py-3" onclick="TagManager.clearAllFilters()" title="Clear all filters and reset app" style="font-weight: 700; box-shadow: 0 4px 12px rgba(0,0,0,0.3); white-space: nowrap; font-size: 14px; border-radius: 8px; min-width: 180px; min-height: 45px;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2">
+                          <polyline points="3 6 5 6 21 6"></polyline>
+                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
+                        </svg>
+                        Clear Filters
+                      </button>
                       <!-- Upload Button -->
                       <input type="file" id="fileInput" accept=".xlsx" style="display:none;">
                       <button type="button" class="btn px-3 py-3" id="uploadTriggerBtn" onclick="var input = document.getElementById('fileInput'); if(input) input.click();" aria-label="Upload Excel file" style="font-weight: 700; box-shadow: 0 4px 12px rgba(0,0,0,0.3); white-space: nowrap; font-size: 14px; border-radius: 8px; min-width: 180px; min-height: 45px; background: linear-gradient(135deg, #a084e8 0%, #8b5cf6 100%); border: 2px solid #a084e8; color: white;">
@@ -4841,14 +4826,6 @@
                           <line x1="12" y1="15" x2="12" y2="3"></line>
                         </svg>
                         Upload Excel
-                      </button>
-                      <!-- Clear Button -->
-                      <button id="clearFiltersBtn" class="btn btn-danger px-3 py-3" onclick="TagManager.clearAllFilters()" title="Clear all filters and reset app" style="font-weight: 700; box-shadow: 0 4px 12px rgba(0,0,0,0.3); white-space: nowrap; font-size: 14px; border-radius: 8px; min-width: 180px; min-height: 45px;">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2">
-                          <polyline points="3 6 5 6 21 6"></polyline>
-                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
-                        </svg>
-                        Clear Filters
                       </button>
                     </div>
                   </div>
@@ -4949,7 +4926,7 @@
           </div>
           
           <!-- Center Column with Controls -->
-          <div class="mb-2 mt-0 d-flex flex-column justify-content-start align-items-center" style="flex: 0 0 auto; z-index: 10; position: relative;" data-container-type="center">
+          <div class="mb-2 mt-0 d-flex flex-column justify-content-start align-items-center" style="flex: 0 0 auto;" data-container-type="center">
             <!-- Controls -->
             <div class="control-panel">
               <!-- Template Section -->
@@ -6598,11 +6575,66 @@
     });
     
     // Don't set default store immediately - let checkStoreRequired handle it
+
+    // RELIABLE TAG MANAGER INITIALIZATION
+    // Wait for main.js to fully load before initializing
+    let tagManagerInitAttempts = 0;
+    const MAX_INIT_ATTEMPTS = 50; // 5 seconds max (50 * 100ms)
     
-    // CRITICAL FIX: Don't interfere with main.js TagManager initialization
-    // main.js already calls TagManager.init() in its DOMContentLoaded handler
-    // We just need to ensure store is checked first
-    console.log('✅ Page scripts loaded - main.js will handle TagManager initialization');
+    function waitForTagManagerAndInit() {
+      tagManagerInitAttempts++;
+      
+      // Check if full TagManager from main.js is loaded
+      // The full TagManager has the createTagElement method
+      if (window.TagManager && typeof window.TagManager.createTagElement === 'function') {
+        console.log('✅ Full TagManager from main.js is loaded! Initializing...');
+        
+        // Wait for DOM and store, then init
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', function() {
+            initializeTagManagerSafely();
+          });
+        } else {
+          initializeTagManagerSafely();
+        }
+      } else if (tagManagerInitAttempts < MAX_INIT_ATTEMPTS) {
+        // Keep waiting for main.js to load
+        console.log(`⏳ Waiting for main.js TagManager... attempt ${tagManagerInitAttempts}`);
+        setTimeout(waitForTagManagerAndInit, 100);
+      } else {
+        // Fallback: something went wrong with main.js loading
+        console.error('❌ Failed to load full TagManager from main.js after 5 seconds');
+        console.error('❌ This will cause tags to not load properly. Check browser console for script errors.');
+        
+        // Try to initialize anyway as last resort
+        if (window.TagManager && typeof window.TagManager.init === 'function') {
+          console.log('⚠️ Attempting to initialize with available TagManager...');
+          initializeTagManagerSafely();
+        }
+      }
+    }
+    
+    function initializeTagManagerSafely() {
+      console.log('🚀 initializeTagManagerSafely called');
+      
+      // Check store FIRST before initializing tags
+      setTimeout(() => {
+        console.log('🔄 Checking store requirement BEFORE initializing TagManager...');
+        checkStoreRequired(function() {
+          // This callback only runs when store is confirmed
+          console.log('✅ Store confirmed! Initializing TagManager...');
+          
+          if (window.TagManager && typeof window.TagManager.init === 'function') {
+            TagManager.init();
+          } else {
+            console.error('❌ TagManager.init is not available');
+          }
+        });
+      }, 100);
+    }
+    
+    // Start waiting for TagManager to load
+    waitForTagManagerAndInit();
     
     // Additional DOM-ready setup
     document.addEventListener('DOMContentLoaded', function() {

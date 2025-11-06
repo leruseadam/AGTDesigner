@@ -155,10 +155,9 @@ h6 { font-size: 1.15rem !important; font-weight: 600 !important; }
 
 .filter-bar select, .filter-bar .form-select, .filter-bar option {
   font-size: 1.05rem !important;
-  padding: 0.75rem 2.5rem 0.75rem 1rem !important;
+  padding: 0.75rem 0.9rem !important;
   min-height: 52px !important;
   line-height: 1.5 !important;
-  min-width: 180px !important;
 }
 
 /* Larger list items */
@@ -467,14 +466,14 @@ canvas#lava-lamp-canvas {
   }
 }
 
-/* Direct overrides for dynamic vh panels */
+/* Direct overrides for fixed vh panels */
 @supports (height: 1svh) {
   #availableTags,
-  #selectedTags { max-height: 80svh !important; min-height: 200px !important; height: auto !important; }
+  #selectedTags { height: 80svh !important; min-height: 80svh !important; }
 }
 @supports (height: 1dvh) {
   #availableTags,
-  #selectedTags { max-height: 80dvh !important; min-height: 200px !important; height: auto !important; }
+  #selectedTags { height: 80dvh !important; min-height: 80dvh !important; }
 }
 
 /* Ensure main content respects dynamic viewport height */
@@ -736,8 +735,7 @@ canvas#lava-lamp-canvas {
 
   .filter-item .form-select {
     font-size: 1.05rem;
-    min-width: 140px;
-    padding: 0.5rem 2.5rem 0.5rem 0.75rem !important;
+    min-width: 120px;
   }
 
   .modern-upload-bar {
@@ -1742,9 +1740,8 @@ canvas#lava-lamp-canvas {
   #availableTags {
     margin: 0 !important;
     padding: 0 !important;
-    max-height: 80vh !important;
-    min-height: 200px !important;
-    height: auto !important;
+    height: 80vh !important;
+    min-height: 80vh !important;
     overflow-y: auto !important;
     overflow-x: hidden !important;
     display: block !important;
@@ -1761,9 +1758,9 @@ canvas#lava-lamp-canvas {
   #selectedTags {
     margin: 0 !important;
     padding: 0 !important;
-    max-height: 80vh !important;
-    min-height: 200px !important;
-    height: auto !important;
+    height: 80vh !important;
+    min-height: 80vh !important;
+    max-height: none !important;
     overflow-y: auto !important;
     overflow-x: hidden !important;
     display: block !important;
@@ -2408,7 +2405,7 @@ canvas#lava-lamp-canvas {
   
   /* Ensure center panel content is properly spaced - COMPACT */
   .control-panel .btn {
-    margin-bottom: 0.5rem !important;
+    margin-bottom: 0.15rem !important;
     min-height: 32px !important;
     font-size: 0.9rem !important;
     padding: 0.3rem 0.6rem !important;
@@ -2416,8 +2413,8 @@ canvas#lava-lamp-canvas {
   
   /* Professional section spacing for center panel */
   .control-panel > div {
-    margin-bottom: 1.5rem !important;
-    padding-bottom: 0.75rem !important;
+    margin-bottom: 1rem !important;
+    padding-bottom: 0.6rem !important;
   }
   
   /* Add subtle divider between sections */
@@ -2553,13 +2550,13 @@ canvas#lava-lamp-canvas {
   
   /* JSON Tools section spacing */
   .control-panel .mb-3 {
-    margin-bottom: 0.75rem !important;
-    margin-top: 0.5rem !important;
+    margin-bottom: 0.5rem !important;
+    margin-top: 0.3rem !important;
   }
   
   /* d-grid spacing in center column - Enhanced for better UX */
   .control-panel .d-grid {
-    gap: 0.75rem !important;
+    gap: 0.5rem !important;
   }
   
   /* Filter labels in center column */
@@ -2635,8 +2632,8 @@ canvas#lava-lamp-canvas {
   
   /* Section spacing improvements */
   .control-panel > .mb-3 {
-    margin-bottom: 1.75rem !important;
-    margin-top: 1rem !important;
+    margin-bottom: 1.5rem !important;
+    margin-top: 0.75rem !important;
   }
   
   .control-panel > .mb-3:first-of-type {
@@ -2713,43 +2710,37 @@ canvas#lava-lamp-canvas {
     transition: left 0.6s ease;
   }
   
-  .tag-item:hover {
-    z-index: 1 !important;
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(160, 132, 232, 0.15) !important;
-  }
-  
   .tag-item:hover::before {
     left: 100%;
   }
+  
+  .tag-item:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(160, 132, 232, 0.15) !important;
+  }
 
   /* Drag handle styles - only for selected tags */
-  /* Enhanced for better visibility and interaction */
   #selectedTags .drag-handle {
     position: absolute !important;
-    left: 6px !important;
+    left: 4px !important;
     top: 50% !important;
     transform: translateY(-50%) !important;
-    color: rgba(79, 172, 254, 1) !important;
-    opacity: 1 !important;
+    color: rgba(79, 172, 254, 0.8) !important;
+    opacity: 0.8 !important;
     transition: all 0.2s ease !important;
     cursor: grab !important;
     pointer-events: auto !important;
-    z-index: 10000 !important;
-    background: rgba(79, 172, 254, 0.35) !important;
-    border-radius: 6px !important;
-    padding: 8px !important;
-    border: 2px solid rgba(79, 172, 254, 0.8) !important;
+    z-index: 1000 !important;
+    background: rgba(79, 172, 254, 0.2) !important;
+    border-radius: 4px !important;
+    padding: 4px !important;
+    border: 2px solid rgba(79, 172, 254, 0.4) !important;
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
-    width: 32px !important;
-    height: 32px !important;
-    min-width: 32px !important;
-    min-height: 32px !important;
-    box-shadow: 0 4px 12px rgba(79, 172, 254, 0.5), 0 2px 6px rgba(0,0,0,0.3) !important;
-    user-select: none !important;
-    -webkit-user-select: none !important;
+    width: 24px !important;
+    height: 24px !important;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
   }
 
   /* Hide drag handles in available tags */
@@ -2757,41 +2748,26 @@ canvas#lava-lamp-canvas {
     display: none !important;
   }
 
-  /* Ensure tag rows in selected tags have proper padding for drag handles */
-  #selectedTags .tag-row {
-    position: relative !important;
-    padding-left: 45px !important;
-    min-height: 40px !important;
-  }
-
   #selectedTags .tag-row:hover .drag-handle {
     opacity: 1 !important;
-    background: rgba(79, 172, 254, 0.5) !important;
-    border-color: rgba(79, 172, 254, 1) !important;
-    transform: translateY(-50%) scale(1.15) !important;
-    box-shadow: 0 6px 16px rgba(79, 172, 254, 0.6), 0 3px 8px rgba(0,0,0,0.3) !important;
+    background: rgba(79, 172, 254, 0.4) !important;
+    border-color: rgba(79, 172, 254, 0.8) !important;
+    transform: translateY(-50%) scale(1.1) !important;
+    box-shadow: 0 4px 8px rgba(79, 172, 254, 0.3) !important;
   }
 
   .drag-handle:hover {
-    background: rgba(79, 172, 254, 0.5) !important;
-    border-color: rgba(79, 172, 254, 1) !important;
+    background: rgba(79, 172, 254, 0.4) !important;
+    border-color: rgba(79, 172, 254, 0.8) !important;
     transform: translateY(-50%) scale(1.15) !important;
-    box-shadow: 0 6px 16px rgba(79, 172, 254, 0.6), 0 3px 8px rgba(0,0,0,0.3) !important;
+    box-shadow: 0 4px 8px rgba(79, 172, 254, 0.3) !important;
   }
 
   #selectedTags .drag-handle:active {
-    background: rgba(79, 172, 254, 0.7) !important;
-    transform: translateY(-50%) scale(1.2) !important;
+    background: rgba(79, 172, 254, 0.6) !important;
+    transform: translateY(-50%) scale(1.25) !important;
     cursor: grabbing !important;
-    box-shadow: 0 8px 20px rgba(79, 172, 254, 0.7), 0 4px 12px rgba(0,0,0,0.4) !important;
-  }
-  
-  /* Ensure drag handle SVG is visible */
-  #selectedTags .drag-handle svg {
-    width: 16px !important;
-    height: 16px !important;
-    fill: currentColor !important;
-    pointer-events: none !important;
+    box-shadow: 0 6px 12px rgba(79, 172, 254, 0.4) !important;
   }
 
   /* Drag and drop states - updated to target tag-row instead of tag-item */
@@ -4349,11 +4325,11 @@ canvas#lava-lamp-canvas {
   }
 
   .filter-bar select {
-    min-width: 180px !important;
-    max-width: 280px !important;
+    min-width: 160px !important;
+    max-width: 250px !important;
     font-size: 1.05rem !important;
-    height: 38px !important;
-    padding: 6px 2.5rem 6px 12px !important;
+    height: 36px !important;
+    padding: 6px 12px !important;
     background: rgba(45, 34, 58, 0.8) !important;
     color: var(--text-primary) !important;
     border: 1px solid rgba(160, 132, 232, 0.3) !important;
@@ -6644,11 +6620,10 @@ canvas#lava-lamp-canvas {
     color: #fff;
     border-radius: 8px;
     border: 1.5px solid #a084e8;
-    height: 42px;
-    min-height: 42px;
-    padding: 8px 10px;
+    height: 36px;
+    min-height: 36px;
+    padding: 6px 10px;
     font-size: 0.95rem;
-    line-height: 1.5;
     /* Bright blue arrow */
     background-image: url('data:image/svg+xml;utf8,<svg fill="%2300BFFF" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
     background-repeat: no-repeat !important;

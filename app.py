@@ -125,7 +125,7 @@ IS_PRODUCTION = os.environ.get('FLASK_ENV') == 'production' or IS_PYTHONANYWHERE
 # OPTIMIZATION: Disable startup file loading for faster app startup
 # Set to False to enable default file loading on startup
 # CRITICAL: Set to True to prevent adding blank products from default Excel file on every startup!
-DISABLE_STARTUP_FILE_LOADING = False  # Enable startup file loading with timeout protection - loads default file automatically
+DISABLE_STARTUP_FILE_LOADING = False  # Enable startup file loading for lineage editor functionality
 
 # OPTIMIZATION: Enable lazy loading for faster app startup
 # Set to False to load files immediately
@@ -858,82 +858,47 @@ def get_excel_processor():
                     else:
                         # OPTIMIZATION: Skip default file loading on startup for faster app loading
                         if not _excel_processor_reset_flag and not DISABLE_STARTUP_FILE_LOADING:
-                            # Try to load the default file for the selected store with timeout protection
-                            import signal
-                            import time
-                            
-                            def timeout_handler(signum, frame):
-                                raise TimeoutError("File loading timed out")
-                            
-                            try:
-                                selected_store = get_current_store_name() if has_store_selection() else None
-                                logging.info(f"🔍 TRACE get_excel_processor: Current store = {selected_store}")
-                                
-                                # Set 5 second timeout for file search
-                                signal.signal(signal.SIGALRM, timeout_handler)
-                                signal.alarm(5)
-                                
-                                start_time = time.time()
-                                default_file = get_default_upload_file(selected_store)
-                                search_time = time.time() - start_time
-                                
-                                signal.alarm(0)  # Cancel alarm
-                                logging.info(f"🔍 TRACE get_excel_processor: default_file = {default_file} (found in {search_time:.2f}s)")
-                                
-                                if default_file and os.path.exists(default_file):
-                                    logging.info(f"Loading default file in get_excel_processor: {default_file}")
+                            # Try to load the default file for the selected store
+                            selected_store = get_current_store_name() if has_store_selection() else None
+                            logging.info(f"🔍 TRACE get_excel_processor: Current store = {selected_store}")
+                            default_file = get_default_upload_file(selected_store)
+                            logging.info(f"🔍 TRACE get_excel_processor: default_file = {default_file}")
+                            if default_file and os.path.exists(default_file):
+                                logging.info(f"Loading default file in get_excel_processor: {default_file}")
+                                # Use fast loading mode for better performance
+                                success = _excel_processor.load_file(default_file)
+                                if success:
+                                    _excel_processor._last_loaded_file = default_file
+                                    # Optimize DataFrame
+                                    if _excel_processor.df is not None:
+                                        for col in ['Product Type*', 'Lineage', 'Product Brand', 'Vendor', 'Product Strain']:
+                                            canonical_col = get_canonical_field(col)
+                                            if canonical_col in _excel_processor.df.columns:
+                                                _excel_processor.df[canonical_col] = _excel_processor.df[canonical_col].astype('category')
                                     
-                                    # Set 5 second timeout for file loading
-                                    signal.alarm(5)
-                                    load_start = time.time()
-                                    success = _excel_processor.load_file(default_file)
-                                    load_time = time.time() - load_start
-                                    signal.alarm(0)  # Cancel alarm
-                                    
-                                    if success:
-                                        _excel_processor._last_loaded_file = default_file
-                                        logging.info(f"Default file loaded successfully in {load_time:.2f}s")
-                                        
-                                        # Optimize DataFrame
-                                        if _excel_processor.df is not None:
-                                            for col in ['Product Type*', 'Lineage', 'Product Brand', 'Vendor', 'Product Strain']:
-                                                canonical_col = get_canonical_field(col)
-                                                if canonical_col in _excel_processor.df.columns:
-                                                    _excel_processor.df[canonical_col] = _excel_processor.df[canonical_col].astype('category')
-                                        
-                                        # CRITICAL FIX: Ensure dropdown cache is populated after successful file load
-                                        if hasattr(_excel_processor, '_cache_dropdown_values'):
-                                            try:
-                                                _excel_processor._cache_dropdown_values()
-                                                logging.info(f"Successfully populated dropdown cache in get_excel_processor")
-                                                # Log the strain count specifically
-                                                if 'strain' in _excel_processor.dropdown_cache:
-                                                    strain_count = len(_excel_processor.dropdown_cache['strain'])
-                                                    logging.info(f"Dropdown cache contains {strain_count} strains")
-                                                else:
-                                                    logging.warning("No strain filter found in dropdown cache")
-                                            except Exception as e:
-                                                logging.error(f"Failed to populate dropdown cache in get_excel_processor: {e}")
-                                        else:
-                                            logging.warning("ExcelProcessor does not have _cache_dropdown_values method")
+                                    # CRITICAL FIX: Ensure dropdown cache is populated after successful file load
+                                    if hasattr(_excel_processor, '_cache_dropdown_values'):
+                                        try:
+                                            _excel_processor._cache_dropdown_values()
+                                            logging.info(f"Successfully populated dropdown cache in get_excel_processor")
+                                            # Log the strain count specifically
+                                            if 'strain' in _excel_processor.dropdown_cache:
+                                                strain_count = len(_excel_processor.dropdown_cache['strain'])
+                                                logging.info(f"Dropdown cache contains {strain_count} strains")
+                                            else:
+                                                logging.warning("No strain filter found in dropdown cache")
+                                        except Exception as e:
+                                            logging.error(f"Failed to populate dropdown cache in get_excel_processor: {e}")
                                     else:
-                                        logging.error("Failed to load default file in get_excel_processor")
-                                        # Ensure df attribute exists even if loading failed
-                                        if not hasattr(_excel_processor, 'df'):
-                                            _excel_processor.df = pd.DataFrame()
+                                        logging.warning("ExcelProcessor does not have _cache_dropdown_values method")
                                 else:
-                                    logging.warning("No default file found in get_excel_processor")
-                                    # Ensure df attribute exists even if no default file
+                                    logging.error("Failed to load default file in get_excel_processor")
+                                    # Ensure df attribute exists even if loading failed
                                     if not hasattr(_excel_processor, 'df'):
                                         _excel_processor.df = pd.DataFrame()
-                            except TimeoutError:
-                                signal.alarm(0)  # Cancel alarm
-                                logging.warning("File loading timed out - proceeding with empty state")
-                                if not hasattr(_excel_processor, 'df'):
-                                    _excel_processor.df = pd.DataFrame()
-                            except Exception as load_error:
-                                signal.alarm(0)  # Cancel alarm if exception occurred
-                                logging.error(f"Error loading default file: {load_error}")
+                            else:
+                                logging.warning("No default file found in get_excel_processor")
+                                # Ensure df attribute exists even if no default file
                                 if not hasattr(_excel_processor, 'df'):
                                     _excel_processor.df = pd.DataFrame()
                         else:
@@ -947,73 +912,34 @@ def get_excel_processor():
                             _excel_processor_reset_flag = False
                 except Exception as session_error:
                     logging.warning(f"Error checking session for uploaded file: {session_error}")
-                    # Load default file with timeout protection for faster app loading
+                    # OPTIMIZATION: Skip default file loading on startup for faster app loading
                     if not _excel_processor_reset_flag and not DISABLE_STARTUP_FILE_LOADING:
-                        import signal
-                        import time
-                        
-                        def timeout_handler(signum, frame):
-                            raise TimeoutError("File loading timed out")
-                        
-                        try:
-                            selected_store = get_current_store_name() if has_store_selection() else None
-                            
-                            # Set 5 second timeout for file search
-                            signal.signal(signal.SIGALRM, timeout_handler)
-                            signal.alarm(5)
-                            
-                            start_time = time.time()
-                            default_file = get_default_upload_file(selected_store)
-                            search_time = time.time() - start_time
-                            
-                            signal.alarm(0)  # Cancel alarm
-                            logging.info(f"File search completed in {search_time:.2f}s")
-                            
-                            if default_file and os.path.exists(default_file):
-                                logging.info(f"Loading default file in get_excel_processor: {default_file}")
-                                
-                                # Set 5 second timeout for file loading
-                                signal.alarm(5)
-                                load_start = time.time()
-                                success = _excel_processor.load_file(default_file)
-                                load_time = time.time() - load_start
-                                signal.alarm(0)  # Cancel alarm
-                                
-                                if success:
-                                    _excel_processor._last_loaded_file = default_file
-                                    logging.info(f"Default file loaded in {load_time:.2f}s")
-                                    
-                                    # CRITICAL FIX: Ensure dropdown cache is populated after successful file load
-                                    if hasattr(_excel_processor, '_cache_dropdown_values'):
-                                        try:
-                                            _excel_processor._cache_dropdown_values()
-                                            logging.info(f"Successfully populated dropdown cache in get_excel_processor fallback")
-                                            # Log the strain count specifically
-                                            if 'strain' in _excel_processor.dropdown_cache:
-                                                strain_count = len(_excel_processor.dropdown_cache['strain'])
-                                                logging.info(f"Dropdown cache contains {strain_count} strains")
-                                            else:
-                                                logging.warning("No strain filter found in dropdown cache")
-                                        except Exception as e:
-                                            logging.error(f"Failed to populate dropdown cache in get_excel_processor fallback: {e}")
-                                    else:
-                                        logging.warning("ExcelProcessor does not have _cache_dropdown_values method")
+                        selected_store = get_current_store_name() if has_store_selection() else None
+                        default_file = get_default_upload_file(selected_store)
+                        if default_file and os.path.exists(default_file):
+                            logging.info(f"Loading default file in get_excel_processor: {default_file}")
+                            success = _excel_processor.load_file(default_file)
+                            if success:
+                                _excel_processor._last_loaded_file = default_file
+                                # CRITICAL FIX: Ensure dropdown cache is populated after successful file load
+                                if hasattr(_excel_processor, '_cache_dropdown_values'):
+                                    try:
+                                        _excel_processor._cache_dropdown_values()
+                                        logging.info(f"Successfully populated dropdown cache in get_excel_processor fallback")
+                                        # Log the strain count specifically
+                                        if 'strain' in _excel_processor.dropdown_cache:
+                                            strain_count = len(_excel_processor.dropdown_cache['strain'])
+                                            logging.info(f"Dropdown cache contains {strain_count} strains")
+                                        else:
+                                            logging.warning("No strain filter found in dropdown cache")
+                                    except Exception as e:
+                                        logging.error(f"Failed to populate dropdown cache in get_excel_processor fallback: {e}")
                                 else:
-                                    logging.warning("Failed to load default file")
-                                    if not hasattr(_excel_processor, 'df'):
-                                        _excel_processor.df = pd.DataFrame()
+                                    logging.warning("ExcelProcessor does not have _cache_dropdown_values method")
                             else:
-                                logging.info("No default file found")
                                 if not hasattr(_excel_processor, 'df'):
                                     _excel_processor.df = pd.DataFrame()
-                        except TimeoutError:
-                            signal.alarm(0)  # Cancel alarm
-                            logging.warning("File loading timed out - proceeding with empty state")
-                            if not hasattr(_excel_processor, 'df'):
-                                _excel_processor.df = pd.DataFrame()
-                        except Exception as load_error:
-                            signal.alarm(0)  # Cancel alarm if exception occurred
-                            logging.error(f"Error loading default file: {load_error}")
+                        else:
                             if not hasattr(_excel_processor, 'df'):
                                 _excel_processor.df = pd.DataFrame()
                     else:
@@ -6984,47 +6910,71 @@ def get_available_tags():
         cache_key = get_session_cache_key('available_tags')
         cached_tags = cache.get(cache_key) if not prefer_db else None
         if cached_tags and not nocache:
-            # PERFORMANCE OPTIMIZATION: Batch lineage query for cached tags
+            # Ensure cached tags' lineage matches database (prefer strain sovereign/canonical over product lineage)
             try:
                 store_name = get_current_store_name()
                 product_db = get_product_database(store_name)
                 if product_db:
+                    lineage_cache = {}
+                    # Prepare connection once
                     conn = product_db._get_connection()
                     cur = conn.cursor()
-                    
-                    # Get all product names for batch query
-                    product_names = [tag.get('Product Name*') or tag.get('ProductName') for tag in cached_tags if tag.get('Product Name*') or tag.get('ProductName')]
-                    if product_names:
-                        placeholders = ','.join('?' * len(product_names))
-                        
-                        # Batch query with strain join
-                        batch_query = f'''
-                            SELECT 
-                                p."Product Name*",
-                                COALESCE(s.canonical_lineage, p."Lineage") AS current_lineage
-                            FROM products p
-                            LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
-                            WHERE p."Product Name*" IN ({placeholders})
-                            GROUP BY p."Product Name*"
-                        '''
-                        
+                    # Prefer joining strains by strain_name to avoid missing p.strain_id column
+                    lineage_query_join_by_name = '''
+                        SELECT s.canonical_lineage AS current_lineage
+                        FROM products p
+                        LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
+                        WHERE p."Product Name*" = ? OR p.normalized_name = ?
+                        ORDER BY p.id DESC
+                        LIMIT 1
+                    '''
+                    # Fallback: use product's own Lineage if strains table/column not available
+                    lineage_query_fallback = '''
+                        SELECT p."Lineage" AS current_lineage
+                        FROM products p
+                        WHERE p."Product Name*" = ? OR p.normalized_name = ?
+                        ORDER BY p.id DESC
+                        LIMIT 1
+                    '''
+                    logging.info(f"📦 LINEAGE-CACHE ALIGNMENT: path={getattr(product_db, 'db_path', 'unknown')} store={getattr(product_db, '_store_name', 'unknown')}")
+                    updated = 0
+                    for tag in cached_tags:
                         try:
-                            cur.execute(batch_query, product_names)
-                            lineage_map = {row[0]: row[1] for row in cur.fetchall() if row[1]}
-                        except Exception as e:
-                            logging.debug(f"Batch cache lineage query failed: {e}")
-                            lineage_map = {}
-                        
-                        # Apply lineages to cached tags
-                        for tag in cached_tags:
-                            name = tag.get('Product Name*') or tag.get('ProductName')
-                            if name and name in lineage_map:
-                                db_lin_clean = str(lineage_map[name]).strip().upper()
+                            name = tag.get('Product Name*') or tag.get('ProductName') or ''
+                            if not name:
+                                continue
+                            if name in lineage_cache:
+                                db_lin = lineage_cache[name]
+                            else:
+                                # Prefer strain-level lineage used by DOCX (sovereign -> canonical)
+                                # Match by exact product name or normalized name to avoid missing column errors
+                                try:
+                                    normalized = product_db._normalize_product_name(name)
+                                except Exception:
+                                    normalized = name.strip().lower()
+                                try:
+                                    cur.execute(lineage_query_join_by_name, (name, normalized))
+                                    row = cur.fetchone()
+                                except Exception:
+                                    # Join failed (e.g., missing columns) - fallback to product lineage
+                                    cur.execute(lineage_query_fallback, (name, normalized))
+                                    row = cur.fetchone()
+                                db_lin = row[0] if row else None
+                                lineage_cache[name] = db_lin
+                            if db_lin:
+                                db_lin_clean = str(db_lin).strip().upper()
+                                # Always expose DB lineage on stable fields the UI can prefer
                                 tag['currentLineage'] = db_lin_clean
                                 tag['canonical_lineage'] = db_lin_clean
                                 tag['Lineage'] = db_lin_clean
+                        except Exception as _loop_err:
+                            logging.debug(f"UI lineage alignment (cache) error for a tag: {_loop_err}")
+                    if updated:
+                        # Refresh cache with aligned data
+                        cache.set(cache_key, cached_tags, timeout=300)
+                        logging.info(f"🔄 UI LINEAGE ALIGNMENT (cache): Applied {updated} lineage overrides to cached tags")
             except Exception as e:
-                logging.debug(f"UI lineage alignment (cache) skipped: {e}")
+                logging.warning(f"UI lineage alignment (cache) skipped due to error: {e}")
 
             elapsed = (time.time() - start_time) * 1000
             logging.info(f"✅ Using {len(cached_tags)} cached available tags ({elapsed:.1f}ms)")
@@ -7050,7 +7000,6 @@ def get_available_tags():
                     logging.warning(f"Excel processor error: {e}")
         
         # If we have tags from Excel, prefer them but align lineage with database values
-        # PERFORMANCE OPTIMIZATION: Use batch query instead of N+1 individual queries
         if all_tags and not prefer_db:
             try:
                 store_name = get_current_store_name()
@@ -7059,6 +7008,9 @@ def get_available_tags():
                     raise ValueError("No store selected")
                 product_db = get_product_database(store_name)
                 if product_db:
+                    # Build a small cache to reduce duplicate lookups in this batch
+                    lineage_cache = {}
+                    updated = 0
                     conn = product_db._get_connection()
                     cur = conn.cursor()
                     # Skip alignment entirely if products table doesn't exist
@@ -7069,52 +7021,61 @@ def get_available_tags():
                             raise RuntimeError("no-products-table")
                     except RuntimeError:
                         raise
-                    
-                    # BATCH QUERY OPTIMIZATION: Get all lineages in a single query
-                    product_names = [tag.get('Product Name*') or tag.get('ProductName') for tag in all_tags if tag.get('Product Name*') or tag.get('ProductName')]
-                    if product_names:
-                        # Create placeholders for IN clause
-                        placeholders = ','.join('?' * len(product_names))
-                        
-                        # Try with strain join first
-                        batch_query = f'''
-                            SELECT 
-                                p."Product Name*",
-                                COALESCE(s.canonical_lineage, p."Lineage") AS current_lineage
-                            FROM products p
-                            LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
-                            WHERE p."Product Name*" IN ({placeholders})
-                            GROUP BY p."Product Name*"
-                        '''
-                        
+                    # Prefer joining strains by strain_name to avoid missing p.strain_id column
+                    lineage_query_join_by_name = '''
+                        SELECT s.canonical_lineage AS current_lineage
+                        FROM products p
+                        LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
+                        WHERE p."Product Name*" = ? OR p.normalized_name = ?
+                        ORDER BY p.id DESC
+                        LIMIT 1
+                    '''
+                    # Fallback: use product's own Lineage if strains table/column not available
+                    lineage_query_fallback = '''
+                        SELECT p."Lineage" AS current_lineage
+                        FROM products p
+                        WHERE p."Product Name*" = ? OR p.normalized_name = ?
+                        ORDER BY p.id DESC
+                        LIMIT 1
+                    '''
+                    logging.info(f"📦 LINEAGE-BUILD ALIGNMENT: path={getattr(product_db, 'db_path', 'unknown')} store={getattr(product_db, '_store_name', 'unknown')}")
+                    for tag in all_tags:
                         try:
-                            cur.execute(batch_query, product_names)
-                            lineage_map = {row[0]: row[1] for row in cur.fetchall() if row[1]}
-                        except Exception as e:
-                            logging.debug(f"Batch lineage query failed: {e}, trying fallback")
-                            # Fallback to simple query without strain join
-                            batch_query_fallback = f'''
-                                SELECT "Product Name*", "Lineage"
-                                FROM products
-                                WHERE "Product Name*" IN ({placeholders})
-                            '''
-                            cur.execute(batch_query_fallback, product_names)
-                            lineage_map = {row[0]: row[1] for row in cur.fetchall() if row[1]}
-                        
-                        # Apply lineages to tags
-                        updated = 0
-                        for tag in all_tags:
-                            name = tag.get('Product Name*') or tag.get('ProductName')
-                            if name and name in lineage_map:
-                                db_lin_clean = str(lineage_map[name]).strip().upper()
+                            name = tag.get('Product Name*') or tag.get('ProductName') or ''
+                            if not name:
+                                continue
+                            if name in lineage_cache:
+                                db_lin = lineage_cache[name]
+                            else:
+                                # Prefer strain-level lineage used by DOCX (sovereign -> canonical)
+                                try:
+                                    normalized = product_db._normalize_product_name(name)
+                                except Exception:
+                                    normalized = name.strip().lower()
+                                try:
+                                    cur.execute(lineage_query_join_by_name, (name, normalized))
+                                    row = cur.fetchone()
+                                except Exception:
+                                    # Join failed (e.g., missing columns) - fallback to product lineage
+                                    cur.execute(lineage_query_fallback, (name, normalized))
+                                    row = cur.fetchone()
+                                db_lin = row[0] if row else None
+                                lineage_cache[name] = db_lin
+                            if db_lin:
+                                db_lin_clean = str(db_lin).strip().upper()
+                                # Always expose DB lineage on stable fields the UI can prefer
                                 tag['currentLineage'] = db_lin_clean
                                 tag['canonical_lineage'] = db_lin_clean
                                 if str(tag.get('Lineage','')).strip().upper() != db_lin_clean:
                                     tag['Lineage'] = db_lin_clean
                                     updated += 1
-                        
-                        if updated:
-                            logging.info(f"🔄 UI LINEAGE ALIGNMENT: Applied {updated} database lineage overrides to Excel tags (BATCH)")
+                        except RuntimeError:
+                            # Bubble out to outer except to skip alignment
+                            raise
+                        except Exception as _loop_err:
+                            logging.debug(f"UI lineage alignment error for a tag: {_loop_err}")
+                    if updated:
+                        logging.info(f"🔄 UI LINEAGE ALIGNMENT: Applied {updated} database lineage overrides to Excel tags")
             except Exception as e:
                 logging.warning(f"UI lineage alignment skipped due to error: {e}")
 
@@ -13140,11 +13101,6 @@ def get_initial_data():
         logging.info("=== INITIAL DATA REQUEST START ===")
         logging.info(f"Initial data request at {datetime.now().strftime('%H:%M:%S')}")
         
-        # Log session info to help debug
-        selected_store = get_current_store_name() if has_store_selection() else None
-        logging.info(f"Store from session: {selected_store}")
-        logging.info(f"Session ID: {session.get('_id', 'no session')}")
-        
         # Get the excel processor
         excel_processor = get_excel_processor()
         logging.info(f"Excel processor obtained: {excel_processor}")
@@ -13154,96 +13110,30 @@ def get_initial_data():
             excel_processor.df = None
             logging.info("Excel processor missing df attribute - set to None")
             
-        # If no data is loaded, try to load default file BUT with timeout protection
+        # If no data is loaded, try to load the default file
         if excel_processor.df is None:
-            logging.info("No data loaded - attempting to load default file with timeout protection")
-            
-            # Check if store is properly set before trying to load file
-            if not selected_store:
-                logging.warning("No store selected, skipping default file load")
-                return jsonify({
-                    'success': False,
-                    'message': 'No store selected. Please select a store first.',
-                    'ready_for_upload': True
-                })
-            
+            logging.info("No data loaded - attempting to load default file")
             from src.core.data.excel_processor import get_default_upload_file
-            import time
-            import signal
+            selected_store = get_current_store_name() if has_store_selection() else None
+            default_file = get_default_upload_file(selected_store)
             
-            # Define timeout handler
-            def timeout_handler(signum, frame):
-                raise TimeoutError("File loading timed out")
-            
-            try:
-                # Set 5 second timeout for file search
-                signal.signal(signal.SIGALRM, timeout_handler)
-                signal.alarm(5)
-                
-                start_time = time.time()
-                default_file = get_default_upload_file(selected_store)
-                search_time = time.time() - start_time
-                
-                signal.alarm(0)  # Cancel alarm
-                logging.info(f"File search took {search_time:.2f} seconds")
-                
-                if default_file:
-                    try:
-                        logging.info(f"Loading default file for {selected_store}: {os.path.basename(default_file)}")
-                        
-                        # Set 5 second timeout for file loading
-                        signal.alarm(5)
-                        load_start = time.time()
-                        excel_processor.load_file(default_file)
-                        load_time = time.time() - load_start
-                        signal.alarm(0)  # Cancel alarm
-                        
-                        excel_processor._last_loaded_file = default_file
-                        logging.info(f"Default file loaded successfully in {load_time:.2f} seconds")
-                    except TimeoutError:
-                        signal.alarm(0)  # Cancel alarm
-                        logging.error(f"File loading timed out after 5 seconds")
-                        return jsonify({
-                            'success': False,
-                            'message': f'File loading timed out. Please upload a file manually.',
-                            'ready_for_upload': True,
-                            'store': selected_store
-                        })
-                    except Exception as e:
-                        signal.alarm(0)  # Cancel alarm
-                        logging.error(f"Failed to load default file: {e}")
-                        logging.error(f"Exception traceback: {traceback.format_exc()}")
-                        return jsonify({
-                            'success': False,
-                            'message': f'Failed to load default file: {str(e)}',
-                            'ready_for_upload': True,
-                            'store': selected_store
-                        })
-                else:
-                    logging.warning(f"No default file found for store: {selected_store}")
+            if default_file:
+                try:
+                    logging.info(f"Loading default file for {selected_store}: {os.path.basename(default_file)}")
+                    excel_processor.load_file(default_file)
+                    excel_processor._last_loaded_file = default_file
+                    logging.info(f"Default file loaded successfully")
+                except Exception as e:
+                    logging.error(f"Failed to load default file: {e}")
                     return jsonify({
                         'success': False,
-                        'message': f'No recent file found for {selected_store}. Please upload a file.',
-                        'ready_for_upload': True,
-                        'store': selected_store
+                        'message': f'Failed to load default file: {str(e)}'
                     })
-            except TimeoutError:
-                signal.alarm(0)  # Cancel alarm
-                logging.error(f"File search timed out after 5 seconds")
+            else:
+                logging.warning("No default file found")
                 return jsonify({
                     'success': False,
-                    'message': 'File search timed out. Please upload a file manually.',
-                    'ready_for_upload': True,
-                    'store': selected_store
-                })
-            except Exception as e:
-                signal.alarm(0)  # Cancel alarm if exception occurred
-                logging.error(f"Error during file loading: {e}")
-                return jsonify({
-                    'success': False,
-                    'message': f'Error loading file: {str(e)}',
-                    'ready_for_upload': True,
-                    'store': selected_store
+                    'message': 'No default file found and no data currently loaded'
                 })
         
         if hasattr(excel_processor, 'df') and excel_processor.df is not None:
