@@ -5209,12 +5209,20 @@ const TagManager = {
                 if (splash && splash.style.display !== 'none') {
                     console.log('Emergency fix: hiding stuck splash screen');
                     splash.style.display = 'none';
-                    const mainContent = document.getElementById('mainContent');
-                    if (mainContent) {
+                }
+                
+                // CRITICAL FIX: Always ensure main content is visible
+                const mainContent = document.getElementById('mainContent');
+                if (mainContent) {
+                    const computedStyle = window.getComputedStyle(mainContent);
+                    if (computedStyle.display === 'none' || computedStyle.opacity === '0') {
+                        console.log('🚨 EMERGENCY: Main content still hidden, forcing display');
                         mainContent.style.display = 'block';
+                        mainContent.classList.add('loaded');
+                        mainContent.classList.add('store-selected');
                     }
                 }
-            }, 20000); // 20 second emergency timeout
+            }, 5000); // Check after 5 seconds
         });
     },
 
@@ -5310,9 +5318,9 @@ const TagManager = {
         console.log('=== CHECK FOR EXISTING DATA FUNCTION CALLED ===');
         console.log('Checking for existing data... (attempt ' + (retryCount + 1) + ')');
         
-        // 15 second timeout - allows time to load default files but still reasonable
+        // Reduced timeout to 10 seconds for better UX - if it takes longer, retry or skip
         const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('Initialization timeout')), 15000); // 15 second timeout
+            setTimeout(() => reject(new Error('Initialization timeout')), 10000); // 10 second timeout
         });
         
         try {

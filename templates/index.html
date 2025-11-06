@@ -4575,6 +4575,12 @@
       opacity: 1;
     }
     
+    /* EMERGENCY FIX: Allow loaded class alone to show content */
+    .main-content.loaded {
+      display: block !important;
+      opacity: 1 !important;
+    }
+    
     /* Store modal backdrop - ensure it's visible */
     #storeSelectionModal.show {
       display: block !important;
