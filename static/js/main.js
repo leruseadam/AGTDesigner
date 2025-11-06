@@ -5393,8 +5393,9 @@ const TagManager = {
                     AppLoadingSplash.stopAutoAdvance();
                     AppLoadingSplash.complete();
                     
-                    // Load test data since no initial data was found
-                    this.loadTestData();
+                    // DON'T load test data - let user upload a file or select a store
+                    // Show empty state instead
+                    console.log('Waiting for user to upload a file or select a store');
                     return;
                 }
             } else {
@@ -5411,8 +5412,8 @@ const TagManager = {
                 AppLoadingSplash.stopAutoAdvance();
                 AppLoadingSplash.complete();
                 
-                // Load test data since initial data failed
-                this.loadTestData();
+                // DON'T load test data on error - show empty state
+                console.log('Waiting for user to upload a file or select a store');
                 return;
             }
         } catch (error) {
@@ -5436,8 +5437,8 @@ const TagManager = {
             AppLoadingSplash.stopAutoAdvance();
             AppLoadingSplash.complete();
             
-            // Load test data since initial data failed
-            this.loadTestData();
+            // DON'T load test data on timeout - show empty state
+            console.log('Waiting for user to upload a file or select a store');
             return;
         }
         
