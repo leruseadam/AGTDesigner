@@ -1231,12 +1231,20 @@ def create_app():
     
     # Initialize session management
     if Session:
-        # Create sessions directory if it doesn't exist
-        sessions_dir = app.config.get('SESSION_FILE_DIR')
-        if sessions_dir:
-            os.makedirs(sessions_dir, exist_ok=True)
+        # CRITICAL FIX: Explicitly set session configuration before initializing
+        sessions_dir = os.path.join(current_dir, 'sessions')
+        os.makedirs(sessions_dir, exist_ok=True)
+        
+        app.config['SESSION_TYPE'] = 'filesystem'
+        app.config['SESSION_FILE_DIR'] = sessions_dir
+        app.config['SESSION_PERMANENT'] = False
+        app.config['SESSION_USE_SIGNER'] = True
+        app.config['SESSION_KEY_PREFIX'] = 'labelmaker:'
+        app.config['SESSION_FILE_THRESHOLD'] = 500  # Max number of session files
+        
         Session(app)
-        logging.info("Flask-Session initialized with filesystem storage")
+        logging.info(f"Flask-Session initialized with filesystem storage at {sessions_dir}")
+        logging.info(f"Session config: TYPE={app.config.get('SESSION_TYPE')}, DIR={app.config.get('SESSION_FILE_DIR')}")
     else:
         logging.warning("Flask-Session not available, using default session handling")
     
@@ -4695,6 +4703,13 @@ def check_store_required():
         logging.info(f"Check store required for IP: {ip_address}")
         logging.info(f"Store selections in memory: {list(_ip_store_selections.keys())}")
         
+        # CRITICAL DEBUG: Check session data
+        session_store = session.get('selected_store')
+        session_dict = dict(session)
+        logging.info(f"SESSION DEBUG: selected_store={session_store}")
+        logging.info(f"SESSION DEBUG: full session={session_dict}")
+        logging.info(f"SESSION DEBUG: session.permanent={session.permanent}")
+        
         # Check if there's a selection for this IP
         has_selection = has_store_selection()
         logging.info(f"has_store_selection() returned: {has_selection}")
@@ -4704,7 +4719,11 @@ def check_store_required():
             return jsonify({
                 'success': True,
                 'requires_store': True,
-                'store': None
+                'store': None,
+                'debug': {
+                    'session_store': session_store,
+                    'ip_address': ip_address
+                }
             })
         
         # Get the current store (should not be None if has_store_selection returned True)
@@ -4716,7 +4735,11 @@ def check_store_required():
             return jsonify({
                 'success': True,
                 'requires_store': False,
-                'store': current_store
+                'store': current_store,
+                'debug': {
+                    'session_store': session_store,
+                    'ip_address': ip_address
+                }
             })
         else:
             # Edge case: has_store_selection returned True but get_current_store_name returned None
@@ -4724,7 +4747,12 @@ def check_store_required():
             return jsonify({
                 'success': True,
                 'requires_store': True,
-                'store': None
+                'store': None,
+                'debug': {
+                    'session_store': session_store,
+                    'ip_address': ip_address,
+                    'edge_case': True
+                }
             })
         
     except Exception as e:
