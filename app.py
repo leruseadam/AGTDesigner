@@ -6998,6 +6998,18 @@ def get_available_tags():
                     logging.info(f"✅ Excel processor returned {len(excel_tags)} tags")
                 except Exception as e:
                     logging.warning(f"Excel processor error: {e}")
+            
+            # CRITICAL FIX: If no Excel data and prefer_db not set, return empty to require Excel upload
+            if not all_tags:
+                logging.info("⚠️ No Excel data loaded - returning empty tags to require Excel upload")
+                elapsed = (time.time() - start_time) * 1000
+                return jsonify({
+                    'tags': [],
+                    'total_count': 0,
+                    'source': 'no-excel-data',
+                    'message': 'Please upload an Excel file to see products',
+                    'elapsed_ms': elapsed
+                })
         
         # If we have tags from Excel, prefer them but align lineage with database values
         if all_tags and not prefer_db:
