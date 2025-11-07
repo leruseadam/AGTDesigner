@@ -65,10 +65,6 @@
   <!-- Performance Optimizations - Load early for best results -->
   <script src="{{ url_for('static', filename='js/performance.js') }}?v={{ cache_bust }}"></script>
   
-  <script>
-    window.AGT_SERVER_BOOT_ID = {{ server_boot_id|tojson }};
-  </script>
-
   <!-- Performance hints -->
   <meta http-equiv="x-dns-prefetch-control" content="on">
   <link rel="dns-prefetch" href="//cdn.jsdelivr.net">
@@ -4935,9 +4931,6 @@
                     Change
                   </button>
                 </div>
-                <button class="big-glow-help-btn" id="help-btn" title="Click for help with downloading LOTs data and using the application" data-bs-toggle="modal" data-bs-target="#helpModal">
-                  <span style="font-size: 16px; font-weight: bold; color: white;">?</span>
-                </button>
               </div>
             </div>
 
@@ -5089,7 +5082,7 @@
             <!-- Controls -->
             <div class="control-panel" style="width: 100%;">
               <!-- Template Section -->
-              <div class="mb-3">
+              <div class="control-section mb-2">
                 <label class="filter-label">Template</label>
                 <select id="templateSelect" class="form-select form-select-modern" aria-label="Template" style="margin: 0 auto !important; display: block !important; min-width: 100%; white-space: nowrap;">
                   <option value="horizontal">Horizontal</option>
@@ -5115,7 +5108,7 @@
                 </select>
               </div>
               <!-- Controls Section -->
-              <div class="mb-3">
+              <div class="control-section mb-2">
                 <label class="filter-label">Controls</label>
                 <div class="d-grid gap-3 w-100">
                   <!-- Match JSON Button - Moved to top for easy access -->
@@ -5161,7 +5154,7 @@
               </div>
 
               <!-- Database and Lineage Management -->
-              <div class="mb-3">
+              <div class="control-section mb-2">
                 <label class="filter-label">Database Tools</label>
                 <div class="d-grid gap-3">
                   <button class="btn btn-glass btn-control" onclick="showProductDatabaseManager()" title="Open Data & Analytics">
@@ -5194,6 +5187,12 @@
                     </span>
                   </button>
                 </div>
+              </div>
+
+              <div class="help-button-container">
+                <button class="big-glow-help-btn" id="help-btn" title="Click for help with downloading LOTs data and using the application" data-bs-toggle="modal" data-bs-target="#helpModal">
+                  <span style="font-size: 16px; font-weight: bold; color: white;">?</span>
+                </button>
               </div>
 
             </div>
@@ -5340,31 +5339,6 @@
       .then(data => {
         console.log('Backend store check response:', data);
         
-        const currentBootId = window.AGT_SERVER_BOOT_ID || null;
-        let storedBootId = null;
-        try {
-          storedBootId = sessionStorage.getItem('server_boot_id');
-        } catch (storageErr) {
-          console.warn('⚠️ Unable to read stored server boot ID:', storageErr);
-        }
-
-        const navigationEntry = (performance && typeof performance.getEntriesByType === 'function')
-          ? performance.getEntriesByType('navigation')[0]
-          : null;
-        const isReloadNavigation = navigationEntry
-          ? navigationEntry.type === 'reload'
-          : (performance && performance.navigation ? performance.navigation.type === 1 : false);
-
-        const serverRestartDetected = Boolean(currentBootId && storedBootId && storedBootId !== currentBootId);
-        const hardReloadRequested = Boolean(isReloadNavigation && !serverRestartDetected && sessionStorage.getItem('store_just_selected') !== 'true');
-
-        if (serverRestartDetected) {
-          console.log('♻️ Server restart detected (boot ID changed). Forcing store confirmation.');
-          sessionStorage.removeItem('store_just_selected');
-          sessionStorage.removeItem('store_selected_timestamp');
-          sessionStorage.removeItem('selected_store');
-        }
-
         // Backend returns 'requires_store', not 'required'
         const requiresStore = data.requires_store === true || data.required === true;
         const storeName = data?.store || null;
@@ -5427,34 +5401,14 @@
           }
         };
         
-        if (requiresStore || !storeName || serverRestartDetected || hardReloadRequested) {
-          if (requiresStore || !storeName) {
-            console.log('❗ No store selected in backend - showing modal');
-          } else if (serverRestartDetected) {
-            console.log('❗ Forcing modal due to server restart');
-          } else if (hardReloadRequested) {
-            console.log('❗ Hard reload detected - showing modal for store change');
-          }
-          try {
-            if (currentBootId) {
-              sessionStorage.setItem('server_boot_id', currentBootId);
-            }
-          } catch (storageErr) {
-            console.warn('⚠️ Unable to persist server boot ID before showing modal:', storageErr);
-          }
+        if (requiresStore || !storeName) {
+          console.log('❗ No store selected in backend - showing modal');
           forceShowModal();
           return;
         }
 
-        console.log('✅ Backend reports existing store selection:', storeName, '- skipping modal');
-
-        // Persist most recent known store locally so other scripts can reference it without another fetch
-        try {
-          sessionStorage.setItem('selected_store', storeName);
-        } catch (storageErr) {
-          console.warn('⚠️ Unable to cache selected store in sessionStorage:', storageErr);
-        }
-
+        console.log('✅ Store available from backend:', storeName, '- showing content');
+        sessionStorage.setItem('selected_store', storeName);
         sessionStorage.removeItem('store_just_selected');
         sessionStorage.removeItem('store_selected_timestamp');
 
@@ -5483,14 +5437,6 @@
         }
         if (typeof updateStoreStatus === 'function') {
           updateStoreStatus(`Store: ${storeName.replace(/_/g, ' ')}`, 'active');
-        }
-
-        try {
-          if (currentBootId) {
-            sessionStorage.setItem('server_boot_id', currentBootId);
-          }
-        } catch (storageErr) {
-          console.warn('⚠️ Unable to persist server boot ID after confirming store:', storageErr);
         }
       })
       .catch(err => {

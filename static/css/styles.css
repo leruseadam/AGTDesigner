@@ -26,6 +26,11 @@
   --spacing-md: 1rem;
   --spacing-lg: 1.5rem;
   --spacing-xl: 2rem;
+  
+  --tag-list-height: max(var(--tag-list-min-height), calc(100vh - var(--tag-list-vertical-offset)));        /* Height of tag list containers */
+  --filter-height: auto;           /* Height of filter bar (auto or specific px) */
+  --center-panel-height: 75rem;     /* Height of center control panel */
+  --tag-list-scroll-padding: 1rem;
 }
 
 /* Larger scaling for better readability */
@@ -334,7 +339,7 @@ p, span, div {
 .centerframe .header-buttons-container {
   gap: 1.25rem !important; /* subtle increase over gap-3 (~1rem) */
   column-gap: 1.25rem !important;
-  row-gap: 0.75rem !important;
+  row-gap: 0.5rem !important;
 }
 
 /* Responsive Hardening Overrides — ensure usability across all consumer viewports */
@@ -460,8 +465,8 @@ canvas#lava-lamp-canvas {
 
 /* Dynamic viewport height support so layout adapts when DevTools/keyboard open */
 :root {
-  --tag-list-vertical-offset: clamp(3.5rem, 5vh, 5.5rem);
-  --tag-list-min-height: 48rem;
+  --tag-list-vertical-offset: clamp(3.25rem, 4.5vh, 5rem);
+  --tag-list-min-height: 55rem;
 }
 @supports (height: 100svh) {
   :root {
@@ -531,6 +536,51 @@ canvas#lava-lamp-canvas {
   font-style: italic !important;
   opacity: 0.7 !important;
 }
+
+.control-panel {
+  justify-content: flex-start !important;
+  align-items: stretch !important;
+  gap: 0 !important;
+  overflow-y: visible !important;
+  min-height: calc(var(--center-panel-height) - 1.5rem) !important;
+}
+
+.control-panel > * {
+  width: 100% !important;
+}
+
+.control-panel > .control-section + .control-section {
+  margin-top: 0.9rem !important;
+}
+
+.control-panel > .control-section + .help-button-container {
+  margin-top: 0 !important;
+}
+ 
+.control-section {
+  width: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 0.50rem !important;
+}
+ 
+.control-section .d-grid,
+.control-section .d-flex {
+  gap: 0.50rem !important;
+}
+
+.help-button-container {
+  margin: 0 !important;
+  width: 100% !important;
+  display: flex !important;
+  justify-content: center !important;
+  align-items: center !important;
+  padding: 0 !important;
+}
+
+.help-button-container .big-glow-help-btn {
+  margin: 0.5rem !important;
+}
 :root {
     --primary-gradient: linear-gradient(135deg, #ff8fab 0%, #a084e8 100%);
     --secondary-gradient: linear-gradient(135deg, #8b5cf6 0%, #43e97b 100%);
@@ -562,7 +612,8 @@ canvas#lava-lamp-canvas {
     /* Height Variables - Flexible for natural layout */
     --tag-list-height: max(var(--tag-list-min-height), calc(100vh - var(--tag-list-vertical-offset)));        /* Height of tag list containers */
     --filter-height: auto;           /* Height of filter bar (auto or specific px) */
-    --center-panel-height: var(--tag-list-height);     /* Height of center control panel matches tag lists */
+    --center-panel-height: 54rem;     /* Height of center control panel */
+    --tag-list-scroll-padding: 1rem;
   }
 
   /* Responsive sizing variables for center column buttons */
@@ -1045,21 +1096,34 @@ canvas#lava-lamp-canvas {
     background: rgba(255, 255, 255, 0.1);
     border: 1px solid rgba(255, 255, 255, 0.2);
     border-radius: 3px;
-    width: 18px;
-    height: 18px;
+    width: 54px;
+    height: 54px;
     display: flex;
     align-items: center;
     justify-content: center;
     transition: all 0.3s ease;
     color: rgba(255, 255, 255, 0.9);
-    font-size: 0.8rem;
+    font-size: 1.4rem;
+    font-weight: 700;
   }
   
   .big-glow-help-btn:hover {
     background: rgba(255, 255, 255, 0.2);
     border-color: rgba(255, 255, 255, 0.3);
-    transform: scale(1.02);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    transform: scale(1.05);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  }
+  
+  .big-glow-help-btn svg {
+    width: 34px;
+    height: 34px;
+    opacity: 0.9;
+  }
+  
+  .big-glow-help-btn span {
+    font-size: 1.6rem !important;
+    font-weight: 700 !important;
+    line-height: 1 !important;
   }
   
   /* Responsive Store Selection */
@@ -1277,7 +1341,6 @@ canvas#lava-lamp-canvas {
       margin: 0 auto !important;
     }
   }
-  
   /* Small screens (tablets, 481px and up) */
   @media (min-width: 481px) and (max-width: 768px) {
     .btn-modern, .btn-modern2, .btn-modern3,
@@ -2076,7 +2139,6 @@ canvas#lava-lamp-canvas {
     min-height: 200px;
     flex: 1;
   }
-  
   /* Ensure the glass-card container properly supports flex */
   .glass-card.h-100 {
     display: flex;
@@ -2124,7 +2186,6 @@ canvas#lava-lamp-canvas {
     transform: translateZ(0);
     will-change: height;
   }
-  
   /* Ensure glass-card containers can expand properly */
   .glass-card.d-flex.flex-column {
     height: auto !important;
@@ -2466,6 +2527,9 @@ canvas#lava-lamp-canvas {
   .control-panel {
     justify-content: flex-start !important;
     align-items: stretch !important;
+    gap: 0 !important;
+    overflow-y: visible !important;
+    min-height: calc(var(--center-panel-height) - 1.5rem) !important;
   }
   
   /* Center panel grid alignment */
@@ -2502,7 +2566,12 @@ canvas#lava-lamp-canvas {
 
   /* Center column specific spacing reductions */
   .help-button-container {
-    margin-bottom: 0 !important;
+    margin: 0.9rem 0 !important;
+    width: 100% !important;
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    padding: 0.75rem !important;
   }
   
   .help-button-container .big-glow-help-btn {
@@ -2557,21 +2626,44 @@ canvas#lava-lamp-canvas {
 
   /* Generate button themed like header buttons (color/border/hover) without size constraints */
   .btn-generate-themed {
-    background: linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%) !important;
-    backdrop-filter: blur(15px);
-    -webkit-backdrop-filter: blur(15px);
-    border: 1px solid rgba(139, 92, 246, 0.8) !important;
-    color: #fff !important;
+    background: var(--primary-gradient) !important;
+    border: none !important;
+    color: white !important;
+    padding: 8px 16px !important;
     border-radius: 12px !important;
-    box-shadow: 0 3px 12px rgba(139, 92, 246, 0.4) !important;
-    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.4) !important;
+    font-weight: 700 !important;
+    font-size: 1rem !important;
+    transition: all 0.4s cubic-bezier(0.4,0,0.2,1) !important;
+    box-shadow: 
+      0 4px 16px rgba(160,132,232,0.15), 
+      0 2px 8px rgba(0,0,0,0.1),
+      inset 0 1px 0 rgba(255,255,255,0.2) !important;
+    text-decoration: none !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 4px !important;
+    cursor: pointer !important;
+    outline: none !important;
+    position: relative !important;
   }
 
   .btn-generate-themed:hover {
-    background: linear-gradient(135deg, #9F7AEA 0%, #8B5CF6 100%) !important;
-    border-color: rgba(159, 122, 234, 1) !important;
-    box-shadow: 0 5px 18px rgba(139, 92, 246, 0.5) !important;
-    transform: translateY(-2px) scale(1.02);
+    filter: brightness(1.1) saturate(1.15) !important;
+    box-shadow: 
+      0 12px 40px rgba(160,132,232,0.2), 
+      0 4px 16px rgba(0,0,0,0.12),
+      inset 0 1px 0 rgba(255,255,255,0.25) !important;
+    transform: translateY(-3px) scale(1.02) !important;
+  }
+  
+  .btn-generate-themed:active {
+    transform: translateY(0) !important;
+    transition: transform 0.1s ease !important;
+  }
+  
+  .btn-generate-themed:focus {
+    box-shadow: 0 0 0 4px rgba(160,132,232,0.13), 0 2px 12px 0 rgba(160,132,232,0.10) !important;
   }
   
   /* JSON Tools section spacing */
@@ -2601,11 +2693,11 @@ canvas#lava-lamp-canvas {
   .control-panel .btn-glass.btn-control,
   .btn-control {
     padding: 12px 14px !important;
-    font-size: 0.9rem !important;
+    font-size: 1.05rem !important;
     font-weight: 600 !important;
     min-height: 50px !important;
-    width: 75% !important;
-    max-width: 200px !important;
+    width: 70% !important;
+    max-width: 185px !important;
     margin: 0 auto !important;
     border-radius: 10px !important;
     display: flex !important;
@@ -2870,7 +2962,6 @@ canvas#lava-lamp-canvas {
   .lineage-select {
     margin-left: 6px !important;
   }
-  
   .vendor-header, .brand-header, .product-type-header, .weight-header, .container-label {
       font-size: 0.9rem !important;
       font-weight: 700 !important;
@@ -2906,7 +2997,6 @@ canvas#lava-lamp-canvas {
     max-width: 36px !important;
     width: 32px !important;
   }
-  
   .lineage-dropdown {
     /* Cross-platform consistency - remove platform-specific styling */
     -webkit-appearance: none !important;
@@ -4275,7 +4365,6 @@ canvas#lava-lamp-canvas {
     font-size: 0.9rem;
     transition: all 0.3s ease;
   }
-
   .lineage-dropdown:hover,
   .lineage-dropdown-mini:hover,
   .form-select.lineage-dropdown:hover {
@@ -5066,7 +5155,6 @@ canvas#lava-lamp-canvas {
     padding-right: 16px !important;
     width: calc(100% + 32px) !important;
   }
-  
   /* Ensure tag bars extend to container edges */
   .tag-item {
     border-radius: 0 !important;
@@ -5868,11 +5956,9 @@ canvas#lava-lamp-canvas {
   #lineageEditorModal .modal-dialog {
     z-index: 10002 !important;
   }
-
   #lineageEditorModal .modal-content {
     z-index: 10003 !important;
   }
-
   #strainLineageEditorModal {
     z-index: 10001 !important;
     position: fixed !important;
@@ -6139,14 +6225,14 @@ canvas#lava-lamp-canvas {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 32px;
-    height: 32px;
+    width: 54px;
+    height: 54px;
     border-radius: 50%;
     background: linear-gradient(135deg, #00d4aa 0%, #0099cc 100%);
     box-shadow: 0 0 4px 1px rgba(0, 212, 170, 0.6), 0 0 8px 2px rgba(0, 212, 170, 0.4);
     border: 1px solid rgba(255, 255, 255, 0.8);
     color: #ffffff;
-    font-size: 0.875rem;
+    font-size: 1.4rem;
     margin: 0;
     cursor: pointer;
     transition: box-shadow 0.3s, transform 0.2s;
@@ -6157,8 +6243,8 @@ canvas#lava-lamp-canvas {
   }
 
   .big-glow-help-btn svg {
-    width: 22px;
-    height: 22px;
+    width: 34px;
+    height: 34px;
     stroke: #ffffff;
     filter: drop-shadow(0 0 2px rgba(0, 212, 170, 0.8)) drop-shadow(0 0 4px rgba(0, 212, 170, 0.6));
   }
@@ -6214,17 +6300,21 @@ canvas#lava-lamp-canvas {
   }
 
   .center-panel {
-    align-self: flex-start; /* prevents it from being pushed down */
+    align-self: center !important;
+    justify-self: center !important;
     padding-top: 0 !important;
-    margin-top: 0 !important;
-    height: 100% !important;
+    margin-top: auto !important;
+    margin-bottom: auto !important;
+    height: var(--center-panel-height) !important;
+    display: flex;
+    flex-direction: column;
   }
 
 .main-content-row {
   width: 100% !important;
   max-width: 100% !important;
   min-height: 80vh;
-  align-items: start !important;
+  align-items: center !important;
   display: grid !important;
   grid-template-columns: minmax(320px, 1fr) minmax(230px, 280px) minmax(320px, 1fr);
   gap: 1rem !important;
@@ -6243,7 +6333,6 @@ canvas#lava-lamp-canvas {
     gap: 0.75rem !important;
   }
 }
-
   .card-width {
     max-width: 600px;
     width: 100%;
@@ -6477,10 +6566,12 @@ canvas#lava-lamp-canvas {
   
   /* Help Button Container and Label Styling */
   .help-button-container {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    margin-bottom: 1rem;
+    margin: 0.9rem 0 !important;
+    width: 100% !important;
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    padding: 0.75rem !important;
   }
   
   .help-label {
@@ -7024,22 +7115,22 @@ canvas#lava-lamp-canvas {
     flex: 0 0 calc(var(--filter-column-width) / 12 * 100%) !important;
     max-width: calc(var(--filter-column-width) / 12 * 100%) !important;
   }
-  
   [data-container-type="center"] {
     flex: 0 0 calc(var(--center-column-width) / 12 * 100%) !important;
     max-width: calc(var(--center-column-width) / 12 * 100%) !important;
   display: flex !important;
   flex-direction: column !important;
-  height: auto !important;
-  min-height: var(--tag-list-min-height) !important;
+  height: var(--center-panel-height) !important;
+  min-height: var(--center-panel-height) !important;
   max-height: var(--center-panel-height) !important;
-  overflow-y: auto !important;
+  overflow: hidden !important;
   }
   
   [data-container-type="available"],
   [data-container-type="selected"] {
     flex: 0 0 calc(var(--tag-list-column-width) / 12 * 100%) !important;
     max-width: calc(var(--tag-list-column-width) / 12 * 100%) !important;
+    min-width: calc(var(--tag-list-column-width) / 12 * 100%) !important;
   }
   
   /* Custom heights using CSS variables */
@@ -7047,16 +7138,26 @@ canvas#lava-lamp-canvas {
     height: var(--filter-height) !important;
     min-height: var(--filter-height) !important;
   }
-  
   [data-container-type="center"] .control-panel {
-  height: auto !important;
-  min-height: var(--tag-list-min-height) !important;
+  height: var(--center-panel-height) !important;
+  min-height: var(--center-panel-height) !important;
   max-height: var(--center-panel-height) !important;
     display: flex !important;
     flex-direction: column !important;
     flex: 1 1 auto !important;
-  overflow-y: auto !important;
-  padding-bottom: 1.5rem !important;
+  justify-content: flex-start !important;
+  align-items: stretch !important;
+  gap: 0 !important;
+  overflow-y: visible !important;
+  min-height: calc(var(--center-panel-height) - 1.5rem) !important;
+  }
+  
+  .control-panel > * {
+    width: 100% !important;
+  }
+  
+  .control-panel > * + * {
+    margin-top: 0.9rem !important;
   }
   
   [data-container-type="available"] #availableTags,
@@ -7490,7 +7591,6 @@ canvas#lava-lamp-canvas {
     text-shadow: 0 2px 4px rgba(0,0,0,0.3);
     box-shadow: 0 4px 12px rgba(160, 132, 232, 0.2);
   }
-
   /* Enhanced visual hierarchy for main sections */
   .main-content {
     margin-top: 1rem !important;
@@ -7810,7 +7910,6 @@ canvas#lava-lamp-canvas {
     flex-direction: column;
     height: 100%;
   }
-
   .fallback-modal-header {
     padding: 20px 25px;
     border-bottom: 1px solid #e9ecef;
@@ -7825,7 +7924,6 @@ canvas#lava-lamp-canvas {
     color: #495057;
     font-weight: 600;
   }
-
   .fallback-modal-close {
     background: none;
     border: none;
@@ -7846,7 +7944,6 @@ canvas#lava-lamp-canvas {
     background: #e9ecef;
     color: #495057;
   }
-
   .fallback-modal-body {
     padding: 25px;
     flex: 1;
@@ -8289,7 +8386,6 @@ canvas#lava-lamp-canvas {
   .collapsible-header .tag-checkbox {
     pointer-events: auto !important;
   }
-  
   /* Specific fix for product type checkboxes */
   .product-type-header .select-all-checkbox,
   .product-type-header input[type="checkbox"] {
@@ -8610,7 +8706,6 @@ canvas#lava-lamp-canvas {
     font-size: clamp(9px, 2vw, 15px) !important;
     font-weight: 500 !important;
   }
-  
   /* Description text with multi-line support */
   .description-text {
     font-size: clamp(7px, 1.6vw, 11px) !important;
@@ -8623,13 +8718,11 @@ canvas#lava-lamp-canvas {
     -ms-hyphens: auto !important;
     hyphens: auto !important;
   }
-  
   /* JavaScript-powered dynamic font sizing */
   .dynamic-font {
     font-size: var(--dynamic-font-size, var(--base-font-size)) !important;
     transition: font-size 0.2s ease !important;
   }
-  
   /* Container width breakpoints for font sizing */
   @media (max-width: 200px) {
     .text-container {
@@ -8648,8 +8741,7 @@ canvas#lava-lamp-canvas {
       font-size: clamp(11px, 3.2vw, 17px) !important;
     }
   }
-  
-  @media (min-width: 401px) and (max-width: 500px) {
+  @media (301px) and (max-width: 500px) {
     .text-container {
       font-size: clamp(12px, 3.4vw, 19px) !important;
     }
@@ -9091,7 +9183,6 @@ canvas#lava-lamp-canvas {
     font-weight: 500 !important;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3) !important;
   }
-
   .dropdown-instruction-blurb .instruction-icon {
     color: #a084e8 !important;
     flex-shrink: 0 !important;
@@ -9407,7 +9498,6 @@ canvas#lava-lamp-canvas {
 /* ========================================
    FULLSCREEN CANVAS FIX - FINAL OVERRIDE
    ======================================== */
-
 /* CRITICAL: Ensure lava lamp canvas fills entire screen without any gaps or shadows */
 #lava-lamp-canvas {
   display: block !important;
@@ -9433,7 +9523,6 @@ canvas#lava-lamp-canvas {
   /* Ensure no browser default spacing */
   background: transparent !important;
 }
-
 /* Override any inherited styles that might affect canvas positioning */
 canvas#lava-lamp-canvas {
   max-width: none !important;
@@ -9448,7 +9537,6 @@ canvas#lava-lamp-canvas {
 /* ========================================
    FULLSCREEN CANVAS FIX - ABSOLUTE POSITIONING
    ======================================== */
-
 /* Ensure canvas fills entire viewport with absolute positioning */
 #lava-lamp-canvas,
 canvas#lava-lamp-canvas {

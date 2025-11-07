@@ -856,6 +856,7 @@ class TemplateProcessor:
         return buf
 
     def process_records(self, records):
+        documents = []
         # FULLY DISABLE CHUNKING for horizontal, vertical, and double templates
         try:
             if self.template_type in ['horizontal', 'vertical', 'double']:
@@ -894,12 +895,50 @@ class TemplateProcessor:
                     self.logger.info(f"✅ DEDUPLICATION: Removed {duplicate_count} duplicate(s), {len(unique_records)} unique products remain")
                     records = unique_records
                 
-                documents = []
                 # Process all records in a single chunk
                 chunk = records
                 self.chunk_count = 1
                 documents.append(self._process_chunk(chunk))
                 # All records processed in one chunk; no further chunking or looping required
+            else:
+                # Ensure chunk size matches record count for all other template types (e.g., mini, inventory)
+                self.chunk_size = len(records)
+                self.logger.info(f"🔍 LABEL RENDER: Processing {len(records)} records for template '{self.template_type}' with chunk_size {self.chunk_size}.")
+                self.start_time = time.time()
+                self.chunk_count = 1
+                overall_order = [record.get('ProductName', 'Unknown') for record in records]
+                self.logger.info(f"Processing {len(records)} records in overall order: {overall_order}")
+                has_json_products = any(record.get('Source', '').startswith('JSON') or record.get('Source', '').startswith('Database Priority') for record in records)
+
+                # Apply the same deduplication logic for consistency across templates
+                seen_products = set()
+                unique_records = []
+                duplicate_count = 0
+
+                for record in records:
+                    product_name = record.get('ProductName', 'Unknown')
+                    price = record.get('Price', '')
+                    weight = record.get('Weight', '') or record.get('NetWeight', '')
+                    vendor = record.get('Vendor', '') or record.get('ProductVendor', '')
+
+                    dedup_key = f"{product_name}|{price}|{weight}|{vendor}".lower().strip()
+
+                    if dedup_key not in seen_products:
+                        seen_products.add(dedup_key)
+                        unique_records.append(record)
+                    else:
+                        duplicate_count += 1
+                        self.logger.info(f"🗑️ DEDUPLICATION: Removing duplicate '{product_name}' (Price: {price}, Weight: {weight})")
+
+                if duplicate_count > 0:
+                    self.logger.info(f"✅ DEDUPLICATION: Removed {duplicate_count} duplicate(s), {len(unique_records)} unique products remain")
+                    records = unique_records
+
+                if not records:
+                    self.logger.warning("No records to process after deduplication.")
+                    return None
+
+                documents.append(self._process_chunk(records))
             
             if not documents: 
                 return None
@@ -1687,11 +1726,28 @@ class TemplateProcessor:
                 label_context['ProductVendor'] = ""
                 self.logger.debug(f"ProductVendor set to empty for classic type '{product_type}' (no vendor data)")
             
-            # CRITICAL FIX: Classic types should NOT have ProductBrand - they show lineage only
-            # Ensure ProductBrand is empty for classic types regardless of template type
+            # CRITICAL FIX: Classic types should NOT have ProductBrand for most templates
+            # However, mini templates still display brand in dedicated cells
+            if self.template_type == 'mini':
+                if product_brand:
+                    classic_brand_text = str(product_brand).strip().upper()
+                    label_context['ProductBrand'] = classic_brand_text
+                    label_context['ProductBrand_Center'] = classic_brand_text
+                    self.logger.info(
+                        f"🎯 MINI CLASSIC BRAND: Preserving ProductBrand '{classic_brand_text}' for classic type '{product_type}'"
+                    )
+                else:
             label_context['ProductBrand'] = ""
             label_context['ProductBrand_Center'] = ""
-            self.logger.info(f"🔧 CLASSIC TYPE FIX: Set ProductBrand to empty for classic type '{product_type}' (classic types show lineage, not brand)")
+                    self.logger.info(
+                        f"🎯 MINI CLASSIC BRAND: No brand available to preserve for classic type '{product_type}'"
+                    )
+            else:
+                label_context['ProductBrand'] = ""
+                label_context['ProductBrand_Center'] = ""
+                self.logger.info(
+                    f"🔧 CLASSIC TYPE FIX: Set ProductBrand to empty for classic type '{product_type}' (classic types show lineage, not brand)"
+                )
         else:
             # For ALL non-classic types (including tinctures), Lineage shows brand and ProductVendor is empty
             # Color is determined by Product Strain (CBD Blend = yellow, Mixed = blue)

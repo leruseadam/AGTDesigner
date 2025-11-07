@@ -112,9 +112,6 @@ def safe_load_file_with_timeout(processor, file_path, timeout_seconds=30):
         return False
     finally:
         signal.alarm(0)  # Ensure timeout is cancelled
-# Unique identifier for current Flask process instance (used for store modal resets)
-SERVER_BOOT_ID = f"{int(time.time())}-{os.getpid()}"
-
 LAZY_LOADING_ENABLED = True  # Enable lazy loading for better performance
 
 # Browser-based store persistence (handled by frontend JavaScript)
@@ -310,6 +307,7 @@ import subprocess
 from collections import defaultdict
 import shutil
 import pickle
+import uuid
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -321,6 +319,9 @@ CACHE_DURATION = 300  # Cache for 5 minutes
 # Global ExcelProcessor instance
 _excel_processor = None
 _excel_processor_reset_flag = False  # Flag to track when processor has been explicitly reset
+
+# Unique identifier for this Flask server instance (changes on restart)
+SERVER_INSTANCE_ID = str(uuid.uuid4())
 
 # Global ProductDatabase instance
 _product_database = None
@@ -363,6 +364,10 @@ def is_store_selection_valid(ip_address, store_selection):
     if not store_selection:
         return False
     
+    # Invalidate selections from previous server instances
+    if store_selection.get('server_id') != SERVER_INSTANCE_ID:
+        return False
+
     selection_time = store_selection.get('timestamp')
     if not selection_time:
         return False
@@ -466,13 +471,18 @@ def get_client_ip():
     else:
         return request.remote_addr
 
-def get_current_store_name():
+def get_current_store_name(allow_fallback=True):
     """Get the current store name for the requesting client. Returns None if no valid selection."""
     try:
         # CRITICAL FIX: Check Flask session first (more reliable on PythonAnywhere)
         if session.get('selected_store'):
-            logging.debug(f"Returning store from session: {session.get('selected_store')}")
-            return session.get('selected_store')
+            if session.get('store_server_id') == SERVER_INSTANCE_ID:
+                logging.debug(f"Returning store from session: {session.get('selected_store')}")
+                return session.get('selected_store')
+            else:
+                logging.info("Session store belongs to previous server instance, clearing")
+                session.pop('selected_store', None)
+                session.pop('store_server_id', None)
         
         # Fallback to IP-based selection
         ip_address = get_client_ip()
@@ -481,56 +491,62 @@ def get_current_store_name():
                 store_data = _ip_store_selections[ip_address]
                 # Check if the selection is still valid (not expired)
                 if is_store_selection_valid(ip_address, store_data):
-                    # Also save to session for consistency
-                    session['selected_store'] = store_data['store']
-                    return store_data['store']
+                    if store_data.get('server_id') != SERVER_INSTANCE_ID:
+                        logging.info("IP store selection from previous server instance ignored")
+                    else:
+                        # Also save to session for consistency
+                        session['selected_store'] = store_data['store']
+                        session['store_server_id'] = SERVER_INSTANCE_ID
+                        return store_data['store']
                 else:
                     # Remove expired selection
                     del _ip_store_selections[ip_address]
         
-        # JSON MATCH FIX: If no store is selected, find and use the database with the most products
-        # This ensures JSON matching works even without explicit store selection
-        logging.info("No store selected, finding database with most products for JSON matching...")
-        try:
-            import os
-            import glob
-            import sqlite3
-            
-            # Check for database files
-            db_dir = os.path.join(os.getcwd(), 'uploads')
-            if os.path.exists(db_dir):
-                db_files = glob.glob(os.path.join(db_dir, 'product_database_*.db'))
+        if allow_fallback:
+            # JSON MATCH FIX: If no store is selected, find and use the database with the most products
+            # This ensures JSON matching works even without explicit store selection
+            logging.info("No store selected, finding database with most products for JSON matching...")
+            try:
+                import os
+                import glob
+                import sqlite3
                 
-                best_db = None
-                best_count = 0
-                best_store = None
-                
-                for db_file in db_files:
-                    try:
-                        conn = sqlite3.connect(db_file)
-                        cursor = conn.cursor()
-                        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
-                        if cursor.fetchone():
-                            cursor.execute("SELECT COUNT(*) FROM products")
-                            count = cursor.fetchone()[0]
-                            if count > best_count:
-                                best_count = count
-                                best_db = db_file
-                                # Extract store name from filename
-                                filename = os.path.basename(db_file)
-                                best_store = filename.replace('product_database_', '').replace('.db', '')
-                        conn.close()
-                    except Exception as e:
-                        logging.debug(f"Error checking database {db_file}: {e}")
-                        continue
-                
-                if best_store and best_count > 0:
-                    logging.info(f"JSON MATCH FIX: Auto-selected store '{best_store}' with {best_count} products")
-                    # Save to session so future requests use the same store
-                    session['selected_store'] = best_store
-                    return best_store
-        except Exception as e:
-            logging.warning(f"Error finding best database: {e}")
+                # Check for database files
+                db_dir = os.path.join(os.getcwd(), 'uploads')
+                if os.path.exists(db_dir):
+                    db_files = glob.glob(os.path.join(db_dir, 'product_database_*.db'))
+                    
+                    best_db = None
+                    best_count = 0
+                    best_store = None
+                    
+                    for db_file in db_files:
+                        try:
+                            conn = sqlite3.connect(db_file)
+                            cursor = conn.cursor()
+                            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+                            if cursor.fetchone():
+                                cursor.execute("SELECT COUNT(*) FROM products")
+                                count = cursor.fetchone()[0]
+                                if count > best_count:
+                                    best_count = count
+                                    best_db = db_file
+                                    # Extract store name from filename
+                                    filename = os.path.basename(db_file)
+                                    best_store = filename.replace('product_database_', '').replace('.db', '')
+                            conn.close()
+                        except Exception as e:
+                            logging.debug(f"Error checking database {db_file}: {e}")
+                            continue
+                    
+                    if best_store and best_count > 0:
+                        logging.info(f"JSON MATCH FIX: Auto-selected store '{best_store}' with {best_count} products")
+                        # Save to session so future requests use the same store
+                        session['selected_store'] = best_store
+                        session['store_server_id'] = SERVER_INSTANCE_ID
+                        return best_store
+            except Exception as e:
+                logging.warning(f"Error finding best database: {e}")
         
         # No store selection found - return None (caller must handle)
         return None
@@ -548,8 +564,13 @@ def has_store_selection():
         
         # CRITICAL FIX: Check Flask session FIRST (most reliable)
         if session.get('selected_store'):
-            logging.debug(f"has_store_selection: Found store in session: {session.get('selected_store')}")
-            return True
+            if session.get('store_server_id') == SERVER_INSTANCE_ID:
+                logging.debug(f"has_store_selection: Found store in session: {session.get('selected_store')}")
+                return True
+            else:
+                logging.info("has_store_selection: Session store belongs to previous server instance; clearing")
+                session.pop('selected_store', None)
+                session.pop('store_server_id', None)
         
         # Fallback to IP-based selection
         ip_address = get_client_ip()
@@ -566,6 +587,7 @@ def has_store_selection():
                 if is_valid:
                     # Also save to session for consistency
                     session['selected_store'] = store_data['store']
+                    session['store_server_id'] = SERVER_INSTANCE_ID
                     logging.debug(f"has_store_selection: Found store in IP selections and saved to session: {store_data['store']}")
                 return is_valid
         
@@ -2177,8 +2199,7 @@ def index():
                              cache_bust=cache_bust,
                              user_has_store=user_has_store,
                              current_store=current_store,
-                             uploaded_filename=uploaded_filename,
-                             server_boot_id=SERVER_BOOT_ID)
+                             uploaded_filename=uploaded_filename)
         
     except Exception as e:
         logging.error(f"Error in index route: {str(e)}")
@@ -2188,7 +2209,7 @@ def index():
         user_has_store = False
         current_store = None
         uploaded_filename = ''
-        return render_template('index.html', error=str(e), cache_bust=cache_bust, user_has_store=user_has_store, current_store=current_store, uploaded_filename=uploaded_filename, server_boot_id=SERVER_BOOT_ID)
+        return render_template('index.html', error=str(e), cache_bust=cache_bust, user_has_store=user_has_store, current_store=current_store, uploaded_filename=uploaded_filename)
 
 @app.route('/splash')
 def splash():
@@ -2198,7 +2219,7 @@ def splash():
 @app.route('/debug-template')
 def debug_template():
     """Debug route to test template loading."""
-    return render_template('index.html', debug_message="DEBUG TEMPLATE ROUTE WORKING", server_boot_id=SERVER_BOOT_ID)
+    return render_template('index.html', debug_message="DEBUG TEMPLATE ROUTE WORKING")
 
 @app.route('/generation-splash')
 def generation_splash():
@@ -4589,6 +4610,7 @@ def set_store():
         
         # CRITICAL FIX: Save to Flask session first (most reliable on PythonAnywhere)
         session['selected_store'] = store_value
+        session['store_server_id'] = SERVER_INSTANCE_ID
         session.permanent = True  # Mark session as permanent to persist across browser restarts
         session.modified = True  # Force session to save
         logging.info(f"✅ Store saved to session: {store_value}")
@@ -4598,16 +4620,24 @@ def set_store():
             _ip_store_selections[ip_address] = {
                 'store': store_value,
                 'timestamp': datetime.now().isoformat(),
-                'ip_address': ip_address
+                'ip_address': ip_address,
+                'server_id': SERVER_INSTANCE_ID
             }
             # Reduced logging for speed
             logging.debug(f"Store selection set for IP {ip_address}: {store_value}")
         
-        # OPTIMIZATION: Skip cleanup and disk save for faster response
-        # The session-based storage is primary, IP storage is just backup
-        # Cleanup and save will happen on next request or server restart
-        # cleanup_expired_store_selections()  # Commented out for speed
-        # save_store_selections()  # Commented out for speed
+        # Persist the IP-based selections so future requests (and worker processes)
+        # can honor the remembered store.  Use a lightweight background thread so
+        # the response stays snappy even on PythonAnywhere's slower storage.
+        def _persist_store_selection():
+            try:
+                save_store_selections()
+            except Exception as persist_error:
+                logging.warning(f"Failed to persist store selections: {persist_error}")
+        try:
+            threading.Thread(target=_persist_store_selection, daemon=True).start()
+        except Exception:
+            _persist_store_selection()
         
         # CRITICAL: Clear other session data from previous store (but keep selected_store!)
         session.pop('file_path', None)
@@ -4646,7 +4676,8 @@ def get_store():
             if ip_address in _ip_store_selections:
                 store_data = _ip_store_selections[ip_address]
                 # Check if the selection is still valid (not expired)
-                if datetime.now() - datetime.fromisoformat(store_data['timestamp']) < timedelta(hours=12):
+                if (datetime.now() - datetime.fromisoformat(store_data['timestamp']) < timedelta(hours=12) and
+                    store_data.get('server_id') == SERVER_INSTANCE_ID):
                     logging.info(f"Found valid store selection: {store_data['store']}")
                     return jsonify({
                         'success': True,
@@ -4654,8 +4685,10 @@ def get_store():
                         'expires_at': (datetime.fromisoformat(store_data['timestamp']) + timedelta(hours=12)).isoformat()
                     })
                 else:
-                    # Remove expired selection
-                    logging.info(f"Store selection expired for IP {ip_address}")
+                    reason = "expired"
+                    if store_data.get('server_id') != SERVER_INSTANCE_ID:
+                        reason = "different server instance"
+                    logging.info(f"Store selection invalid ({reason}) for IP {ip_address}; removing")
                     del _ip_store_selections[ip_address]
         
         # No valid selection found, return no store
@@ -4683,6 +4716,8 @@ def clear_store():
         if 'selected_store' in session:
             del session['selected_store']
             logging.info("Cleared 'selected_store' from Flask session")
+        if 'store_server_id' in session:
+            del session['store_server_id']
         
         # Also clear IP-based storage
         with _ip_store_lock:
@@ -4718,45 +4753,27 @@ def check_store_required():
         
         # CRITICAL DEBUG: Check session data
         session_store = session.get('selected_store')
+        if session_store and session.get('store_server_id') != SERVER_INSTANCE_ID:
+            logging.info("Session store from previous server instance detected in check-store-required; clearing")
+            session_store = None
+            session.pop('selected_store', None)
+            session.pop('store_server_id', None)
         session_dict = dict(session)
         logging.info(f"SESSION DEBUG: selected_store={session_store}")
         logging.info(f"SESSION DEBUG: full session={session_dict}")
         logging.info(f"SESSION DEBUG: session.permanent={session.permanent}")
         
-        # Check if there's a selection for this IP
+        # Try to resolve the current store using all available strategies
+        # (session → IP-mapped cache → smart database fallback)
+        current_store = get_current_store_name(allow_fallback=False)
+        logging.info(f"get_current_store_name() returned: {current_store}")
+        
+        # Log the low-level selection flag for debugging but do not gate on it
         has_selection = has_store_selection()
         logging.info(f"has_store_selection() returned: {has_selection}")
         
-        if not has_selection:
-            logging.info(f"No store selection found for IP {ip_address}, requiring selection")
-            return jsonify({
-                'success': True,
-                'requires_store': True,
-                'store': None,
-                'debug': {
-                    'session_store': session_store,
-                    'ip_address': ip_address
-                }
-            })
-        
-        # Get the current store (should not be None if has_store_selection returned True)
-        current_store = get_current_store_name()
-        logging.info(f"get_current_store_name() returned: {current_store}")
-        
-        if current_store:
-            logging.info(f"Store found for IP {ip_address}: {current_store}")
-            return jsonify({
-                'success': True,
-                'requires_store': False,
-                'store': current_store,
-                'debug': {
-                    'session_store': session_store,
-                    'ip_address': ip_address
-                }
-            })
-        else:
-            # Edge case: has_store_selection returned True but get_current_store_name returned None
-            logging.warning(f"Edge case: has_selection={has_selection} but current_store={current_store}")
+        if not current_store:
+            logging.info(f"No store resolved for IP {ip_address}, requiring selection")
             return jsonify({
                 'success': True,
                 'requires_store': True,
@@ -4764,9 +4781,25 @@ def check_store_required():
                 'debug': {
                     'session_store': session_store,
                     'ip_address': ip_address,
-                    'edge_case': True
+                    'has_selection': has_selection
                 }
             })
+        
+        # If we found a store, make sure it is persisted in the session for future requests
+        session['selected_store'] = current_store
+        session.modified = True
+        
+        logging.info(f"Store found for IP {ip_address}: {current_store}")
+        return jsonify({
+            'success': True,
+            'requires_store': False,
+            'store': current_store,
+            'debug': {
+                'session_store': session_store,
+                'ip_address': ip_address,
+                'has_selection': has_selection
+            }
+        })
         
     except Exception as e:
         logging.error(f"Error checking store requirement: {str(e)}")
