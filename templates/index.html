@@ -5401,6 +5401,17 @@
           console.log('✅ MAIN CONTENT SHOWN (store just selected)');
         }
         
+        // Initialize TagManager now that store is selected
+        // Wait a moment for everything to settle, then initialize
+        setTimeout(() => {
+          if (window.TagManager && typeof window.TagManager.init === 'function') {
+            console.log('🔄 Initializing TagManager after store selection...');
+            window.TagManager.init();
+          } else {
+            console.log('⏳ TagManager not ready yet, will initialize when available');
+          }
+        }, 200);
+        
       } else {
         // NOT just selected - clear backend and show modal
         console.log('🔄 NOT just selected - clearing backend store and showing modal');
@@ -5477,30 +5488,6 @@
           }
         });
       }
-      .catch(err => {
-        console.error('Error checking store status:', err);
-        // On error, default to showing modal (safer)
-        console.log('⚠️ Error checking store - defaulting to show modal');
-        window.STORE_MODAL_BLOCKING = true;
-        
-        const showModal = () => {
-          const modalElement = document.getElementById('storeSelectionModal');
-          if (modalElement) {
-            modalElement.style.display = 'block';
-            modalElement.classList.add('show');
-            document.body.classList.add('modal-open');
-            document.body.style.overflow = 'hidden';
-          } else {
-            setTimeout(showModal, 50);
-          }
-        };
-        
-        if (document.readyState === 'loading') {
-          document.addEventListener('DOMContentLoaded', showModal);
-        } else {
-          showModal();
-        }
-      });
     })();
   </script>
   
