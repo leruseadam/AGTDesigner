@@ -163,7 +163,8 @@ from flask import (
     session,  # Add this
     send_from_directory,
     current_app,
-    g  # Add this for per-request globals
+    g,  # Add this for per-request globals
+    make_response  # Add for web-optimized endpoints
 )
 from flask_cors import CORS
 try:
@@ -4666,13 +4667,20 @@ def get_store():
 
 @app.route('/api/clear-store', methods=['POST'])
 def clear_store():
-    """Clear store selection for the current IP address."""
+    """Clear store selection for the current IP address AND Flask session."""
     try:
         ip_address = get_client_ip()
         
         logging.info(f"Attempting to clear store for IP {ip_address}")
         logging.info(f"Current store selections: {list(_ip_store_selections.keys())}")
+        logging.info(f"Session store before clear: {session.get('selected_store')}")
         
+        # CRITICAL: Clear Flask session FIRST (this is what has_store_selection checks first)
+        if 'selected_store' in session:
+            del session['selected_store']
+            logging.info("Cleared 'selected_store' from Flask session")
+        
+        # Also clear IP-based storage
         with _ip_store_lock:
             if ip_address in _ip_store_selections:
                 del _ip_store_selections[ip_address]
@@ -4683,10 +4691,11 @@ def clear_store():
                 logging.info(f"No store selection found for IP {ip_address}")
         
         logging.info(f"Store selections after clear: {list(_ip_store_selections.keys())}")
+        logging.info(f"Session store after clear: {session.get('selected_store')}")
         
         return jsonify({
             'success': True,
-            'message': 'Store selection cleared',
+            'message': 'Store selection cleared from both session and IP storage',
             'ip_address': ip_address,
             'remaining_selections': list(_ip_store_selections.keys())
         })

@@ -4656,6 +4656,7 @@
     /* Force all three columns to have equal height and prevent center column from being taller */
     .d-flex[style*="gap: 6rem"],
     .d-flex[style*="gap: 4rem"],
+    .d-flex[style*="gap: 1.25rem"],
     .d-flex[style*="gap: 0.75rem"],
     .d-flex[style*="gap: 0.5rem"] {
       align-items: stretch !important;
@@ -4664,6 +4665,7 @@
     /* Center column should match height of side columns */
     .d-flex[style*="gap: 6rem"] > div[data-container-type="center"],
     .d-flex[style*="gap: 4rem"] > div[data-container-type="center"],
+    .d-flex[style*="gap: 1.25rem"] > div[data-container-type="center"],
     .d-flex[style*="gap: 0.75rem"] > div[data-container-type="center"],
     .d-flex[style*="gap: 0.5rem"] > div[data-container-type="center"] {
       display: flex !important;
@@ -4686,6 +4688,8 @@
     .d-flex[style*="gap: 6rem"] > div[data-container-type="selected"],
     .d-flex[style*="gap: 4rem"] > div[data-container-type="available"],
     .d-flex[style*="gap: 4rem"] > div[data-container-type="selected"],
+    .d-flex[style*="gap: 1.25rem"] > div[data-container-type="available"],
+    .d-flex[style*="gap: 1.25rem"] > div[data-container-type="selected"],
     .d-flex[style*="gap: 0.75rem"] > div[data-container-type="available"],
     .d-flex[style*="gap: 0.75rem"] > div[data-container-type="selected"],
     .d-flex[style*="gap: 0.5rem"] > div[data-container-type="available"],
@@ -5011,39 +5015,39 @@
                     </div>
                   </div>
                   
-                  <!-- Filter Dropdowns Row - Left Aligned, Fills Width -->
-                  <div class="filter-row d-flex align-items-center justify-content-start gap-1 flex-grow-1" style="width: 100%; max-width: 100%; overflow-x: auto; margin-left: 0.5rem;">
-                    <div class="filter-group" style="min-width: 140px !important; flex: 1 1 0 !important;">
+                  <!-- Filter Dropdowns Row - Left Aligned, Fits Within Container -->
+                  <div class="filter-row d-flex align-items-center justify-content-start gap-1 flex-grow-1" style="width: 100%; max-width: 100%; overflow-x: hidden; margin-left: 0.5rem; flex-wrap: nowrap;">
+                    <div class="filter-group" style="min-width: 0 !important; flex: 1 1 0 !important; max-width: 100% !important;">
                       <label for="vendorFilter" class="filter-label">VENDOR</label>
                       <select id="vendorFilter" class="form-select filter-select" aria-label="Filter by vendor" style="width: 100% !important; min-height: 42px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 8px 14px !important; font-size: 13px !important;">
                         <option value="All">All</option>
                       </select>
                     </div>
-                    <div class="filter-group" style="min-width: 140px !important; flex: 1 1 0 !important;">
+                    <div class="filter-group" style="min-width: 0 !important; flex: 1 1 0 !important; max-width: 100% !important;">
                       <label for="brandFilter" class="filter-label">BRAND</label>
                       <select id="brandFilter" class="form-select filter-select" aria-label="Filter by brand" style="width: 100% !important; min-height: 42px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 8px 14px !important; font-size: 13px !important;">
                         <option value="All">All</option>
                       </select>
                     </div>
-                    <div class="filter-group" style="min-width: 140px !important; flex: 1 1 0 !important;">
+                    <div class="filter-group" style="min-width: 0 !important; flex: 1 1 0 !important; max-width: 100% !important;">
                       <label for="productTypeFilter" class="filter-label">PRODUCT TYPE</label>
                       <select id="productTypeFilter" class="form-select filter-select" aria-label="Filter by product type" style="width: 100% !important; min-height: 42px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 8px 14px !important; font-size: 13px !important;">
                         <option value="All">All</option>
                       </select>
                     </div>
-                    <div class="filter-group" style="min-width: 140px !important; flex: 1 1 0 !important;">
+                    <div class="filter-group" style="min-width: 0 !important; flex: 1 1 0 !important; max-width: 100% !important;">
                       <label for="lineageFilter" class="filter-label">LINEAGE</label>
                       <select id="lineageFilter" class="form-select filter-select" aria-label="Filter by lineage" style="width: 100% !important; min-height: 42px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 8px 14px !important; font-size: 13px !important;">
                         <option value="All">All</option>
                       </select>
                     </div>
-                    <div class="filter-group" style="min-width: 140px !important; flex: 1 1 0 !important;">
+                    <div class="filter-group" style="min-width: 0 !important; flex: 1 1 0 !important; max-width: 100% !important;">
                       <label for="weightFilter" class="filter-label">WEIGHT</label>
                       <select id="weightFilter" class="form-select filter-select" aria-label="Filter by weight" style="width: 100% !important; min-height: 42px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 8px 14px !important; font-size: 13px !important;">
                         <option value="All">All</option>
                       </select>
                     </div>
-                    <div class="filter-group" style="min-width: 140px !important; flex: 1 1 0 !important;">
+                    <div class="filter-group" style="min-width: 0 !important; flex: 1 1 0 !important; max-width: 100% !important;">
                       <label for="dohFilter" class="filter-label">DOH COMPLIANCE</label>
                       <select id="dohFilter" class="form-select filter-select" aria-label="Filter by DOH compliance" style="width: 100% !important; min-height: 42px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 8px 14px !important; font-size: 13px !important;">
                         <option value="All">All</option>
@@ -5053,7 +5057,7 @@
                         <option value="Unknown">Unknown</option>
                       </select>
                     </div>
-                    <div class="filter-group" style="min-width: 140px !important; flex: 1 1 0 !important;">
+                    <div class="filter-group" style="min-width: 0 !important; flex: 1 1 0 !important; max-width: 100% !important;">
                       <label for="highCbdFilter" class="filter-label">HIGH CBD</label>
                       <select id="highCbdFilter" class="form-select filter-select" aria-label="Filter by High CBD products" style="width: 100% !important; min-height: 42px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 8px 14px !important; font-size: 13px !important;">
                         <option value="All">All</option>
@@ -5065,7 +5069,7 @@
         </div>
         
         <!-- Main Content Row -->
-        <div class="d-flex fade-in" style="animation-delay: 0.6s; width: 100%; gap: 6rem; justify-content: center; padding-left: 0.5rem; padding-right: 0.5rem;">
+        <div class="d-flex fade-in" style="animation-delay: 0.6s; width: 100%; gap: 1.25rem; justify-content: flex-start; padding-left: 0.5rem; padding-right: 0.5rem; box-sizing: border-box;">
           <!-- Available Tags -->
           <div class="mb-2" data-container-type="available" style="flex: 1; max-width: 28rem;">
             <div class="glass-card d-flex flex-column h-100">
@@ -5107,13 +5111,13 @@
           </div>
           
           <!-- Center Column with Controls -->
-          <div class="mb-2 mt-0 d-flex flex-column justify-content-start align-items-center" style="flex: 0 0 auto;" data-container-type="center">
+          <div class="mb-2 mt-0 d-flex flex-column justify-content-start align-items-center" style="flex: 0 0 auto; min-width: 200px;" data-container-type="center">
             <!-- Controls -->
             <div class="control-panel" style="width: 100%;">
               <!-- Template Section -->
               <div class="mb-3">
                 <label class="filter-label">Template</label>
-                <select id="templateSelect" class="form-select form-select-modern" aria-label="Template" style="margin: 0 auto !important; display: block !important;">
+                <select id="templateSelect" class="form-select form-select-modern" aria-label="Template" style="margin: 0 auto !important; display: block !important; min-width: 100%; white-space: nowrap;">
                   <option value="horizontal">Horizontal</option>
                   <option value="vertical">Vertical</option>
                   <option value="mini">Mini</option>
