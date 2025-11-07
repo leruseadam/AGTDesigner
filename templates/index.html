@@ -4656,6 +4656,7 @@
     /* Force all three columns to have equal height and prevent center column from being taller */
     .d-flex[style*="gap: 6rem"],
     .d-flex[style*="gap: 4rem"],
+    .d-flex[style*="gap: 2rem"],
     .d-flex[style*="gap: 1.25rem"],
     .d-flex[style*="gap: 0.75rem"],
     .d-flex[style*="gap: 0.5rem"] {
@@ -4665,6 +4666,7 @@
     /* Center column should match height of side columns */
     .d-flex[style*="gap: 6rem"] > div[data-container-type="center"],
     .d-flex[style*="gap: 4rem"] > div[data-container-type="center"],
+    .d-flex[style*="gap: 2rem"] > div[data-container-type="center"],
     .d-flex[style*="gap: 1.25rem"] > div[data-container-type="center"],
     .d-flex[style*="gap: 0.75rem"] > div[data-container-type="center"],
     .d-flex[style*="gap: 0.5rem"] > div[data-container-type="center"] {
@@ -4688,6 +4690,8 @@
     .d-flex[style*="gap: 6rem"] > div[data-container-type="selected"],
     .d-flex[style*="gap: 4rem"] > div[data-container-type="available"],
     .d-flex[style*="gap: 4rem"] > div[data-container-type="selected"],
+    .d-flex[style*="gap: 2rem"] > div[data-container-type="available"],
+    .d-flex[style*="gap: 2rem"] > div[data-container-type="selected"],
     .d-flex[style*="gap: 1.25rem"] > div[data-container-type="available"],
     .d-flex[style*="gap: 1.25rem"] > div[data-container-type="selected"],
     .d-flex[style*="gap: 0.75rem"] > div[data-container-type="available"],
@@ -5069,7 +5073,7 @@
         </div>
         
         <!-- Main Content Row -->
-        <div class="d-flex fade-in" style="animation-delay: 0.6s; width: 100%; gap: 1.25rem; justify-content: flex-start; padding-left: 0.5rem; padding-right: 0.5rem; box-sizing: border-box;">
+        <div class="d-flex fade-in" style="animation-delay: 0.6s; width: 100%; gap: 2rem; justify-content: flex-start; padding-left: 0.5rem; padding-right: 0.5rem; box-sizing: border-box;">
           <!-- Available Tags -->
           <div class="mb-2" data-container-type="available" style="flex: 1; max-width: 28rem;">
             <div class="glass-card d-flex flex-column h-100">
@@ -5111,7 +5115,7 @@
           </div>
           
           <!-- Center Column with Controls -->
-          <div class="mb-2 mt-0 d-flex flex-column justify-content-start align-items-center" style="flex: 0 0 auto; min-width: 200px;" data-container-type="center">
+          <div class="mb-2 mt-0 d-flex flex-column justify-content-start align-items-center" style="flex: 0 0 auto; min-width: 280px;" data-container-type="center">
             <!-- Controls -->
             <div class="control-panel" style="width: 100%;">
               <!-- Template Section -->
@@ -5357,97 +5361,52 @@
         mainContent.style.visibility = 'hidden';
       }
       
-      // Always check backend for store selection (don't rely on sessionStorage)
-      fetch('/api/check-store-required', {
-        method: 'GET',
+      // ALWAYS clear backend store on page load, then show modal
+      // This ensures modal appears on every reload (hard refresh, server restart, normal reload)
+      console.log('🔄 Clearing backend store on page load to force modal');
+      
+      fetch('/api/clear-store', {
+        method: 'POST',
         credentials: 'same-origin'
       })
       .then(response => response.json())
       .then(data => {
-        console.log('Backend store check response:', data);
+        console.log('✅ Backend store cleared:', data);
         
-        // Backend returns 'requires_store', not 'required'
-        const requiresStore = data.requires_store === true || data.required === true;
+        // Now show modal IMMEDIATELY after clearing
+        window.STORE_MODAL_BLOCKING = true;
+        console.log('🚫 BLOCKING TagManager initialization until store selected');
         
-        if (requiresStore) {
-          // No store selected - SHOW MODAL
-          console.log('❗ No store selected in backend - SHOWING MODAL');
+        const showModal = () => {
+          const modalElement = document.getElementById('storeSelectionModal');
           
-          // Set blocking flag
-          window.STORE_MODAL_BLOCKING = true;
-          console.log('🚫 BLOCKING TagManager initialization until store selected');
-          
-          // Show modal
-          const showModal = () => {
-            const modalElement = document.getElementById('storeSelectionModal');
-            const mainContent = document.getElementById('mainContent');
+          if (modalElement) {
+            modalElement.style.display = 'block';
+            modalElement.classList.add('show');
+            modalElement.setAttribute('aria-hidden', 'false');
+            document.body.classList.add('modal-open');
+            document.body.style.overflow = 'hidden';
             
-            if (modalElement) {
-              modalElement.style.display = 'block';
-              modalElement.classList.add('show');
-              modalElement.setAttribute('aria-hidden', 'false');
-              document.body.classList.add('modal-open');
-              document.body.style.overflow = 'hidden';
-              
-              // Add backdrop
-              if (!document.querySelector('.modal-backdrop, #storeModalBackdrop')) {
-                const backdrop = document.createElement('div');
-                backdrop.id = 'storeModalBackdrop';
-                backdrop.className = 'modal-backdrop fade show';
-                backdrop.style.zIndex = '9998';
-                document.body.appendChild(backdrop);
-              }
-              
-              console.log('✅✅✅ MODAL IS NOW VISIBLE ✅✅✅');
-            } else {
-              console.log('⏳ Modal element not ready, retrying...');
-              setTimeout(showModal, 50);
-              return;
+            // Add backdrop
+            if (!document.querySelector('.modal-backdrop, #storeModalBackdrop')) {
+              const backdrop = document.createElement('div');
+              backdrop.id = 'storeModalBackdrop';
+              backdrop.className = 'modal-backdrop fade show';
+              backdrop.style.zIndex = '9998';
+              document.body.appendChild(backdrop);
             }
             
-            // Hide main content
-            if (mainContent) {
-              mainContent.style.display = 'none';
-              mainContent.style.visibility = 'hidden';
-              console.log('🚫 MAIN CONTENT HIDDEN');
-            }
-          };
-          
-          // Show modal when DOM ready
-          if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', showModal);
+            console.log('✅✅✅ MODAL FORCED VISIBLE (backend cleared) ✅✅✅');
           } else {
-            showModal();
+            console.log('⏳ Modal element not ready, retrying...');
+            setTimeout(showModal, 50);
           }
-          
+        };
+        
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', showModal);
         } else {
-          // Store is selected - HIDE MODAL
-          console.log('✅ Store is selected in backend - hiding modal');
-          
-          // Clear blocking flag
-          window.STORE_MODAL_BLOCKING = false;
-          console.log('✅ STORE_MODAL_BLOCKING cleared - TagManager can initialize');
-          
-          // Hide modal
-          const modal = document.getElementById('storeSelectionModal');
-          if (modal) {
-            modal.style.display = 'none';
-            modal.classList.remove('show');
-            modal.setAttribute('aria-hidden', 'true');
-          }
-          
-          // Remove backdrops
-          document.querySelectorAll('.modal-backdrop').forEach(b => b.remove());
-          document.body.classList.remove('modal-open');
-          document.body.style.overflow = '';
-          
-          // Show main content
-          if (mainContent) {
-            mainContent.style.display = 'block';
-            mainContent.style.visibility = 'visible';
-            mainContent.classList.add('store-selected', 'loaded');
-            console.log('✅ MAIN CONTENT SHOWN');
-          }
+          showModal();
         }
       })
       .catch(err => {
