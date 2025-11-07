@@ -2362,6 +2362,11 @@ def upload_file():
             def process_in_background():
                 try:
                     logging.info(f"[BACKGROUND] Processing file: {file_path}")
+                    # CRITICAL FIX: Clear global processor so it loads the NEW file from session
+                    global _excel_processor
+                    _excel_processor = None
+                    logging.info("[BACKGROUND] Cleared global processor before loading new file")
+                    
                     processor = get_excel_processor()
                     success = processor.load_file(file_path)
                     
