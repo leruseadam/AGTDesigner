@@ -2052,7 +2052,7 @@ class JSONMatcher:
             print(f"🔍 DEBUG: SIMPLIFIED MATCHING - Processing {len(unique_items)} items for maximum matches")
             print(f"🎯 GOAL: Match ALL {len(unique_items)} items - ZERO should be lost!")
             if json_vendor_filter:
-                print(f"🔍 VENDOR PREFERENCE: Preferring products from vendor '{json_vendor_filter}' (but allowing other vendors with lower scores)")
+                print(f"🔍 VENDOR ISOLATION: Strict vendor filter active - ONLY matching products from vendor '{json_vendor_filter}'")
             
             items_processed = 0
             items_matched = 0
@@ -2113,17 +2113,24 @@ class JSONMatcher:
                             # ENHANCED SCORING: Multi-factor matching with PRECISION FOCUS
                             score = 0.0
                             
-                            # 0. VENDOR FILTER: Prefer products from the JSON vendor but don't exclude others
+                            # 0. VENDOR FILTER: STRICT vendor isolation - reject non-matching vendors
                             excel_vendor = cache_item.get('vendor', '').strip()
                             vendor_match_bonus = 0.0
                             if json_vendor_filter and excel_vendor:
-                                # Give bonus points for vendor match instead of filtering out non-matches
-                                if json_vendor_filter.lower() in excel_vendor.lower() or excel_vendor.lower() in json_vendor_filter.lower():
+                                # CRITICAL: Use the vendor matching function to check if vendors match
+                                json_vendor_normalized = self._normalize_vendor_name(json_vendor_filter.lower())
+                                excel_vendor_normalized = self._normalize_vendor_name(excel_vendor.lower())
+                                
+                                # Check if vendors match (exact, substring, or flexible match)
+                                vendor_matches = self._is_vendor_match(json_vendor_filter, excel_vendor)
+                                
+                                if vendor_matches:
                                     vendor_match_bonus = 50.0  # Strong bonus for vendor match
                                     logging.debug(f"✓ Vendor match: '{json_vendor_filter}' matches '{excel_vendor}'")
                                 else:
-                                    # Still allow matching, just with lower score
-                                    logging.debug(f"⚠ Vendor mismatch: '{json_vendor_filter}' vs '{excel_vendor}' - still allowing match with reduced score")
+                                    # REJECT non-matching vendors to prevent cross-brand contamination
+                                    logging.debug(f"🚫 REJECTED: Vendor mismatch - JSON vendor '{json_vendor_filter}' ≠ Excel vendor '{excel_vendor}'")
+                                    continue  # Skip this candidate entirely
                             
                             # 1. Exact name match (highest priority)
                             if product_name.lower() == excel_product_name:
@@ -3124,19 +3131,27 @@ class JSONMatcher:
             # CRITICAL FIX: Don't add weight to description to avoid duplication
             desc_and_weight = cleaned_product_name
             
+            # Determine DOH value based on product type (proper DOH handling)
+            doh_value = self._determine_doh_value(final_assigned_type, cleaned_product_name)
+            
             # Create the product object
             product = {
                 'Product Name*': cleaned_product_name,
                 'ProductName': cleaned_product_name,
-                'Description': cleaned_product_name,
+                'Description': cleaned_product_name,  # EXCEL PRIORITY: Description reflects product name
                 'DescAndWeight': desc_and_weight,  # Format: "Description - Weight" like other tags
                 'displayName': cleaned_product_name,  # Use clean name for UI display
-                'Product Type*': final_assigned_type,
+                'Product Type*': final_assigned_type,  # EXCEL PRIORITY: Product Type from inferred/mapped data
+                'ProductType': final_assigned_type,
                 'Product Brand': final_brand or '',
+                'ProductBrand': final_brand or '',
                 'Product Strain': strain or 'Unknown Strain',
+                'ProductStrain': strain or 'Unknown Strain',
                 'Lineage': final_lineage,
                 'Vendor': vendor or 'Unknown Vendor',
-                'Price': final_price,
+                'Vendor/Supplier*': vendor or 'Unknown Vendor',
+                'Price': final_price,  # EXCEL PRIORITY: Price from intelligent matching
+                'Price*': final_price,
                 'Weight*': weight_value,
                 'Weight': weight_value,
                 'CombinedWeight': weight_with_units,  # CombinedWeight includes units
@@ -3164,8 +3179,8 @@ class JSONMatcher:
                 'Discountable? (yes/no)': 'yes',
                 'Room*': 'Default',
                 'Medical Only (Yes/No)': 'No',
-                'DOH': 'YES',  # JSON matched products should show DOH compliance stamp
-                'DOH Compliant (Yes/No)': 'Yes',
+                'DOH': doh_value,  # EXCEL PRIORITY: DOH value based on product type (THC/CBD/YES/NO)
+                'DOH Compliant (Yes/No)': 'Yes' if doh_value in ['YES', 'THC', 'CBD'] else 'No',
                 'Source': 'JSON Match'  # Mark as JSON matched item
             }
             
@@ -5797,18 +5812,12 @@ class JSONMatcher:
             else:
                 logging.debug(f"⚠️ No vendor specified for '{json_name}', skipping vendor fuzzy matching")
             
-            # Step 4: Try cross-vendor fuzzy matching as fallback (more lenient threshold)
-            # This helps when vendor names don't match but products are similar
-            cross_vendor_matches = self._find_fuzzy_name_matches(json_name, threshold=35)  # More lenient threshold for cross-vendor matching
-            if cross_vendor_matches:
-                best_match = cross_vendor_matches[0]
-                score = cross_vendor_matches[0]['fuzzy_score'] / 100.0
-                logging.debug(f"✅ CROSS-VENDOR FUZZY MATCH: '{json_name}' → '{best_match.get('original_name', 'Unknown')}' (score: {score:.2f}, threshold: 35)")
-                return best_match, score, "Cross-vendor fuzzy name match"
-            else:
-                logging.debug(f"❌ No cross-vendor fuzzy match for '{json_name}' (threshold: 35)")
+            # Step 4: DISABLED - Cross-vendor fuzzy matching removed to prevent brand contamination
+            # Cross-vendor matches were introducing products from wrong brands
+            # All matching now strictly enforces vendor isolation
+            logging.debug(f"🚫 VENDOR ISOLATION: Cross-vendor fuzzy matching is disabled to prevent brand contamination")
             
-            # Step 5: Try enhanced fuzzy matching with multiple strategies
+            # Step 5: Try enhanced fuzzy matching with multiple strategies (vendor-aware)
             enhanced_matches = self._find_enhanced_fuzzy_matches(json_item)
             if enhanced_matches:
                 best_match = enhanced_matches[0]
@@ -6215,6 +6224,13 @@ class JSONMatcher:
                 product_weight = str(product.get('Weight*', '')).strip().lower()
                 product_strain = str(product.get('Strain*', '')).strip().lower()
                 
+                # STRICT VENDOR ISOLATION: Skip products from different vendors
+                if json_vendor and product_vendor:
+                    vendor_matches = self._is_vendor_match(json_vendor, product_vendor)
+                    if not vendor_matches:
+                        # Skip non-matching vendors to prevent cross-brand contamination
+                        continue
+                
                 score = 0.0
                 match_reasons = []
                 
@@ -6386,6 +6402,13 @@ class JSONMatcher:
                 product_brand = str(product.get('Product Brand', '')).strip().lower()
                 product_type = str(product.get('Product Type*', '')).strip().lower()
                 product_weight = str(product.get('Weight*', '')).strip().lower()
+                
+                # STRICT VENDOR ISOLATION: Skip products from different vendors
+                if json_vendor and product_vendor:
+                    vendor_matches = self._is_vendor_match(json_vendor, product_vendor)
+                    if not vendor_matches:
+                        # Skip non-matching vendors to prevent cross-brand contamination
+                        continue
                 
                 score = 0.0
                 match_reasons = []
@@ -7896,12 +7919,14 @@ class JSONMatcher:
                                 vendor_match = True
                                 print(f"🔍 FLEXIBLE VENDOR MATCH: '{vendor_clean}' matches '{excel_vendor_clean}' via flexible matching")
                         
-                        # Debug logging for vendor isolation
-                        if vendor_match:
-                            print(f"🔍 VENDOR MATCH: '{product_name}' (vendor: '{vendor}') matches Excel '{excel_product_name}' (vendor: '{excel_vendor}') - SAME VENDOR")
-                        else:
-                            print(f"🔍 CROSS-VENDOR: '{product_name}' (vendor: '{vendor}') vs Excel '{excel_product_name}' (vendor: '{excel_vendor}') - DIFFERENT VENDORS (allowing with penalty)")
-                            # Don't skip - allow cross-vendor matches with penalty
+                        # STRICT vendor isolation - reject non-matching vendors
+                        if vendor and excel_vendor:
+                            if not vendor_match:
+                                # REJECT cross-vendor matches to prevent brand contamination
+                                print(f"🚫 REJECTED: Cross-vendor match - '{product_name}' (vendor: '{vendor}') ≠ Excel '{excel_product_name}' (vendor: '{excel_vendor}')")
+                                continue  # Skip this candidate
+                            else:
+                                print(f"✓ VENDOR MATCH: '{product_name}' (vendor: '{vendor}') matches Excel '{excel_product_name}' (vendor: '{excel_vendor}')")
                         
                         # Calculate match score
                         score = 0.0
@@ -7910,12 +7935,9 @@ class JSONMatcher:
                         if product_name.lower() == excel_product_name:
                             score += 100.0
                         
-                        # Vendor match (heavily weighted) - already confirmed above
+                        # Vendor match bonus (already confirmed above)
                         if vendor_match:
-                            score += 100.0  # Heavily increased for vendor matching
-                        else:
-                            # Cross-vendor penalty (but still allow the match)
-                            score -= 20.0  # Small penalty for cross-vendor matches
+                            score += 100.0  # Strong bonus for vendor matching
                         
                         # Product type match (very important for accuracy)
                         excel_product_type = str(row.get('Product Type*', '') or row.get('ProductType', '')).strip().lower()
@@ -9536,6 +9558,61 @@ class JSONMatcher:
         # No change needed for non-whole numbers or already formatted weights
         return weight_string
 
+    def _determine_doh_value(self, product_type: str, product_name: str = '') -> str:
+        """
+        Determine the appropriate DOH value based on product type.
+        
+        Args:
+            product_type: The product type string
+            product_name: The product name (optional, for additional context)
+            
+        Returns:
+            DOH value string: 'THC', 'CBD', 'YES', or 'NO'
+        """
+        if not product_type:
+            # Default to THC for products without type
+            return 'THC'
+        
+        product_type_lower = str(product_type).lower().strip()
+        product_name_lower = str(product_name).lower().strip()
+        
+        # High CBD products get CBD designation
+        if 'high cbd' in product_type_lower or 'highcbd' in product_type_lower:
+            return 'CBD'
+        
+        # CBD-focused products (check product name too)
+        if 'cbd' in product_type_lower and 'thc' not in product_type_lower:
+            return 'CBD'
+        
+        # Classic types (flower, pre-roll, concentrates, vapes) get THC designation
+        classic_types = [
+            'flower', 'bud', 'pre-roll', 'preroll', 'blunt', 'joint',
+            'concentrate', 'wax', 'shatter', 'rosin', 'resin', 'hash',
+            'cartridge', 'vape', 'pen', 'disposable', 'distillate',
+            'extract', 'crumble', 'badder', 'sauce', 'diamonds', 'live'
+        ]
+        
+        if any(classic_type in product_type_lower for classic_type in classic_types):
+            return 'THC'
+        
+        # High THC products get THC designation
+        if 'high thc' in product_type_lower or 'highthc' in product_type_lower:
+            return 'THC'
+        
+        # Non-classic types (edibles, tinctures, topicals) default to YES
+        nonclassic_types = [
+            'edible', 'tincture', 'topical', 'capsule', 'pill',
+            'tablet', 'gummy', 'gummies', 'chocolate', 'candy',
+            'beverage', 'drink', 'syrup', 'powder', 'spray',
+            'lotion', 'balm', 'salve', 'cream', 'patch'
+        ]
+        
+        if any(nonclassic_type in product_type_lower for nonclassic_type in nonclassic_types):
+            return 'YES'
+        
+        # Default to THC for unrecognized types
+        return 'THC'
+    
     def _get_default_lineage_for_product_type(self, product_type: str) -> str:
         """
         Get default lineage based on product type.
