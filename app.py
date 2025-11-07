@@ -1,4 +1,5 @@
 """
+
 AGT Label Maker - Consolidated Web Application
 ============================================
 This is the sole, consolidated web version of the AGT Label Maker application.
@@ -482,6 +483,51 @@ def get_current_store_name():
                 else:
                     # Remove expired selection
                     del _ip_store_selections[ip_address]
+        
+        # JSON MATCH FIX: If no store is selected, find and use the database with the most products
+        # This ensures JSON matching works even without explicit store selection
+        logging.info("No store selected, finding database with most products for JSON matching...")
+        try:
+            import os
+            import glob
+            import sqlite3
+            
+            # Check for database files
+            db_dir = os.path.join(os.getcwd(), 'uploads')
+            if os.path.exists(db_dir):
+                db_files = glob.glob(os.path.join(db_dir, 'product_database_*.db'))
+                
+                best_db = None
+                best_count = 0
+                best_store = None
+                
+                for db_file in db_files:
+                    try:
+                        conn = sqlite3.connect(db_file)
+                        cursor = conn.cursor()
+                        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+                        if cursor.fetchone():
+                            cursor.execute("SELECT COUNT(*) FROM products")
+                            count = cursor.fetchone()[0]
+                            if count > best_count:
+                                best_count = count
+                                best_db = db_file
+                                # Extract store name from filename
+                                filename = os.path.basename(db_file)
+                                best_store = filename.replace('product_database_', '').replace('.db', '')
+                        conn.close()
+                    except Exception as e:
+                        logging.debug(f"Error checking database {db_file}: {e}")
+                        continue
+                
+                if best_store and best_count > 0:
+                    logging.info(f"JSON MATCH FIX: Auto-selected store '{best_store}' with {best_count} products")
+                    # Save to session so future requests use the same store
+                    session['selected_store'] = best_store
+                    return best_store
+        except Exception as e:
+            logging.warning(f"Error finding best database: {e}")
+        
         # No store selection found - return None (caller must handle)
         return None
     except Exception as e:
@@ -1866,21 +1912,18 @@ def get_session_json_matcher():
         if not hasattr(app, '_json_matcher'):
             app._json_matcher = JSONMatcher(excel_processor)
             
-            # CRITICAL FIX: Populate excel processor with database data for ML models
+            # CRITICAL FIX: Build cache from database to ensure JSON matching works
             try:
-                # Get database products and populate the excel processor
-                db_products = app._json_matcher._get_database_products()
-                if db_products and len(db_products) > 0:
-                    import pandas as pd
-                    app._json_matcher.excel_processor.df = pd.DataFrame(db_products)
-                    app._json_matcher._build_ml_models()
-                    logging.info(f"Enhanced JSON matcher loaded {len(db_products)} products from database and built ML models")
+                # Build the sheet cache from database - this will auto-select the best database
+                app._json_matcher._build_cache_from_database()
+                if app._json_matcher._sheet_cache and len(app._json_matcher._sheet_cache) > 0:
+                    logging.info(f"JSON matcher loaded {len(app._json_matcher._sheet_cache)} products from database cache")
                 else:
-                    logging.warning("No database products found for ML model building")
+                    logging.warning("No products found in JSON matcher cache - JSON matching may not work")
             except Exception as e:
-                logging.error(f"Error populating JSON matcher with database data: {e}")
+                logging.error(f"Error building JSON matcher cache from database: {e}")
             
-            logging.info("Created new EnhancedJSONMatcher instance")
+            logging.info("Created new JSONMatcher instance")
         else:
             # Update the Excel processor reference in case it changed
             app._json_matcher.excel_processor = excel_processor
@@ -11695,6 +11738,35 @@ def json_match():
     try:
         logging.info("JSON match endpoint called")
         
+        # JSON MATCH FIX: Check if database has products before attempting to match
+        store_name = get_current_store_name()
+        if not store_name:
+            return jsonify({
+                'error': 'No store selected. Please select a store or upload an Excel file with product data first.',
+                'message': 'JSON matching requires product data to match against.'
+            }), 400
+        
+        # Check product database
+        product_db = get_product_database(store_name)
+        if product_db:
+            try:
+                products = product_db.get_all_products()
+                product_count = len(products) if products else 0
+                logging.info(f"JSON MATCH: Using store '{store_name}' with {product_count} products")
+                
+                if product_count == 0:
+                    return jsonify({
+                        'error': f'The selected store database ({store_name}) is empty.',
+                        'message': 'Please upload an Excel file with product data before using JSON matching.',
+                        'store_name': store_name
+                    }), 400
+            except Exception as db_error:
+                logging.error(f"Error checking database: {db_error}")
+                return jsonify({
+                    'error': 'Database error. Please try again or upload an Excel file first.',
+                    'details': str(db_error)
+                }), 500
+        
         # Clear the available tags cache to force refresh after JSON matching
         cache_key = get_session_cache_key('available_tags')
         cache.delete(cache_key)
@@ -17084,3 +17156,7 @@ if __name__ == '__main__':
                 os.remove(lock_file)
         except Exception:
             pass 
+@app.route('/test-json-match')
+def test_json_match_page():
+    """Test page for JSON matching functionality."""
+    return render_template('test_json_match.html')

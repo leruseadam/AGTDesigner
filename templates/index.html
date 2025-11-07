@@ -4558,9 +4558,29 @@
       opacity: 1;
     }
     
-    /* Store modal backdrop - ensure it's visible */
+    /* Store modal backdrop - ensure it's visible and ON TOP */
     #storeSelectionModal.show {
       display: block !important;
+    }
+    
+    /* Force store modal and its backdrop to be on top of everything */
+    #storeSelectionModal {
+      z-index: 9999 !important;
+    }
+    
+    /* Store modal backdrop should be just below the modal */
+    #storeSelectionModal + .modal-backdrop,
+    #storeModalBackdrop {
+      z-index: 9998 !important;
+    }
+    
+    /* Ensure JSON match modal stays below store selection */
+    #jsonMatchModal {
+      z-index: 1050 !important;
+    }
+    
+    #jsonMatchModal + .modal-backdrop {
+      z-index: 1049 !important;
     }
     
     /* Store modal backdrop */
@@ -5088,7 +5108,7 @@
   <!-- Modals -->
   
   <!-- Store Selection Modal - Only shown if user doesn't have a store -->
-  <div class="modal fade {% if user_has_store %}{% else %}show{% endif %}" id="storeSelectionModal" tabindex="-1" aria-labelledby="storeSelectionModalLabel" data-bs-backdrop="static" data-bs-keyboard="false" style="{% if user_has_store %}display: none;{% else %}display: block;{% endif %} z-index: 1055;">
+  <div class="modal fade {% if user_has_store %}{% else %}show{% endif %}" id="storeSelectionModal" tabindex="-1" aria-labelledby="storeSelectionModalLabel" data-bs-backdrop="static" data-bs-keyboard="false" style="{% if user_has_store %}display: none;{% else %}display: block;{% endif %} z-index: 9999 !important;">
     <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-xl">
       <div class="modal-content glass-card">
         <div class="modal-header border-0" style="padding: 2.5rem 2.5rem 1.5rem;">
@@ -7714,9 +7734,8 @@
         }
         
         console.log('Available tags updated with JSON matched items');
-      }, 500);
-    })
-    .catch(error => {
+      })
+      .catch(error => {
       console.error('JSON matching error:', error);
       
       // Show error message to user
@@ -7745,18 +7764,20 @@
       matchCount.textContent = '0';
       matchedProductsList.innerHTML = '<div class="text-muted">No products matched</div>';
       resultsDiv.classList.add('d-none');
+    })
+    .finally(() => {
+      // Reset button state (runs whether success or error)
+      clearTimeout(timeoutId);
+      matchBtn.disabled = false;
+      matchBtn.innerHTML = `
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="7 10 12 15 17 10"></polyline>
+          <line x1="12" y1="15" x2="12" y2="3"></line>
+        </svg>
+        Match Products
+      `;
     });
-    
-    // Reset button state
-    matchBtn.disabled = false;
-    matchBtn.innerHTML = `
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2">
-        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-        <polyline points="7 10 12 15 17 10"></polyline>
-        <line x1="12" y1="15" x2="12" y2="3"></line>
-      </svg>
-      Match Products
-    `;
     }
 
     // Test function to debug strain search

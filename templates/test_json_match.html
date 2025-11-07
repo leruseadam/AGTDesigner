@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>JSON Match Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #1a1a2e;
+            color: white;
+        }
+        .test-box {
+            background: #16213e;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+        button {
+            background: #0f3460;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background: #16213e;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            background: #0f3460;
+            border-radius: 5px;
+            display: none;
+        }
+        .success { border-left: 4px solid #4CAF50; }
+        .error { border-left: 4px solid #f44336; }
+        pre {
+            overflow-x: auto;
+            background: #000;
+            padding: 10px;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 JSON Match Test Page</h1>
+    
+    <div class="test-box">
+        <h2>Test JSON Matching</h2>
+        <p>Click the button below to test JSON matching with a real Cultivera manifest:</p>
+        <button onclick="testJsonMatch()">🚀 Test JSON Match</button>
+        
+        <div id="result" class="result"></div>
+    </div>
+    
+    <div class="test-box">
+        <h2>Manual Test</h2>
+        <p>Enter a JSON URL to test:</p>
+        <input type="text" id="customUrl" placeholder="https://..." style="width: 100%; padding: 10px; background: #0f3460; border: 1px solid #16213e; color: white; border-radius: 5px;">
+        <button onclick="testCustomUrl()" style="margin-top: 10px;">Test Custom URL</button>
+        
+        <div id="customResult" class="result"></div>
+    </div>
+
+    <script>
+        function testJsonMatch() {
+            const resultDiv = document.getElementById('result');
+            resultDiv.style.display = 'block';
+            resultDiv.className = 'result';
+            resultDiv.innerHTML = '<p>⏳ Testing JSON match endpoint...</p>';
+            
+            const testUrl = 'https://files.cultivera.com/435553542D57533739/Interop/25/43/HCQJH01000C5PQZC/Cultivera_ORD-8799_422044.json';
+            
+            fetch('/api/json-match', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: testUrl })
+            })
+            .then(response => {
+                console.log('Response status:', response.status);
+                if (!response.ok) {
+                    return response.json().then(err => {
+                        throw new Error(err.error || 'Request failed');
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log('Success data:', data);
+                resultDiv.className = 'result success';
+                resultDiv.innerHTML = `
+                    <h3>✅ Success!</h3>
+                    <p><strong>Matched Products:</strong> ${data.matched_count || 0}</p>
+                    <p><strong>Message:</strong> ${data.message || 'No message'}</p>
+                    <details>
+                        <summary>View Product Names (${data.matched_names ? data.matched_names.length : 0})</summary>
+                        <pre>${JSON.stringify(data.matched_names, null, 2)}</pre>
+                    </details>
+                    <details>
+                        <summary>View Full Response</summary>
+                        <pre>${JSON.stringify(data, null, 2)}</pre>
+                    </details>
+                `;
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = `
+                    <h3>❌ Error</h3>
+                    <p>${error.message}</p>
+                `;
+            });
+        }
+        
+        function testCustomUrl() {
+            const customUrl = document.getElementById('customUrl').value.trim();
+            const resultDiv = document.getElementById('customResult');
+            
+            if (!customUrl) {
+                alert('Please enter a URL');
+                return;
+            }
+            
+            resultDiv.style.display = 'block';
+            resultDiv.className = 'result';
+            resultDiv.innerHTML = '<p>⏳ Testing custom URL...</p>';
+            
+            fetch('/api/json-match', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: customUrl })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(err => {
+                        throw new Error(err.error || err.message || 'Request failed');
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                resultDiv.className = 'result success';
+                resultDiv.innerHTML = `
+                    <h3>✅ Success!</h3>
+                    <p><strong>Matched Products:</strong> ${data.matched_count || 0}</p>
+                    <p><strong>Message:</strong> ${data.message || 'No message'}</p>
+                    <details>
+                        <summary>View Full Response</summary>
+                        <pre>${JSON.stringify(data, null, 2)}</pre>
+                    </details>
+                `;
+            })
+            .catch(error => {
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = `
+                    <h3>❌ Error</h3>
+                    <p>${error.message}</p>
+                `;
+            });
+        }
+    </script>
+</body>
+</html>
+
