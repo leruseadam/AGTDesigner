@@ -23,6 +23,24 @@ import pandas as pd  # Add this import
 import time
 import re
 import json
+
+# Performance optimizations - Import only if available
+try:
+    from src.core.utils.response_cache import cached_route, compress_response, invalidate_cache_on_change
+    RESPONSE_CACHE_AVAILABLE = True
+except ImportError:
+    RESPONSE_CACHE_AVAILABLE = False
+    # Create dummy decorators if not available
+    def cached_route(*args, **kwargs):
+        def decorator(f):
+            return f
+        return decorator
+    def compress_response(response):
+        return response
+    def invalidate_cache_on_change(*args, **kwargs):
+        def decorator(f):
+            return f
+        return decorator
 # Startup Performance Optimization
 # DISABLE_STARTUP_FILE_LOADING = True  # Disable startup file loading to prevent hangs
 
@@ -1371,6 +1389,31 @@ else:
 
 # Flask-Compress already initialized in create_app() - no need to initialize again
 
+# Add performance headers and response optimization
+@app.after_request
+def add_performance_headers(response):
+    """Add performance optimization headers to all responses"""
+    # Add caching headers for static assets
+    if request.path.startswith('/static/'):
+        response.headers['Cache-Control'] = 'public, max-age=31536000'  # 1 year
+    # Add cache headers for API responses (short-lived)
+    elif request.path.startswith('/api/'):
+        if response.status_code == 200:
+            response.headers['Cache-Control'] = 'private, max-age=60'  # 1 minute for API responses
+    # Security headers
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+    # Add timing header for debugging
+    if hasattr(request, '_start_time'):
+        elapsed = (time.time() - request._start_time) * 1000
+        response.headers['X-Response-Time'] = f"{elapsed:.1f}ms"
+    return response
+
+@app.before_request
+def start_request_timer():
+    """Start timer for request duration tracking"""
+    request._start_time = time.time()
+
 # Initialize performance optimizations - DISABLED to prevent CPU issues on PythonAnywhere
 if False:  # Temporarily disabled due to high CPU usage on PythonAnywhere
     try:
@@ -1780,34 +1823,29 @@ def get_session_excel_processor():
                 session.pop('upload_timestamp', None)
             
             # CRITICAL FIX: Ensure ExcelProcessor has data for JSON matching
-            if not hasattr(g.excel_processor, 'df') or g.excel_processor.df is None or g.excel_processor.df.empty:
-                logging.info("CRITICAL FIX: ExcelProcessor DataFrame is empty, loading default file for JSON matching")
-                from src.core.data.excel_processor import get_default_upload_file
-                selected_store = get_current_store_name() if has_store_selection() else None
-                default_file = get_default_upload_file(selected_store)
-                if default_file and os.path.exists(default_file):
-                    logging.info(f"CRITICAL FIX: Loading default file for JSON matching: {default_file}")
-                    success = g.excel_processor.load_file(default_file)
-                    if success:
-                        logging.info(f"CRITICAL FIX: Successfully loaded default file for JSON matching")
-                        # Populate dropdown cache
-                        if hasattr(g.excel_processor, '_cache_dropdown_values'):
-                            try:
-                                g.excel_processor._cache_dropdown_values()
-                                logging.info(f"Successfully populated dropdown cache from default file")
-                            except Exception as e:
-                                logging.error(f"Failed to populate dropdown cache from default file: {e}")
+            # Only load default file if we don't have a session file AND DataFrame is empty
+            if not session_file_path:
+                if not hasattr(g.excel_processor, 'df') or g.excel_processor.df is None or g.excel_processor.df.empty:
+                    logging.info("CRITICAL FIX: No session file and DataFrame is empty, loading default file")
+                    from src.core.data.excel_processor import get_default_upload_file
+                    selected_store = get_current_store_name() if has_store_selection() else None
+                    default_file = get_default_upload_file(selected_store)
+                    if default_file and os.path.exists(default_file):
+                        logging.info(f"CRITICAL FIX: Loading default file: {default_file}")
+                        success = g.excel_processor.load_file(default_file)
+                        if success:
+                            logging.info(f"CRITICAL FIX: Successfully loaded default file")
+                            # Populate dropdown cache
+                            if hasattr(g.excel_processor, '_cache_dropdown_values'):
+                                try:
+                                    g.excel_processor._cache_dropdown_values()
+                                    logging.info(f"Successfully populated dropdown cache from default file")
+                                except Exception as e:
+                                    logging.error(f"Failed to populate dropdown cache from default file: {e}")
+                        else:
+                            logging.error(f"CRITICAL FIX: Failed to load default file: {default_file}")
                     else:
-                        logging.error(f"CRITICAL FIX: Failed to load default file for JSON matching: {default_file}")
-                else:
-                    logging.warning("CRITICAL FIX: No default file available for JSON matching")
-            else:
-                logging.warning("ExcelProcessor does not have _cache_dropdown_values method")
-        else:
-            logging.error("Failed to load uploaded file from session")
-            # Create a minimal DataFrame to prevent errors
-            import pandas as pd
-            g.excel_processor.df = pd.DataFrame()
+                        logging.warning("CRITICAL FIX: No default file available")
         
         # CRITICAL FIX: For new uploaded files, update the last processed file but DON'T clear tags
         if session_file_path and session_file_path != getattr(g.excel_processor, '_last_processed_file', None):
@@ -1833,89 +1871,54 @@ def get_session_excel_processor():
             
             logging.info(f"CRITICAL FIX: Selected tags after update: {len(g.excel_processor.selected_tags)}")
             logging.info(f"CRITICAL FIX: Session selected tags after update: {len(session.get('selected_tags', []))}")
-        else:
-            # Only load default file if no uploaded file exists
-            if not hasattr(g.excel_processor, 'df') or g.excel_processor.df is None or g.excel_processor.df.empty:
-                from src.core.data.excel_processor import get_default_upload_file
-                selected_store = get_current_store_name() if has_store_selection() else None
-                default_file = get_default_upload_file(selected_store)
-                if default_file and os.path.exists(default_file):
-                    logging.info(f"Loading default file for session: {default_file}")
-                    success = g.excel_processor.load_file(default_file)
-                    if success:
-                        # CRITICAL FIX: Ensure dropdown cache is populated after successful file load
-                        if hasattr(g.excel_processor, '_cache_dropdown_values'):
-                            try:
-                                g.excel_processor._cache_dropdown_values()
-                                logging.info(f"Successfully populated dropdown cache from session default file")
-                                # Log the strain count specifically
-                                if 'strain' in g.excel_processor.dropdown_cache:
-                                    strain_count = len(g.excel_processor.dropdown_cache['strain'])
-                                    logging.info(f"Dropdown cache contains {strain_count} strains")
-                                else:
-                                    logging.warning("No strain filter found in dropdown cache")
-                            except Exception as e:
-                                    logging.error(f"Failed to populate dropdown cache from session default file: {e}")
-                            else:
-                                logging.warning("ExcelProcessor does not have _cache_dropdown_values method")
-                        else:
-                            logging.error("Failed to load default file for session")
-                            # Create a minimal DataFrame to prevent errors
-                            import pandas as pd
-                            g.excel_processor.df = pd.DataFrame()
-                    else:
-                        logging.warning("No default file found for session")
-                        # Create a minimal DataFrame to prevent errors
-                        import pandas as pd
-                        g.excel_processor.df = pd.DataFrame()
-            
-            # Ensure selected_tags attribute exists
-            if not hasattr(g.excel_processor, 'selected_tags'):
-                g.excel_processor.selected_tags = []
-            
-            # Restore selected tags from session
-            session_selected_tag_names = session.get('selected_tags', [])
-            logging.info(f"Session selected_tags count: {len(session_selected_tag_names)}")
-            
-            # Convert tag names back to full tag objects
-            if session_selected_tag_names:
-                restored_tags = []
-                for tag_name in session_selected_tag_names:
-                    # Find the tag in the current data
-                    found_tag = None
-                    
-                    # Try to find in DataFrame first
-                    if hasattr(g.excel_processor, 'df') and g.excel_processor.df is not None:
-                        possible_columns = ['ProductName', 'Product Name*', 'Product Name']
-                        for col in possible_columns:
-                            if col in g.excel_processor.df.columns:
-                                mask = g.excel_processor.df[col] == tag_name
-                                if mask.any():
-                                    row = g.excel_processor.df[mask].iloc[0]
-                                    found_tag = row.to_dict()
-                                    break
-                    
-                    # If not found in DataFrame, try data attribute
-                    if not found_tag and hasattr(g.excel_processor, 'data'):
-                        for tag in g.excel_processor.data:
-                            if tag.get('Product Name*') == tag_name:
-                                found_tag = tag
-                                break
-                    
-                    if found_tag:
-                        restored_tags.append(found_tag)
-                    else:
-                        logging.warning(f"Tag not found in data: {tag_name}")
+        
+        # Ensure selected_tags attribute exists
+        if not hasattr(g.excel_processor, 'selected_tags'):
+            g.excel_processor.selected_tags = []
+        
+        # Restore selected tags from session
+        session_selected_tag_names = session.get('selected_tags', [])
+        logging.info(f"Session selected_tags count: {len(session_selected_tag_names)}")
+        
+        # Convert tag names back to full tag objects
+        if session_selected_tag_names:
+            restored_tags = []
+            for tag_name in session_selected_tag_names:
+                # Find the tag in the current data
+                found_tag = None
                 
-                g.excel_processor.selected_tags = restored_tags
-            else:
-                g.excel_processor.selected_tags = []
+                # Try to find in DataFrame first
+                if hasattr(g.excel_processor, 'df') and g.excel_processor.df is not None:
+                    possible_columns = ['ProductName', 'Product Name*', 'Product Name']
+                    for col in possible_columns:
+                        if col in g.excel_processor.df.columns:
+                            mask = g.excel_processor.df[col] == tag_name
+                            if mask.any():
+                                row = g.excel_processor.df[mask].iloc[0]
+                                found_tag = row.to_dict()
+                                break
+                
+                # If not found in DataFrame, try data attribute
+                if not found_tag and hasattr(g.excel_processor, 'data'):
+                    for tag in g.excel_processor.data:
+                        if tag.get('Product Name*') == tag_name:
+                            found_tag = tag
+                            break
+                
+                if found_tag:
+                    restored_tags.append(found_tag)
+                else:
+                    logging.warning(f"Tag not found in data: {tag_name}")
             
-            logging.info(f"Restored {len(g.excel_processor.selected_tags)} selected tags from session")
-            logging.info(f"Session selected_tags: {session_selected_tag_names}")
-            # Truncate large log messages to prevent "Message too long" error
-            selected_tags_preview = str(g.excel_processor.selected_tags)[:500] + "..." if len(str(g.excel_processor.selected_tags)) > 500 else str(g.excel_processor.selected_tags)
-            logging.info(f"Excel processor selected_tags after restore: {selected_tags_preview}")
+            g.excel_processor.selected_tags = restored_tags
+        else:
+            g.excel_processor.selected_tags = []
+        
+        logging.info(f"Restored {len(g.excel_processor.selected_tags)} selected tags from session")
+        logging.info(f"Session selected_tags: {session_selected_tag_names}")
+        # Truncate large log messages to prevent "Message too long" error
+        selected_tags_preview = str(g.excel_processor.selected_tags)[:500] + "..." if len(str(g.excel_processor.selected_tags)) > 500 else str(g.excel_processor.selected_tags)
+        logging.info(f"Excel processor selected_tags after restore: {selected_tags_preview}")
         
         # Final safety check - ensure df attribute exists
         if not hasattr(g.excel_processor, 'df'):
@@ -2377,7 +2380,14 @@ def upload_file():
                         
                         # CRITICAL: Clear ALL caches to force complete refresh
                         try:
-                            cache_keys_to_clear = ['available_tags', 'selected_tags', 'vendor_tags', 'initial_data']
+                            # Clear file-specific cache (uses file path in key)
+                            # Note: In background thread, we can't access session directly, use file_path from closure
+                            cache_keys_to_clear = [
+                                f'available_tags_{file_path}',
+                                'selected_tags', 
+                                'vendor_tags', 
+                                'initial_data'
+                            ]
                             for key_base in cache_keys_to_clear:
                                 cache_key = get_session_cache_key(key_base)
                                 cache.delete(cache_key)
@@ -2451,7 +2461,24 @@ def upload_file():
                 
                 # CRITICAL: Clear ALL caches to force complete refresh
                 try:
-                    cache_keys_to_clear = ['available_tags', 'selected_tags', 'vendor_tags', 'initial_data']
+                    # Clear file-specific cache (uses file path in key)
+                    session_file_path = session.get('file_path', '')
+                    cache_keys_to_clear = [
+                        f'available_tags_{session_file_path}',
+                        'selected_tags', 
+                        'vendor_tags', 
+                        'initial_data'
+                    ]
+                    
+                    # Also clear any old available_tags caches (from previous uploads)
+                    # Try to delete with empty path (legacy cache key)
+                    try:
+                        legacy_cache_key = get_session_cache_key('available_tags_')
+                        cache.delete(legacy_cache_key)
+                        logging.info(f"✅ Cleared legacy cache: available_tags_")
+                    except:
+                        pass
+                    
                     for key_base in cache_keys_to_clear:
                         cache_key = get_session_cache_key(key_base)
                         cache.delete(cache_key)
@@ -7037,7 +7064,9 @@ def get_available_tags():
 
         # Check for cached available tags first (JSON matched products)
         # Skip cache entirely if prefer_db is set (we want fresh DB data)
-        cache_key = get_session_cache_key('available_tags')
+        # CRITICAL FIX: Include file path in cache key to prevent stale data from previous uploads
+        session_file_path = session.get('file_path', '')
+        cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
         cached_tags = cache.get(cache_key) if not prefer_db else None
         if cached_tags and not nocache:
             # Ensure cached tags' lineage matches database (prefer strain sovereign/canonical over product lineage)
@@ -7120,7 +7149,8 @@ def get_available_tags():
         all_tags = []
         if not prefer_db:
             # Try Excel processor first (lighter than database queries)
-            excel_processor = get_excel_processor()
+            # CRITICAL FIX: Use get_session_excel_processor() to get uploaded file, not default file
+            excel_processor = get_session_excel_processor()
             if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
                 try:
                     excel_tags = excel_processor.get_available_tags()
@@ -13321,7 +13351,8 @@ def get_initial_data():
         logging.info(f"Initial data request at {datetime.now().strftime('%H:%M:%S')}")
         
         # Get the excel processor
-        excel_processor = get_excel_processor()
+        # CRITICAL FIX: Use get_session_excel_processor() to get uploaded file, not default file
+        excel_processor = get_session_excel_processor()
         logging.info(f"Excel processor obtained: {excel_processor}")
         
         # Check if excel_processor is valid and has df attribute
