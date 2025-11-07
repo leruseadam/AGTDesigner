@@ -5301,13 +5301,18 @@
   
   <!-- ANTI-LOOP SAFEGUARD: Prevent modal from showing after reload -->
   <script>
+    // ===== MODAL CONTROL - RUNS IMMEDIATELY ON PAGE LOAD =====
     (function() {
-      // Check if store was just selected (flag set before reload)
-      if (sessionStorage.getItem('store_just_selected') === 'true') {
-        console.log('🛡️ Anti-loop safeguard: Store was just selected, ensuring modal stays hidden');
+      console.log('🚀 FIRST SCRIPT - Modal control starting');
+      const storeJustSelected = sessionStorage.getItem('store_just_selected');
+      console.log('store_just_selected flag:', storeJustSelected);
+      
+      if (storeJustSelected === 'true') {
+        // User selected store in THIS session - keep modal hidden
+        console.log('✅ Store was selected in this session - modal stays hidden');
         
-        // Clear the flag
-        sessionStorage.removeItem('store_just_selected');
+        // DON'T remove the flag yet - keep it so later checks know store was selected
+        // It will be cleared on next fresh load (new tab/browser restart)
         
         // Force hide the modal and cleanup
         const modal = document.getElementById('storeSelectionModal');
@@ -5326,6 +5331,55 @@
         const mainContent = document.getElementById('mainContent');
         if (mainContent) {
           mainContent.style.display = 'block';
+        }
+      } else {
+        // NO FLAG = Fresh load - FORCE MODAL VISIBLE NOW
+        console.log('❗ NO flag found - FORCING MODAL VISIBLE');
+        
+        // Clear backend session
+        fetch('/api/clear-store', {
+          method: 'POST',
+          credentials: 'same-origin'
+        }).then(() => {
+          console.log('✅ Backend session cleared');
+        }).catch(err => console.error('Clear error:', err));
+        
+        // FORCE modal visible immediately
+        const showModal = () => {
+          const modalElement = document.getElementById('storeSelectionModal');
+          const mainContent = document.getElementById('mainContent');
+          
+          if (modalElement) {
+            modalElement.style.display = 'block';
+            modalElement.classList.add('show');
+            document.body.classList.add('modal-open');
+            document.body.style.overflow = 'hidden';
+            
+            // Add backdrop
+            if (!document.querySelector('.modal-backdrop, #storeModalBackdrop')) {
+              const backdrop = document.createElement('div');
+              backdrop.id = 'storeModalBackdrop';
+              backdrop.className = 'modal-backdrop fade show';
+              backdrop.style.zIndex = '9998';
+              document.body.appendChild(backdrop);
+            }
+            
+            console.log('✅✅✅ MODAL IS NOW VISIBLE ✅✅✅');
+          } else {
+            console.log('⏳ Modal element not ready, retrying...');
+            setTimeout(showModal, 50);
+          }
+          
+          if (mainContent) {
+            mainContent.style.display = 'none';
+          }
+        };
+        
+        // Show modal now or when DOM ready
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', showModal);
+        } else {
+          showModal();
         }
       }
     })();
@@ -6779,63 +6833,6 @@
         }
       }
     }
-    
-    // ===== FORCE STORE MODAL IMMEDIATELY ON FRESH LOADS =====
-    // This runs BEFORE TagManager initialization to ensure modal shows first
-    (function() {
-      console.log('🚀 IMMEDIATE STORE CHECK (runs before everything)');
-      const storeJustSelected = sessionStorage.getItem('store_just_selected');
-      
-      if (!storeJustSelected) {
-        console.log('❗ NO sessionStorage flag - FORCING MODAL NOW');
-        
-        // Clear backend session
-        fetch('/api/clear-store', {
-          method: 'POST',
-          credentials: 'same-origin'
-        }).catch(err => console.error('Clear session error:', err));
-        
-        // IMMEDIATELY force modal visible
-        const showModalNow = () => {
-          const modalElement = document.getElementById('storeSelectionModal');
-          const mainContent = document.getElementById('mainContent');
-          
-          if (modalElement) {
-            modalElement.style.display = 'block';
-            modalElement.classList.add('show');
-            document.body.classList.add('modal-open');
-            document.body.style.overflow = 'hidden';
-            
-            // Add backdrop
-            if (!document.querySelector('.modal-backdrop, #storeModalBackdrop')) {
-              const backdrop = document.createElement('div');
-              backdrop.id = 'storeModalBackdrop';
-              backdrop.className = 'modal-backdrop fade show';
-              backdrop.style.zIndex = '9998';
-              document.body.appendChild(backdrop);
-            }
-            
-            console.log('✅ MODAL FORCED VISIBLE AT PAGE START');
-          } else {
-            // Modal element not ready yet, retry
-            setTimeout(showModalNow, 50);
-          }
-          
-          if (mainContent) {
-            mainContent.style.display = 'none';
-          }
-        };
-        
-        // Try immediately, and retry if needed
-        if (document.readyState === 'loading') {
-          document.addEventListener('DOMContentLoaded', showModalNow);
-        } else {
-          showModalNow();
-        }
-      } else {
-        console.log('✅ Store was selected in this session - modal will be controlled normally');
-      }
-    })();
     
     // Start waiting for TagManager to load
     waitForTagManagerAndInit();
