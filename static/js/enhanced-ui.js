@@ -87,8 +87,13 @@ function hideSplashWithDelay(splashStartTime, minDisplayTime = 800) {
   
   setTimeout(() => {
     console.log('⏱️ Minimum display time reached, hiding splash now');
-    if (typeof TagManager !== 'undefined' && TagManager.hideExcelLoadingSplash) {
-      TagManager.hideExcelLoadingSplash();
+    // Hide directly without waiting for TagManager
+    const splash = document.getElementById('excelLoadingSplash');
+    if (splash) {
+      splash.style.display = 'none';
+      console.log('✅ Splash hidden directly');
+    } else {
+      console.error('❌ Could not find splash element to hide');
     }
   }, remainingTime);
 }
@@ -117,10 +122,25 @@ async function handleFiles(files) {
       }, 10);
     }
 
-    // Show Excel loading splash screen for manual uploads
+    // Show Excel loading splash screen - DIRECT METHOD (doesn't wait for TagManager)
     const splashStartTime = Date.now();
-    if (typeof TagManager !== 'undefined' && TagManager.showExcelLoadingSplash) {
-      TagManager.showExcelLoadingSplash(file.name);
+    console.log('🎬 UPLOAD: Attempting to show splash for:', file.name);
+    const splash = document.getElementById('excelLoadingSplash');
+    const filenameElement = document.getElementById('excelLoadingFilename');
+    const statusElement = document.getElementById('excelLoadingStatus');
+    
+    if (splash && filenameElement && statusElement) {
+      console.log('🎬 UPLOAD: Showing splash directly');
+      filenameElement.textContent = file.name;
+      statusElement.textContent = 'Processing...';
+      splash.style.display = 'flex';
+      splash.style.zIndex = '99999';
+    } else {
+      console.error('🎬 UPLOAD: Could not find splash elements:', {
+        splash: !!splash,
+        filenameElement: !!filenameElement,
+        statusElement: !!statusElement
+      });
     }
 
     // Handle file upload
@@ -157,10 +177,9 @@ async function handleFiles(files) {
           if (confirm(warningMsg + '\n\nDo you want to continue anyway?')) {
             // User confirmed, continue with upload
           } else {
-            // User cancelled, don't reload
-            if (typeof TagManager !== 'undefined' && TagManager.hideExcelLoadingSplash) {
-              TagManager.hideExcelLoadingSplash();
-            }
+            // User cancelled, don't reload - hide splash directly
+            const splash = document.getElementById('excelLoadingSplash');
+            if (splash) splash.style.display = 'none';
             return;
           }
         }
