@@ -4307,19 +4307,19 @@
     }
 
     .app-loading-logo {
-      width: 80px;
-      height: 80px;
+      width: 120px; /* Bigger - was 80px */
+      height: 120px; /* Bigger - was 80px */
       background: linear-gradient(135deg, #00d4aa, #0099cc);
-      border-radius: 20px;
+      border-radius: 24px; /* Slightly more rounded */
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 36px;
+      font-size: 54px; /* Bigger icon - was 36px */
       box-shadow: 
         0 15px 35px rgba(0, 212, 170, 0.3),
         0 0 0 1px rgba(0, 212, 170, 0.2);
       animation: logo-float 3s ease-in-out infinite;
-      margin-bottom: 30px;
+      margin-bottom: 40px; /* More space */
     }
 
     @keyframes logo-float {
@@ -4332,9 +4332,9 @@
     }
 
     .app-loading-title {
-      font-size: 42px;
+      font-size: 64px; /* Much larger - was 42px */
       font-weight: 800;
-      margin-bottom: 12px;
+      margin-bottom: 20px; /* More space */
       background: linear-gradient(135deg, #00d4aa, #ffffff);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
@@ -4349,11 +4349,11 @@
     }
 
     .app-loading-subtitle {
-      font-size: 18px;
+      font-size: 24px; /* Larger - was 18px */
       font-weight: 600;
       opacity: 1;
-      margin-bottom: 40px;
-      letter-spacing: 1px;
+      margin-bottom: 50px; /* More space */
+      letter-spacing: 2px; /* More spacing */
       text-transform: uppercase;
       text-shadow: 
         0 2px 6px rgba(0,0,0,0.4),
@@ -5138,8 +5138,8 @@
 
   <!-- Modals -->
   
-  <!-- Store Selection Modal - Only shown if user doesn't have a store -->
-  <div class="modal fade {% if user_has_store %}{% else %}show{% endif %}" id="storeSelectionModal" tabindex="-1" aria-labelledby="storeSelectionModalLabel" data-bs-backdrop="static" data-bs-keyboard="false" style="{% if user_has_store %}display: none;{% else %}display: block;{% endif %} z-index: 9999 !important;">
+  <!-- Store Selection Modal - JavaScript controls visibility after checking session -->
+  <div class="modal fade" id="storeSelectionModal" tabindex="-1" aria-labelledby="storeSelectionModalLabel" data-bs-backdrop="static" data-bs-keyboard="false" style="display: none; z-index: 9999 !important;">
     <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-xl">
       <div class="modal-content glass-card">
         <div class="modal-header border-0" style="padding: 2.5rem 2.5rem 1.5rem;">
