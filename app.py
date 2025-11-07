@@ -2092,6 +2092,17 @@ def favicon():
     return send_from_directory(os.path.join(app.root_path, 'static'),
                                'favicon.ico', mimetype='image/vnd.microsoft.icon')
 
+@app.route('/service-worker.js')
+@app.route('/static/service-worker.js')
+def service_worker():
+    """Serve the service worker with proper headers."""
+    response = send_from_directory(os.path.join(app.root_path, 'static'),
+                                   'service-worker.js', mimetype='application/javascript')
+    # Service workers must be served with proper MIME type and no caching for updates
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Service-Worker-Allowed'] = '/'
+    return response
+
 @app.after_request
 def add_cache_control_headers(response):
     """Add cache control headers to prevent aggressive caching on PythonAnywhere."""
