@@ -5836,17 +5836,17 @@ def generate_labels():
                     logging.info(f"🔍 VALIDATION DEBUG: About to validate {len(normalized_tags)} normalized tags")
                     logging.info(f"🔍 VALIDATION DEBUG: First 10 tags: {normalized_tags[:10]}")
                     
-                    # ⚡ PERFORMANCE: Use batched querier for better performance
-                    from src.core.generation.fast_generation import BatchedDatabaseQuerier
-                    batched_querier = BatchedDatabaseQuerier(product_db)
+                    # ⚠️ DIRECT DATABASE QUERIES (batching disabled for troubleshooting)
+                    # from src.core.generation.fast_generation import BatchedDatabaseQuerier
+                    # batched_querier = BatchedDatabaseQuerier(product_db)
                     
                     # Use fuzzy matching for JSON matched sessions
                     if is_json_matched_session:
                         logging.info(f"🔍 JSON SESSION: Using fuzzy matching for better JSON abbreviation handling")
                         db_records = product_db.get_products_by_names_with_fuzzy(normalized_tags)
                     else:
-                        # ⚡ PERFORMANCE: Use batched query instead of individual lookups
-                        db_records = batched_querier.get_products_batch(normalized_tags, batch_size=100)
+                        # Direct database query
+                        db_records = product_db.get_products_by_names(normalized_tags)
                     
                     logging.info(f"🔍 VALIDATION DEBUG: Database lookup returned {len(db_records)} records")
                     
@@ -6379,9 +6379,9 @@ def generate_labels():
         font_scheme = get_font_scheme(template_type)
         processor = TemplateProcessor(template_type, font_scheme, saved_scale_factor, excel_processor)
         
-        # ⚡ PERFORMANCE: Wrap processor in FastGenerationEngine for caching
-        from src.core.generation.fast_generation import FastGenerationEngine, optimize_records_for_generation
-        fast_engine = FastGenerationEngine(processor)
+        # ⚠️ DISABLED: Fast generation temporarily disabled for troubleshooting
+        # from src.core.generation.fast_generation import FastGenerationEngine, optimize_records_for_generation
+        # fast_engine = FastGenerationEngine(processor)
         
         # CRITICAL: For mini templates, NEVER force re-expansion as they have fixed capacity
         if hasattr(processor, '_expand_template_if_needed') and processor.template_type != 'mini':
@@ -6508,15 +6508,13 @@ def generate_labels():
             lineage = record.get('Lineage', 'NOT_FOUND')
             logging.info(f"  Record {i+1}: '{product_name}' -> Lineage: '{lineage}'")
         
-        # ⚡ PERFORMANCE: Optimize records before generation
-        optimized_records = optimize_records_for_generation(records)
-        
-        # ⚡ PERFORMANCE: Use fast generation engine with caching
+        # ⚠️ SIMPLE DIRECT GENERATION (fast generation disabled)
         generation_start = time.time()
-        final_doc = fast_engine.generate_with_cache(optimized_records, template_type, saved_scale_factor)
+        logging.info(f"🔧 Starting DIRECT generation of {len(records)} labels...")
+        final_doc = processor.process_records(records)
         generation_time = time.time() - generation_start
         
-        logging.info(f"⚡ FAST GENERATION: Completed {len(records)} labels in {generation_time:.2f}s ({generation_time/len(records):.3f}s per label)")
+        logging.info(f"✅ GENERATION COMPLETE: {len(records)} labels in {generation_time:.2f}s ({generation_time/len(records):.3f}s per label)")
         if hasattr(final_doc, 'labels_rendered'):
             logging.info(f"🔍 LABEL RENDER: TemplateProcessor rendered {final_doc.labels_rendered} labels")
         if final_doc is None:
