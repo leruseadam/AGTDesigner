@@ -2437,70 +2437,56 @@ def upload_file():
             return jsonify(response_data)
             
         else:
-            # Local development: Process synchronously for immediate feedback
-            logging.info("[LOCAL] Processing file synchronously")
-            processor = get_excel_processor()
+            # Local development: FAST UPLOAD - just save file, don't process
+            # Processing happens on page reload for instant upload response
+            logging.info("[LOCAL] Fast upload mode - saving file without processing")
             
-            success = processor.load_file(file_path)
-            if success:
-                row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
-                logging.info(f"File loaded successfully: {row_count} rows")
-
-                # Skip database storage during upload for speed
-                # The file is already loaded in processor and will be available immediately
-                # Database storage can happen lazily when data is accessed
-                logging.info(f"File uploaded successfully with {row_count} products (database storage skipped for speed)")
-
-                # CRITICAL FIX: Invalidate the global processor cache so page reload gets fresh data
-                global _excel_processor
-                _excel_processor = None
-                logging.info("✅ Cleared Excel processor cache to force reload of new file on next request")
+            # CRITICAL FIX: Invalidate the global processor cache so page reload gets fresh data
+            global _excel_processor
+            _excel_processor = None
+            logging.info("✅ Cleared Excel processor cache to force reload of new file on next request")
+            
+            # CRITICAL: Clear ALL caches to force complete refresh
+            try:
+                # Clear file-specific cache (uses file path in key)
+                session_file_path = session.get('file_path', '')
+                cache_keys_to_clear = [
+                    f'available_tags_{session_file_path}',
+                    'selected_tags', 
+                    'vendor_tags', 
+                    'initial_data'
+                ]
                 
-                # CRITICAL: Clear ALL caches to force complete refresh
+                # Also clear any old available_tags caches (from previous uploads)
+                # Try to delete with empty path (legacy cache key)
                 try:
-                    # Clear file-specific cache (uses file path in key)
-                    session_file_path = session.get('file_path', '')
-                    cache_keys_to_clear = [
-                        f'available_tags_{session_file_path}',
-                        'selected_tags', 
-                        'vendor_tags', 
-                        'initial_data'
-                    ]
-                    
-                    # Also clear any old available_tags caches (from previous uploads)
-                    # Try to delete with empty path (legacy cache key)
-                    try:
-                        legacy_cache_key = get_session_cache_key('available_tags_')
-                        cache.delete(legacy_cache_key)
-                        logging.info(f"✅ Cleared legacy cache: available_tags_")
-                    except:
-                        pass
-                    
-                    for key_base in cache_keys_to_clear:
-                        cache_key = get_session_cache_key(key_base)
-                        cache.delete(cache_key)
-                        logging.info(f"✅ Cleared cache: {key_base}")
-                except Exception as cache_err:
-                    logging.warning(f"Failed to clear cache: {cache_err}")
+                    legacy_cache_key = get_session_cache_key('available_tags_')
+                    cache.delete(legacy_cache_key)
+                    logging.info(f"✅ Cleared legacy cache: available_tags_")
+                except:
+                    pass
                 
-                # CRITICAL: Verify session file path is set correctly
-                logging.info(f"✅ Session file_path after upload: {session.get('file_path')}")
-                logging.info(f"✅ Uploaded file saved at: {file_path}")
+                for key_base in cache_keys_to_clear:
+                    cache_key = get_session_cache_key(key_base)
+                    cache.delete(cache_key)
+                    logging.info(f"✅ Cleared cache: {key_base}")
+            except Exception as cache_err:
+                logging.warning(f"Failed to clear cache: {cache_err}")
+            
+            # CRITICAL: Verify session file path is set correctly
+            logging.info(f"✅ Session file_path after upload: {session.get('file_path')}")
+            logging.info(f"✅ Uploaded file saved at: {file_path}")
 
-                update_processing_status(file.filename, 'ready')
-            else:
-                logging.error("File load returned False")
-                update_processing_status(file.filename, 'error: File load failed')
-                return jsonify({'error': 'Failed to process file'}), 500
+            update_processing_status(file.filename, 'ready')
             
             upload_time = time.time() - start_time
-            logging.info(f"=== UPLOAD COMPLETE: {upload_time:.3f}s ===")
+            logging.info(f"=== UPLOAD COMPLETE (instant): {upload_time:.3f}s ===")
             
             response_data = {
                 'success': True,
-                'message': 'File uploaded and processed',
+                'message': 'File uploaded successfully',
                 'filename': file.filename,
-                'rows': row_count
+                'rows': 0  # Unknown until page reload processes it
             }
             if warning_to_return:
                 response_data['warning'] = warning_to_return
