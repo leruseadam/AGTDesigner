@@ -11535,16 +11535,39 @@
         const file = e.target.files[0];
         console.log('🚨 EMERGENCY: Uploading file:', file.name);
 
-        // Show loading splash
+        // Show loading splash - MUST BE VISIBLE!
+        console.log('🎬 EMERGENCY: Getting splash elements...');
         const splash = document.getElementById('excelLoadingSplash');
         const filenameElement = document.getElementById('excelLoadingFilename');
         const statusElement = document.getElementById('excelLoadingStatus');
+        
+        console.log('🎬 EMERGENCY: Splash elements found?', {
+          splash: !!splash,
+          filename: !!filenameElement,
+          status: !!statusElement
+        });
+        
         if (splash && filenameElement && statusElement) {
-          console.log('🎬 EMERGENCY: Showing upload splash...');
+          console.log('🎬 EMERGENCY: FORCING SPLASH TO SHOW...');
           filenameElement.textContent = file.name;
           statusElement.textContent = 'Uploading file...';
-          splash.style.display = 'flex';
-          splash.style.zIndex = '999999';
+          
+          // FORCE SPLASH TO SHOW WITH ALL POSSIBLE OVERRIDES
+          splash.style.setProperty('display', 'flex', 'important');
+          splash.style.setProperty('position', 'fixed', 'important');
+          splash.style.setProperty('top', '0', 'important');
+          splash.style.setProperty('left', '0', 'important');
+          splash.style.setProperty('width', '100%', 'important');
+          splash.style.setProperty('height', '100%', 'important');
+          splash.style.setProperty('z-index', '999999', 'important');
+          splash.style.setProperty('background', 'rgba(0, 0, 0, 0.85)', 'important');
+          splash.style.setProperty('align-items', 'center', 'important');
+          splash.style.setProperty('justify-content', 'center', 'important');
+          
+          console.log('🎬 EMERGENCY: Splash should now be visible! Display:', splash.style.display);
+        } else {
+          console.error('❌ EMERGENCY: Could not find splash elements!');
+          alert('Error: Splash screen elements not found. Upload will continue but without visual feedback.');
         }
 
         const formData = new FormData();
