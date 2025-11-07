@@ -1086,10 +1086,7 @@ canvas#lava-lamp-canvas {
   /* Glass Card Styling - Professional and Clean with FINAL POLISH */
   .glass-card {
     transition: all 0.4s cubic-bezier(0.4,0,0.2,1);
-    box-shadow: 
-      0 6px 32px rgba(0,0,0,0.25), 
-      0 4px 16px rgba(160,132,232,0.2),
-      inset 0 1px 0 rgba(255,255,255,0.1);
+    box-shadow: none; /* Removed shadow */
     border-radius: 16px; /* Increased from 12px for softer look */
     border: 1px solid rgba(160,132,232,0.3);
     background: rgba(30, 30, 50, 0.96) !important;
