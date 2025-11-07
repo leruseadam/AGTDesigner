@@ -4652,11 +4652,13 @@
 
     /* Three Column Layout - Equal Heights */
     /* Force all three columns to have equal height and prevent center column from being taller */
+    .d-flex[style*="gap: 6rem"],
     .d-flex[style*="gap: 4rem"] {
       align-items: stretch !important;
     }
 
     /* Center column should match height of side columns */
+    .d-flex[style*="gap: 6rem"] > div[data-container-type="center"],
     .d-flex[style*="gap: 4rem"] > div[data-container-type="center"] {
       display: flex !important;
       flex-direction: column !important;
@@ -4674,6 +4676,8 @@
     }
 
     /* Side columns (Available & Selected Tags) should set the height */
+    .d-flex[style*="gap: 6rem"] > div[data-container-type="available"],
+    .d-flex[style*="gap: 6rem"] > div[data-container-type="selected"],
     .d-flex[style*="gap: 4rem"] > div[data-container-type="available"],
     .d-flex[style*="gap: 4rem"] > div[data-container-type="selected"] {
       min-height: 600px !important;
@@ -4696,6 +4700,8 @@
 
     /* Responsive height adjustments for smaller screens */
     @media (max-height: 900px) {
+      .d-flex[style*="gap: 6rem"] > div[data-container-type="available"],
+      .d-flex[style*="gap: 6rem"] > div[data-container-type="selected"],
       .d-flex[style*="gap: 4rem"] > div[data-container-type="available"],
       .d-flex[style*="gap: 4rem"] > div[data-container-type="selected"],
       div[data-container-type="center"] {
@@ -4705,6 +4711,8 @@
     }
 
     @media (max-height: 768px) {
+      .d-flex[style*="gap: 6rem"] > div[data-container-type="available"],
+      .d-flex[style*="gap: 6rem"] > div[data-container-type="selected"],
       .d-flex[style*="gap: 4rem"] > div[data-container-type="available"],
       .d-flex[style*="gap: 4rem"] > div[data-container-type="selected"],
       div[data-container-type="center"] {
@@ -4714,6 +4722,8 @@
     }
 
     @media (max-height: 600px) {
+      .d-flex[style*="gap: 6rem"] > div[data-container-type="available"],
+      .d-flex[style*="gap: 6rem"] > div[data-container-type="selected"],
       .d-flex[style*="gap: 4rem"] > div[data-container-type="available"],
       .d-flex[style*="gap: 4rem"] > div[data-container-type="selected"],
       div[data-container-type="center"] {
@@ -4724,11 +4734,14 @@
 
     /* Mobile responsive - stack columns vertically on small screens */
     @media (max-width: 768px) {
+      .d-flex[style*="gap: 6rem"],
       .d-flex[style*="gap: 4rem"] {
         flex-direction: column !important;
         gap: 1rem !important;
       }
 
+      .d-flex[style*="gap: 6rem"] > div[data-container-type="available"],
+      .d-flex[style*="gap: 6rem"] > div[data-container-type="selected"],
       .d-flex[style*="gap: 4rem"] > div[data-container-type="available"],
       .d-flex[style*="gap: 4rem"] > div[data-container-type="selected"],
       div[data-container-type="center"] {
@@ -4736,6 +4749,11 @@
         width: 100% !important;
         min-height: 300px !important;
         max-height: 400px !important;
+      }
+      
+      div[data-container-type="center"] {
+        margin-left: 0 !important;
+        margin-right: 0 !important;
       }
     }
 
@@ -4948,7 +4966,7 @@
       <!-- Main Content Area -->
       <div class="w-100">
         <!-- Tag-list containers row (now includes filter bar for alignment) -->
-        <div class="row fade-in g-1" style="animation-delay: 0.4s;">
+        <div class="row fade-in g-1" style="animation-delay: 0.4s; padding-left: 0.5rem; padding-right: 0.5rem;">
           <!-- Filter Bar as a column -->
           <div class="col-12 mb-4" data-container-type="filter">
               <div class="enhanced-filter-bar d-flex align-items-center gap-2 p-3" style="background: rgba(45, 34, 58, 0.95); border-radius: 16px; backdrop-filter: blur(20px); border: 2px solid rgba(160, 132, 232, 0.6); min-height: 120px;">
@@ -4962,14 +4980,6 @@
                     </div>
                     <!-- Buttons Row -->
                     <div class="buttons-row d-flex align-items-center gap-2">
-                      <!-- Clear Button -->
-                      <button id="clearFiltersBtn" class="btn btn-danger px-2 py-2" onclick="TagManager.clearAllFilters()" title="Clear all filters and reset app" style="font-weight: 700; box-shadow: 0 4px 12px rgba(0,0,0,0.3); white-space: nowrap; font-size: 13px; border-radius: 8px; min-width: 140px; min-height: 40px;">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2">
-                          <polyline points="3 6 5 6 21 6"></polyline>
-                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
-                        </svg>
-                        Clear Filters
-                      </button>
                       <!-- Upload Button -->
                       <input type="file" id="fileInput" accept=".xlsx" style="display:none;">
                       <button type="button" class="btn px-2 py-2" id="uploadTriggerBtn" onclick="var input = document.getElementById('fileInput'); if(input) input.click();" aria-label="Upload Excel file" style="font-weight: 700; box-shadow: 0 4px 12px rgba(0,0,0,0.3); white-space: nowrap; font-size: 13px; border-radius: 8px; min-width: 140px; min-height: 40px; background: linear-gradient(135deg, #a084e8 0%, #8b5cf6 100%); border: 2px solid #a084e8; color: white;">
@@ -4979,6 +4989,14 @@
                           <line x1="12" y1="15" x2="12" y2="3"></line>
                         </svg>
                         Upload Excel
+                      </button>
+                      <!-- Clear Button -->
+                      <button id="clearFiltersBtn" class="btn btn-danger px-2 py-2" onclick="TagManager.clearAllFilters()" title="Clear all filters and reset app" style="font-weight: 700; box-shadow: 0 4px 12px rgba(0,0,0,0.3); white-space: nowrap; font-size: 13px; border-radius: 8px; min-width: 140px; min-height: 40px;">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2">
+                          <polyline points="3 6 5 6 21 6"></polyline>
+                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
+                        </svg>
+                        Clear Filters
                       </button>
                     </div>
                   </div>
@@ -5037,7 +5055,7 @@
         </div>
         
         <!-- Main Content Row -->
-        <div class="d-flex fade-in" style="animation-delay: 0.6s; width: 100%; gap: 4rem; justify-content: center;">
+        <div class="d-flex fade-in" style="animation-delay: 0.6s; width: 100%; gap: 6rem; justify-content: center; padding-left: 0.5rem; padding-right: 0.5rem;">
           <!-- Available Tags -->
           <div class="mb-2" data-container-type="available" style="flex: 1; max-width: 28rem;">
             <div class="glass-card d-flex flex-column h-100">
@@ -5079,13 +5097,13 @@
           </div>
           
           <!-- Center Column with Controls -->
-          <div class="mb-2 mt-0 d-flex flex-column justify-content-start align-items-center" style="flex: 0 0 auto; max-width: 200px; width: 200px;" data-container-type="center">
+          <div class="mb-2 mt-0 d-flex flex-column justify-content-start align-items-center" style="flex: 0 0 auto; margin-left: 3rem; margin-right: 3rem;" data-container-type="center">
             <!-- Controls -->
-            <div class="control-panel" style="width: 100%; max-width: 200px;">
+            <div class="control-panel" style="width: 100%;">
               <!-- Template Section -->
               <div class="mb-3">
                 <label class="filter-label">Template</label>
-                <select id="templateSelect" class="form-select form-select-modern" aria-label="Template" style="width: 70% !important; max-width: 200px !important; margin: 0 auto !important; display: block !important;">
+                <select id="templateSelect" class="form-select form-select-modern" aria-label="Template" style="margin: 0 auto !important; display: block !important;">
                   <option value="horizontal">Horizontal</option>
                   <option value="vertical">Vertical</option>
                   <option value="mini">Mini</option>
@@ -5311,12 +5329,12 @@
     </div>
   </div>
   
-  <!-- MODAL CONTROL - Checks backend on every page load -->
+  <!-- MODAL CONTROL - Forces modal on hard refresh/server restart -->
   <script>
     // ===== MODAL CONTROL - RUNS IMMEDIATELY ON PAGE LOAD =====
-    // FIXED: Always check backend instead of relying on sessionStorage
+    // FIXED: Clear backend store if sessionStorage flag doesn't exist (hard refresh/restart)
     (function() {
-      console.log('🚀 FIRST SCRIPT - Modal control starting (checking backend)');
+      console.log('🚀 FIRST SCRIPT - Modal control starting');
       
       // CRITICAL: Hide main content initially until we know store status
       const mainContent = document.getElementById('mainContent');
@@ -5325,30 +5343,28 @@
         mainContent.style.visibility = 'hidden';
       }
       
-      // Always check backend for store selection (don't rely on sessionStorage)
-      fetch('/api/check-store-required', {
-        method: 'GET',
-        credentials: 'same-origin'
-      })
-      .then(response => response.json())
-      .then(data => {
-        console.log('Backend store check response:', data);
+      // Check if this is a fresh load (hard refresh or server restart)
+      // sessionStorage gets cleared on hard refresh, so no flag = fresh load
+      const storeJustSelected = sessionStorage.getItem('store_just_selected');
+      console.log('sessionStorage store_just_selected:', storeJustSelected);
+      
+      if (!storeJustSelected) {
+        // FRESH LOAD (hard refresh/server restart) - CLEAR BACKEND AND FORCE MODAL
+        console.log('🔄 FRESH LOAD detected - clearing backend store and showing modal');
         
-        // Backend returns 'requires_store', not 'required'
-        const requiresStore = data.requires_store === true || data.required === true;
-        
-        if (requiresStore) {
-          // No store selected - SHOW MODAL
-          console.log('❗ No store selected in backend - SHOWING MODAL');
+        // Clear backend store selection first
+        fetch('/api/clear-store', {
+          method: 'POST',
+          credentials: 'same-origin'
+        })
+        .then(() => {
+          console.log('✅ Backend store cleared');
           
-          // Set blocking flag
+          // Now show modal
           window.STORE_MODAL_BLOCKING = true;
-          console.log('🚫 BLOCKING TagManager initialization until store selected');
           
-          // Show modal
           const showModal = () => {
             const modalElement = document.getElementById('storeSelectionModal');
-            const mainContent = document.getElementById('mainContent');
             
             if (modalElement) {
               modalElement.style.display = 'block';
@@ -5366,82 +5382,127 @@
                 document.body.appendChild(backdrop);
               }
               
-              console.log('✅✅✅ MODAL IS NOW VISIBLE ✅✅✅');
+              console.log('✅✅✅ MODAL FORCED VISIBLE (fresh load) ✅✅✅');
             } else {
               console.log('⏳ Modal element not ready, retrying...');
               setTimeout(showModal, 50);
-              return;
-            }
-            
-            // Hide main content
-            if (mainContent) {
-              mainContent.style.display = 'none';
-              mainContent.style.visibility = 'hidden';
-              console.log('🚫 MAIN CONTENT HIDDEN');
             }
           };
           
-          // Show modal when DOM ready
           if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', showModal);
           } else {
             showModal();
           }
+        })
+        .catch(err => {
+          console.error('Error clearing store:', err);
+          // Still show modal even if clear fails
+          window.STORE_MODAL_BLOCKING = true;
           
-        } else {
-          // Store is selected - HIDE MODAL
-          console.log('✅ Store is selected in backend - hiding modal');
+          const showModal = () => {
+            const modalElement = document.getElementById('storeSelectionModal');
+            if (modalElement) {
+              modalElement.style.display = 'block';
+              modalElement.classList.add('show');
+              document.body.classList.add('modal-open');
+              document.body.style.overflow = 'hidden';
+            } else {
+              setTimeout(showModal, 50);
+            }
+          };
           
-          // Clear blocking flag
-          window.STORE_MODAL_BLOCKING = false;
-          console.log('✅ STORE_MODAL_BLOCKING cleared - TagManager can initialize');
-          
-          // Hide modal
-          const modal = document.getElementById('storeSelectionModal');
-          if (modal) {
-            modal.style.display = 'none';
-            modal.classList.remove('show');
-            modal.setAttribute('aria-hidden', 'true');
-          }
-          
-          // Remove backdrops
-          document.querySelectorAll('.modal-backdrop').forEach(b => b.remove());
-          document.body.classList.remove('modal-open');
-          document.body.style.overflow = '';
-          
-          // Show main content
-          if (mainContent) {
-            mainContent.style.display = 'block';
-            mainContent.style.visibility = 'visible';
-            mainContent.classList.add('store-selected', 'loaded');
-            console.log('✅ MAIN CONTENT SHOWN');
-          }
-        }
-      })
-      .catch(err => {
-        console.error('Error checking store status:', err);
-        // On error, default to showing modal (safer)
-        console.log('⚠️ Error checking store - defaulting to show modal');
-        window.STORE_MODAL_BLOCKING = true;
-        
-        const showModal = () => {
-          const modalElement = document.getElementById('storeSelectionModal');
-          if (modalElement) {
-            modalElement.style.display = 'block';
-            modalElement.classList.add('show');
-            document.body.classList.add('modal-open');
-            document.body.style.overflow = 'hidden';
+          if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', showModal);
           } else {
-            setTimeout(showModal, 50);
+            showModal();
           }
-        };
+        });
         
-        if (document.readyState === 'loading') {
-          document.addEventListener('DOMContentLoaded', showModal);
-        } else {
-          showModal();
-        }
-      });
+      } else {
+        // SAME SESSION - Check backend (but don't clear it)
+        console.log('✅ Same session - checking backend for store');
+        
+        fetch('/api/check-store-required', {
+          method: 'GET',
+          credentials: 'same-origin'
+        })
+        .then(response => response.json())
+        .then(data => {
+          console.log('Backend store check response:', data);
+          
+          const requiresStore = data.requires_store === true || data.required === true;
+          
+          if (requiresStore) {
+            // No store in backend - show modal
+            console.log('❗ No store in backend - SHOWING MODAL');
+            window.STORE_MODAL_BLOCKING = true;
+            
+            const showModal = () => {
+              const modalElement = document.getElementById('storeSelectionModal');
+              if (modalElement) {
+                modalElement.style.display = 'block';
+                modalElement.classList.add('show');
+                document.body.classList.add('modal-open');
+                document.body.style.overflow = 'hidden';
+              } else {
+                setTimeout(showModal, 50);
+              }
+            };
+            
+            if (document.readyState === 'loading') {
+              document.addEventListener('DOMContentLoaded', showModal);
+            } else {
+              showModal();
+            }
+            
+          } else {
+            // Store exists - hide modal and show content
+            console.log('✅ Store found in backend - hiding modal');
+            window.STORE_MODAL_BLOCKING = false;
+            
+            const modal = document.getElementById('storeSelectionModal');
+            if (modal) {
+              modal.style.display = 'none';
+              modal.classList.remove('show');
+              modal.setAttribute('aria-hidden', 'true');
+            }
+            
+            document.querySelectorAll('.modal-backdrop').forEach(b => b.remove());
+            document.body.classList.remove('modal-open');
+            document.body.style.overflow = '';
+            
+            if (mainContent) {
+              mainContent.style.display = 'block';
+              mainContent.style.visibility = 'visible';
+              mainContent.classList.add('store-selected', 'loaded');
+            }
+          }
+        })
+        .catch(err => {
+          console.error('Error checking store:', err);
+          // On error, default to showing modal
+          window.STORE_MODAL_BLOCKING = true;
+          
+          const showModal = () => {
+            const modalElement = document.getElementById('storeSelectionModal');
+            if (modalElement) {
+              modalElement.style.display = 'block';
+              modalElement.classList.add('show');
+              document.body.classList.add('modal-open');
+              document.body.style.overflow = 'hidden';
+            } else {
+              setTimeout(showModal, 50);
+            }
+          };
+          
+          if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', showModal);
+          } else {
+            showModal();
+          }
+        });
+      }
     })();
   </script>
   
