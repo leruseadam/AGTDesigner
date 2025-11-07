@@ -11781,11 +11781,40 @@ def json_match():
         
         # JSON MATCH FIX: Check if database has products before attempting to match
         store_name = get_current_store_name()
+        logging.info(f"JSON MATCH: get_current_store_name() returned: {store_name}")
+        logging.info(f"JSON MATCH: session['selected_store'] = {session.get('selected_store')}")
+        
         if not store_name:
-            return jsonify({
-                'error': 'No store selected. Please select a store or upload an Excel file with product data first.',
-                'message': 'JSON matching requires product data to match against.'
-            }), 400
+            # Try to get from Product Database fallback (uses database with most products)
+            logging.warning("No store name from get_current_store_name(), trying Product Database fallback...")
+            try:
+                from src.core.data.product_database import ProductDatabase
+                # Try default Bothell database as fallback
+                test_db = ProductDatabase(db_path='bothell_products.db')
+                test_products = test_db.get_all_products()
+                if test_products and len(test_products) > 0:
+                    logging.info(f"Fallback: Using bothell_products.db with {len(test_products)} products for JSON matching")
+                    store_name = 'AGT_Bothell'  # Use Bothell as fallback
+                    session['selected_store'] = store_name
+                    session.permanent = True
+                    session.modified = True
+                else:
+                    return jsonify({
+                        'error': 'No store selected and no product data available.',
+                        'message': 'Please select a store from the store selection modal, or upload an Excel file with product data first.',
+                        'suggestion': 'Click on a store location to continue.'
+                    }), 400
+            except Exception as fallback_error:
+                logging.error(f"Fallback database check failed: {fallback_error}")
+                return jsonify({
+                    'error': 'No store selected. Please select a store or upload an Excel file with product data first.',
+                    'message': 'JSON matching requires product data to match against.',
+                    'debug': {
+                        'store_name': None,
+                        'session_store': session.get('selected_store'),
+                        'fallback_error': str(fallback_error)
+                    }
+                }), 400
         
         # Check product database
         product_db = get_product_database(store_name)
