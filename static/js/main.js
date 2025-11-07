@@ -6950,15 +6950,21 @@ const TagManager = {
             // Upload complete, no need for separate processing step
             const processData = uploadData;
             
-            // Success!
+            // Hide splash and show success message
+            this.hideExcelLoadingSplash();
             this.updateUploadUI(`✅ ${file.name} ready!`, 'File processed successfully', 'success');
             console.log(`✅ Lightning upload completed! Upload: ${uploadData.upload_time?.toFixed(3)}s, Process: ${processData.process_time?.toFixed(3)}s`);
+            
+            // Show success toast
+            if (typeof showToast === 'function') {
+                showToast('success', `File uploaded successfully! ${uploadData.rows || 0} rows processed.`);
+            }
             
             // Refresh the page to show new data
             setTimeout(() => {
                 console.log('🔄 Refreshing page to show new data...');
                 window.location.reload();
-            }, 1000);
+            }, 1500);
             
             return; // Success!
         } catch (error) {
