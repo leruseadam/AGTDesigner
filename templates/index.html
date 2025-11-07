@@ -11504,50 +11504,20 @@
       const finalFileInput = document.getElementById('fileInput');
 
       finalFileInput.addEventListener('change', async function(e) {
-        console.log('🚨 EMERGENCY: Change event fired!');
-        console.log('Files:', e.target.files);
-
-        if (!e.target.files || e.target.files.length === 0) {
-          console.log('🚨 EMERGENCY: No files selected');
-          return;
-        }
+        if (!e.target.files || e.target.files.length === 0) return;
 
         const file = e.target.files[0];
-        console.log('🚨 EMERGENCY: Uploading file:', file.name);
-
-        // Show loading splash - MUST BE VISIBLE!
-        console.log('🎬 EMERGENCY: Getting splash elements...');
+        
+        // Show loading splash
         const splash = document.getElementById('excelLoadingSplash');
         const filenameElement = document.getElementById('excelLoadingFilename');
         const statusElement = document.getElementById('excelLoadingStatus');
         
-        console.log('🎬 EMERGENCY: Splash elements found?', {
-          splash: !!splash,
-          filename: !!filenameElement,
-          status: !!statusElement
-        });
-        
         if (splash && filenameElement && statusElement) {
-          console.log('🎬 EMERGENCY: FORCING SPLASH TO SHOW...');
           filenameElement.textContent = file.name;
-          statusElement.textContent = 'Uploading file...';
-          
-          // FORCE SPLASH TO SHOW WITH ALL POSSIBLE OVERRIDES
-          splash.style.setProperty('display', 'flex', 'important');
-          splash.style.setProperty('position', 'fixed', 'important');
-          splash.style.setProperty('top', '0', 'important');
-          splash.style.setProperty('left', '0', 'important');
-          splash.style.setProperty('width', '100%', 'important');
-          splash.style.setProperty('height', '100%', 'important');
-          splash.style.setProperty('z-index', '999999', 'important');
-          splash.style.setProperty('background', 'rgba(0, 0, 0, 0.85)', 'important');
-          splash.style.setProperty('align-items', 'center', 'important');
-          splash.style.setProperty('justify-content', 'center', 'important');
-          
-          console.log('🎬 EMERGENCY: Splash should now be visible! Display:', splash.style.display);
-        } else {
-          console.error('❌ EMERGENCY: Could not find splash elements!');
-          alert('Error: Splash screen elements not found. Upload will continue but without visual feedback.');
+          statusElement.textContent = 'Uploading...';
+          splash.style.display = 'flex';
+          splash.style.zIndex = '999999';
         }
 
         const formData = new FormData();
@@ -11560,42 +11530,29 @@
           });
 
           const data = await response.json();
-          console.log('🚨 EMERGENCY: Upload response:', data);
 
           if (response.ok && data.success) {
-            console.log('✅ Upload successful, clearing all caches and reloading...');
-            
             // Update splash status
             if (statusElement) {
-              statusElement.textContent = 'Upload successful! Reloading...';
+              statusElement.textContent = 'Success! Reloading...';
             }
             
-            // Clear all frontend caches
+            // Quick cache clear and reload
             if (window.TagManager && window.TagManager.clearCache) {
               window.TagManager.clearCache();
             }
-            
-            // Clear session storage
             sessionStorage.clear();
             
-            // Force hard reload with cache bust to ensure new products show up
+            // Fast reload
             setTimeout(() => {
-              // Add nocache parameter to force fresh data load
-              window.location.href = window.location.href.split('?')[0] + '?nocache=1&reload=true&t=' + Date.now();
-            }, 1500);
+              window.location.href = window.location.href.split('?')[0] + '?t=' + Date.now();
+            }, 500);
           } else {
-            // Hide splash on error
-            if (splash) {
-              splash.style.display = 'none';
-            }
+            if (splash) splash.style.display = 'none';
             alert('Upload failed: ' + (data.error || 'Unknown error'));
           }
         } catch (error) {
-          console.error('🚨 EMERGENCY: Upload error:', error);
-          // Hide splash on error
-          if (splash) {
-            splash.style.display = 'none';
-          }
+          if (splash) splash.style.display = 'none';
           alert('Upload failed: ' + error.message);
         }
       });
