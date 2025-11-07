@@ -78,6 +78,18 @@ if (fileInput && window.TagManager) {
   });
 }
 
+// Helper function to hide splash with minimum display time
+function hideSplashWithDelay(splashStartTime, minDisplayTime = 800) {
+  const elapsedTime = Date.now() - splashStartTime;
+  const remainingTime = Math.max(0, minDisplayTime - elapsedTime);
+  
+  setTimeout(() => {
+    if (typeof TagManager !== 'undefined' && TagManager.hideExcelLoadingSplash) {
+      TagManager.hideExcelLoadingSplash();
+    }
+  }, remainingTime);
+}
+
 async function handleFiles(files) {
   console.log('📁 handleFiles called with:', files.length, 'files');
   if (files.length > 0) {
@@ -103,6 +115,7 @@ async function handleFiles(files) {
     }
 
     // Show Excel loading splash screen for manual uploads
+    const splashStartTime = Date.now();
     if (typeof TagManager !== 'undefined' && TagManager.showExcelLoadingSplash) {
       TagManager.showExcelLoadingSplash(file.name);
     }
@@ -149,10 +162,8 @@ async function handleFiles(files) {
           }
         }
         
-        // Hide splash screen immediately since processing is done
-        if (typeof TagManager !== 'undefined' && TagManager.hideExcelLoadingSplash) {
-          TagManager.hideExcelLoadingSplash();
-        }
+        // Hide splash screen with minimum display time (800ms) so user can see it
+        hideSplashWithDelay(splashStartTime, 800);
         
         // Clear UI state for fresh data
         if (typeof TagManager !== 'undefined') {
@@ -188,10 +199,8 @@ async function handleFiles(files) {
           }, 1000);
         }
       } else {
-        // Hide splash screen on error
-        if (typeof TagManager !== 'undefined' && TagManager.hideExcelLoadingSplash) {
-          TagManager.hideExcelLoadingSplash();
-        }
+        // Hide splash screen on error with minimum display time
+        hideSplashWithDelay(splashStartTime, 800);
         // Show detailed error message if available
         const errorMsg = data.error || 'Upload failed';
         if (data.filename && data.selected_store) {
@@ -202,10 +211,8 @@ async function handleFiles(files) {
       }
     } catch (error) {
       console.error('Upload error:', error);
-      // Hide splash screen on error
-      if (typeof TagManager !== 'undefined' && TagManager.hideExcelLoadingSplash) {
-        TagManager.hideExcelLoadingSplash();
-      }
+      // Hide splash screen on error with minimum display time
+      hideSplashWithDelay(splashStartTime, 800);
       showToast("error", 'Upload failed');
     } finally {
       TagManager.setLoading(false);
