@@ -6668,24 +6668,48 @@
     function initializeTagManagerSafely() {
       console.log('🚀 initializeTagManagerSafely called');
       
-      // CRITICAL FIX: For web users, clear old session store unless explicitly set in THIS session
+      // CRITICAL FIX: For web users, ALWAYS show modal unless store was selected in THIS session
       const storeJustSelected = sessionStorage.getItem('store_just_selected');
       if (!storeJustSelected) {
-        console.log('🔄 Initial page load - clearing old session store to force modal...');
-        // Clear backend session store to force modal on fresh loads
-        // WAIT for clear to complete before checking store
+        console.log('🔄 Initial page load - FORCING MODAL because no sessionStorage flag...');
+        // Clear backend session AND force show modal
         fetch('/api/clear-store', {
           method: 'POST',
           credentials: 'same-origin'
         }).then(() => {
-          console.log('✅ Old session cleared - modal will show');
-          // NOW check store requirement after clearing
-          proceedWithStoreCheck();
+          console.log('✅ Old session cleared');
         }).catch(err => {
           console.error('⚠️ Failed to clear session:', err);
-          // Still proceed even if clear failed
-          proceedWithStoreCheck();
+        }).finally(() => {
+          // FORCE show modal immediately - don't wait for backend check
+          console.log('🎯 FORCING MODAL DISPLAY NOW');
+          const modalElement = document.getElementById('storeSelectionModal');
+          const mainContent = document.getElementById('mainContent');
+          
+          if (modalElement) {
+            modalElement.style.display = 'block';
+            modalElement.classList.add('show');
+            document.body.classList.add('modal-open');
+            document.body.style.overflow = 'hidden';
+            
+            // Add backdrop
+            if (!document.querySelector('.modal-backdrop, #storeModalBackdrop')) {
+              const backdrop = document.createElement('div');
+              backdrop.id = 'storeModalBackdrop';
+              backdrop.className = 'modal-backdrop fade show';
+              backdrop.style.zIndex = '9998';
+              document.body.appendChild(backdrop);
+            }
+            
+            console.log('✅ MODAL FORCED TO SHOW');
+          }
+          
+          if (mainContent) {
+            mainContent.style.display = 'none';
+            console.log('✅ MAIN CONTENT HIDDEN');
+          }
         });
+        return; // Don't proceed with normal flow
       } else {
         // Store was selected in this session, proceed normally
         console.log('✅ Store already selected in this session');
