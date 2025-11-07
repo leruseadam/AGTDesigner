@@ -2387,10 +2387,8 @@ def upload_file():
                         except Exception as db_error:
                             logging.warning(f"[BACKGROUND] Database storage failed: {db_error}")
 
-                        # CRITICAL FIX: Invalidate the global processor cache so page reload gets fresh data
-                        global _excel_processor
-                        _excel_processor = None
-                        logging.info("[BACKGROUND] ✅ Cleared Excel processor cache to force reload of new file on next request")
+                        # Global processor already cleared at start of function
+                        logging.info("[BACKGROUND] ✅ Excel processor cache cleared")
                         
                         # CRITICAL: Clear ALL caches to force complete refresh
                         try:
@@ -13335,6 +13333,15 @@ def get_rate_limit_info(ip_address):
 def get_initial_data():
     """Load initial data for the application (called by frontend after page load)."""
     try:
+        # PERFORMANCE: Check cache first
+        cache_key = get_session_cache_key('initial_data')
+        cached_response = cache.get(cache_key)
+        if cached_response and request.args.get('nocache') != '1':
+            logging.info("⚡ Returning cached initial data")
+            response = make_response(jsonify(cached_response))
+            response.headers['X-Cache'] = 'HIT'
+            return response
+        
         logging.info("=== INITIAL DATA REQUEST START ===")
         logging.info(f"Initial data request at {datetime.now().strftime('%H:%M:%S')}")
         
@@ -13431,9 +13438,17 @@ def get_initial_data():
                 'selected_tags': [],  # Don't restore selected tags on page reload
                 'total_records': len(excel_processor.df)
             }
+            
+            # PERFORMANCE: Cache the response for 5 minutes
+            cache_key = get_session_cache_key('initial_data')
+            cache.set(cache_key, initial_data, timeout=300)
+            
             logging.info(f"Initial data loaded: {len(initial_data['available_tags'])} tags, {initial_data['total_records']} records")
             logging.info("=== INITIAL DATA REQUEST COMPLETE ===")
-            return jsonify(initial_data)
+            
+            response = make_response(jsonify(initial_data))
+            response.headers['X-Cache'] = 'MISS'
+            return response
         else:
             logging.error("Excel processor has no DataFrame")
             return jsonify({
