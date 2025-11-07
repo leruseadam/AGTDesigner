@@ -8751,6 +8751,25 @@ def get_web_available_tags():
         
         # Try Excel processor first (lighter than database queries)
         excel_processor = get_excel_processor()
+        
+        # CRITICAL FIX: If Excel processor is empty, try to load default file for selected store
+        if excel_processor and (excel_processor.df is None or excel_processor.df.empty):
+            store_name = get_current_store_name()
+            logging.info(f"WEB TAGS: Excel empty, trying to load default file for store: {store_name}")
+            
+            if store_name:
+                try:
+                    from src.core.data.excel_processor import get_default_upload_file
+                    default_file = get_default_upload_file(store_name)
+                    if default_file and os.path.exists(default_file):
+                        logging.info(f"WEB TAGS: Loading default Excel file: {default_file}")
+                        excel_processor.load_file(default_file)
+                        logging.info(f"WEB TAGS: Loaded {len(excel_processor.df) if excel_processor.df is not None else 0} rows")
+                    else:
+                        logging.warning(f"WEB TAGS: No default file found for store {store_name}")
+                except Exception as load_error:
+                    logging.error(f"WEB TAGS: Error loading default file: {load_error}")
+        
         if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
             try:
                 excel_tags = excel_processor.get_available_tags()
