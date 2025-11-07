@@ -4705,12 +4705,12 @@
       height: 100% !important;
     }
 
-    /* Control panel should fill available space and scroll if needed */
+    /* Control panel should fill available space and match tag list heights */
     .control-panel {
       display: flex !important;
       flex-direction: column !important;
-      height: 100% !important;
-      max-height: 100% !important;
+      height: var(--center-panel-height) !important;
+      min-height: var(--center-panel-height) !important;
       overflow-y: auto !important;
       overflow-x: hidden !important;
     }
@@ -4726,8 +4726,8 @@
     .d-flex[style*="gap: 0.75rem"] > div[data-container-type="selected"],
     .d-flex[style*="gap: 0.5rem"] > div[data-container-type="available"],
     .d-flex[style*="gap: 0.5rem"] > div[data-container-type="selected"] {
-      min-height: var(--tag-list-min-height) !important;
-      max-height: var(--tag-list-height) !important;
+      height: var(--center-panel-height) !important;
+      min-height: var(--center-panel-height) !important;
     }
 
     /* Ensure glass cards in side columns fill their containers */
@@ -4740,8 +4740,8 @@
 
     /* Center column tracks shared height variables instead of hard vh offsets */
     div[data-container-type="center"] {
-      min-height: var(--tag-list-min-height) !important;
-      max-height: var(--tag-list-height) !important;
+      height: var(--center-panel-height) !important;
+      min-height: var(--center-panel-height) !important;
     }
 
     /* Mobile responsive - stack columns vertically on small screens */
@@ -11535,6 +11535,18 @@
         const file = e.target.files[0];
         console.log('🚨 EMERGENCY: Uploading file:', file.name);
 
+        // Show loading splash
+        const splash = document.getElementById('excelLoadingSplash');
+        const filenameElement = document.getElementById('excelLoadingFilename');
+        const statusElement = document.getElementById('excelLoadingStatus');
+        if (splash && filenameElement && statusElement) {
+          console.log('🎬 EMERGENCY: Showing upload splash...');
+          filenameElement.textContent = file.name;
+          statusElement.textContent = 'Uploading file...';
+          splash.style.display = 'flex';
+          splash.style.zIndex = '999999';
+        }
+
         const formData = new FormData();
         formData.append('file', file);
 
@@ -11550,6 +11562,11 @@
           if (response.ok && data.success) {
             console.log('✅ Upload successful, clearing all caches and reloading...');
             
+            // Update splash status
+            if (statusElement) {
+              statusElement.textContent = 'Upload successful! Reloading...';
+            }
+            
             // Clear all frontend caches
             if (window.TagManager && window.TagManager.clearCache) {
               window.TagManager.clearCache();
@@ -11564,10 +11581,18 @@
               window.location.href = window.location.href.split('?')[0] + '?nocache=1&reload=true&t=' + Date.now();
             }, 1500);
           } else {
+            // Hide splash on error
+            if (splash) {
+              splash.style.display = 'none';
+            }
             alert('Upload failed: ' + (data.error || 'Unknown error'));
           }
         } catch (error) {
           console.error('🚨 EMERGENCY: Upload error:', error);
+          // Hide splash on error
+          if (splash) {
+            splash.style.display = 'none';
+          }
           alert('Upload failed: ' + error.message);
         }
       });
