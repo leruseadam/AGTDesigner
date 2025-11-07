@@ -1812,13 +1812,35 @@
               
               // Fetch database statistics and display enhanced interface
               fetch('/api/database-stats')
-                .then(response => response.json())
+                .then(response => {
+                  console.log('✅ Database stats response received:', response.status);
+                  if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                  }
+                  return response.json();
+                })
                 .then(data => {
+                  console.log('✅ Database stats data:', data);
                   const stats = data.stats || {};
                   const vendorStats = data.vendor_stats || {};
                   
+                  console.log('📊 Stats extracted:', {
+                    total_products: stats.total_products,
+                    unique_vendors: stats.unique_vendors,
+                    unique_brands: stats.unique_brands,
+                    unique_product_types: stats.unique_product_types
+                  });
+                  
                   const modalBody = document.querySelector('#databaseModal .modal-body');
+                  console.log('📍 Modal body element found:', modalBody ? 'YES' : 'NO');
+                  
+                  if (!modalBody) {
+                    console.error('❌ Modal body not found! Cannot update stats.');
+                    return;
+                  }
+                  
                   if (modalBody) {
+                    console.log('🔄 Updating modal body with stats...');
                     modalBody.innerHTML = `
                       <div class="container-fluid">
                         <div class="row mb-4">
@@ -2217,10 +2239,16 @@
                         </div>
                       </div>
                     `;
+                    console.log('✅ Modal body updated successfully with stats:', {
+                      total_products: stats.total_products,
+                      unique_vendors: stats.unique_vendors,
+                      unique_brands: stats.unique_brands,
+                      unique_product_types: stats.unique_product_types
+                    });
                   }
                 })
                 .catch(error => {
-                  console.error('Error fetching database stats:', error);
+                  console.error('❌ Error fetching database stats:', error);
                   const modalBody = document.querySelector('#databaseModal .modal-body');
                   if (modalBody) {
                     modalBody.innerHTML = `

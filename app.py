@@ -2336,6 +2336,15 @@ def upload_file():
         logging.info(f"✅ Session updated and saved: file_path={file_path}, filename={file.filename}, permanent={session.permanent}")
         logging.info(f"✅ Session data: {dict(session)}")
         
+        # CRITICAL: Verify session was saved by reading it back
+        verify_file_path = session.get('file_path')
+        verify_filename = session.get('uploaded_filename')
+        if verify_file_path == file_path and verify_filename == file.filename:
+            logging.info(f"✅ SESSION VERIFIED: file_path and filename saved correctly")
+        else:
+            logging.error(f"❌ SESSION VERIFICATION FAILED: file_path={verify_file_path}, filename={verify_filename}")
+            logging.error(f"❌ Expected file_path={file_path}, filename={file.filename}")
+        
         # Mark as processing
         update_processing_status(file.filename, 'processing')
         
@@ -13360,31 +13369,56 @@ def get_initial_data():
             excel_processor.df = None
             logging.info("Excel processor missing df attribute - set to None")
             
-        # If no data is loaded, try to load the default file
-        if excel_processor.df is None:
-            logging.info("No data loaded - attempting to load default file")
-            from src.core.data.excel_processor import get_default_upload_file
-            selected_store = get_current_store_name() if has_store_selection() else None
-            default_file = get_default_upload_file(selected_store)
+        # If no data is loaded, check session first, then try default file
+        if excel_processor.df is None or excel_processor.df.empty:
+            logging.info("No data loaded - checking session for uploaded file first")
             
-            if default_file:
+            # CRITICAL FIX: Check if there's an uploaded file in session first
+            session_file_path = session.get('file_path')
+            if session_file_path and os.path.exists(session_file_path):
                 try:
-                    logging.info(f"Loading default file for {selected_store}: {os.path.basename(default_file)}")
-                    excel_processor.load_file(default_file)
-                    excel_processor._last_loaded_file = default_file
-                    logging.info(f"Default file loaded successfully")
+                    logging.info(f"📂 Found uploaded file in session: {session_file_path}")
+                    success = excel_processor.load_file(session_file_path)
+                    if success:
+                        excel_processor._last_loaded_file = session_file_path
+                        logging.info(f"✅ Successfully loaded uploaded file from session: {os.path.basename(session_file_path)}")
+                        logging.info(f"✅ Loaded {len(excel_processor.df)} rows from uploaded file")
+                    else:
+                        logging.error(f"❌ Failed to load uploaded file from session: {session_file_path}")
+                        # Clear invalid session data
+                        session.pop('file_path', None)
+                        session.pop('uploaded_filename', None)
                 except Exception as e:
-                    logging.error(f"Failed to load default file: {e}")
+                    logging.error(f"❌ Error loading uploaded file from session: {e}")
+                    # Clear invalid session data
+                    session.pop('file_path', None)
+                    session.pop('uploaded_filename', None)
+            
+            # If still no data after checking session, try default file
+            if excel_processor.df is None or excel_processor.df.empty:
+                logging.info("No uploaded file found - attempting to load default file")
+                from src.core.data.excel_processor import get_default_upload_file
+                selected_store = get_current_store_name() if has_store_selection() else None
+                default_file = get_default_upload_file(selected_store)
+                
+                if default_file:
+                    try:
+                        logging.info(f"Loading default file for {selected_store}: {os.path.basename(default_file)}")
+                        excel_processor.load_file(default_file)
+                        excel_processor._last_loaded_file = default_file
+                        logging.info(f"Default file loaded successfully")
+                    except Exception as e:
+                        logging.error(f"Failed to load default file: {e}")
+                        return jsonify({
+                            'success': False,
+                            'message': f'Failed to load default file: {str(e)}'
+                        })
+                else:
+                    logging.warning("No default file found")
                     return jsonify({
                         'success': False,
-                        'message': f'Failed to load default file: {str(e)}'
+                        'message': 'No default file found and no data currently loaded'
                     })
-            else:
-                logging.warning("No default file found")
-                return jsonify({
-                    'success': False,
-                    'message': 'No default file found and no data currently loaded'
-                })
         
         if hasattr(excel_processor, 'df') and excel_processor.df is not None:
             logging.info(f"Data loaded - DataFrame shape: {excel_processor.df.shape}")
