@@ -60,23 +60,18 @@ if (fileInput) {
   fileInput.addEventListener('change', function(e) {
     console.log('🔄 File input change event fired');
     if (e.target.files && e.target.files.length > 0) {
+      console.log('🎬 UPLOAD START: Showing splash immediately');
       handleFiles(e.target.files);
+      // Prevent any other handlers from running
+      e.stopPropagation();
     }
   });
 } else {
   console.error('❌ fileInput element not found!');
 }
 
-// Also try to attach via main.js handler as backup
-if (fileInput && window.TagManager) {
-  console.log('✅ Attaching TagManager upload handler as backup');
-  fileInput.addEventListener('change', function(e) {
-    if (e.target.files && e.target.files.length > 0 && window.TagManager.uploadFile) {
-      console.log('🔄 Calling TagManager.uploadFile as backup');
-      window.TagManager.uploadFile(e.target.files[0]);
-    }
-  });
-}
+// Note: Removed duplicate TagManager upload handler to prevent conflicts
+// The handleFiles() function above handles uploads and shows the splash correctly
 
 // Helper function to hide splash with minimum display time
 function hideSplashWithDelay(splashStartTime, minDisplayTime = 800) {
@@ -103,6 +98,37 @@ async function handleFiles(files) {
   if (files.length > 0) {
     const file = files[0];
     console.log('📄 File selected:', file.name, 'size:', file.size);
+    
+    // CRITICAL: Show Excel loading splash screen FIRST before anything else
+    const splashStartTime = Date.now();
+    console.log('🎬 UPLOAD: Showing splash IMMEDIATELY for:', file.name);
+    const splash = document.getElementById('excelLoadingSplash');
+    const filenameElement = document.getElementById('excelLoadingFilename');
+    const statusElement = document.getElementById('excelLoadingStatus');
+    
+    if (splash && filenameElement && statusElement) {
+      console.log('🎬 UPLOAD: Splash elements found - displaying NOW');
+      filenameElement.textContent = file.name;
+      statusElement.textContent = 'Uploading file...';
+      splash.style.display = 'flex';
+      splash.style.zIndex = '99999';
+      splash.style.position = 'fixed';
+      splash.style.top = '0';
+      splash.style.left = '0';
+      splash.style.width = '100%';
+      splash.style.height = '100%';
+      console.log('✅ SPLASH SHOWN - display:', splash.style.display);
+    } else {
+      console.error('❌ UPLOAD: Could not find splash elements:', {
+        splash: !!splash,
+        filenameElement: !!filenameElement,
+        statusElement: !!statusElement
+      });
+      alert('Error: Upload splash screen not found. Please refresh the page.');
+      return;
+    }
+    
+    // Now update file info UI
     if (currentFile) currentFile.textContent = file.name;
     if (currentFileInfo) currentFileInfo.style.display = 'block';
     
@@ -122,27 +148,6 @@ async function handleFiles(files) {
       }, 10);
     }
 
-    // Show Excel loading splash screen - DIRECT METHOD (doesn't wait for TagManager)
-    const splashStartTime = Date.now();
-    console.log('🎬 UPLOAD: Attempting to show splash for:', file.name);
-    const splash = document.getElementById('excelLoadingSplash');
-    const filenameElement = document.getElementById('excelLoadingFilename');
-    const statusElement = document.getElementById('excelLoadingStatus');
-    
-    if (splash && filenameElement && statusElement) {
-      console.log('🎬 UPLOAD: Showing splash directly');
-      filenameElement.textContent = file.name;
-      statusElement.textContent = 'Processing...';
-      splash.style.display = 'flex';
-      splash.style.zIndex = '99999';
-    } else {
-      console.error('🎬 UPLOAD: Could not find splash elements:', {
-        splash: !!splash,
-        filenameElement: !!filenameElement,
-        statusElement: !!statusElement
-      });
-    }
-
     // Handle file upload
     const formData = new FormData();
     formData.append('file', file);
@@ -156,11 +161,18 @@ async function handleFiles(files) {
       }
       
       console.log('🚀 Sending upload request to /upload...');
+      // Update splash status
+      if (statusElement) statusElement.textContent = 'Uploading file...';
+      
       const response = await fetch('/upload', {
         method: 'POST',
         body: formData
       });
       console.log('📡 Upload response status:', response.status);
+      
+      // Update splash status
+      if (statusElement) statusElement.textContent = 'Processing data...';
+      
       const data = await response.json();
       console.log('📦 Upload response data:', data);
       
@@ -168,6 +180,9 @@ async function handleFiles(files) {
         // File uploaded successfully - data is already processed synchronously
         console.log(`File uploaded successfully: ${data.filename}, rows: ${data.rows}`);
         console.log('Upload response data:', data);
+        
+        // Update splash to show success
+        if (statusElement) statusElement.textContent = `✅ Success! ${data.rows || 'File'} rows loaded`;
         
         // Check for store mismatch warning
         if (data.warning) {
