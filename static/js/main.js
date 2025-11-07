@@ -1148,39 +1148,60 @@ const TagManager = {
                 ratio: new Set()
             };
 
-            filteredTags.forEach(tag => {
+            // USER PREFERENCE: Always show ALL options for vendor, brand, productType, lineage, doh, highCbd
+            // Only filter weight options based on selections
+            // This makes it easier to change filters without going back to "All"
+            
+            // Use ORIGINAL tags for most filters (not filtered tags)
+            const tagsForOptions = tagsToFilter; // Use full tag list
+            
+            tagsForOptions.forEach(tag => {
+                // Always add vendor options (show all vendors)
                 if (tag.Vendor || tag.vendor) availableOptions.vendor.add((tag.Vendor || tag.vendor || '').toString().trim());
+                
+                // Always add brand options (show all brands)
                 if (tag['Product Brand'] || tag.productBrand) availableOptions.brand.add((tag['Product Brand'] || tag.productBrand || '').toString().trim());
+                
+                // Always add product type options (show all types)
                 if (tag['Product Type*'] || tag.productType) {
                     const productType = (tag['Product Type*'] || tag.productType || '').toString().trim();
                     const normalizedType = normalizeProductType(productType);
                     if (normalizedType) availableOptions.productType.add(normalizedType);
                 }
+                
+                // Always add lineage options (show all lineages)
                 if (tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage) {
                     availableOptions.lineage.add((tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '').toString().trim());
                 }
-                // CRITICAL FIX: Check all possible weight field variations for options generation
-                if (tag['Weight*'] || tag.weight || tag.weightWithUnits || tag.WeightWithUnits || tag.WeightUnits || tag.CombinedWeight) {
-                    // Always use the combined value for display and filtering - check all possible sources
-                    const combined = (tag.weightWithUnits || tag.WeightWithUnits || tag.WeightUnits || 
-                                    tag.CombinedWeight || tag['Weight*'] || tag.weight).toString().trim();
-                    if (combined) availableOptions.weight.add(combined);
-                }
+                
+                // Always add DOH options (show all)
                 if (tag.DOH || tag.doh) availableOptions.doh.add((tag.DOH || tag.doh || '').toString().trim());
                 
-                // Extract ratio information
-                if (tag.Ratio || tag['Ratio_or_THC_CBD']) {
-                    const ratio = (tag.Ratio || tag['Ratio_or_THC_CBD'] || '').toString().trim();
-                    if (ratio) availableOptions.ratio.add(ratio);
-                }
-                
-                // For High CBD, categorize the product type
+                // Always add high CBD options (show all)
                 const tagProductType = (tag['Product Type*'] || tag.productType || '').toString().trim().toLowerCase();
                 const isHighCbd = tagProductType.startsWith('high cbd');
                 if (isHighCbd) {
                     availableOptions.highCbd.add('High CBD Products');
                 } else if (tagProductType) {
                     availableOptions.highCbd.add('Non-High CBD Products');
+                }
+                
+                // Extract ratio information (show all)
+                if (tag.Ratio || tag['Ratio_or_THC_CBD']) {
+                    const ratio = (tag.Ratio || tag['Ratio_or_THC_CBD'] || '').toString().trim();
+                    if (ratio) availableOptions.ratio.add(ratio);
+                }
+            });
+            
+            // WEIGHT FILTER: Use filtered tags (user preference - weight should be context-aware)
+            // Only show weights that are available given current filter selections
+            filteredTags.forEach(tag => {
+                // CRITICAL FIX: Check all possible weight field variations for options generation
+                if (tag['Weight*'] || tag.weight || tag.weightWithUnits || tag.WeightWithUnits || tag.WeightUnits || tag.CombinedWeight) {
+                    // Always use the combined value for display and filtering - check all possible sources
+                    const combined = (tag.weightWithUnits || tag.WeightWithUnits || tag.WeightUnits || 
+                                    tag.CombinedWeight || tag['Weight*'] || tag.weight).toString().trim();
+                    if (combined) availableOptions.weight.add(combined);
                 }
             });
 
@@ -1270,8 +1291,7 @@ const TagManager = {
     applyFilters() {
         console.log('🔍 applyFilters() called');
         console.trace('Call stack for applyFilters');
-        // Preserve scroll position when filters are applied
-        const savedScroll = this._saveAvailableScrollPosition();
+        // USER PREFERENCE: Scroll to top when filter is applied (don't preserve position)
         // Fast path: show all if no filters (Mac-like speed)
         const vendorFilter = document.getElementById('vendorFilter')?.value || '';
         const brandFilter = document.getElementById('brandFilter')?.value || '';
@@ -1295,9 +1315,9 @@ const TagManager = {
             this.state.filterCache = null;
             this.debouncedUpdateAvailableTags(this.state.originalTags, null);
             this.renderActiveFilters();
-            // Restore scroll after filter update
+            // USER PREFERENCE: Scroll to top after clearing filters
             requestAnimationFrame(() => {
-                this._restoreAvailableScrollPosition(savedScroll);
+                this._scrollAvailableTagsToTop();
             });
             return;
         }
@@ -1319,9 +1339,9 @@ const TagManager = {
             // Always pass original tags to preserve persistent selections
             this.debouncedUpdateAvailableTags(this.state.originalTags, this.state.filterCache.result);
             this.renderActiveFilters();
-            // Restore scroll after filter update
+            // USER PREFERENCE: Scroll to top after applying cached filter
             requestAnimationFrame(() => {
-                this._restoreAvailableScrollPosition(savedScroll);
+                this._scrollAvailableTagsToTop();
             });
             return;
         }
@@ -1487,9 +1507,9 @@ const TagManager = {
         
         this.updateSelectedTags(selectedTagObjects);
         this.renderActiveFilters();
-        // Restore scroll after filter update
+        // USER PREFERENCE: Scroll to top after filter update
         requestAnimationFrame(() => {
-            this._restoreAvailableScrollPosition(savedScroll);
+            this._scrollAvailableTagsToTop();
         });
     },
 
@@ -1858,6 +1878,19 @@ const TagManager = {
     }, 300),
 
     // Helpers to preserve scroll position of the available list across re-renders
+    // USER PREFERENCE: Scroll CURRENT INVENTORY to top when filter is applied
+    _scrollAvailableTagsToTop() {
+        try {
+            const availableTagsContainer = document.getElementById('availableTags');
+            if (availableTagsContainer) {
+                availableTagsContainer.scrollTop = 0;
+                console.log('✅ Scrolled CURRENT INVENTORY to top after filter change');
+            }
+        } catch (error) {
+            console.warn('Could not scroll to top:', error);
+        }
+    },
+
     _saveAvailableScrollPosition() {
         const container = document.getElementById('availableTags');
         if (!container) return null;
@@ -6447,9 +6480,9 @@ const TagManager = {
                 left: 0;
                 width: 100%;
                 height: 100%;
-                background: rgba(0, 0, 0, 0.4);
-                backdrop-filter: blur(4px);
-                -webkit-backdrop-filter: blur(4px);
+                background: rgba(0, 0, 0, 0.6);
+                backdrop-filter: blur(8px);
+                -webkit-backdrop-filter: blur(8px);
                 animation: fadeIn 0.2s ease-out;
             " onclick="event.target === this && TagManager.hideEnhancedGenerationSplash()">
                 <div style="
@@ -6457,20 +6490,26 @@ const TagManager = {
                     top: 50%;
                     left: 50%;
                     transform: translate(-50%, -50%);
-                    background: white;
-                    border-radius: 16px;
-                    padding: 40px 50px;
-                    min-width: 400px;
-                    max-width: 500px;
-                    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                    background: rgba(45, 34, 58, 0.95);
+                    -webkit-backdrop-filter: blur(20px);
+                    backdrop-filter: blur(20px);
+                    border: 1px solid rgba(160, 132, 232, 0.3);
+                    border-radius: 15px;
+                    padding: 36px 42px;
+                    min-width: 420px;
+                    max-width: 480px;
+                    box-shadow: 
+                        0 20px 60px rgba(0, 0, 0, 0.5),
+                        0 0 0 1px rgba(160, 132, 232, 0.1);
                     animation: scaleIn 0.3s ease-out;
+                    color: #ffffff;
                 " onclick="event.stopPropagation()">
                     
-                    <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 24px;">
+                    <div style="display: flex; align-items: center; gap: 18px; margin-bottom: 28px;">
                         <div class="spinner" style="
-                            width: 32px;
-                            height: 32px;
-                            border: 3px solid rgba(0, 212, 170, 0.2);
+                            width: 36px;
+                            height: 36px;
+                            border: 3px solid rgba(160, 132, 232, 0.2);
                             border-top-color: #00d4aa;
                             border-radius: 50%;
                             animation: spin 0.8s linear infinite;
@@ -6478,71 +6517,75 @@ const TagManager = {
                         "></div>
                         <div style="flex: 1;">
                             <h2 style="
-                                font-size: 20px;
-                                font-weight: 700;
-                                color: #1a1a2e;
-                                margin: 0 0 6px 0;
+                                font-size: 22px;
+                                font-weight: 600;
+                                color: #ffffff;
+                                margin: 0 0 8px 0;
+                                letter-spacing: 0.3px;
                             ">Generating Labels</h2>
                             <div id="status-text" style="
                                 font-size: 14px;
-                                color: #666;
+                                color: rgba(255, 255, 255, 0.7);
                                 transition: opacity 0.2s ease;
+                                font-weight: 400;
                             ">Preparing templates...</div>
                         </div>
                     </div>
                     
                     <div style="
-                        background: rgba(0, 212, 170, 0.05);
+                        background: linear-gradient(135deg, rgba(160, 132, 232, 0.15), rgba(0, 212, 170, 0.1));
+                        border: 1px solid rgba(160, 132, 232, 0.2);
                         border-radius: 12px;
-                        padding: 16px 20px;
+                        padding: 20px 24px;
                         margin-bottom: 24px;
                     ">
                         <div style="
                             display: flex;
                             justify-content: space-between;
                             align-items: center;
-                            gap: 20px;
+                            gap: 24px;
                         ">
                             <div>
-                                <div style="font-size: 12px; color: #888; margin-bottom: 4px;">Labels</div>
-                                <div style="font-size: 18px; font-weight: 600; color: #1a1a2e;">${labelCount}</div>
+                                <div style="font-size: 11px; color: rgba(255, 255, 255, 0.6); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 500;">Labels</div>
+                                <div style="font-size: 20px; font-weight: 600; color: #00d4aa;">${labelCount}</div>
                             </div>
-                            <div style="width: 1px; height: 30px; background: rgba(0, 0, 0, 0.1);"></div>
+                            <div style="width: 1px; height: 36px; background: rgba(160, 132, 232, 0.3);"></div>
                             <div>
-                                <div style="font-size: 12px; color: #888; margin-bottom: 4px;">Template</div>
-                                <div style="font-size: 18px; font-weight: 600; color: #1a1a2e;">${templateType}</div>
+                                <div style="font-size: 11px; color: rgba(255, 255, 255, 0.6); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 500;">Template</div>
+                                <div style="font-size: 20px; font-weight: 600; color: #00d4aa; text-transform: capitalize;">${templateType}</div>
                             </div>
                         </div>
                     </div>
                     
                     <div style="
                         width: 100%;
-                        height: 4px;
-                        background: rgba(0, 212, 170, 0.15);
-                        border-radius: 2px;
+                        height: 5px;
+                        background: rgba(160, 132, 232, 0.2);
+                        border-radius: 3px;
                         overflow: hidden;
-                        margin-bottom: 20px;
+                        margin-bottom: 24px;
                     ">
                         <div style="
                             height: 100%;
-                            background: linear-gradient(90deg, #00d4aa, #0099cc, #00d4aa);
-                            border-radius: 2px;
+                            background: linear-gradient(90deg, #00d4aa, #a084e8, #00d4aa);
+                            border-radius: 3px;
                             animation: progress 2s ease-in-out infinite;
+                            box-shadow: 0 0 10px rgba(0, 212, 170, 0.5);
                         "></div>
                     </div>
                     
                     <button onclick="TagManager.hideEnhancedGenerationSplash()" style="
                         width: 100%;
-                        background: transparent;
-                        border: 1px solid rgba(0, 0, 0, 0.1);
-                        color: #666;
-                        padding: 10px;
+                        background: rgba(160, 132, 232, 0.15);
+                        border: 1px solid rgba(160, 132, 232, 0.3);
+                        color: rgba(255, 255, 255, 0.9);
+                        padding: 11px;
                         border-radius: 8px;
                         font-size: 13px;
                         font-weight: 500;
                         cursor: pointer;
                         transition: all 0.2s ease;
-                    " onmouseover="this.style.background='rgba(0,0,0,0.03)'; this.style.borderColor='rgba(0,0,0,0.2)'" onmouseout="this.style.background='transparent'; this.style.borderColor='rgba(0,0,0,0.1)'">
+                    " onmouseover="this.style.background='rgba(160, 132, 232, 0.25)'; this.style.borderColor='rgba(160, 132, 232, 0.5)'; this.style.color='#ffffff'" onmouseout="this.style.background='rgba(160, 132, 232, 0.15)'; this.style.borderColor='rgba(160, 132, 232, 0.3)'; this.style.color='rgba(255, 255, 255, 0.9)'">
                         Cancel
                     </button>
                 </div>
