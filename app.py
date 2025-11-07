@@ -2446,22 +2446,10 @@ def upload_file():
                 row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
                 logging.info(f"File loaded successfully: {row_count} rows")
 
-                # Store in database for persistence
-                try:
-                    # CRITICAL: Use the selected_store from validation above
-                    store_name = selected_store
-                    product_db = get_product_database(store_name)
-
-                    if product_db and hasattr(product_db, 'store_excel_data'):
-                        logging.info(f"Storing {row_count} products in database for store {store_name}...")
-                        result = product_db.store_excel_data(processor.df, file_path)
-                        logging.info(f"Database storage result: {result}")
-                    else:
-                        logging.warning("Database storage not available")
-
-                except Exception as db_error:
-                    logging.warning(f"Database storage failed (non-fatal): {db_error}")
-                    # Continue anyway - file is still loaded in processor
+                # Skip database storage during upload for speed
+                # The file is already loaded in processor and will be available immediately
+                # Database storage can happen lazily when data is accessed
+                logging.info(f"File uploaded successfully with {row_count} products (database storage skipped for speed)")
 
                 # CRITICAL FIX: Invalidate the global processor cache so page reload gets fresh data
                 global _excel_processor
