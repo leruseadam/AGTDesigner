@@ -51,7 +51,7 @@ body {
   height: 100%;
   min-height: 100vh;
   margin: 0;
-  padding: 0;
+  padding: 0 0 0.5rem 0; /* Reduced bottom gutter from 1.5rem */
   overflow-x: hidden;
   /* Ensure body doesn't interfere with fullscreen canvas */
   position: relative;
@@ -76,8 +76,14 @@ body {
   max-width: 100% !important;
   margin-left: auto !important;
   margin-right: auto !important;
-  padding-left: 1rem !important;
-  padding-right: 1rem !important;
+  padding-left: 0.5rem !important; /* Reduced from 1rem */
+  padding-right: 0.5rem !important; /* Reduced from 1rem */
+}
+
+/* Align tag lists container with filter section */
+.d-flex.fade-in[style*="gap: 4rem"] {
+  padding-left: 0.5rem !important;
+  padding-right: 0.5rem !important;
 }
 
 /* Ensure the entire app stays centered and has breathing room */
@@ -103,8 +109,8 @@ body > .container-fluid {
 
 /* Larger scaling for key UI elements - zoom responsive */
 .tag-item, .tag-entry {
-  font-size: 1.5rem !important;
-  min-height: 3.2rem !important;
+  font-size: 0.8rem !important; /* Reduced for more compact tag lists */
+  min-height: 2.4rem !important;
 }
 
 .quick-start-guide, .help-text {
@@ -129,9 +135,9 @@ button, .btn {
 }
 
 .form-control, .form-select, input, select {
-  font-size: 1.05rem !important;
-  padding: 0.7rem 1rem !important;
-  min-height: 46px !important;
+  font-size: 0.95rem !important; /* Reduced from 1.05rem */
+  padding: 0.5rem 0.75rem !important; /* Reduced from 0.7rem 1rem */
+  min-height: 40px !important; /* Reduced from 46px */
 }
 
 /* Scale up all labels and headers throughout app */
@@ -448,32 +454,50 @@ canvas#lava-lamp-canvas {
 /* Account for iOS safe areas */
 @supports (padding: max(0px)) {
   body {
-    padding-bottom: max(0px, env(safe-area-inset-bottom));
+    padding-bottom: max(0.5rem, env(safe-area-inset-bottom)); /* Reduced gutter with safe area */
   }
 }
 
 /* Dynamic viewport height support so layout adapts when DevTools/keyboard open */
+:root {
+  --tag-list-vertical-offset: clamp(3.5rem, 5vh, 5.5rem);
+  --tag-list-min-height: 48rem;
+}
 @supports (height: 100svh) {
   :root {
-    --tag-list-height: 75svh;
-    --center-panel-height: 90svh;
+    --tag-list-height: max(var(--tag-list-min-height), calc(100svh - var(--tag-list-vertical-offset)));
+    --center-panel-height: var(--tag-list-height);
   }
 }
 @supports (height: 100dvh) {
   :root {
-    --tag-list-height: 75dvh;
-    --center-panel-height: 90dvh;
+    --tag-list-height: max(var(--tag-list-min-height), calc(100dvh - var(--tag-list-vertical-offset)));
+    --center-panel-height: var(--tag-list-height);
   }
 }
 
 /* Direct overrides for fixed vh panels */
 @supports (height: 1svh) {
+  :root {
+    --tag-list-height: max(var(--tag-list-min-height), calc(100svh - var(--tag-list-vertical-offset)));
+    --center-panel-height: var(--tag-list-height);
+  }
   #availableTags,
-  #selectedTags { height: 80svh !important; min-height: 80svh !important; }
+  #selectedTags {
+    height: var(--tag-list-height) !important;
+    min-height: var(--tag-list-height) !important;
+  }
 }
 @supports (height: 1dvh) {
+  :root {
+    --tag-list-height: max(var(--tag-list-min-height), calc(100dvh - var(--tag-list-vertical-offset)));
+    --center-panel-height: var(--tag-list-height);
+  }
   #availableTags,
-  #selectedTags { height: 80dvh !important; min-height: 80dvh !important; }
+  #selectedTags {
+    height: var(--tag-list-height) !important;
+    min-height: var(--tag-list-height) !important;
+  }
 }
 
 /* Ensure main content respects dynamic viewport height */
@@ -483,11 +507,11 @@ canvas#lava-lamp-canvas {
 /* Short-viewport optimizations (e.g., when console is open) */
 @media (max-height: 700px) {
   :root {
-    --tag-list-height: 60vh;
-    --center-panel-height: 70vh;
+    --tag-list-height: max(var(--tag-list-min-height), 72vh);
+    --center-panel-height: var(--tag-list-height);
   }
   @supports (height: 100dvh) {
-    :root { --tag-list-height: 60dvh; --center-panel-height: 70dvh; }
+    :root { --tag-list-height: max(var(--tag-list-min-height), 72dvh); --center-panel-height: var(--tag-list-height); }
   }
   .control-panel,
   .center-panel,
@@ -532,13 +556,13 @@ canvas#lava-lamp-canvas {
     /* Column Width Variables - Flexible for natural layout */
     --canvas-max-width: 100%;        /* Allow full width with padding */
     --filter-column-width: auto;      /* Bootstrap columns (1-12) - can use decimals */
-    --center-column-width: 1.5;      /* Bootstrap columns (1-12) - can use decimals */
+    --center-column-width: 1.3;      /* Bootstrap columns (1-12) - can use decimals */
     --tag-list-column-width: 5.1;   /* Bootstrap columns (1-12) - can use decimals */
     
     /* Height Variables - Flexible for natural layout */
-    --tag-list-height: 75vh;        /* Height of tag list containers */
+    --tag-list-height: max(var(--tag-list-min-height), calc(100vh - var(--tag-list-vertical-offset)));        /* Height of tag list containers */
     --filter-height: auto;           /* Height of filter bar (auto or specific px) */
-    --center-panel-height: 90vh;     /* Height of center control panel (auto or specific px) */
+    --center-panel-height: var(--tag-list-height);     /* Height of center control panel matches tag lists */
   }
 
   /* Responsive sizing variables for center column buttons */
@@ -674,11 +698,11 @@ canvas#lava-lamp-canvas {
     color: #ffffff !important;
     font-family: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
     font-weight: 800 !important;
-    font-size: 4.3rem !important; /* Balanced size for good readability */
+    font-size: 2.8rem !important; /* Reduced from 3.6rem for compactness */
     letter-spacing: -0.02em;
-    margin: 0 0 0.8rem 0 !important;
+    margin: 0 0 0.4rem 0 !important; /* Reduced from 0.8rem */
     text-align: center !important;
-    line-height: 1.1;
+    line-height: 1.0;
     text-shadow: 
       0 4px 12px rgba(0,0,0,0.4),
       0 8px 24px rgba(160, 132, 232, 0.3);
@@ -689,26 +713,26 @@ canvas#lava-lamp-canvas {
   /* Responsive Title Scaling */
   @media (max-width: 768px) {
     .vibrant-title {
-      font-size: 3rem !important;
-      margin: 0 0 0.6rem 0 !important;
+      font-size: 2.4rem !important; /* Reduced from 2.6rem */
+      margin: 0 0 0.3rem 0 !important; /* Reduced from 0.6rem */
     }
     
     .vibrant-subtitle {
-      font-size: 1.35rem !important;
-      margin: 0 0 1rem 0 !important;
+      font-size: 0.85rem !important; /* Reduced from 0.95rem */
+      margin: 0 0 0.5rem 0 !important; /* Reduced from 1rem */
     }
   }
   
   @media (max-width: 480px) {
     .vibrant-title {
-      font-size: 2.5rem !important;
-      margin: 0 0 0.5rem 0 !important;
+      font-size: 2.0rem !important; /* Reduced from 2.2rem */
+      margin: 0 0 0.3rem 0 !important; /* Reduced from 0.5rem */
       padding: 0 1rem;
     }
     
     .vibrant-subtitle {
-      font-size: 1.25rem !important;
-      margin: 0 0 0.8rem 0 !important;
+      font-size: 0.8rem !important; /* Reduced from 0.85rem */
+      margin: 0 0 0.5rem 0 !important; /* Reduced from 0.8rem */
       padding: 0 1rem;
     }
   }
@@ -721,8 +745,10 @@ canvas#lava-lamp-canvas {
   .filter-item {
     display: flex;
     flex-direction: column;
-    min-width: 120px;
-    flex: 0 0 auto;
+    min-width: 140px;
+    flex: 1 1 0;
+    width: 100%;
+    max-width: 100%;
   }
 
   .filter-item label {
@@ -733,9 +759,11 @@ canvas#lava-lamp-canvas {
     margin-bottom: 0.25rem;
   }
 
+  .filter-item select,
   .filter-item .form-select {
     font-size: 1.05rem;
-    min-width: 120px;
+    width: 100%;
+    min-width: 0;
   }
 
   .modern-upload-bar {
@@ -756,8 +784,8 @@ canvas#lava-lamp-canvas {
 
   @media (max-width: 768px) {
     .sticky-filter-bar {
-      gap: 0.75rem !important;
-      padding: 1rem !important;
+      gap: 0.5rem !important; /* Reduced from 0.75rem */
+      padding: 0.6rem !important; /* Reduced from 1rem */
     }
     
     .filter-item {
@@ -800,12 +828,12 @@ canvas#lava-lamp-canvas {
   .vibrant-subtitle {
     color: rgba(255, 255, 255, 0.9) !important;
     font-family: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
-    font-size: 1.5rem !important; /* Increased for better readability */
+    font-size: 0.9rem !important; /* Reduced from 1.0rem for compactness */
     font-weight: 600 !important;
-    letter-spacing: 0.15em;
+    letter-spacing: 0.06em; /* Reduced from 0.08em */
     text-align: center !important;
-    margin: 0 0 1.2rem 0 !important;
-    line-height: 1.3;
+    margin: 0 0 0.6rem 0 !important; /* Reduced from 1.2rem */
+    line-height: 1.2;
     text-transform: uppercase;
     text-shadow: 0 2px 6px rgba(0,0,0,0.4);
     opacity: 0.95;
@@ -813,9 +841,9 @@ canvas#lava-lamp-canvas {
   }
   
   .copyright-text {
-    font-size: 0.9rem !important;
+    font-size: 0.8rem !important; /* Reduced from 0.9rem */
     color: rgba(255, 255, 255, 0.65) !important;
-    margin: 0.25rem 0 0 0 !important;
+    margin: 0.15rem 0 0 0 !important; /* Reduced from 0.25rem */
     font-family: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
     font-weight: 400;
     letter-spacing: 0.02em;
@@ -873,7 +901,7 @@ canvas#lava-lamp-canvas {
     animation: fadeIn 0.8s ease-out 0.6s both;
     position: relative;
     z-index: 10;
-    margin-top: 2rem;
+    margin-top: 0.75rem; /* Reduced from 2rem */
     display: flex !important;
     justify-content: center !important;
     align-items: stretch !important;
@@ -941,8 +969,8 @@ canvas#lava-lamp-canvas {
     -webkit-backdrop-filter: blur(10px);
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 8px;
-    padding: 0.5rem 1rem;
-    margin: 0.5rem auto;
+    padding: 0.25rem 0.6rem; /* Further reduced padding */
+    margin: 0.25rem auto 0 auto; /* Further reduced margin */
     max-width: 600px;
     box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
   }
@@ -1244,8 +1272,8 @@ canvas#lava-lamp-canvas {
       padding: 0.85rem 1.2rem !important;
       font-size: 1.15rem !important;
       height: 52px !important;
-      width: 75% !important;
-      max-width: 200px !important;
+      width: 100% !important;
+      max-width: 100% !important;
       margin: 0 auto !important;
     }
   }
@@ -1291,12 +1319,11 @@ canvas#lava-lamp-canvas {
       padding: 0.85rem 1.2rem !important;
       font-size: 1.15rem !important;
       height: 52px !important;
-      width: 75% !important;
-      max-width: 200px !important;
+      width: 100% !important;
+      max-width: 100% !important;
       margin: 0 auto !important;
     }
   }
-  
   /* Medium screens (tablets, 769px and up) */
   @media (min-width: 769px) and (max-width: 1024px) {
     .btn-modern, .btn-modern2, .btn-modern3,
@@ -1338,8 +1365,8 @@ canvas#lava-lamp-canvas {
       padding: 0.85rem 1.2rem !important;
       font-size: 1.15rem !important;
       height: 52px !important;
-      width: 75% !important;
-      max-width: 200px !important;
+      width: 100% !important;
+      max-width: 100% !important;
       margin: 0 auto !important;
     }
   }
@@ -1385,8 +1412,8 @@ canvas#lava-lamp-canvas {
       padding: 0.85rem 1.2rem !important;
       font-size: 1.15rem !important;
       height: 52px !important;
-      width: 75% !important;
-      max-width: 200px !important;
+      width: 100% !important;
+      max-width: 100% !important;
       margin: 0 auto !important;
     }
   }
@@ -1432,8 +1459,8 @@ canvas#lava-lamp-canvas {
       padding: 0.85rem 1.2rem !important;
       font-size: 1.15rem !important;
       height: 52px !important;
-      width: 75% !important;
-      max-width: 200px !important;
+      width: 100% !important;
+      max-width: 100% !important;
       margin: 0 auto !important;
     }
   }
@@ -1479,8 +1506,8 @@ canvas#lava-lamp-canvas {
       padding: 0.85rem 1.2rem !important;
       font-size: 1.15rem !important;
       height: 52px !important;
-      width: 75% !important;
-      max-width: 200px !important;
+      width: 100% !important;
+      max-width: 100% !important;
       margin: 0 auto !important;
     }
   }
@@ -1669,6 +1696,9 @@ canvas#lava-lamp-canvas {
   #availableTagsSearch,
   #selectedTagsSearch {
     margin-bottom: 0 !important;
+    padding: 0.45rem 0.7rem !important; /* Reduced padding for compactness */
+    font-size: 0.9rem !important; /* Reduced font size */
+    min-height: 38px !important; /* Reduced height */
   }
 
   /* Remove spacing in tag list container */
@@ -1711,34 +1741,35 @@ canvas#lava-lamp-canvas {
   /* Add space after Select All checkboxes */
   .select-all-container {
     margin-top: 0 !important;
-    margin-bottom: 0.75rem !important;
-    padding-top: 0.5rem !important;
-    padding-bottom: 0.5rem !important;
+    margin-bottom: 0.5rem !important; /* Reduced from 0.75rem */
+    padding-top: 0.35rem !important; /* Reduced from 0.5rem */
+    padding-bottom: 0.35rem !important; /* Reduced from 0.5rem */
     border-bottom: 1px solid rgba(160, 132, 232, 0.2) !important;
     background: rgba(160, 132, 232, 0.05) !important;
     border-radius: 8px !important;
-    padding-left: 0.5rem !important;
-    padding-right: 0.5rem !important;
+    padding-left: 0.4rem !important; /* Reduced from 0.5rem */
+    padding-right: 0.4rem !important; /* Reduced from 0.5rem */
   }
 
   /* Add space after the d-flex container holding Select All */
   .d-flex.align-items-center.gap-3.mb-2 {
-    margin-bottom: 0.75rem !important;
+    margin-bottom: 0.15rem !important; /* Reduced from 0.25rem */
     margin-top: 0 !important;
   }
 
   /* Add breathing room between tag list items */
   .tag-entry {
-    margin-top: 4px !important;
-    margin-bottom: 4px !important;
+    margin-top: 3px !important; /* Reduced from 4px */
+    margin-bottom: 3px !important; /* Reduced from 4px */
   }
 
   /* Remove gap from tag list container */
   #availableTags {
     margin: 0 !important;
     padding: 0 !important;
-    height: 80vh !important;
-    min-height: 80vh !important;
+    height: var(--tag-list-height) !important;
+    min-height: var(--tag-list-height) !important;
+    max-height: var(--tag-list-height) !important;
     overflow-y: auto !important;
     overflow-x: hidden !important;
     display: block !important;
@@ -1755,9 +1786,9 @@ canvas#lava-lamp-canvas {
   #selectedTags {
     margin: 0 !important;
     padding: 0 !important;
-    height: 80vh !important;
-    min-height: 80vh !important;
-    max-height: none !important;
+    height: var(--tag-list-height) !important;
+    min-height: var(--tag-list-height) !important;
+    max-height: var(--tag-list-height) !important;
     overflow-y: auto !important;
     overflow-x: hidden !important;
     display: block !important;
@@ -1766,8 +1797,6 @@ canvas#lava-lamp-canvas {
     flex-grow: 1 !important;
     flex-shrink: 0 !important;
     pointer-events: auto !important;
-    /* Ensure empty containers don't block scrolling */
-    min-height: 0 !important;
   }
   
   /* Ensure selected tags container can expand to show all content */
@@ -2069,7 +2098,6 @@ canvas#lava-lamp-canvas {
     background: rgba(79, 172, 254, 0.1);
     transform: scale(1.02);
   }
-  
   /* Tag list container - SYMMETRICAL - fills column width */
   .tag-list-container {
     background: rgba(45, 34, 58, 0.92);
@@ -2077,7 +2105,7 @@ canvas#lava-lamp-canvas {
     -webkit-backdrop-filter: blur(10px);
     border: 1px solid rgba(160, 132, 232, 0.18);
     border-radius: 1rem;
-    padding: 0.75rem !important;
+    padding: 0.5rem !important; /* Reduced from 0.75rem */
     flex: 1;
     width: 100% !important;
     /* Remove height restrictions to allow full expansion */
@@ -2156,6 +2184,7 @@ canvas#lava-lamp-canvas {
   [data-container-type="center"] {
     flex: 0 0 auto !important;
     width: auto !important;
+    min-width: 260px !important;
   }
   
   /* Ensure tag list containers are responsive - ZOOM RESPONSIVE */
@@ -2348,7 +2377,7 @@ canvas#lava-lamp-canvas {
     max-width: 100%;
     /* Allow content to be visible */
     overflow: visible;
-    margin-bottom: 0.75rem !important; /* Added spacing - zoom responsive */
+    margin-bottom: 0.5rem !important; /* Reduced from 0.75rem for compactness */
   }
   
   .tag-list-container::-webkit-scrollbar {
@@ -2490,8 +2519,8 @@ canvas#lava-lamp-canvas {
     margin: 0.25rem auto !important;
     padding: 0.6rem 0.9rem !important;
     font-size: 1rem !important;
-    width: 80% !important;
-    max-width: 240px !important;
+    width: 100% !important;
+    max-width: 100% !important;
     border-radius: 8px !important;
     display: block !important;
     background: rgba(40, 40, 70, 0.6) !important;
@@ -2503,8 +2532,8 @@ canvas#lava-lamp-canvas {
     margin: 0.2rem auto !important;
     padding: 0.7rem 1.2rem !important;
     font-size: 1.05rem !important;
-    width: 75% !important;
-    max-width: 200px !important;
+    width: 100% !important;
+    max-width: 100% !important;
     display: block !important;
     border-radius: 8px !important;
     font-weight: 700 !important;
@@ -2819,8 +2848,8 @@ canvas#lava-lamp-canvas {
   }
   
   .tag-name {
-    font-size: 1.4rem !important;
-    line-height: 1.4 !important;
+    font-size: 0.8rem !important;
+    line-height: 1.3 !important;
     margin-right: 8px !important;
     white-space: normal !important;
     word-break: break-word !important;
@@ -2870,7 +2899,6 @@ canvas#lava-lamp-canvas {
     min-width: 70px;
     max-width: 90px;
   }
-  
   /* Compact lineage dropdowns override the above rules */
   .lineage-dropdown-mini,
   .lineage-select.lineage-dropdown-mini {
@@ -3447,7 +3475,6 @@ canvas#lava-lamp-canvas {
   display: block;
   text-align: center;
 }
-
   /* Select All checkbox styling - no extra scaling needed, already 32px */
   #selectAllAvailable {
     margin-right: 8px;
@@ -4234,7 +4261,6 @@ canvas#lava-lamp-canvas {
     transform: translateY(0);
     box-shadow: 0 2px 6px rgba(160, 132, 232, 0.15);
   }
-
   /* Lineage dropdown improvements */
   .lineage-dropdown, 
   .lineage-dropdown-mini, 
@@ -4502,12 +4528,12 @@ canvas#lava-lamp-canvas {
   }
 
   .container-label {
-    font-size: 1.1rem !important;
+    font-size: 0.95rem !important; /* Reduced from 1.1rem */
     color: #fff !important;
     font-weight: 700 !important;
-    letter-spacing: 1px !important;
+    letter-spacing: 0.8px !important; /* Reduced from 1px */
     margin-bottom: 0px !important;
-    margin-top: 2px !important;
+    margin-top: 1px !important; /* Reduced from 2px */
     margin-left: 2px !important;
     opacity: 1 !important;
     text-transform: uppercase !important;
@@ -5032,7 +5058,6 @@ canvas#lava-lamp-canvas {
     padding-left: 0 !important;
     margin-left: 0 !important;
   }
-  
   /* Ensure tag bars are completely flush with container edges */
   .tag-item {
     margin-left: -16px !important;
@@ -5474,15 +5499,15 @@ canvas#lava-lamp-canvas {
     display: block !important;
     box-sizing: border-box !important;
     width: 100% !important;
-    min-width: 0 !important;
+    min-width: 180px !important; /* Ensure enough width for "Horizontal" */
     max-width: 100% !important;
     min-height: 60px !important;
     height: 60px !important;
     margin: 0.5rem 0 0.75rem 0 !important;
     text-align: center !important;
     text-align-last: center !important;
-    padding: 12px 20px !important;
-    font-size: 1.3em !important;
+    padding: 12px 40px 12px 40px !important; /* Symmetric padding for centered text */
+   font-size: 1.1em !important;
     font-weight: 700 !important;
     color: #e0d6f6 !important;
     background: rgba(34, 34, 51, 0.85) !important;
@@ -5493,13 +5518,35 @@ canvas#lava-lamp-canvas {
     -webkit-backdrop-filter: blur(10px) !important;
     transition: border 0.2s, box-shadow 0.2s;
     overflow: visible !important;
-    white-space: normal !important;
+    white-space: nowrap !important; /* Prevent text wrapping */
+    text-overflow: ellipsis !important;
     
-    /* Ensure consistent arrow across platforms */
+    /* Ensure consistent arrow across platforms - positioned to not interfere with centering */
     background-image: url('data:image/svg+xml;utf8,<svg fill="%23a084e8" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
     background-repeat: no-repeat !important;
     background-position: right 14px center !important;
     background-size: 18px 18px !important;
+  }
+  
+  /* Override inline styles on template select */
+  #templateSelect[style*="width"],
+  #templateSelect[style*="max-width"] {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 180px !important;
+  }
+  
+  /* Override inline width constraints on center column to allow full width */
+  [data-container-type="center"][style*="max-width"],
+  [data-container-type="center"][style*="width"] {
+    max-width: none !important;
+    width: auto !important;
+  }
+  
+  /* Ensure control panel doesn't constrain width */
+  .control-panel[style*="max-width"] {
+    max-width: 100% !important;
+    width: 100% !important;
   }
 
   #templateSelect option,
@@ -5531,8 +5578,8 @@ canvas#lava-lamp-canvas {
   }
 
   #generateBtn {
-    width: 75% !important;
-    max-width: 200px !important;
+    width: 100% !important;
+    max-width: 100% !important;
     height: 52px !important;
     margin: 0.2rem auto !important;
     padding: 0.85rem 1.2rem !important;
@@ -5557,7 +5604,7 @@ canvas#lava-lamp-canvas {
   }
 
   .tag-list-container {
-    padding: 1rem !important; /* Increased padding from 0.75rem */
+    padding: 0.5rem !important; /* Reduced for compactness */
     border-radius: 16px;
     box-sizing: border-box;
     /* Add horizontal margins for better spacing */
@@ -5808,7 +5855,6 @@ canvas#lava-lamp-canvas {
     display: none !important;
     pointer-events: none !important;
   }
-
   /* Ensure modals don't stay visible when body doesn't have modal-open */
   body:not(.modal-open) .modal {
     pointer-events: none !important;
@@ -6143,13 +6189,13 @@ canvas#lava-lamp-canvas {
   }
 
   .tag-manager-container {
-    margin-top: 2rem !important;
+    margin-top: 1rem !important; /* Reduced from 2rem */
     padding-top: 0 !important;
     align-items: flex-start !important;
-    gap: 2rem !important; /* Increased gap between tag lists */
-    /* Add horizontal padding for better spacing */
-    padding-left: 1rem !important;
-    padding-right: 1rem !important;
+    gap: 1rem !important; /* Reduced from 2rem */
+    /* Reduced horizontal padding */
+    padding-left: 0.5rem !important; /* Reduced from 1rem */
+    padding-right: 0.5rem !important; /* Reduced from 1rem */
   }
 
   .main-content {
@@ -6157,28 +6203,46 @@ canvas#lava-lamp-canvas {
     flex-direction: row;
     align-items: flex-start; /* or 'center' if you want vertical centering */
     justify-content: center;
-    height: 100vh; /* or whatever fits your design */
+    min-height: 100vh;
+    height: auto;
     position: relative;
     padding-top: 0 !important;
     margin-top: 0 !important;
-    /* Add bigger left and right margins for better spacing */
-    padding-left: 2rem !important;
-    padding-right: 2rem !important;
+    /* Reduced left and right margins for more space */
+    padding-left: 0.5rem !important; /* Reduced from 2rem */
+    padding-right: 0.5rem !important; /* Reduced from 2rem */
   }
 
   .center-panel {
     align-self: flex-start; /* prevents it from being pushed down */
     padding-top: 0 !important;
     margin-top: 0 !important;
+    height: 100% !important;
   }
 
+.main-content-row {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-height: 80vh;
+  align-items: start !important;
+  display: grid !important;
+  grid-template-columns: minmax(320px, 1fr) minmax(230px, 280px) minmax(320px, 1fr);
+  gap: 1rem !important;
+  padding-top: 0 !important;
+  margin-top: 0 !important;
+}
+
+.main-content-row > [data-container-type] {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+@media (max-width: 1199px) {
   .main-content-row {
-    min-height: 80vh;
-    align-items: center !important;
-    display: flex !important;
-    padding-top: 0 !important;
-    margin-top: 0 !important;
+    grid-template-columns: 1fr;
+    gap: 0.75rem !important;
   }
+}
 
   .card-width {
     max-width: 600px;
@@ -6194,18 +6258,20 @@ canvas#lava-lamp-canvas {
     backdrop-filter: blur(20px) !important;
     -webkit-backdrop-filter: blur(20px) !important;
     border: 2px solid rgba(160, 132, 232, 0.2) !important; /* Match glass-card border */
-    border-radius: 24px !important; /* Match glass-card border-radius */
+    border-radius: 16px !important; /* Reduced from 24px for compactness */
     box-shadow: 
       0 12px 40px rgba(0,0,0,0.15), 
       0 4px 16px rgba(160,132,232,0.1),
       0 2px 8px rgba(160,132,232,0.08) !important; /* Match glass-card shadows */
-    margin: 0;
-    padding: 1.5rem;
+    margin: 0 0 0.75rem 0; /* Reduced bottom margin */
+    padding: 0.75rem; /* Reduced from 1.5rem */
     transition: all 0.3s cubic-bezier(0.4,0,0.2,1) !important; /* Match glass-card transition */
     position: relative;
-    flex-direction: row !important;
-    align-items: center !important;
-    justify-content: space-between !important;
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    gap: 0.75rem !important;
+    align-items: stretch !important;
+    justify-content: stretch !important;
   }
 
   /* Hover effect to match glass-card */
@@ -6224,15 +6290,18 @@ canvas#lava-lamp-canvas {
 
   /* Filter column styling - updated to match glass-card aesthetic and equal sizing */
   .sticky-filter-bar .filter-column {
-    padding: 1rem !important;
-    margin: 0 0.5rem !important;
+    padding: 0.5rem !important; /* Reduced from 1rem */
+    margin: 0 !important;
     background: rgba(255, 255, 255, 0.08) !important; /* Subtle white overlay like glass-card */
-    border-radius: 12px !important; /* Slightly smaller than parent */
+    border-radius: 10px !important; /* Reduced from 12px */
     border: 1px solid rgba(160, 132, 232, 0.15) !important;
     transition: all 0.3s cubic-bezier(0.4,0,0.2,1) !important;
     flex: 1 1 0 !important; /* Equal flex distribution */
     min-width: 0 !important; /* Allow shrinking */
     max-width: none !important; /* Remove max-width constraints */
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 0.35rem !important;
   }
 
   .sticky-filter-bar .filter-column:hover {
@@ -6245,10 +6314,10 @@ canvas#lava-lamp-canvas {
   /* Filter labels styling - updated to match tag column headers */
   .sticky-filter-bar .form-label,
   .sticky-filter-bar .filter-category-label {
-    font-size: 0.875rem !important;
+    font-size: 0.75rem !important; /* Reduced from 0.875rem */
     font-weight: 700 !important; /* Match tag column header weight */
     color: #ffffff !important; /* Match tag column header color */
-    margin-bottom: 0.75rem !important;
+    margin-bottom: 0.4rem !important; /* Reduced from 0.75rem */
     text-transform: uppercase !important;
     letter-spacing: 0.5px !important;
     text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7) !important; /* Match tag column styling */
@@ -6265,18 +6334,20 @@ canvas#lava-lamp-canvas {
     border-radius: 8px !important;
     border: 1.5px solid rgba(160, 132, 232, 0.3) !important;
     transition: all 0.3s cubic-bezier(0.4,0,0.2,1) !important;
-    padding: 0.5rem 0.75rem !important;
-    padding-right: 2rem !important; /* Extra space for dropdown arrow */
+    padding: 0.35rem 0.55rem !important; /* Reduced padding */
+    padding-right: 1.75rem !important; /* Extra space for dropdown arrow */
     backdrop-filter: blur(10px) !important;
     -webkit-backdrop-filter: blur(10px) !important;
     min-width: 140px !important; /* Minimum width to fit "All" text and arrow */
     white-space: nowrap !important; /* Prevent text wrapping */
     overflow: visible !important; /* Allow dropdown to expand */
     text-overflow: clip !important;
-    width: auto !important; /* Auto width based on content */
-    max-width: none !important; /* Remove max-width constraints */
+    width: 100% !important;
+    max-width: 100% !important;
     flex: 1 1 auto !important; /* Flex grow and shrink */
     box-sizing: border-box !important;
+    font-size: 0.85rem !important; /* Reduced font size */
+    line-height: 1.3 !important;
   }
 
   .sticky-filter-bar .form-select:focus,
@@ -6296,7 +6367,7 @@ canvas#lava-lamp-canvas {
   .sticky-filter-bar .d-flex.flex-row.gap-3 {
     width: 100% !important;
     justify-content: space-between !important;
-    gap: 0.75rem !important; /* Consistent gap */
+    gap: 0.5rem !important; /* Reduced from 0.75rem for compactness */
   }
 
   .sticky-filter-bar .d-flex.flex-row.gap-3 > div {
@@ -6459,7 +6530,7 @@ canvas#lava-lamp-canvas {
     margin-right: 0 !important;
   }
 
-  .sticky-filter-bar .col:not(:last-child)::after {
+  .sticky-filter-bar.d-flex.flex-row > div:not(:last-child)::after {
     content: '';
     position: absolute;
     right: 0;
@@ -6926,7 +6997,7 @@ canvas#lava-lamp-canvas {
   .tag-list-container > .select-all-container {
     margin-left: 0 !important;
     padding-left: 0 !important;
-    margin-bottom: 0.75rem !important;
+    margin-bottom: 0.25rem !important;
   }
 
   /* Enhanced Visual Hierarchy */
@@ -6957,6 +7028,12 @@ canvas#lava-lamp-canvas {
   [data-container-type="center"] {
     flex: 0 0 calc(var(--center-column-width) / 12 * 100%) !important;
     max-width: calc(var(--center-column-width) / 12 * 100%) !important;
+  display: flex !important;
+  flex-direction: column !important;
+  height: auto !important;
+  min-height: var(--tag-list-min-height) !important;
+  max-height: var(--center-panel-height) !important;
+  overflow-y: auto !important;
   }
   
   [data-container-type="available"],
@@ -6972,8 +7049,14 @@ canvas#lava-lamp-canvas {
   }
   
   [data-container-type="center"] .control-panel {
-    height: var(--center-panel-height) !important;
-    min-height: var(--center-panel-height) !important;
+  height: auto !important;
+  min-height: var(--tag-list-min-height) !important;
+  max-height: var(--center-panel-height) !important;
+    display: flex !important;
+    flex-direction: column !important;
+    flex: 1 1 auto !important;
+  overflow-y: auto !important;
+  padding-bottom: 1.5rem !important;
   }
   
   [data-container-type="available"] #availableTags,
@@ -7395,7 +7478,6 @@ canvas#lava-lamp-canvas {
   .mb-2 {
     margin-bottom: 0.5rem !important;
   }
-
   /* Enhanced badge styling */
   .badge-modern {
     background: linear-gradient(135deg, rgba(160, 132, 232, 0.8), rgba(139, 92, 246, 0.6));
@@ -8162,7 +8244,6 @@ canvas#lava-lamp-canvas {
     transform: translateZ(0);
     will-change: height;
   }
-  
      /* Force vendor headers to stay on top */
    .vendor-header {
      position: relative !important;
@@ -8477,7 +8558,7 @@ canvas#lava-lamp-canvas {
   
   /* Container-specific font sizing - using normalized viewport units */
   .tag-item .text-container {
-    font-size: clamp(10px, 1.05rem, 18px) !important;
+    font-size: clamp(9px, 0.8rem, 16px) !important;
     max-width: calc(100% - 40px) !important;
     padding-right: 8px !important;
   }
@@ -8961,7 +9042,6 @@ canvas#lava-lamp-canvas {
   select::-ms-expand, .form-select::-ms-expand, .form-select-modern::-ms-expand {
     display: none !important;
   }
-
   /* Force override any remaining Mac styling */
   select:focus, .form-select:focus, .form-select-modern:focus,
   .lineage-dropdown:focus, .lineage-dropdown-mini:focus,
@@ -9132,18 +9212,18 @@ canvas#lava-lamp-canvas {
 
 .performance-toggle-btn {
   position: fixed;
-  bottom: 20px;
-  right: 20px;
-  width: 50px;
-  height: 50px;
+  bottom: 16px;
+  right: 16px;
+  width: 42px;
+  height: 42px;
   border-radius: 50%;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   border: none;
   color: white;
-  font-size: 20px;
+  font-size: 17px;
   cursor: pointer;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
-  transition: all 0.3s ease;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.18);
+  transition: all 0.25s ease;
   z-index: 999;
   display: flex;
   align-items: center;
@@ -9151,8 +9231,8 @@ canvas#lava-lamp-canvas {
 }
 
 .performance-toggle-btn:hover {
-  transform: scale(1.1);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+  transform: scale(1.08);
+  box-shadow: 0 5px 18px rgba(0, 0, 0, 0.24);
 }
 
 .performance-toggle-btn.active {
@@ -9216,11 +9296,11 @@ canvas#lava-lamp-canvas {
   }
   
   .performance-toggle-btn {
-    bottom: 10px;
-    right: 10px;
-    width: 45px;
-    height: 45px;
-    font-size: 18px;
+    bottom: 8px;
+    right: 8px;
+    width: 38px;
+    height: 38px;
+    font-size: 16px;
   }
 }
 
@@ -9242,14 +9322,16 @@ canvas#lava-lamp-canvas {
 }
 .control-panel #generateBtn {
   margin: 0.2rem auto !important; /* balanced space above/below button, centered */
-  width: 75% !important;
-  max-width: 200px !important;
+  width: 100% !important;
+  max-width: 100% !important;
   height: 52px !important;
 }
 
 /* Slightly lower the center column so it visually centers between the tag lists */
 [data-container-type="center"] {
-  margin-top: 8px !important; /* gentle downward nudge */
+  margin-top: 10px !important;
+  position: relative !important;
+  top: 5px !important;
 }
 
 /* Scale-to-fit support - REMOVED transform-origin from html/body to fix canvas positioning */
@@ -9429,6 +9511,16 @@ html, body {
 /* Filter Bar Row Structure */
 .filter-row {
   width: 100%;
+  max-width: 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.5rem;
+}
+
+@media (min-width: 1400px) {
+  .filter-row {
+    grid-template-columns: repeat(7, minmax(140px, 1fr));
+  }
 }
 
 .filter-row:not(:last-child) {
@@ -9441,7 +9533,8 @@ html, body {
   flex-direction: column;
   gap: 0.5rem;
   min-height: 75px;
-  min-width: 120px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .filter-group .filter-label {

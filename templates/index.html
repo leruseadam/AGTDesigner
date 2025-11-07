@@ -65,6 +65,10 @@
   <!-- Performance Optimizations - Load early for best results -->
   <script src="{{ url_for('static', filename='js/performance.js') }}?v={{ cache_bust }}"></script>
   
+  <script>
+    window.AGT_SERVER_BOOT_ID = {{ server_boot_id|tojson }};
+  </script>
+
   <!-- Performance hints -->
   <meta http-equiv="x-dns-prefetch-control" content="on">
   <link rel="dns-prefetch" href="//cdn.jsdelivr.net">
@@ -513,7 +517,8 @@
         modalElement.style.display = 'none';
       }
       if (mainContent) {
-        mainContent.style.display = 'none';
+        mainContent.style.pointerEvents = 'none';
+        mainContent.classList.add('store-selection-disabled');
       }
       
       console.log('Fetching store status from backend...');
@@ -556,6 +561,8 @@
             if (mainContent) {
               mainContent.style.display = 'block';
               mainContent.style.visibility = 'visible';
+              mainContent.style.pointerEvents = '';
+              mainContent.classList.remove('store-selection-disabled');
               mainContent.classList.add('store-selected');
               setTimeout(() => mainContent.classList.add('loaded'), 100);
             }
@@ -594,7 +601,8 @@
             }
             
             if (mainContent) {
-              mainContent.style.display = 'none';
+              mainContent.style.pointerEvents = 'none';
+              mainContent.classList.add('store-selection-disabled');
             }
             
             console.log('✅ Modal shown, content hidden');
@@ -4656,7 +4664,6 @@
     /* Force all three columns to have equal height and prevent center column from being taller */
     .d-flex[style*="gap: 6rem"],
     .d-flex[style*="gap: 4rem"],
-    .d-flex[style*="gap: 2rem"],
     .d-flex[style*="gap: 1.25rem"],
     .d-flex[style*="gap: 0.75rem"],
     .d-flex[style*="gap: 0.5rem"] {
@@ -4666,7 +4673,6 @@
     /* Center column should match height of side columns */
     .d-flex[style*="gap: 6rem"] > div[data-container-type="center"],
     .d-flex[style*="gap: 4rem"] > div[data-container-type="center"],
-    .d-flex[style*="gap: 2rem"] > div[data-container-type="center"],
     .d-flex[style*="gap: 1.25rem"] > div[data-container-type="center"],
     .d-flex[style*="gap: 0.75rem"] > div[data-container-type="center"],
     .d-flex[style*="gap: 0.5rem"] > div[data-container-type="center"] {
@@ -4685,21 +4691,19 @@
       overflow-x: hidden !important;
     }
 
-    /* Side columns (Available & Selected Tags) should set the height */
+    /* Side columns (Available & Selected Tags) establish shared height using CSS variables */
     .d-flex[style*="gap: 6rem"] > div[data-container-type="available"],
     .d-flex[style*="gap: 6rem"] > div[data-container-type="selected"],
     .d-flex[style*="gap: 4rem"] > div[data-container-type="available"],
     .d-flex[style*="gap: 4rem"] > div[data-container-type="selected"],
-    .d-flex[style*="gap: 2rem"] > div[data-container-type="available"],
-    .d-flex[style*="gap: 2rem"] > div[data-container-type="selected"],
     .d-flex[style*="gap: 1.25rem"] > div[data-container-type="available"],
     .d-flex[style*="gap: 1.25rem"] > div[data-container-type="selected"],
     .d-flex[style*="gap: 0.75rem"] > div[data-container-type="available"],
     .d-flex[style*="gap: 0.75rem"] > div[data-container-type="selected"],
     .d-flex[style*="gap: 0.5rem"] > div[data-container-type="available"],
     .d-flex[style*="gap: 0.5rem"] > div[data-container-type="selected"] {
-      min-height: 600px !important;
-      max-height: calc(100vh - 400px) !important;
+      min-height: var(--tag-list-min-height) !important;
+      max-height: var(--tag-list-height) !important;
     }
 
     /* Ensure glass cards in side columns fill their containers */
@@ -4710,44 +4714,10 @@
       flex-direction: column !important;
     }
 
-    /* Center column should never exceed side column height */
+    /* Center column tracks shared height variables instead of hard vh offsets */
     div[data-container-type="center"] {
-      min-height: 600px !important;
-      max-height: calc(100vh - 400px) !important;
-    }
-
-    /* Responsive height adjustments for smaller screens */
-    @media (max-height: 900px) {
-      .d-flex[style*="gap: 6rem"] > div[data-container-type="available"],
-      .d-flex[style*="gap: 6rem"] > div[data-container-type="selected"],
-      .d-flex[style*="gap: 4rem"] > div[data-container-type="available"],
-      .d-flex[style*="gap: 4rem"] > div[data-container-type="selected"],
-      div[data-container-type="center"] {
-        min-height: 500px !important;
-        max-height: calc(100vh - 300px) !important;
-      }
-    }
-
-    @media (max-height: 768px) {
-      .d-flex[style*="gap: 6rem"] > div[data-container-type="available"],
-      .d-flex[style*="gap: 6rem"] > div[data-container-type="selected"],
-      .d-flex[style*="gap: 4rem"] > div[data-container-type="available"],
-      .d-flex[style*="gap: 4rem"] > div[data-container-type="selected"],
-      div[data-container-type="center"] {
-        min-height: 400px !important;
-        max-height: calc(100vh - 250px) !important;
-      }
-    }
-
-    @media (max-height: 600px) {
-      .d-flex[style*="gap: 6rem"] > div[data-container-type="available"],
-      .d-flex[style*="gap: 6rem"] > div[data-container-type="selected"],
-      .d-flex[style*="gap: 4rem"] > div[data-container-type="available"],
-      .d-flex[style*="gap: 4rem"] > div[data-container-type="selected"],
-      div[data-container-type="center"] {
-        min-height: 350px !important;
-        max-height: calc(100vh - 200px) !important;
-      }
+      min-height: var(--tag-list-min-height) !important;
+      max-height: var(--tag-list-height) !important;
     }
 
     /* Mobile responsive - stack columns vertically on small screens */
@@ -4765,10 +4735,10 @@
       div[data-container-type="center"] {
         max-width: 100% !important;
         width: 100% !important;
-        min-height: 300px !important;
-        max-height: 400px !important;
+        min-height: var(--tag-list-min-height) !important;
+        max-height: var(--tag-list-height) !important;
       }
-      
+
       div[data-container-type="center"] {
         margin-left: 0 !important;
         margin-right: 0 !important;
@@ -4878,7 +4848,7 @@
   <canvas id="lava-lamp-canvas" style="position: fixed !important; top: 0px !important; left: 0px !important; right: 0px !important; bottom: 0px !important; width: 100% !important; height: 100% !important; margin: 0 !important; padding: 0 !important; border: none !important; outline: none !important; box-shadow: none !important; border-radius: 0 !important; z-index: -1 !important; pointer-events: none !important; display: block !important; background: transparent !important; max-width: none !important; max-height: none !important; min-width: 100% !important; min-height: 100% !important; transform: none !important; object-fit: cover !important;"></canvas>
 
   <!-- Main Content (hidden until store is selected) - JavaScript controls visibility -->
-  <div class="main-content" id="mainContent" style="display: none; visibility: hidden;">
+  <div class="main-content" id="mainContent">
     <!-- Psychedelic Background Effects -->
     <div class="psychedelic-orbs">
       <div class="orb"></div>
@@ -5020,38 +4990,38 @@
                   </div>
                   
                   <!-- Filter Dropdowns Row - Left Aligned, Fits Within Container -->
-                  <div class="filter-row d-flex align-items-center justify-content-start gap-1 flex-grow-1" style="width: 100%; max-width: 100%; overflow-x: hidden; margin-left: 0.5rem; flex-wrap: nowrap;">
-                    <div class="filter-group" style="min-width: 0 !important; flex: 1 1 0 !important; max-width: 100% !important;">
+                  <div class="filter-row d-flex align-items-center justify-content-start gap-1 flex-grow-1" style="margin-left: 0.5rem;">
+                    <div class="filter-group" style="min-width: 0 !important;">
                       <label for="vendorFilter" class="filter-label">VENDOR</label>
                       <select id="vendorFilter" class="form-select filter-select" aria-label="Filter by vendor" style="width: 100% !important; min-height: 42px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 8px 14px !important; font-size: 13px !important;">
                         <option value="All">All</option>
                       </select>
                     </div>
-                    <div class="filter-group" style="min-width: 0 !important; flex: 1 1 0 !important; max-width: 100% !important;">
+                    <div class="filter-group" style="min-width: 0 !important;">
                       <label for="brandFilter" class="filter-label">BRAND</label>
                       <select id="brandFilter" class="form-select filter-select" aria-label="Filter by brand" style="width: 100% !important; min-height: 42px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 8px 14px !important; font-size: 13px !important;">
                         <option value="All">All</option>
                       </select>
                     </div>
-                    <div class="filter-group" style="min-width: 0 !important; flex: 1 1 0 !important; max-width: 100% !important;">
+                    <div class="filter-group" style="min-width: 0 !important;">
                       <label for="productTypeFilter" class="filter-label">PRODUCT TYPE</label>
                       <select id="productTypeFilter" class="form-select filter-select" aria-label="Filter by product type" style="width: 100% !important; min-height: 42px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 8px 14px !important; font-size: 13px !important;">
                         <option value="All">All</option>
                       </select>
                     </div>
-                    <div class="filter-group" style="min-width: 0 !important; flex: 1 1 0 !important; max-width: 100% !important;">
+                    <div class="filter-group" style="min-width: 0 !important;">
                       <label for="lineageFilter" class="filter-label">LINEAGE</label>
                       <select id="lineageFilter" class="form-select filter-select" aria-label="Filter by lineage" style="width: 100% !important; min-height: 42px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 8px 14px !important; font-size: 13px !important;">
                         <option value="All">All</option>
                       </select>
                     </div>
-                    <div class="filter-group" style="min-width: 0 !important; flex: 1 1 0 !important; max-width: 100% !important;">
+                    <div class="filter-group" style="min-width: 0 !important;">
                       <label for="weightFilter" class="filter-label">WEIGHT</label>
                       <select id="weightFilter" class="form-select filter-select" aria-label="Filter by weight" style="width: 100% !important; min-height: 42px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 8px 14px !important; font-size: 13px !important;">
                         <option value="All">All</option>
                       </select>
                     </div>
-                    <div class="filter-group" style="min-width: 0 !important; flex: 1 1 0 !important; max-width: 100% !important;">
+                    <div class="filter-group" style="min-width: 0 !important;">
                       <label for="dohFilter" class="filter-label">DOH COMPLIANCE</label>
                       <select id="dohFilter" class="form-select filter-select" aria-label="Filter by DOH compliance" style="width: 100% !important; min-height: 42px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 8px 14px !important; font-size: 13px !important;">
                         <option value="All">All</option>
@@ -5061,7 +5031,7 @@
                         <option value="Unknown">Unknown</option>
                       </select>
                     </div>
-                    <div class="filter-group" style="min-width: 0 !important; flex: 1 1 0 !important; max-width: 100% !important;">
+                    <div class="filter-group" style="min-width: 0 !important;">
                       <label for="highCbdFilter" class="filter-label">HIGH CBD</label>
                       <select id="highCbdFilter" class="form-select filter-select" aria-label="Filter by High CBD products" style="width: 100% !important; min-height: 42px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 8px 14px !important; font-size: 13px !important;">
                         <option value="All">All</option>
@@ -5073,9 +5043,9 @@
         </div>
         
         <!-- Main Content Row -->
-        <div class="d-flex fade-in" style="animation-delay: 0.6s; width: 100%; gap: 2rem; justify-content: flex-start; padding-left: 0.5rem; padding-right: 0.5rem; box-sizing: border-box;">
+        <div class="main-content-row fade-in d-flex flex-wrap" style="animation-delay: 0.6s;">
           <!-- Available Tags -->
-          <div class="mb-2" data-container-type="available" style="flex: 1; max-width: 35rem;">
+          <div class="mb-2" data-container-type="available">
             <div class="glass-card d-flex flex-column h-100">
               <div class="card-header border-0 bg-transparent p-2">
                 <div class="d-flex justify-content-between align-items-center mb-2">
@@ -5115,7 +5085,7 @@
           </div>
           
           <!-- Center Column with Controls -->
-          <div class="mb-2 mt-0 d-flex flex-column justify-content-start align-items-center" style="flex: 0 0 auto; min-width: 280px;" data-container-type="center">
+          <div class="mb-2 mt-0 d-flex flex-column justify-content-start align-items-center" data-container-type="center">
             <!-- Controls -->
             <div class="control-panel" style="width: 100%;">
               <!-- Template Section -->
@@ -5230,7 +5200,7 @@
           </div>
           
           <!-- Selected Tags -->
-          <div class="mb-2" data-container-type="selected" style="flex: 1; max-width: 35rem;">
+          <div class="mb-2" data-container-type="selected">
             <div class="glass-card d-flex flex-column h-100">
               <div class="card-header border-0 bg-transparent p-2">
                 <div class="d-flex justify-content-between align-items-center mb-2">
@@ -5361,133 +5331,192 @@
         mainContent.style.visibility = 'hidden';
       }
       
-      // Check if store was JUST selected (within last 3 seconds)
-      // If yes, keep backend store and hide modal
-      // If no, clear backend store and show modal
-      const storeSelectionTime = sessionStorage.getItem('store_selected_timestamp');
-      const now = Date.now();
-      const THREE_SECONDS = 3000;
-      const wasJustSelected = storeSelectionTime && (now - parseInt(storeSelectionTime)) < THREE_SECONDS;
-      
-      console.log('Store selection timestamp:', storeSelectionTime);
-      console.log('Time since selection:', storeSelectionTime ? (now - parseInt(storeSelectionTime)) + 'ms' : 'N/A');
-      console.log('Was just selected:', wasJustSelected);
-      
-      if (wasJustSelected) {
-        // Store was just selected - DON'T clear backend, just hide modal and show content
-        console.log('✅ Store was just selected - keeping backend store, hiding modal');
+      // Always check backend for store selection (don't rely on sessionStorage)
+      fetch('/api/check-store-required', {
+        method: 'GET',
+        credentials: 'same-origin'
+      })
+      .then(response => response.json())
+      .then(data => {
+        console.log('Backend store check response:', data);
         
-        // Clear the timestamp (it served its purpose)
-        sessionStorage.removeItem('store_selected_timestamp');
-        
-        // Hide modal and show content
-        window.STORE_MODAL_BLOCKING = false;
-        
-        const modal = document.getElementById('storeSelectionModal');
-        if (modal) {
-          modal.style.display = 'none';
-          modal.classList.remove('show');
-          modal.setAttribute('aria-hidden', 'true');
+        const currentBootId = window.AGT_SERVER_BOOT_ID || null;
+        let storedBootId = null;
+        try {
+          storedBootId = sessionStorage.getItem('server_boot_id');
+        } catch (storageErr) {
+          console.warn('⚠️ Unable to read stored server boot ID:', storageErr);
         }
+
+        const navigationEntry = (performance && typeof performance.getEntriesByType === 'function')
+          ? performance.getEntriesByType('navigation')[0]
+          : null;
+        const isReloadNavigation = navigationEntry
+          ? navigationEntry.type === 'reload'
+          : (performance && performance.navigation ? performance.navigation.type === 1 : false);
+
+        const serverRestartDetected = Boolean(currentBootId && storedBootId && storedBootId !== currentBootId);
+        const hardReloadRequested = Boolean(isReloadNavigation && !serverRestartDetected && sessionStorage.getItem('store_just_selected') !== 'true');
+
+        if (serverRestartDetected) {
+          console.log('♻️ Server restart detected (boot ID changed). Forcing store confirmation.');
+          sessionStorage.removeItem('store_just_selected');
+          sessionStorage.removeItem('store_selected_timestamp');
+          sessionStorage.removeItem('selected_store');
+        }
+
+        // Backend returns 'requires_store', not 'required'
+        const requiresStore = data.requires_store === true || data.required === true;
+        const storeName = data?.store || null;
         
-        document.querySelectorAll('.modal-backdrop').forEach(b => b.remove());
+        const forceShowModal = () => {
+          console.log('🔄 Forcing store modal to display...');
+
+          window.STORE_MODAL_BLOCKING = true;
+
+          const attemptShow = () => {
+            if (typeof window.showStoreSelectionModal === 'function') {
+              window.showStoreSelectionModal();
+            } else {
+              const modalElement = document.getElementById('storeSelectionModal');
+              if (modalElement) {
+                try {
+                  const modalInstance = (typeof bootstrap !== 'undefined')
+                    ? bootstrap.Modal.getOrCreateInstance(modalElement, { backdrop: 'static', keyboard: false })
+                    : null;
+                  modalElement.style.display = 'block';
+                  modalElement.classList.add('show');
+                  modalElement.setAttribute('aria-hidden', 'false');
+                  document.body.classList.add('modal-open');
+                  document.body.style.overflow = 'hidden';
+                  if (!document.querySelector('.modal-backdrop, #storeModalBackdrop')) {
+                    const backdrop = document.createElement('div');
+                    backdrop.id = 'storeModalBackdrop';
+                    backdrop.className = 'modal-backdrop fade show';
+                    backdrop.style.zIndex = '9998';
+                    document.body.appendChild(backdrop);
+                  }
+                  if (modalInstance) {
+                    modalInstance.show();
+                  }
+                } catch (err) {
+                  console.warn('⚠️ Failed to show modal via bootstrap, falling back:', err);
+                  setTimeout(attemptShow, 100);
+                  return;
+                }
+              } else {
+                setTimeout(attemptShow, 100);
+                return;
+              }
+            }
+
+            // Ensure main content remains visible but disabled behind modal
+            const mainContent = document.getElementById('mainContent');
+            if (mainContent) {
+              mainContent.style.display = 'block';
+              mainContent.style.visibility = 'visible';
+              mainContent.style.pointerEvents = 'none';
+              mainContent.classList.add('store-selection-disabled');
+            }
+          };
+
+          if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', attemptShow);
+          } else {
+            attemptShow();
+          }
+        };
+        
+        if (requiresStore || !storeName || serverRestartDetected || hardReloadRequested) {
+          if (requiresStore || !storeName) {
+            console.log('❗ No store selected in backend - showing modal');
+          } else if (serverRestartDetected) {
+            console.log('❗ Forcing modal due to server restart');
+          } else if (hardReloadRequested) {
+            console.log('❗ Hard reload detected - showing modal for store change');
+          }
+          try {
+            if (currentBootId) {
+              sessionStorage.setItem('server_boot_id', currentBootId);
+            }
+          } catch (storageErr) {
+            console.warn('⚠️ Unable to persist server boot ID before showing modal:', storageErr);
+          }
+          forceShowModal();
+          return;
+        }
+
+        console.log('✅ Backend reports existing store selection:', storeName, '- skipping modal');
+
+        // Persist most recent known store locally so other scripts can reference it without another fetch
+        try {
+          sessionStorage.setItem('selected_store', storeName);
+        } catch (storageErr) {
+          console.warn('⚠️ Unable to cache selected store in sessionStorage:', storageErr);
+        }
+
+        sessionStorage.removeItem('store_just_selected');
+        sessionStorage.removeItem('store_selected_timestamp');
+
+        window.STORE_MODAL_BLOCKING = false;
+
+        const modalElement = document.getElementById('storeSelectionModal');
+        if (modalElement) {
+          modalElement.style.display = 'none';
+          modalElement.classList.remove('show');
+          modalElement.setAttribute('aria-hidden', 'true');
+        }
+        document.querySelectorAll('.modal-backdrop, #storeModalBackdrop').forEach(b => b.remove());
         document.body.classList.remove('modal-open');
         document.body.style.overflow = '';
-        
+
         if (mainContent) {
           mainContent.style.display = 'block';
           mainContent.style.visibility = 'visible';
+          mainContent.style.pointerEvents = '';
+          mainContent.classList.remove('store-selection-disabled');
           mainContent.classList.add('store-selected', 'loaded');
-          console.log('✅ MAIN CONTENT SHOWN (store just selected)');
         }
-        
-        // Initialize TagManager now that store is selected
-        // Wait a moment for everything to settle, then initialize
-        setTimeout(() => {
-          if (window.TagManager && typeof window.TagManager.init === 'function') {
-            console.log('🔄 Initializing TagManager after store selection...');
-            window.TagManager.init();
-          } else {
-            console.log('⏳ TagManager not ready yet, will initialize when available');
+
+        if (typeof updateCurrentStoreDisplay === 'function') {
+          updateCurrentStoreDisplay(storeName);
+        }
+        if (typeof updateStoreStatus === 'function') {
+          updateStoreStatus(`Store: ${storeName.replace(/_/g, ' ')}`, 'active');
+        }
+
+        try {
+          if (currentBootId) {
+            sessionStorage.setItem('server_boot_id', currentBootId);
           }
-        }, 200);
+        } catch (storageErr) {
+          console.warn('⚠️ Unable to persist server boot ID after confirming store:', storageErr);
+        }
+      })
+      .catch(err => {
+        console.error('Error checking store status:', err);
+        // On error, default to showing modal (safer)
+        console.log('⚠️ Error checking store - defaulting to show modal');
+        window.STORE_MODAL_BLOCKING = true;
         
-      } else {
-        // NOT just selected - clear backend and show modal
-        console.log('🔄 NOT just selected - clearing backend store and showing modal');
-        
-        // Clear stale timestamps
-        sessionStorage.removeItem('store_selected_timestamp');
-        sessionStorage.removeItem('store_just_selected');
-        
-        fetch('/api/clear-store', {
-          method: 'POST',
-          credentials: 'same-origin'
-        })
-        .then(response => response.json())
-        .then(data => {
-          console.log('✅ Backend store cleared:', data);
-          
-          // Now show modal IMMEDIATELY after clearing
-          window.STORE_MODAL_BLOCKING = true;
-          console.log('🚫 BLOCKING TagManager initialization until store selected');
-          
-          const showModal = () => {
-            const modalElement = document.getElementById('storeSelectionModal');
-            
-            if (modalElement) {
-              modalElement.style.display = 'block';
-              modalElement.classList.add('show');
-              modalElement.setAttribute('aria-hidden', 'false');
-              document.body.classList.add('modal-open');
-              document.body.style.overflow = 'hidden';
-              
-              // Add backdrop
-              if (!document.querySelector('.modal-backdrop, #storeModalBackdrop')) {
-                const backdrop = document.createElement('div');
-                backdrop.id = 'storeModalBackdrop';
-                backdrop.className = 'modal-backdrop fade show';
-                backdrop.style.zIndex = '9998';
-                document.body.appendChild(backdrop);
-              }
-              
-              console.log('✅✅✅ MODAL FORCED VISIBLE (backend cleared) ✅✅✅');
-            } else {
-              console.log('⏳ Modal element not ready, retrying...');
-              setTimeout(showModal, 50);
-            }
-          };
-          
-          if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', showModal);
+        const showModal = () => {
+          const modalElement = document.getElementById('storeSelectionModal');
+          if (modalElement) {
+            modalElement.style.display = 'block';
+            modalElement.classList.add('show');
+            document.body.classList.add('modal-open');
+            document.body.style.overflow = 'hidden';
           } else {
-            showModal();
+            setTimeout(showModal, 50);
           }
-        })
-        .catch(err => {
-          console.error('Error clearing store:', err);
-          // Still show modal even if clear fails
-          window.STORE_MODAL_BLOCKING = true;
-          
-          const showModal = () => {
-            const modalElement = document.getElementById('storeSelectionModal');
-            if (modalElement) {
-              modalElement.style.display = 'block';
-              modalElement.classList.add('show');
-              document.body.classList.add('modal-open');
-              document.body.style.overflow = 'hidden';
-            } else {
-              setTimeout(showModal, 50);
-            }
-          };
-          
-          if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', showModal);
-          } else {
-            showModal();
-          }
-        });
-      }
+        };
+        
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', showModal);
+        } else {
+          showModal();
+        }
+      });
     })();
   </script>
   

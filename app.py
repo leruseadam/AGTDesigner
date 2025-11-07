@@ -112,6 +112,9 @@ def safe_load_file_with_timeout(processor, file_path, timeout_seconds=30):
         return False
     finally:
         signal.alarm(0)  # Ensure timeout is cancelled
+# Unique identifier for current Flask process instance (used for store modal resets)
+SERVER_BOOT_ID = f"{int(time.time())}-{os.getpid()}"
+
 LAZY_LOADING_ENABLED = True  # Enable lazy loading for better performance
 
 # Browser-based store persistence (handled by frontend JavaScript)
@@ -2174,7 +2177,8 @@ def index():
                              cache_bust=cache_bust,
                              user_has_store=user_has_store,
                              current_store=current_store,
-                             uploaded_filename=uploaded_filename)
+                             uploaded_filename=uploaded_filename,
+                             server_boot_id=SERVER_BOOT_ID)
         
     except Exception as e:
         logging.error(f"Error in index route: {str(e)}")
@@ -2184,7 +2188,7 @@ def index():
         user_has_store = False
         current_store = None
         uploaded_filename = ''
-        return render_template('index.html', error=str(e), cache_bust=cache_bust, user_has_store=user_has_store, current_store=current_store, uploaded_filename=uploaded_filename)
+        return render_template('index.html', error=str(e), cache_bust=cache_bust, user_has_store=user_has_store, current_store=current_store, uploaded_filename=uploaded_filename, server_boot_id=SERVER_BOOT_ID)
 
 @app.route('/splash')
 def splash():
@@ -2194,7 +2198,7 @@ def splash():
 @app.route('/debug-template')
 def debug_template():
     """Debug route to test template loading."""
-    return render_template('index.html', debug_message="DEBUG TEMPLATE ROUTE WORKING")
+    return render_template('index.html', debug_message="DEBUG TEMPLATE ROUTE WORKING", server_boot_id=SERVER_BOOT_ID)
 
 @app.route('/generation-splash')
 def generation_splash():

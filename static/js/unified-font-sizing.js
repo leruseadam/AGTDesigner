@@ -93,7 +93,17 @@ class UnifiedFontSizing {
   
   adjustFontSize(element) {
     if (!element || !element.textContent) return;
-    
+
+    const isTagListText = element.classList.contains('tag-name') ||
+      element.classList.contains('tag-entry') ||
+      element.closest('#availableTags, #selectedTags, .tag-list-container');
+
+    if (isTagListText) {
+      element.style.removeProperty('font-size');
+      element.style.removeProperty('--dynamic-font-size');
+      return;
+    }
+
     const container = this.getContainer(element);
     const text = element.textContent.trim();
     
