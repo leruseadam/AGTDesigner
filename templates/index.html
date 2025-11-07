@@ -107,7 +107,9 @@
         if (data.success) {
           console.log('✅ Store set successfully:', storeValue);
           
-          // Set flag to prevent modal from re-appearing during reload
+          // Set timestamp to prevent modal from re-appearing immediately after reload
+          // This timestamp is checked on page load - if within 3 seconds, backend won't be cleared
+          sessionStorage.setItem('store_selected_timestamp', Date.now().toString());
           sessionStorage.setItem('store_just_selected', 'true');
           sessionStorage.setItem('selected_store', storeValue);
           
@@ -4653,13 +4655,17 @@
     /* Three Column Layout - Equal Heights */
     /* Force all three columns to have equal height and prevent center column from being taller */
     .d-flex[style*="gap: 6rem"],
-    .d-flex[style*="gap: 4rem"] {
+    .d-flex[style*="gap: 4rem"],
+    .d-flex[style*="gap: 0.75rem"],
+    .d-flex[style*="gap: 0.5rem"] {
       align-items: stretch !important;
     }
 
     /* Center column should match height of side columns */
     .d-flex[style*="gap: 6rem"] > div[data-container-type="center"],
-    .d-flex[style*="gap: 4rem"] > div[data-container-type="center"] {
+    .d-flex[style*="gap: 4rem"] > div[data-container-type="center"],
+    .d-flex[style*="gap: 0.75rem"] > div[data-container-type="center"],
+    .d-flex[style*="gap: 0.5rem"] > div[data-container-type="center"] {
       display: flex !important;
       flex-direction: column !important;
       height: 100% !important;
@@ -4679,7 +4685,11 @@
     .d-flex[style*="gap: 6rem"] > div[data-container-type="available"],
     .d-flex[style*="gap: 6rem"] > div[data-container-type="selected"],
     .d-flex[style*="gap: 4rem"] > div[data-container-type="available"],
-    .d-flex[style*="gap: 4rem"] > div[data-container-type="selected"] {
+    .d-flex[style*="gap: 4rem"] > div[data-container-type="selected"],
+    .d-flex[style*="gap: 0.75rem"] > div[data-container-type="available"],
+    .d-flex[style*="gap: 0.75rem"] > div[data-container-type="selected"],
+    .d-flex[style*="gap: 0.5rem"] > div[data-container-type="available"],
+    .d-flex[style*="gap: 0.5rem"] > div[data-container-type="selected"] {
       min-height: 600px !important;
       max-height: calc(100vh - 400px) !important;
     }
@@ -5097,7 +5107,7 @@
           </div>
           
           <!-- Center Column with Controls -->
-          <div class="mb-2 mt-0 d-flex flex-column justify-content-start align-items-center" style="flex: 0 0 auto; margin-left: 3rem; margin-right: 3rem;" data-container-type="center">
+          <div class="mb-2 mt-0 d-flex flex-column justify-content-start align-items-center" style="flex: 0 0 auto;" data-container-type="center">
             <!-- Controls -->
             <div class="control-panel" style="width: 100%;">
               <!-- Template Section -->
@@ -5329,12 +5339,12 @@
     </div>
   </div>
   
-  <!-- MODAL CONTROL - Forces modal on hard refresh/server restart -->
+  <!-- MODAL CONTROL - Checks backend on every page load -->
   <script>
     // ===== MODAL CONTROL - RUNS IMMEDIATELY ON PAGE LOAD =====
-    // FIXED: Clear backend store if sessionStorage flag doesn't exist (hard refresh/restart)
+    // FIXED: Always check backend instead of relying on sessionStorage
     (function() {
-      console.log('🚀 FIRST SCRIPT - Modal control starting');
+      console.log('🚀 FIRST SCRIPT - Modal control starting (checking backend)');
       
       // CRITICAL: Hide main content initially until we know store status
       const mainContent = document.getElementById('mainContent');
@@ -5343,28 +5353,30 @@
         mainContent.style.visibility = 'hidden';
       }
       
-      // Check if this is a fresh load (hard refresh or server restart)
-      // sessionStorage gets cleared on hard refresh, so no flag = fresh load
-      const storeJustSelected = sessionStorage.getItem('store_just_selected');
-      console.log('sessionStorage store_just_selected:', storeJustSelected);
-      
-      if (!storeJustSelected) {
-        // FRESH LOAD (hard refresh/server restart) - CLEAR BACKEND AND FORCE MODAL
-        console.log('🔄 FRESH LOAD detected - clearing backend store and showing modal');
+      // Always check backend for store selection (don't rely on sessionStorage)
+      fetch('/api/check-store-required', {
+        method: 'GET',
+        credentials: 'same-origin'
+      })
+      .then(response => response.json())
+      .then(data => {
+        console.log('Backend store check response:', data);
         
-        // Clear backend store selection first
-        fetch('/api/clear-store', {
-          method: 'POST',
-          credentials: 'same-origin'
-        })
-        .then(() => {
-          console.log('✅ Backend store cleared');
+        // Backend returns 'requires_store', not 'required'
+        const requiresStore = data.requires_store === true || data.required === true;
+        
+        if (requiresStore) {
+          // No store selected - SHOW MODAL
+          console.log('❗ No store selected in backend - SHOWING MODAL');
           
-          // Now show modal
+          // Set blocking flag
           window.STORE_MODAL_BLOCKING = true;
+          console.log('🚫 BLOCKING TagManager initialization until store selected');
           
+          // Show modal
           const showModal = () => {
             const modalElement = document.getElementById('storeSelectionModal');
+            const mainContent = document.getElementById('mainContent');
             
             if (modalElement) {
               modalElement.style.display = 'block';
@@ -5382,127 +5394,82 @@
                 document.body.appendChild(backdrop);
               }
               
-              console.log('✅✅✅ MODAL FORCED VISIBLE (fresh load) ✅✅✅');
+              console.log('✅✅✅ MODAL IS NOW VISIBLE ✅✅✅');
             } else {
               console.log('⏳ Modal element not ready, retrying...');
               setTimeout(showModal, 50);
-            }
-          };
-          
-          if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', showModal);
-          } else {
-            showModal();
-          }
-        })
-        .catch(err => {
-          console.error('Error clearing store:', err);
-          // Still show modal even if clear fails
-          window.STORE_MODAL_BLOCKING = true;
-          
-          const showModal = () => {
-            const modalElement = document.getElementById('storeSelectionModal');
-            if (modalElement) {
-              modalElement.style.display = 'block';
-              modalElement.classList.add('show');
-              document.body.classList.add('modal-open');
-              document.body.style.overflow = 'hidden';
-            } else {
-              setTimeout(showModal, 50);
-            }
-          };
-          
-          if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', showModal);
-          } else {
-            showModal();
-          }
-        });
-        
-      } else {
-        // SAME SESSION - Check backend (but don't clear it)
-        console.log('✅ Same session - checking backend for store');
-        
-        fetch('/api/check-store-required', {
-          method: 'GET',
-          credentials: 'same-origin'
-        })
-        .then(response => response.json())
-        .then(data => {
-          console.log('Backend store check response:', data);
-          
-          const requiresStore = data.requires_store === true || data.required === true;
-          
-          if (requiresStore) {
-            // No store in backend - show modal
-            console.log('❗ No store in backend - SHOWING MODAL');
-            window.STORE_MODAL_BLOCKING = true;
-            
-            const showModal = () => {
-              const modalElement = document.getElementById('storeSelectionModal');
-              if (modalElement) {
-                modalElement.style.display = 'block';
-                modalElement.classList.add('show');
-                document.body.classList.add('modal-open');
-                document.body.style.overflow = 'hidden';
-              } else {
-                setTimeout(showModal, 50);
-              }
-            };
-            
-            if (document.readyState === 'loading') {
-              document.addEventListener('DOMContentLoaded', showModal);
-            } else {
-              showModal();
+              return;
             }
             
-          } else {
-            // Store exists - hide modal and show content
-            console.log('✅ Store found in backend - hiding modal');
-            window.STORE_MODAL_BLOCKING = false;
-            
-            const modal = document.getElementById('storeSelectionModal');
-            if (modal) {
-              modal.style.display = 'none';
-              modal.classList.remove('show');
-              modal.setAttribute('aria-hidden', 'true');
-            }
-            
-            document.querySelectorAll('.modal-backdrop').forEach(b => b.remove());
-            document.body.classList.remove('modal-open');
-            document.body.style.overflow = '';
-            
+            // Hide main content
             if (mainContent) {
-              mainContent.style.display = 'block';
-              mainContent.style.visibility = 'visible';
-              mainContent.classList.add('store-selected', 'loaded');
-            }
-          }
-        })
-        .catch(err => {
-          console.error('Error checking store:', err);
-          // On error, default to showing modal
-          window.STORE_MODAL_BLOCKING = true;
-          
-          const showModal = () => {
-            const modalElement = document.getElementById('storeSelectionModal');
-            if (modalElement) {
-              modalElement.style.display = 'block';
-              modalElement.classList.add('show');
-              document.body.classList.add('modal-open');
-              document.body.style.overflow = 'hidden';
-            } else {
-              setTimeout(showModal, 50);
+              mainContent.style.display = 'none';
+              mainContent.style.visibility = 'hidden';
+              console.log('🚫 MAIN CONTENT HIDDEN');
             }
           };
           
+          // Show modal when DOM ready
           if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', showModal);
           } else {
             showModal();
           }
-        });
-      }
+          
+        } else {
+          // Store is selected - HIDE MODAL
+          console.log('✅ Store is selected in backend - hiding modal');
+          
+          // Clear blocking flag
+          window.STORE_MODAL_BLOCKING = false;
+          console.log('✅ STORE_MODAL_BLOCKING cleared - TagManager can initialize');
+          
+          // Hide modal
+          const modal = document.getElementById('storeSelectionModal');
+          if (modal) {
+            modal.style.display = 'none';
+            modal.classList.remove('show');
+            modal.setAttribute('aria-hidden', 'true');
+          }
+          
+          // Remove backdrops
+          document.querySelectorAll('.modal-backdrop').forEach(b => b.remove());
+          document.body.classList.remove('modal-open');
+          document.body.style.overflow = '';
+          
+          // Show main content
+          if (mainContent) {
+            mainContent.style.display = 'block';
+            mainContent.style.visibility = 'visible';
+            mainContent.classList.add('store-selected', 'loaded');
+            console.log('✅ MAIN CONTENT SHOWN');
+          }
+        }
+      })
+      .catch(err => {
+        console.error('Error checking store status:', err);
+        // On error, default to showing modal (safer)
+        console.log('⚠️ Error checking store - defaulting to show modal');
+        window.STORE_MODAL_BLOCKING = true;
+        
+        const showModal = () => {
+          const modalElement = document.getElementById('storeSelectionModal');
+          if (modalElement) {
+            modalElement.style.display = 'block';
+            modalElement.classList.add('show');
+            document.body.classList.add('modal-open');
+            document.body.style.overflow = 'hidden';
+          } else {
+            setTimeout(showModal, 50);
+          }
+        };
+        
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', showModal);
+        } else {
+          showModal();
+        }
+      });
     })();
   </script>
   
