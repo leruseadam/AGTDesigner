@@ -10,14 +10,22 @@ import json
 from io import BytesIO
 from typing import List, Dict, Any, Optional
 from functools import lru_cache
-from cachetools import TTLCache
 from docx import Document
 
 logger = logging.getLogger(__name__)
 
-# Global caches
-_generation_cache = TTLCache(maxsize=100, ttl=300)  # 5-minute cache
+# Try to import cachetools, fall back to simple dict if not available
+try:
+    from cachetools import TTLCache
+    _generation_cache = TTLCache(maxsize=100, ttl=300)  # 5-minute cache
+    HAS_CACHETOOLS = True
+except ImportError:
+    logger.warning("cachetools not available, using simple dict cache (install with: pip install cachetools)")
+    _generation_cache = {}  # Simple dict fallback
+    HAS_CACHETOOLS = False
+
 _template_buffer_cache = {}  # Persistent cache for template buffers
+_cache_timestamps = {}  # Track cache entry times for manual TTL
 
 
 class FastGenerationEngine:
@@ -76,6 +84,14 @@ class FastGenerationEngine:
         # Check cache first
         cache_key = self._get_cache_key(records, template_type, scale_factor)
         
+        # Handle manual TTL for simple dict cache
+        if not HAS_CACHETOOLS and cache_key in _generation_cache:
+            cache_age = time.time() - _cache_timestamps.get(cache_key, 0)
+            if cache_age > 300:  # 5 minute TTL
+                logger.info(f"⚡ CACHE EXPIRED: Removing stale entry (age: {cache_age:.1f}s)")
+                del _generation_cache[cache_key]
+                del _cache_timestamps[cache_key]
+        
         if cache_key in _generation_cache:
             self.cache_hits += 1
             logger.info(f"⚡ CACHE HIT: Returning cached generation for {len(records)} records")
@@ -96,12 +112,38 @@ class FastGenerationEngine:
         buffer.seek(0)
         _generation_cache[cache_key] = buffer.getvalue()
         
+        # Track timestamp for manual TTL
+        if not HAS_CACHETOOLS:
+            _cache_timestamps[cache_key] = time.time()
+            # Clean up old entries if cache is too large
+            if len(_generation_cache) > 100:
+                self._cleanup_cache()
+        
         generation_time = time.time() - start_time
         logger.info(f"⚡ Generation completed in {generation_time:.2f}s (cache hit rate: {self._get_hit_rate():.1f}%)")
         
         # Return the document
         buffer.seek(0)
         return Document(buffer)
+    
+    def _cleanup_cache(self):
+        """Clean up old cache entries when using simple dict"""
+        if HAS_CACHETOOLS:
+            return  # TTLCache handles this automatically
+        
+        current_time = time.time()
+        expired_keys = [
+            key for key, timestamp in _cache_timestamps.items()
+            if current_time - timestamp > 300
+        ]
+        
+        for key in expired_keys:
+            if key in _generation_cache:
+                del _generation_cache[key]
+            if key in _cache_timestamps:
+                del _cache_timestamps[key]
+        
+        logger.info(f"⚡ Cache cleanup: Removed {len(expired_keys)} expired entries")
     
     def _get_hit_rate(self) -> float:
         """Calculate cache hit rate"""
