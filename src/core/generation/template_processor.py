@@ -1737,8 +1737,8 @@ class TemplateProcessor:
                         f"🎯 MINI CLASSIC BRAND: Preserving ProductBrand '{classic_brand_text}' for classic type '{product_type}'"
                     )
                 else:
-            label_context['ProductBrand'] = ""
-            label_context['ProductBrand_Center'] = ""
+                    label_context['ProductBrand'] = ""
+                    label_context['ProductBrand_Center'] = ""
                     self.logger.info(
                         f"🎯 MINI CLASSIC BRAND: No brand available to preserve for classic type '{product_type}'"
                     )
