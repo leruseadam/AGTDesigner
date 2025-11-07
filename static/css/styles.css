@@ -455,13 +455,13 @@ canvas#lava-lamp-canvas {
 /* Dynamic viewport height support so layout adapts when DevTools/keyboard open */
 @supports (height: 100svh) {
   :root {
-    --tag-list-height: 55svh;
+    --tag-list-height: 75svh;
     --center-panel-height: 90svh;
   }
 }
 @supports (height: 100dvh) {
   :root {
-    --tag-list-height: 55dvh;
+    --tag-list-height: 75dvh;
     --center-panel-height: 90dvh;
   }
 }
@@ -483,11 +483,11 @@ canvas#lava-lamp-canvas {
 /* Short-viewport optimizations (e.g., when console is open) */
 @media (max-height: 700px) {
   :root {
-    --tag-list-height: 50vh;
+    --tag-list-height: 65vh;
     --center-panel-height: 70vh;
   }
   @supports (height: 100dvh) {
-    :root { --tag-list-height: 50dvh; --center-panel-height: 70dvh; }
+    :root { --tag-list-height: 65dvh; --center-panel-height: 70dvh; }
   }
   .control-panel,
   .center-panel,
@@ -536,7 +536,7 @@ canvas#lava-lamp-canvas {
     --tag-list-column-width: 5.1;   /* Bootstrap columns (1-12) - can use decimals */
     
     /* Height Variables - Flexible for natural layout */
-    --tag-list-height: 55vh;        /* Height of tag list containers */
+    --tag-list-height: 75vh;        /* Height of tag list containers */
     --filter-height: auto;           /* Height of filter bar (auto or specific px) */
     --center-panel-height: 90vh;     /* Height of center control panel (auto or specific px) */
   }
@@ -1740,9 +1740,9 @@ canvas#lava-lamp-canvas {
   #availableTags {
     margin: 0 !important;
     padding: 0 !important;
-    height: 55vh !important;
-    min-height: 55vh !important;
-    max-height: 55vh !important;
+    height: 75vh !important;
+    min-height: 75vh !important;
+    max-height: 75vh !important;
     overflow-y: auto !important;
     overflow-x: hidden !important;
     display: block !important;
@@ -1759,9 +1759,9 @@ canvas#lava-lamp-canvas {
   #selectedTags {
     margin: 0 !important;
     padding: 0 !important;
-    height: 55vh !important;
-    min-height: 55vh !important;
-    max-height: 55vh !important;
+    height: 75vh !important;
+    min-height: 75vh !important;
+    max-height: 75vh !important;
     overflow-y: auto !important;
     overflow-x: hidden !important;
     display: block !important;
