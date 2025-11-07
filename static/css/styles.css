@@ -483,11 +483,11 @@ canvas#lava-lamp-canvas {
 /* Short-viewport optimizations (e.g., when console is open) */
 @media (max-height: 700px) {
   :root {
-    --tag-list-height: 65vh;
+    --tag-list-height: 60vh;
     --center-panel-height: 70vh;
   }
   @supports (height: 100dvh) {
-    :root { --tag-list-height: 65dvh; --center-panel-height: 70dvh; }
+    :root { --tag-list-height: 60dvh; --center-panel-height: 70dvh; }
   }
   .control-panel,
   .center-panel,
@@ -1740,9 +1740,8 @@ canvas#lava-lamp-canvas {
   #availableTags {
     margin: 0 !important;
     padding: 0 !important;
-    height: 75vh !important;
-    min-height: 75vh !important;
-    max-height: 75vh !important;
+    height: 80vh !important;
+    min-height: 80vh !important;
     overflow-y: auto !important;
     overflow-x: hidden !important;
     display: block !important;
@@ -1759,9 +1758,9 @@ canvas#lava-lamp-canvas {
   #selectedTags {
     margin: 0 !important;
     padding: 0 !important;
-    height: 75vh !important;
-    min-height: 75vh !important;
-    max-height: 75vh !important;
+    height: 80vh !important;
+    min-height: 80vh !important;
+    max-height: none !important;
     overflow-y: auto !important;
     overflow-x: hidden !important;
     display: block !important;
@@ -6288,12 +6287,16 @@ canvas#lava-lamp-canvas {
     border: 1.5px solid rgba(160, 132, 232, 0.3) !important;
     transition: all 0.3s cubic-bezier(0.4,0,0.2,1) !important;
     padding: 0.5rem 0.75rem !important;
+    padding-right: 2rem !important; /* Extra space for dropdown arrow */
     backdrop-filter: blur(10px) !important;
     -webkit-backdrop-filter: blur(10px) !important;
-    width: 100% !important; /* Full width of container */
-    min-width: 0 !important; /* Allow shrinking */
+    min-width: 140px !important; /* Minimum width to fit "All" text and arrow */
+    white-space: nowrap !important; /* Prevent text wrapping */
+    overflow: visible !important; /* Allow dropdown to expand */
+    text-overflow: clip !important;
+    width: auto !important; /* Auto width based on content */
     max-width: none !important; /* Remove max-width constraints */
-    flex-shrink: 1 !important; /* Allow shrinking */
+    flex: 1 1 auto !important; /* Flex grow and shrink */
     box-sizing: border-box !important;
   }
 

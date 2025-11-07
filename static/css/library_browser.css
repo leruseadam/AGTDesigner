@@ -65,12 +65,27 @@ body {
     border-radius: 8px;
     font-weight: 600;
     transition: all 0.3s ease;
+    padding: 0.5rem 1rem !important; /* Increased padding for better text fit */
+    min-width: 80px !important; /* Minimum width to fit "All" text */
+    white-space: nowrap !important; /* Prevent text wrapping */
 }
 
 .search-filter-section .btn:hover {
     background: linear-gradient(135deg, rgba(160, 132, 232, 0.9), rgba(160, 132, 232, 0.7));
     transform: translateY(-2px);
     box-shadow: 0 4px 15px rgba(160, 132, 232, 0.3);
+}
+
+/* Filter button group styling */
+.search-filter-section .btn-group {
+    width: 100%;
+    display: flex;
+    gap: 0.5rem;
+}
+
+.search-filter-section .btn-group .btn {
+    flex: 1;
+    min-width: 100px !important; /* Ensure each button has enough space */
 }
 
 /* Statistics Cards */
