@@ -457,10 +457,10 @@ def load_and_cleanup_on_startup():
 # Uncomment ONE of the following:
 
 # Force store selection on every server restart:
-clear_all_on_startup()
+# clear_all_on_startup()
 
 # OR keep 12-hour persistence across restarts:
-# load_and_cleanup_on_startup()
+load_and_cleanup_on_startup()
 
 def get_client_ip():
     """Get the client's IP address."""
