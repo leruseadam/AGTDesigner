@@ -944,16 +944,24 @@ def get_excel_processor():
                     
                     if session_file_path and os.path.exists(session_file_path):
                         logging.info(f"✅ CRITICAL FIX: Found uploaded file in session: {session_file_path}")
-                        # Load the uploaded file instead of clearing the DataFrame
-                        success = _excel_processor.load_file(session_file_path)
-                        if success:
-                            _excel_processor._last_loaded_file = session_file_path
-                            logging.info(f"✅ CRITICAL FIX: Successfully loaded session file: {session_file_path}")
-                            row_count = len(_excel_processor.df) if hasattr(_excel_processor, 'df') and _excel_processor.df is not None else 0
-                            logging.info(f"✅ Loaded {row_count} rows from session file")
+                        
+                        # Check if already loaded to avoid reprocessing
+                        if _excel_processor._last_loaded_file == session_file_path and hasattr(_excel_processor, 'df') and _excel_processor.df is not None and not _excel_processor.df.empty:
+                            logging.info(f"⚡ File already loaded, skipping reload: {session_file_path}")
+                            row_count = len(_excel_processor.df)
+                            logging.info(f"✅ Using cached data: {row_count} rows")
                         else:
-                            logging.error(f"❌ CRITICAL FIX: Failed to load session file: {session_file_path}")
-                            _excel_processor.df = pd.DataFrame()  # Fallback to empty DataFrame
+                            # Load the uploaded file instead of clearing the DataFrame
+                            logging.info(f"📂 Loading session file: {session_file_path}")
+                            success = _excel_processor.load_file(session_file_path)
+                            if success:
+                                _excel_processor._last_loaded_file = session_file_path
+                                logging.info(f"✅ CRITICAL FIX: Successfully loaded session file: {session_file_path}")
+                                row_count = len(_excel_processor.df) if hasattr(_excel_processor, 'df') and _excel_processor.df is not None else 0
+                                logging.info(f"✅ Loaded {row_count} rows from session file")
+                            else:
+                                logging.error(f"❌ CRITICAL FIX: Failed to load session file: {session_file_path}")
+                                _excel_processor.df = pd.DataFrame()  # Fallback to empty DataFrame
                     elif session_file_path:
                         logging.error(f"❌ Session file_path exists but file not found: {session_file_path}")
                     else:
