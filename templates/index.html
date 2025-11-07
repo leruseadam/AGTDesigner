@@ -4332,7 +4332,7 @@
     }
 
     .app-loading-title {
-      font-size: 64px; /* Much larger - was 42px */
+      font-size: 54px; /* Slightly smaller for better balance */
       font-weight: 800;
       margin-bottom: 20px; /* More space */
       background: linear-gradient(135deg, #00d4aa, #ffffff);
@@ -4349,11 +4349,11 @@
     }
 
     .app-loading-subtitle {
-      font-size: 24px; /* Larger - was 18px */
+      font-size: 16px; /* Smaller to fit on one line - was 24px */
       font-weight: 600;
       opacity: 1;
       margin-bottom: 50px; /* More space */
-      letter-spacing: 2px; /* More spacing */
+      letter-spacing: 1.5px; /* Reduced spacing to fit on one line */
       text-transform: uppercase;
       text-shadow: 
         0 2px 6px rgba(0,0,0,0.4),
@@ -4577,6 +4577,7 @@
     /* Hide main content until store is selected */
     .main-content {
       display: none !important;
+      padding-bottom: 2rem !important; /* Small gutter at bottom */
     }
 
     .main-content.store-selected {
@@ -4634,6 +4635,95 @@
       50% { 
         transform: scale(1.2) rotate(180deg); 
         opacity: 0.8;
+      }
+    }
+
+    /* Three Column Layout - Equal Heights */
+    /* Force all three columns to have equal height and prevent center column from being taller */
+    .d-flex[style*="gap: 4rem"] {
+      align-items: stretch !important;
+    }
+
+    /* Center column should match height of side columns */
+    .d-flex[style*="gap: 4rem"] > div[data-container-type="center"] {
+      display: flex !important;
+      flex-direction: column !important;
+      height: 100% !important;
+    }
+
+    /* Control panel should fill available space and scroll if needed */
+    .control-panel {
+      display: flex !important;
+      flex-direction: column !important;
+      height: 100% !important;
+      max-height: 100% !important;
+      overflow-y: auto !important;
+      overflow-x: hidden !important;
+    }
+
+    /* Side columns (Available & Selected Tags) should set the height */
+    .d-flex[style*="gap: 4rem"] > div[data-container-type="available"],
+    .d-flex[style*="gap: 4rem"] > div[data-container-type="selected"] {
+      min-height: 600px !important;
+      max-height: calc(100vh - 400px) !important;
+    }
+
+    /* Ensure glass cards in side columns fill their containers */
+    div[data-container-type="available"] .glass-card,
+    div[data-container-type="selected"] .glass-card {
+      height: 100% !important;
+      display: flex !important;
+      flex-direction: column !important;
+    }
+
+    /* Center column should never exceed side column height */
+    div[data-container-type="center"] {
+      min-height: 600px !important;
+      max-height: calc(100vh - 400px) !important;
+    }
+
+    /* Responsive height adjustments for smaller screens */
+    @media (max-height: 900px) {
+      .d-flex[style*="gap: 4rem"] > div[data-container-type="available"],
+      .d-flex[style*="gap: 4rem"] > div[data-container-type="selected"],
+      div[data-container-type="center"] {
+        min-height: 500px !important;
+        max-height: calc(100vh - 300px) !important;
+      }
+    }
+
+    @media (max-height: 768px) {
+      .d-flex[style*="gap: 4rem"] > div[data-container-type="available"],
+      .d-flex[style*="gap: 4rem"] > div[data-container-type="selected"],
+      div[data-container-type="center"] {
+        min-height: 400px !important;
+        max-height: calc(100vh - 250px) !important;
+      }
+    }
+
+    @media (max-height: 600px) {
+      .d-flex[style*="gap: 4rem"] > div[data-container-type="available"],
+      .d-flex[style*="gap: 4rem"] > div[data-container-type="selected"],
+      div[data-container-type="center"] {
+        min-height: 350px !important;
+        max-height: calc(100vh - 200px) !important;
+      }
+    }
+
+    /* Mobile responsive - stack columns vertically on small screens */
+    @media (max-width: 768px) {
+      .d-flex[style*="gap: 4rem"] {
+        flex-direction: column !important;
+        gap: 1rem !important;
+      }
+
+      .d-flex[style*="gap: 4rem"] > div[data-container-type="available"],
+      .d-flex[style*="gap: 4rem"] > div[data-container-type="selected"],
+      div[data-container-type="center"] {
+        max-width: 100% !important;
+        width: 100% !important;
+        min-height: 300px !important;
+        max-height: 400px !important;
       }
     }
 
@@ -6668,53 +6758,8 @@
     function initializeTagManagerSafely() {
       console.log('🚀 initializeTagManagerSafely called');
       
-      // CRITICAL FIX: For web users, ALWAYS show modal unless store was selected in THIS session
-      const storeJustSelected = sessionStorage.getItem('store_just_selected');
-      if (!storeJustSelected) {
-        console.log('🔄 Initial page load - FORCING MODAL because no sessionStorage flag...');
-        // Clear backend session AND force show modal
-        fetch('/api/clear-store', {
-          method: 'POST',
-          credentials: 'same-origin'
-        }).then(() => {
-          console.log('✅ Old session cleared');
-        }).catch(err => {
-          console.error('⚠️ Failed to clear session:', err);
-        }).finally(() => {
-          // FORCE show modal immediately - don't wait for backend check
-          console.log('🎯 FORCING MODAL DISPLAY NOW');
-          const modalElement = document.getElementById('storeSelectionModal');
-          const mainContent = document.getElementById('mainContent');
-          
-          if (modalElement) {
-            modalElement.style.display = 'block';
-            modalElement.classList.add('show');
-            document.body.classList.add('modal-open');
-            document.body.style.overflow = 'hidden';
-            
-            // Add backdrop
-            if (!document.querySelector('.modal-backdrop, #storeModalBackdrop')) {
-              const backdrop = document.createElement('div');
-              backdrop.id = 'storeModalBackdrop';
-              backdrop.className = 'modal-backdrop fade show';
-              backdrop.style.zIndex = '9998';
-              document.body.appendChild(backdrop);
-            }
-            
-            console.log('✅ MODAL FORCED TO SHOW');
-          }
-          
-          if (mainContent) {
-            mainContent.style.display = 'none';
-            console.log('✅ MAIN CONTENT HIDDEN');
-          }
-        });
-        return; // Don't proceed with normal flow
-      } else {
-        // Store was selected in this session, proceed normally
-        console.log('✅ Store already selected in this session');
-        proceedWithStoreCheck();
-      }
+      // Modal forcing is now handled by IIFE above, just proceed with store check
+      proceedWithStoreCheck();
       
       function proceedWithStoreCheck() {
         // Check store FIRST before initializing tags
@@ -6734,6 +6779,63 @@
         }
       }
     }
+    
+    // ===== FORCE STORE MODAL IMMEDIATELY ON FRESH LOADS =====
+    // This runs BEFORE TagManager initialization to ensure modal shows first
+    (function() {
+      console.log('🚀 IMMEDIATE STORE CHECK (runs before everything)');
+      const storeJustSelected = sessionStorage.getItem('store_just_selected');
+      
+      if (!storeJustSelected) {
+        console.log('❗ NO sessionStorage flag - FORCING MODAL NOW');
+        
+        // Clear backend session
+        fetch('/api/clear-store', {
+          method: 'POST',
+          credentials: 'same-origin'
+        }).catch(err => console.error('Clear session error:', err));
+        
+        // IMMEDIATELY force modal visible
+        const showModalNow = () => {
+          const modalElement = document.getElementById('storeSelectionModal');
+          const mainContent = document.getElementById('mainContent');
+          
+          if (modalElement) {
+            modalElement.style.display = 'block';
+            modalElement.classList.add('show');
+            document.body.classList.add('modal-open');
+            document.body.style.overflow = 'hidden';
+            
+            // Add backdrop
+            if (!document.querySelector('.modal-backdrop, #storeModalBackdrop')) {
+              const backdrop = document.createElement('div');
+              backdrop.id = 'storeModalBackdrop';
+              backdrop.className = 'modal-backdrop fade show';
+              backdrop.style.zIndex = '9998';
+              document.body.appendChild(backdrop);
+            }
+            
+            console.log('✅ MODAL FORCED VISIBLE AT PAGE START');
+          } else {
+            // Modal element not ready yet, retry
+            setTimeout(showModalNow, 50);
+          }
+          
+          if (mainContent) {
+            mainContent.style.display = 'none';
+          }
+        };
+        
+        // Try immediately, and retry if needed
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', showModalNow);
+        } else {
+          showModalNow();
+        }
+      } else {
+        console.log('✅ Store was selected in this session - modal will be controlled normally');
+      }
+    })();
     
     // Start waiting for TagManager to load
     waitForTagManagerAndInit();
