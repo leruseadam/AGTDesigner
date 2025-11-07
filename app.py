@@ -5455,6 +5455,32 @@ def _replace_json_tags_with_database_data(selected_tags, product_db):
         logging.error(f"Error replacing JSON tags with database data: {e}")
         return selected_tags  # Return original tags if enhancement fails
 
+@app.route('/api/generation-progress', methods=['GET'])
+def get_generation_progress():
+    """Get current generation progress"""
+    try:
+        from src.core.generation.fast_generation import get_generation_stats
+        stats = get_generation_stats()
+        return jsonify({
+            'success': True,
+            'stats': stats
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/clear-generation-cache', methods=['POST'])
+def clear_generation_cache():
+    """Clear generation cache"""
+    try:
+        from src.core.generation.fast_generation import clear_all_caches
+        clear_all_caches()
+        return jsonify({
+            'success': True,
+            'message': 'Generation cache cleared'
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/generate', methods=['POST'])
 @performance_monitor if PERFORMANCE_ENABLED else lambda x: x
 def generate_labels():
@@ -5833,12 +5859,17 @@ def generate_labels():
                     logging.info(f"🔍 VALIDATION DEBUG: About to validate {len(normalized_tags)} normalized tags")
                     logging.info(f"🔍 VALIDATION DEBUG: First 10 tags: {normalized_tags[:10]}")
                     
+                    # ⚡ PERFORMANCE: Use batched querier for better performance
+                    from src.core.generation.fast_generation import BatchedDatabaseQuerier
+                    batched_querier = BatchedDatabaseQuerier(product_db)
+                    
                     # Use fuzzy matching for JSON matched sessions
                     if is_json_matched_session:
                         logging.info(f"🔍 JSON SESSION: Using fuzzy matching for better JSON abbreviation handling")
                         db_records = product_db.get_products_by_names_with_fuzzy(normalized_tags)
                     else:
-                        db_records = product_db.get_products_by_names(normalized_tags)
+                        # ⚡ PERFORMANCE: Use batched query instead of individual lookups
+                        db_records = batched_querier.get_products_batch(normalized_tags, batch_size=100)
                     
                     logging.info(f"🔍 VALIDATION DEBUG: Database lookup returned {len(db_records)} records")
                     
@@ -6371,6 +6402,10 @@ def generate_labels():
         font_scheme = get_font_scheme(template_type)
         processor = TemplateProcessor(template_type, font_scheme, saved_scale_factor, excel_processor)
         
+        # ⚡ PERFORMANCE: Wrap processor in FastGenerationEngine for caching
+        from src.core.generation.fast_generation import FastGenerationEngine, optimize_records_for_generation
+        fast_engine = FastGenerationEngine(processor)
+        
         # CRITICAL: For mini templates, NEVER force re-expansion as they have fixed capacity
         if hasattr(processor, '_expand_template_if_needed') and processor.template_type != 'mini':
             # CRITICAL FIX: Don't force re-expansion for horizontal/vertical/double templates as it bypasses dynamic template creation
@@ -6496,7 +6531,15 @@ def generate_labels():
             lineage = record.get('Lineage', 'NOT_FOUND')
             logging.info(f"  Record {i+1}: '{product_name}' -> Lineage: '{lineage}'")
         
-        final_doc = processor.process_records(records)
+        # ⚡ PERFORMANCE: Optimize records before generation
+        optimized_records = optimize_records_for_generation(records)
+        
+        # ⚡ PERFORMANCE: Use fast generation engine with caching
+        generation_start = time.time()
+        final_doc = fast_engine.generate_with_cache(optimized_records, template_type, saved_scale_factor)
+        generation_time = time.time() - generation_start
+        
+        logging.info(f"⚡ FAST GENERATION: Completed {len(records)} labels in {generation_time:.2f}s ({generation_time/len(records):.3f}s per label)")
         if hasattr(final_doc, 'labels_rendered'):
             logging.info(f"🔍 LABEL RENDER: TemplateProcessor rendered {final_doc.labels_rendered} labels")
         if final_doc is None:
