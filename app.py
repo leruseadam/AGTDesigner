@@ -1794,35 +1794,12 @@ def get_session_excel_processor():
             # Store context removed - using single database
             
             if session_file_path and os.path.exists(session_file_path):
-                logging.info(f"CRITICAL FIX: Session has uploaded file: {session_file_path}")
-                logging.info(f"CRITICAL FIX: File store context: {session_store}")
-                
-                # Store mismatch logic removed - using single database for all stores
-                
-                # Don't load default file if we have an uploaded file
-                if not hasattr(g.excel_processor, 'df') or g.excel_processor.df is None or g.excel_processor.df.empty:
-                    logging.info(f"CRITICAL FIX: Loading uploaded file from session: {session_file_path}")
-                    success = g.excel_processor.load_file(session_file_path)
-                    if success:
-                        # CRITICAL FIX: Ensure dropdown cache is populated after successful file load
-                        if hasattr(g.excel_processor, '_cache_dropdown_values'):
-                            try:
-                                g.excel_processor._cache_dropdown_values()
-                                logging.info(f"Successfully populated dropdown cache from session uploaded file")
-                                # Log the strain count specifically
-                                if 'strain' in g.excel_processor.dropdown_cache:
-                                    strain_count = len(g.excel_processor.dropdown_cache['strain'])
-                                    logging.info(f"Dropdown cache contains {strain_count} strains")
-                                else:
-                                    logging.warning("No strain filter found in dropdown cache")
-                            except Exception as e:
-                                logging.error(f"Failed to populate dropdown cache from session uploaded file: {e}")
-                    else:
-                        logging.warning(f"Failed to load uploaded file from session: {session_file_path}")
-                        # Mark file as failed for cleanup
-                        filename = session.get('uploaded_filename', '')
-                        if filename:
-                            update_processing_status(filename, 'error: File load failed on session restore')
+                # File already loaded by get_excel_processor() above - just verify
+                if hasattr(g.excel_processor, 'df') and g.excel_processor.df is not None and not g.excel_processor.df.empty:
+                    row_count = len(g.excel_processor.df)
+                    logging.info(f"✅ Session file already loaded by get_excel_processor(): {session_file_path} ({row_count} rows)")
+                else:
+                    logging.warning(f"⚠️ Session file not loaded by get_excel_processor(), DataFrame is empty")
             elif session_file_path:
                 logging.warning(f"Session uploaded file does not exist: {session_file_path}")
                 # Clear invalid session data

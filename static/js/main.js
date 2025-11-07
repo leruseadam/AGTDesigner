@@ -885,8 +885,7 @@ const TagManager = {
             lineage: 'lineageFilter',
             weight: 'weightFilter',
             doh: 'dohFilter',
-            highCbd: 'highCbdFilter',
-            ratio: 'ratioFilter'
+            highCbd: 'highCbdFilter'
             // Removed strain since there's no strainFilter dropdown in the HTML
         };
         
@@ -1021,8 +1020,7 @@ const TagManager = {
                 lineage: document.getElementById('lineageFilter')?.value || '',
                 weight: document.getElementById('weightFilter')?.value || '',
                 doh: document.getElementById('dohFilter')?.value || '',
-                highCbd: document.getElementById('highCbdFilter')?.value || '',
-                ratio: document.getElementById('ratioFilter')?.value || ''
+                highCbd: document.getElementById('highCbdFilter')?.value || ''
             };
 
             // Get the currently filtered tags to determine available options
@@ -1213,8 +1211,7 @@ const TagManager = {
                 lineage: 'lineageFilter',
                 weight: 'weightFilter',
                 doh: 'dohFilter',
-                highCbd: 'highCbdFilter',
-                ratio: 'ratioFilter'
+                highCbd: 'highCbdFilter'
             };
 
             Object.entries(filterFieldMap).forEach(([filterType, filterId]) => {
@@ -1300,12 +1297,11 @@ const TagManager = {
         const weightFilter = document.getElementById('weightFilter')?.value || '';
         const dohFilter = document.getElementById('dohFilter')?.value || '';
         const highCbdFilter = document.getElementById('highCbdFilter')?.value || '';
-        const ratioFilter = document.getElementById('ratioFilter')?.value || '';
         
-        console.log('🔍 Current filter values:', { vendorFilter, brandFilter, productTypeFilter, lineageFilter, weightFilter, dohFilter, highCbdFilter, ratioFilter });
+        console.log('🔍 Current filter values:', { vendorFilter, brandFilter, productTypeFilter, lineageFilter, weightFilter, dohFilter, highCbdFilter });
         
         // Check if all filters are "All" - show everything (fast path)
-        const allFiltersAll = [vendorFilter, brandFilter, productTypeFilter, lineageFilter, weightFilter, dohFilter, highCbdFilter, ratioFilter]
+        const allFiltersAll = [vendorFilter, brandFilter, productTypeFilter, lineageFilter, weightFilter, dohFilter, highCbdFilter]
             .every(filter => !filter || filter.trim() === '' || filter.toLowerCase() === 'all');
         
         console.log('🔍 All filters empty?', allFiltersAll);
@@ -1330,8 +1326,7 @@ const TagManager = {
             lineageFilter || '',
             weightFilter || '',
             dohFilter || '',
-            highCbdFilter || '',
-            ratioFilter || ''
+            highCbdFilter || ''
         ].join('|');
         
         // Check if we have cached results for this exact filter combination
@@ -5144,7 +5139,7 @@ const TagManager = {
             weight: 'All'
         };
         // Set each filter dropdown to 'All' (or '')
-        const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter', 'ratioFilter'];
+        const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
         filterIds.forEach(id => {
             const el = document.getElementById(id);
             if (el) el.value = '';
@@ -5374,8 +5369,8 @@ const TagManager = {
                     AppLoadingSplash.stopAutoAdvance();
                     AppLoadingSplash.complete();
                     
-                    // Load test data since no initial data was found
-                    this.loadTestData();
+                    // FIXED: Initialize empty state instead of loading test data
+                    this.initializeEmptyState();
                     return;
                 }
             } else {
@@ -5384,8 +5379,8 @@ const TagManager = {
                 AppLoadingSplash.stopAutoAdvance();
                 AppLoadingSplash.complete();
                 
-                // Load test data since initial data failed
-                this.loadTestData();
+                // FIXED: Initialize empty state instead of loading test data
+                this.initializeEmptyState();
                 return;
             }
         } catch (error) {
@@ -5401,8 +5396,8 @@ const TagManager = {
             AppLoadingSplash.stopAutoAdvance();
             AppLoadingSplash.complete();
             
-            // Load test data since initial data failed
-            this.loadTestData();
+            // FIXED: Initialize empty state instead of loading test data
+            this.initializeEmptyState();
             return;
         }
         
@@ -7312,8 +7307,7 @@ const TagManager = {
             'lineageFilter': 'lineage',
             'weightFilter': 'weight',
             'dohFilter': 'doh',
-            'highCbdFilter': 'highCbd',
-            'ratioFilter': 'ratio'
+            'highCbdFilter': 'highCbd'
         };
         return idToType[filterId] || filterId;
     },
@@ -7327,8 +7321,7 @@ const TagManager = {
             { id: 'lineageFilter', label: 'Lineage' },
             { id: 'weightFilter', label: 'Weight' },
             { id: 'dohFilter', label: 'DOH' },
-            { id: 'highCbdFilter', label: 'High CBD' },
-            { id: 'ratioFilter', label: 'Ratio' }
+            { id: 'highCbdFilter', label: 'High CBD' }
         ];
         let container = document.getElementById('activeFiltersContainer');
         if (!container) {
@@ -7425,7 +7418,7 @@ const TagManager = {
             await performFullAppReset();
             
             // Additional filter-specific clearing
-            const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter', 'ratioFilter'];
+            const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
             
             // Clear each filter dropdown
             filterIds.forEach(filterId => {
@@ -7477,7 +7470,7 @@ const TagManager = {
         const currentVendorValue = vendorFilter ? vendorFilter.value : '';
         
         // List of all filters except vendor
-        const otherFilterIds = ['brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter', 'ratioFilter'];
+        const otherFilterIds = ['brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
         
         // Clear all other filter dropdowns
         otherFilterIds.forEach(filterId => {
