@@ -111,6 +111,12 @@
           sessionStorage.setItem('store_just_selected', 'true');
           sessionStorage.setItem('selected_store', storeValue);
           
+          // CRITICAL: Clear blocking flag so TagManager can initialize after reload
+          if (window.STORE_MODAL_BLOCKING) {
+            console.log('✅ Clearing STORE_MODAL_BLOCKING flag');
+            window.STORE_MODAL_BLOCKING = false;
+          }
+          
           // Show success message
           if (window.Toast && typeof window.Toast.show === 'function') {
             window.Toast.show('success', `Switching to ${storeValue.replace(/_/g, ' ')}...`);
@@ -547,8 +553,15 @@
             // Show content
             if (mainContent) {
               mainContent.style.display = 'block';
+              mainContent.style.visibility = 'visible';
               mainContent.classList.add('store-selected');
               setTimeout(() => mainContent.classList.add('loaded'), 100);
+            }
+            
+            // Clear blocking flag if it exists
+            if (window.STORE_MODAL_BLOCKING) {
+              console.log('✅ Clearing STORE_MODAL_BLOCKING - TagManager can initialize');
+              window.STORE_MODAL_BLOCKING = false;
             }
             
             console.log('✅ Content shown, modal hidden');
@@ -4829,8 +4842,8 @@
   <!-- Lava Lamp Canvas - Full Screen Background with FORCED STYLING -->
   <canvas id="lava-lamp-canvas" style="position: fixed !important; top: 0px !important; left: 0px !important; right: 0px !important; bottom: 0px !important; width: 100% !important; height: 100% !important; margin: 0 !important; padding: 0 !important; border: none !important; outline: none !important; box-shadow: none !important; border-radius: 0 !important; z-index: -1 !important; pointer-events: none !important; display: block !important; background: transparent !important; max-width: none !important; max-height: none !important; min-width: 100% !important; min-height: 100% !important; transform: none !important; object-fit: cover !important;"></canvas>
 
-  <!-- Main Content (hidden until store is selected) -->
-  <div class="main-content{% if user_has_store %} store-selected loaded{% endif %}" id="mainContent" style="{% if user_has_store %}display: block;{% else %}display: none;{% endif %}">
+  <!-- Main Content (hidden until store is selected) - JavaScript controls visibility -->
+  <div class="main-content" id="mainContent" style="display: none; visibility: hidden;">
     <!-- Psychedelic Background Effects -->
     <div class="psychedelic-orbs">
       <div class="orb"></div>
@@ -5311,6 +5324,10 @@
         // User selected store in THIS session - keep modal hidden
         console.log('✅ Store was selected in this session - modal stays hidden');
         
+        // CRITICAL: Clear blocking flag so TagManager can initialize
+        window.STORE_MODAL_BLOCKING = false;
+        console.log('✅ STORE_MODAL_BLOCKING cleared - TagManager can initialize');
+        
         // DON'T remove the flag yet - keep it so later checks know store was selected
         // It will be cleared on next fresh load (new tab/browser restart)
         
@@ -5331,10 +5348,16 @@
         const mainContent = document.getElementById('mainContent');
         if (mainContent) {
           mainContent.style.display = 'block';
+          mainContent.style.visibility = 'visible';
+          mainContent.classList.add('store-selected', 'loaded');
         }
       } else {
         // NO FLAG = Fresh load - FORCE MODAL VISIBLE NOW
         console.log('❗ NO flag found - FORCING MODAL VISIBLE');
+        
+        // CRITICAL: Set flag to BLOCK TagManager initialization
+        window.STORE_MODAL_BLOCKING = true;
+        console.log('🚫 BLOCKING TagManager initialization until store selected');
         
         // Clear backend session
         fetch('/api/clear-store', {
@@ -5370,8 +5393,11 @@
             setTimeout(showModal, 50);
           }
           
+          // CRITICAL: Hide main content IMMEDIATELY
           if (mainContent) {
             mainContent.style.display = 'none';
+            mainContent.style.visibility = 'hidden';
+            console.log('🚫 MAIN CONTENT HIDDEN');
           }
         };
         
@@ -6811,6 +6837,14 @@
     
     function initializeTagManagerSafely() {
       console.log('🚀 initializeTagManagerSafely called');
+      
+      // CHECK: Is store modal blocking initialization?
+      if (window.STORE_MODAL_BLOCKING === true) {
+        console.log('🚫 TagManager initialization BLOCKED - store modal is active');
+        console.log('⏳ Waiting for store selection before initializing...');
+        // Don't initialize - wait for store selection to call us
+        return;
+      }
       
       // Modal forcing is now handled by IIFE above, just proceed with store check
       proceedWithStoreCheck();
