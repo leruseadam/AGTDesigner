@@ -5075,7 +5075,7 @@
         <!-- Main Content Row -->
         <div class="d-flex fade-in" style="animation-delay: 0.6s; width: 100%; gap: 2rem; justify-content: flex-start; padding-left: 0.5rem; padding-right: 0.5rem; box-sizing: border-box;">
           <!-- Available Tags -->
-          <div class="mb-2" data-container-type="available" style="flex: 1; max-width: 28rem;">
+          <div class="mb-2" data-container-type="available" style="flex: 1; max-width: 35rem;">
             <div class="glass-card d-flex flex-column h-100">
               <div class="card-header border-0 bg-transparent p-2">
                 <div class="d-flex justify-content-between align-items-center mb-2">
@@ -5230,7 +5230,7 @@
           </div>
           
           <!-- Selected Tags -->
-          <div class="mb-2" data-container-type="selected" style="flex: 1; max-width: 28rem;">
+          <div class="mb-2" data-container-type="selected" style="flex: 1; max-width: 35rem;">
             <div class="glass-card d-flex flex-column h-100">
               <div class="card-header border-0 bg-transparent p-2">
                 <div class="d-flex justify-content-between align-items-center mb-2">
@@ -5361,54 +5361,122 @@
         mainContent.style.visibility = 'hidden';
       }
       
-      // ALWAYS clear backend store on page load, then show modal
-      // This ensures modal appears on every reload (hard refresh, server restart, normal reload)
-      console.log('🔄 Clearing backend store on page load to force modal');
+      // Check if store was JUST selected (within last 3 seconds)
+      // If yes, keep backend store and hide modal
+      // If no, clear backend store and show modal
+      const storeSelectionTime = sessionStorage.getItem('store_selected_timestamp');
+      const now = Date.now();
+      const THREE_SECONDS = 3000;
+      const wasJustSelected = storeSelectionTime && (now - parseInt(storeSelectionTime)) < THREE_SECONDS;
       
-      fetch('/api/clear-store', {
-        method: 'POST',
-        credentials: 'same-origin'
-      })
-      .then(response => response.json())
-      .then(data => {
-        console.log('✅ Backend store cleared:', data);
+      console.log('Store selection timestamp:', storeSelectionTime);
+      console.log('Time since selection:', storeSelectionTime ? (now - parseInt(storeSelectionTime)) + 'ms' : 'N/A');
+      console.log('Was just selected:', wasJustSelected);
+      
+      if (wasJustSelected) {
+        // Store was just selected - DON'T clear backend, just hide modal and show content
+        console.log('✅ Store was just selected - keeping backend store, hiding modal');
         
-        // Now show modal IMMEDIATELY after clearing
-        window.STORE_MODAL_BLOCKING = true;
-        console.log('🚫 BLOCKING TagManager initialization until store selected');
+        // Clear the timestamp (it served its purpose)
+        sessionStorage.removeItem('store_selected_timestamp');
         
-        const showModal = () => {
-          const modalElement = document.getElementById('storeSelectionModal');
-          
-          if (modalElement) {
-            modalElement.style.display = 'block';
-            modalElement.classList.add('show');
-            modalElement.setAttribute('aria-hidden', 'false');
-            document.body.classList.add('modal-open');
-            document.body.style.overflow = 'hidden';
-            
-            // Add backdrop
-            if (!document.querySelector('.modal-backdrop, #storeModalBackdrop')) {
-              const backdrop = document.createElement('div');
-              backdrop.id = 'storeModalBackdrop';
-              backdrop.className = 'modal-backdrop fade show';
-              backdrop.style.zIndex = '9998';
-              document.body.appendChild(backdrop);
-            }
-            
-            console.log('✅✅✅ MODAL FORCED VISIBLE (backend cleared) ✅✅✅');
-          } else {
-            console.log('⏳ Modal element not ready, retrying...');
-            setTimeout(showModal, 50);
-          }
-        };
+        // Hide modal and show content
+        window.STORE_MODAL_BLOCKING = false;
         
-        if (document.readyState === 'loading') {
-          document.addEventListener('DOMContentLoaded', showModal);
-        } else {
-          showModal();
+        const modal = document.getElementById('storeSelectionModal');
+        if (modal) {
+          modal.style.display = 'none';
+          modal.classList.remove('show');
+          modal.setAttribute('aria-hidden', 'true');
         }
-      })
+        
+        document.querySelectorAll('.modal-backdrop').forEach(b => b.remove());
+        document.body.classList.remove('modal-open');
+        document.body.style.overflow = '';
+        
+        if (mainContent) {
+          mainContent.style.display = 'block';
+          mainContent.style.visibility = 'visible';
+          mainContent.classList.add('store-selected', 'loaded');
+          console.log('✅ MAIN CONTENT SHOWN (store just selected)');
+        }
+        
+      } else {
+        // NOT just selected - clear backend and show modal
+        console.log('🔄 NOT just selected - clearing backend store and showing modal');
+        
+        // Clear stale timestamps
+        sessionStorage.removeItem('store_selected_timestamp');
+        sessionStorage.removeItem('store_just_selected');
+        
+        fetch('/api/clear-store', {
+          method: 'POST',
+          credentials: 'same-origin'
+        })
+        .then(response => response.json())
+        .then(data => {
+          console.log('✅ Backend store cleared:', data);
+          
+          // Now show modal IMMEDIATELY after clearing
+          window.STORE_MODAL_BLOCKING = true;
+          console.log('🚫 BLOCKING TagManager initialization until store selected');
+          
+          const showModal = () => {
+            const modalElement = document.getElementById('storeSelectionModal');
+            
+            if (modalElement) {
+              modalElement.style.display = 'block';
+              modalElement.classList.add('show');
+              modalElement.setAttribute('aria-hidden', 'false');
+              document.body.classList.add('modal-open');
+              document.body.style.overflow = 'hidden';
+              
+              // Add backdrop
+              if (!document.querySelector('.modal-backdrop, #storeModalBackdrop')) {
+                const backdrop = document.createElement('div');
+                backdrop.id = 'storeModalBackdrop';
+                backdrop.className = 'modal-backdrop fade show';
+                backdrop.style.zIndex = '9998';
+                document.body.appendChild(backdrop);
+              }
+              
+              console.log('✅✅✅ MODAL FORCED VISIBLE (backend cleared) ✅✅✅');
+            } else {
+              console.log('⏳ Modal element not ready, retrying...');
+              setTimeout(showModal, 50);
+            }
+          };
+          
+          if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', showModal);
+          } else {
+            showModal();
+          }
+        })
+        .catch(err => {
+          console.error('Error clearing store:', err);
+          // Still show modal even if clear fails
+          window.STORE_MODAL_BLOCKING = true;
+          
+          const showModal = () => {
+            const modalElement = document.getElementById('storeSelectionModal');
+            if (modalElement) {
+              modalElement.style.display = 'block';
+              modalElement.classList.add('show');
+              document.body.classList.add('modal-open');
+              document.body.style.overflow = 'hidden';
+            } else {
+              setTimeout(showModal, 50);
+            }
+          };
+          
+          if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', showModal);
+          } else {
+            showModal();
+          }
+        });
+      }
       .catch(err => {
         console.error('Error checking store status:', err);
         // On error, default to showing modal (safer)
