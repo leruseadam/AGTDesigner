@@ -64,13 +64,8 @@ logs/
 temp/
 tmp/
 
-# Uploads and outputs (keep structure but exclude large files)
-uploads/**/*.db
-uploads/**/*.db-shm  
-uploads/**/*.db-wal
-uploads/**/*.db.gz
-uploads/**/*.xlsx
-uploads/**/
+# Uploads and outputs - NOW TRACKED (user requested)
+# uploads folder is now included in git
 output/
 cache/
 
@@ -87,18 +82,12 @@ backup/
 
 # PythonAnywhere specific
 pythonanywhere.log product_database_fixed.db.gz
-*.xlsx
-*.tar.gz
-# Large files to exclude from git
-*.db
-*.db.gz
+# Large archive files to exclude from git
 *.tar.gz
 *.zip
-*.xlsx
 cache/*
 sessions/*
 __pycache__/*
 *.pyc
 *.pyo
 .DS_Store
-uploads/
