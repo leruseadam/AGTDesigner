@@ -542,6 +542,12 @@ def has_store_selection():
         if not has_request_context():
             return False
         
+        # CRITICAL FIX: Check Flask session FIRST (most reliable)
+        if session.get('selected_store'):
+            logging.debug(f"has_store_selection: Found store in session: {session.get('selected_store')}")
+            return True
+        
+        # Fallback to IP-based selection
         ip_address = get_client_ip()
         
         # Fast path: check without lock first
@@ -552,7 +558,12 @@ def has_store_selection():
         with _ip_store_lock:
             if ip_address in _ip_store_selections:
                 store_data = _ip_store_selections[ip_address]
-                return is_store_selection_valid(ip_address, store_data)
+                is_valid = is_store_selection_valid(ip_address, store_data)
+                if is_valid:
+                    # Also save to session for consistency
+                    session['selected_store'] = store_data['store']
+                    logging.debug(f"has_store_selection: Found store in IP selections and saved to session: {store_data['store']}")
+                return is_valid
         
         return False
     except Exception as e:
@@ -4565,6 +4576,8 @@ def set_store():
         
         # CRITICAL FIX: Save to Flask session first (most reliable on PythonAnywhere)
         session['selected_store'] = store_value
+        session.permanent = True  # Mark session as permanent to persist across browser restarts
+        session.modified = True  # Force session to save
         logging.info(f"✅ Store saved to session: {store_value}")
         
         # Also store in IP-based selection (backup method)
