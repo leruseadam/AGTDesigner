@@ -1,11 +1,19 @@
 /**
  * Service Worker for aggressive caching of static assets
  * This significantly speeds up page loads by caching CSS, JS, and images
+ * 
+ * DEVELOPMENT MODE: Set DEV_MODE = true to disable caching
+ * CACHE BUST: Increment version numbers to force cache refresh
  */
 
-const CACHE_NAME = 'labelmaker-v1';
-const STATIC_CACHE_NAME = 'labelmaker-static-v1';
-const API_CACHE_NAME = 'labelmaker-api-v1';
+// 🔧 DEVELOPMENT MODE: Set to true to disable all caching
+const DEV_MODE = false;
+
+// Version numbers - increment to force cache refresh
+const CACHE_VERSION = 'v3';
+const CACHE_NAME = `labelmaker-${CACHE_VERSION}`;
+const STATIC_CACHE_NAME = `labelmaker-static-${CACHE_VERSION}`;
+const API_CACHE_NAME = `labelmaker-api-${CACHE_VERSION}`;
 
 // Static assets to cache immediately
 const STATIC_ASSETS = [
@@ -87,8 +95,16 @@ self.addEventListener('fetch', (event) => {
     const { request } = event;
     const url = new URL(request.url);
     
-    // Skip non-GET requests
+    // 🔧 DEVELOPMENT MODE: Skip all caching
+    if (DEV_MODE) {
+        console.log('[Service Worker] DEV_MODE: Bypassing cache for:', url.pathname);
+        return; // Use network for everything
+    }
+    
+    // Skip non-GET requests (POST, PUT, DELETE, etc.)
+    // This ensures lineage updates and other mutations are never cached
     if (request.method !== 'GET') {
+        console.log('[Service Worker] Skipping non-GET request:', request.method, url.pathname);
         return;
     }
     
@@ -125,22 +141,35 @@ self.addEventListener('fetch', (event) => {
         return;
     }
     
-    // Handle API requests - network first, cache fallback with short TTL
+    // Handle API requests - network first, limited caching
     if (url.pathname.startsWith('/api/')) {
+        // Never cache mutation endpoints (update, save, delete, etc.)
+        const isMutationEndpoint = url.pathname.includes('update') || 
+                                   url.pathname.includes('save') || 
+                                   url.pathname.includes('delete') ||
+                                   url.pathname.includes('upload');
+        
+        if (isMutationEndpoint) {
+            console.log('[Service Worker] Not caching mutation endpoint:', url.pathname);
+            event.respondWith(fetch(request));
+            return;
+        }
+        
+        // For read-only endpoints, use network-first with cache fallback
         event.respondWith(
             fetch(request)
                 .then((response) => {
-                    // Cache successful API responses
+                    // Cache successful API responses (read-only endpoints only)
                     if (response && response.status === 200) {
                         const responseClone = response.clone();
                         caches.open(API_CACHE_NAME)
                             .then((cache) => {
                                 cache.put(request, responseClone);
                                 
-                                // Set expiry for API cache (5 minutes)
+                                // Set expiry for API cache (2 minutes - shorter for faster updates)
                                 setTimeout(() => {
                                     cache.delete(request);
-                                }, 5 * 60 * 1000);
+                                }, 2 * 60 * 1000);
                             });
                     }
                     return response;
