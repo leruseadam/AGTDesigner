@@ -710,7 +710,7 @@
             vendor_brands: [] 
           })),
           fetchWithTimeout('/api/database-analytics').catch(e => ({ error: `Analytics: ${e.message}` })),
-          fetchWithTimeout('/api/available-tags?prefer_db=1&nocache=1').catch(e => { console.error('Available tags failed:', e); return []; })
+          fetchWithTimeout('/api/web/available-tags').catch(e => { console.error('Available tags failed:', e); return []; })
         ])
         .then((results) => {
           console.log('All promises settled:', results);
@@ -4158,11 +4158,23 @@
     }
     
     .filter-group {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      flex: 1;
-      min-width: 0;
+      display: flex !important;
+      flex-direction: column !important;
+      align-items: center !important;
+      flex: 1 1 250px !important; /* EVEN WIDER */
+      min-width: 250px !important;
+      max-width: 300px !important;
+    }
+    
+    /* Force filter row to allow wider children */
+    .filter-row {
+      min-width: max-content !important;
+      flex-wrap: nowrap !important;
+    }
+    
+    /* EXTREME override for testing */
+    div.filter-group {
+      min-width: 250px !important;
     }
     
     .filter-label {
@@ -4181,16 +4193,35 @@
     
     .filter-select {
       background: rgba(255, 255, 255, 0.2) !important;
-      border: 2px solid rgba(160, 132, 232, 0.5) !important;
+      border: 3px solid rgba(255, 100, 100, 0.8) !important; /* BRIGHT BORDER TO CONFIRM CSS LOADED */
       color: #fff !important;
-      font-size: 14px;
-      font-weight: 600;
-      padding: 8px 10px;
-      width: 100%;
-      border-radius: 8px;
-      min-height: 40px;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-      transition: all 0.2s ease;
+      font-size: 15px !important;
+      font-weight: 700 !important;
+      padding: 12px 20px !important; /* EXTRA padding */
+      width: 100% !important;
+      min-width: 250px !important; /* EVEN WIDER - 250px! */
+      max-width: 300px !important;
+      border-radius: 10px !important;
+      min-height: 50px !important; /* TALLER - 50px! */
+      box-shadow: 0 6px 20px rgba(255, 0, 0, 0.5) !important; /* RED GLOW TO CONFIRM */
+      transition: all 0.2s ease !important;
+    }
+    
+    /* Override any Bootstrap or other framework constraints */
+    .form-select.filter-select,
+    select.filter-select,
+    #vendorFilter,
+    #brandFilter,
+    #productTypeFilter,
+    #lineageFilter,
+    #weightFilter,
+    #dohFilter,
+    #highCbdFilter {
+      min-width: 250px !important;
+      width: 250px !important;
+      max-width: 300px !important;
+      min-height: 50px !important;
+      border: 3px solid rgba(255, 100, 100, 0.8) !important;
     }
     
     .filter-select:hover {
@@ -4851,40 +4882,40 @@
                   </div>
                   
                   <!-- Center: Compact Filter Dropdowns Row -->
-                  <div class="filter-row d-flex align-items-center justify-content-center gap-3 flex-grow-1" style="width: 100%;">
-                    <div class="filter-group">
+                  <div class="filter-row d-flex align-items-center justify-content-center gap-2 flex-grow-1" style="width: 100%; max-width: 100%; overflow-x: auto;">
+                    <div class="filter-group" style="min-width: 250px !important; flex: 1 1 250px !important;">
                       <label for="vendorFilter" class="filter-label">VENDOR</label>
-                      <select id="vendorFilter" class="form-select filter-select" aria-label="Filter by vendor">
+                      <select id="vendorFilter" class="form-select filter-select" aria-label="Filter by vendor" style="min-width: 250px !important; width: 250px !important; min-height: 50px !important; border: 3px solid #ff6464 !important; box-shadow: 0 0 20px rgba(255,0,0,0.5) !important; padding: 12px 20px !important; font-size: 15px !important;">
                         <option value="All">All</option>
                       </select>
                     </div>
-                    <div class="filter-group">
+                    <div class="filter-group" style="min-width: 250px !important; flex: 1 1 250px !important;">
                       <label for="brandFilter" class="filter-label">BRAND</label>
-                      <select id="brandFilter" class="form-select filter-select" aria-label="Filter by brand">
+                      <select id="brandFilter" class="form-select filter-select" aria-label="Filter by brand" style="min-width: 250px !important; width: 250px !important; min-height: 50px !important; border: 3px solid #ff6464 !important; box-shadow: 0 0 20px rgba(255,0,0,0.5) !important; padding: 12px 20px !important; font-size: 15px !important;">
                         <option value="All">All</option>
                       </select>
                     </div>
-                    <div class="filter-group">
+                    <div class="filter-group" style="min-width: 250px !important; flex: 1 1 250px !important;">
                       <label for="productTypeFilter" class="filter-label">PRODUCT TYPE</label>
-                      <select id="productTypeFilter" class="form-select filter-select" aria-label="Filter by product type">
+                      <select id="productTypeFilter" class="form-select filter-select" aria-label="Filter by product type" style="min-width: 250px !important; width: 250px !important; min-height: 50px !important; border: 3px solid #ff6464 !important; box-shadow: 0 0 20px rgba(255,0,0,0.5) !important; padding: 12px 20px !important; font-size: 15px !important;">
                         <option value="All">All</option>
                       </select>
                     </div>
-                    <div class="filter-group">
+                    <div class="filter-group" style="min-width: 250px !important; flex: 1 1 250px !important;">
                       <label for="lineageFilter" class="filter-label">LINEAGE</label>
-                      <select id="lineageFilter" class="form-select filter-select" aria-label="Filter by lineage">
+                      <select id="lineageFilter" class="form-select filter-select" aria-label="Filter by lineage" style="min-width: 250px !important; width: 250px !important; min-height: 50px !important; border: 3px solid #ff6464 !important; box-shadow: 0 0 20px rgba(255,0,0,0.5) !important; padding: 12px 20px !important; font-size: 15px !important;">
                         <option value="All">All</option>
                       </select>
                     </div>
-                    <div class="filter-group">
+                    <div class="filter-group" style="min-width: 250px !important; flex: 1 1 250px !important;">
                       <label for="weightFilter" class="filter-label">WEIGHT</label>
-                      <select id="weightFilter" class="form-select filter-select" aria-label="Filter by weight">
+                      <select id="weightFilter" class="form-select filter-select" aria-label="Filter by weight" style="min-width: 250px !important; width: 250px !important; min-height: 50px !important; border: 3px solid #ff6464 !important; box-shadow: 0 0 20px rgba(255,0,0,0.5) !important; padding: 12px 20px !important; font-size: 15px !important;">
                         <option value="All">All</option>
                       </select>
                     </div>
-                    <div class="filter-group">
+                    <div class="filter-group" style="min-width: 250px !important; flex: 1 1 250px !important;">
                       <label for="dohFilter" class="filter-label">DOH COMPLIANCE</label>
-                      <select id="dohFilter" class="form-select filter-select" aria-label="Filter by DOH compliance">
+                      <select id="dohFilter" class="form-select filter-select" aria-label="Filter by DOH compliance" style="min-width: 250px !important; width: 250px !important; min-height: 50px !important; border: 3px solid #ff6464 !important; box-shadow: 0 0 20px rgba(255,0,0,0.5) !important; padding: 12px 20px !important; font-size: 15px !important;">
                         <option value="All">All</option>
                         <option value="Yes">Yes</option>
                         <option value="No">No</option>
@@ -4892,9 +4923,9 @@
                         <option value="Unknown">Unknown</option>
                       </select>
                     </div>
-                    <div class="filter-group">
+                    <div class="filter-group" style="min-width: 250px !important; flex: 1 1 250px !important;">
                       <label for="highCbdFilter" class="filter-label">HIGH CBD</label>
-                      <select id="highCbdFilter" class="form-select filter-select" aria-label="Filter by High CBD products">
+                      <select id="highCbdFilter" class="form-select filter-select" aria-label="Filter by High CBD products" style="min-width: 250px !important; width: 250px !important; min-height: 50px !important; border: 3px solid #ff6464 !important; box-shadow: 0 0 20px rgba(255,0,0,0.5) !important; padding: 12px 20px !important; font-size: 15px !important;">
                         <option value="All">All</option>
                       </select>
                     </div>
@@ -4904,7 +4935,7 @@
         </div>
         
         <!-- Main Content Row -->
-        <div class="d-flex fade-in" style="animation-delay: 0.6s; width: 100%; gap: 2.5rem; justify-content: center;">
+        <div class="d-flex fade-in" style="animation-delay: 0.6s; width: 100%; gap: 4rem; justify-content: center;">
           <!-- Available Tags -->
           <div class="mb-2" data-container-type="available" style="flex: 1; max-width: 28rem;">
             <div class="glass-card d-flex flex-column h-100">
@@ -4946,9 +4977,9 @@
           </div>
           
           <!-- Center Column with Controls -->
-          <div class="mb-2 mt-0 d-flex flex-column justify-content-start align-items-center" style="flex: 0 0 auto;" data-container-type="center">
+          <div class="mb-2 mt-0 d-flex flex-column justify-content-start align-items-center" style="flex: 0 0 auto; max-width: 200px; width: 200px;" data-container-type="center">
             <!-- Controls -->
-            <div class="control-panel">
+            <div class="control-panel" style="width: 100%; max-width: 200px;">
               <!-- Template Section -->
               <div class="mb-3">
                 <label class="filter-label">Template</label>
@@ -7260,7 +7291,7 @@
         fetch('/api/database-stats').then(r => r.json()),
         fetch('/api/database-view').then(r => r.json()),
         fetch('/api/database-vendor-stats').then(r => r.json()),
-        fetch('/api/available-tags?prefer_db=1&nocache=1').then(r => r.json())
+        fetch('/api/web/available-tags').then(r => r.json())
       ])
       .then(([stats, view, vendorStats, availableTags]) => {
         const totalProducts = availableTags.length;
@@ -9219,7 +9250,7 @@
           fetch('/api/database-stats').then(r => r.json()),
           fetch('/api/database-vendor-stats').then(r => r.json()),
           fetch('/api/database-analytics').then(r => r.json()).catch(() => ({})),
-          fetch('/api/available-tags?prefer_db=1&nocache=1').then(r => r.json())
+          fetch('/api/web/available-tags').then(r => r.json())
         ])
         .then(([stats, vendorStats, analytics, availableTags]) => {
           const totalProducts = availableTags.length;
