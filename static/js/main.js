@@ -6275,23 +6275,42 @@ const TagManager = {
     },
 
     showExcelLoadingSplash(filename) {
+        console.log('🎬 SHOWING EXCEL SPLASH for:', filename);
         const splash = document.getElementById('excelLoadingSplash');
         const filenameElement = document.getElementById('excelLoadingFilename');
         const statusElement = document.getElementById('excelLoadingStatus');
         
         if (splash && filenameElement && statusElement) {
+            console.log('✅ Splash elements found, displaying...');
             filenameElement.textContent = filename;
             statusElement.textContent = 'Processing...';
             splash.style.display = 'flex';
+            splash.style.zIndex = '99999';
+            splash.style.position = 'fixed';
+            splash.style.top = '0';
+            splash.style.left = '0';
+            splash.style.width = '100%';
+            splash.style.height = '100%';
+            console.log('✅ Splash display set to:', splash.style.display);
+        } else {
+            console.error('❌ Could not find splash elements:', {
+                splash: !!splash,
+                filenameElement: !!filenameElement,
+                statusElement: !!statusElement
+            });
         }
     },
 
     hideExcelLoadingSplash() {
+        console.log('🎬 HIDING EXCEL SPLASH');
         const splash = document.getElementById('excelLoadingSplash');
         
         if (splash) {
             // Hide splash immediately
             splash.style.display = 'none';
+            console.log('✅ Splash hidden');
+        } else {
+            console.error('❌ Could not find splash element to hide');
         }
     },
 

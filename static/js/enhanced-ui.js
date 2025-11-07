@@ -83,7 +83,10 @@ function hideSplashWithDelay(splashStartTime, minDisplayTime = 800) {
   const elapsedTime = Date.now() - splashStartTime;
   const remainingTime = Math.max(0, minDisplayTime - elapsedTime);
   
+  console.log(`⏱️ Splash timing: elapsed=${elapsedTime}ms, minimum=${minDisplayTime}ms, waiting=${remainingTime}ms`);
+  
   setTimeout(() => {
+    console.log('⏱️ Minimum display time reached, hiding splash now');
     if (typeof TagManager !== 'undefined' && TagManager.hideExcelLoadingSplash) {
       TagManager.hideExcelLoadingSplash();
     }
