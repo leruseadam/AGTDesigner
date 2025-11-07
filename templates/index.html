@@ -4301,7 +4301,7 @@
       flex-direction: column;
       justify-content: center;
       align-items: center;
-      padding: 60px;
+      padding: 80px; /* More padding for larger splash */
       color: white;
       text-align: center;
     }
@@ -6673,30 +6673,42 @@
       if (!storeJustSelected) {
         console.log('🔄 Initial page load - clearing old session store to force modal...');
         // Clear backend session store to force modal on fresh loads
+        // WAIT for clear to complete before checking store
         fetch('/api/clear-store', {
           method: 'POST',
           credentials: 'same-origin'
         }).then(() => {
           console.log('✅ Old session cleared - modal will show');
+          // NOW check store requirement after clearing
+          proceedWithStoreCheck();
         }).catch(err => {
           console.error('⚠️ Failed to clear session:', err);
+          // Still proceed even if clear failed
+          proceedWithStoreCheck();
         });
+      } else {
+        // Store was selected in this session, proceed normally
+        console.log('✅ Store already selected in this session');
+        proceedWithStoreCheck();
       }
       
-      // Check store FIRST before initializing tags
-      setTimeout(() => {
-        console.log('🔄 Checking store requirement BEFORE initializing TagManager...');
-        checkStoreRequired(function() {
-          // This callback only runs when store is confirmed
-          console.log('✅ Store confirmed! Initializing TagManager...');
-          
-          if (window.TagManager && typeof window.TagManager.init === 'function') {
-            TagManager.init();
-          } else {
-            console.error('❌ TagManager.init is not available');
-          }
-        });
-      }, 100);
+      function proceedWithStoreCheck() {
+        // Check store FIRST before initializing tags
+        setTimeout(() => {
+          console.log('🔄 Checking store requirement BEFORE initializing TagManager...');
+          checkStoreRequired(function() {
+            // This callback only runs when store is confirmed
+            console.log('✅ Store confirmed! Initializing TagManager...');
+            
+              if (window.TagManager && typeof window.TagManager.init === 'function') {
+                TagManager.init();
+              } else {
+                console.error('❌ TagManager.init is not available');
+              }
+            });
+          }, 100);
+        }
+      }
     }
     
     // Start waiting for TagManager to load
