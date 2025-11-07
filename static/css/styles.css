@@ -6259,7 +6259,7 @@ canvas#lava-lamp-canvas {
   .sticky-filter-bar .filter-column:hover {
     background: rgba(255, 255, 255, 0.12) !important;
     border-color: rgba(160, 132, 232, 0.25) !important;
-    box-shadow: 0 4px 16px rgba(160,132,232,0.1) !important;
+    box-shadow: none !important; /* Removed hover shadow */
     transform: scale(1.02) !important;
   }
 
@@ -6303,7 +6303,7 @@ canvas#lava-lamp-canvas {
   .sticky-filter-bar .form-select:focus,
   .sticky-filter-bar .compact-filter:focus {
     border-color: rgba(160, 132, 232, 0.5) !important;
-    box-shadow: 0 0 0 0.2rem rgba(160, 132, 232, 0.25) !important;
+    box-shadow: none !important; /* Removed focus shadow */
     background: rgba(42, 32, 64, 0.95) !important;
   }
 
@@ -6345,7 +6345,7 @@ canvas#lava-lamp-canvas {
     background: rgba(45, 34, 58, 0.9) !important;
     border-color: rgba(160, 132, 232, 0.25) !important;
     transform: translateY(-1px) !important;
-    box-shadow: 0 4px 16px rgba(160,132,232,0.15) !important;
+    box-shadow: none !important; /* Removed shadow */
   }
 
   /* Horizontal Filter Bar - updated to match sticky filter bar */
@@ -6355,7 +6355,7 @@ canvas#lava-lamp-canvas {
     -webkit-backdrop-filter: blur(20px) !important;
     border: 2px solid rgba(160, 132, 232, 0.2) !important; /* Match glass-card border */
     border-radius: 24px !important; /* Match glass-card border-radius */
-    box-shadow: 0 12px 40px rgba(0,0,0,0.15), 0 4px 16px rgba(160,132,232,0.1), 0 2px 8px rgba(160,132,232,0.08) !important; /* Match glass-card shadows */
+    box-shadow: none !important; /* Removed shadow */
     padding: 1.5rem !important; /* Match sticky filter bar padding */
     max-width: calc(var(--canvas-max-width) - 2rem);
     margin-left: auto;
@@ -6364,7 +6364,7 @@ canvas#lava-lamp-canvas {
   }
 
   .horizontal-filter-bar:hover {
-    box-shadow: 0 16px 48px rgba(160,132,232,0.13), 0 4px 24px rgba(0,0,0,0.13) !important;
+    box-shadow: none !important; /* Removed hover shadow */
     border-color: rgba(160,132,232,0.25) !important;
     transform: scale(1.005) !important;
   }
@@ -6580,7 +6580,7 @@ canvas#lava-lamp-canvas {
     -webkit-backdrop-filter: blur(20px);
     border: 2px solid rgba(160, 132, 232, 0.2);
     border-radius: 18px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2), 0 4px 12px rgba(160, 132, 232, 0.1);
+    box-shadow: none; /* Removed shadow */
     padding: 0.5rem 0.75rem;
     max-width: calc(var(--canvas-max-width) - 2rem); /* account for gaps between columns */
     margin-left: auto;
@@ -6645,7 +6645,7 @@ canvas#lava-lamp-canvas {
   .horizontal-filter-bar .compact-filter:focus {
     outline: none;
     border-color: #b49cf0;
-    box-shadow: 0 0 0 0.15rem rgba(160, 132, 232, 0.25);
+    box-shadow: none; /* Removed focus shadow */
   }
 
   /* Ultra-compact sidebar filter bar overrides */
