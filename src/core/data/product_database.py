@@ -819,31 +819,43 @@ class ProductDatabase:
                 if existing:
                     strain_id, existing_lineage, occurrences, confidence, existing_sovereign = existing
                     new_occurrences = occurrences + 1
-                    # Update lineage if provided and different
-                    if lineage and lineage != existing_lineage:
-                        cursor.execute('''
-                            INSERT INTO lineage_history (strain_id, old_lineage, new_lineage, change_date, change_reason)
-                            VALUES (?, ?, ?, ?, ?)
-                        ''', (strain_id, existing_lineage, lineage, current_date, 'New data upload'))
-                        cursor.execute('''
-                            UPDATE strains 
-                            SET canonical_lineage = ?, total_occurrences = ?, last_seen_date = ?, updated_at = ?
-                            WHERE id = ?
-                        ''', (lineage, new_occurrences, current_date, current_date, strain_id))
-                        
-                        # Notify all sessions of the lineage update (non-blocking)
-                        try:
-                            from .database_notifier import notify_lineage_update
-                            notify_lineage_update(strain_name, existing_lineage, lineage)
-                        except Exception as notify_error:
-                            logger.warning(f"Failed to notify lineage update: {notify_error}")
-                    else:
+                    
+                    # CRITICAL: If sovereign lineage is set, DON'T update canonical lineage from Excel
+                    if existing_sovereign:
+                        logger.info(f"🔒 SOVEREIGN PROTECTION: Strain '{strain_name}' has sovereign lineage '{existing_sovereign}' - ignoring Excel lineage update")
+                        # Just update occurrence count, don't touch lineage
                         cursor.execute('''
                             UPDATE strains 
                             SET total_occurrences = ?, last_seen_date = ?, updated_at = ?
                             WHERE id = ?
                         ''', (new_occurrences, current_date, current_date, strain_id))
-                    # Sovereign lineage update
+                    else:
+                        # No sovereign lineage - update canonical lineage from Excel as normal
+                        if lineage and lineage != existing_lineage:
+                            cursor.execute('''
+                                INSERT INTO lineage_history (strain_id, old_lineage, new_lineage, change_date, change_reason)
+                                VALUES (?, ?, ?, ?, ?)
+                            ''', (strain_id, existing_lineage, lineage, current_date, 'New data upload'))
+                            cursor.execute('''
+                                UPDATE strains 
+                                SET canonical_lineage = ?, total_occurrences = ?, last_seen_date = ?, updated_at = ?
+                                WHERE id = ?
+                            ''', (lineage, new_occurrences, current_date, current_date, strain_id))
+                            
+                            # Notify all sessions of the lineage update (non-blocking)
+                            try:
+                                from .database_notifier import notify_lineage_update
+                                notify_lineage_update(strain_name, existing_lineage, lineage)
+                            except Exception as notify_error:
+                                logger.warning(f"Failed to notify lineage update: {notify_error}")
+                        else:
+                            cursor.execute('''
+                                UPDATE strains 
+                                SET total_occurrences = ?, last_seen_date = ?, updated_at = ?
+                                WHERE id = ?
+                            ''', (new_occurrences, current_date, current_date, strain_id))
+                    
+                    # Sovereign lineage update (always applies if sovereign=True)
                     if sovereign and lineage:
                         cursor.execute('''
                             UPDATE strains SET sovereign_lineage = ? WHERE id = ?
@@ -1026,6 +1038,15 @@ class ProductDatabase:
                     cursor.execute("PRAGMA table_info(products)")
                     available_columns = {row[1] for row in cursor.fetchall()}
                     
+                    # CRITICAL: Check if strain has sovereign_lineage before using Excel lineage
+                    lineage_to_use = self._normalize_lineage(product_data.get('Lineage'))
+                    if strain_id:
+                        cursor.execute('SELECT sovereign_lineage FROM strains WHERE id = ?', (strain_id,))
+                        sovereign_result = cursor.fetchone()
+                        if sovereign_result and sovereign_result[0]:
+                            lineage_to_use = str(sovereign_result[0]).strip()
+                            logger.info(f"🔒 NEW PRODUCT: Using sovereign lineage '{lineage_to_use}' for '{product_name}' (ignoring Excel)")
+                    
                     # Build column list and values list based on what exists
                     columns_to_insert = []
                     values_to_insert = []
@@ -1047,7 +1068,7 @@ class ProductDatabase:
                         'Weight*': product_data.get('Weight*'),
                         'Units': product_data.get('Units'),
                         'Price': product_data.get('Price'),  # EXCEL PRIORITY: Excel Price always overwrites DB
-                        'Lineage': self._normalize_lineage(product_data.get('Lineage')),
+                        'Lineage': lineage_to_use,  # SOVEREIGN PRIORITY: Use sovereign_lineage if set, otherwise Excel
                         'first_seen_date': current_date,
                         'last_seen_date': current_date,
                         'created_at': current_date,
@@ -3110,31 +3131,50 @@ class ProductDatabase:
             ak_value = self._calculate_ak_value(product_data)
             
             # Update the product with new data
-            # CRITICAL FIX: Preserve existing non-empty Lineage from database; only update if incoming lineage is non-empty
-            incoming_lineage = self._normalize_lineage(product_data.get('Lineage'))
-            incoming_lineage_clean = str(incoming_lineage).strip() if incoming_lineage else ''
-            # Check if incoming lineage is valid (not empty/null)
-            has_valid_incoming_lineage = (incoming_lineage_clean and 
-                                        incoming_lineage_clean not in ['', 'nan', 'none', 'null', 'None', 'NaN'])
+            # CRITICAL FIX: Check for sovereign_lineage FIRST - it takes absolute priority
+            cursor.execute('SELECT strain_id FROM products WHERE id = ?', (product_id,))
+            strain_id_result = cursor.fetchone()
+            strain_id = strain_id_result[0] if strain_id_result else None
             
-            # Get current database lineage to preserve it
-            cursor.execute('SELECT "Lineage" FROM products WHERE id = ?', (product_id,))
-            current_db_lineage = cursor.fetchone()
-            current_lineage = current_db_lineage[0] if current_db_lineage and current_db_lineage[0] else ''
-            current_lineage_clean = str(current_lineage).strip() if current_lineage else ''
-            has_existing_lineage = (current_lineage_clean and 
-                                  current_lineage_clean not in ['', 'nan', 'none', 'null', 'None', 'NaN'])
+            sovereign_lineage = None
+            if strain_id:
+                # Check if this strain has a manually-set sovereign_lineage
+                cursor.execute('SELECT sovereign_lineage FROM strains WHERE id = ?', (strain_id,))
+                sovereign_result = cursor.fetchone()
+                if sovereign_result and sovereign_result[0]:
+                    sovereign_lineage = str(sovereign_result[0]).strip()
+                    logger.info(f"🔒 SOVEREIGN LINEAGE: Found manually-set lineage '{sovereign_lineage}' for product ID {product_id}")
             
-            # Determine final lineage: prefer incoming if valid, otherwise preserve existing
-            if has_valid_incoming_lineage:
-                final_lineage = incoming_lineage_clean
-                logger.info(f"✅ LINEAGE UPDATE: Using incoming lineage '{final_lineage}' for product ID {product_id}")
-            elif has_existing_lineage:
-                final_lineage = current_lineage_clean
-                logger.info(f"✅ LINEAGE PRESERVE: Preserving existing lineage '{final_lineage}' for product ID {product_id} (incoming was empty)")
+            # If sovereign lineage exists, USE IT and ignore Excel lineage
+            if sovereign_lineage:
+                final_lineage = sovereign_lineage
+                logger.info(f"✅ LINEAGE PRIORITY: Using sovereign lineage '{final_lineage}' for product ID {product_id} (ignoring Excel)")
             else:
-                final_lineage = incoming_lineage_clean  # Even if empty, use it
-                logger.info(f"⚠️ LINEAGE EMPTY: No lineage to preserve for product ID {product_id}")
+                # No sovereign lineage - use normal Excel/database priority logic
+                incoming_lineage = self._normalize_lineage(product_data.get('Lineage'))
+                incoming_lineage_clean = str(incoming_lineage).strip() if incoming_lineage else ''
+                # Check if incoming lineage is valid (not empty/null)
+                has_valid_incoming_lineage = (incoming_lineage_clean and 
+                                            incoming_lineage_clean not in ['', 'nan', 'none', 'null', 'None', 'NaN'])
+                
+                # Get current database lineage to preserve it
+                cursor.execute('SELECT "Lineage" FROM products WHERE id = ?', (product_id,))
+                current_db_lineage = cursor.fetchone()
+                current_lineage = current_db_lineage[0] if current_db_lineage and current_db_lineage[0] else ''
+                current_lineage_clean = str(current_lineage).strip() if current_lineage else ''
+                has_existing_lineage = (current_lineage_clean and 
+                                      current_lineage_clean not in ['', 'nan', 'none', 'null', 'None', 'NaN'])
+                
+                # Determine final lineage: prefer incoming if valid, otherwise preserve existing
+                if has_valid_incoming_lineage:
+                    final_lineage = incoming_lineage_clean
+                    logger.info(f"✅ LINEAGE UPDATE: Using incoming lineage '{final_lineage}' for product ID {product_id}")
+                elif has_existing_lineage:
+                    final_lineage = current_lineage_clean
+                    logger.info(f"✅ LINEAGE PRESERVE: Preserving existing lineage '{final_lineage}' for product ID {product_id} (incoming was empty)")
+                else:
+                    final_lineage = incoming_lineage_clean  # Even if empty, use it
+                    logger.info(f"⚠️ LINEAGE EMPTY: No lineage to preserve for product ID {product_id}")
             
             # CRITICAL FIX: Excel values for DOH, Price, and Product Type always overwrite database
             # These fields are the source of truth from Excel uploads
