@@ -4173,30 +4173,26 @@
     .filter-group {
       display: flex !important;
       flex-direction: column !important;
-      align-items: center !important;
-      flex: 1 1 250px !important; /* EVEN WIDER */
-      min-width: 250px !important;
-      max-width: 300px !important;
+      align-items: flex-start !important;
+      flex: 1 1 0 !important; /* Grow to fill available space */
+      min-width: 140px !important;
+      max-width: none !important;
     }
     
-    /* Force filter row to allow wider children */
+    /* Force filter row to allow compact layout */
     .filter-row {
       min-width: max-content !important;
       flex-wrap: nowrap !important;
-    }
-    
-    /* EXTREME override for testing */
-    div.filter-group {
-      min-width: 250px !important;
+      justify-content: flex-start !important;
     }
     
     .filter-label {
-      font-size: 13px;
+      font-size: 11px;
       font-weight: 700;
       color: rgba(255, 255, 255, 0.95);
-      margin-bottom: 6px;
-      text-align: center;
-      letter-spacing: 0.8px;
+      margin-bottom: 4px;
+      text-align: left;
+      letter-spacing: 0.5px;
       white-space: nowrap;
       text-overflow: ellipsis;
       overflow: hidden;
@@ -4230,11 +4226,14 @@
     #weightFilter,
     #dohFilter,
     #highCbdFilter {
-      min-width: 250px !important;
-      width: 250px !important;
-      max-width: 300px !important;
-      min-height: 50px !important;
+      min-width: 140px !important;
+      width: 100% !important; /* Fill parent container */
+      max-width: 100% !important;
+      min-height: 42px !important;
       border: 3px solid rgba(0, 212, 170, 0.8) !important;
+      font-size: 13px !important;
+      padding: 8px 14px !important;
+      box-sizing: border-box !important;
     }
     
     .filter-select:hover {
@@ -4896,12 +4895,12 @@
       </div>
     </div>
 
-    <div class="w-100 py-2" style="z-index:1; position:relative;">
+    <div class="w-100 py-1" style="z-index:1; position:relative;">
       <!-- Title and Subtitle centered above tag panels -->
 
       <div class="centerframe" style="width:100%; margin:0 auto; text-align:center; position:relative;">
-        <div style="display: flex; justify-content: center; align-items: center; margin-bottom: 1.25rem;">
-          <div style="text-align: center; background: linear-gradient(135deg, rgba(45, 34, 58, 0.95) 0%, rgba(60, 45, 75, 0.9) 50%, rgba(45, 34, 58, 0.95) 100%); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 2px solid rgba(160, 132, 232, 0.4); border-radius: 20px; padding: 3rem 5rem; box-shadow: 0 8px 32px rgba(80, 40, 160, 0.25), 0 0 0 1px rgba(160, 132, 232, 0.1); max-width: 700px; position: relative; overflow: hidden;">
+        <div style="display: flex; justify-content: center; align-items: center; margin-bottom: 0.75rem;">
+          <div style="text-align: center; background: linear-gradient(135deg, rgba(45, 34, 58, 0.95) 0%, rgba(60, 45, 75, 0.9) 50%, rgba(45, 34, 58, 0.95) 100%); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 2px solid rgba(160, 132, 232, 0.4); border-radius: 16px; padding: 1.25rem 2.5rem; box-shadow: 0 8px 32px rgba(80, 40, 160, 0.25), 0 0 0 1px rgba(160, 132, 232, 0.1); max-width: 600px; position: relative; overflow: hidden;">
             <div style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: radial-gradient(circle at 30% 20%, rgba(160, 132, 232, 0.1) 0%, transparent 50%), radial-gradient(circle at 70% 80%, rgba(139, 92, 246, 0.08) 0%, transparent 50%); pointer-events: none;"></div>
             <div style="position: relative; z-index: 2;">
               <h1 class="vibrant-title">
@@ -4916,9 +4915,9 @@
             </div>
 
             <!-- Store Selection -->
-            <div class="store-selection-container">
-              <div class="d-flex align-items-center justify-content-center gap-3">
-                <div class="d-flex align-items-center gap-3">
+            <div class="store-selection-container" style="margin-top: 0.5rem;">
+              <div class="d-flex align-items-center justify-content-center gap-2">
+                <div class="d-flex align-items-center gap-2">
                   <span class="store-label">Store:</span>
                   <span class="current-store-display" id="currentStoreDisplay" style="{% if user_has_store %}color: #4ade80;{% else %}color: #f87171;{% endif %}">{% if user_has_store and current_store %}{{ current_store|replace("_", " ") }}{% else %}No store selected{% endif %}</span>
                   <button class="btn btn-sm btn-outline-primary" onclick="showStoreSelectionModal()" title="Change store">
@@ -4952,20 +4951,20 @@
         <div class="row fade-in g-1" style="animation-delay: 0.4s;">
           <!-- Filter Bar as a column -->
           <div class="col-12 mb-4" data-container-type="filter">
-              <div class="enhanced-filter-bar d-flex align-items-center gap-3 p-5" style="background: rgba(45, 34, 58, 0.95); border-radius: 16px; backdrop-filter: blur(20px); border: 2px solid rgba(160, 132, 232, 0.6); min-height: 140px;">
+              <div class="enhanced-filter-bar d-flex align-items-center gap-2 p-3" style="background: rgba(45, 34, 58, 0.95); border-radius: 16px; backdrop-filter: blur(20px); border: 2px solid rgba(160, 132, 232, 0.6); min-height: 120px;">
                   <!-- Left Side: Clear Button and Upload Section -->
-                  <div class="left-section d-flex flex-column gap-3" style="flex-shrink: 0; min-height: 90px; justify-content: center;">
+                  <div class="left-section d-flex flex-column gap-2" style="flex-shrink: 0; min-height: 80px; justify-content: center;">
                     <!-- File Path Display (Above buttons) -->
                     <div class="file-path-display text-center">
-                      <span class="text-white" id="fileInfoText" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; display: block; padding: 8px 12px; background: rgba(255, 255, 255, 0.1); border-radius: 6px; border: 1px solid rgba(160, 132, 232, 0.3); min-height: 36px; line-height: 1.5;">
+                      <span class="text-white" id="fileInfoText" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 600; display: block; padding: 6px 10px; background: rgba(255, 255, 255, 0.1); border-radius: 6px; border: 1px solid rgba(160, 132, 232, 0.3); min-height: 32px; line-height: 1.4;">
                         {% if uploaded_filename %}{{ uploaded_filename }}{% else %}No file uploaded{% endif %}
                       </span>
                     </div>
                     <!-- Buttons Row -->
-                    <div class="buttons-row d-flex align-items-center gap-3">
+                    <div class="buttons-row d-flex align-items-center gap-2">
                       <!-- Clear Button -->
-                      <button id="clearFiltersBtn" class="btn btn-danger px-3 py-3" onclick="TagManager.clearAllFilters()" title="Clear all filters and reset app" style="font-weight: 700; box-shadow: 0 4px 12px rgba(0,0,0,0.3); white-space: nowrap; font-size: 14px; border-radius: 8px; min-width: 180px; min-height: 45px;">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2">
+                      <button id="clearFiltersBtn" class="btn btn-danger px-2 py-2" onclick="TagManager.clearAllFilters()" title="Clear all filters and reset app" style="font-weight: 700; box-shadow: 0 4px 12px rgba(0,0,0,0.3); white-space: nowrap; font-size: 13px; border-radius: 8px; min-width: 140px; min-height: 40px;">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2">
                           <polyline points="3 6 5 6 21 6"></polyline>
                           <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
                         </svg>
@@ -4973,8 +4972,8 @@
                       </button>
                       <!-- Upload Button -->
                       <input type="file" id="fileInput" accept=".xlsx" style="display:none;">
-                      <button type="button" class="btn px-3 py-3" id="uploadTriggerBtn" onclick="var input = document.getElementById('fileInput'); if(input) input.click();" aria-label="Upload Excel file" style="font-weight: 700; box-shadow: 0 4px 12px rgba(0,0,0,0.3); white-space: nowrap; font-size: 14px; border-radius: 8px; min-width: 180px; min-height: 45px; background: linear-gradient(135deg, #a084e8 0%, #8b5cf6 100%); border: 2px solid #a084e8; color: white;">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2">
+                      <button type="button" class="btn px-2 py-2" id="uploadTriggerBtn" onclick="var input = document.getElementById('fileInput'); if(input) input.click();" aria-label="Upload Excel file" style="font-weight: 700; box-shadow: 0 4px 12px rgba(0,0,0,0.3); white-space: nowrap; font-size: 13px; border-radius: 8px; min-width: 140px; min-height: 40px; background: linear-gradient(135deg, #a084e8 0%, #8b5cf6 100%); border: 2px solid #a084e8; color: white;">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2">
                           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                           <polyline points="7 10 12 15 17 10"></polyline>
                           <line x1="12" y1="15" x2="12" y2="3"></line>
@@ -4984,41 +4983,41 @@
                     </div>
                   </div>
                   
-                  <!-- Center: Compact Filter Dropdowns Row -->
-                  <div class="filter-row d-flex align-items-center justify-content-center gap-2 flex-grow-1" style="width: 100%; max-width: 100%; overflow-x: auto;">
-                    <div class="filter-group" style="min-width: 250px !important; flex: 1 1 250px !important;">
+                  <!-- Filter Dropdowns Row - Left Aligned, Fills Width -->
+                  <div class="filter-row d-flex align-items-center justify-content-start gap-1 flex-grow-1" style="width: 100%; max-width: 100%; overflow-x: auto; margin-left: 0.5rem;">
+                    <div class="filter-group" style="min-width: 140px !important; flex: 1 1 0 !important;">
                       <label for="vendorFilter" class="filter-label">VENDOR</label>
-                      <select id="vendorFilter" class="form-select filter-select" aria-label="Filter by vendor" style="min-width: 250px !important; width: 250px !important; min-height: 50px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 12px 20px !important; font-size: 15px !important;">
+                      <select id="vendorFilter" class="form-select filter-select" aria-label="Filter by vendor" style="width: 100% !important; min-height: 42px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 8px 14px !important; font-size: 13px !important;">
                         <option value="All">All</option>
                       </select>
                     </div>
-                    <div class="filter-group" style="min-width: 250px !important; flex: 1 1 250px !important;">
+                    <div class="filter-group" style="min-width: 140px !important; flex: 1 1 0 !important;">
                       <label for="brandFilter" class="filter-label">BRAND</label>
-                      <select id="brandFilter" class="form-select filter-select" aria-label="Filter by brand" style="min-width: 250px !important; width: 250px !important; min-height: 50px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 12px 20px !important; font-size: 15px !important;">
+                      <select id="brandFilter" class="form-select filter-select" aria-label="Filter by brand" style="width: 100% !important; min-height: 42px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 8px 14px !important; font-size: 13px !important;">
                         <option value="All">All</option>
                       </select>
                     </div>
-                    <div class="filter-group" style="min-width: 250px !important; flex: 1 1 250px !important;">
+                    <div class="filter-group" style="min-width: 140px !important; flex: 1 1 0 !important;">
                       <label for="productTypeFilter" class="filter-label">PRODUCT TYPE</label>
-                      <select id="productTypeFilter" class="form-select filter-select" aria-label="Filter by product type" style="min-width: 250px !important; width: 250px !important; min-height: 50px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 12px 20px !important; font-size: 15px !important;">
+                      <select id="productTypeFilter" class="form-select filter-select" aria-label="Filter by product type" style="width: 100% !important; min-height: 42px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 8px 14px !important; font-size: 13px !important;">
                         <option value="All">All</option>
                       </select>
                     </div>
-                    <div class="filter-group" style="min-width: 250px !important; flex: 1 1 250px !important;">
+                    <div class="filter-group" style="min-width: 140px !important; flex: 1 1 0 !important;">
                       <label for="lineageFilter" class="filter-label">LINEAGE</label>
-                      <select id="lineageFilter" class="form-select filter-select" aria-label="Filter by lineage" style="min-width: 250px !important; width: 250px !important; min-height: 50px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 12px 20px !important; font-size: 15px !important;">
+                      <select id="lineageFilter" class="form-select filter-select" aria-label="Filter by lineage" style="width: 100% !important; min-height: 42px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 8px 14px !important; font-size: 13px !important;">
                         <option value="All">All</option>
                       </select>
                     </div>
-                    <div class="filter-group" style="min-width: 250px !important; flex: 1 1 250px !important;">
+                    <div class="filter-group" style="min-width: 140px !important; flex: 1 1 0 !important;">
                       <label for="weightFilter" class="filter-label">WEIGHT</label>
-                      <select id="weightFilter" class="form-select filter-select" aria-label="Filter by weight" style="min-width: 250px !important; width: 250px !important; min-height: 50px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 12px 20px !important; font-size: 15px !important;">
+                      <select id="weightFilter" class="form-select filter-select" aria-label="Filter by weight" style="width: 100% !important; min-height: 42px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 8px 14px !important; font-size: 13px !important;">
                         <option value="All">All</option>
                       </select>
                     </div>
-                    <div class="filter-group" style="min-width: 250px !important; flex: 1 1 250px !important;">
+                    <div class="filter-group" style="min-width: 140px !important; flex: 1 1 0 !important;">
                       <label for="dohFilter" class="filter-label">DOH COMPLIANCE</label>
-                      <select id="dohFilter" class="form-select filter-select" aria-label="Filter by DOH compliance" style="min-width: 250px !important; width: 250px !important; min-height: 50px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 12px 20px !important; font-size: 15px !important;">
+                      <select id="dohFilter" class="form-select filter-select" aria-label="Filter by DOH compliance" style="width: 100% !important; min-height: 42px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 8px 14px !important; font-size: 13px !important;">
                         <option value="All">All</option>
                         <option value="Yes">Yes</option>
                         <option value="No">No</option>
@@ -5026,9 +5025,9 @@
                         <option value="Unknown">Unknown</option>
                       </select>
                     </div>
-                    <div class="filter-group" style="min-width: 250px !important; flex: 1 1 250px !important;">
+                    <div class="filter-group" style="min-width: 140px !important; flex: 1 1 0 !important;">
                       <label for="highCbdFilter" class="filter-label">HIGH CBD</label>
-                      <select id="highCbdFilter" class="form-select filter-select" aria-label="Filter by High CBD products" style="min-width: 250px !important; width: 250px !important; min-height: 50px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 12px 20px !important; font-size: 15px !important;">
+                      <select id="highCbdFilter" class="form-select filter-select" aria-label="Filter by High CBD products" style="width: 100% !important; min-height: 42px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 8px 14px !important; font-size: 13px !important;">
                         <option value="All">All</option>
                       </select>
                     </div>
@@ -5312,102 +5311,137 @@
     </div>
   </div>
   
-  <!-- ANTI-LOOP SAFEGUARD: Prevent modal from showing after reload -->
+  <!-- MODAL CONTROL - Checks backend on every page load -->
   <script>
     // ===== MODAL CONTROL - RUNS IMMEDIATELY ON PAGE LOAD =====
+    // FIXED: Always check backend instead of relying on sessionStorage
     (function() {
-      console.log('🚀 FIRST SCRIPT - Modal control starting');
-      const storeJustSelected = sessionStorage.getItem('store_just_selected');
-      console.log('store_just_selected flag:', storeJustSelected);
+      console.log('🚀 FIRST SCRIPT - Modal control starting (checking backend)');
       
-      if (storeJustSelected === 'true') {
-        // User selected store in THIS session - keep modal hidden
-        console.log('✅ Store was selected in this session - modal stays hidden');
+      // CRITICAL: Hide main content initially until we know store status
+      const mainContent = document.getElementById('mainContent');
+      if (mainContent) {
+        mainContent.style.display = 'none';
+        mainContent.style.visibility = 'hidden';
+      }
+      
+      // Always check backend for store selection (don't rely on sessionStorage)
+      fetch('/api/check-store-required', {
+        method: 'GET',
+        credentials: 'same-origin'
+      })
+      .then(response => response.json())
+      .then(data => {
+        console.log('Backend store check response:', data);
         
-        // CRITICAL: Clear blocking flag so TagManager can initialize
-        window.STORE_MODAL_BLOCKING = false;
-        console.log('✅ STORE_MODAL_BLOCKING cleared - TagManager can initialize');
+        // Backend returns 'requires_store', not 'required'
+        const requiresStore = data.requires_store === true || data.required === true;
         
-        // DON'T remove the flag yet - keep it so later checks know store was selected
-        // It will be cleared on next fresh load (new tab/browser restart)
-        
-        // Force hide the modal and cleanup
-        const modal = document.getElementById('storeSelectionModal');
-        if (modal) {
-          modal.style.display = 'none';
-          modal.classList.remove('show');
-          modal.setAttribute('aria-hidden', 'true');
+        if (requiresStore) {
+          // No store selected - SHOW MODAL
+          console.log('❗ No store selected in backend - SHOWING MODAL');
+          
+          // Set blocking flag
+          window.STORE_MODAL_BLOCKING = true;
+          console.log('🚫 BLOCKING TagManager initialization until store selected');
+          
+          // Show modal
+          const showModal = () => {
+            const modalElement = document.getElementById('storeSelectionModal');
+            const mainContent = document.getElementById('mainContent');
+            
+            if (modalElement) {
+              modalElement.style.display = 'block';
+              modalElement.classList.add('show');
+              modalElement.setAttribute('aria-hidden', 'false');
+              document.body.classList.add('modal-open');
+              document.body.style.overflow = 'hidden';
+              
+              // Add backdrop
+              if (!document.querySelector('.modal-backdrop, #storeModalBackdrop')) {
+                const backdrop = document.createElement('div');
+                backdrop.id = 'storeModalBackdrop';
+                backdrop.className = 'modal-backdrop fade show';
+                backdrop.style.zIndex = '9998';
+                document.body.appendChild(backdrop);
+              }
+              
+              console.log('✅✅✅ MODAL IS NOW VISIBLE ✅✅✅');
+            } else {
+              console.log('⏳ Modal element not ready, retrying...');
+              setTimeout(showModal, 50);
+              return;
+            }
+            
+            // Hide main content
+            if (mainContent) {
+              mainContent.style.display = 'none';
+              mainContent.style.visibility = 'hidden';
+              console.log('🚫 MAIN CONTENT HIDDEN');
+            }
+          };
+          
+          // Show modal when DOM ready
+          if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', showModal);
+          } else {
+            showModal();
+          }
+          
+        } else {
+          // Store is selected - HIDE MODAL
+          console.log('✅ Store is selected in backend - hiding modal');
+          
+          // Clear blocking flag
+          window.STORE_MODAL_BLOCKING = false;
+          console.log('✅ STORE_MODAL_BLOCKING cleared - TagManager can initialize');
+          
+          // Hide modal
+          const modal = document.getElementById('storeSelectionModal');
+          if (modal) {
+            modal.style.display = 'none';
+            modal.classList.remove('show');
+            modal.setAttribute('aria-hidden', 'true');
+          }
+          
+          // Remove backdrops
+          document.querySelectorAll('.modal-backdrop').forEach(b => b.remove());
+          document.body.classList.remove('modal-open');
+          document.body.style.overflow = '';
+          
+          // Show main content
+          if (mainContent) {
+            mainContent.style.display = 'block';
+            mainContent.style.visibility = 'visible';
+            mainContent.classList.add('store-selected', 'loaded');
+            console.log('✅ MAIN CONTENT SHOWN');
+          }
         }
-        
-        // Remove any backdrops
-        document.querySelectorAll('.modal-backdrop').forEach(b => b.remove());
-        document.body.classList.remove('modal-open');
-        document.body.style.overflow = '';
-        
-        // Ensure main content is visible
-        const mainContent = document.getElementById('mainContent');
-        if (mainContent) {
-          mainContent.style.display = 'block';
-          mainContent.style.visibility = 'visible';
-          mainContent.classList.add('store-selected', 'loaded');
-        }
-      } else {
-        // NO FLAG = Fresh load - FORCE MODAL VISIBLE NOW
-        console.log('❗ NO flag found - FORCING MODAL VISIBLE');
-        
-        // CRITICAL: Set flag to BLOCK TagManager initialization
+      })
+      .catch(err => {
+        console.error('Error checking store status:', err);
+        // On error, default to showing modal (safer)
+        console.log('⚠️ Error checking store - defaulting to show modal');
         window.STORE_MODAL_BLOCKING = true;
-        console.log('🚫 BLOCKING TagManager initialization until store selected');
         
-        // Clear backend session
-        fetch('/api/clear-store', {
-          method: 'POST',
-          credentials: 'same-origin'
-        }).then(() => {
-          console.log('✅ Backend session cleared');
-        }).catch(err => console.error('Clear error:', err));
-        
-        // FORCE modal visible immediately
         const showModal = () => {
           const modalElement = document.getElementById('storeSelectionModal');
-          const mainContent = document.getElementById('mainContent');
-          
           if (modalElement) {
             modalElement.style.display = 'block';
             modalElement.classList.add('show');
             document.body.classList.add('modal-open');
             document.body.style.overflow = 'hidden';
-            
-            // Add backdrop
-            if (!document.querySelector('.modal-backdrop, #storeModalBackdrop')) {
-              const backdrop = document.createElement('div');
-              backdrop.id = 'storeModalBackdrop';
-              backdrop.className = 'modal-backdrop fade show';
-              backdrop.style.zIndex = '9998';
-              document.body.appendChild(backdrop);
-            }
-            
-            console.log('✅✅✅ MODAL IS NOW VISIBLE ✅✅✅');
           } else {
-            console.log('⏳ Modal element not ready, retrying...');
             setTimeout(showModal, 50);
-          }
-          
-          // CRITICAL: Hide main content IMMEDIATELY
-          if (mainContent) {
-            mainContent.style.display = 'none';
-            mainContent.style.visibility = 'hidden';
-            console.log('🚫 MAIN CONTENT HIDDEN');
           }
         };
         
-        // Show modal now or when DOM ready
         if (document.readyState === 'loading') {
           document.addEventListener('DOMContentLoaded', showModal);
         } else {
           showModal();
         }
-      }
+      });
     })();
   </script>
   
