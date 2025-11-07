@@ -4925,26 +4925,6 @@
       </div>
     </div>
 
-    <!-- Debug: Test Splash Button (Remove after testing) -->
-    <button onclick="
-      console.log('🧪 TEST BUTTON CLICKED');
-      const splash = document.getElementById('excelLoadingSplash');
-      console.log('🧪 Found splash element:', !!splash);
-      if (splash) {
-        console.log('🧪 Current display:', splash.style.display);
-        console.log('🧪 Setting display to flex...');
-        splash.style.display = 'flex';
-        splash.style.zIndex = '999999';
-        console.log('🧪 New display:', splash.style.display);
-        setTimeout(() => {
-          console.log('🧪 Hiding splash...');
-          splash.style.display = 'none';
-        }, 3000);
-      } else {
-        alert('❌ Splash element not found!');
-      }
-    " style="position: fixed; bottom: 10px; right: 10px; z-index: 100000; padding: 10px 20px; background: #ff0066; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 8px rgba(0,0,0,0.3);">TEST SPLASH</button>
-
     <div class="w-100 py-1" style="z-index:1; position:relative;">
       <!-- Title and Subtitle centered above tag panels -->
 
