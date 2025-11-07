@@ -9471,6 +9471,7 @@ html, body {
   flex-direction: column;
   gap: 0.5rem;
   min-height: 75px;
+  min-width: 120px;
 }
 
 .filter-group .filter-label {

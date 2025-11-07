@@ -1219,6 +1219,13 @@ class ProductDatabase:
             error_count = 0
             errors = []
             
+            # CRITICAL FIX: Filter out rows with blank product names BEFORE processing
+            # This prevents trying to add empty rows and avoids thousands of rejection log messages
+            if 'Product Name*' in filtered_df.columns:
+                valid_mask = filtered_df['Product Name*'].notna() & (filtered_df['Product Name*'].astype(str).str.strip() != '')
+                filtered_df = filtered_df[valid_mask]
+                print(f"🔍 DEBUG: Filtered out blank product names - Processing {len(filtered_df)} valid rows")
+            
             # Process each row in the filtered DataFrame
             print(f"🔍 DEBUG: Starting to process {len(filtered_df)} rows for database storage")
             for index, row in filtered_df.iterrows():
