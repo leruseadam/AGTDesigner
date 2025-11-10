@@ -6,20 +6,39 @@ from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, Mm, RGBColor
 from docxtpl import DocxTemplate, InlineImage
 from docxcompose.composer import Composer
+import qrcode
 from io import BytesIO
 import logging
 import os
 from pathlib import Path
 import re
+import time
 from typing import Dict, Any, List, Optional
 import traceback
+import pandas as pd
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK, WD_TAB_ALIGNMENT
 from docx.enum.table import WD_ALIGN_VERTICAL
 from docx.enum.section import WD_SECTION
-# from docx.oxml.shared import OxmlElement, qn  # Duplicate import removed
-import time
-import pandas as pd
-import qrcode
+from importlib.metadata import version as get_package_version
+from importlib import resources as importlib_resources
+import sys
+import types
+import docxcompose.properties as _docx_props
+
+try:
+    import pkg_resources  # type: ignore
+except ModuleNotFoundError:
+    import types as _types  # Fallback if types not available
+    pkg_resources = _types.ModuleType('pkg_resources')  # type: ignore
+
+    def _resource_string(package, resource):
+        return importlib_resources.read_binary(package, resource)
+
+    pkg_resources.resource_string = _resource_string  # type: ignore
+    sys.modules['pkg_resources'] = pkg_resources  # type: ignore
+
+if not hasattr(_docx_props, 'pkg_resources'):
+    _docx_props.pkg_resources = pkg_resources
 
 # Local imports
 from src.core.utils.common import safe_get
@@ -68,7 +87,7 @@ def get_font_scheme(template_type, base_size=12):
     }
 
 class TemplateProcessor:
-    # ...existing code...
+    # ...rest of the code...
     def _get_template_path(self):
         """Return the path to the DOCX template file for the current template type."""
         base_dir = os.path.join(os.path.dirname(__file__), 'templates')
@@ -132,10 +151,13 @@ class TemplateProcessor:
         self.start_time = time.time()
         self.chunk_count = 0
 
-        # CRITICAL FIX: Disable chunking and grid limits, always set chunk_size to number of records for all templates
-        self.chunk_size = None  # Will be set dynamically in process_records
-        self.logger.info(f"CRITICAL FIX: Chunking disabled, chunk_size will be set to number of records for all templates")
-            # ...existing code...
+        # CRITICAL FIX: Disable chunking only for templates that support dynamic grids
+        if self.template_type in ['horizontal', 'vertical', 'double']:
+            self.chunk_size = None  # Will be set dynamically in process_records for these templates
+            self.logger.info(f"CRITICAL FIX: Chunking disabled for template '{self.template_type}' - chunk_size will match total records")
+        else:
+            self.logger.info(f"Chunking retained for template '{self.template_type}' with chunk_size {self.chunk_size}")
+            # ...rest of the code...
 
     def _expand_template_if_needed(self, force_expand=False):
         """Expand template if needed and return buffer."""
@@ -553,7 +575,6 @@ class TemplateProcessor:
         except Exception as e:
             self.logger.warning(f"Failed to create dynamic template: {e}")
             return False
-
     def _expand_template_to_4x3_fixed_double(self, num_products=None):
         """Expand template to 4x3 grid for double templates (4 columns, 3 rows)."""
         from docx import Document
@@ -586,103 +607,96 @@ class TemplateProcessor:
             if not paragraph.text.strip():
                 paragraph._element.getparent().remove(paragraph._element)
 
-        tbl = doc.add_table(rows=num_rows, cols=num_cols)
-        tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
+        max_cells_per_page = num_rows * num_cols
+        total_products = num_products if num_products is not None else max_cells_per_page
+        pages = (total_products + max_cells_per_page - 1) // max_cells_per_page
+        self.logger.info(f"🔍 DOUBLE TEMPLATE EXPANSION: Creating {pages} table(s) for {total_products} products.")
         
-        # Copy the original table properties and styling from the source template
-        # instead of creating hardcoded styling
-        if hasattr(old, '_element') and old._element is not None:
-            old_tblPr = old._element.find(qn('w:tblPr'))
-            if old_tblPr is not None:
-                # Copy the original table properties
-                tbl._element.insert(0, deepcopy(old_tblPr))
+        product_idx = 0
+        for page in range(pages):
+            tbl = doc.add_table(rows=num_rows, cols=num_cols)
+            tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
+            
+            # Copy the original table properties and styling from the source template
+            if hasattr(old, '_element') and old._element is not None:
+                old_tblPr = old._element.find(qn('w:tblPr'))
+                if old_tblPr is not None:
+                    tbl._element.insert(0, deepcopy(old_tblPr))
+                else:
+                    tblPr = OxmlElement('w:tblPr')
+                    layout = OxmlElement('w:tblLayout')
+                    layout.set(qn('w:type'), 'fixed')
+                    tblPr.append(layout)
+                    tbl._element.insert(0, tblPr)
             else:
-                # Fallback to minimal table properties if none exist
                 tblPr = OxmlElement('w:tblPr')
                 layout = OxmlElement('w:tblLayout')
                 layout.set(qn('w:type'), 'fixed')
                 tblPr.append(layout)
                 tbl._element.insert(0, tblPr)
-        else:
-            # Fallback to minimal table properties
-            tblPr = OxmlElement('w:tblPr')
-            layout = OxmlElement('w:tblLayout')
-            layout.set(qn('w:type'), 'fixed')
-            tblPr.append(layout)
-            tbl._element.insert(0, tblPr)
-        
-        # Set up the grid with proper column widths
-        grid = OxmlElement('w:tblGrid')
-        for _ in range(num_cols):
-            gc = OxmlElement('w:gridCol')
-            gc.set(qn('w:w'), col_width_twips)
-            grid.append(gc)
-        tbl._element.insert(0, grid)
-        
-        # Set row heights
-        for row in tbl.rows:
-            row.height = row_height_pts
-            row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
-        
-        # FIXED: Restore proper template content copying with clean placeholder addition
-        cnt = 1
-        max_cells = num_products if num_products else (num_rows * num_cols)
-        
-        for r in range(num_rows):
-            for c in range(num_cols):
-                if cnt > max_cells:
-                    # Clear extra cells completely and set white background
-                    cell = tbl.cell(r,c)
+            
+            # Set up the grid with proper column widths
+            grid = OxmlElement('w:tblGrid')
+            for _ in range(num_cols):
+                gc = OxmlElement('w:gridCol')
+                gc.set(qn('w:w'), col_width_twips)
+                grid.append(gc)
+            tbl._element.insert(0, grid)
+            
+            # Set row heights
+            for row in tbl.rows:
+                row.height = row_height_pts
+                row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+            
+            for r in range(num_rows):
+                for c in range(num_cols):
+                    cell = tbl.cell(r, c)
                     cell._tc.clear_content()
                     
-                    # Set white background for extra cells
-                    tc = cell._tc
-                    tcPr = tc.find(qn('w:tcPr'))
-                    if tcPr is None:
-                        tcPr = OxmlElement('w:tcPr')
-                        tc.insert(0, tcPr)
-                    
-                    # Remove any existing background color
-                    shd = tcPr.find(qn('w:shd'))
-                    if shd is not None:
-                        tcPr.remove(shd)
-                    
-                    # Add white background
-                    shd = OxmlElement('w:shd')
-                    shd.set(qn('w:val'), 'clear')
-                    shd.set(qn('w:color'), 'auto')
-                    shd.set(qn('w:fill'), 'FFFFFF')  # White background
-                    tcPr.append(shd)
-                    
-                    cell.add_paragraph()  # Add empty paragraph to maintain structure
-                    continue
-                    
-                cell = tbl.cell(r,c)
-                cell._tc.clear_content()
-                tc = deepcopy(src_tc)
-                
-                # RESTORE DOUBLE TEMPLATE: Preserve original template structure like horizontal/vertical
-                # Update Label1 references to Label{cnt} for proper grid expansion
-                cell_text = ''
-                for t in tc.iter(qn('w:t')):
-                    if t.text:
-                        cell_text += t.text
-                        if 'Label1' in t.text:
-                            t.text = t.text.replace('Label1', f'Label{cnt}')
-                
-                # Copy the original cell content and styling exactly as it is
-                for el in tc.xpath('./*'):
-                    cell._tc.append(deepcopy(el))
-                
-                cnt += 1
-                
-        # Add minimal spacing between cells
-        from docx.oxml.shared import OxmlElement as OE
-        tblPr2 = tbl._element.find(qn('w:tblPr'))
-        spacing = OxmlElement('w:tblCellSpacing')
-        spacing.set(qn('w:w'), str(cut_line_twips))
-        spacing.set(qn('w:type'), 'dxa')
-        tblPr2.append(spacing)
+                    if product_idx < total_products:
+                        cnt = product_idx + 1
+                        tc = deepcopy(src_tc)
+                        
+                        # Update placeholders
+                        for t in tc.iter(qn('w:t')):
+                            if t.text and 'Label1' in t.text:
+                                t.text = t.text.replace('Label1', f'Label{cnt}')
+                        
+                        for el in tc.xpath('./*'):
+                            cell._tc.append(deepcopy(el))
+                        product_idx += 1
+                    else:
+                        # Clear unused cells and set white background
+                        tc = cell._tc
+                        tcPr = tc.find(qn('w:tcPr'))
+                        if tcPr is None:
+                            tcPr = OxmlElement('w:tcPr')
+                            tc.insert(0, tcPr)
+                        
+                        shd = tcPr.find(qn('w:shd'))
+                        if shd is not None:
+                            tcPr.remove(shd)
+                        
+                        shd = OxmlElement('w:shd')
+                        shd.set(qn('w:val'), 'clear')
+                        shd.set(qn('w:color'), 'auto')
+                        shd.set(qn('w:fill'), 'FFFFFF')
+                        tcPr.append(shd)
+                        cell.add_paragraph()
+            
+            # Add minimal spacing between cells
+            tblPr2 = tbl._element.find(qn('w:tblPr'))
+            spacing = OxmlElement('w:tblCellSpacing')
+            spacing.set(qn('w:w'), str(cut_line_twips))
+            spacing.set(qn('w:type'), 'dxa')
+            tblPr2.append(spacing)
+            
+            # Insert page break after each table except the last
+            if page < pages - 1:
+                page_break_para = doc.add_paragraph()
+                page_break_run = page_break_para.add_run()
+                page_break_run.add_break(WD_BREAK.PAGE)
+                self.logger.info(f"🔍 DOUBLE TEMPLATE EXPANSION: Added page break after table {page + 1} of {pages}")
         
         buf = BytesIO()
         doc.save(buf)
@@ -901,11 +915,11 @@ class TemplateProcessor:
                 documents.append(self._process_chunk(chunk))
                 # All records processed in one chunk; no further chunking or looping required
             else:
-                # Ensure chunk size matches record count for all other template types (e.g., mini, inventory)
-                self.chunk_size = len(records)
+                # Ensure chunk size respects fixed page capacity for templates like mini/inventory
+                self.chunk_size = self.chunk_size or len(records)
                 self.logger.info(f"🔍 LABEL RENDER: Processing {len(records)} records for template '{self.template_type}' with chunk_size {self.chunk_size}.")
                 self.start_time = time.time()
-                self.chunk_count = 1
+                self.chunk_count = 0
                 overall_order = [record.get('ProductName', 'Unknown') for record in records]
                 self.logger.info(f"Processing {len(records)} records in overall order: {overall_order}")
                 has_json_products = any(record.get('Source', '').startswith('JSON') or record.get('Source', '').startswith('Database Priority') for record in records)
@@ -938,7 +952,12 @@ class TemplateProcessor:
                     self.logger.warning("No records to process after deduplication.")
                     return None
 
-                documents.append(self._process_chunk(records))
+                chunk_size = max(1, self.chunk_size)
+                for start in range(0, len(records), chunk_size):
+                    chunk = records[start:start + chunk_size]
+                    self.chunk_count += 1
+                    self.logger.info(f"🔍 LABEL RENDER: Processing chunk {self.chunk_count} containing {len(chunk)} record(s)")
+                    documents.append(self._process_chunk(chunk))
             
             if not documents: 
                 return None
@@ -1194,7 +1213,6 @@ class TemplateProcessor:
         except Exception as e:
             self.logger.error(f"Error in _process_chunk: {e}\n{traceback.format_exc()}")
             raise
-
     def _build_inventory_context(self, record):
         """Build context dictionary for inventory slip template."""
         context = {}
@@ -1688,8 +1706,8 @@ class TemplateProcessor:
                 cleaned_lineage_val = lineage_val.strip()
                 self.logger.debug(f"DEBUG: Cleaned lineage_val: '{repr(cleaned_lineage_val)}'")
                 
-                # CRITICAL FIX: For double, horizontal, and vertical templates, don't clean lineage - preserve full lineage values
-                if self.template_type not in ('double', 'horizontal', 'vertical'):
+                # CRITICAL FIX: For horizontal and vertical templates, preserve the full lineage value
+                if self.template_type not in ('horizontal', 'vertical'):
                     # Only clean lineage for templates that use marker-wrapped lineage (e.g., standard flows)
                     classic_lineages = ["HYBRID/SATIVA", "HYBRID/INDICA", "SATIVA", "INDICA", "HYBRID", "CBD", "MIXED"]
                     for classic_lineage in classic_lineages:
@@ -1725,6 +1743,16 @@ class TemplateProcessor:
             else:
                 label_context['ProductVendor'] = ""
                 self.logger.debug(f"ProductVendor set to empty for classic type '{product_type}' (no vendor data)")
+            
+            # Ensure ProductStrain uses proper marker wrapping for classic types (1pt sizing)
+            product_strain_value = record.get('ProductStrain') or record.get('Product Strain', '')
+            if product_strain_value:
+                if self.template_type == 'mini':
+                    label_context['ProductStrain'] = str(product_strain_value).strip()
+                else:
+                    label_context['ProductStrain'] = wrap_with_marker(str(product_strain_value).strip(), 'PRODUCTSTRAIN')
+            else:
+                label_context['ProductStrain'] = ""
             
             # CRITICAL FIX: Classic types should NOT have ProductBrand for most templates
             # However, mini templates still display brand in dedicated cells
@@ -1778,7 +1806,7 @@ class TemplateProcessor:
                     # CRITICAL FIX: Clean brand_center_text to prevent corruption while preserving the brand
                     clean_brand_text = str(brand_center_text).strip().upper()
                     
-                    # Only remove corrupted marker patterns if they exist, but preserve the actual brand name
+                    # Only remove corrupted patterns if they exist, but preserve the actual brand name
                     import re
                     # CRITICAL FIX: Add debugging to see what's happening to brand text
                     self.logger.info(f"🔍 BRAND CLEANING DEBUG: Original brand text: '{clean_brand_text}'")
@@ -1809,14 +1837,92 @@ class TemplateProcessor:
                     else:
                         # Fallback to original brand text if cleaning removed everything
                         final_brand_text = str(brand_center_text).strip().upper()
+                    # Remove trailing strain content if it was concatenated with the brand text
+                    product_strain_value = (product_strain or record.get('ProductStrain') or record.get('Product Strain', ''))
+                    if product_strain_value:
+                        strain_token = str(product_strain_value).strip().upper()
+                        # Remove marker remnants if present
+                        strain_token = strain_token.replace('PRODUCTSTRAIN_START', '').replace('PRODUCTSTRAIN_END', '').strip()
+                        if strain_token:
+                            original_brand = final_brand_text
+                            
+                            # Tokenize strain string into individual tokens (split on separators)
+                            strain_components = {strain_token}
+                            strain_components.update(
+                                token.strip()
+                                for token in re.split(r'[\s\-\/,|]+', strain_token)
+                                if token.strip()
+                            )
+
+                            # Remove common separators before strain tokens (e.g., " - ", " / ")
+                            final_brand_text = re.sub(
+                                rf"\s*[-–\/]+\s*{re.escape(strain_token)}\s*$",
+                                "",
+                                final_brand_text,
+                                flags=re.IGNORECASE,
+                            )
+                            # If the strain token still appears at the end without a separator, remove it
+                            final_brand_text = re.sub(
+                                rf"{re.escape(strain_token)}\s*$",
+                                "",
+                                final_brand_text,
+                                flags=re.IGNORECASE,
+                            )
+                            # Remove strain tokens wrapped in parentheses or brackets at the end
+                            final_brand_text = re.sub(
+                                rf"\s*[\(\[\{{]\s*{re.escape(strain_token)}\s*[\)\]\}}]\s*$",
+                                "",
+                                final_brand_text,
+                                flags=re.IGNORECASE,
+                            )
+                            # Remove strain tokens anywhere within the brand text
+                            for component in list(strain_components):
+                                if component:
+                                    final_brand_text = re.sub(
+                                        rf"[\s\(\[\{{\-–\/]*{re.escape(component)}[\s\)\]\}}\-–\/]*",
+                                        " ",
+                                        final_brand_text,
+                                        flags=re.IGNORECASE,
+                                    )
+                            # Remove lineage tokens accidentally attached to brand text
+                            lineage_tokens = ["SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", "CBD", "MIXED"]
+                            for lineage_token in lineage_tokens:
+                                if lineage_token:
+                                    final_brand_text = re.sub(
+                                        rf"[\s\(\[\{{\-–\/]*{re.escape(lineage_token)}[\s\)\]\}}\-–\/]*",
+                                        " ",
+                                        final_brand_text,
+                                        flags=re.IGNORECASE,
+                                    )
+                                final_brand_text = re.sub(
+                                    rf"\s*[\(\[\{{]*\s*{re.escape(lineage_token)}\s*[\)\]\}}]*\s*$",
+                                    "",
+                                    final_brand_text,
+                                    flags=re.IGNORECASE,
+                                )
+                                final_brand_text = re.sub(
+                                    rf"\s*[-–\/]*\s*{re.escape(lineage_token)}\s*$",
+                                    "",
+                                    final_brand_text,
+                                    flags=re.IGNORECASE,
+                                )
+                            # Collapse extra whitespace created by removals
+                            final_brand_text = re.sub(r"\s{2,}", " ", final_brand_text).strip()
+                            final_brand_text = final_brand_text.rstrip("-–/").rstrip()
+                            if final_brand_text != original_brand:
+                                self.logger.info(
+                                    f"🎯 DOUBLE TEMPLATE STRAIN SPLIT: Removed strain/lineage token from brand -> '{final_brand_text}'"
+                                )
+                    if not final_brand_text:
+                        final_brand_text = clean_brand_text or str(brand_center_text).strip().upper()
                     
                     # CRITICAL FIX: Add debugging to see final brand text
                     self.logger.info(f"🔍 BRAND CLEANING DEBUG: Final brand text: '{final_brand_text}' (length: {len(final_brand_text)})")
                     
                     label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{final_brand_text}PRODUCTBRAND_CENTER_END"
                     # Also populate ProductBrand fields for templates that reference ProductBrand instead of Lineage
-                    label_context['ProductBrand'] = final_brand_text
-                    label_context['ProductBrand_Center'] = final_brand_text
+                    label_context['ProductBrand'] = ""
+                    label_context['ProductBrand_Center'] = ""
                     
                     self.logger.info(f"🎯 DOUBLE TEMPLATE BRAND FIX: Set Lineage to '{final_brand_text}' for double template (with markers)")
                 else:
@@ -2253,7 +2359,6 @@ class TemplateProcessor:
         except Exception as e:
             self.logger.warning(f"Error preserving apostrophes: {e}")
             # Don't raise the exception - this is a defensive measure
-
     def _post_process_and_replace_content(self, doc):
         """Post-process the document after template rendering."""
         # Skip unnecessary processing for inventory templates
@@ -2632,7 +2737,6 @@ class TemplateProcessor:
                                             ind = pPr.find(qn('w:ind'))
                                             if ind is not None:
                                                 pPr.remove(ind)
-                                            
                                             self.logger.debug("Applied top-section DOH image centering")
                                             break
                             
@@ -2902,7 +3006,6 @@ class TemplateProcessor:
                 
         except Exception as e:
             self.logger.warning(f"Error adding DOH vertical spacer: {e}")
-
     def _final_marker_cleanup(self, doc):
         """
         Final marker cleanup to ensure ALL markers are stripped from the final output.
@@ -3200,6 +3303,8 @@ class TemplateProcessor:
         try:
             from src.core.generation.unified_font_sizing import get_font_size
             
+            template_orientation = self.template_type if self.template_type in {'vertical', 'double'} else 'vertical'
+
             for table in doc.tables:
                 for row in table.rows:
                     for cell in row.cells:
@@ -3207,18 +3312,23 @@ class TemplateProcessor:
                             for run in paragraph.runs:
                                 if run.text and run.text.strip():
                                     # Determine field type based on text content and position
-                                    field_type = self._determine_field_type_for_vertical_template(run.text, paragraph, cell)
+                                    field_type = self._determine_field_type_for_template(run.text, paragraph, cell)
                                     
                                     # Apply unified font sizing
-                                    font_size = get_font_size(run.text, field_type, 'vertical', self.scale_factor)
+                                    font_size = get_font_size(run.text, field_type, template_orientation, self.scale_factor)
                                     # Apply at run and XML level to prevent Word from overriding
                                     from src.core.generation.unified_font_sizing import set_run_font_size
                                     set_run_font_size(run, font_size)
                                     
-                                    self.logger.debug(f"Applied unified font sizing to vertical template text: '{run.text}' -> {field_type} -> {font_size}")
+                                    self.logger.debug(f"Applied unified font sizing to {self.template_type} template text: '{run.text}' -> {field_type} -> {font_size}")
                                     
         except Exception as e:
             self.logger.warning(f"Failed to apply unified font sizing to vertical template text: {e}")
+
+    def _determine_field_type_for_template(self, text, paragraph, cell):
+        if self.template_type == 'double':
+            return self._determine_field_type_for_double_template(text, paragraph, cell)
+        return self._determine_field_type_for_vertical_template(text, paragraph, cell)
 
     def _determine_field_type_for_vertical_template(self, text, paragraph, cell):
         """
@@ -3278,6 +3388,59 @@ class TemplateProcessor:
         # where most text should be hidden/minimal
         self.logger.debug(f"⚠️ TEXT CLASSIFIED AS STRAIN: '{text_stripped}' (len={len(text_stripped)}) - will be invisible")
         return 'strain'
+
+    def _determine_field_type_for_double_template(self, text, paragraph, cell):
+        """
+        Determine the field type for double template text based on content and context.
+        Double templates should display most content visibly, so default to 'default' sizing.
+        """
+        text_lower = text.lower().strip()
+        text_stripped = text.strip()
+        is_all_caps = (text_stripped.isupper() and any(c.isalpha() for c in text_stripped))
+        is_short_wordy = (len(text_stripped) <= 18 and all(ch.isalpha() or ch.isspace() or ch in ['&','-','/'] for ch in text_stripped))
+
+        # Prices
+        if '$' in text:
+            return 'price'
+
+        # THC/CBD percentages
+        if '%' in text or any(keyword in text_lower for keyword in ['thc', 'cbd', 'cbn', 'cbg']):
+            return 'thc_cbd'
+
+        # Weight / ratios
+        if any(keyword in text_lower for keyword in ['oz', 'gram', 'g ', 'mg', 'ml']) or ':' in text:
+            return 'ratio'
+
+        # Classic lineage values
+        classic_lineages = ['hybrid/sativa', 'hybrid/indica', 'sativa', 'indica', 'hybrid', 'cbd', 'mixed']
+        if text_stripped.upper() in [lineage.upper() for lineage in classic_lineages]:
+            self.logger.debug(f"🎯 DOUBLE LINEAGE DETECTED: '{text_stripped}' classified as lineage")
+            return 'lineage'
+
+        # Detect obvious product strain tokens (e.g., "HYBRID" in non-classic contexts)
+        if text_stripped.upper() in classic_lineages:
+            return 'strain'
+
+        # Well known brands
+        well_known_brands = ['constellation', 'gravity', 'mary jones', 'skagit organics', 'artizen', 'sitka', 'raven', 'grassroots', 'pruf cultivar', 'lil ray', 'green revolution']
+        if any(brand in text_lower for brand in well_known_brands):
+            return 'brand'
+
+        # Heuristic brand detection
+        if is_all_caps and is_short_wordy and len(text_stripped.split()) <= 4 and len(text_stripped) >= 2:
+            self.logger.debug(f"🎯 DOUBLE BRAND CLASSIFIED: '{text_stripped}' classified as brand")
+            return 'brand'
+
+        if (len(text_stripped) >= 3 and len(text_stripped) <= 24 and 
+            any(word in text_lower for word in ['ray', 'lil', 'green', 'revolution', 'cannabis', 'co', 'brands', 'farm', 'company']) and
+            any(char.isalpha() for char in text_stripped) and
+            not any(char.isdigit() for char in text_stripped) and
+            not any(keyword in text_lower for keyword in ['oz', 'gram', 'mg', 'ml', 'thc', 'cbd', '%', '$'])):
+            self.logger.debug(f"🎯 DOUBLE MIXED-CASE BRAND CLASSIFIED: '{text_stripped}' classified as brand")
+            return 'brand'
+
+        # Default: Treat as normal visible text
+        return 'default'
 
     def _optimize_vertical_template_spacing(self, doc):
         """
@@ -3355,7 +3518,6 @@ class TemplateProcessor:
                 for row in table.rows:
                     for cell in row.cells:
                         self._recursive_autosize_template_specific_multi(cell, markers)
-
     def _process_paragraph_for_markers_template_specific(self, paragraph, markers):
         """
         Process a single paragraph for multiple markers using template-specific font sizing.
@@ -4005,7 +4167,6 @@ class TemplateProcessor:
             # Fallback: just remove the BR markers
             for run in paragraph.runs:
                 run.text = run.text.replace('|BR|', ' ')
-
     def _ensure_consistent_lineage_spacing(self, doc):
         """
         Ensure consistent spacing above lineage/brand sections for equal margins across all labels.
@@ -4649,7 +4810,6 @@ class TemplateProcessor:
         except Exception as e:
             self.logger.error(f"Failed to rebuild corrupted table: {e}")
             return False
-
     def _ensure_proper_centering(self, doc):
         """
         Ensure tables are properly centered in the document with correct margins and spacing.
@@ -5078,6 +5238,13 @@ class TemplateProcessor:
         except Exception as e:
             self.logger.error(f"Error ensuring brand centering for nonclassic types: {e}")
 
+    def _is_non_classic_type(self, product_type):
+        """Return True if product_type is not one of the classic types."""
+        if not product_type:
+            return False
+        classic_types = {'flower', 'pre-roll', 'live'}
+        return product_type.lower() not in classic_types
+
     def _clean_up_lineage_brand_concatenation(self, doc):
         """
         Clean up any remaining concatenated lineage+brand content for classic types.
@@ -5135,6 +5302,69 @@ class TemplateProcessor:
                                 
         except Exception as e:
             self.logger.error(f"Error cleaning up lineage brand concatenation: {e}")
+
+    def _final_doh_positioning_enforcement(self, doc):
+        """Ensure DOH image paragraphs remain centered after processing."""
+        try:
+            from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
+            from docx.enum.text import WD_ALIGN_PARAGRAPH
+            from docx.oxml.ns import qn
+            from docx.oxml import OxmlElement
+
+            fixed = 0
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        paragraphs = []
+                        has_image = False
+                        for paragraph in cell.paragraphs:
+                            for run in paragraph.runs:
+                                if hasattr(run, '_element') and (
+                                    run._element.find(qn('w:drawing')) is not None or
+                                    run._element.find(qn('w:pict')) is not None
+                                ):
+                                    has_image = True
+                                    paragraphs.append(paragraph)
+                                    break
+                            if has_image:
+                                break
+
+                        if not has_image:
+                            continue
+
+                        fixed += 1
+                        cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+                        for paragraph in paragraphs:
+                            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                            try:
+                                pPr = paragraph._element.get_or_add_pPr()
+                                existing_jc = pPr.find(qn('w:jc'))
+                                if existing_jc is not None:
+                                    pPr.remove(existing_jc)
+                                jc = OxmlElement('w:jc')
+                                jc.set(qn('w:val'), 'center')
+                                pPr.append(jc)
+
+                                existing_spacing = pPr.find(qn('w:spacing'))
+                                if existing_spacing is not None:
+                                    pPr.remove(existing_spacing)
+                                spacing = OxmlElement('w:spacing')
+                                spacing.set(qn('w:before'), '60')
+                                spacing.set(qn('w:after'), '60')
+                                spacing.set(qn('w:line'), '240')
+                                spacing.set(qn('w:lineRule'), 'auto')
+                                pPr.append(spacing)
+
+                                existing_ind = pPr.find(qn('w:ind'))
+                                if existing_ind is not None:
+                                    pPr.remove(existing_ind)
+                            except Exception as xml_error:
+                                self.logger.warning(f"Error centering DOH paragraph: {xml_error}")
+
+            if fixed:
+                self.logger.info(f"Final DOH positioning enforcement centered {fixed} cell(s)")
+        except Exception as e:
+            self.logger.warning(f"DOH centering enforcement skipped: {e}")
 
     def _ensure_standalone_cannabinoid_font_sizing(self, doc):
         """
@@ -5225,7 +5455,6 @@ class TemplateProcessor:
         if not text.startswith('\u00AD\u00A0'):
             text = f'\u00AD\u00A0{text}'
         return text
-
     def format_classic_ratio(self, text, record=None):
         """
         Format ratio for classic types. Handles various input formats and converts them to the standard display format.
@@ -5856,7 +6085,6 @@ class TemplateProcessor:
                 return False
         
         return False
-
     def _fix_productstrain_in_brand_cells(self, doc):
         """Fix ProductStrain appearing in ProductBrand cells for non-classic types."""
         try:
@@ -5893,726 +6121,152 @@ class TemplateProcessor:
                                     
         except Exception as e:
             self.logger.warning(f"Error fixing ProductStrain in Brand cells: {e}")
-    
+
     def _detect_productstrain_in_brand_content(self, text):
         """Detect if ProductStrain content appears in the same cell as ProductBrand content."""
-        # CRITICAL FIX: Don't interfere with Lineage field content
-        # The Lineage field is SUPPOSED to contain strain content (INDICA, SATIVA, HYBRID) 
-        # alongside vendor names for classic types - this is correct behavior
-        
-        # Only apply this fix if we're in a ProductBrand-specific context
-        # Check if this is actually a ProductBrand cell, not a Lineage cell
-        if 'PRODUCTBRAND' in text.upper() or 'BRAND' in text.upper():
-            # Common strain values that shouldn't appear in brand cells
-            common_strains = [
-                'HYBRID', 'INDICA', 'SATIVA', 'MIXED', 'CBD', 'CBD BLEND', 'PARAPHERNALIA', 'PARA'
-            ]
-            
-            # Check if any strain content appears in the text
-            for strain in common_strains:
-                if strain in text.upper():
-                    # Also check if there's likely brand content (words that look like brand names)
-                    # Brand names typically have mixed case, multiple words, and may contain LLC, Inc, etc.
-                    brand_indicators = ['LLC', 'INC', 'CORP', 'CO', 'COMPANY', 'BRANDS', 'BRAND']
-                    has_brand_indicators = any(indicator in text.upper() for indicator in brand_indicators)
-                    
-                    # If we have both strain content and brand indicators, this needs fixing
-                    if has_brand_indicators:
-                        return True
-        
+        if not text:
+            return False
+
+        upper_text = text.upper()
+        if 'PRODUCTBRAND' not in upper_text and 'BRAND' not in upper_text:
+            # Even if markers were stripped, double templates typically still contain uppercase brand text
+            # Check for multiple uppercase words as a heuristic
+            words = [w for w in upper_text.split() if w.isalpha()]
+            if len(words) < 2:
+                return False
+
+        common_strains = ['HYBRID', 'INDICA', 'SATIVA', 'MIXED', 'CBD', 'CBD BLEND', 'PARAPHERNALIA', 'PARA']
+
+        for strain in common_strains:
+            if strain in upper_text:
+                # Ensure there is additional non-strain content
+                cleaned = upper_text.replace(strain, '')
+                if cleaned.strip():
+                    return True
         return False
-    
+
     def _fix_productstrain_content_in_brand_cells(self, paragraph, full_text):
         """Fix ProductStrain content appearing in ProductBrand cells by removing strain content."""
         try:
-            # Common strain values to remove
-            common_strains = [
-                'HYBRID', 'INDICA', 'SATIVA', 'MIXED', 'CBD', 'CBD BLEND', 'PARAPHERNALIA', 'PARA'
-            ]
-            
-            # Find and remove strain content
+            if not full_text:
+                return False
+
+            common_strains = ['HYBRID', 'INDICA', 'SATIVA', 'MIXED', 'CBD', 'CBD BLEND', 'PARAPHERNALIA', 'PARA']
             new_text = full_text
-            removed_strains = []
-            
+            removed = []
+
             for strain in common_strains:
                 if strain.upper() in new_text.upper():
-                    # Remove the strain content (case-insensitive)
-                    strain_pattern = re.compile(re.escape(strain), re.IGNORECASE)
-                    new_text = strain_pattern.sub('', new_text)
-                    removed_strains.append(strain)
-            
-            # Clean up extra whitespace and line breaks
-            new_text = re.sub(r'\n\s*\n', '\n', new_text)  # Remove double line breaks
-            new_text = new_text.strip()  # Remove leading/trailing whitespace
-            
-            if removed_strains:
-                self.logger.debug(f"Removed ProductStrain content: {removed_strains}")
-                self.logger.debug(f"Original text: '{full_text}'")
-                self.logger.debug(f"Cleaned text: '{new_text}'")
-                
-                # Update the paragraph with cleaned text
+                    pattern = re.compile(re.escape(strain), re.IGNORECASE)
+                    new_text = pattern.sub('', new_text)
+                    removed.append(strain)
+
+            new_text = re.sub(r'\n\s*\n', '\n', new_text)
+            new_text = re.sub(r'\s{2,}', ' ', new_text).strip()
+            new_text = new_text.rstrip("-–/").strip()
+
+            if removed and new_text != full_text:
+                self.logger.debug(f"Removed ProductStrain content {removed} from brand cell")
                 paragraph.clear()
                 run = paragraph.add_run()
                 run.text = new_text
                 run.font.name = "Arial"
                 run.font.bold = True
-                
-                # Apply appropriate font sizing for ProductBrand using the unified font sizing
-                from src.core.generation.unified_font_sizing import get_font_size
+
                 font_size = get_font_size(new_text, 'brand', self.template_type, self.scale_factor)
                 run.font.size = font_size
-                
                 return True
-            
+
             return False
-            
         except Exception as e:
             self.logger.warning(f"Error fixing ProductStrain content in brand cells: {e}")
             return False
-    
+
     def _fix_productstrain_markers_in_brand_cells(self, paragraph, full_text):
         """Legacy method to fix ProductStrain markers in ProductBrand cells."""
         try:
-            # Extract the ProductStrain content
             strain_start = full_text.find('PRODUCTSTRAIN_START')
             strain_end = full_text.find('PRODUCTSTRAIN_END')
-            
+
             if strain_start >= 0 and strain_end >= 0:
-                # Extract the strain content (without markers)
                 strain_content_start = strain_start + len('PRODUCTSTRAIN_START')
                 strain_content = full_text[strain_content_start:strain_end]
-                
-                # Extract the ProductBrand content (without ProductStrain)
+
                 brand_start = full_text.find('PRODUCTBRAND_CENTER_START')
                 brand_end = full_text.find('PRODUCTBRAND_CENTER_END')
-                
+
                 if brand_start >= 0 and brand_end >= 0:
-                    # Get the brand content between the markers
-                    brand_content_start = brand_start + len('PRODUCTBRAND_CENTER_START')
-                    brand_content = full_text[brand_content_start:brand_end]
-                    
-                    # Remove the ProductStrain content from this paragraph
-                    # Keep only the ProductBrand content
                     new_text = full_text[:strain_start] + full_text[strain_end + len('PRODUCTSTRAIN_END'):]
-                    
-                    # Clear the paragraph and recreate with just the ProductBrand content
+
                     paragraph.clear()
                     run = paragraph.add_run()
                     run.text = new_text
                     run.font.name = "Arial"
                     run.font.bold = True
-                    
-                    # Apply appropriate font sizing for ProductBrand
-                    from src.core.generation.unified_font_sizing import get_font_size_by_marker
+
                     font_size = get_font_size_by_marker(new_text, 'PRODUCTBRAND_CENTER', self.template_type, self.scale_factor)
                     if font_size:
                         run.font.size = font_size
-                    
+
                     self.logger.debug(f"Separated ProductStrain '{strain_content}' from ProductBrand cell")
-                    
+                    return True
+
+            return False
         except Exception as e:
             self.logger.warning(f"Error fixing ProductStrain markers in brand cells: {e}")
+            return False
 
     def _detect_arbitrary_strain_concatenation(self, text):
         """Detect arbitrary Product Strain concatenation to Lineage/Brand in vertical template for non-classic types."""
-        # Only check for non-classic type strain patterns in vertical templates
-        if not text.strip():
+        if not text:
             return False
-            
-        # Common non-classic strain patterns that shouldn't be concatenated to brand names
-        non_classic_strains = [
-            'CBD BLEND', 'MIXED', 'CBD', 'PARAPHERNALIA', 'PARA', 'N/A'
-        ]
-        
-        # Look for patterns where a strain is concatenated directly to brand content
-        # Example: "HUSTLERCBD BLEND" should be "HUSTLER" + separate "CBD BLEND"
+
         text_upper = text.upper()
-        
+        non_classic_strains = ['CBD BLEND', 'MIXED', 'CBD', 'PARAPHERNALIA', 'PARA', 'N/A']
+
         for strain in non_classic_strains:
             strain_upper = strain.upper()
             if strain_upper in text_upper:
-                # Check if strain appears to be concatenated (no space before strain)
                 strain_index = text_upper.find(strain_upper)
                 if strain_index > 0:
-                    # Check if there's text immediately before the strain (no space)
                     char_before = text_upper[strain_index - 1]
-                    if char_before.isalnum():  # Letter or number directly before strain
-                        # This looks like concatenation - brand name + strain without space
+                    if char_before.isalnum():
                         self.logger.debug(f"Detected arbitrary strain concatenation: '{text}' contains '{strain}' concatenated to brand")
                         return True
-        
         return False
 
     def _fix_arbitrary_strain_concatenation(self, paragraph, full_text):
         """Fix arbitrary Product Strain concatenation to Lineage/Brand for vertical template non-classic types."""
         try:
-            # Common non-classic strain patterns to separate
-            non_classic_strains = [
-                'CBD BLEND', 'MIXED', 'CBD', 'PARAPHERNALIA', 'PARA', 'N/A'
-            ]
-            
-            new_text = full_text
             text_upper = full_text.upper()
-            
+            non_classic_strains = ['CBD BLEND', 'MIXED', 'CBD', 'PARAPHERNALIA', 'PARA', 'N/A']
+
             for strain in non_classic_strains:
                 strain_upper = strain.upper()
                 if strain_upper in text_upper:
                     strain_index = text_upper.find(strain_upper)
                     if strain_index > 0:
-                        # Check if strain is concatenated (no space before)
                         char_before = text_upper[strain_index - 1]
                         if char_before.isalnum():
-                            # Extract the brand part (before strain)
                             brand_part = full_text[:strain_index].strip()
-                            strain_part = full_text[strain_index:strain_index + len(strain)].strip()
                             remainder = full_text[strain_index + len(strain):].strip()
-                            
-                            # For vertical template non-classic types, keep only the brand part in Lineage
-                            # The strain should be handled separately by ProductStrain field
+
                             new_text = brand_part
                             if remainder:
                                 new_text += " " + remainder
-                            
-                            self.logger.debug(f"Fixed arbitrary concatenation in vertical template:")
-                            self.logger.debug(f"  Original: '{full_text}'")
-                            self.logger.debug(f"  Brand part: '{brand_part}'")
-                            self.logger.debug(f"  Strain part: '{strain_part}' (removed from Lineage)")
-                            self.logger.debug(f"  Result: '{new_text}'")
-                            break
-            
-            # Update the paragraph if we made changes
-            if new_text != full_text:
-                paragraph.clear()
-                run = paragraph.add_run()
-                run.text = new_text.strip()
-                run.font.name = "Arial"
-                run.font.bold = True
-                
-                # Apply appropriate font sizing for brand content
-                from src.core.generation.unified_font_sizing import get_font_size
-                font_size = get_font_size(new_text, 'brand', self.template_type, self.scale_factor)
-                run.font.size = font_size
-                
-                return True
-            
+
+                            paragraph.clear()
+                            run = paragraph.add_run()
+                            run.text = new_text.strip()
+                            run.font.name = "Arial"
+                            run.font.bold = True
+
+                            font_size = get_font_size(new_text, 'brand', self.template_type, self.scale_factor)
+                            run.font.size = font_size
+
+                            self.logger.debug(f"Fixed arbitrary strain concatenation in vertical template: '{full_text}' -> '{new_text}'")
+                            return True
             return False
-            
         except Exception as e:
             self.logger.error(f"Error fixing arbitrary strain concatenation: {e}")
             return False
-
-    def _is_non_classic_type(self, product_type):
-        """Check if a product type is non-classic (not Flower, Pre-Roll, or Live)."""
-        if not product_type:
-            return False
-        
-        classic_types = ['flower', 'pre-roll', 'live']
-        return product_type.lower() not in classic_types
-
-    def _cell_contains_doh_image(self, cell):
-        """
-        Check if a cell contains a DOH image.
-        This is used to preserve center alignment for DOH images when setting other content to TOP alignment.
-        
-        Args:
-            cell: The table cell to check
-            
-        Returns:
-            bool: True if the cell contains a DOH image, False otherwise
-        """
-        # Use the common utility function
-        from src.core.utils.common import cell_contains_doh_image
-        return cell_contains_doh_image(cell)
-
-    def _final_doh_positioning_enforcement(self, doc):
-        """
-        Final enforcement pass to ensure DOH images are ALWAYS centered.
-        This method runs at the very end and overrides any other positioning logic.
-        It addresses the issue where Advanced Layout gets set to "top" instead of "center".
-        """
-        try:
-            from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
-            from docx.enum.text import WD_ALIGN_PARAGRAPH
-            from docx.oxml.ns import qn
-            from docx.oxml import OxmlElement
-            
-            doh_cells_fixed = 0
-            
-            for table in doc.tables:
-                for row in table.rows:
-                    for cell in row.cells:
-                        # Check if this cell contains a DOH image
-                        has_doh_image = False
-                        doh_paragraphs = []
-                        
-                        for paragraph in cell.paragraphs:
-                            for run in paragraph.runs:
-                                if hasattr(run, '_element'):
-                                    # Check for drawing elements (InlineImage) or picture elements
-                                    if (run._element.find(qn('w:drawing')) is not None or 
-                                        run._element.find(qn('w:pict')) is not None):
-                                        has_doh_image = True
-                                        doh_paragraphs.append(paragraph)
-                                        break
-                            if has_doh_image:
-                                break
-                        
-                        if has_doh_image:
-                            doh_cells_fixed += 1
-                            
-                            # FORCE cell vertical alignment to CENTER
-                            cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
-                            
-                            # FORCE paragraph alignment to CENTER for all DOH image paragraphs
-                            for paragraph in doh_paragraphs:
-                                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                                
-                                # FORCE XML-level centering to override any Word template defaults
-                                try:
-                                    pPr = paragraph._element.get_or_add_pPr()
-                                    
-                                    # Remove any existing justification and set to center
-                                    existing_jc = pPr.find(qn('w:jc'))
-                                    if existing_jc is not None:
-                                        pPr.remove(existing_jc)
-                                    
-                                    jc = OxmlElement('w:jc')
-                                    jc.set(qn('w:val'), 'center')
-                                    pPr.append(jc)
-                                    
-                                    # Ensure proper spacing
-                                    existing_spacing = pPr.find(qn('w:spacing'))
-                                    if existing_spacing is not None:
-                                        pPr.remove(existing_spacing)
-                                    
-                                    spacing = OxmlElement('w:spacing')
-                                    spacing.set(qn('w:before'), '60')  # 3pt before
-                                    spacing.set(qn('w:after'), '60')   # 3pt after
-                                    spacing.set(qn('w:line'), '240')   # Single line spacing
-                                    spacing.set(qn('w:lineRule'), 'auto')
-                                    pPr.append(spacing)
-                                    
-                                    # Remove any indentation that might affect centering
-                                    existing_ind = pPr.find(qn('w:ind'))
-                                    if existing_ind is not None:
-                                        pPr.remove(existing_ind)
-                                    
-                                except Exception as xml_error:
-                                    self.logger.warning(f"Error applying XML-level DOH centering: {xml_error}")
-            
-            if doh_cells_fixed > 0:
-                self.logger.info(f"Final DOH positioning enforcement: Fixed {doh_cells_fixed} DOH image cells to ensure CENTER alignment")
-                
-        except Exception as e:
-            self.logger.warning(f"Error in final DOH positioning enforcement: {e}")
-
-    def _clean_doh_cells_before_processing(self, doc):
-        """
-        Clean up DOH cells before processing to ensure no content interferes with image positioning.
-        This should be called before DOH images are inserted.
-        """
-        try:
-            from docx.oxml.ns import qn
-            
-            for table in doc.tables:
-                for row in table.rows:
-                    for cell in row.cells:
-                        # Check if this cell contains DOH placeholder
-                        cell_text = cell.text.strip()
-                        if '{{Label' in cell_text and '.DOH}}' in cell_text:
-                            # Clear the cell content to prepare for image insertion
-                            cell._tc.clear_content()
-                            
-                            # Add a single empty paragraph to maintain cell structure
-                            paragraph = cell.add_paragraph()
-                            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                            
-                            # Set minimal spacing
-                            paragraph.paragraph_format.space_before = Pt(0)
-                            paragraph.paragraph_format.space_after = Pt(0)
-                            paragraph.paragraph_format.line_spacing = 1.0
-                            
-                            # Set cell vertical alignment
-                            cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
-                            
-                            self.logger.debug("Cleaned DOH cell for image insertion")
-                            
-        except Exception as e:
-            self.logger.warning(f"Error cleaning DOH cells: {e}")
-
-    def _replace_qr_placeholder(self, doc, qr_inline_image, label_key="Label1"):
-        """Replace QR placeholder with actual QR code image for specific label."""
-        try:
-            self.logger.debug(f"Starting QR placeholder replacement for {label_key}")
-            
-            # Find and replace QR_PLACEHOLDER text with actual QR code
-            # We'll replace the first QR_PLACEHOLDER we find for this label
-            for table in doc.tables:
-                for row in table.rows:
-                    for cell in row.cells:
-                        for paragraph in cell.paragraphs:
-                            for run in paragraph.runs:
-                                if 'QR_PLACEHOLDER' in run.text:
-                                    # Clear the run text and add the QR image
-                                    run.clear()
-                                    run._element.append(qr_inline_image._inline)
-                                    self.logger.debug(f"Replaced QR placeholder with QR code image for {label_key}")
-                                    return True
-            
-            self.logger.warning(f"QR_PLACEHOLDER not found for {label_key}")
-            return False
-            
-        except Exception as e:
-            self.logger.error(f"Error replacing QR placeholder for {label_key}: {e}")
-            return False
-
-    def _manual_replace_placeholders(self, doc, context):
-        """Manually replace placeholders in the document when DocxTemplate fails."""
-        try:
-            self.logger.info("Starting manual placeholder replacement")
-            
-            # Debug: Log the context structure
-            self.logger.info(f"Context keys: {list(context.keys())}")
-            for label_key, label_context in context.items():
-                if isinstance(label_context, dict):
-                    self.logger.info(f"{label_key} fields: {list(label_context.keys())}")
-                    # Log a few sample values
-                    for field_key, field_value in list(label_context.items())[:5]:
-                        # Avoid calling str() on InlineImage objects which causes rendering issues
-                        if hasattr(field_value, '_raw_image_data'):
-                            self.logger.info(f"  {field_key}: <QR Code InlineImage>")
-                        else:
-                            self.logger.info(f"  {field_key}: {repr(str(field_value)[:100])}")
-            
-            # Debug: Check what placeholders exist in the template
-            placeholder_count = 0
-            found_placeholders = set()
-            for table in doc.tables:
-                for row in table.rows:
-                    for cell in row.cells:
-                        for paragraph in cell.paragraphs:
-                            full_text = ''.join(run.text for run in paragraph.runs)
-                            if '{{' in full_text and '}}' in full_text:
-                                # Extract all placeholders from this paragraph
-                                import re
-                                placeholders = re.findall(r'{{[^}]+}}', full_text)
-                                for p in placeholders:
-                                    found_placeholders.add(p)
-                                    placeholder_count += 1
-                                    self.logger.debug(f"Found placeholder in template: {p}")
-                            elif full_text.strip():  # Log non-empty text that doesn't contain placeholders
-                                self.logger.debug(f"Found non-placeholder text: '{full_text.strip()}'")
-            
-            self.logger.info(f"Found {placeholder_count} placeholders in template: {sorted(found_placeholders)}")
-            
-            # Process each table in the document
-            replacements_made = 0
-            for table in doc.tables:
-                for row in table.rows:
-                    for cell in row.cells:
-                        for paragraph in cell.paragraphs:
-                            # First, try to handle split placeholders by reconstructing the full paragraph text
-                            full_paragraph_text = ''.join(run.text for run in paragraph.runs)
-                            
-                            # Process each run for placeholder replacement
-                            for run in paragraph.runs:
-                                text = run.text
-                                self.logger.debug(f"BRAND DEBUG: Processing run with initial text: '{text}'")
-                                for label_key, label_context in context.items():
-                                    for field_key, field_value in label_context.items():
-                                        placeholder = f"{{{{{label_key}.{field_key}}}}}"
-                                        
-                                        # Check if placeholder is in this run or split across runs
-                                        if placeholder in text or placeholder in full_paragraph_text:
-                                            self.logger.debug(f"BRAND DEBUG: Found placeholder {placeholder} in text: '{text}' or paragraph: '{full_paragraph_text}'")
-                                            if placeholder in text:
-                                                self.logger.debug(f"Found placeholder to replace: {placeholder}")
-                                                # CRITICAL FIX: Check if this placeholder has already been processed
-                                                if hasattr(run, '_processed_placeholders'):
-                                                    if placeholder in run._processed_placeholders:
-                                                        self.logger.debug(f"BRAND DEBUG: Placeholder {placeholder} already processed, skipping")
-                                                        continue
-                                                    run._processed_placeholders.add(placeholder)
-                                                else:
-                                                    run._processed_placeholders = {placeholder}
-                                            else:
-                                                self.logger.debug(f"Found split placeholder to replace: {placeholder}")
-                                            replacements_made += 1
-                                            
-                                            # Special handling for QR codes (InlineImage objects)
-                                            if field_key == 'QR' and hasattr(field_value, '_raw_image_data'):
-                                                # This is a QR code - replace with actual image
-                                                try:
-                                                    from PIL import Image
-                                                    # Get the image data
-                                                    img_buffer = BytesIO(field_value._raw_image_data)
-                                                    img_buffer.seek(0)
-                                                    
-                                                    # Clear the run and add the image directly
-                                                    run.clear()
-                                                    # Add the QR code image to the run
-                                                    run.add_picture(img_buffer, width=field_value._raw_image_width)
-                                                    self.logger.debug(f"Replaced {placeholder} with QR code image")
-                                                    continue
-                                                except Exception as qr_error:
-                                                    self.logger.error(f"Failed to insert QR code image: {qr_error}")
-                                                    # Fall back to replacing with product name
-                                                    text = text.replace(placeholder, getattr(field_value, '_product_name', 'QR Code'))
-                                                continue
-                                            
-                                            # For all templates, unwrap markers to get clean content
-                                            if True:  # Apply to all templates
-                                                # Unwrap common markers to get clean content
-                                                clean_value = str(field_value)
-                                                self.logger.debug(f"Processing field {field_key} with value: {clean_value}")
-                                                if 'DESC_START' in clean_value and 'DESC_END' in clean_value:
-                                                    clean_value = unwrap_marker(clean_value, 'DESC')
-                                                elif 'PRICE_START' in clean_value and 'PRICE_END' in clean_value:
-                                                    clean_value = unwrap_marker(clean_value, 'PRICE')
-                                                elif 'THC_CBD_START' in clean_value and 'THC_CBD_END' in clean_value:
-                                                    clean_value = unwrap_marker(clean_value, 'THC_CBD')
-                                                elif 'RATIO_START' in clean_value and 'RATIO_END' in clean_value:
-                                                    clean_value = unwrap_marker(clean_value, 'RATIO')
-                                                elif 'PRODUCTNAME_START' in clean_value and 'PRODUCTNAME_END' in clean_value:
-                                                    clean_value = unwrap_marker(clean_value, 'PRODUCTNAME')
-                                                elif 'PRODUCTBRAND_CENTER_START' in clean_value and 'PRODUCTBRAND_CENTER_END' in clean_value:
-                                                    clean_value = unwrap_marker(clean_value, 'PRODUCTBRAND_CENTER')
-                                                elif 'PRODUCTBRAND_START' in clean_value and 'PRODUCTBRAND_END' in clean_value:
-                                                    clean_value = unwrap_marker(clean_value, 'PRODUCTBRAND')
-                                                elif 'WEIGHTUNITS_START' in clean_value and 'WEIGHTUNITS_END' in clean_value:
-                                                    clean_value = unwrap_marker(clean_value, 'WEIGHTUNITS')
-                                                elif 'PRODUCTVENDOR_START' in clean_value and 'PRODUCTVENDOR_END' in clean_value:
-                                                    clean_value = unwrap_marker(clean_value, 'PRODUCTVENDOR')
-                                                elif 'PRODUCTSTRAIN_START' in clean_value and 'PRODUCTSTRAIN_END' in clean_value:
-                                                    clean_value = unwrap_marker(clean_value, 'PRODUCTSTRAIN')
-                                                elif 'LINEAGE_START' in clean_value and 'LINEAGE_END' in clean_value:
-                                                    clean_value = unwrap_marker(clean_value, 'LINEAGE')
-                                                
-                                                # Replace placeholder with clean value
-                                                original_text = text
-                                                text = text.replace(placeholder, clean_value)
-                                                self.logger.debug(f"BRAND DEBUG: Replaced {placeholder} with unwrapped value: {clean_value}")
-                                                self.logger.debug(f"BRAND DEBUG: Original text: '{original_text}' -> New text: '{text}'")
-                                                
-                                                # CRITICAL FIX: Apply centering for Lineage field with PRODUCTBRAND_CENTER markers
-                                                if field_key == 'Lineage' and 'PRODUCTBRAND_CENTER_START' in str(field_value) and 'PRODUCTBRAND_CENTER_END' in str(field_value):
-                                                    # This is a non-classic type with Product Brand in Lineage field
-                                                    # For double template, center the existing paragraph instead of creating a new one
-                                                    from docx.enum.text import WD_ALIGN_PARAGRAPH
-                                                    
-                                                    self.logger.debug(f"Applying centering to Lineage field with value: {field_value}")
-                                                    
-                                                    # Find the paragraph and center it
-                                                    paragraph = run._element.getparent()
-                                                    if paragraph is not None:
-                                                        # Center the existing paragraph
-                                                        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                                                        self.logger.debug(f"Centered existing paragraph for brand: {clean_value}")
-                                                    else:
-                                                        self.logger.debug(f"Could not find paragraph for centering")
-                                                
-                                                # Update the run text
-                                                self.logger.debug(f"BRAND DEBUG: Setting run.text to: '{text}'")
-                                                # Check for non-breaking hyphens before setting
-                                                if '\u2011' in text:
-                                                    self.logger.debug(f"BRAND DEBUG: Text contains non-breaking hyphens: '{text}'")
-                                                run.text = text
-                                                self.logger.debug(f"BRAND DEBUG: After setting, run.text is: '{run.text}'")
-                                                # Check for non-breaking hyphens after setting
-                                                if '\u2011' in run.text:
-                                                    self.logger.debug(f"BRAND DEBUG: Run.text still contains non-breaking hyphens: '{run.text}'")
-                                                else:
-                                                    self.logger.debug(f"BRAND DEBUG: Run.text lost non-breaking hyphens: '{run.text}'")
-                                                
-                                                # CRITICAL FIX: Apply bold formatting to DESC content
-                                                if field_key == 'DescAndWeight' and 'DESC_START' in str(field_value) and 'DESC_END' in str(field_value):
-                                                    # Apply bold formatting at multiple levels for maximum compatibility
-                                                    run.font.bold = True
-                                                    
-                                                    # Force bold at XML level for maximum compatibility
-                                                    from docx.oxml import OxmlElement
-                                                    from docx.oxml.ns import qn
-                                                    rPr = run._element.get_or_add_rPr()
-                                                    
-                                                    # Remove any existing bold formatting
-                                                    for b_elem in rPr.xpath('.//w:b'):
-                                                        rPr.remove(b_elem)
-                                                    
-                                                    # Add new bold formatting
-                                                    b = OxmlElement('w:b')
-                                                    b.set(qn('w:val'), '1')
-                                                    rPr.append(b)
-                                                    
-                                                    # Also force Arial font
-                                                    run.font.name = "Arial"
-                                                    rFonts = OxmlElement('w:rFonts')
-                                                    rFonts.set(qn('w:ascii'), 'Arial')
-                                                    rFonts.set(qn('w:hAnsi'), 'Arial')
-                                                    rFonts.set(qn('w:eastAsia'), 'Arial')
-                                                    rFonts.set(qn('w:cs'), 'Arial')
-                                                    rPr.append(rFonts)
-                                                    
-                                                    self.logger.debug(f"Applied comprehensive bold formatting to DescAndWeight: {clean_value}")
-                                                
-                                                # Apply unified font sizing for double templates
-                                                field_type_mapping = {
-                                                    'DescAndWeight': 'description',
-                                                    'Price': 'price',
-                                                    'Ratio_or_THC_CBD': 'thc_cbd',
-                                                    'ProductBrand': 'brand',
-                                                    'Lineage': 'lineage',  # Use lineage font sizing for CBD/Lineage content
-                                                    'ProductStrain': 'strain',
-                                                    'ProductVendor': 'vendor',
-                                                    'DOH': 'doh',
-                                                    'QR': 'qr'
-                                                }
-                                                
-                                                field_type = field_type_mapping.get(field_key, 'default')
-                                                from src.core.generation.unified_font_sizing import get_font_size
-                                                font_size = get_font_size(clean_value, field_type, self.template_type, self.scale_factor)
-                                                set_run_font_size(run, font_size)
-                                                self.logger.debug(f"Applied font sizing: {field_key} -> {field_type} -> {font_size.pt}pt")
-                                            else:
-                                                # For other templates, use the original value
-                                                text = text.replace(placeholder, str(field_value))
-                                                self.logger.debug(f"Replaced {placeholder} with {field_value}")
-                                
-                                run.text = text
-                                
-                                # CRITICAL FIX: Apply bold formatting to DESC content for other templates
-                                if field_key == 'DescAndWeight' and 'DESC_START' in str(field_value) and 'DESC_END' in str(field_value):
-                                    # Apply bold formatting at multiple levels for maximum compatibility
-                                    run.font.bold = True
-                                    
-                                    # Force bold at XML level for maximum compatibility
-                                    from docx.oxml import OxmlElement
-                                    from docx.oxml.ns import qn
-                                    rPr = run._element.get_or_add_rPr()
-                                    
-                                    # Remove any existing bold formatting
-                                    for b_elem in rPr.xpath('.//w:b'):
-                                        rPr.remove(b_elem)
-                                    
-                                    # Add new bold formatting
-                                    b = OxmlElement('w:b')
-                                    b.set(qn('w:val'), '1')
-                                    rPr.append(b)
-                                    
-                                    # Also force Arial font
-                                    run.font.name = "Arial"
-                                    rFonts = OxmlElement('w:rFonts')
-                                    rFonts.set(qn('w:ascii'), 'Arial')
-                                    rFonts.set(qn('w:hAnsi'), 'Arial')
-                                    rFonts.set(qn('w:eastAsia'), 'Arial')
-                                    rFonts.set(qn('w:cs'), 'Arial')
-                                    rPr.append(rFonts)
-                                    
-                                    self.logger.debug(f"Applied comprehensive bold formatting to DescAndWeight (other templates): {str(field_value)}")
-                            
-                            # Also check paragraph text for remaining placeholders
-                            paragraph_text = paragraph.text
-                            if paragraph_text is None:
-                                paragraph_text = ""
-                            for label_key, label_context in context.items():
-                                for field_key, field_value in label_context.items():
-                                    placeholder = f"{{{{{label_key}.{field_key}}}}}"
-                                    if placeholder in paragraph_text:
-                                        # Special handling for QR codes (InlineImage objects)
-                                        if field_key == 'QR' and hasattr(field_value, '_raw_image_data'):
-                                            # Clear the paragraph and add the QR code image
-                                            try:
-                                                img_buffer = BytesIO(field_value._raw_image_data)
-                                                img_buffer.seek(0)
-                                                paragraph.clear()
-                                                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                                                new_run = paragraph.add_run()
-                                                new_run.add_picture(img_buffer, width=field_value._raw_image_width)
-                                                self.logger.debug(f"Replaced {placeholder} with QR code image in paragraph")
-                                                continue
-                                            except Exception as qr_error:
-                                                self.logger.error(f"Failed to insert QR code in paragraph: {qr_error}")
-                                                # Fall back to product name
-                                                paragraph_text = paragraph_text.replace(placeholder, getattr(field_value, '_product_name', 'QR Code'))
-                                                continue
-                                        
-                                        # Handle simple QR placeholder {{QR}}
-                                        if placeholder == '{{QR}}' and field_key == 'QR' and hasattr(field_value, '_raw_image_data'):
-                                            # Clear the paragraph and add the QR code image
-                                            try:
-                                                img_buffer = BytesIO(field_value._raw_image_data)
-                                                img_buffer.seek(0)
-                                                paragraph.clear()
-                                                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER  
-                                                new_run = paragraph.add_run()
-                                                new_run.add_picture(img_buffer, width=field_value._raw_image_width)
-                                                self.logger.debug(f"Replaced simple {{QR}} placeholder with QR code image in paragraph")
-                                                continue
-                                            except Exception as qr_error:
-                                                self.logger.error(f"Failed to insert simple QR code: {qr_error}")
-                                                # Fall back to product name
-                                                paragraph_text = paragraph_text.replace(placeholder, getattr(field_value, '_product_name', 'QR Code'))
-                                                continue
-                                        
-                                        # For all templates, unwrap markers to get clean content
-                                        if True:  # Apply to all templates
-                                            # Unwrap common markers to get clean content
-                                            clean_value = str(field_value)
-                                            if 'DESC_START' in clean_value and 'DESC_END' in clean_value:
-                                                clean_value = unwrap_marker(clean_value, 'DESC')
-                                            elif 'PRICE_START' in clean_value and 'PRICE_END' in clean_value:
-                                                clean_value = unwrap_marker(clean_value, 'PRICE')
-                                            elif 'THC_CBD_START' in clean_value and 'THC_CBD_END' in clean_value:
-                                                clean_value = unwrap_marker(clean_value, 'THC_CBD')
-                                            elif 'RATIO_START' in clean_value and 'RATIO_END' in clean_value:
-                                                clean_value = unwrap_marker(clean_value, 'RATIO')
-                                            elif 'PRODUCTNAME_START' in clean_value and 'PRODUCTNAME_END' in clean_value:
-                                                clean_value = unwrap_marker(clean_value, 'PRODUCTNAME')
-                                            elif 'PRODUCTBRAND_START' in clean_value and 'PRODUCTBRAND_END' in clean_value:
-                                                clean_value = unwrap_marker(clean_value, 'PRODUCTBRAND')
-                                            elif 'WEIGHTUNITS_START' in clean_value and 'WEIGHTUNITS_END' in clean_value:
-                                                clean_value = unwrap_marker(clean_value, 'WEIGHTUNITS')
-                                            elif 'PRODUCTVENDOR_START' in clean_value and 'PRODUCTVENDOR_END' in clean_value:
-                                                clean_value = unwrap_marker(clean_value, 'PRODUCTVENDOR')
-                                            elif 'PRODUCTSTRAIN_START' in clean_value and 'PRODUCTSTRAIN_END' in clean_value:
-                                                clean_value = unwrap_marker(clean_value, 'PRODUCTSTRAIN')
-                                            
-                                            # Replace placeholder with clean value
-                                            paragraph_text = paragraph_text.replace(placeholder, clean_value)
-                                            self.logger.debug(f"Replaced {placeholder} with unwrapped value in paragraph: {clean_value}")
-                                            
-                                            # Apply unified font sizing for double templates
-                                            field_type_mapping = {
-                                                'DescAndWeight': 'description',
-                                                'Price': 'price',
-                                                'Ratio_or_THC_CBD': 'thc_cbd',
-                                                'ProductBrand': 'brand',
-                                                'Lineage': 'brand',  # CRITICAL FIX: Lineage field contains PRODUCTBRAND_CENTER content, use 'brand' sizing
-                                                'ProductStrain': 'strain',
-                                                'ProductVendor': 'vendor',
-                                                'DOH': 'doh',
-                                                'QR': 'qr'
-                                            }
-                                            
-                                            field_type = field_type_mapping.get(field_key, 'default')
-                                            from src.core.generation.unified_font_sizing import get_font_size
-                                            font_size = get_font_size(clean_value, field_type, self.template_type, self.scale_factor)
-                                            
-                                            # Apply font sizing to all runs in the paragraph
-                                            for run in paragraph.runs:
-                                                set_run_font_size(run, font_size)
-                                            self.logger.debug(f"Applied font sizing to paragraph: {field_key} -> {field_type} -> {font_size.pt}pt")
-                                        else:
-                                            # For other templates, use the original value
-                                            paragraph_text = paragraph_text.replace(placeholder, str(field_value))
-                                            self.logger.debug(f"Replaced {placeholder} with {field_value} in paragraph")
-                            
-                            # CRITICAL FIX: Don't set paragraph.text as it overrides formatting including centering
-                            # The run.text updates above preserve paragraph formatting
-            
-            self.logger.info(f"Manual placeholder replacement completed - made {replacements_made} replacements")
-            
-        except Exception as e:
-            self.logger.error(f"Error during manual placeholder replacement: {e}")
-            raise
-
-__all__ = ['get_font_scheme', 'TemplateProcessor']

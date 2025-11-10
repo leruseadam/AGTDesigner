@@ -9,6 +9,16 @@ class PerformanceOptimizer {
         this.cache = new Map();
         this.maxCacheSize = 100;
         this.uploadProgress = null;
+        
+        // Request batching
+        this.requestBatches = new Map();
+        this.batchTimers = new Map();
+        this.batchDelay = 50; // 50ms batching delay
+        
+        // Request queue for avoiding simultaneous requests
+        this.requestQueue = [];
+        this.maxConcurrentRequests = 6;
+        this.activeRequests = 0;
     }
 
     /**
@@ -293,6 +303,106 @@ class PerformanceOptimizer {
         }
     }
 
+    /**
+     * Batch multiple API requests together
+     */
+    batchRequest(endpoint, data, batchKey = 'default') {
+        return new Promise((resolve, reject) => {
+            // Get or create batch for this key
+            if (!this.requestBatches.has(batchKey)) {
+                this.requestBatches.set(batchKey, []);
+            }
+            
+            const batch = this.requestBatches.get(batchKey);
+            batch.push({ data, resolve, reject });
+            
+            // Clear existing timer
+            if (this.batchTimers.has(batchKey)) {
+                clearTimeout(this.batchTimers.get(batchKey));
+            }
+            
+            // Set new timer to execute batch
+            const timer = setTimeout(() => {
+                this.executeBatch(endpoint, batchKey);
+            }, this.batchDelay);
+            
+            this.batchTimers.set(batchKey, timer);
+        });
+    }
+    
+    /**
+     * Execute a batch of requests
+     */
+    async executeBatch(endpoint, batchKey) {
+        const batch = this.requestBatches.get(batchKey);
+        if (!batch || batch.length === 0) return;
+        
+        // Clear batch and timer
+        this.requestBatches.delete(batchKey);
+        this.batchTimers.delete(batchKey);
+        
+        // Combine all data into single request
+        const batchData = batch.map(item => item.data);
+        
+        try {
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ batch: batchData })
+            });
+            
+            const results = await response.json();
+            
+            // Resolve individual promises
+            batch.forEach((item, index) => {
+                if (results[index]) {
+                    item.resolve(results[index]);
+                } else {
+                    item.reject(new Error('Batch request failed'));
+                }
+            });
+        } catch (error) {
+            // Reject all promises in batch
+            batch.forEach(item => item.reject(error));
+        }
+    }
+    
+    /**
+     * Queue requests to avoid overwhelming the server
+     */
+    async queuedFetch(url, options = {}) {
+        return new Promise((resolve, reject) => {
+            const executeRequest = async () => {
+                this.activeRequests++;
+                
+                try {
+                    const response = await fetch(url, options);
+                    const data = await response.json();
+                    resolve(data);
+                } catch (error) {
+                    reject(error);
+                } finally {
+                    this.activeRequests--;
+                    this.processQueue();
+                }
+            };
+            
+            // Add to queue
+            this.requestQueue.push(executeRequest);
+            this.processQueue();
+        });
+    }
+    
+    /**
+     * Process the request queue
+     */
+    processQueue() {
+        while (this.activeRequests < this.maxConcurrentRequests && this.requestQueue.length > 0) {
+            const nextRequest = this.requestQueue.shift();
+            nextRequest();
+        }
+    }
+    
     /**
      * Get performance metrics
      */

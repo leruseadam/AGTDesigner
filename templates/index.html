@@ -689,7 +689,6 @@
         generateBtn.disabled = false;
       });
     }
-    
     window.openDatabaseAnalytics = function() {
       console.log('openDatabaseAnalytics called');
       
@@ -1425,7 +1424,6 @@
             window.initializeExcelStrainEditor = function() {
               console.log('Initializing Excel strain editor...');
             };
-            
             // Use the consolidated function from window scope
             
             window.filterStrainBrowser = function() {
@@ -1800,7 +1798,6 @@
               createEnhancedLineageEditor: typeof window.createEnhancedLineageEditor,
               initializeEnhancedLineageEditor: typeof window.initializeEnhancedLineageEditor
             });
-            
             // Enhanced Product Database Manager
             window.showProductDatabaseManager = function() {
               console.log('showProductDatabaseManager function called!');
@@ -2587,7 +2584,6 @@
               
               return { valid: true };
             }
-            
             // Add file input change handler and drag-and-drop functionality
             document.addEventListener('DOMContentLoaded', function() {
               const fileInput = document.getElementById('databaseFile');
@@ -3385,7 +3381,6 @@
     .stats-content {
       padding: 0.25rem !important;
     }
-    
     .database-modal .glass-card {
       background: #ffffff;
       border: 1px solid #e9ecef;
@@ -4182,7 +4177,6 @@
     .spinner-border.text-primary {
       color: #00d4aa !important;
     }
-    
     /* Form text helper */
     .form-text {
       font-size: 0.875rem;
@@ -5500,7 +5494,6 @@
       });
     })();
   </script>
-  
   <!-- Help Modal -->
   <div class="modal fade" id="helpModal" tabindex="-1" aria-labelledby="helpModalLabel">
     <div class="modal-dialog modal-lg">
@@ -5563,7 +5556,7 @@
             </div>
           </div>
 
-          <div class="mt-4 p-3" style="background: rgba(102, 126, 234, 0.1); border-radius: 8px; border-left: 4px solid #667eea;">
+          <div class="mt-4 p-3" style="background: linear-gradient(135deg, rgba(255, 193, 7, 0.15), rgba(255, 152, 0, 0.15)); border-radius: 8px; border-left: 4px solid #ffc107; border-right: 4px solid #ff9800; box-shadow: 0 4px 15px rgba(255, 193, 7, 0.2);">
             <h6 class="text-info mb-2">🔧 Quick Actions Guide</h6>
             <div class="row">
               <div class="col-md-4">
@@ -6162,7 +6155,6 @@
        
        console.log('Vendor selection complete. selectedVendor:', window.selectedVendor);
      };
-     
     // Function to search products by vendor from real database
     window.searchProducts = function(searchTerm) {
       console.log('🔍 searchProducts called with:', searchTerm);
@@ -6828,7 +6820,6 @@
       });
     }
   </script>
-  
   <!-- ⚡ PERFORMANCE: Load performance optimizer first -->
   <script src="{{ url_for('static', filename='js/performance.js') }}?v={{ cache_bust }}" defer></script>
   
@@ -7575,7 +7566,6 @@
         alert('Error opening modal: ' + error.message);
       }
     }
-
     function openDatabaseInfo() {
       // Show loading state
       const loadingHtml = `
@@ -8207,7 +8197,6 @@
         `;
       });
     };
-    
     window.displayDetailedMatchResults = function(result) {
       const matchSummary = document.getElementById('matchSummary');
       const matchComparisons = document.getElementById('matchComparisons');
@@ -8766,7 +8755,6 @@
       });
     });
   </script>
-  
   <!-- Backup function definition for performDetailedJsonMatch -->
   <script>
     // Backup definition in case the main script has issues
@@ -8915,23 +8903,21 @@
                       </div>
                     </div>
                     <div class="col-md-6">
-                      <h6 class="text-success">� Database Match (100% DB Data):</h6>
+                      <h6 class="text-success">📊 Best Excel Match:</h6>
                       ${match.best_match ? `
                         <div class="bg-success bg-opacity-10 p-3 rounded">
-                          <strong>${match.best_match['Product Name*'] || match.best_match['ProductName'] || 'Enhanced Match'}</strong>
+                          <strong>${match.best_match['Product Name*'] || 'Unknown'}</strong>
                           <div class="mt-2">
                             <small class="text-muted">
-                              <strong>Price:</strong> $${match.best_match['Price'] || '25.00'}<br>
-                              <strong>Brand:</strong> ${match.best_match['Product Brand'] || 'CERES'}<br>
-                              <strong>Type:</strong> ${match.best_match['Product Type*'] || 'Edible (Solid)'}<br>
-                              <strong>Source:</strong> ${match.source || 'Database Priority (100% DB)'}<br>
-                              <strong>Confidence:</strong> ${match.match_confidence || scoreDisplay}
+                              Vendor: ${match.best_match['Vendor/Supplier*'] || 'N/A'}<br>
+                              Type: ${match.best_match['Product Type*'] || 'N/A'}<br>
+                              Score: ${((match.best_score || 0) * 100).toFixed(1)}%
                             </small>
                           </div>
                         </div>
                       ` : `
                         <div class="bg-secondary bg-opacity-10 p-3 rounded">
-                          <em>No database match found</em>
+                          <em>No suitable match found</em>
                         </div>
                       `}
                     </div>
@@ -11568,19 +11554,19 @@
 
           if (response.ok && data.success) {
             // Always just reload quickly - processing happens during page load
-            if (statusElement) {
+              if (statusElement) {
               statusElement.textContent = 'Upload complete! Reloading...';
             }
             
             // Clear caches
-            if (window.TagManager && window.TagManager.clearCache) {
-              window.TagManager.clearCache();
-            }
-            sessionStorage.clear();
-            
+              if (window.TagManager && window.TagManager.clearCache) {
+                window.TagManager.clearCache();
+              }
+              sessionStorage.clear();
+              
             // Reload after brief delay
-            setTimeout(() => {
-              window.location.href = window.location.href.split('?')[0] + '?t=' + Date.now();
+              setTimeout(() => {
+                window.location.href = window.location.href.split('?')[0] + '?t=' + Date.now();
             }, 800);
           } else {
             if (splash) splash.style.display = 'none';

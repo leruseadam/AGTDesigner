@@ -1,23 +1,21 @@
-"""
-
-AGT Label Maker - Consolidated Web Application
-============================================
-This is the sole, consolidated web version of the AGT Label Maker application.
-All web deployment functionality has been consolidated into this single file.
-
-Features:
-- Complete Flask web interface
-- 100% database-derived product matching
-- JointRatio support for pre-roll products
-- Advanced DOCX label generation
-- Real-time Excel processing
-- Session management and caching
-"""
+# AGT Label Maker - Consolidated Web Application
+# ============================================
+# This is the sole, consolidated web version of the AGT Label Maker application.
+# All web deployment functionality has been consolidated into this single file.
+#
+# Features:
+# - Complete Flask web interface
+# - 100% database-derived product matching
+# - JointRatio support for pre-roll products
+# - Advanced DOCX label generation
+# - Real-time Excel processing
+# - Session management and caching
 
 from src.core.data.field_mapping import get_canonical_field
 import os
 import sys  # Add this import
 import logging
+import traceback
 import threading
 import pandas as pd  # Add this import
 import time
@@ -846,16 +844,21 @@ def force_reload_excel_processor(new_file_path):
                         logging.error(f"Failed to populate dropdown cache from fallback: {e}")
             else:
                 logging.error(f"Failed to load default file as fallback: {default_file}")
-                # Only create empty DataFrame as last resort
+                if hasattr(_excel_processor, 'df') and _excel_processor.df is not None and not _excel_processor.df.empty:
+                    logging.warning("Preserving existing DataFrame to avoid wiping loaded data")
+                else:
+                    # Only create empty DataFrame if there truly is no data loaded
+                    _excel_processor.df = pd.DataFrame()
+                    _excel_processor.selected_tags = []
+                    logging.warning("Created empty DataFrame as last resort - no prior data available")
+        else:
+            logging.error("No default file available as fallback")
+            if hasattr(_excel_processor, 'df') and _excel_processor.df is not None and not _excel_processor.df.empty:
+                logging.warning("Preserving existing DataFrame despite missing fallback file")
+            else:
                 _excel_processor.df = pd.DataFrame()
                 _excel_processor.selected_tags = []
                 logging.warning("Created empty DataFrame as last resort - this may cause 'no strains' issues")
-        else:
-            logging.error("No default file available as fallback")
-            # Only create empty DataFrame as last resort
-            _excel_processor.df = pd.DataFrame()
-            _excel_processor.selected_tags = []
-            logging.warning("Created empty DataFrame as last resort - this may cause 'no strains' issues")
 
 def cleanup_old_processing_status():
     """Clean up old processing status entries to prevent memory leaks."""
@@ -1002,13 +1005,13 @@ def get_excel_processor():
                                         logging.warning("ExcelProcessor does not have _cache_dropdown_values method")
                                 else:
                                     logging.error("Failed to load default file in get_excel_processor")
-                                    # Ensure df attribute exists even if loading failed
-                                    if not hasattr(_excel_processor, 'df'):
+                                    # Ensure df attribute exists even if loading failed, but do not wipe existing data
+                                    if not hasattr(_excel_processor, 'df') or _excel_processor.df is None:
                                         _excel_processor.df = pd.DataFrame()
                             else:
                                 logging.warning("No default file found in get_excel_processor")
-                                # Ensure df attribute exists even if no default file
-                                if not hasattr(_excel_processor, 'df'):
+                                # Ensure df attribute exists even if no default file, but preserve existing data if present
+                                if not hasattr(_excel_processor, 'df') or _excel_processor.df is None:
                                     _excel_processor.df = pd.DataFrame()
                         else:
                             if DISABLE_STARTUP_FILE_LOADING:

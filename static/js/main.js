@@ -675,7 +675,6 @@ const debounce = (func, delay) => {
         timeoutId = setTimeout(() => func.apply(context, args), delay);
     };
 };
-
 // Application Loading Splash Manager
 const AppLoadingSplash = {
     loadingSteps: [
@@ -842,7 +841,7 @@ const TagManager = {
             'INDICA': 'var(--lineage-indica)',
             'HYBRID': 'var(--lineage-hybrid)',
             'HYBRID/SATIVA': 'var(--lineage-hybrid-sativa)',
-            'HYBRID/INDICA': 'var(--lineage-hybrid-indica)',
+            'HYBRID/INDICA': 'var(--lineage-indica)',
             'CBD': 'var(--lineage-cbd)',
             'PARA': 'var(--lineage-para)',
             'MIXED': 'var(--lineage-mixed)',
@@ -3255,7 +3254,7 @@ const TagManager = {
             'INDICA': 'I',
             'HYBRID': 'H',
             'HYBRID/SATIVA': 'H/S',
-            'HYBRID/INDICA': 'H/I',
+            'HYBRID/INDICA': 'I',
             'CBD': 'CBD',
             'PARA': 'P',
             'MIXED': 'THC',
@@ -4716,7 +4715,6 @@ const TagManager = {
         });
         // Update the top-level select all
         updateSelectAllCheckboxState(container);
-        
         // Update select all checkbox states
         this.updateSelectAllCheckboxes();
         
@@ -5303,6 +5301,16 @@ const TagManager = {
         const timeoutPromise = new Promise((_, reject) => {
             setTimeout(() => reject(new Error('Initialization timeout')), 10000); // 10 second timeout
         });
+
+        // Safety net: ensure loading overlay never blocks interaction for long
+        const splashSafetyTimeout = setTimeout(() => {
+            console.warn('⏳ Safety timeout triggered - force hiding loading splash');
+            if (typeof this.hideActionSplash === 'function') {
+                this.hideActionSplash();
+            }
+            AppLoadingSplash.stopAutoAdvance();
+            AppLoadingSplash.complete();
+        }, 1500);
         
         try {
             // Use the new initial-data endpoint for faster loading with timeout
@@ -5360,6 +5368,7 @@ const TagManager = {
                     setTimeout(() => {
                         this.hideActionSplash();
                     }, 200);
+                    clearTimeout(splashSafetyTimeout);
                     
                     console.log('Initial data loaded successfully');
                     return;
@@ -5368,6 +5377,7 @@ const TagManager = {
                     // Complete splash loading even if no data
                     AppLoadingSplash.stopAutoAdvance();
                     AppLoadingSplash.complete();
+                clearTimeout(splashSafetyTimeout);
                     
                     // FIXED: Initialize empty state instead of loading test data
                     this.initializeEmptyState();
@@ -5378,6 +5388,7 @@ const TagManager = {
                 // Complete splash loading on error
                 AppLoadingSplash.stopAutoAdvance();
                 AppLoadingSplash.complete();
+                clearTimeout(splashSafetyTimeout);
                 
                 // FIXED: Initialize empty state instead of loading test data
                 this.initializeEmptyState();
@@ -5395,12 +5406,12 @@ const TagManager = {
             // Complete splash loading on error
             AppLoadingSplash.stopAutoAdvance();
             AppLoadingSplash.complete();
+            clearTimeout(splashSafetyTimeout);
             
             // FIXED: Initialize empty state instead of loading test data
             this.initializeEmptyState();
             return;
         }
-        
     },
 
     loadTestData() {
@@ -5739,10 +5750,10 @@ const TagManager = {
         if (explicitValues.has(normalizedInput)) {
             const lineageColors = {
                 'SATIVA': 'var(--lineage-sativa)',
-                'INDICA': 'var(--lineage-indica)', 
+                'INDICA': 'var(--lineage-indica)',
                 'HYBRID': 'var(--lineage-hybrid)',
                 'HYBRID/SATIVA': 'var(--lineage-hybrid-sativa)',
-                'HYBRID/INDICA': 'var(--lineage-hybrid-indica)',
+                'HYBRID/INDICA': 'var(--lineage-indica)',
                 'CBD': 'var(--lineage-cbd)',
                 'MIXED': 'var(--lineage-mixed)'
             };
@@ -5762,10 +5773,10 @@ const TagManager = {
         // Apply color mapping based on final determined lineage
         const lineageColors = {
             'SATIVA': 'var(--lineage-sativa)',
-            'INDICA': 'var(--lineage-indica)', 
+            'INDICA': 'var(--lineage-indica)',
             'HYBRID': 'var(--lineage-hybrid)',
             'HYBRID/SATIVA': 'var(--lineage-hybrid-sativa)',
-            'HYBRID/INDICA': 'var(--lineage-hybrid-indica)',
+            'HYBRID/INDICA': 'var(--lineage-indica)',
             'CBD': 'var(--lineage-cbd)',
             'CBD_BLEND': 'var(--lineage-cbd)',
             'MIXED': 'var(--lineage-mixed)',
@@ -6710,11 +6721,11 @@ const TagManager = {
                     </div>
                 </div>
                 <button onclick="TagManager.hideEnhancedGenerationSplash()" style="background: rgba(220, 53, 69, 0.8); border: 1px solid rgba(220, 53, 69, 0.8); color: white; padding: 8px 16px; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.3s ease; margin-top: 15px;" onmouseover="this.style.background='rgba(220, 53, 69, 1)'; this.style.transform='scale(1.05)'" onmouseout="this.style.background='rgba(220, 53, 69, 0.8)'; this.style.transform='scale(1)'">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px; vertical-align: middle;">
-                        <line x1="18" y1="6" x2="6" y2="18"></line>
-                        <line x1="6" y1="6" x2="18" y2="18"></line>
-                    </svg>
-                    Exit Generation
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px; vertical-align: middle;">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+                Exit Generation
                 </button>
                 <style>
                     @keyframes progress { 0% { width: 0%; } 50% { width: 100%; } 100% { width: 0%; } }
@@ -7760,7 +7771,6 @@ const TagManager = {
             }, 300); // Match the CSS transition duration
         }
     },
-
     // Start memory optimization
     startMemoryOptimization() {
         // Run memory optimization every 30 seconds
@@ -7933,7 +7943,7 @@ const ABBREVIATED_LINEAGE = {
     "INDICA": "I", 
     "HYBRID": "H",
     "HYBRID/SATIVA": "H/S",
-    "HYBRID/INDICA": "H/I",
+    "HYBRID/INDICA": "I",
     "CBD": "CBD",
     "CBD_BLEND": "CBD",
     "MIXED": "THC",
@@ -8475,7 +8485,6 @@ function clearUIState() {
     if (window.localStorage) localStorage.clear();
     if (window.sessionStorage) sessionStorage.clear();
 }
-
 // Comprehensive app reset function
 async function performFullAppReset() {
     console.log('🔄 Performing full app reset...');

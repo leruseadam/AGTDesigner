@@ -471,13 +471,13 @@ canvas#lava-lamp-canvas {
 @supports (height: 100svh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100svh - var(--tag-list-vertical-offset)));
-    --center-panel-height: var(--tag-list-height);
+    --center-panel-height: max(78rem, var(--tag-list-height));
   }
 }
 @supports (height: 100dvh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100dvh - var(--tag-list-vertical-offset)));
-    --center-panel-height: var(--tag-list-height);
+    --center-panel-height: max(78rem, var(--tag-list-height));
   }
 }
 
@@ -485,23 +485,23 @@ canvas#lava-lamp-canvas {
 @supports (height: 1svh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100svh - var(--tag-list-vertical-offset)));
-    --center-panel-height: var(--tag-list-height);
+    --center-panel-height: max(78rem, var(--tag-list-height));
   }
   #availableTags,
   #selectedTags {
-    height: var(--tag-list-height) !important;
-    min-height: var(--tag-list-height) !important;
+    height: var(--center-panel-height) !important;
+    min-height: var(--center-panel-height) !important;
   }
 }
 @supports (height: 1dvh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100dvh - var(--tag-list-vertical-offset)));
-    --center-panel-height: var(--tag-list-height);
+    --center-panel-height: max(78rem, var(--tag-list-height));
   }
   #availableTags,
   #selectedTags {
-    height: var(--tag-list-height) !important;
-    min-height: var(--tag-list-height) !important;
+    height: var(--center-panel-height) !important;
+    min-height: var(--center-panel-height) !important;
   }
 }
 
@@ -513,10 +513,10 @@ canvas#lava-lamp-canvas {
 @media (max-height: 700px) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), 72vh);
-    --center-panel-height: var(--tag-list-height);
+    --center-panel-height: max(78rem, var(--tag-list-height));
   }
   @supports (height: 100dvh) {
-    :root { --tag-list-height: max(var(--tag-list-min-height), 72dvh); --center-panel-height: var(--tag-list-height); }
+    :root { --tag-list-height: max(var(--tag-list-min-height), 72dvh); --center-panel-height: max(78rem, var(--tag-list-height)); }
   }
   .control-panel,
   .center-panel,
@@ -542,9 +542,8 @@ canvas#lava-lamp-canvas {
   align-items: stretch !important;
   gap: 0 !important;
   overflow-y: visible !important;
-  min-height: calc(var(--center-panel-height) - 1.5rem) !important;
-  height: var(--tag-list-height) !important;
-  max-height: var(--tag-list-height) !important;
+  height: var(--center-panel-height) !important;
+  min-height: var(--center-panel-height) !important;
 }
 
 .control-panel > * {
@@ -2531,9 +2530,8 @@ canvas#lava-lamp-canvas {
     align-items: stretch !important;
     gap: 0 !important;
     overflow-y: visible !important;
-    min-height: calc(var(--center-panel-height) - 1.5rem) !important;
-    height: var(--tag-list-height) !important;
-    max-height: var(--tag-list-height) !important;
+    height: var(--center-panel-height) !important;
+    min-height: var(--center-panel-height) !important;
   }
   
   /* Center panel grid alignment */

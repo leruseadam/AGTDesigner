@@ -87,7 +87,13 @@ class ProductDatabase:
         else:
             self.db_path = db_path
             self._store_name = store_name
+        
+        # Enhanced connection pooling
         self._connection_pool = {}
+        self._pool_lock = threading.Lock()
+        self._max_pool_size = 10  # Maximum connections per thread
+        self._pool_timeout = 30.0  # Connection timeout in seconds
+        
         self._cache = {}
         self._cache_lock = threading.Lock()
         self._initialized = False
@@ -107,29 +113,86 @@ class ProductDatabase:
             'queries': 0,
             'total_time': 0.0,
             'cache_hits': 0,
-            'cache_misses': 0
+            'cache_misses': 0,
+            'connection_reuses': 0,
+            'connection_creates': 0
         }
     
     def _get_connection(self):
-        """Get a database connection, reusing if possible."""
+        """Get a database connection from pool, with enhanced connection management."""
         thread_id = threading.get_ident()
-        if thread_id not in self._connection_pool:
-            # Configure connection for better concurrency
+        
+        with self._pool_lock:
+            # Check if we have a connection for this thread
+            if thread_id in self._connection_pool:
+                conn = self._connection_pool[thread_id]
+                # Verify connection is still valid
+                try:
+                    conn.execute("SELECT 1")
+                    self._timing_stats['connection_reuses'] += 1
+                    return conn
+                except sqlite3.Error:
+                    # Connection is dead, remove it
+                    try:
+                        conn.close()
+                    except:
+                        pass
+                    del self._connection_pool[thread_id]
+            
+            # Create new connection with optimized settings
             conn = sqlite3.connect(
                 self.db_path,
-                timeout=30.0,  # 30 second timeout for database operations
-                check_same_thread=False  # Allow connection sharing across threads
+                timeout=self._pool_timeout,
+                check_same_thread=False,  # Allow connection sharing
+                isolation_level='DEFERRED'  # Better concurrency for reads
             )
-            # Enable WAL mode for better concurrency
-            conn.execute("PRAGMA journal_mode=WAL")
-            # Set busy timeout (60s) to ride out background batches
-            conn.execute("PRAGMA busy_timeout=60000")
-            # Optimize for concurrent access
-            conn.execute("PRAGMA synchronous=NORMAL")
-            conn.execute("PRAGMA cache_size=10000")
-            conn.execute("PRAGMA temp_store=MEMORY")
+            
+            # Apply performance optimizations
+            conn.execute("PRAGMA journal_mode=WAL")  # Write-Ahead Logging
+            conn.execute("PRAGMA busy_timeout=60000")  # 60 second busy timeout
+            conn.execute("PRAGMA synchronous=NORMAL")  # Balance safety/speed
+            conn.execute("PRAGMA cache_size=-20000")  # 20MB cache
+            conn.execute("PRAGMA temp_store=MEMORY")  # Temp tables in memory
+            conn.execute("PRAGMA mmap_size=268435456")  # 256MB memory-mapped I/O
+            conn.execute("PRAGMA page_size=4096")  # Optimal page size
+            
+            # Store in pool
             self._connection_pool[thread_id] = conn
-        return self._connection_pool[thread_id]
+            self._timing_stats['connection_creates'] += 1
+            
+            return conn
+    
+    def close_connection(self):
+        """Close the connection for the current thread."""
+        thread_id = threading.get_ident()
+        with self._pool_lock:
+            if thread_id in self._connection_pool:
+                try:
+                    self._connection_pool[thread_id].close()
+                except:
+                    pass
+                del self._connection_pool[thread_id]
+    
+    def close_all_connections(self):
+        """Close all connections in the pool."""
+        with self._pool_lock:
+            for conn in self._connection_pool.values():
+                try:
+                    conn.close()
+                except:
+                    pass
+            self._connection_pool.clear()
+    
+    def get_pool_stats(self) -> Dict[str, Any]:
+        """Get connection pool statistics."""
+        with self._pool_lock:
+            return {
+                'active_connections': len(self._connection_pool),
+                'max_pool_size': self._max_pool_size,
+                'connection_reuses': self._timing_stats.get('connection_reuses', 0),
+                'connection_creates': self._timing_stats.get('connection_creates', 0),
+                'reuse_ratio': self._timing_stats.get('connection_reuses', 0) / max(1, self._timing_stats.get('connection_creates', 0))
+            }
     
     def init_database(self):
         """Initialize the database with required tables (lazy initialization)."""

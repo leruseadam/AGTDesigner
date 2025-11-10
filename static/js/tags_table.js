@@ -150,7 +150,7 @@ class TagsTable {
         if (cleanText.includes("PARAPHERNALIA")) {
             return 'var(--lineage-para)';
         } else if (cleanText.includes("HYBRID/INDICA") || cleanText.includes("HYBRID INDICA")) {
-            return 'var(--lineage-hybrid-indica)';
+            return 'var(--lineage-indica)';
         } else if (cleanText.includes("HYBRID/SATIVA") || cleanText.includes("HYBRID SATIVA")) {
             return 'var(--lineage-hybrid-sativa)';
         } else if (cleanText.includes("SATIVA")) {
@@ -381,17 +381,31 @@ class TagsTable {
       const result = await response.json();
       console.log(`✅ Successfully updated lineage for ${tagName} (${oldLineage} → ${newLineage})`);
 
-      // Always fetch latest tags from backend to ensure UI matches backend normalization
-      if (typeof TagManager !== 'undefined' && typeof TagManager.fetchAndUpdateAvailableTags === 'function') {
-        await TagManager.fetchAndUpdateAvailableTags();
-        console.log('✅ Refreshed available tags from backend after lineage update');
+      // Update UI elements directly without full refresh (prevents hanging)
+      if (typeof TagManager !== 'undefined' && typeof TagManager.updateTagLineageInUI === 'function') {
+        TagManager.updateTagLineageInUI(tagName, newLineage);
+        console.log(`🎨 Updated lineage UI for ${tagName}`);
       }
-      if (typeof TagManager !== 'undefined' && typeof TagManager.fetchAndUpdateSelectedTags === 'function') {
-        await TagManager.fetchAndUpdateSelectedTags();
-        console.log('✅ Refreshed selected tags from backend after lineage update');
+      
+      // Update similar products in the background (non-blocking)
+      if (typeof TagManager !== 'undefined' && typeof TagManager.updateSimilarLineages === 'function') {
+        TagManager.updateSimilarLineages(tagName, newLineage);
+        console.log(`🎨 Updated similar lineages for ${tagName}`);
       }
 
-      // Optionally, show brief visual feedback
+      // Refresh backend cache in the background (non-blocking)
+      setTimeout(async () => {
+        try {
+          if (typeof TagManager !== 'undefined' && typeof TagManager.refreshBackendCache === 'function') {
+            await TagManager.refreshBackendCache();
+            console.log('✅ Backend cache refreshed in background');
+          }
+        } catch (e) {
+          console.warn('Background cache refresh failed:', e);
+        }
+      }, 100);
+
+      // Show brief visual feedback
       selectElement.style.backgroundColor = '#d4edda';
       setTimeout(() => {
         selectElement.style.backgroundColor = '';

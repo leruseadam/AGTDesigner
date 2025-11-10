@@ -7,7 +7,7 @@
  */
 
 // 🔧 DEVELOPMENT MODE: Set to true to disable all caching
-const DEV_MODE = false;
+const DEV_MODE = true;
 
 // Version numbers - increment to force cache refresh
 const CACHE_VERSION = 'v3';

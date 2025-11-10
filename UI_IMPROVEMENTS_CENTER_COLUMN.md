@@ -2,7 +2,7 @@
 
 ## Summary of Changes
 
-Fixed the awkward button layout in the center column to create a more balanced, professional, and user-friendly interface.
+Fixed the awkward button layout in the center column to create a more balanced, professional, and user-friendly interface. **Updated November 7, 2025:** Fixed center column height to match left and right tag list panels for consistent vertical alignment.
 
 ## What Was Fixed
 
@@ -104,14 +104,15 @@ Fixed the awkward button layout in the center column to create a more balanced, 
 
 ## Testing Checklist
 
-- [ ] Buttons are more visible and comfortable to click
-- [ ] Icons are clear and easy to see
-- [ ] Spacing feels balanced and not cramped
-- [ ] Hover effects provide good feedback
-- [ ] Labels are readable and well-organized
-- [ ] Overall center column feels less awkward
-- [ ] No layout breaking on different screen sizes
-- [ ] Smooth transitions and animations work properly
+- [x] Buttons are more visible and comfortable to click
+- [x] Icons are clear and easy to see
+- [x] Spacing feels balanced and not cramped
+- [x] Hover effects provide good feedback
+- [x] Labels are readable and well-organized
+- [x] Overall center column feels less awkward
+- [x] No layout breaking on different screen sizes
+- [x] Smooth transitions and animations work properly
+- [x] **Center column height matches left and right panels (Nov 7, 2025)**
 
 ## Technical Details
 
@@ -131,7 +132,39 @@ Fixed the awkward button layout in the center column to create a more balanced, 
 
 ---
 
+## Height Fix (November 7, 2025)
+
+### Problem
+The center column (`.control-panel`) was not matching the height of the left and right tag list panels, creating visual imbalance. Initial fix attempt inadvertently made all three columns shorter.
+
+### Solution
+Updated both `static/css/styles.css` and `templates/index.html` to ensure all three columns use a unified height variable (`--center-panel-height`) that maintains the taller 78rem base height:
+
+**Changes Made:**
+
+1. **static/css/styles.css** (lines 540-547, 471-520, 2528-2535):
+   - Changed `.control-panel` to use `height: var(--center-panel-height)`
+   - Updated all `@supports` rules to use `--center-panel-height: max(78rem, var(--tag-list-height))`
+   - This ensures minimum height of 78rem while adapting to larger viewports
+   - Updated `#availableTags` and `#selectedTags` to use `--center-panel-height`
+
+2. **templates/index.html** (lines 4708-4745):
+   - Changed `.control-panel` height to `var(--center-panel-height)`
+   - Updated side column containers (`data-container-type="available"` and `"selected"`) to use `--center-panel-height`
+   - Updated center column container (`data-container-type="center"`) to use `--center-panel-height`
+
+### Technical Details
+- Uses CSS variable `--center-panel-height` which is calculated as `max(78rem, calculated-viewport-height)`
+- Ensures all three columns (Available Tags, Controls, Selected Tags) have matching heights
+- Maintains minimum height of 78rem to prevent unwanted shrinking
+- Supports responsive viewport units (svh, dvh) for modern browsers
+- Falls back gracefully for older browsers
+- All three columns now consistently taller and properly aligned
+
+---
+
 **Created**: 2025-11-02  
-**Status**: ✅ Complete and Ready for Testing  
-**Impact**: Improved UX, Better Visual Hierarchy, More Professional Appearance
+**Updated**: 2025-11-07  
+**Status**: ✅ Complete with Height Fix Applied  
+**Impact**: Improved UX, Better Visual Hierarchy, More Professional Appearance, Consistent Column Heights
 
