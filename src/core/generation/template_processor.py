@@ -3092,6 +3092,7 @@ class TemplateProcessor:
             
             def clean_text(text):
                 """Clean text by removing all marker patterns while preserving lineage content."""
+                original_text = text
                 cleaned = text
                 
                 # CRITICAL FIX: Handle lineage markers specially to preserve content
@@ -3165,6 +3166,13 @@ class TemplateProcessor:
                 
                 for remnant in partial_remnants:
                     cleaned = re.sub(remnant, '', cleaned, flags=re.IGNORECASE)
+
+                # Remove stray CENTER tokens left behind by split PRODUCTBRAND_CENTER markers.
+                # This specifically catches runs that only contain the marker fragment.
+                if cleaned.strip().upper() == 'CENTER':
+                    original_upper = original_text.upper()
+                    if ('PRODUCTBRAND' in original_upper) or (original_text.strip().upper() in {'CENTER', 'CENTER_', '_CENTER'}):
+                        cleaned = ''
                 
                 # Clean up any double spaces, leading/trailing spaces
                 # CRITICAL FIX: Preserve non-breaking hyphens (\u2011) when cleaning whitespace

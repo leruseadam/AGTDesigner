@@ -4,6 +4,9 @@ import urllib.request
 import logging
 import time
 import traceback
+import os
+import glob
+import sqlite3
 from datetime import datetime
 from difflib import SequenceMatcher
 from typing import List, Dict, Set, Optional, Tuple, Any
@@ -14,6 +17,7 @@ from .product_database import ProductDatabase
 from .ai_product_matcher import AIProductMatcher
 from .advanced_matcher import AdvancedMatcher, MatchResult
 from .enhanced_json_matcher import ENHANCED_JSON_FIELD_MAP
+from src.core.generation.text_processing import format_price
 from collections import defaultdict
 from fuzzywuzzy import fuzz
 from fuzzywuzzy import process
@@ -715,6 +719,280 @@ class JSONMatcher:
         self._strain_cache = None
         self._lineage_cache = None
         self.advanced_matcher = AdvancedMatcher()  # Initialize advanced matching system
+        self._product_db_instance = None
+        self._cached_store_name = None
+        self._product_table_columns = None
+
+    def _determine_store_name(self) -> str:
+        """Determine the best store name to use for ProductDatabase operations."""
+        if self._cached_store_name:
+            return self._cached_store_name
+
+        store_name = None
+
+        # 1. Try Flask session (if we're inside a request context)
+        try:
+            from flask import session
+            store_name = (
+                session.get('current_store')
+                or session.get('selected_store')
+                or session.get('store_name')
+            )
+        except Exception:
+            store_name = None
+
+        # 2. Try Excel processor metadata
+        if not store_name and self.excel_processor:
+            store_name = getattr(self.excel_processor, 'current_store', None) or \
+                         getattr(self.excel_processor, '_current_store', None) or \
+                         getattr(self.excel_processor, 'store_name', None)
+
+        # 3. Environment overrides
+        if not store_name:
+            store_name = (
+                os.environ.get('DEFAULT_JSON_MATCH_STORE')
+                or os.environ.get('DEFAULT_STORE_NAME')
+                or os.environ.get('DEFAULT_STORE')
+            )
+
+        # 4. Scan local databases to find the one with the most products
+        if not store_name:
+            store_name = self._scan_databases_for_best_store()
+
+        # 5. Final fallback
+        if not store_name:
+            store_name = 'AGT_Bothell'
+
+        self._cached_store_name = store_name
+        return store_name
+
+    def _scan_databases_for_best_store(self) -> Optional[str]:
+        """Inspect local database files and choose the store with the largest dataset."""
+        search_dirs = [
+            os.path.join(os.getcwd(), 'uploads'),
+            os.path.join(os.getcwd(), 'databases')
+        ]
+
+        best_store = None
+        best_count = 0
+
+        for db_dir in search_dirs:
+            if not os.path.exists(db_dir):
+                continue
+
+            db_files = glob.glob(os.path.join(db_dir, 'product_database_*.db'))
+            db_files += glob.glob(os.path.join(db_dir, '*_products.db'))
+
+            for db_file in db_files:
+                try:
+                    conn = sqlite3.connect(db_file)
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT COUNT(*) FROM products")
+                    count = cursor.fetchone()[0]
+                    conn.close()
+
+                    if count > best_count:
+                        filename = os.path.basename(db_file)
+                        if filename.startswith('product_database_'):
+                            store_candidate = filename.replace('product_database_', '').replace('.db', '')
+                        else:
+                            store_candidate = filename.replace('_products.db', '')
+
+                        best_store = store_candidate
+                        best_count = count
+                except Exception as e:
+                    logging.debug(f"Failed to inspect database {db_file}: {e}")
+                    continue
+
+        if best_store:
+            logging.info(f"📊 Auto-selected store '{best_store}' with {best_count} products for JSON matching")
+        return best_store
+
+    def _reset_product_database_cache(self):
+        """Drop cached ProductDatabase instance (e.g., if store selection changes)."""
+        if self._product_db_instance:
+            try:
+                self._product_db_instance.close_all_connections()
+            except Exception:
+                pass
+        self._product_db_instance = None
+
+    def _get_product_database(self):
+        """Get (and cache) the ProductDatabase instance for the active store."""
+        if self._product_db_instance:
+            return self._product_db_instance
+
+        store_name = self._determine_store_name()
+        product_db = ProductDatabase(store_name=store_name)
+        try:
+            product_db.init_database()
+        except Exception as e:
+            logging.warning(f"Failed to initialize ProductDatabase for store '{store_name}': {e}")
+        self._product_db_instance = product_db
+        return product_db
+
+    def _product_table_has_column(self, column_name: str) -> bool:
+        """Check if the products table contains a specific column (cached)."""
+        if self._product_table_columns is None:
+            try:
+                product_db = self._get_product_database()
+                conn = product_db._get_connection()
+                cursor = conn.cursor()
+                cursor.execute('PRAGMA table_info(products)')
+                self._product_table_columns = {row[1] for row in cursor.fetchall()}
+            except Exception as e:
+                logging.warning(f"Failed to inspect products table schema: {e}")
+                self._product_table_columns = set()
+        return column_name in self._product_table_columns
+
+    def _find_best_database_match(self, product_name: str, vendor: str, weight: str, strain: str, product_db) -> Optional[Dict[str, Any]]:
+        """Find the best matching product directly from the product database."""
+        try:
+            conn = product_db._get_connection()
+            cursor = conn.cursor()
+
+            vendor_filters = []
+            if vendor:
+                vendor_lower = vendor.lower().strip()
+                if vendor_lower:
+                    vendor_filters.append(vendor_lower)
+                    normalized = self._normalize_vendor_name(vendor_lower)
+                    if normalized and normalized != vendor_lower:
+                        vendor_filters.append(normalized)
+            # Deduplicate while preserving order
+            seen_filters = set()
+            vendor_filters = [vf for vf in vendor_filters if not (vf in seen_filters or seen_filters.add(vf))]
+
+            import re
+            
+            def build_keyword_list(name: str) -> List[str]:
+                if not name:
+                    return []
+                tokens = re.findall(r"[a-z0-9]+", name.lower())
+                stop_words = {
+                    "by", "the", "and", "pack", "joint", "joints", "pre", "roll", "preroll", "pre-roll",
+                    "pack", "x", "nt", "ea", "unit", "units", "infused", "super", "sale", "mini", "buds"
+                }
+                keywords = []
+                for token in tokens:
+                    if token in stop_words:
+                        continue
+                    if len(token) < 2:
+                        continue
+                    keywords.append(token)
+                return keywords[:5]
+            
+            keywords = build_keyword_list(product_name)
+            
+            def fetch_candidates():
+                seen = set()
+                collected = []
+                
+                def add_rows(rows):
+                    nonlocal collected
+                    if not rows:
+                        return
+                    columns = [col[0] for col in cursor.description]
+                    for row in rows:
+                        row_dict = dict(zip(columns, row))
+                        key = (row_dict.get("Product Name*"), row_dict.get("Vendor/Supplier*"))
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        collected.append(row_dict)
+                
+                # First try vendor + keyword targeted searches
+                if vendor_filters and keywords:
+                    for vendor_filter in vendor_filters:
+                        for keyword in keywords:
+                            sql = (
+                                'SELECT * FROM products '
+                                'WHERE LOWER("Vendor/Supplier*") LIKE ? '
+                                'AND LOWER("Product Name*") LIKE ? '
+                                'LIMIT 150'
+                            )
+                            params = [f"%{vendor_filter}%", f"%{keyword}%"]
+                            cursor.execute(sql, params)
+                            add_rows(cursor.fetchall())
+                            if len(collected) >= 250:
+                                return collected
+                
+                # Next try vendor-only fetch
+                for vendor_filter in vendor_filters:
+                    sql = 'SELECT * FROM products WHERE LOWER("Vendor/Supplier*") LIKE ? LIMIT 250'
+                    params = [f"%{vendor_filter}%"]
+                    cursor.execute(sql, params)
+                    add_rows(cursor.fetchall())
+                    if len(collected) >= 250:
+                        return collected
+                
+                # Finally fallback without vendor constraint (keyword first if available)
+                if keywords:
+                    for keyword in keywords:
+                        cursor.execute(
+                            'SELECT * FROM products WHERE LOWER("Product Name*") LIKE ? LIMIT 150',
+                            [f"%{keyword}%"]
+                        )
+                        add_rows(cursor.fetchall())
+                        if len(collected) >= 250:
+                            return collected
+                
+                cursor.execute('SELECT * FROM products LIMIT 250')
+                add_rows(cursor.fetchall())
+                return collected
+
+            candidates = fetch_candidates()
+
+            if not candidates:
+                return None
+
+            try:
+                from fuzzywuzzy import fuzz
+                similarity_func = lambda a, b: fuzz.token_set_ratio(a, b)
+            except ImportError:
+                similarity_func = lambda a, b: int(SequenceMatcher(None, a, b).ratio() * 100)
+
+            best_match = None
+            best_score = 0
+
+            def parse_weight(value):
+                try:
+                    return float(str(value).replace('g', '').strip())
+                except (TypeError, ValueError, AttributeError):
+                    return None
+
+            item_weight = parse_weight(weight)
+
+            for candidate in candidates:
+                candidate_name = str(candidate.get('Product Name*') or candidate.get('product_name') or '').strip()
+                if not candidate_name:
+                    continue
+
+                score = similarity_func(product_name.lower(), candidate_name.lower())
+
+                if item_weight is not None:
+                    candidate_weight = parse_weight(candidate.get('Weight*') or candidate.get('weight'))
+                    if candidate_weight is not None:
+                        diff = abs(candidate_weight - item_weight)
+                        weight_tolerance = max(0.1, item_weight * 0.25)
+                        if diff > weight_tolerance:
+                            score -= min(30, int(diff * 10))
+
+                if strain:
+                    candidate_strain = str(candidate.get('Product Strain') or candidate.get('product_strain') or '').lower()
+                    if candidate_strain and strain.lower() in candidate_strain:
+                        score += 5
+
+                if score > best_score:
+                    best_score = score
+                    best_match = candidate
+
+            if best_match and best_score >= 65:
+                best_match['_similarity_score'] = best_score
+                return best_match
+        except Exception as e:
+            logging.warning(f"Direct database match search failed: {e}")
+        return None
     
     def _build_cache_from_database(self):
         """Build sheet cache from ProductDatabase when Excel data is not available."""
@@ -782,8 +1060,13 @@ class JSONMatcher:
                     store_name = 'generic'
                     logging.info("📊 Using generic database as fallback")
             
+            # Cache the store selection so subsequent lookups reuse it
+            if self._cached_store_name and self._cached_store_name != store_name:
+                self._reset_product_database_cache()
+            self._cached_store_name = store_name
+
             # Initialize ProductDatabase with store name
-            product_db = ProductDatabase(store_name=store_name)
+            product_db = self._get_product_database()
             logging.info(f"📊 Connected to ProductDatabase: {product_db.db_path}")
             
             # Get all products from database
@@ -1830,8 +2113,7 @@ class JSONMatcher:
         # Special mode: return ALL DB products as matched tags (bypass JSON matching)
         if url.lower().startswith("db:all"):
             try:
-                from .product_database import ProductDatabase
-                product_db = ProductDatabase()
+                product_db = self._get_product_database()
                 db_products = product_db.get_all_products() or []
                 print(f"🔍 DEBUG: DB_ALL mode - loading {len(db_products)} products from database")
                 matched_products = []
@@ -3055,8 +3337,7 @@ class JSONMatcher:
                 else:
                     # Try to find strain in database by searching for similar product names
                     try:
-                        from .product_database import ProductDatabase
-                        product_db = ProductDatabase()
+                        product_db = self._get_product_database()
                         db_strain = self._find_strain_in_database(product_name, product_db)
                         if db_strain:
                             strain = db_strain
@@ -3264,8 +3545,7 @@ class JSONMatcher:
         """
         try:
             # Initialize Product Database
-            from .product_database import ProductDatabase
-            product_db = ProductDatabase()
+            product_db = self._get_product_database()
             
             # Search for similar products using multiple strategies
             similar_products = self._find_similar_products_in_database(
@@ -3461,15 +3741,25 @@ class JSONMatcher:
             import sqlite3
             conn = sqlite3.connect(product_db.db_path)
             
-            # Search in both products and strains tables using correct column names
-            query = """
-                SELECT p.*, s.canonical_lineage 
-                FROM products p
-                LEFT JOIN strains s ON p.strain_id = s.id
-                WHERE p.product_strain = ? OR s.strain_name = ?
-                LIMIT 10
-            """
-            df = pd.read_sql_query(query, conn, params=[strain, strain])
+            if self._product_table_has_column('strain_id'):
+                query = """
+                    SELECT p.*, s.canonical_lineage 
+                    FROM products p
+                    LEFT JOIN strains s ON p.strain_id = s.id
+                    WHERE p."Product Strain" LIKE ? OR s.strain_name LIKE ?
+                    LIMIT 10
+                """
+                params = [f"%{strain}%", f"%{strain}%"]
+            else:
+                query = """
+                    SELECT p.*, '' AS canonical_lineage
+                    FROM products p
+                    WHERE p."Product Strain" LIKE ? OR p."Lineage" LIKE ?
+                    LIMIT 10
+                """
+                params = [f"%{strain}%", f"%{strain}%"]
+            
+            df = pd.read_sql_query(query, conn, params=params)
             conn.close()
             
             return df.to_dict('records')
@@ -3875,8 +4165,7 @@ class JSONMatcher:
             
             # Strategy 3: Search for similar product names and use average prices
             try:
-                from .product_database import ProductDatabase
-                product_db = ProductDatabase()
+                product_db = self._get_product_database()
                 similar_products = self._search_similar_product_names(product_name, product_db)
                 
                 if similar_products:
@@ -3994,8 +4283,7 @@ class JSONMatcher:
             
             # Strategy 3: Search for similar product names and use average costs
             try:
-                from .product_database import ProductDatabase
-                product_db = ProductDatabase()
+                product_db = self._get_product_database()
                 similar_products = self._search_similar_product_names(product_name, product_db)
                 
                 if similar_products:
@@ -4132,13 +4420,23 @@ class JSONMatcher:
             conn = product_db._get_connection()
             cursor = conn.cursor()
             
-            cursor.execute('''
-                SELECT p.*, s.canonical_lineage, s.sovereign_lineage
-                FROM products p
-                LEFT JOIN strains s ON p.strain_id = s.id
-                WHERE p.price IS NOT NULL AND p.price != '' AND p.price != '0' AND p.price != '$0'
-                ORDER BY p.last_seen_date DESC
-            ''')
+            if self._product_table_has_column('strain_id'):
+                query = '''
+                    SELECT p.*, s.canonical_lineage, s.sovereign_lineage
+                    FROM products p
+                    LEFT JOIN strains s ON p.strain_id = s.id
+                    WHERE p."Price" IS NOT NULL AND p."Price" != '' AND p."Price" != '0' AND p."Price" != '$0'
+                    ORDER BY p."last_seen_date" DESC
+                '''
+            else:
+                query = '''
+                    SELECT p.*, '' AS canonical_lineage, '' AS sovereign_lineage
+                    FROM products p
+                    WHERE p."Price" IS NOT NULL AND p."Price" != '' AND p."Price" != '0' AND p."Price" != '$0'
+                    ORDER BY p."last_seen_date" DESC
+                '''
+            
+            cursor.execute(query)
             
             all_products = []
             for row in cursor.fetchall():
@@ -4328,7 +4626,7 @@ class JSONMatcher:
             # Initialize Product Database for priority lookups
             logging.info("Initializing Product Database for priority lookups...")
             try:
-                product_db = ProductDatabase()
+                product_db = self._get_product_database()
                 logging.info("Product Database initialized successfully")
             except Exception as e:
                 logging.warning(f"Could not initialize Product Database: {e}")
@@ -4393,94 +4691,97 @@ class JSONMatcher:
                 logging.warning("No inventory transfer items found in JSON")
                 return []
                 
-            # CRITICAL FIX: Intelligent deduplication to remove near-identical products
-            logging.info(f"Processing {len(items)} JSON items with intelligent deduplication")
-            
-            def normalize_product_name(name):
-                """Normalize product name to catch variations like 'Cookies & Cream' vs 'Cookies N Cream'"""
-                if not name:
-                    return ""
+            # Optional deduplication based on inventory identifiers
+            if deduplicate:
+                logging.info(f"Processing {len(items)} JSON items with intelligent deduplication")
                 
-                # Convert to lowercase and replace common variations
-                normalized = name.lower()
-                
-                # Replace common variations with standard forms
-                variations = {
-                    '&': 'and',
-                    'n ': 'and ',
-                    'n\'': 'and',
-                    'cookies n cream': 'cookies and cream',
-                    'cookies & cream': 'cookies and cream',
-                    'cookies cream': 'cookies and cream',
-                    ' by ceres': '',
-                    ' ceres': '',
-                    ' - ': ' ',
-                    '  ': ' '  # Remove double spaces
-                }
-                
-                for variation, standard in variations.items():
-                    normalized = normalized.replace(variation, standard)
-                
-                # Remove extra whitespace
-                normalized = ' '.join(normalized.split())
-                
-                return normalized
-            
-            unique_items = []
-            seen_item_ids = set()
-            duplicate_count = 0
-            
-            for item in items:
-                if not isinstance(item, dict):
-                    continue
+                def normalize_product_name(name):
+                    """Normalize product name to catch variations like 'Cookies & Cream' vs 'Cookies N Cream'"""
+                    if not name:
+                        return ""
                     
-                product_name = str(item.get("product_name", "")).strip()
-                
-                # CRITICAL FIX: Process ALL items, even those with missing product names
-                if not product_name:
-                    # Try to create a fallback product name from other available fields
-                    vendor = str(item.get("vendor", "")).strip()
-                    brand = str(item.get("brand", "")).strip()
-                    weight = str(item.get("weight", "")).strip()
-                    product_type = str(item.get("inventory_type", "")).strip()
+                    # Convert to lowercase and replace common variations
+                    normalized = name.lower()
                     
-                    # Create a fallback product name
-                    fallback_parts = []
-                    if brand:
-                        fallback_parts.append(brand)
-                    if product_type:
-                        fallback_parts.append(product_type)
-                    if weight:
-                        fallback_parts.append(weight)
+                    # Replace common variations with standard forms
+                    variations = {
+                        '&': 'and',
+                        'n ': 'and ',
+                        'n\'': 'and',
+                        'cookies n cream': 'cookies and cream',
+                        'cookies & cream': 'cookies and cream',
+                        'cookies cream': 'cookies and cream',
+                        ' by ceres': '',
+                        ' ceres': '',
+                        ' - ': ' ',
+                        '  ': ' '  # Remove double spaces
+                    }
                     
-                    if fallback_parts:
-                        product_name = " ".join(fallback_parts)
-                    else:
-                        product_name = f"JSON Product {len(unique_items) + 1}"
+                    for variation, standard in variations.items():
+                        normalized = normalized.replace(variation, standard)
                     
-                    logging.info(f"⚠️  Created fallback product name: '{product_name}' for JSON item with missing name")
+                    # Remove extra whitespace
+                    normalized = ' '.join(normalized.split())
+                    
+                    return normalized
                 
-                # CRITICAL FIX: Use unique item identifiers instead of normalized names for deduplication
-                # This preserves products with different SKUs/IDs even if they have similar names
-                item_id = item.get("inventory_id") or item.get("integrator_data") or item.get("sample_source_id")
-                if not item_id:
-                    # Fallback to using the original product name as ID if no unique ID exists
-                    item_id = product_name
+                unique_items = []
+                seen_item_ids = set()
+                duplicate_count = 0
                 
-                if item_id and item_id in seen_item_ids:
-                    duplicate_count += 1
-                    logging.info(f"🔄 Skipping duplicate JSON item: '{product_name}' (ID: '{item_id}')")
-                    continue
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                        
+                    product_name = str(item.get("product_name", "")).strip()
+                    
+                    # CRITICAL FIX: Process ALL items, even those with missing product names
+                    if not product_name:
+                        # Try to create a fallback product name from other available fields
+                        vendor = str(item.get("vendor", "")).strip()
+                        brand = str(item.get("brand", "")).strip()
+                        weight = str(item.get("weight", "")).strip()
+                        product_type = str(item.get("inventory_type", "")).strip()
+                        
+                        # Create a fallback product name
+                        fallback_parts = []
+                        if brand:
+                            fallback_parts.append(brand)
+                        if product_type:
+                            fallback_parts.append(product_type)
+                        if weight:
+                            fallback_parts.append(weight)
+                        
+                        if fallback_parts:
+                            product_name = " ".join(fallback_parts)
+                        else:
+                            product_name = f"JSON Product {len(unique_items) + 1}"
+                        
+                        logging.info(f"⚠️  Created fallback product name: '{product_name}' for JSON item with missing name")
+                    
+                    # CRITICAL FIX: Use unique item identifiers instead of normalized names for deduplication
+                    # This preserves products with different SKUs/IDs even if they have similar names
+                    item_id = item.get("inventory_id") or item.get("integrator_data") or item.get("sample_source_id")
+                    if not item_id:
+                        # Fallback to using the original product name as ID if no unique ID exists
+                        item_id = product_name
+                    
+                    if item_id and item_id in seen_item_ids:
+                        duplicate_count += 1
+                        logging.info(f"🔄 Skipping duplicate JSON item: '{product_name}' (ID: '{item_id}')")
+                        continue
+                    
+                    # Add to seen set and unique items
+                    if item_id:
+                        seen_item_ids.add(item_id)
+                    unique_items.append(item)
                 
-                # Add to seen set and unique items
-                if item_id:
-                    seen_item_ids.add(item_id)
-                unique_items.append(item)
-            
-            logging.info(f"INTELLIGENT DEDUPLICATION: {len(items)} items -> {len(unique_items)} unique products ({duplicate_count} duplicates removed)")
-            
-            # Use deduplicated items for processing
-            items = unique_items
+                logging.info(f"INTELLIGENT DEDUPLICATION: {len(items)} items -> {len(unique_items)} unique products ({duplicate_count} duplicates removed)")
+                
+                # Use deduplicated items for processing
+                items = unique_items
+            else:
+                logging.info(f"Processing {len(items)} JSON items without deduplication (deduplicate=False)")
             
             # Initialize tracking variables
             matched_idxs = set()
@@ -4655,6 +4956,15 @@ class JSONMatcher:
                     
                     # PRIORITY 2: Use comprehensive matching logic (Excel) if no SKU database match
                     try:
+                        if product_db:
+                            db_direct_match = self._find_best_database_match(product_name, vendor, weight, strain, product_db)
+                            if db_direct_match:
+                                tag = self._create_tag_from_database_info(db_direct_match, vendor, item)
+                                all_tags.append(tag)
+                                matched_count += 1
+                                logging.info(f"✅ Direct database match found for '{product_name}' (similarity: {db_direct_match.get('_similarity_score')})")
+                                continue
+
                         # Use the same comprehensive matching logic that was working in the debug output
                         print(f"🔍 DEBUG: Trying comprehensive matching for '{product_name}' (type: {product_type})")
                         matched_products = self._process_item_with_main_matching(item, product_name, vendor, product_type, strain, global_vendor)
@@ -5475,7 +5785,7 @@ class JSONMatcher:
     def _build_strain_cache(self):
         """Build a cache of strain data from the product database for fast matching."""
         try:
-            product_db = ProductDatabase()
+            product_db = self._get_product_database()
             self._strain_cache = product_db.get_all_strains()
             self._lineage_cache = product_db.get_strain_lineage_map()
             
@@ -6643,25 +6953,15 @@ class JSONMatcher:
 
             # PRIORITY 2: Database products (fallback source)
             try:
-                # Try to use the app's global database instance first (AGT_Bothell store database)
+                # Try to use the app's global database instance first
                 try:
                     from app import get_product_database
                     product_db = get_product_database()
-                    logging.info("Using global product database instance (AGT_Bothell)")
+                    logging.info("Using global product database instance supplied by app")
                 except ImportError:
-                    # Fallback to creating a new instance with AGT_Bothell store
-                    from .product_database import ProductDatabase
-                    import os
-                    current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-                    db_path = os.path.join(current_dir, 'uploads', 'product_database_AGT_Bothell.db')
-                    if os.path.exists(db_path):
-                        product_db = ProductDatabase(db_path)
-                        product_db.init_database()
-                        logging.info(f"Created ProductDatabase instance for AGT_Bothell at {db_path}")
-                    else:
-                        # No store-specific database found, raise error
-                        logging.error(f"Store-specific database not found for AGT_Bothell at {db_path}")
-                        raise FileNotFoundError(f"Store-specific database not found: {db_path}")
+                    # Fallback to JSON matcher managed instance
+                    product_db = self._get_product_database()
+                    logging.info("Using JSON matcher managed ProductDatabase instance")
                 
                 db_products = product_db.get_all_products()
                 if db_products:
@@ -7238,7 +7538,7 @@ class JSONMatcher:
             Dictionary containing Product Database status and priority information
         """
         try:
-            product_db = ProductDatabase()
+            product_db = self._get_product_database()
             strains = product_db.get_all_strains()
             products = product_db.get_all_products()
             
@@ -7585,7 +7885,8 @@ class JSONMatcher:
             product_type = db_info.get("Product Type*", "") or db_info.get("product_type", "")
             strain = db_info.get("Product Strain", "") or db_info.get("product_strain", "")
             lineage = db_info.get("Lineage", "") or db_info.get("lineage", "")
-            price = str(db_info.get("Price", "") or db_info.get("price", ""))
+            raw_price = db_info.get("Price", "") or db_info.get("price", "")
+            price = format_price(raw_price) if str(raw_price).strip() else ""
             
             # CRITICAL FIX: Use proper weight normalization for nonclassic types
             weight, units = self._normalize_weight_for_json_product(
@@ -7603,7 +7904,8 @@ class JSONMatcher:
             barcode = str(db_info.get("Barcode*", "") or db_info.get("barcode", ""))
             cost = str(db_info.get("cost", ""))
             medical_only = str(db_info.get("Medical Only (Yes/No)", "No") or db_info.get("medical_only", "No"))
-            med_price = str(db_info.get("Med Price", "") or db_info.get("med_price", ""))
+            raw_med_price = db_info.get("Med Price", "") or db_info.get("med_price", "")
+            med_price = format_price(raw_med_price) if str(raw_med_price).strip() else ""
             expiration = str(db_info.get("Expiration Date(YYYY-MM-DD)", "") or db_info.get("expiration_date", ""))
             is_archived = str(db_info.get("Is Archived? (yes/no)", "no") or db_info.get("is_archived", "no"))
             thc_per_serving = str(db_info.get("THC Per Serving", "") or db_info.get("thc_per_serving", ""))
@@ -7738,7 +8040,7 @@ class JSONMatcher:
                 'Ingredients': ingredients,
                 
                 # Legacy fields for compatibility - CRITICAL FIX: Use JSON Match source for proper frontend detection
-                'Source': 'JSON Match',  # Changed back to 'JSON Match' for proper frontend detection
+                'Source': 'JSON Match - Database Priority (100% DB)',
                 'Quantity Received*': "1",
                 'Weight Unit* (grams/gm or ounces/oz)': units or "g",
                 'CombinedWeight': weight or "1",
@@ -7830,10 +8132,7 @@ class JSONMatcher:
             
             # PRIORITY 1: Try Product Database
             try:
-                import os
-                from .product_database import ProductDatabase
-                product_db = ProductDatabase()
-                product_db.init_database()
+                product_db = self._get_product_database()
                 
                 # ENHANCED: Try multiple search variations for better CERES matching
                 db_match = None
@@ -7851,8 +8150,27 @@ class JSONMatcher:
                 
                 if not db_match:
                     print(f"🔍 DEBUG: No database match found with any search variation")
+                    
+                    # FINAL ATTEMPT: Use direct database lookup with keyword targeting
+                    try:
+                        fallback_weight = item.get('unit_weight') or item.get('weight') or ''
+                        fallback_strain = strain or item.get('strain_name') or ''
+                        direct_match = self._find_best_database_match(
+                            product_name=product_name,
+                            vendor=vendor,
+                            weight=str(fallback_weight),
+                            strain=fallback_strain,
+                            product_db=product_db
+                        )
+                        if direct_match:
+                            db_match = direct_match
+                            print(f"🔍 DEBUG: Direct database fallback matched '{direct_match.get('Product Name*', 'Unknown')}'")
+                    except Exception as direct_db_error:
+                        logging.debug(f"Direct database fallback lookup failed: {direct_db_error}")
                 
                 if db_match:
+                    if hasattr(db_match, 'to_dict'):
+                        db_match = db_match.to_dict()
                     db_score = 70.0  # Base score for database match
                     
                     # Add intelligent scoring based on product type and naming patterns
@@ -8018,7 +8336,7 @@ class JSONMatcher:
                     print(f"🔍 EXCEL VENDOR: No matches found for vendor '{vendor}' - will try advanced matching")
             
             # PRIORITY 3: Try Advanced Matching (if no good matches found)
-            if (not db_match or db_score < 70) and (not excel_match or excel_score < 70):
+            if (db_match is None or db_score < 70) and (excel_match is None or excel_score < 70):
                 try:
                     print(f"🔍 DEBUG: Trying advanced matching for '{product_name}'")
                     
@@ -8042,11 +8360,29 @@ class JSONMatcher:
                         print(f"🔍 DEBUG: Sheet cache has {len(self._sheet_cache)} candidates")
                         advanced_matches = self._find_advanced_matches(json_item)
                         if advanced_matches:
-                            best_advanced = advanced_matches[0]
+                            product_type_lower = (product_type or "").strip().lower()
+                            compatible_match = None
+                            
+                            for candidate in advanced_matches:
+                                candidate_item = candidate.item
+                                candidate_type = (candidate_item.get('Product Type*') or
+                                                  candidate_item.get('product_type') or
+                                                  candidate_item.get('ProductType') or
+                                                  "").strip().lower()
+                                
+                                if not product_type_lower or not candidate_type:
+                                    compatible_match = candidate
+                                    break
+                                
+                                if candidate_type == product_type_lower or self._are_product_types_compatible(product_type_lower, candidate_type):
+                                    compatible_match = candidate
+                                    break
+                            
+                            best_advanced = compatible_match or advanced_matches[0]
                             advanced_score = best_advanced.overall_score
                             advanced_match = best_advanced.item
                             print(f"🔍 DEBUG: Advanced matching found {len(advanced_matches)} matches, best score {advanced_score:.1f}")
-                            print(f"🔍 DEBUG: Best match: {best_advanced.item.get('original_name', 'Unknown')}")
+                            print(f"🔍 DEBUG: Best match: {advanced_match.get('original_name', 'Unknown')}")
                         else:
                             print(f"🔍 DEBUG: Advanced matching found no matches")
                     else:
@@ -8069,8 +8405,9 @@ class JSONMatcher:
             
             # Add Excel match if found
             if excel_match is not None and not (hasattr(excel_match, 'empty') and excel_match.empty):
+                excel_match_payload = excel_match.to_dict() if hasattr(excel_match, 'to_dict') else excel_match
                 matches.append({
-                    'match': excel_match,
+                    'match': excel_match_payload,
                     'score': float(excel_score) if excel_score is not None else 0.0,
                     'source': 'Excel Match'
                 })
@@ -8084,6 +8421,32 @@ class JSONMatcher:
                 })
             
             # Choose the best match
+            if matches:
+                json_product_type = product_type or map_inventory_type_to_product_type(
+                    item.get('inventory_type'),
+                    item.get('inventory_category'),
+                    item.get('product_name')
+                )
+            if matches and json_product_type:
+                product_type_lower = str(json_product_type).strip().lower()
+                filtered_matches = []
+                for candidate in matches:
+                    match_obj = candidate.get('match', {})
+                    candidate_type = (match_obj.get('Product Type*') or
+                                      match_obj.get('product_type') or
+                                      match_obj.get('ProductType') or
+                                      '').strip().lower()
+                    if candidate_type:
+                        if not self._are_product_types_compatible(product_type_lower, candidate_type) and candidate_type != product_type_lower:
+                            logging.debug(f"🚫 Product type mismatch: JSON '{product_type_lower}' vs candidate '{candidate_type}'")
+                            continue
+                    filtered_matches.append(candidate)
+                if filtered_matches:
+                    matches = filtered_matches
+                else:
+                    logging.debug("🚫 All matches filtered out due to product type incompatibility")
+                    matches = []
+
             if matches:
                 best_match_info = max(matches, key=lambda x: x['score'])
                 best_match = best_match_info['match']
@@ -8119,6 +8482,7 @@ class JSONMatcher:
             
         except Exception as e:
             logging.warning(f"Error in main matching logic: {e}")
+            logging.debug(traceback.format_exc())
             return []
     
     def _create_product_from_advanced_match(self, advanced_match: Dict, item: Dict, global_vendor: str) -> Dict:
@@ -8260,6 +8624,7 @@ class JSONMatcher:
                     item.get('price', '') or
                     item.get('line_price', '') or
                     '')  # Leave blank if no price found - don't use defaults
+            price = format_price(price) if str(price).strip() else ""
             
             # DEBUG: Log price extraction
             print(f"🔍 DEBUG: _create_tag_from_product - Product: '{product_name}', JSON price: '{item.get('line_price', item.get('price', ''))}', Final price: '{price}'")
@@ -8321,7 +8686,9 @@ class JSONMatcher:
                 'Units': units,
                 'Price': price,
                 'Price* (Tier Name for Bulk)': price,
+                'price': price,
                 'displayName': clean_display_name,  # Use clean product name for UI display
+                'Original JSON Product Name': str(item.get('product_name', '')),
                 
                 # Enhanced fields
                 'State': 'active',
@@ -8968,7 +9335,7 @@ class JSONMatcher:
         """
         try:
             # Check if we can initialize the Product Database
-            product_db = ProductDatabase()
+            product_db = self._get_product_database()
             # Try to access a simple method to verify it's working
             strains = product_db.get_all_strains()
             return len(strains) > 0
@@ -9114,11 +9481,9 @@ class JSONMatcher:
         
         # First, try to find brand in database using pattern matching
         try:
-            from .product_database import ProductDatabase
-            product_db = ProductDatabase()
+            product_db = self._get_product_database()
             
             # Search for similar product names in database to find brand
-            import sqlite3
             with sqlite3.connect(product_db.db_path) as conn:
                 # Use fuzzy matching to find similar product names
                 cursor = conn.execute("""
@@ -9302,8 +9667,7 @@ class JSONMatcher:
             # Special case: Look for similar product patterns in database
             # This helps match products that share similar naming conventions
             try:
-                from .product_database import ProductDatabase
-                product_db = ProductDatabase()
+                product_db = self._get_product_database()
                 
                 # Extract key terms from the product name
                 key_terms = self._extract_key_terms_for_brand_matching(product_name)
@@ -9941,8 +10305,7 @@ class JSONMatcher:
             
             # FALLBACK: Try to find strain in database by searching for similar product names
             try:
-                from .product_database import ProductDatabase
-                product_db = ProductDatabase()
+                product_db = self._get_product_database()
                 
                 # Search for products with similar names that have strains
                 import sqlite3

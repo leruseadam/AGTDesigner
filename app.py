@@ -4720,9 +4720,19 @@ def set_store():
         global _product_database, _excel_processor
         _product_database = None
         _excel_processor = None
-        
+
+        # CRITICAL FIX: Clear the initial_data cache so tags reload with new store
+        initial_data_cache_key = get_session_cache_key('initial_data')
+        cache.delete(initial_data_cache_key)
+        logging.debug(f"Cleared initial_data cache for new store: {store_value}")
+
+        # Also clear available_tags cache
+        available_tags_cache_key = get_session_cache_key('available_tags')
+        cache.delete(available_tags_cache_key)
+        logging.debug(f"Cleared available_tags cache for new store: {store_value}")
+
         # OPTIMIZATION: File loading deferred to page reload for instant response
-        logging.debug(f"Store set to {store_value} - cleared session & globals")
+        logging.debug(f"Store set to {store_value} - cleared session, globals & caches")
         
         return jsonify({
             'success': True,

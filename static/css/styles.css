@@ -892,16 +892,16 @@ canvas#lava-lamp-canvas {
     position: relative;
   }
   
-  .copyright-text {
+ .copyright-text {
     font-size: 0.8rem !important; /* Reduced from 0.9rem */
-    color: rgba(255, 255, 255, 0.65) !important;
+    color: #ffffff !important;
     margin: 0.15rem 0 0 0 !important; /* Reduced from 0.25rem */
     font-family: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
     font-weight: 400;
     letter-spacing: 0.02em;
     text-align: center;
     text-shadow: 0 1px 2px rgba(0,0,0,0.3);
-    opacity: 0.75;
+    opacity: 1;
   }
 
   /* Header Action Buttons */

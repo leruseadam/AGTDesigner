@@ -100,6 +100,7 @@ class ProductDatabase:
         self._init_lock = threading.Lock()
         # Serialize writers to avoid 'database is locked' under concurrent writes
         self._write_lock = threading.RLock()
+        self._products_columns = None
         
         # Track rejected products to reduce log noise
         self._rejected_blank_names = 0
@@ -786,6 +787,19 @@ class ProductDatabase:
                 'value': value,
                 'expires': time.time() + ttl
             }
+
+    def _products_has_column(self, column_name: str) -> bool:
+        """Check if the products table includes the given column (cached)."""
+        if self._products_columns is None:
+            try:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                cursor.execute('PRAGMA table_info(products)')
+                self._products_columns = {row[1] for row in cursor.fetchall()}
+            except Exception as e:
+                logger.warning(f"Unable to inspect products table columns: {e}")
+                self._products_columns = set()
+        return column_name in self._products_columns
     
     def _clean_expired_cache(self):
         """Remove expired cache entries."""
@@ -2015,22 +2029,26 @@ class ProductDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
             
+            has_strain_id = self._products_has_column('strain_id')
+            lineage_select = 's.strain_name, s.canonical_lineage' if has_strain_id else 'p."Product Strain" as strain_name, p."Lineage" as canonical_lineage'
+            join_clause = 'LEFT JOIN strains s ON p.strain_id = s.id' if has_strain_id else ''
+            
             if vendor and brand:
-                cursor.execute('''
+                cursor.execute(f'''
                     SELECT p.id, p."Product Name*", p.normalized_name, p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
-                           s.strain_name, s.canonical_lineage, 0 as total_occurrences, '' as first_seen_date, '' as last_seen_date,
+                           {lineage_select}, 0 as total_occurrences, '' as first_seen_date, '' as last_seen_date,
                            p."Description", p."Weight*", p."Units", p."Price"
                     FROM products p
-                    LEFT JOIN strains s ON p.strain_id = s.id
+                    {join_clause}
                     WHERE p.normalized_name = ? AND p."Vendor/Supplier*" = ? AND p."Product Brand" = ?
                 ''', (normalized_name, vendor, brand))
             else:
-                cursor.execute('''
+                cursor.execute(f'''
                     SELECT p.id, p."Product Name*", p.normalized_name, p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Lineage",
-                           s.strain_name, s.canonical_lineage, 0 as total_occurrences, '' as first_seen_date, '' as last_seen_date,
+                           {lineage_select}, 0 as total_occurrences, '' as first_seen_date, '' as last_seen_date,
                            p."Description", p."Weight*", p."Units", p."Price"
                     FROM products p
-                    LEFT JOIN strains s ON p.strain_id = s.id
+                    {join_clause}
                     WHERE p.normalized_name = ?
                 ''', (normalized_name,))
             
