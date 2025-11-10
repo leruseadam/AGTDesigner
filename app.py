@@ -13487,15 +13487,19 @@ def get_rate_limit_info(ip_address):
 def get_initial_data():
     """Load initial data for the application (called by frontend after page load)."""
     try:
+        start_time = time.time()
+        logging.info(f"⏱️ /api/initial-data request started at {start_time}")
+
         # PERFORMANCE: Check cache first
         cache_key = get_session_cache_key('initial_data')
         cached_response = cache.get(cache_key)
         if cached_response and request.args.get('nocache') != '1':
-            logging.info("⚡ Returning cached initial data")
+            elapsed = (time.time() - start_time) * 1000
+            logging.info(f"⚡ Returning cached initial data (took {elapsed:.0f}ms)")
             response = make_response(jsonify(cached_response))
             response.headers['X-Cache'] = 'HIT'
             return response
-        
+
         logging.info("=== INITIAL DATA REQUEST START ===")
         logging.info(f"Initial data request at {datetime.now().strftime('%H:%M:%S')}")
         
@@ -13705,7 +13709,8 @@ def get_initial_data():
             cache_status = 'BYPASS'
             logging.info("Initial data cache bypassed due to empty dataset - waiting for upload completion")
         
-        logging.info(f"Initial data loaded: {len(initial_data['available_tags'])} tags, {initial_data['total_records']} records (source={initial_data.get('source')})")
+        elapsed = (time.time() - start_time) * 1000
+        logging.info(f"⏱️ Initial data loaded in {elapsed:.0f}ms: {len(initial_data['available_tags'])} tags, {initial_data['total_records']} records (source={initial_data.get('source')})")
         logging.info("=== INITIAL DATA REQUEST COMPLETE ===")
         
         response = make_response(jsonify(initial_data))

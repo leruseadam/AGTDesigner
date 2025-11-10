@@ -492,6 +492,17 @@ def get_default_upload_file(store_name: Optional[str] = None) -> Optional[str]:
                                 store_parts.lower(),           # Lowercase: bothell
                                 store_parts.upper(),           # Uppercase: BOTHELL
                             ]
+                            # Handle known multi-word variants (e.g., Gold Bar)
+                            EXTRA_STORE_VARIANTS = {
+                                'AGT_Goldbar': ['Gold Bar'],
+                            }
+                            for extra in EXTRA_STORE_VARIANTS.get(store_name, []):
+                                store_variants.extend([
+                                    extra,
+                                    extra.lower(),
+                                    extra.upper(),
+                                    extra.replace(' ', ''),
+                                ])
                             # Check case-insensitive
                             filename_lower = filename.lower()
                             if not any(variant.lower() in filename_lower for variant in store_variants):

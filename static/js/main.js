@@ -5342,9 +5342,9 @@ const TagManager = {
         console.log('=== CHECK FOR EXISTING DATA FUNCTION CALLED ===');
         console.log('Checking for existing data...');
         
-        // Add timeout protection
+        // Add timeout protection - increased to 30 seconds for large Excel files
         const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('Initialization timeout')), 10000); // 10 second timeout
+            setTimeout(() => reject(new Error('Initialization timeout')), 30000); // 30 second timeout
         });
 
         // Safety net: ensure loading overlay never blocks interaction for long
