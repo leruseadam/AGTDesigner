@@ -104,14 +104,18 @@
         body: JSON.stringify({ store: storeValue })
       })
       .then(response => {
-        console.log('Response status:', response.status);
+        console.log('✅ Fetch completed - Response status:', response.status);
         if (!response.ok) {
+          console.error('❌ Response not OK:', response.status, response.statusText);
           throw new Error(`HTTP error! status: ${response.status}`);
         }
+        console.log('About to parse JSON response...');
         return response.json();
       })
       .then(data => {
+        console.log('✅ JSON parsed successfully');
         console.log('Response data:', data);
+        console.log('data.success =', data.success);
         if (data.success) {
           console.log('✅ Store set successfully:', storeValue);
           

@@ -4712,13 +4712,30 @@ def set_store():
         
         # CRITICAL FIX: Clear caches BEFORE clearing globals (cache key depends on _last_loaded_file)
         # Get cache keys while excel_processor still has the old file path
-        initial_data_cache_key = get_session_cache_key('initial_data')
-        available_tags_cache_key = get_session_cache_key('available_tags')
+        try:
+            initial_data_cache_key = get_session_cache_key('initial_data')
+            available_tags_cache_key = get_session_cache_key('available_tags')
 
-        # Delete the caches
-        cache.delete(initial_data_cache_key)
-        cache.delete(available_tags_cache_key)
-        logging.debug(f"Cleared initial_data and available_tags cache for new store: {store_value}")
+            # Delete the caches
+            cache.delete(initial_data_cache_key)
+            cache.delete(available_tags_cache_key)
+            logging.debug(f"Cleared initial_data and available_tags cache for new store: {store_value}")
+        except Exception as cache_error:
+            # If cache key generation fails (e.g., Excel processor is slow), clear all session caches
+            logging.warning(f"Failed to get specific cache keys, clearing all caches: {cache_error}")
+            try:
+                # Clear all caches for this session
+                sid = session.get('_id', None) or (session.sid if hasattr(session, 'sid') else 'unknown')
+                # Use a wildcard pattern or just clear the simple keys
+                for key_base in ['initial_data', 'available_tags', 'web_available_tags']:
+                    try:
+                        # Try with empty file path
+                        simple_key = hashlib.sha256(f"{key_base}:{sid}:".encode()).hexdigest()
+                        cache.delete(simple_key)
+                    except:
+                        pass
+            except Exception as e2:
+                logging.warning(f"Failed to clear caches with fallback method: {e2}")
 
         # CRITICAL: Clear other session data from previous store (but keep selected_store!)
         session.pop('file_path', None)
@@ -6887,11 +6904,13 @@ def get_session_cache_key(base_key):
             sid = 'background'  # Use 'background' for background processing
     except:
         sid = 'background'  # Fallback for any session access issues
-    
-    # Get the actual loaded file path from the Excel processor
-    excel_processor = get_excel_processor()
-    file_path = getattr(excel_processor, '_last_loaded_file', '')
-    
+
+    # OPTIMIZATION: Get file path from global _excel_processor if it exists, without loading
+    global _excel_processor
+    file_path = ''
+    if _excel_processor is not None:
+        file_path = getattr(_excel_processor, '_last_loaded_file', '')
+
     key_str = f"{base_key}:{sid}:{file_path}"
     return hashlib.sha256(key_str.encode()).hexdigest()
 
