@@ -88,10 +88,8 @@
     window.selectStore = function(storeValue) {
       console.log('=== STORE SELECTION CLICKED ===');
       console.log('Store value:', storeValue);
+      console.log('About to send fetch request to /api/set-store');
 
-      // DEBUG: Alert to verify function is being called
-      alert('Store selection clicked: ' + storeValue);
-      
       // Don't check if it's the same store - just always proceed
       // This ensures the selection always works even if there's a mismatch
       console.log('Processing store selection:', storeValue);
