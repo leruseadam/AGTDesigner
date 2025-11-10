@@ -850,11 +850,53 @@ const TagManager = {
         filterCache: null, // Single cache entry
         updateAvailableTagsTimer: null,
         isSearching: false,
+        initialDataAttempts: 0,
+        initialDataRetryTimer: null,
         // Memory optimization flags
         _memoryOptimized: true,
         _lastCleanup: Date.now()
     },
+    initialDataRetryDelays: [1500, 3500, 6000, 10000],
     isGenerating: false, // Add generation lock flag
+
+    clearInitialDataRetry() {
+        if (this.state.initialDataRetryTimer) {
+            clearTimeout(this.state.initialDataRetryTimer);
+            this.state.initialDataRetryTimer = null;
+        }
+        this.state.initialDataAttempts = 0;
+    },
+
+    scheduleInitialDataRetry(reason = 'unknown') {
+        const delays = Array.isArray(this.initialDataRetryDelays) && this.initialDataRetryDelays.length > 0
+            ? this.initialDataRetryDelays
+            : [2000];
+        const maxAttempts = delays.length + 1;
+        const attemptsSoFar = this.state.initialDataAttempts || 0;
+
+        if (attemptsSoFar >= maxAttempts) {
+            console.warn(`[InitialData] Max attempts (${maxAttempts}) reached; not scheduling retry. Last reason: ${reason}`);
+            return;
+        }
+
+        if (this.state.initialDataRetryTimer) {
+            clearTimeout(this.state.initialDataRetryTimer);
+            this.state.initialDataRetryTimer = null;
+        }
+
+        const delayIndex = Math.max(0, Math.min(attemptsSoFar - 1, delays.length - 1));
+        const delay = delays[Math.max(0, delayIndex)] || 2000;
+        const nextAttempt = attemptsSoFar + 1;
+
+        console.log(`[InitialData] Scheduling retry ${nextAttempt}/${maxAttempts} in ${delay}ms (reason: ${reason})`);
+
+        const self = this;
+        this.state.initialDataRetryTimer = setTimeout(function() {
+            self.state.initialDataRetryTimer = null;
+            console.log(`[InitialData] Retrying initial data load (attempt ${(self.state.initialDataAttempts || 0) + 1}/${maxAttempts})`);
+            self.checkForExistingData();
+        }, delay);
+    },
 
     // Function to update brand filter label based on product type
     updateBrandFilterLabel() {
@@ -5167,6 +5209,7 @@ const TagManager = {
         AppLoadingSplash.startAutoAdvance();
         
         // Initialize empty state first
+        this.clearInitialDataRetry();
         this.initializeEmptyState();
         AppLoadingSplash.nextStep(); // Templates loaded
         
@@ -5341,6 +5384,18 @@ const TagManager = {
     async checkForExistingData() {
         console.log('=== CHECK FOR EXISTING DATA FUNCTION CALLED ===');
         console.log('Checking for existing data...');
+
+        const retryDelays = Array.isArray(this.initialDataRetryDelays) && this.initialDataRetryDelays.length > 0
+            ? this.initialDataRetryDelays
+            : [2000];
+        this.state.initialDataAttempts = (this.state.initialDataAttempts || 0) + 1;
+        const attemptNumber = this.state.initialDataAttempts;
+        const maxAttempts = retryDelays.length + 1;
+        console.log(`[InitialData] Attempt ${attemptNumber}/${maxAttempts}`);
+        if (attemptNumber > maxAttempts) {
+            console.warn(`[InitialData] Attempt limit exceeded (${maxAttempts}); aborting further retries.`);
+            return;
+        }
         
         // Add timeout protection - increased to 30 seconds for large Excel files
         const timeoutPromise = new Promise((_, reject) => {
@@ -5415,6 +5470,7 @@ const TagManager = {
                     }, 200);
                     clearTimeout(splashSafetyTimeout);
                     
+                    this.clearInitialDataRetry();
                     console.log('Initial data loaded successfully');
                     return;
                 } else {
@@ -5426,6 +5482,7 @@ const TagManager = {
                     
                     // FIXED: Initialize empty state instead of loading test data
                     this.initializeEmptyState();
+                    this.scheduleInitialDataRetry('Empty initial data response');
                     return;
                 }
             } else {
@@ -5437,6 +5494,7 @@ const TagManager = {
                 
                 // FIXED: Initialize empty state instead of loading test data
                 this.initializeEmptyState();
+                this.scheduleInitialDataRetry(`HTTP ${response.status}`);
                 return;
             }
         } catch (error) {
@@ -5455,6 +5513,7 @@ const TagManager = {
             
             // FIXED: Initialize empty state instead of loading test data
             this.initializeEmptyState();
+            this.scheduleInitialDataRetry(error.message || 'initial data fetch error');
             return;
         }
     },
