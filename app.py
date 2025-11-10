@@ -21,6 +21,11 @@ import pandas as pd  # Add this import
 import time
 import re
 import json
+from src.core.generation.fast_generation import (
+    FastGenerationEngine,
+    optimize_records_for_generation,
+    update_generation_stats
+)
 
 # Performance optimizations - Import only if available
 try:
@@ -6597,13 +6602,20 @@ def generate_labels():
             lineage = record.get('Lineage', 'NOT_FOUND')
             logging.info(f"  Record {i+1}: '{product_name}' -> Lineage: '{lineage}'")
         
-        # ⚠️ SIMPLE DIRECT GENERATION (fast generation disabled)
+        # Fast generation with caching
+        fast_engine = FastGenerationEngine(processor)
+        cache_hits_before = fast_engine.cache_hits
         generation_start = time.time()
-        logging.info(f"🔧 Starting DIRECT generation of {len(records)} labels...")
-        final_doc = processor.process_records(records)
+        logging.info(f"🔧 Starting FAST generation of {len(records)} labels (cache-enabled)...")
+        final_doc = fast_engine.generate_with_cache(records, template_type, saved_scale_factor)
         generation_time = time.time() - generation_start
+        cache_hit = fast_engine.cache_hits > cache_hits_before
+        update_generation_stats(len(records), generation_time, cache_hit)
         
-        logging.info(f"✅ GENERATION COMPLETE: {len(records)} labels in {generation_time:.2f}s ({generation_time/len(records):.3f}s per label)")
+        logging.info(
+            f"✅ GENERATION COMPLETE: {len(records)} labels in {generation_time:.2f}s "
+            f"({generation_time/len(records):.3f}s per label, cache_hit={cache_hit})"
+        )
         if hasattr(final_doc, 'labels_rendered'):
             logging.info(f"🔍 LABEL RENDER: TemplateProcessor rendered {final_doc.labels_rendered} labels")
         if final_doc is None:
@@ -8338,17 +8350,18 @@ def update_lineage():
             session.modified = True
             logging.info(f"✅ LINEAGE UPDATE: Cleared all caches and updated session timestamp")
             
-            # CRITICAL: Force Excel processor to rebuild from database to ensure lineage consistency
+            # CRITICAL: Force Excel processor to rebuild caches so UI reflects new lineage data
             try:
                 if excel_processor and excel_processor.df is not None:
-                    # Clear Excel processor's internal caches
-                    if hasattr(excel_processor, '_available_tags_cache'):
-                        excel_processor._available_tags_cache = None
-                    if hasattr(excel_processor, 'dropdown_cache'):
-                        excel_processor.dropdown_cache = {}
-                    logging.info(f"✅ LINEAGE UPDATE: Cleared Excel processor internal caches")
+                    if hasattr(excel_processor, '_invalidate_caches'):
+                        excel_processor._invalidate_caches()
+                    if hasattr(excel_processor, '_schedule_cache_prewarm'):
+                        excel_processor._schedule_cache_prewarm()
+                    if hasattr(excel_processor, '_cache_dropdown_values'):
+                        excel_processor._cache_dropdown_values()
+                    logging.info("✅ LINEAGE UPDATE: Excel processor caches invalidated and refresh scheduled")
             except Exception as e:
-                logging.warning(f"Could not clear Excel processor caches: {e}")
+                logging.warning(f"Could not reset Excel processor caches after lineage update: {e}")
                 
         except Exception as cache_error:
             logging.warning(f"Could not clear caches after lineage update: {cache_error}")

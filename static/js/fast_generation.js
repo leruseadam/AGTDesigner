@@ -3,12 +3,30 @@
 (function() {
     'use strict';
     
+    const FAST_GEN_DEBUG_ENABLED = Boolean(
+        window.localStorage?.getItem('tagManagerDebug') === 'true' ||
+        window.sessionStorage?.getItem('tagManagerDebug') === 'true' ||
+        window.TAG_MANAGER_DEBUG === true
+    );
+
+    const fastGenLog = (...args) => {
+        if (FAST_GEN_DEBUG_ENABLED) {
+            console.log(...args);
+        }
+    };
+
+    const fastGenWarn = (...args) => {
+        if (FAST_GEN_DEBUG_ENABLED) {
+            console.warn(...args);
+        }
+    };
+    
     // Override the generation function for fast processing
     if (typeof TagManager !== 'undefined' && TagManager.prototype.generateLabels) {
         const originalGenerateLabels = TagManager.prototype.generateLabels;
         
         TagManager.prototype.generateLabels = function(templateType, scaleFactor) {
-            console.log('⚡ Using FAST generation mode');
+            fastGenLog('⚡ Using FAST generation mode');
             
             const selectedTags = this.getSelectedTags();
             if (!selectedTags || selectedTags.length === 0) {
@@ -41,7 +59,7 @@
                 return response.blob();
             })
             .then(blob => {
-                console.log('⚡ Fast generation result:', blob.size, 'bytes');
+                fastGenLog('⚡ Fast generation result:', blob.size, 'bytes');
                 
                 // Create download link
                 const url = window.URL.createObjectURL(blob);
@@ -61,7 +79,7 @@
             .catch(error => {
                 console.error('⚡ Fast generation failed:', error);
                 // Try parallel generation as fallback
-                console.log('⚡ Trying parallel generation...');
+                fastGenLog('⚡ Trying parallel generation...');
                 return this.tryParallelGeneration(templateType, scaleFactor, selectedTags);
             });
         };
@@ -91,7 +109,7 @@
                 return response.blob();
             })
             .then(blob => {
-                console.log('⚡ Parallel generation result:', blob.size, 'bytes');
+                fastGenLog('⚡ Parallel generation result:', blob.size, 'bytes');
                 
                 // Create download link
                 const url = window.URL.createObjectURL(blob);
@@ -117,14 +135,14 @@
         // Add progress and success methods if they don't exist
         if (!TagManager.prototype.showGenerationProgress) {
             TagManager.prototype.showGenerationProgress = function(message) {
-                console.log('⚡ Generation Progress:', message);
+                fastGenLog('⚡ Generation Progress:', message);
                 // You can add UI feedback here
             };
         }
         
         if (!TagManager.prototype.showGenerationSuccess) {
             TagManager.prototype.showGenerationSuccess = function(message) {
-                console.log('⚡ Generation Success:', message);
+                fastGenLog('⚡ Generation Success:', message);
                 // You can add UI feedback here
             };
         }
@@ -136,7 +154,7 @@
             };
         }
         
-        console.log('⚡ Fast generation mode activated');
-        console.log('📊 Plan specs: 6 web workers, 20GB disk, Postgres enabled');
+        fastGenLog('⚡ Fast generation mode activated');
+        fastGenLog('📊 Plan specs: 6 web workers, 20GB disk, Postgres enabled');
     }
 })();

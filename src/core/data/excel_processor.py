@@ -4329,7 +4329,8 @@ class ExcelProcessor:
         # Get weight and units from Excel data first (priority)
         excel_weight = safe_get_value(record.get('Weight*', None))
         excel_units = safe_get_value(record.get('Units', ''))
-        product_type = safe_get_value(record.get('Product Type*', '')).lower()
+        product_type = safe_get_value(record.get('Product Type*', ''))
+        product_type = product_type.lower() if product_type else ''
         product_name = safe_get_value(record.get('Product Name*', ''))
         
         # Get database weight and units as fallback

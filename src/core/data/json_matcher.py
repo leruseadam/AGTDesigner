@@ -2897,6 +2897,9 @@ class JSONMatcher:
             raw_units = str(item.get("unit_weight_uom", item.get("uom", "g"))).strip()
             raw_price = str(item.get("line_price", item.get("price", ""))).strip()
             strain = str(item.get("strain_name", item.get("strain", ""))).strip()
+            vendor = self._normalize_vendor_display_name(vendor)
+            if brand:
+                brand = self._normalize_vendor_display_name(brand)
             
             # Extract cannabinoid data if available
             thc = ""
@@ -2917,9 +2920,30 @@ class JSONMatcher:
             
             # ===== STEP 3: Transform SKU to human-readable name =====
             product_name = transform_sku_to_readable_name(raw_product_name) or raw_product_name
+            excel_variations, type_override = self._generate_excel_style_variations(item, vendor, product_type)
+            use_excel_style_name = False
+            if type_override:
+                product_type = type_override
+            if excel_variations:
+                try:
+                    product_db = self._get_product_database()
+                    if product_db:
+                        db_match = self._find_best_database_match(
+                            product_name=excel_variations[0],
+                            vendor=vendor,
+                            weight=str(item.get("unit_weight", item.get("weight", ""))).strip(),
+                            strain=strain,
+                            product_db=product_db
+                        )
+                        if db_match:
+                            return self._create_tag_from_database_info(db_match, vendor, item)
+                except Exception as db_lookup_error:
+                    logging.debug(f"DB lookup during fallback conversion failed: {db_lookup_error}")
+                product_name = excel_variations[0]
+                use_excel_style_name = True
             
             # ===== STEP 4: Create better product name if needed =====
-            if not product_name or product_name.startswith("JSON Product"):
+            if not use_excel_style_name and (not product_name or product_name.startswith("JSON Product")):
                 name_parts = []
                 
                 # Add brand first if available
@@ -2959,12 +2983,15 @@ class JSONMatcher:
             
             # ===== STEP 6: Normalize weight and units =====
             weight, weight_units = self._normalize_weight_for_json_product(raw_weight, raw_units, product_type, product_name)
+            weight_label = self._format_weight_label(weight, weight_units)
             
             # Ensure weight is valid
             if not weight or weight == "0":
                 weight = "1"
             if not weight_units:
                 weight_units = "g"
+            if not weight_label:
+                weight_label = f"{weight}{weight_units}"
             
             # ===== STEP 7: Determine price with intelligent fallbacks =====
             price = raw_price
@@ -2974,6 +3001,9 @@ class JSONMatcher:
                 if estimated_price:
                     price = estimated_price
                     logging.info(f"💰 Estimated price '${price}' for '{product_name}'")
+            formatted_price = format_price(price) if str(price).strip() else ""
+            if formatted_price:
+                price = formatted_price
             
             # ===== STEP 8: Determine lineage =====
             lineage = self._determine_lineage_for_product(product_type, '', product_name, strain)
@@ -2990,15 +3020,17 @@ class JSONMatcher:
             ratio = self._calculate_ratio_for_json_product(product_type, item)
             
             # ===== STEP 9.5: Standardize description format for consistency =====
-            # Ensure all descriptions use same format: "Product Name - Xg" (not "Xg" or "X.0g")
-            description = product_name
-            # Normalize weight format in description: "1.0g" → "1g", ensure hyphen separator
-            import re
-            # Remove existing weight patterns and re-add in standardized format
-            desc_clean = re.sub(r'\s*-?\s*\d+\.?\d*\s*g\s*$', '', description, flags=re.IGNORECASE)
-            desc_clean = re.sub(r'\s+', ' ', desc_clean).strip()
-            # Add standardized weight suffix
-            description = f"{desc_clean} - {weight}{weight_units}"
+            if use_excel_style_name:
+                description = product_name
+            else:
+                description = product_name
+                import re
+                desc_clean = re.sub(r'\s*-?\s*\d+\.?\d*\s*[a-zA-Z]+\s*$', '', description, flags=re.IGNORECASE)
+                desc_clean = re.sub(r'\s+', ' ', desc_clean).strip()
+                if weight_label:
+                    description = f"{desc_clean} - {weight_label}"
+                else:
+                    description = desc_clean
             
             # ===== STEP 10: Build COMPLETE product with ALL required fields =====
             product = {
@@ -3021,7 +3053,7 @@ class JSONMatcher:
                 # Weight and quantity
                 'Weight*': weight,
                 'Units': weight_units,
-                'Weight Value + Unit': f"{weight}{weight_units}",
+                'Weight Value + Unit': weight_label,
                 'Quantity*': '1',
                 'Quantity': '1',
                 
@@ -3044,7 +3076,8 @@ class JSONMatcher:
                 'Ratio_or_THC_CBD': ratio,
                 
                 # Metadata
-                'Source': 'JSON - No DB Match'
+                'Source': 'JSON - No DB Match',
+                'displayName': description
             }
             
             # ===== STEP 11: Log creation =====
@@ -8118,9 +8151,26 @@ class JSONMatcher:
             if translated_name != original_name:
                 print(f"🔍 DEBUG: Translated CERES code '{original_name}' to '{translated_name}'")
                 product_name = translated_name
+
+            vendor_for_variations = vendor or global_vendor or item.get('vendor', '')
+            excel_style_variations, type_override = self._generate_excel_style_variations(
+                item,
+                vendor_for_variations,
+                product_type
+            )
+            if type_override:
+                product_type = type_override
+            if vendor_for_variations:
+                vendor = self._normalize_vendor_display_name(vendor_for_variations)
+            if excel_style_variations:
+                product_name = excel_style_variations[0]
             
             # ENHANCED: Create multiple search variations for better CERES matching
             search_variations = self._create_ceres_search_variations(original_name, translated_name, product_type)
+            if excel_style_variations:
+                for variation in excel_style_variations:
+                    if variation not in search_variations:
+                        search_variations.insert(0, variation)
             
             # Initialize variables for main matching
             db_match = None
@@ -9952,6 +10002,155 @@ class JSONMatcher:
         
         # No change needed for non-whole numbers or already formatted weights
         return weight_string
+
+    def _normalize_vendor_display_name(self, vendor: str) -> str:
+        """
+        Normalize vendor casing to align with Excel / database conventions.
+        Currently focuses on Cultivera manifests where vendor strings are fully uppercase.
+        """
+        if not vendor:
+            return ""
+        
+        vendor_clean = str(vendor).strip()
+        if not vendor_clean:
+            return ""
+        
+        vendor_lower = vendor_clean.lower()
+        
+        special_cases = {
+            'mt baker homegrown': 'Mt Baker Homegrown',
+            'a greener today-bothell': 'A Greener Today - Bothell',
+            'a greener today bothell': 'A Greener Today - Bothell'
+        }
+        
+        if vendor_lower in special_cases:
+            return special_cases[vendor_lower]
+        
+        # Title-case by default, but preserve common all-caps abbreviations
+        title_cased = vendor_lower.title()
+        # Preserve LLC/Inc style suffixes
+        title_cased = title_cased.replace('Llc', 'LLC').replace('Inc', 'Inc').replace('Dbc', 'DBC')
+        return title_cased
+
+    def _format_weight_label(self, weight_value: Any, units: str) -> str:
+        """
+        Format a numeric weight plus units into Excel-style label (e.g., 1.0 g -> 1g, 3.5 g -> 3.5g).
+        """
+        if weight_value in [None, ""]:
+            return ""
+        
+        unit = (units or "").strip()
+        if not unit:
+            unit = ""
+        
+        try:
+            value = float(weight_value)
+        except (TypeError, ValueError):
+            # If parsing fails, fall back to raw value
+            return f"{weight_value}{unit}"
+        
+        if value.is_integer():
+            value_str = str(int(value))
+        else:
+            value_str = f"{value:.2f}".rstrip('0').rstrip('.')
+        
+        return f"{value_str}{unit}"
+
+    def _generate_excel_style_variations(
+        self,
+        item: Dict[str, Any],
+        vendor: str,
+        product_type: Optional[str] = None
+    ) -> Tuple[List[str], Optional[str]]:
+        """
+        Generate Excel-format product name variations for Cultivera-style manifests so that
+        JSON matching can line up with database naming conventions.
+        Returns a tuple of (variations, product_type_override).
+        """
+        variations: List[str] = []
+        product_type_override: Optional[str] = None
+        
+        if not isinstance(item, dict):
+            return variations, product_type_override
+        
+        vendor_display = self._normalize_vendor_display_name(vendor or item.get('vendor') or "")
+        strain = str(item.get('strain_name') or item.get('strain') or "").strip()
+        product_name = str(item.get('product_name', '')).strip()
+        units = (item.get('unit_weight_uom') or item.get('weight_unit') or item.get('uom') or "").strip()
+        weight_value = item.get('unit_weight') or item.get('weight')
+        
+        # Prepare helpers
+        try:
+            total_weight = float(weight_value) if weight_value not in [None, ""] else None
+        except (TypeError, ValueError):
+            total_weight = None
+        
+        units_lower = units.lower()
+        name_lower = product_name.lower()
+        is_joint_product = any(keyword in name_lower for keyword in ['joint', 'pre-roll', 'preroll'])
+        
+        # Flower / standard usable marijuana formatting
+        if vendor_display and strain and total_weight is not None and units_lower in ['g', 'gram', 'grams'] and not is_joint_product:
+            weight_label = self._format_weight_label(total_weight, 'g')
+            if weight_label:
+                base_name = f"{strain} by {vendor_display} - {weight_label}"
+                variations.append(base_name)
+                product_type_override = product_type_override or "Flower"
+        
+        # Pre-roll / joint formatting with pack sizes
+        if vendor_display and strain and total_weight is not None and units_lower in ['g', 'gram', 'grams'] and is_joint_product:
+            # Attempt to extract pack size from product name
+            pack_count = None
+            pack_match = re.search(r'joint\s*x\s*(\d+)', name_lower)
+            if not pack_match:
+                pack_match = re.search(r'x\s*(\d+)\s*pack', name_lower)
+            if not pack_match:
+                pack_match = re.search(r'(\d+)\s*pack', name_lower)
+            if pack_match:
+                try:
+                    pack_count = int(pack_match.group(1))
+                except ValueError:
+                    pack_count = None
+            
+            if pack_count is None or pack_count <= 0:
+                # Fallback: infer pack count based on naming patterns (e.g., "x2 Pack")
+                if 'x2' in name_lower:
+                    pack_count = 2
+                elif 'x10' in name_lower:
+                    pack_count = 10
+            
+            if pack_count is None or pack_count <= 0:
+                pack_count = 1
+            
+            if pack_count > 0:
+                per_unit_weight = total_weight / pack_count if pack_count else total_weight
+                per_unit_label = self._format_weight_label(per_unit_weight, 'g')
+                
+                pack_suffix = "Pack" if pack_count > 1 else ""
+                base_name = f"{strain} Pre-Roll by {vendor_display} - {per_unit_label} x {pack_count} {pack_suffix}".strip()
+                variations.append(base_name)
+                
+                # Alternate formatting used in some Excel rows ("Pre-Rolls By")
+                variations.append(base_name.replace("Pre-Roll by", "Pre-Rolls By", 1))
+                
+                # Allow variant without leading zero for .5g style entries
+                if per_unit_label.startswith("0."):
+                    no_leading_zero = per_unit_label[1:]
+                    variations.append(base_name.replace(per_unit_label, no_leading_zero))
+                    variations.append(base_name.replace(per_unit_label, no_leading_zero).replace("Pre-Roll by", "Pre-Rolls By", 1))
+                
+                product_type_override = "Pre-Roll"
+        
+        # Deduplicate while preserving order
+        seen = set()
+        unique_variations = []
+        for variation in variations:
+            normalized = variation.strip()
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                unique_variations.append(normalized)
+        
+        return unique_variations, product_type_override
 
     def _determine_doh_value(self, product_type: str, product_name: str = '') -> str:
         """

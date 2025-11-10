@@ -229,6 +229,9 @@ p, span, div {
   user-select: none;
   /* Optimize rendering */
   will-change: opacity, transform;
+  /* Allow browser to skip rendering off-screen content */
+  content-visibility: auto;
+  contain-intrinsic-size: 44px 320px;
 }
 
 /* Disable transitions during rapid updates to prevent flashing */
