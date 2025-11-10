@@ -13538,8 +13538,16 @@ def get_initial_data():
             if excel_processor.df is None or excel_processor.df.empty:
                 logging.info("No uploaded file found - attempting to load default file")
                 from src.core.data.excel_processor import get_default_upload_file
-                selected_store = get_current_store_name() if has_store_selection() else None
+
+                # Get the current store
+                has_store = has_store_selection()
+                selected_store = get_current_store_name() if has_store else None
+                logging.info(f"📍 has_store_selection() = {has_store}")
+                logging.info(f"📍 Current store name = {selected_store}")
+
+                # Get default file for this store
                 default_file = get_default_upload_file(selected_store)
+                logging.info(f"📍 Default file returned: {default_file}")
                 
                 if default_file:
                     try:
