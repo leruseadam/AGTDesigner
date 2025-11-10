@@ -36,6 +36,8 @@ VALID_LINEAGES = [
     "SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", "CBD", "MIXED", "PARAPHERNALIA"
 ]
 
+NONCLASSIC_MINOR_CANNABINOID_REGEX = r'\b(?:CBD|CBG|CBN|CBC)\b'
+
 def normalize_lineage(lineage: str) -> str:
     """Normalize lineage to proper ALL CAPS format."""
     if not lineage or pd.isna(lineage):
@@ -191,11 +193,19 @@ def optimized_lineage_assignment(df, product_types, lineages, classic_types):
             cbd_from_column_mask = cbd_str.str.contains(r'\bCBD\b|cbd', case=False, na=False)
     
     # Also check product name as fallback
-    cbd_from_name_mask = pd.Series([False] * len(df), index=df.index)
+    product_names = pd.Series([''] * len(df), index=df.index)
     if 'Product Name*' in df.columns:
         product_names = df['Product Name*'].astype(str)
-        cbd_from_name_mask = product_names.str.contains(r'\bCBD\b', case=False, na=False)
-    
+    elif 'Product Name' in df.columns:
+        product_names = df['Product Name'].astype(str)
+    elif 'Product_Name' in df.columns:
+        product_names = df['Product_Name'].astype(str)
+
+    cbd_from_name_mask = product_names.str.contains(r'\bCBD\b', case=False, na=False)
+    minor_cannabinoid_from_name_mask = product_names.str.contains(
+        NONCLASSIC_MINOR_CANNABINOID_REGEX, case=False, na=False
+    )
+
     # For classic types with CBD in column OR name, assign CBD lineage (even if lineage exists)
     # CRITICAL: Override existing lineage for CBD Classic products to ensure they show as CBD
     classic_cbd_mask = classic_mask & (cbd_from_column_mask | cbd_from_name_mask)
@@ -211,7 +221,7 @@ def optimized_lineage_assignment(df, product_types, lineages, classic_types):
         
         # CRITICAL: For nonclassic types, CBD detection is ONLY based on product name/title
         # Do NOT check Product Strain or Description - only the title matters
-        nonclassic_cbd_from_name = nonclassic_mask & cbd_from_name_mask
+        nonclassic_cbd_from_name = nonclassic_mask & minor_cannabinoid_from_name_mask
         
         # Use ONLY product name for CBD detection in non-classic types
         cbd_detection_mask = nonclassic_cbd_from_name
@@ -229,7 +239,7 @@ def optimized_lineage_assignment(df, product_types, lineages, classic_types):
         if 'Product Name*' in df.columns:
             high_cbd_edible_mask = edible_cbd & (
                 (product_types.str.strip().str.lower() == "high cbd edible liquid") |
-                cbd_from_name_mask
+                minor_cannabinoid_from_name_mask
             )
             result[high_cbd_edible_mask] = 'CBD'
             # Set remaining edibles with CBD to MIXED
