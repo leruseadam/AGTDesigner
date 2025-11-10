@@ -294,9 +294,9 @@ def create_dynamic_mini_template(template_path, num_products, scale_factor=1.0):
         row.height = row_height_pts
         row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
     
-    # Set borders
+    # Set borders (include outer light grey border to match original mini template framing)
     borders = OxmlElement('w:tblBorders')
-    for side in ('insideH','insideV'):
+    for side in ('top', 'left', 'bottom', 'right', 'insideH', 'insideV'):
         b = OxmlElement(f"w:{side}")
         b.set(qn('w:val'), "single")
         b.set(qn('w:sz'), "4")
