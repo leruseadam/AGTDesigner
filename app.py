@@ -3191,8 +3191,17 @@ def ultra_fast_background_processing(filename, temp_path):
         logging.info("[ULTRA-FAST-BG] Ultra-minimal processing completed - raw data ready")
         
         # Step 5: Store in global processor (skip database storage for speed)
-        global excel_processor
-        excel_processor = processor
+        global _excel_processor
+        try:
+            with excel_processor_lock:
+                _excel_processor = processor
+                _excel_processor._last_loaded_file = temp_path
+                logging.info(f"[ULTRA-FAST-BG] Global processor updated with {len(processor.df)} rows")
+        except NameError:
+            # Fallback if lock not available in this context (shouldn't happen)
+            _excel_processor = processor
+            _excel_processor._last_loaded_file = temp_path
+            logging.info(f"[ULTRA-FAST-BG] Global processor updated without lock ({len(processor.df)} rows)")
         
         # Update processing status immediately
         update_processing_status(filename, 'ready')
