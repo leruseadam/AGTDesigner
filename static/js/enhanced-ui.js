@@ -177,6 +177,28 @@ async function handleFiles(files) {
       console.log('📦 Upload response data:', data);
       
       if (response.ok && data.success) {
+        // For PythonAnywhere/web deployment the file continues processing in background.
+        if (data.processing) {
+          console.log(`Background processing required for ${data.filename || file.name}`);
+          
+          // Keep splash visible and update messaging while we wait for processing to finish.
+          if (statusElement) statusElement.textContent = 'Processing file...';
+          if (typeof TagManager !== 'undefined' && TagManager.updateExcelLoadingStatus) {
+            TagManager.updateExcelLoadingStatus('Processing file...');
+          }
+          
+          // Start polling backend until the upload is ready, then stop normal success flow.
+          if (typeof pollUploadStatus === 'function') {
+            pollUploadStatus(data.filename || file.name);
+          } else {
+            console.warn('pollUploadStatus function not available; falling back to manual reload');
+            setTimeout(() => {
+              window.location.reload();
+            }, 2000);
+          }
+          return;
+        }
+
         // File uploaded successfully - data is already processed synchronously
         console.log(`File uploaded successfully: ${data.filename}, rows: ${data.rows}`);
         console.log('Upload response data:', data);

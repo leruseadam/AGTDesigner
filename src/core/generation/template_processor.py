@@ -2084,6 +2084,10 @@ class TemplateProcessor:
         else:
             self.logger.debug(f"STRAIN OVERRIDE DEBUG: Skipping strain override - ProductStrain already set to '{label_context['ProductStrain']}' for non-classic type")
 
+        # Double template should never display ProductStrain text (prevent 12pt strain labels)
+        if self.template_type == 'double':
+            label_context['ProductStrain'] = ''
+
         # Lineage logic is now handled earlier in the method for both classic and non-classic types
 
         # Add marker strings for template processing
