@@ -1784,8 +1784,14 @@ class TemplateProcessor:
             if self.template_type == 'mini':
                 if product_brand:
                     classic_brand_text = str(product_brand).strip().upper()
-                    label_context['ProductBrand'] = classic_brand_text
-                    label_context['ProductBrand_Center'] = classic_brand_text
+                    # Ensure markers are applied consistently for downstream formatting
+                    plain_brand = classic_brand_text
+                    if is_already_wrapped(plain_brand, 'PRODUCTBRAND'):
+                        plain_brand = unwrap_marker(plain_brand, 'PRODUCTBRAND')
+                    elif is_already_wrapped(plain_brand, 'PRODUCTBRAND_CENTER'):
+                        plain_brand = unwrap_marker(plain_brand, 'PRODUCTBRAND_CENTER')
+                    label_context['ProductBrand'] = wrap_with_marker(plain_brand, 'PRODUCTBRAND')
+                    label_context['ProductBrand_Center'] = wrap_with_marker(plain_brand, 'PRODUCTBRAND_CENTER')
                     self.logger.info(
                         f"🎯 MINI CLASSIC BRAND: Preserving ProductBrand '{classic_brand_text}' for classic type '{product_type}'"
                     )
@@ -1822,9 +1828,14 @@ class TemplateProcessor:
                 elif self.template_type == 'mini':
                     # For mini template, set both Lineage and ProductBrand for maximum compatibility
                     # Mini templates need brand information in multiple fields
+                    plain_brand = brand_center_text
+                    if is_already_wrapped(plain_brand, 'PRODUCTBRAND'):
+                        plain_brand = unwrap_marker(plain_brand, 'PRODUCTBRAND')
+                    elif is_already_wrapped(plain_brand, 'PRODUCTBRAND_CENTER'):
+                        plain_brand = unwrap_marker(plain_brand, 'PRODUCTBRAND_CENTER')
                     label_context['Lineage'] = brand_center_text
-                    label_context['ProductBrand'] = brand_center_text
-                    label_context['ProductBrand_Center'] = brand_center_text
+                    label_context['ProductBrand'] = wrap_with_marker(plain_brand, 'PRODUCTBRAND')
+                    label_context['ProductBrand_Center'] = wrap_with_marker(plain_brand, 'PRODUCTBRAND_CENTER')
                     self.logger.info(f"🎯 MINI TEMPLATE BRAND FIX: Set Lineage, ProductBrand, and ProductBrand_Center to '{brand_center_text}' for mini template")
                 elif self.template_type == 'double':
                     # For double template, use marker-based formatting like other templates for proper font sizing
