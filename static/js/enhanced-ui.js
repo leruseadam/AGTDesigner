@@ -730,6 +730,24 @@ document.addEventListener('DOMContentLoaded', function() {
     html.setAttribute('data-app-scale', String(s));
   }
 
+  const BASELINE_WIDTH = 1920;
+  const BASELINE_HEIGHT = 1080;
+  const LARGE_VIEWPORT_SOFTENING = 0.3;
+  const LARGE_VIEWPORT_MIN_SCALE = 0.7;
+
+  function normalizeLargeViewportScale(scale, viewportWidth, viewportHeight, minScale) {
+    const softenRatio = (ratio) => {
+      const bounded = Math.min(1, Math.max(0, ratio));
+      const softened = bounded + (1 - bounded) * LARGE_VIEWPORT_SOFTENING;
+      return Math.max(LARGE_VIEWPORT_MIN_SCALE, softened);
+    };
+
+    const widthRatio = BASELINE_WIDTH / Math.max(viewportWidth, BASELINE_WIDTH);
+    const heightRatio = BASELINE_HEIGHT / Math.max(viewportHeight, BASELINE_HEIGHT);
+    const normalized = Math.min(scale, softenRatio(widthRatio), softenRatio(heightRatio));
+    return Math.min(scale, Math.max(normalized, minScale));
+  }
+
   function scaleAppToFit() {
     const main = document.getElementById('mainContent');
     const page = document.body;
@@ -812,17 +830,18 @@ document.addEventListener('DOMContentLoaded', function() {
       }
     }
 
+    const normalizedScale = normalizeLargeViewportScale(appliedScale, vw, vh, minScale);
+    if (normalizedScale !== appliedScale) {
+      appliedScale = normalizedScale;
+      applyScaleToBody(appliedScale);
+    }
+
     // Hide scrollbars for a cleaner fit
     document.documentElement.style.overflow = 'hidden';
     document.body.style.overflow = 'hidden';
 
     // Expose current scale for quick verification in DevTools
     document.documentElement.setAttribute('data-app-scale', String(appliedScale));
-
-    // If still no visible change and scale ~1, force a visible 0.9 once
-    if (appliedScale >= 0.995) {
-      applyGlobalZoom(0.9);
-    }
   }
 
   // Expose for other scripts
@@ -849,12 +868,6 @@ document.addEventListener('DOMContentLoaded', function() {
     requestAnimationFrame(scaleAppToFit);
     setTimeout(scaleAppToFit, 0);
     setTimeout(scaleAppToFit, 250);
-    // Ensure visible change regardless
-    setTimeout(() => {
-      if ((document.documentElement.getAttribute('data-app-scale') || '1') === '1') {
-        applyGlobalZoom(0.9);
-      }
-    }, 400);
   });
 
   let resizeTimer;
