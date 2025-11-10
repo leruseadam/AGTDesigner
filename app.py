@@ -10,7 +10,7 @@
 # - Advanced DOCX label generation
 # - Real-time Excel processing
 # - Session management and caching
-
+push
 from src.core.data.field_mapping import get_canonical_field
 import os
 import sys  # Add this import
@@ -6592,7 +6592,6 @@ def generate_labels():
                 logging.info(f"✅ DOH OVERRIDE SUMMARY: Applied {applied} override(s) to {len(records)} record(s)")
         except Exception as ov_err:
             logging.warning(f"Skipping DOH overrides application: {ov_err}")
-            import traceback
             logging.error(f"DOH override error details: {traceback.format_exc()}")
 
         # CRITICAL DEBUG: Log lineage values in records right before processing

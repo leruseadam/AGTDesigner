@@ -2345,19 +2345,30 @@ const TagManager = {
                 // Select ALL checkboxes (both select-all checkboxes and tag checkboxes) within this section
                 const checkboxes = vendorSection.querySelectorAll('input[type="checkbox"]');
                 checkboxes.forEach(checkbox => {
+                    if (!checkbox.classList.contains('tag-checkbox')) {
                     checkbox.checked = isChecked;
-                    if (checkbox.classList.contains('tag-checkbox')) {
-                        const tag = this.state.tags.find(t => t['Product Name*'] === checkbox.value);
-                        if (tag) {
+                        return;
+                    }
+                    
+                    const tagName = checkbox.value;
+                    const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
+                    if (!tag) {
+                        checkbox.checked = isChecked;
+                        return;
+                    }
+
+                    checkbox.checked = isChecked;
+
                             if (isChecked) {
-                                if (!this.state.persistentSelectedTags.includes(tag['Product Name*'])) {
-                                    this.state.persistentSelectedTags.push(tag['Product Name*']);
+                        if (!this.state.persistentSelectedTags.includes(tagName)) {
+                            this.state.persistentSelectedTags.push(tagName);
                                 }
                             } else {
-                                const index = this.state.persistentSelectedTags.indexOf(tag['Product Name*']);
+                        // Only remove if the originating event is actually unchecking
+                        if (!e.target.checked) {
+                            const index = this.state.persistentSelectedTags.indexOf(tagName);
                                 if (index > -1) {
                                     this.state.persistentSelectedTags.splice(index, 1);
-                                }
                             }
                         }
                     }
@@ -2428,19 +2439,29 @@ const TagManager = {
                 // Select ALL checkboxes (both select-all checkboxes and tag checkboxes) within this section
                 const checkboxes = brandSection.querySelectorAll('input[type="checkbox"]');
                 checkboxes.forEach(checkbox => {
+                    if (!checkbox.classList.contains('tag-checkbox')) {
                     checkbox.checked = isChecked;
-                    if (checkbox.classList.contains('tag-checkbox')) {
-                        const tag = this.state.tags.find(t => t['Product Name*'] === checkbox.value);
-                        if (tag) {
+                        return;
+                    }
+
+                    const tagName = checkbox.value;
+                    const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
+                    if (!tag) {
+                        checkbox.checked = isChecked;
+                        return;
+                    }
+
+                    checkbox.checked = isChecked;
+
                             if (isChecked) {
-                                if (!this.state.persistentSelectedTags.includes(tag['Product Name*'])) {
-                                    this.state.persistentSelectedTags.push(tag['Product Name*']);
+                        if (!this.state.persistentSelectedTags.includes(tagName)) {
+                            this.state.persistentSelectedTags.push(tagName);
                                 }
                             } else {
-                                const index = this.state.persistentSelectedTags.indexOf(tag['Product Name*']);
+                        if (!e.target.checked) {
+                            const index = this.state.persistentSelectedTags.indexOf(tagName);
                                 if (index > -1) {
                                     this.state.persistentSelectedTags.splice(index, 1);
-                                }
                             }
                         }
                     }
@@ -2509,19 +2530,29 @@ const TagManager = {
                         // Select ALL checkboxes (both select-all checkboxes and tag checkboxes) within this section
                         const checkboxes = productTypeSection.querySelectorAll('input[type="checkbox"]');
                         checkboxes.forEach(checkbox => {
+                            if (!checkbox.classList.contains('tag-checkbox')) {
                             checkbox.checked = isChecked;
-                            if (checkbox.classList.contains('tag-checkbox')) {
-                                const tag = this.state.tags.find(t => t['Product Name*'] === checkbox.value);
-                                if (tag) {
+                                return;
+                            }
+
+                            const tagName = checkbox.value;
+                            const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
+                            if (!tag) {
+                                checkbox.checked = isChecked;
+                                return;
+                            }
+
+                            checkbox.checked = isChecked;
+
                                     if (isChecked) {
-                                        if (!this.state.persistentSelectedTags.includes(tag['Product Name*'])) {
-                                            this.state.persistentSelectedTags.push(tag['Product Name*']);
+                                if (!this.state.persistentSelectedTags.includes(tagName)) {
+                                    this.state.persistentSelectedTags.push(tagName);
                                         }
                                     } else {
-                                        const index = this.state.persistentSelectedTags.indexOf(tag['Product Name*']);
+                                if (!e.target.checked) {
+                                    const index = this.state.persistentSelectedTags.indexOf(tagName);
                                         if (index > -1) {
                                             this.state.persistentSelectedTags.splice(index, 1);
-                                        }
                                     }
                                 }
                             }
@@ -2590,19 +2621,29 @@ const TagManager = {
                             // Select ALL checkboxes (both select-all checkboxes and tag checkboxes) within this section
                             const checkboxes = weightSection.querySelectorAll('input[type="checkbox"]');
                             checkboxes.forEach(checkbox => {
+                                if (!checkbox.classList.contains('tag-checkbox')) {
                                 checkbox.checked = isChecked;
-                                if (checkbox.classList.contains('tag-checkbox')) {
-                                    const tag = this.state.tags.find(t => t['Product Name*'] === checkbox.value);
-                                    if (tag) {
+                                    return;
+                                }
+
+                                const tagName = checkbox.value;
+                                const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
+                                if (!tag) {
+                                    checkbox.checked = isChecked;
+                                    return;
+                                }
+
+                                checkbox.checked = isChecked;
+
                                         if (isChecked) {
-                                            if (!this.state.persistentSelectedTags.includes(tag['Product Name*'])) {
-                                                this.state.persistentSelectedTags.push(tag['Product Name*']);
+                                    if (!this.state.persistentSelectedTags.includes(tagName)) {
+                                        this.state.persistentSelectedTags.push(tagName);
                                             }
                                         } else {
-                                            const index = this.state.persistentSelectedTags.indexOf(tag['Product Name*']);
+                                    if (!e.target.checked) {
+                                        const index = this.state.persistentSelectedTags.indexOf(tagName);
                                             if (index > -1) {
                                                 this.state.persistentSelectedTags.splice(index, 1);
-                                            }
                                         }
                                     }
                                 }
@@ -2692,18 +2733,18 @@ const TagManager = {
             if (this.state.isProcessingDeselection) {
                 return;
             }
-
+            
             // Prevent event handling during drag operations
             if (e.target.hasAttribute('data-reordering') || e.target.hasAttribute('data-drag-disabled')) {
                 return;
             }
-
+            
             // Save current state for undo before making changes
             this.saveSelectionState('checkbox_selection');
-
+            
             // Ensure the checkbox state is properly updated
             const isChecked = e.target.checked;
-
+            
             // Update persistent selected tags with proper array handling
             if (isChecked) {
                 if (!this.state.persistentSelectedTags.includes(displayName)) {
@@ -2715,10 +2756,10 @@ const TagManager = {
                     this.state.persistentSelectedTags.splice(index, 1);
                 }
             }
-
+            
             // Update the regular selectedTags set to match persistent ones
             this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-
+            
             // Call the main handler - find the current tag object from state
             const currentTag = this.state.tags.find(t => t && t['Product Name*'] === displayName) ||
                               this.state.originalTags.find(t => t && t['Product Name*'] === displayName) ||
@@ -2746,7 +2787,7 @@ const TagManager = {
             // CRITICAL FIX: Set flag BEFORE checkbox state changes if this is a deselection
             const isInSelectedTags = e.target.closest('#selectedTags') !== null;
             const isUncheckingInSelected = isInSelectedTags && e.target.checked; // Clicking on checked box in selected tags
-
+            
             if (isUncheckingInSelected) {
                 this.state.isProcessingDeselection = true;
             }

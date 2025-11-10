@@ -130,11 +130,17 @@ def apply_lineage_colors(doc):
                         color_hex = COLORS['PARA']
                         lineage_matched = "PARAPHERNALIA"
                     elif "HYBRID/INDICA" in text or "HYBRID INDICA" in text:
-                        color_hex = COLORS['HYBRID_INDICA']
+                        color_hex = COLORS['INDICA']
                         lineage_matched = "HYBRID/INDICA"
                     elif "HYBRID/SATIVA" in text or "HYBRID SATIVA" in text:
-                        color_hex = COLORS['HYBRID_SATIVA']
+                        color_hex = COLORS['SATIVA']
                         lineage_matched = "HYBRID/SATIVA"
+                    elif "HYBRID" in text and "SATIVA" in text:
+                        color_hex = COLORS['SATIVA']
+                        lineage_matched = "HYBRID+SATIVA"
+                    elif "HYBRID" in text and "INDICA" in text:
+                        color_hex = COLORS['INDICA']
+                        lineage_matched = "HYBRID+INDICA"
                     elif "SATIVA" in text:
                         color_hex = COLORS['SATIVA']
                         lineage_matched = "SATIVA"

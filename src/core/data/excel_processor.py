@@ -2970,11 +2970,31 @@ class ExcelProcessor:
                     sample_types = self.df.loc[nonclassic_mask, "Product Type*"].unique()
                     self.logger.info(f"Sample non-classic product types: {sample_types}")
                 
-                # Identify CBD Blend products
+                # Determine the primary product name column for CBD detection
+                product_name_col = None
+                for candidate in ["Product Name*", "ProductName", "Product Name"]:
+                    if candidate in self.df.columns:
+                        product_name_col = candidate
+                        break
+
+                # Identify CBD Blend products and broader CBD indicators
+                cbd_from_strain = self.df["Product Strain"].astype(str).str.contains(r"\bCBD\b", case=False, na=False)
+                cbd_from_description = self.df["Description"].astype(str).str.contains(r"\bCBD\b", case=False, na=False)
+                cbd_from_ratio = (
+                    self.df["Ratio"].astype(str).str.contains(r"\bCBD\b", case=False, na=False)
+                    if "Ratio" in self.df.columns else pd.Series(False, index=self.df.index)
+                )
+                cbd_from_product_type = self.df["Product Type*"].astype(str).str.contains(r"high\s*cbd", case=False, na=False)
+                if product_name_col:
+                    cbd_from_name = self.df[product_name_col].astype(str).str.contains(r"\bCBD\b", case=False, na=False)
+                else:
+                    cbd_from_name = pd.Series(False, index=self.df.index)
+
                 is_cbd_blend = (
-                    self.df["Product Strain"].astype(str).str.lower().str.strip() == "cbd blend"
-                ) | (
-                    self.df["Description"].astype(str).str.lower().str.contains("cbd blend", na=False)
+                    (self.df["Product Strain"].astype(str).str.lower().str.strip() == "cbd blend") |
+                    self.df["Description"].astype(str).str.lower().str.contains("cbd blend", na=False) |
+                    cbd_from_strain | cbd_from_description | cbd_from_ratio |
+                    cbd_from_product_type | cbd_from_name
                 )
                 
                 # Set Lineage to 'CBD' for blends (not 'CBD Blend')
