@@ -252,7 +252,7 @@ from docx.enum.section import WD_ORIENT
 from docx.oxml import parse_xml, OxmlElement
 from docx.oxml.ns import qn
 from docx.enum.table import WD_ROW_HEIGHT_RULE
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 from src.core.generation.template_processor import get_font_scheme, TemplateProcessor
 from src.core.generation.tag_generator import get_template_path
 import time
@@ -8931,6 +8931,28 @@ def get_web_available_tags():
                 logging.warning(f"Excel processor error: {e}")
         
         # If we have tags from Excel, use those and skip heavy database queries
+        if not all_tags:
+            # Fallback: attempt to build tags from product database when Excel is unavailable
+            try:
+                store_name = get_current_store_name()
+                product_db = get_product_database(store_name) if store_name else None
+                if product_db:
+                    logging.info(f"WEB TAGS: Building tags from database fallback for store: {store_name}")
+                    db_products = product_db.get_all_products()
+                    db_tags = []
+                    for product in db_products:
+                        try:
+                            processed = process_database_product_for_api(product)
+                            db_tags.append(processed)
+                        except Exception as tag_error:
+                            logging.debug(f"WEB TAGS: Skipping product due to processing error: {tag_error}")
+                    all_tags.extend(db_tags)
+                    logging.info(f"WEB TAGS: Database fallback returned {len(db_tags)} tags")
+                else:
+                    logging.warning("WEB TAGS: No product database available for fallback")
+            except Exception as db_error:
+                logging.error(f"WEB TAGS: Database fallback failed: {db_error}")
+        
         if all_tags:
             # WEB OPTIMIZATION: Cache the results for web clients
             cache.set(cache_key, all_tags, timeout=300)  # Cache for 5 minutes

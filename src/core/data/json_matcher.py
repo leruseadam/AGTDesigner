@@ -7,6 +7,7 @@ import traceback
 from datetime import datetime
 from difflib import SequenceMatcher
 from typing import List, Dict, Set, Optional, Tuple, Any
+from decimal import Decimal, InvalidOperation
 from .field_mapping import get_canonical_field
 import pandas as pd
 from .product_database import ProductDatabase
@@ -289,6 +290,16 @@ def map_inventory_type_to_product_type(inventory_type, inventory_category=None, 
             return "Vape Cartridge"
         elif "flower" in inventory_type_lower:
             return "Flower"
+
+    # Handle Washington-style usable marijuana inventory types
+    if inventory_type_lower.startswith("usable"):
+        if product_name_lower:
+            joint_keywords = ["pre-roll", "pre roll", "joint", "blunt", "cone"]
+            if any(keyword in product_name_lower for keyword in joint_keywords):
+                return "Pre-Roll"
+            if any(keyword in product_name_lower for keyword in ["shake", "trim"]):
+                return "Flower"
+        return "Flower"
     
     # Enhanced product name analysis for "Medically Compliant" products
     if product_name_lower and "medically compliant" in product_name_lower:
@@ -302,6 +313,21 @@ def map_inventory_type_to_product_type(inventory_type, inventory_category=None, 
         elif any(keyword in product_name_lower for keyword in ["melt stix", "flavour stix", "rosin rolls", "infused blunt"]):
             return "Pre-Roll"
     
+    # Additional product-name based heuristics
+    if product_name_lower:
+        if any(keyword in product_name_lower for keyword in ["pre-roll", "pre roll", "joint", "blunt", "cone"]):
+            return "Pre-Roll"
+        if any(keyword in product_name_lower for keyword in ["cartridge", "cart", "vape", "510", "all-in-one", "aio", "disposable"]):
+            return "Vape Cartridge"
+        if any(keyword in product_name_lower for keyword in ["rosin", "resin", "wax", "shatter", "crumble", "sauce", "badder", "diamonds", "hash", "solventless", "distillate"]):
+            return "Concentrate"
+        if any(keyword in product_name_lower for keyword in ["gummy", "chew", "cookie", "brownie", "chocolate", "edible", "candy", "lozenge"]):
+            return "Edible"
+        if any(keyword in product_name_lower for keyword in ["tincture", "drops", "sublingual", "dropper"]):
+            return "Tincture"
+        if any(keyword in product_name_lower for keyword in ["topical", "lotion", "salve", "balm", "cream", "ointment"]):
+            return "Topical"
+
     # Check for specific keywords in the inventory type
     if any(keyword in inventory_type_lower for keyword in ["cartridge", "pen", "vape"]):
         return "Vape Cartridge"
@@ -322,8 +348,13 @@ def map_inventory_type_to_product_type(inventory_type, inventory_category=None, 
     elif "flower" in inventory_type_lower:
         return "Flower"
     else:
-        # For any remaining unknown types, default to Vape Cartridge since most products are concentrates
-        return "Vape Cartridge"
+        # Final fallback - make a conservative guess based on product name keywords
+        if product_name_lower:
+            if any(keyword in product_name_lower for keyword in ["rosin", "resin", "wax", "shatter", "crumble", "sauce", "badder", "diamonds", "hash"]):
+                return "Concentrate"
+            if any(keyword in product_name_lower for keyword in ["pre-roll", "pre roll", "joint", "blunt", "cone"]):
+                return "Pre-Roll"
+        return "Flower"
 
 def extract_cannabinoids(lab_result_data):
     """Enhanced cannabinoid extraction with better parsing and validation."""
