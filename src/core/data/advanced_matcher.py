@@ -834,28 +834,7 @@ class AdvancedMatcher:
                     if vendor_matches < 3:
                         print(f"🔍 ADVANCED VENDOR SKIP: '{json_vendor}' != '{candidate_vendor}'")
             
-            # If vendor matches are low (less than 10), also allow cross-vendor matching for better results
-            if len(filtered_candidates) < 10:
-                if filtered_candidates:
-                    print(f"🔍 ADVANCED VENDOR: Only found {len(filtered_candidates)} vendor matches - allowing cross-vendor for better coverage")
-                else:
-                    print(f"🔍 ADVANCED VENDOR: No vendor matches found for '{json_vendor}' - allowing cross-vendor matching")
-                    
-                # Show what vendors are actually available
-                available_vendors = set()
-                for candidate in candidates[:50]:  # Check first 50 candidates
-                    candidate_vendor = str(candidate.get("vendor", "")).strip()
-                    if candidate_vendor:
-                        available_vendors.add(candidate_vendor)
-                
-                print(f"🔍 AVAILABLE VENDORS: {sorted(list(available_vendors))[:20]}...")
-                
-                # Add more candidates from cross-vendor matching (limit to reasonable number)
-                cross_vendor_candidates = [c for c in candidates if c not in filtered_candidates][:50-len(filtered_candidates)]
-                filtered_candidates.extend(cross_vendor_candidates)
-                print(f"🔍 ADVANCED VENDOR: Added {len(cross_vendor_candidates)} cross-vendor candidates for total of {len(filtered_candidates)}")
-            
-            # If still no vendor matches found, try full cross-vendor matching
+            # If still no vendor matches found, attempt flexible vendor resolution without crossing vendors
             if not filtered_candidates:
                 # Show what vendors are actually available
                 available_vendors = set()
@@ -866,7 +845,7 @@ class AdvancedMatcher:
                 
                 print(f"🔍 ADVANCED VENDOR: No vendor matches found for '{json_vendor}'")
                 print(f"🔍 AVAILABLE VENDORS: {sorted(list(available_vendors))[:20]}...")
-                print(f"🔍 ADVANCED VENDOR: No vendor matches found - allowing cross-vendor matching")
+                print(f"🔍 ADVANCED VENDOR: No vendor matches found - attempting flexible vendor lookup")
                 
                 # DEBUG: Try to find any vendor that might match using flexible matching
                 print(f"🔍 DEBUG: Looking for flexible matches to '{json_vendor}'...")
@@ -920,21 +899,18 @@ class AdvancedMatcher:
                         potential_matches.append(vendor)
                         print(f"🔍 DEBUG: POTENTIAL MATCH: '{json_vendor}' vs '{vendor}' ({match_reason})")
                 
-                # If we found potential matches, use them instead of returning empty
+                # If we found potential matches, use them, otherwise stop matching
                 if potential_matches:
                     print(f"🔍 DEBUG: Found {len(potential_matches)} potential CERES matches, using them")
-                    # Filter candidates to only include these potential matches
-                    filtered_candidates = []
-                    for candidate in candidates:
-                        candidate_vendor = str(candidate.get("vendor", "")).strip()
-                        if candidate_vendor in potential_matches:
-                            filtered_candidates.append(candidate)
+                    filtered_candidates = [
+                        candidate
+                        for candidate in candidates
+                        if str(candidate.get("vendor", "")).strip() in potential_matches
+                    ]
                     print(f"🔍 DEBUG: Filtered to {len(filtered_candidates)} candidates from potential CERES vendors")
-                    # Continue with the filtered candidates instead of returning empty
                 else:
-                    print(f"🔍 DEBUG: No vendor matches found in Excel data - allowing cross-vendor matching")
-                    # Allow cross-vendor matching instead of returning empty
-                    filtered_candidates = candidates  # Use all candidates for cross-vendor matching
+                    print(f"🔍 DEBUG: No vendor matches found in Excel data - aborting to prevent cross-vendor matches")
+                    return []
             else:
                 print(f"🔍 ADVANCED VENDOR: Filtered to {len(filtered_candidates)} candidates from same vendor '{json_vendor}' (found {vendor_matches} vendor matches)")
         
