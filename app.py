@@ -12139,6 +12139,10 @@ def json_match():
             
             matched_products.sort(key=get_sort_key)
             logging.info(f"✅ Sorted {len(matched_products)} matched products alphabetically")
+            try:
+                matched_products = json_matcher._upgrade_fallback_products(matched_products, None)
+            except Exception as post_process_error:
+                logging.warning(f"Post-processing upgrade failed: {post_process_error}")
 
         # CRITICAL DEBUG: Log what we actually got back
         if matched_products:
@@ -12295,20 +12299,26 @@ def json_match():
             logging.info(f"🔍   - All keys: {list(matched_products[0].keys())}")
 
         # Create response data - Return matched products directly
+        response_products = json_matcher._upgrade_fallback_products(matched_products, None) if matched_products else []
         response_data = {
             'success': True,
-            'matched_count': len(matched_products),
+            'matched_count': len(response_products),
             'matched_names': matched_names,
-            'available_tags': matched_products,  # Return matched products directly
+            'available_tags': response_products,  # Return matched products directly
             'selected_tags': matched_names,  # Return names of selected products
-            'message': f"Successfully matched {len(matched_products)} products. They are ready for label generation.",
+            'message': f"Successfully matched {len(response_products)} products. They are ready for label generation.",
             'auto_selected': True,
             'selected_count': len(matched_names)
         }
 
+        if response_products:
+            logging.info(f"Post-processed first product source: {response_products[0].get('Source')}")
+            logging.info(f"Post-processed first product type: {response_products[0].get('Product Type*')}")
+            logging.info(f"Post-processed first product price: {response_products[0].get('Price')}")
+
         logging.info(f"✅ Sending JSON match response:")
-        logging.info(f"   - matched_count: {len(matched_products)}")
-        logging.info(f"   - available_tags count: {len(matched_products)}")
+        logging.info(f"   - matched_count: {len(response_products)}")
+        logging.info(f"   - available_tags count: {len(response_products)}")
         logging.info(f"   - selected_tags count: {len(matched_names)}")
         return jsonify(response_data)
         

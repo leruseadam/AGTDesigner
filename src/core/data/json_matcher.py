@@ -2775,6 +2775,8 @@ class JSONMatcher:
                     logging.info(f"🔧 Deduplicated {len(matched_products)} matches -> {len(deduplicated_products)} unique products")
                     logging.info(f"   Merged {duplicate_count} duplicate entries by increasing quantity")
                 
+                deduplicated_products = self._upgrade_fallback_products(deduplicated_products, global_vendor)
+                
                 if json_vendor_filter:
                     print(f"🔍 VENDOR PREFERENCE: Matches prioritized for vendor '{json_vendor_filter}' but also include other vendors")
                 
@@ -2787,7 +2789,7 @@ class JSONMatcher:
                 if json_vendor_filter:
                     print(f"🔍 VENDOR PREFERENCE: Matches prioritized for vendor '{json_vendor_filter}' but also include other vendors")
                 
-                return matched_products
+                return self._upgrade_fallback_products(matched_products, global_vendor)
         except Exception as e:
             logging.error(f"Error in fetch_and_match: {e}")
             logging.error(f"Traceback: {traceback.format_exc()}")
@@ -3077,7 +3079,8 @@ class JSONMatcher:
                 
                 # Metadata
                 'Source': 'JSON - No DB Match',
-                'displayName': description
+                'displayName': description,
+                '__json_item__': item
             }
             
             # ===== STEP 11: Log creation =====
@@ -10151,6 +10154,84 @@ class JSONMatcher:
                 unique_variations.append(normalized)
         
         return unique_variations, product_type_override
+
+    def _upgrade_fallback_products(self, products: List[Dict], global_vendor: str) -> List[Dict]:
+        """
+        Post-process fallback products by attempting to convert them to full database-backed tags
+        and applying formatting consistency when conversion isn't possible.
+        """
+        if not products:
+            return products
+        
+        try:
+            product_db = self._get_product_database()
+        except Exception as db_error:
+            logging.debug(f"Unable to obtain product database for fallback upgrade: {db_error}")
+            product_db = None
+        
+        upgraded_products: List[Dict] = []
+        
+        for product in products:
+            original_item = product.pop('__json_item__', None)
+            vendor = product.get('Vendor') or global_vendor
+            vendor_norm = self._normalize_vendor_display_name(vendor)
+            strain = product.get('Product Strain') or (original_item.get('strain_name') if isinstance(original_item, dict) else '')
+            product_type = product.get('Product Type*') or ''
+            
+            upgraded = False
+            if product.get('Source', '').startswith('JSON - No DB Match') and product_db and isinstance(original_item, dict):
+                variations, type_override = self._generate_excel_style_variations(original_item, vendor_norm, product_type)
+                if type_override:
+                    product_type = type_override
+                if variations:
+                    try:
+                        db_match = self._find_best_database_match(
+                            product_name=variations[0],
+                            vendor=vendor_norm,
+                            weight=str(original_item.get("unit_weight", original_item.get("weight", ""))).strip(),
+                            strain=str(original_item.get("strain_name", original_item.get("strain", ""))).strip(),
+                            product_db=product_db
+                        )
+                        if db_match:
+                            upgraded_products.append(self._create_tag_from_database_info(db_match, vendor_norm, original_item))
+                            upgraded = True
+                    except Exception as upgrade_error:
+                        logging.debug(f"DB upgrade for fallback failed: {upgrade_error}")
+            
+            if upgraded:
+                continue
+            
+            # Apply consistent formatting even when we can't upgrade to DB match
+            if vendor_norm:
+                product['Vendor'] = vendor_norm
+                product['Vendor/Supplier*'] = vendor_norm
+            if product.get('Product Brand'):
+                product['Product Brand'] = self._normalize_vendor_display_name(product['Product Brand'])
+                product['ProductBrand'] = product['Product Brand']
+            else:
+                product['Product Brand'] = vendor_norm or product.get('Product Brand', 'Unknown Brand')
+                product['ProductBrand'] = product['Product Brand']
+            
+            if product_type:
+                product['Product Type*'] = product_type
+                product['ProductType'] = product_type
+            
+            # Format weight label
+            weight_value = product.get('Weight*')
+            units = product.get('Units')
+            weight_label = self._format_weight_label(weight_value, units)
+            if weight_label:
+                product['Weight Value + Unit'] = weight_label
+            
+            # Format price
+            if product.get('Price'):
+                formatted_price = format_price(product['Price'])
+                product['Price'] = formatted_price
+                product['Price*'] = formatted_price
+            
+            upgraded_products.append(product)
+        
+        return upgraded_products
 
     def _determine_doh_value(self, product_type: str, product_name: str = '') -> str:
         """

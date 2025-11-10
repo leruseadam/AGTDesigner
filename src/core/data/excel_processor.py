@@ -934,7 +934,6 @@ class ExcelProcessor:
         if file_mtime is not None:
             self._last_loaded_mtime = file_mtime
         self._invalidate_caches()
-        self._schedule_cache_prewarm()
 
     def clear_file_cache(self):
         """Clear the file cache to free memory."""
