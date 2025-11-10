@@ -8495,9 +8495,17 @@ async function performFullAppReset() {
             TagManager.clearAllFilters();
         }
         
-        // 2. Clear all selected tags
-        if (window.TagManager && TagManager.clearSelected) {
-            await TagManager.clearSelected();
+        // 2. Clear all selected tags (handled locally to avoid recursion)
+        if (window.TagManager) {
+            if (TagManager.state && TagManager.state.selectedTags) {
+                TagManager.state.selectedTags.clear();
+            }
+            if (TagManager.state) {
+                TagManager.state.persistentSelectedTags = [];
+            }
+            if (TagManager.updateSelectedTags) {
+                TagManager.updateSelectedTags([]);
+            }
         }
         
         // 3. Clear all search fields

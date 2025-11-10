@@ -252,6 +252,7 @@ from docx.enum.section import WD_ORIENT
 from docx.oxml import parse_xml, OxmlElement
 from docx.oxml.ns import qn
 from docx.enum.table import WD_ROW_HEIGHT_RULE
+from typing import Optional, Tuple
 from src.core.generation.template_processor import get_font_scheme, TemplateProcessor
 from src.core.generation.tag_generator import get_template_path
 import time
@@ -1082,38 +1083,87 @@ def get_excel_processor():
             # Return None and let the calling code handle it
             return None
     # Ensure no stray indentation or orphaned blocks before function definition
+def _resolve_database_path_for_store(store_name: Optional[str] = None) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Resolve the best available database path for a given store.
+    Returns (db_path, resolved_store_name) or (None, None) if no database exists.
+    """
+    uploads_dir = os.path.join(current_dir, 'uploads')
+    if not os.path.isdir(uploads_dir):
+        logging.warning(f"Uploads directory not found when resolving database path: {uploads_dir}")
+        return None, None
+
+    normalized_requested = ''
+    if store_name:
+        normalized_requested = store_name.replace('_', '').replace(' ', '').lower()
+
+    # 1. Exact match: product_database_{store_name}.db
+    if store_name:
+        exact_path = os.path.join(uploads_dir, f'product_database_{store_name}.db')
+        if os.path.exists(exact_path):
+            return exact_path, store_name
+
+    # 2. Fuzzy match: look for any product_database_* file containing the store token
+    candidate_paths = glob.glob(os.path.join(uploads_dir, 'product_database_*.db'))
+    if candidate_paths:
+        for candidate in candidate_paths:
+            candidate_store = os.path.basename(candidate).replace('product_database_', '').replace('.db', '')
+            candidate_normalized = candidate_store.replace('_', '').replace(' ', '').lower()
+            if normalized_requested and normalized_requested in candidate_normalized:
+                return candidate, candidate_store or store_name
+
+    # 3. Generic database fallback
+    generic_db = os.path.join(uploads_dir, 'product_database.db')
+    if os.path.exists(generic_db):
+        logging.warning(f"Generic product database fallback in use: {generic_db}")
+        return generic_db, store_name
+
+    # 4. Most recent database as final fallback
+    if candidate_paths:
+        newest_path = max(candidate_paths, key=os.path.getmtime)
+        inferred_store = os.path.basename(newest_path).replace('product_database_', '').replace('.db', '')
+        logging.warning(f"No database found for store '{store_name}'. Using most recent database: {newest_path}")
+        return newest_path, inferred_store or store_name
+
+    logging.error(f"No product database files found in uploads directory: {uploads_dir}")
+    return None, None
+
+
 def get_product_database(store_name=None):
     """Lazy load ProductDatabase to avoid startup delay."""
     global _product_database
     
-    # Always require a store_name
     if store_name is None:
-        raise ValueError("Store name must be provided for product database access.")
+        logging.warning("get_product_database called without store name; attempting fallback resolution.")
+    
+    db_path, resolved_store = _resolve_database_path_for_store(store_name)
+    if not db_path:
+        raise FileNotFoundError(f"No product database file available for store '{store_name}'. Upload the database via the admin tools.")
 
-    # Only use store-specific database, never fallback to generic db
-    db_filename = f'product_database_{store_name}.db'
-    db_path = os.path.join(current_dir, 'uploads', db_filename)
-    if not os.path.exists(db_path):
-        raise FileNotFoundError(f"Store-specific database not found: {db_path}")
+    effective_store = resolved_store or store_name
 
     # Check if reload is needed
     current_store_in_db = getattr(_product_database, '_store_name', None) if _product_database else None
     current_db_path = getattr(_product_database, 'db_path', None) if _product_database else None
-    needs_reload = (_product_database is None or current_store_in_db != store_name or current_db_path != db_path)
+    needs_reload = (_product_database is None or current_store_in_db != effective_store or current_db_path != db_path)
 
-    logging.info(f"📦 Database load check: requested_store='{store_name}', current_store_in_db='{current_store_in_db}', current_db_path='{current_db_path}', expected_db_path='{db_path}', needs_reload={needs_reload}")
+    logging.info(
+        f"📦 Database load check: requested_store='{store_name}', "
+        f"resolved_store='{effective_store}', current_store_in_db='{current_store_in_db}', "
+        f"current_db_path='{current_db_path}', resolved_db_path='{db_path}', needs_reload={needs_reload}"
+    )
 
     if needs_reload:
         from src.core.data.product_database import ProductDatabase
-        logging.info(f"📦 Loading database for store '{store_name}' from: {db_path}")
+        logging.info(f"📦 Loading database for store '{effective_store}' from: {db_path}")
         _product_database = ProductDatabase(db_path)
-        _product_database._store_name = store_name
-        if _product_database.db_path != db_path:
+        _product_database._store_name = effective_store
+        if getattr(_product_database, 'db_path', db_path) != db_path:
             logging.warning(f"ProductDatabase db_path mismatch: {_product_database.db_path} != {db_path}")
         logging.info(f"✅ ProductDatabase created with db_path: {_product_database.db_path}")
         _product_database.init_database()
         if os.path.exists(db_path):
-            logging.info(f"✅ ProductDatabase loaded for store '{store_name}' at: {db_path}")
+            logging.info(f"✅ ProductDatabase loaded for store '{effective_store}' at: {db_path}")
 
     return _product_database
 
@@ -8843,7 +8893,7 @@ def get_web_available_tags():
                 'total_count': len(cached_tags),
                 'source': 'web-cache'
             }))
-            response.headers['Content-Encoding'] = 'gzip'
+            response = compress_response(response)
             return response
         
         logging.info("🔄 No web cache found, building optimized tag list...")
@@ -8898,7 +8948,7 @@ def get_web_available_tags():
                 'total_count': len(all_tags),
                 'source': 'web-excel-only'
             }))
-            response.headers['Content-Encoding'] = 'gzip'
+            response = compress_response(response)
             return response
         
         # Fallback: return empty list for web clients
@@ -8912,7 +8962,7 @@ def get_web_available_tags():
             'total_count': 0,
             'source': 'web-empty'
         }))
-        response.headers['Content-Encoding'] = 'gzip'
+        response = compress_response(response)
         return response
         
     except Exception as e:
@@ -8947,7 +8997,7 @@ def get_web_filter_options():
             
             # Apply compression for web clients
             response = make_response(jsonify(cached_options))
-            response.headers['Content-Encoding'] = 'gzip'
+            response = compress_response(response)
             return response
         
         excel_processor = get_session_excel_processor()
@@ -9019,7 +9069,7 @@ def get_web_filter_options():
         
         # WEB OPTIMIZATION: Apply compression for web clients
         response = make_response(jsonify(options))
-        response.headers['Content-Encoding'] = 'gzip'
+        response = compress_response(response)
         return response
         
     except Exception as e:
@@ -9063,7 +9113,7 @@ def get_filter_options():
                 
                 # Apply compression for web clients
                 response = make_response(jsonify(cached_options))
-                response.headers['Content-Encoding'] = 'gzip'
+                response = compress_response(response)
                 return response
         # CRITICAL FIX: Don't clear cache for web clients - this was causing slowness!
         # Only clear cache for non-web clients to ensure updated formatting
@@ -9191,7 +9241,7 @@ def get_filter_options():
         # WEB OPTIMIZATION: Apply compression for web clients
         if is_web_client:
             response = make_response(jsonify(options))
-            response.headers['Content-Encoding'] = 'gzip'
+            response = compress_response(response)
             return response
         
         return jsonify(options)
