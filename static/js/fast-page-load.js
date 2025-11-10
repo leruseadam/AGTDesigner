@@ -59,15 +59,7 @@
             
             // Load data in background (non-blocking)
             try {
-                // Add shorter timeout for faster failure
-                const timeoutPromise = new Promise((_, reject) => {
-                    setTimeout(() => reject(new Error('Quick timeout')), 3000); // 3 second timeout
-                });
-                
-                const response = await Promise.race([
-                    fetch('/api/initial-data'),
-                    timeoutPromise
-                ]);
+                const response = await fetch('/api/initial-data');
                 
                 if (response.ok) {
                     const data = await response.json();
@@ -110,7 +102,7 @@
                     this.initializeEmptyState();
                 }
             } catch (error) {
-                console.log('⚡ Quick timeout or error - UI remains interactive:', error.message);
+                console.log('⚡ Initial data load error - UI remains interactive:', error.message);
                 // Don't load test data on timeout - just leave UI ready for upload
                 this.initializeEmptyState();
             }
