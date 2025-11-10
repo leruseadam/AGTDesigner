@@ -1478,62 +1478,72 @@ class TemplateProcessor:
             
             # CRITICAL FIX: Horizontal template uses DescAndWeight placeholder, not separate WeightUnits
             # Add weight to description for the {{Label1.DescAndWeight}} placeholder
+            product_name_display = (
+                label_context.get('ProductName') or
+                record.get('ProductName') or
+                record.get('Product Name*', '')
+            )
             
-            # Check if WeightUnits already contains the complete weight+units
-            weight_units = record.get("WeightUnits", "")
-            if weight_units and weight_units.strip():
-                # WeightUnits already contains the complete weight (e.g., "3.4oz", "1616.0g")
-                clean_weight = weight_units.strip()
-                
-                # CRITICAL FIX: Clean weight duplication patterns directly in template processor
-                import re
-                
-                # Pattern 1: Decimal duplication like "0.50.5oz" -> "0.5oz"
-                decimal_dup_pattern = r'^(\d+\.\d{1,2})\1(oz|g|mg|kg|lb|lbs)$'
-                match1 = re.match(decimal_dup_pattern, clean_weight, re.IGNORECASE)
-                if match1:
-                    clean_weight = f"{match1.group(1)}{match1.group(2)}"
-                    self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED DECIMAL DUPLICATION: '{weight_units}' -> '{clean_weight}'")
-                else:
-                    # Pattern 2: Integer duplication like "1010.0g" -> "10.0g"
-                    integer_dup_pattern = r'^(\d+)\1\.0(oz|g|mg|kg|lb|lbs)$'
-                    match2 = re.match(integer_dup_pattern, clean_weight, re.IGNORECASE)
-                    if match2:
-                        clean_weight = f"{match2.group(1)}.0{match2.group(2)}"
-                        self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED INTEGER DUPLICATION: '{weight_units}' -> '{clean_weight}'")
-                    else:
-                        # Pattern 3: Mixed duplication like "0.220.22g" -> "0.22g"
-                        mixed_dup_pattern = r'^(\d+\.\d+)\1(oz|g|mg|kg|lb|lbs)$'
-                        match3 = re.match(mixed_dup_pattern, clean_weight, re.IGNORECASE)
-                        if match3:
-                            clean_weight = f"{match3.group(1)}{match3.group(2)}"
-                            self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED MIXED DUPLICATION: '{weight_units}' -> '{clean_weight}'")
-                
-                # Keep weight on the same line as description with non-breaking space
-                desc_and_weight = f"{desc} -\u00A0{clean_weight}"
-                self.logger.info(f"🔍 WEIGHT FROM WEIGHTUNITS: '{clean_weight}' -> '{desc_and_weight}'")
+            if self.template_type == 'double':
+                primary_text = (product_name_display or desc or '').strip()
+                self.logger.info(f"🔍 DOUBLE TEMPLATE DESC: Using primary text '{primary_text}'")
+                label_context['DescAndWeight'] = wrap_with_marker(primary_text, 'DESC')
             else:
-                # Fallback to constructing from Weight* + Units
-                weight_value = record.get("Weight*", "")
-                units_value = record.get("Units", "")
-                
-                if not weight_value:
-                    weight_value = record.get("Weight", "")
-                if not units_value:
-                    units_value = record.get("Units", "")
-                
-                self.logger.info(f"🔍 FALLBACK WEIGHT VALUES: Weight*='{weight_value}', Units='{units_value}'")
-                
-                if weight_value and units_value:
-                    clean_weight = f"{weight_value}{units_value}"
+                # Check if WeightUnits already contains the complete weight+units
+                weight_units = record.get("WeightUnits", "")
+                if weight_units and weight_units.strip():
+                    # WeightUnits already contains the complete weight (e.g., "3.4oz", "1616.0g")
+                    clean_weight = weight_units.strip()
+                    
+                    # CRITICAL FIX: Clean weight duplication patterns directly in template processor
+                    import re
+                    
+                    # Pattern 1: Decimal duplication like "0.50.5oz" -> "0.5oz"
+                    decimal_dup_pattern = r'^(\d+\.\d{1,2})\1(oz|g|mg|kg|lb|lbs)$'
+                    match1 = re.match(decimal_dup_pattern, clean_weight, re.IGNORECASE)
+                    if match1:
+                        clean_weight = f"{match1.group(1)}{match1.group(2)}"
+                        self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED DECIMAL DUPLICATION: '{weight_units}' -> '{clean_weight}'")
+                    else:
+                        # Pattern 2: Integer duplication like "1010.0g" -> "10.0g"
+                        integer_dup_pattern = r'^(\d+)\1\.0(oz|g|mg|kg|lb|lbs)$'
+                        match2 = re.match(integer_dup_pattern, clean_weight, re.IGNORECASE)
+                        if match2:
+                            clean_weight = f"{match2.group(1)}.0{match2.group(2)}"
+                            self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED INTEGER DUPLICATION: '{weight_units}' -> '{clean_weight}'")
+                        else:
+                            # Pattern 3: Mixed duplication like "0.220.22g" -> "0.22g"
+                            mixed_dup_pattern = r'^(\d+\.\d+)\1(oz|g|mg|kg|lb|lbs)$'
+                            match3 = re.match(mixed_dup_pattern, clean_weight, re.IGNORECASE)
+                            if match3:
+                                clean_weight = f"{match3.group(1)}{match3.group(2)}"
+                                self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED MIXED DUPLICATION: '{weight_units}' -> '{clean_weight}'")
+                    
+                    # Keep weight on the same line as description with non-breaking space
                     desc_and_weight = f"{desc} -\u00A0{clean_weight}"
-                    self.logger.info(f"🔍 WEIGHT CONSTRUCTED: '{clean_weight}' -> '{desc_and_weight}'")
+                    self.logger.info(f"🔍 WEIGHT FROM WEIGHTUNITS: '{clean_weight}' -> '{desc_and_weight}'")
                 else:
-                    desc_and_weight = desc
-                    self.logger.info(f"🔍 NO WEIGHT AVAILABLE: Weight*='{weight_value}', Units='{units_value}' -> '{desc_and_weight}'")
-            
-            self.logger.info(f"🔍 DESCANDWEIGHT RESULT: '{desc_and_weight}'")
-            label_context['DescAndWeight'] = wrap_with_marker(desc_and_weight, 'DESC')
+                    # Fallback to constructing from Weight* + Units
+                    weight_value = record.get("Weight*", "")
+                    units_value = record.get("Units", "")
+                    
+                    if not weight_value:
+                        weight_value = record.get("Weight", "")
+                    if not units_value:
+                        units_value = record.get("Units", "")
+                    
+                    self.logger.info(f"🔍 FALLBACK WEIGHT VALUES: Weight*='{weight_value}', Units='{units_value}'")
+                    
+                    if weight_value and units_value:
+                        clean_weight = f"{weight_value}{units_value}"
+                        desc_and_weight = f"{desc} -\u00A0{clean_weight}"
+                        self.logger.info(f"🔍 WEIGHT CONSTRUCTED: '{clean_weight}' -> '{desc_and_weight}'")
+                    else:
+                        desc_and_weight = desc
+                        self.logger.info(f"🔍 NO WEIGHT AVAILABLE: Weight*='{weight_value}', Units='{units_value}' -> '{desc_and_weight}'")
+                
+                self.logger.info(f"🔍 DESCANDWEIGHT RESULT: '{desc_and_weight}'")
+                label_context['DescAndWeight'] = wrap_with_marker(desc_and_weight, 'DESC')
 
         # Fast DOH image processing - only if needed
         # IMPORTANT: Only use the canonical DOH field for image decisions
