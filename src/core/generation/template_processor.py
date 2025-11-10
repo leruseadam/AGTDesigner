@@ -90,7 +90,7 @@ class TemplateProcessor:
     # ...rest of the code...
     def _get_template_path(self):
         """Return the path to the DOCX template file for the current template type."""
-        base_dir = os.path.join(os.path.dirname(__file__), 'templates')
+        base_dir = Path(__file__).parent / 'templates'
         template_map = {
             'mini': 'mini.docx',
             'double': 'double.docx',
@@ -99,11 +99,36 @@ class TemplateProcessor:
             'vertical': 'vertical.docx',
         }
         filename = template_map.get(self.template_type, 'horizontal.docx')
-        template_path = os.path.abspath(os.path.join(base_dir, filename))
-        if not os.path.exists(template_path):
-            self.logger.error(f"Template not found: {template_path}")
-            raise FileNotFoundError(f"Template not found: {template_path}")
-        return template_path
+        template_path = base_dir / filename
+        if template_path.exists():
+            return str(template_path.resolve())
+
+        # Case-insensitive fallback for hosts with case-sensitive filesystems
+        expected_lower = filename.lower()
+        fallback_path = None
+        try:
+            for candidate in base_dir.iterdir():
+                if not candidate.is_file():
+                    continue
+                name = candidate.name
+                if name.startswith('.') or name.startswith('~$'):
+                    continue
+                if name.lower() == expected_lower:
+                    fallback_path = candidate
+                    break
+        except FileNotFoundError:
+            # Directory missing; let the original error handling occur
+            pass
+
+        if fallback_path and fallback_path.exists():
+            self.logger.warning(
+                f"Template not found with exact casing ('{filename}'); using fallback '{fallback_path.name}'"
+            )
+            return str(fallback_path.resolve())
+
+        resolved_path = str(template_path.resolve()) if template_path.exists() else str(template_path)
+        self.logger.error(f"Template not found: {resolved_path}")
+        raise FileNotFoundError(f"Template not found: {resolved_path}")
     def __init__(self, template_type, font_scheme, scale_factor=1.0, excel_processor=None):
         self.template_type = template_type
         self.font_scheme = font_scheme
