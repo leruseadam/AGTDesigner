@@ -9102,11 +9102,24 @@ class JSONMatcher:
             
             brand = str(json_item.get("brand", "")).strip()
             inventory_type = str(json_item.get("inventory_type", "")).strip()
+            inventory_category = str(json_item.get("inventory_category", "")).strip()
             
             # Extract product type
             product_type = str(json_item.get("product_type", "")).strip()
+            inventory_type_lower = inventory_type.lower() if inventory_type else ""
+            if product_type:
+                product_type_lower = product_type.lower()
+                if product_type_lower in {"unknown", "unknown type"} or product_type_lower == inventory_type_lower:
+                    product_type = ""
+            mapped_product_type = map_inventory_type_to_product_type(
+                inventory_type,
+                inventory_category,
+                product_name
+            )
+            if not product_type and mapped_product_type:
+                product_type = mapped_product_type
             if not product_type:
-                product_type = inventory_type or "hybrid" if inventory_type else "Unknown Type"
+                product_type = inventory_type or "Unknown"
             
             # Extract weight
             weight = str(json_item.get("weight", json_item.get("unit_weight", ""))).strip()
@@ -9210,6 +9223,37 @@ class JSONMatcher:
                 except Exception as infer_error:
                     logging.warning(f"Could not extrapolate data from similar products: {infer_error}")
             
+            # Ensure manifest-derived product type takes precedence when inference conflicts
+            if mapped_product_type and mapped_product_type.lower() not in {"unknown", "unknown type"}:
+                mapped_type_lower = mapped_product_type.lower()
+                product_type_lower = product_type.lower() if product_type else ""
+                if product_type_lower and not self._are_product_types_compatible(mapped_type_lower, product_type_lower):
+                    logging.info(f"🔁 Keeping manifest product type '{mapped_product_type}' over inferred '{product_type}'")
+                    product_type = mapped_product_type
+            elif not product_type:
+                product_type = mapped_product_type or product_type
+            
+            # Normalize vendor/brand display
+            vendor_display = self._normalize_vendor_display_name(vendor) if vendor else ''
+            if vendor_display:
+                vendor = vendor_display
+            if not brand and vendor:
+                brand = vendor
+            
+            # Normalize units and weight formatting
+            units = (units or '').strip().lower() or 'g'
+            formatted_weight = self._format_weight_label(weight, units) if weight else ''
+            if not formatted_weight:
+                formatted_weight = f"{weight}{units}".strip() if weight else ''
+            combined_weight_value = weight
+            
+            # Format price using Excel-style formatting
+            if price:
+                price = format_price(price)
+            elif inferred_data.get('price'):
+                price = format_price(inferred_data['price'])
+            price_value = price or ''
+            
             # Create the faux tag
             tag = {
                 # Core product information
@@ -9225,13 +9269,13 @@ class JSONMatcher:
                 'Product Strain': strain,
                 'Strain Name': strain,
                 'Lineage': lineage,
-                'Weight*': f"{weight} {units}" if weight and units else weight,
-                'Weight': f"{weight} {units}" if weight and units else weight,
+                'Weight*': formatted_weight,
+                'Weight': formatted_weight,
                 'Quantity*': quantity,
                 'Quantity': quantity,
                 'Units': units,
-                'Price': price,
-                'Price* (Tier Name for Bulk)': price,
+                'Price': price_value,
+                'Price* (Tier Name for Bulk)': price_value,
                 
                 # Enhanced fields
                 'State': 'active',
@@ -9270,21 +9314,21 @@ class JSONMatcher:
                 'Source': 'JSON Match - Faux Tag (Novel Product)',
                 'Quantity Received*': quantity,
                 'Weight Unit* (grams/gm or ounces/oz)': units,
-                'CombinedWeight': weight,
+                'CombinedWeight': combined_weight_value,
                 'DescAndWeight': self._process_description_from_product_name(product_name, weight, units),
                 'Description_Complexity': '1',
                 'Ratio_or_THC_CBD': '',
                 'displayName': product_name,
-                'weightWithUnits': f"{str(round(float(weight or '1')))}{units or 'g'}",
-                'WeightWithUnits': f"{str(round(float(weight or '1')))}{units or 'g'}",
-                'WeightUnits': f"{str(round(float(weight or '1')))}{units or 'g'}",
+                'weightWithUnits': formatted_weight,
+                'WeightWithUnits': formatted_weight,
+                'WeightUnits': formatted_weight,
                 'vendor': vendor,
                 'productBrand': brand,
                 'lineage': lineage,
                 'productType': product_type,
                 'weight': weight,
                 'units': units,
-                'price': price,
+                'price': price_value,
                 'description': description,
                 'strain': strain,
                 'quantity': quantity,
