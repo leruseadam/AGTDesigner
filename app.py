@@ -12064,11 +12064,15 @@ def json_match():
         logging.info("JSON matcher created successfully")
         
         # Perform JSON matching with Product Database integration
-        # CRITICAL FIX: Use simplified matching approach to ensure all products are processed with complete data
-        # DEDUPLICATION DISABLED: Preserve ALL items from JSON manifest (each item gets its own label)
-        # Note: If you want to merge duplicates, manually adjust quantities after import
-        matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=True, deduplicate=False)
-        logging.info(f"JSON matching (simplified approach) returned {len(matched_products) if matched_products else 0} products")
+        # Start with full database-aware matching so we reuse prices/brands whenever possible.
+        matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=False, deduplicate=False)
+        logging.info(f"JSON matching (database-first) returned {len(matched_products) if matched_products else 0} products")
+
+        # If nothing matched (e.g., database unavailable), fall back to the legacy simplified flow.
+        if not matched_products:
+            logging.warning("Primary database matching returned no products – falling back to simplified matcher")
+            matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=True, deduplicate=False)
+            logging.info(f"JSON matching (simplified fallback) returned {len(matched_products) if matched_products else 0} products")
         
         # Sort matched products alphabetically by product name
         if matched_products:
@@ -13644,15 +13648,22 @@ def get_initial_data():
                 'source': 'database' if available_tags else 'empty'
             }
         
-        # PERFORMANCE: Cache the response for 5 minutes
+        # PERFORMANCE: Cache the response for 5 minutes only when we have real data
         cache_key = get_session_cache_key('initial_data')
-        cache.set(cache_key, initial_data, timeout=300)
+        should_cache = bool(initial_data.get('data_loaded')) and initial_data.get('total_records', 0) > 0
+        if should_cache:
+            cache.set(cache_key, initial_data, timeout=300)
+            cache_status = 'MISS'
+        else:
+            cache.delete(cache_key)
+            cache_status = 'BYPASS'
+            logging.info("Initial data cache bypassed due to empty dataset - waiting for upload completion")
         
         logging.info(f"Initial data loaded: {len(initial_data['available_tags'])} tags, {initial_data['total_records']} records (source={initial_data.get('source')})")
         logging.info("=== INITIAL DATA REQUEST COMPLETE ===")
         
         response = make_response(jsonify(initial_data))
-        response.headers['X-Cache'] = 'MISS'
+        response.headers['X-Cache'] = cache_status
         return response
             
     except Exception as e:
@@ -15239,6 +15250,14 @@ def upload_file_fast():
         # Store file path in session
         session['file_path'] = str(file_path)
         session['selected_tags'] = []
+        
+        # Clear cached initial data so fresh upload is visible immediately
+        try:
+            cache_key = get_session_cache_key('initial_data')
+            cache.delete(cache_key)
+            logging.info(f"Cleared initial data cache for session after upload: {cache_key}")
+        except Exception as cache_error:
+            logging.warning(f"Could not clear initial data cache after upload: {cache_error}")
         
         # CRITICAL FIX: Use background processing with database storage
         # This ensures products are stored in the database
