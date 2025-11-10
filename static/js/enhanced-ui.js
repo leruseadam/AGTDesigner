@@ -452,26 +452,30 @@ function pollUploadStatus(filename) {
 
         // Fetch all updated data in parallel to avoid serial bottlenecks
         console.time('post-ready-data-fetch');
-        await Promise.all([
-          // Available tags
-          (async () => {
-            console.log('Fetching available tags...');
-            const res = await TagManager.fetchAndUpdateAvailableTags();
-            console.log('Available tags result:', res);
-          })(),
-          // Selected tags
-          (async () => {
-            console.log('Fetching selected tags...');
-            const res = await TagManager.fetchAndUpdateSelectedTags();
-            console.log('Selected tags result:', res);
-          })(),
-          // Filter options
-          (async () => {
-            console.log('Fetching filter options...');
-            await TagManager.fetchAndPopulateFilters();
-            console.log('Filter options updated');
-          })()
-        ]);
+        if (typeof TagManager !== 'undefined' && TagManager.refreshTagLists) {
+          await TagManager.refreshTagLists({ preserveFilters: true, force: true });
+        } else {
+          await Promise.all([
+            // Available tags
+            (async () => {
+              console.log('Fetching available tags (fallback)...');
+              const res = await TagManager.fetchAndUpdateAvailableTags();
+              console.log('Available tags result:', res);
+            })(),
+            // Selected tags
+            (async () => {
+              console.log('Fetching selected tags (fallback)...');
+              const res = await TagManager.fetchAndUpdateSelectedTags();
+              console.log('Selected tags result:', res);
+            })(),
+            // Filter options
+            (async () => {
+              console.log('Fetching filter options (fallback)...');
+              await TagManager.fetchAndPopulateFilters();
+              console.log('Filter options updated');
+            })()
+          ]);
+        }
         console.timeEnd('post-ready-data-fetch');
         
         // Hide splash screen on success

@@ -5054,6 +5054,51 @@ const TagManager = {
         }
     },
 
+    /**
+     * Refresh the available tags, selected tags, and filters after an upload completes.
+     * Options:
+     *   - preserveFilters (default true): keep current filter selections
+     *   - force (default true): temporarily bypass fetch rate limiting
+     */
+    async refreshTagLists(options = {}) {
+        const { preserveFilters = true, force = true } = options;
+        console.log('=== refreshTagLists START ===', { preserveFilters, force });
+
+        // Optionally preserve filters by skipping reset
+        if (!preserveFilters) {
+            this.clearUIStateForNewFile(false);
+        }
+
+        // Temporarily bypass fetch rate limiting if requested
+        const previousFetchTime = this._lastFetchTime;
+        if (force) {
+            this._lastFetchTime = 0;
+        }
+
+        try {
+            const results = await Promise.all([
+                this.fetchAndUpdateAvailableTags(),
+                this.fetchAndUpdateSelectedTags(),
+                this.fetchAndPopulateFilters()
+            ]);
+
+            // Ensure UI reflects latest state
+            this.updateSelectAllCheckboxes();
+            this.updateGenerateButtonState();
+            this.alignDisplayedLineagesWithTags();
+
+            console.log('=== refreshTagLists END ===', results);
+            return results;
+        } catch (error) {
+            console.error('refreshTagLists error:', error);
+            throw error;
+        } finally {
+            if (force) {
+                this._lastFetchTime = previousFetchTime;
+            }
+        }
+    },
+
     async downloadExcel() {
         // Collect filter values from dropdowns (adjust IDs as needed)
         const filters = {
@@ -7521,11 +7566,6 @@ const TagManager = {
         if (fileInfoText) {
             fileInfoText.textContent = '';
         }
-        
-        // Force refresh the data
-        this.fetchAndUpdateAvailableTags();
-        this.fetchAndUpdateSelectedTags();
-        this.fetchAndPopulateFilters();
         
         console.log('Upload UI state cleared');
     },
