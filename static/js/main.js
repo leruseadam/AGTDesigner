@@ -1208,14 +1208,6 @@ const TagManager = {
                     }
                 }
                 
-                // Check ratio filter - only apply if not empty and not "All"
-                if (currentFilters.ratio && currentFilters.ratio.trim() !== '' && currentFilters.ratio.toLowerCase() !== 'all') {
-                    const tagRatio = (tag.Ratio || tag['Ratio_or_THC_CBD'] || '').toString().trim();
-                    if (tagRatio.toLowerCase() !== currentFilters.ratio.toLowerCase()) {
-                        return false;
-                    }
-                }
-                
                 return true;
             }) : tagsToFilter;
 
@@ -1227,8 +1219,7 @@ const TagManager = {
                 lineage: new Set(),
                 weight: new Set(),
                 doh: new Set(),
-                highCbd: new Set(),
-                ratio: new Set()
+                highCbd: new Set()
             };
 
             // USER PREFERENCE: Always show ALL options for vendor, brand, productType, lineage, doh, highCbd
@@ -1269,11 +1260,6 @@ const TagManager = {
                     availableOptions.highCbd.add('Non-High CBD Products');
                 }
                 
-                // Extract ratio information (show all)
-                if (tag.Ratio || tag['Ratio_or_THC_CBD']) {
-                    const ratio = (tag.Ratio || tag['Ratio_or_THC_CBD'] || '').toString().trim();
-                    if (ratio) availableOptions.ratio.add(ratio);
-                }
             });
             
             // WEIGHT FILTER: Use filtered tags (user preference - weight should be context-aware)
@@ -2842,14 +2828,10 @@ const TagManager = {
             const strainStr = String(productStrain).toLowerCase();
             
             // CRITICAL: For non-classic types, always check Product Strain first
-            if (strainStr.includes('cbd blend')) {
-                // CBD Blend products get CBD lineage (yellow color)
-                displayLineage = 'CBD';
-                verboseLog(`🎨 NON-CLASSIC CBD BLEND: "${displayName}" → CBD (yellow)`);
-            } else if (strainStr.includes('cbn') || strainStr.includes('cbc') || strainStr.includes('cbg')) {
-                // CBN, CBC, CBG products get CBD lineage (yellow color)
-                displayLineage = 'CBD';
-                verboseLog(`🎨 NON-CLASSIC CBN/CBC/CBG: "${displayName}" → CBD (yellow)`);
+            if (strainStr.includes('cbd blend') || strainStr.includes('cbd') || strainStr.includes('cbn') || strainStr.includes('cbc') || strainStr.includes('cbg')) {
+                // CBD family products display as CBD Blend lineage (yellow color)
+                displayLineage = 'CBD_BLEND';
+                verboseLog(`🎨 NON-CLASSIC CBD FAMILY: "${displayName}" → CBD_BLEND (yellow)`);
             } else if (strainStr.includes('paraphernalia')) {
                 displayLineage = 'PARAPHERNALIA'; // Pink color
                 verboseLog(`🎨 NON-CLASSIC PARA: "${displayName}" → PARAPHERNALIA (pink)`);
@@ -2858,9 +2840,9 @@ const TagManager = {
                 verboseLog(`🎨 NON-CLASSIC MIXED: "${displayName}" → MIXED (blue)`);
             } else {
                 // Check lineage field as fallback
-                if (lineage && lineage.toUpperCase() === 'CBD') {
-                    displayLineage = 'CBD';
-                    verboseLog(`🎨 NON-CLASSIC from Lineage: "${displayName}" → CBD (yellow)`);
+                if (lineage && (lineage.toUpperCase() === 'CBD' || lineage.toUpperCase() === 'CBD_BLEND')) {
+                    displayLineage = 'CBD_BLEND';
+                    verboseLog(`🎨 NON-CLASSIC from Lineage: "${displayName}" → CBD_BLEND (yellow)`);
                 } else {
                     displayLineage = 'MIXED'; // Blue color default
                     verboseLog(`🎨 NON-CLASSIC default: "${displayName}" → MIXED (blue)`);
@@ -3004,22 +2986,6 @@ const TagManager = {
         
         updateDohImage(initialDohStatus);
         tagInfo.appendChild(imageContainer);
-        
-        // Add ratio display for nonclassic products
-        const ratio = tag.Ratio || tag['Ratio_or_THC_CBD'] || '';
-        if (ratio && ratio.trim() !== '') {
-            const ratioElement = document.createElement('span');
-            ratioElement.className = 'ratio-badge badge bg-info me-2';
-            ratioElement.style.fontSize = '0.7rem';
-            ratioElement.style.padding = '2px 6px';
-            ratioElement.style.backgroundColor = 'rgba(13, 202, 240, 0.8)';
-            ratioElement.style.color = '#fff';
-            ratioElement.style.borderRadius = '4px';
-            ratioElement.style.fontWeight = '500';
-            ratioElement.textContent = ratio.trim();
-            ratioElement.title = `Ratio: ${ratio.trim()}`;
-            tagInfo.appendChild(ratioElement);
-        }
         
         // Add JSON match indicator if this tag came from JSON matching or educated guessing
         if (isJsonMatched) {
@@ -5953,30 +5919,17 @@ const TagManager = {
         // BACKEND RULE 2: Use Product Strain to determine lineage for ALL non-classic types (override existing lineage)
         // UPDATED: Be more conservative with edible CBD lineage assignment
         if (isNonClassicType && productStrain) {
-            // Define edible types for more conservative CBD assignment
-            const edibleTypes = ['edible (solid)', 'edible (liquid)', 'high cbd edible liquid', 'tincture', 'topical', 'capsule'];
-            const isEdible = edibleTypes.includes(productType);
+            const strainLower = productStrain.toLowerCase();
             
-            if (productStrain.toLowerCase().includes('cbd blend')) {
-                // For edibles, only assign CBD lineage if explicitly high-CBD
-                if (isEdible) {
-                    const productName = (productData['Product Name*'] || productData.ProductName || '').toString().toUpperCase();
-                    if (productType === 'high cbd edible liquid' || 
-                        (productName.includes('CBD') && ['HIGH', 'PURE', 'ISOLATE'].some(word => productName.includes(word)))) {
-                        return 'CBD'; // Explicitly high-CBD edible
-                    } else {
-                        return 'MIXED'; // Regular edible with CBD Blend strain
-                    }
-                } else {
-                    return 'CBD'; // Non-edible with CBD Blend strain
-                }
+            if (strainLower.includes('cbd blend') || strainLower.includes('cbd') || strainLower.includes('cbn') || strainLower.includes('cbc') || strainLower.includes('cbg')) {
+                return 'CBD_BLEND';
             }
             // Paraphernalia products -> PARAPHERNALIA lineage (pink) - override existing lineage
-            else if (productStrain.toLowerCase().includes('paraphernalia')) {
+            else if (strainLower.includes('paraphernalia')) {
                 return 'PARAPHERNALIA';
             }
             // Mixed products -> MIXED lineage (blue) - override existing lineage
-            else if (productStrain.toLowerCase().includes('mixed')) {
+            else if (strainLower.includes('mixed')) {
                 return 'MIXED';
             }
             // Default fallback for non-classic types with empty lineage -> MIXED
@@ -5997,17 +5950,7 @@ const TagManager = {
                                 description.includes('CBD') || description.includes('CBG') || description.includes('CBN') || description.includes('CBC');
             
             if (hasCbdContent) {
-                // For edibles, only assign CBD lineage if explicitly high-CBD
-                if (isEdible) {
-                    if (productType === 'high cbd edible liquid' || 
-                        (productName.includes('CBD') && ['HIGH', 'PURE', 'ISOLATE'].some(word => productName.includes(word)))) {
-                        return 'CBD'; // Explicitly high-CBD edible
-                    } else {
-                        return 'MIXED'; // Regular edible with CBD content
-                    }
-                } else {
-                    return 'CBD'; // Non-edible with CBD content
-                }
+                return 'CBD_BLEND';
             }
         }
         
