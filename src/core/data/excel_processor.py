@@ -7,6 +7,7 @@ from typing import List, Optional, Dict, Any
 from pathlib import Path
 import pandas as pd
 import datetime
+import threading
 from flask import send_file
 from src.core.formatting.markers import wrap_with_marker, unwrap_marker
 from docx import Document
@@ -799,11 +800,137 @@ class ExcelProcessor:
             'method_used': 'unknown',
             'memory_usage_mb': 0
         }
+        # Caching primitives for frequently requested data
+        self._cache_lock = threading.RLock()
+        self._cache_max_entries = 16
+        self._available_tags_cache: OrderedDict = OrderedDict()
+        self._filter_options_cache: OrderedDict = OrderedDict()
+        self._cache_token = 0
+        self._last_loaded_mtime = None
+        self._cache_prewarm_thread: Optional[threading.Thread] = None
+
+    def _invalidate_caches(self):
+        """Invalidate cached filter/tag results when the underlying data changes."""
+        with self._cache_lock:
+            self._available_tags_cache.clear()
+            self._filter_options_cache.clear()
+            self._cache_token += 1
+        self.logger.debug("ExcelProcessor caches invalidated")
+
+    def _schedule_cache_prewarm(self):
+        """Warm caches asynchronously so subsequent requests return instantly."""
+        if self.df is None or getattr(self.df, 'empty', True):
+            return
+        with self._cache_lock:
+            thread = getattr(self, '_cache_prewarm_thread', None)
+            if thread and thread.is_alive():
+                return
+            self._cache_prewarm_thread = threading.Thread(
+                target=self._prewarm_caches,
+                name="ExcelProcessorCachePrewarm",
+                daemon=True,
+            )
+            self._cache_prewarm_thread.start()
+
+    def _prewarm_caches(self):
+        """Compute tag/filter caches in the background."""
+        try:
+            self.logger.debug("Starting ExcelProcessor cache prewarm")
+            # Precompute filter options and available tags; results populate caches.
+            self.get_dynamic_filter_options({})
+            self.get_available_tags()
+            self.logger.debug("ExcelProcessor cache prewarm completed")
+        except Exception as prewarm_error:
+            self.logger.warning(f"Cache prewarm failed: {prewarm_error}")
+
+    def _normalize_filter_value(self, value):
+        """Normalize filter values so semantically equivalent filters share a cache key."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            normalized = value.strip()
+            if not normalized or normalized.lower() == 'all':
+                return None
+            return normalized.lower()
+        if isinstance(value, (list, tuple, set)):
+            normalized_items = [
+                item for item in (
+                    self._normalize_filter_value(v) for v in value
+                ) if item is not None
+            ]
+            if not normalized_items:
+                return None
+            return tuple(sorted(normalized_items))
+        # Fallback for other scalar types
+        normalized_str = str(value).strip()
+        return normalized_str.lower() if normalized_str else None
+
+    def _build_cache_key(self, namespace: str, filters: Optional[Dict[str, Any]] = None) -> tuple:
+        """Build a stable cache key for the current dataset and filter combination."""
+        data_source = self._last_loaded_file or ('db' if self.df is None else 'in-memory')
+        normalized_filters = ()
+        if filters:
+            if isinstance(filters, dict):
+                normalized_items = []
+                for key, value in filters.items():
+                    normalized_value = self._normalize_filter_value(value)
+                    if normalized_value is None:
+                        continue
+                    normalized_items.append((str(key), normalized_value))
+                if normalized_items:
+                    normalized_filters = tuple(sorted(normalized_items))
+            else:
+                normalized_value = self._normalize_filter_value(filters)
+                if normalized_value is not None:
+                    if isinstance(normalized_value, tuple):
+                        normalized_filters = normalized_value
+                    else:
+                        normalized_filters = (normalized_value,)
+        # Include cache token to force misses after explicit invalidation
+        return (namespace, data_source, normalized_filters, self._cache_token)
+
+    def _clone_tag_results(self, tags: List[Any]) -> List[Any]:
+        """Create a safe clone of tag results for cache storage or retrieval."""
+        return [
+            dict(tag) if isinstance(tag, dict) else tag
+            for tag in tags
+        ]
+
+    def _clone_filter_options(self, options: Dict[str, List[Any]]) -> Dict[str, List[Any]]:
+        """Create a safe clone of filter options for cache storage or retrieval."""
+        return {key: list(values) for key, values in options.items()}
+
+    def _get_cached_value(self, cache_store: OrderedDict, cache_key):
+        """Retrieve a cached value if available and refresh its LRU position."""
+        with self._cache_lock:
+            if cache_key in cache_store:
+                cache_store.move_to_end(cache_key)
+                return cache_store[cache_key]
+        return None
+
+    def _store_cache_value(self, cache_store: OrderedDict, cache_key, value):
+        """Store a value in the cache while enforcing the maximum cache size."""
+        with self._cache_lock:
+            if cache_key in cache_store:
+                cache_store.move_to_end(cache_key)
+            cache_store[cache_key] = value
+            while len(cache_store) > self._cache_max_entries:
+                cache_store.popitem(last=False)
+
+    def _on_dataset_updated(self, file_path: Optional[str] = None, file_mtime: Optional[float] = None):
+        """Record dataset metadata changes and invalidate dependent caches."""
+        if file_path is not None:
+            self._last_loaded_file = file_path
+        if file_mtime is not None:
+            self._last_loaded_mtime = file_mtime
+        self._invalidate_caches()
+        self._schedule_cache_prewarm()
 
     def clear_file_cache(self):
         """Clear the file cache to free memory."""
         self._file_cache.clear()
         self.logger.debug("File cache cleared")
+        self._on_dataset_updated()
     
     def check_memory_usage(self):
         """Check current memory usage and cleanup if needed."""
@@ -844,6 +971,7 @@ class ExcelProcessor:
         import gc
         gc.collect()
         
+        self._on_dataset_updated()
         self.logger.info("Memory cleanup completed")
     
     def process_with_memory_limit(self, df, max_rows=None):
@@ -907,6 +1035,8 @@ class ExcelProcessor:
                 self.logger.info("No Moonshot products found for strain extraction")
         else:
             self.logger.warning("Product Strain column not found for strain extraction")
+        
+        self._on_dataset_updated()
 
     def _manage_cache_size(self):
         """Keep cache size under control."""
@@ -1473,7 +1603,7 @@ class ExcelProcessor:
             # Process Description values using our established formula
             self._process_descriptions_from_product_names()
             
-            self._last_loaded_file = file_path
+            self._on_dataset_updated(file_path)
             self.logger.info(f"Ultra-fast load successful: {len(self.df)} rows, {len(self.df.columns)} columns")
             return True
                 
@@ -1577,7 +1707,7 @@ class ExcelProcessor:
                 self.logger.warning(f"JointRatio processing failed in minimal load: {joint_error}")
             
             self.df = df
-            self._last_loaded_file = file_path
+            self._on_dataset_updated(file_path)
             
             self.logger.info(f"Minimal load complete: {len(df)} rows, {len(df.columns)} columns")
             return True
@@ -1624,7 +1754,7 @@ class ExcelProcessor:
             if cache_key in self._file_cache:
                 self.logger.debug(f"Using cached data for {file_path}")
                 self.df = self._file_cache[cache_key].copy()
-                self._last_loaded_file = file_path
+                self._on_dataset_updated(file_path, file_mtime)
                 return True
             
             # Clear previous data to free memory
@@ -2799,7 +2929,6 @@ class ExcelProcessor:
             
             # Cache the processed file
             self._file_cache[cache_key] = self.df.copy()
-            self._last_loaded_file = file_path
             
             # Manage cache size
             self._manage_cache_size()
@@ -2898,6 +3027,7 @@ class ExcelProcessor:
                     self.df.loc[mixed_lineage_mask, "Lineage"] = "HYBRID"
                     self.logger.info(f"Fixed {mixed_lineage_mask.sum()} classic products with MIXED lineage, changed to HYBRID")
 
+            self._on_dataset_updated(file_path, file_mtime)
             self.logger.info(f"File loaded successfully: {len(self.df)} rows, {len(self.df.columns)} columns")
             return True
             
@@ -3251,7 +3381,7 @@ class ExcelProcessor:
         logger.info(f"   🔄 Duplicates removed: {duplicates_removed}")
         logger.info(f"   📈 Deduplication rate: {(duplicates_removed/len(filtered_df)*100):.1f}%")
         
-        return sorted_tags
+        return _return_with_cache(sorted_tags)
 
     def select_tags(self, tags):
         """Add tags to the selected set, preserving order and avoiding duplicates."""
@@ -4336,6 +4466,10 @@ class ExcelProcessor:
                 "doh": [],
                 "highCbd": []
             }
+        cache_key = self._build_cache_key('filter_options', current_filters or {})
+        cached_options = self._get_cached_value(self._filter_options_cache, cache_key)
+        if cached_options is not None:
+            return self._clone_filter_options(cached_options)
         df = self.df.copy()
         filter_map = {
             "vendor": "Vendor",
@@ -4431,7 +4565,9 @@ class ExcelProcessor:
             else:
                 options[filter_key] = []
         
-        return options
+        cached_copy = self._clone_filter_options(options)
+        self._store_cache_value(self._filter_options_cache, cache_key, cached_copy)
+        return self._clone_filter_options(cached_copy)
 
     @staticmethod
     def parse_weight_str(w, u=None):
@@ -4893,7 +5029,7 @@ class ExcelProcessor:
             
             # Set the dataframe
             self.df = df
-            self._last_loaded_file = file_path
+            self._on_dataset_updated(file_path)
             
             # Cache the result
             self._cache_file_result(file_path, df)
@@ -6748,6 +6884,16 @@ class ExcelProcessor:
 
     def get_available_tags(self, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """Return a list of tag objects with all necessary data."""
+        cache_key = self._build_cache_key('available_tags', filters or {})
+        cached_tags = self._get_cached_value(self._available_tags_cache, cache_key)
+        if cached_tags is not None:
+            return self._clone_tag_results(cached_tags)
+
+        def _return_with_cache(tag_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            cached_copy = self._clone_tag_results(tag_list)
+            self._store_cache_value(self._available_tags_cache, cache_key, cached_copy)
+            return self._clone_tag_results(cached_copy)
+
         if self.df is None:
             logger.warning("DataFrame is None in get_available_tags, attempting to use database")
             try:
@@ -6826,7 +6972,7 @@ class ExcelProcessor:
                         filtered_tags.append(tag)
                     
                     logger.info(f"Applied filters, returning {len(filtered_tags)} tags")
-                    return filtered_tags
+                    return _return_with_cache(filtered_tags)
                 
                 # CRITICAL FIX: Final deduplication to catch any remaining duplicates
                 final_tags = []
@@ -6845,7 +6991,7 @@ class ExcelProcessor:
                 if duplicate_count > 0:
                     logger.info(f"🔄 FINAL DEDUPLICATION: Removed {duplicate_count} duplicates, returning {len(final_tags)} unique products")
                 
-                return final_tags
+                return _return_with_cache(final_tags)
                 
             except Exception as e:
                 logger.error(f"Failed to get products from database: {e}")
