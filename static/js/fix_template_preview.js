@@ -1,16 +1,25 @@
 // Template Preview Fix
 // This script fixes the template preview functionality in the Edit Template modal
 
+let templatePreviewInitAttempts = 0;
+let templatePreviewInitialized = false;
+
 document.addEventListener('DOMContentLoaded', function() {
     console.log('Template Preview Fix: DOM loaded');
-    
-    // Wait a bit for Bootstrap to initialize
-    setTimeout(function() {
-        initializeTemplatePreview();
-    }, 500);
+    scheduleTemplatePreviewInit();
 });
 
+function scheduleTemplatePreviewInit(delay = 500) {
+    setTimeout(function() {
+        initializeTemplatePreview();
+    }, delay);
+}
+
 function initializeTemplatePreview() {
+    if (templatePreviewInitialized) {
+        return;
+    }
+
     console.log('Template Preview Fix: Initializing...');
     
     // Get all the necessary elements
@@ -41,14 +50,28 @@ function initializeTemplatePreview() {
     });
     
     if (!editTemplateModal) {
-        console.error('Template Preview Fix: Edit Template modal not found!');
+        templatePreviewInitAttempts += 1;
+        if (templatePreviewInitAttempts <= 10) {
+            console.warn(`Template Preview Fix: Edit Template modal not found (attempt ${templatePreviewInitAttempts}/10) - retrying...`);
+            scheduleTemplatePreviewInit(600);
+        } else {
+            console.error('Template Preview Fix: Edit Template modal not found after multiple attempts. Preview will be disabled until modal becomes available.');
+        }
         return;
     }
     
     if (!previewContainer) {
-        console.error('Template Preview Fix: Preview container not found!');
+        templatePreviewInitAttempts += 1;
+        if (templatePreviewInitAttempts <= 10) {
+            console.warn(`Template Preview Fix: Preview container not found (attempt ${templatePreviewInitAttempts}/10) - retrying...`);
+            scheduleTemplatePreviewInit(600);
+        } else {
+            console.error('Template Preview Fix: Preview container not found after multiple attempts. Preview will be disabled until container becomes available.');
+        }
         return;
     }
+    
+    templatePreviewInitialized = true;
     
     // Function to update the template preview
     function updateTemplatePreview() {

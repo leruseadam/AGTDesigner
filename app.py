@@ -10,7 +10,7 @@
 # - Advanced DOCX label generation
 # - Real-time Excel processing
 # - Session management and caching
-push
+
 from src.core.data.field_mapping import get_canonical_field
 import os
 import sys  # Add this import
@@ -21,6 +21,12 @@ import pandas as pd  # Add this import
 import time
 import re
 import json
+try:
+    import requests  # Optional dependency for internal HTTP calls
+    REQUESTS_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    requests = None
+    REQUESTS_AVAILABLE = False
 from src.core.generation.fast_generation import (
     FastGenerationEngine,
     optimize_records_for_generation,
@@ -145,9 +151,14 @@ IS_PYTHONANYWHERE = 'pythonanywhere.com' in os.environ.get('HTTP_HOST', '')
 IS_PRODUCTION = os.environ.get('FLASK_ENV') == 'production' or IS_PYTHONANYWHERE
 
 # OPTIMIZATION: Disable startup file loading for faster app startup
-# Set to False to enable default file loading on startup
-# CRITICAL: Set to True to prevent adding blank products from default Excel file on every startup!
-DISABLE_STARTUP_FILE_LOADING = False  # Enable startup file loading for lineage editor functionality
+# Honour environment override so PythonAnywhere can skip the heavy Excel scan
+# Default remains False for full-featured local runs unless explicitly disabled
+_disable_startup_env = os.environ.get('DISABLE_STARTUP_FILE_LOADING')
+if _disable_startup_env is not None:
+    DISABLE_STARTUP_FILE_LOADING = _disable_startup_env.strip().lower() in ('1', 'true', 'yes')
+else:
+    # Default to disabling on resource-constrained hosts (PythonAnywhere), otherwise keep enabled
+    DISABLE_STARTUP_FILE_LOADING = PYTHONANYWHERE_OPTIMIZATION
 
 # OPTIMIZATION: Enable lazy loading for faster app startup
 # Set to False to load files immediately
@@ -210,7 +221,7 @@ except ImportError:
 
 # Performance optimizations
 try:
-    from performance_optimizations import (
+    from performance_optimizations import (  # type: ignore[import]
         cached, performance_monitor, optimize_dataframe, 
         async_processor, clear_cache, log_performance_stats
     )
@@ -269,7 +280,7 @@ import random
 # Import optimized upload handler
 # from optimized_excel_upload import create_optimized_upload_routes  # Disabled - module not found
 try:
-    from fast_excel_upload_fix import create_fast_upload_routes
+    from fast_excel_upload_fix import create_fast_upload_routes  # type: ignore[import]
     FAST_UPLOAD_AVAILABLE = True
 except Exception as e:
     logging.warning(f"Fast upload routes not available: {e}")
@@ -277,7 +288,7 @@ except Exception as e:
     FAST_UPLOAD_AVAILABLE = False
 
 try:
-    from fast_docx_generator import create_fast_docx_routes
+    from fast_docx_generator import create_fast_docx_routes  # type: ignore[import]
     FAST_DOCX_AVAILABLE = True
 except Exception as e:
     logging.warning(f"Fast DOCX routes not available: {e}")
@@ -1710,7 +1721,7 @@ enhanced_logger = None
 
 # --- Enhanced Logging System ---
 try:
-    from enhanced_logging import setup_enhanced_logging, EnhancedLogger, ErrorContext, log_route_error, log_database_error, log_file_processing_error
+    from enhanced_logging import setup_enhanced_logging, EnhancedLogger, ErrorContext, log_route_error, log_database_error, log_file_processing_error  # type: ignore[import]
     ENHANCED_LOGGING_AVAILABLE = True
     enhanced_logger = setup_enhanced_logging()
     print("✅ Enhanced logging system loaded")
@@ -2087,6 +2098,7 @@ def _enhance_json_with_excel_data(json_tag, excel_product):
     return enhanced_tag
 
 @app.route('/api/status', methods=['GET'])
+@cached_route(ttl=5, vary_by=['session_id'])
 def api_status():
     """Check API server status and data loading status."""
     try:
@@ -2563,6 +2575,8 @@ def upload_file_streaming():
     """Ultra-fast streaming Excel upload with chunked processing for maximum performance"""
     try:
         start_time = time.time()
+        max_processing_time = MAX_TOTAL_PROCESSING_TIME if 'MAX_TOTAL_PROCESSING_TIME' in globals() else 300
+        max_processing_time = MAX_TOTAL_PROCESSING_TIME if 'MAX_TOTAL_PROCESSING_TIME' in globals() else 300
         
         # CRITICAL: Require store selection before upload
         if not has_store_selection():
@@ -2947,6 +2961,7 @@ def upload_file_simple():
     """Simple, reliable file upload for PythonAnywhere"""
     try:
         logging.info("=== SIMPLE UPLOAD REQUEST START ===")
+        start_time = time.time()
         
         # CRITICAL: Require store selection before upload
         if not has_store_selection():
@@ -3296,6 +3311,8 @@ def process_excel_background(filename, temp_path):
     """ULTRA-FAST background processing - minimal operations for instant response"""
     global os  # Ensure os is available in this scope
     
+    max_processing_time = MAX_TOTAL_PROCESSING_TIME if 'MAX_TOTAL_PROCESSING_TIME' in globals() else 300
+    start_time = time.time()
     try:
         # PC optimization: Detect platform and use optimized processing
         import platform
@@ -4323,19 +4340,22 @@ def move_tags():
             })
         
         # Save current state for undo using the dedicated endpoint
-        try:
-            undo_response = requests.post(
-                f"http://127.0.0.1:{app.config.get('PORT', 8001)}/api/save-selection-state",
-                json={'action_type': 'move_tags'},
-                headers={'Content-Type': 'application/json'}
-            )
-            if undo_response.ok:
-                logging.info(f"Selection state saved for undo - Stack size: {undo_response.json().get('undo_stack_size', 0)}")
-            else:
-                logging.warning(f"Failed to save selection state for undo: {undo_response.status_code}")
-        except Exception as e:
-            logging.warning(f"Failed to save selection state for undo: {str(e)}")
-            # Continue with the operation even if undo save fails
+        if REQUESTS_AVAILABLE and requests:
+            try:
+                undo_response = requests.post(
+                    f"http://127.0.0.1:{app.config.get('PORT', 8001)}/api/save-selection-state",
+                    json={'action_type': 'move_tags'},
+                    headers={'Content-Type': 'application/json'}
+                )
+                if undo_response.ok:
+                    logging.info(f"Selection state saved for undo - Stack size: {undo_response.json().get('undo_stack_size', 0)}")
+                else:
+                    logging.warning(f"Failed to save selection state for undo: {undo_response.status_code}")
+            except Exception as e:
+                logging.warning(f"Failed to save selection state for undo: {str(e)}")
+                # Continue with the operation even if undo save fails
+        else:
+            logging.debug("Requests library not available; skipping undo state persistence")
         
         if direction == 'to_selected':
             if select_all:
@@ -4618,6 +4638,7 @@ def clear_filters():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/pending-changes', methods=['GET'])
+@cached_route(ttl=5, vary_by=['session_id'])
 def get_pending_changes():
     """Get pending database changes for the current session."""
     try:
@@ -4646,6 +4667,7 @@ def get_pending_changes():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/session-stats', methods=['GET'])
+@cached_route(ttl=5, vary_by=['session_id'])
 def get_session_stats():
     """Get session statistics."""
     try:
@@ -4662,6 +4684,13 @@ def get_session_stats():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/set-store', methods=['POST'])
+@invalidate_cache_on_change([
+    '/api/status',
+    '/api/get-store',
+    '/api/check-store-required',
+    '/api/session-stats',
+    '/api/pending-changes'
+])
 def set_store():
     """Set store selection for the current IP address."""
     try:
@@ -4767,12 +4796,24 @@ def set_store():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/get-store', methods=['GET'])
+@cached_route(ttl=30, vary_by=['session_id'])
 def get_store():
     """Get the current store selection for the IP address."""
     try:
         ip_address = get_client_ip()
         logging.info(f"Getting store for IP: {ip_address}")
         logging.info(f"Current store selections: {list(_ip_store_selections.keys())}")
+        
+        # First, check Flask session for a store selection tied to this server instance
+        session_store = session.get('selected_store')
+        session_server_id = session.get('store_server_id')
+        if session_store and session_server_id == SERVER_INSTANCE_ID:
+            logging.info("Returning store from session for get_store endpoint")
+            return {
+                'success': True,
+                'store': session_store,
+                'source': 'session'
+            }
         
         # Check if there's a stored selection for this IP
         with _ip_store_lock:
@@ -4782,11 +4823,11 @@ def get_store():
                 if (datetime.now() - datetime.fromisoformat(store_data['timestamp']) < timedelta(hours=12) and
                     store_data.get('server_id') == SERVER_INSTANCE_ID):
                     logging.info(f"Found valid store selection: {store_data['store']}")
-                    return jsonify({
+                    return {
                         'success': True,
                         'store': store_data['store'],
                         'expires_at': (datetime.fromisoformat(store_data['timestamp']) + timedelta(hours=12)).isoformat()
-                    })
+                    }
                 else:
                     reason = "expired"
                     if store_data.get('server_id') != SERVER_INSTANCE_ID:
@@ -4796,16 +4837,23 @@ def get_store():
         
         # No valid selection found, return no store
         logging.info(f"No store found for IP {ip_address}")
-        return jsonify({
+        return {
             'success': True,
             'store': None
-        })
+        }
         
     except Exception as e:
         logging.error(f"Error getting store: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return {'success': False, 'error': str(e)}, 500
 
 @app.route('/api/clear-store', methods=['POST'])
+@invalidate_cache_on_change([
+    '/api/status',
+    '/api/get-store',
+    '/api/check-store-required',
+    '/api/session-stats',
+    '/api/pending-changes'
+])
 def clear_store():
     """Clear store selection for the current IP address AND Flask session."""
     try:
@@ -4847,6 +4895,7 @@ def clear_store():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/check-store-required', methods=['GET'])
+@cached_route(ttl=15, vary_by=['session_id'])
 def check_store_required():
     """Check if store selection is required for the current IP address."""
     try:
@@ -4877,7 +4926,7 @@ def check_store_required():
         
         if not current_store:
             logging.info(f"No store resolved for IP {ip_address}, requiring selection")
-            return jsonify({
+            return {
                 'success': True,
                 'requires_store': True,
                 'store': None,
@@ -4886,14 +4935,14 @@ def check_store_required():
                     'ip_address': ip_address,
                     'has_selection': has_selection
                 }
-            })
+            }
         
         # If we found a store, make sure it is persisted in the session for future requests
         session['selected_store'] = current_store
         session.modified = True
         
         logging.info(f"Store found for IP {ip_address}: {current_store}")
-        return jsonify({
+        return {
             'success': True,
             'requires_store': False,
             'store': current_store,
@@ -4902,12 +4951,12 @@ def check_store_required():
                 'ip_address': ip_address,
                 'has_selection': has_selection
             }
-        })
+        }
         
     except Exception as e:
         logging.error(f"Error checking store requirement: {str(e)}")
         logging.error(traceback.format_exc())
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return {'success': False, 'error': str(e)}, 500
 
 @app.route('/api/clear-session', methods=['POST'])
 def clear_session():
@@ -6354,7 +6403,6 @@ def generate_labels():
                             logging.debug("LINEAGE OVERRIDE: No lineage updates needed - all records match database")
                 except Exception as e:
                     logging.warning(f"Error during lineage override check: {e}")
-                    import traceback
                     logging.warning(traceback.format_exc())
             
             # CRITICAL FIX: If we have JSON matched products but no records, try to include them directly
@@ -6803,6 +6851,10 @@ def process_record(row, template_type, excel_processor):
             elif isinstance(value, (int, float)):
                 record[key] = str(value)
         
+        # Ensure both ProductName key variants are populated for downstream processing
+        primary_name = record.get('Product Name*') or record.get('ProductName') or record.get('Product Name') or ''
+        record['ProductName'] = str(primary_name) if primary_name is not None else ''
+        
         # CRITICAL FIX: Apply lineage normalization to ensure proper lineage format
         if 'Lineage' in record and record['Lineage']:
             from src.core.data.excel_processor import normalize_lineage
@@ -7205,7 +7257,9 @@ def get_available_tags():
                     cur = conn.cursor()
                     # Prefer joining strains by strain_name to avoid missing p.strain_id column
                     lineage_query_join_by_name = '''
-                        SELECT s.canonical_lineage AS current_lineage
+                        SELECT 
+                            s.canonical_lineage AS current_lineage,
+                            COALESCE(s.strain_name, p."Product Strain") AS current_strain
                         FROM products p
                         LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
                         WHERE p."Product Name*" = ? OR p.normalized_name = ?
@@ -7214,7 +7268,9 @@ def get_available_tags():
                     '''
                     # Fallback: use product's own Lineage if strains table/column not available
                     lineage_query_fallback = '''
-                        SELECT p."Lineage" AS current_lineage
+                        SELECT 
+                            p."Lineage" AS current_lineage,
+                            p."Product Strain" AS current_strain
                         FROM products p
                         WHERE p."Product Name*" = ? OR p.normalized_name = ?
                         ORDER BY p.id DESC
@@ -7228,8 +7284,10 @@ def get_available_tags():
                             if not name:
                                 continue
                             if name in lineage_cache:
-                                db_lin = lineage_cache[name]
+                                db_lin, db_strain = lineage_cache[name]
                             else:
+                                db_lin = None
+                                db_strain = None
                                 # Prefer strain-level lineage used by DOCX (sovereign -> canonical)
                                 # Match by exact product name or normalized name to avoid missing column errors
                                 try:
@@ -7243,14 +7301,29 @@ def get_available_tags():
                                     # Join failed (e.g., missing columns) - fallback to product lineage
                                     cur.execute(lineage_query_fallback, (name, normalized))
                                     row = cur.fetchone()
-                                db_lin = row[0] if row else None
-                                lineage_cache[name] = db_lin
+                                if row:
+                                    db_lin = row[0]
+                                    if len(row) > 1:
+                                        db_strain = row[1]
+                                lineage_cache[name] = (db_lin, db_strain)
                             if db_lin:
                                 db_lin_clean = str(db_lin).strip().upper()
                                 # Always expose DB lineage on stable fields the UI can prefer
                                 tag['currentLineage'] = db_lin_clean
                                 tag['canonical_lineage'] = db_lin_clean
                                 tag['Lineage'] = db_lin_clean
+                            clean_strain = str(db_strain).strip() if db_strain else ''
+                            if db_lin:
+                                db_lin_clean = str(db_lin).strip().upper()
+                                if db_lin_clean in ('CBD', 'CBD_BLEND'):
+                                    clean_strain = 'CBD Blend'
+                            if not clean_strain:
+                                existing_strain = str(tag.get('Product Strain') or tag.get('ProductStrain') or '').strip()
+                                clean_strain = existing_strain
+                            if clean_strain:
+                                tag['Product Strain'] = clean_strain
+                                tag['ProductStrain'] = clean_strain
+                                tag['productStrain'] = clean_strain
                         except Exception as _loop_err:
                             logging.debug(f"UI lineage alignment (cache) error for a tag: {_loop_err}")
                     if updated:
@@ -7320,7 +7393,9 @@ def get_available_tags():
                         raise
                     # Prefer joining strains by strain_name to avoid missing p.strain_id column
                     lineage_query_join_by_name = '''
-                        SELECT s.canonical_lineage AS current_lineage
+                        SELECT 
+                            s.canonical_lineage AS current_lineage,
+                            COALESCE(s.strain_name, p."Product Strain") AS current_strain
                         FROM products p
                         LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
                         WHERE p."Product Name*" = ? OR p.normalized_name = ?
@@ -7329,7 +7404,9 @@ def get_available_tags():
                     '''
                     # Fallback: use product's own Lineage if strains table/column not available
                     lineage_query_fallback = '''
-                        SELECT p."Lineage" AS current_lineage
+                        SELECT 
+                            p."Lineage" AS current_lineage,
+                            p."Product Strain" AS current_strain
                         FROM products p
                         WHERE p."Product Name*" = ? OR p.normalized_name = ?
                         ORDER BY p.id DESC
@@ -7342,8 +7419,10 @@ def get_available_tags():
                             if not name:
                                 continue
                             if name in lineage_cache:
-                                db_lin = lineage_cache[name]
+                                db_lin, db_strain = lineage_cache[name]
                             else:
+                                db_lin = None
+                                db_strain = None
                                 # Prefer strain-level lineage used by DOCX (sovereign -> canonical)
                                 try:
                                     normalized = product_db._normalize_product_name(name)
@@ -7356,8 +7435,11 @@ def get_available_tags():
                                     # Join failed (e.g., missing columns) - fallback to product lineage
                                     cur.execute(lineage_query_fallback, (name, normalized))
                                     row = cur.fetchone()
-                                db_lin = row[0] if row else None
-                                lineage_cache[name] = db_lin
+                                if row:
+                                    db_lin = row[0]
+                                    if len(row) > 1:
+                                        db_strain = row[1]
+                                lineage_cache[name] = (db_lin, db_strain)
                             if db_lin:
                                 db_lin_clean = str(db_lin).strip().upper()
                                 # Always expose DB lineage on stable fields the UI can prefer
@@ -7366,6 +7448,17 @@ def get_available_tags():
                                 if str(tag.get('Lineage','')).strip().upper() != db_lin_clean:
                                     tag['Lineage'] = db_lin_clean
                                     updated += 1
+                            clean_strain = str(db_strain).strip() if db_strain else ''
+                            if db_lin:
+                                if db_lin_clean in ('CBD', 'CBD_BLEND'):
+                                    clean_strain = 'CBD Blend'
+                            if not clean_strain:
+                                existing_strain = str(tag.get('Product Strain') or tag.get('ProductStrain') or '').strip()
+                                clean_strain = existing_strain
+                            if clean_strain:
+                                tag['Product Strain'] = clean_strain
+                                tag['ProductStrain'] = clean_strain
+                                tag['productStrain'] = clean_strain
                         except RuntimeError:
                             # Bubble out to outer except to skip alignment
                             raise
@@ -8863,7 +8956,17 @@ def log_viewer():
 def api_logs():
     """API endpoint for log viewer"""
     try:
-        from log_viewer import LogViewer
+        try:
+            import importlib
+            log_viewer_module = importlib.import_module('log_viewer')
+            LogViewer = getattr(log_viewer_module, 'LogViewer')
+        except (ImportError, AttributeError):
+            logging.error("log_viewer module not available; log API is disabled")
+            return jsonify({
+                'success': False,
+                'error': 'Log viewer module not available on this deployment',
+                'logs': []
+            }), 501
         
         # Get query parameters
         hours = int(request.args.get('hours', 24))
@@ -11759,14 +11862,6 @@ def upload_product_database():
                     
                     # Add product to database with mapped column names
                     result = product_db.add_or_update_product(mapped_data)
-                    if best:
-                        product_db = ProductDatabase(best)
-                        product_db._store_name = 'AGT_Bothell'
-                        product_db.init_database()
-                        return product_db
-                    return None
-                    if strain_result:
-                        strains_count += 1
                 except Exception as row_error:
                     logging.warning(f"Error processing row {index}: {row_error}")
                     import traceback
@@ -12342,7 +12437,7 @@ def json_process():
             return jsonify({'error': 'Please provide a valid HTTP URL'}), 400
             
         # Process JSON data directly
-        json_matcher = get_json_matcher()
+        json_matcher = get_session_json_matcher()
         matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=True)
         
         if matched_products:
@@ -12386,7 +12481,7 @@ def json_inventory():
             return jsonify({'error': 'Please provide a valid HTTP URL'}), 400
             
         # Process JSON inventory data
-        json_matcher = get_json_matcher()
+        json_matcher = get_session_json_matcher()
         inventory_df = json_matcher.process_json_inventory(url)
         
         if inventory_df.empty:
@@ -12476,7 +12571,7 @@ def json_inventory():
 def json_clear():
     """Clear JSON matches and reset to original state."""
     try:
-        json_matcher = get_json_matcher()
+        json_matcher = get_session_json_matcher()
         json_matcher.clear_matches()
         
         # Reset Excel processor selected tags
@@ -12502,7 +12597,7 @@ def json_status():
     """Get JSON matcher status for debugging."""
     try:
         excel_processor = get_excel_processor()
-        json_matcher = get_json_matcher()
+        json_matcher = get_session_json_matcher()
         
         status = {
             'excel_loaded': excel_processor.df is not None,
@@ -12687,7 +12782,7 @@ def match_json_tags():
         unmatched = []
         
         # Use the improved matching logic from JSONMatcher
-        json_matcher = get_json_matcher()
+        json_matcher = get_session_json_matcher()
         
         # Build cache if needed
         if json_matcher._sheet_cache is None:
@@ -16354,7 +16449,7 @@ def performance_status():
     try:
         # Try to import performance optimizations
         try:
-            from performance_optimizations import get_memory_usage, _memory_cache, _cache_timestamps
+            from performance_optimizations import get_memory_usage, _memory_cache, _cache_timestamps  # type: ignore[import]
         except ImportError:
             # Fallback if performance_optimizations is not available
             def get_memory_usage():
@@ -16730,7 +16825,7 @@ def enhanced_json_match():
         logging.info(f"Processing URL with strategy '{strategy}': {url[:50]}...")
         
         # Get enhanced JSON matcher
-        json_matcher = get_json_matcher()
+        json_matcher = get_session_json_matcher()
         if json_matcher is None:
             return jsonify({'error': 'Failed to initialize enhanced JSON matcher'}), 500
         
@@ -17020,7 +17115,7 @@ def get_matching_performance():
         }
         
         # Get enhanced matcher performance
-        json_matcher = get_json_matcher()
+        json_matcher = get_session_json_matcher()
         if json_matcher and hasattr(json_matcher, 'get_performance_report'):
             try:
                 performance_data['enhanced_matcher'] = json_matcher.get_performance_report()
@@ -17094,7 +17189,7 @@ def train_ai_matcher():
 def warm_matching_cache():
     """Warm up caches for better performance."""
     try:
-        json_matcher = get_json_matcher()
+        json_matcher = get_session_json_matcher()
         if json_matcher and hasattr(json_matcher, 'warm_cache'):
             json_matcher.warm_cache()
             return jsonify({
@@ -17118,7 +17213,7 @@ def clear_enhanced_matching_cache():
         cleared_count = 0
         
         # Clear enhanced matcher cache
-        json_matcher = get_json_matcher()
+        json_matcher = get_session_json_matcher()
         if json_matcher and hasattr(json_matcher, 'clear_cache'):
             json_matcher.clear_cache()
             cleared_count += 1
@@ -17200,7 +17295,7 @@ def debug_json_matching():
             })
         
         # Try different matching approaches and see results
-        json_matcher = get_json_matcher()
+        json_matcher = get_session_json_matcher()
         
         if hasattr(json_matcher, 'match_products'):
             # Enhanced matching - try different strategies

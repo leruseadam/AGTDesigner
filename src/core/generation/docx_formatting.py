@@ -46,6 +46,14 @@ def apply_lineage_colors(doc):
                 for cell in row.cells:
                     cells_processed += 1
                     original_text = cell.text.upper()  # Keep original text to check for markers
+                    lineage_hint_value = None
+                    lineage_hint_token = None
+                    hint_pattern = re.compile(r"__LINEAGE_HINT_([A-Z\/\s]+)__")
+                    hint_match = hint_pattern.search(original_text)
+                    if hint_match:
+                        lineage_hint_value = hint_match.group(1).strip()
+                        lineage_hint_token = hint_match.group(0)
+                        original_text = original_text.replace(lineage_hint_token, "")
                     
                     # CRITICAL FIX: Skip blank cells - don't apply any background color
                     if not original_text.strip() or original_text.strip() == '':
@@ -73,6 +81,8 @@ def apply_lineage_colors(doc):
                     temp_text = original_text
                     for marker in ["LINEAGE_START", "LINEAGE_END", "PRODUCTSTRAIN_START", "PRODUCTSTRAIN_END", "PRODUCTBRAND_CENTER_START", "PRODUCTBRAND_CENTER_END"]:
                         temp_text = temp_text.replace(marker, "")
+                    if lineage_hint_token:
+                        temp_text = temp_text.replace(lineage_hint_token, "")
                     
                     # If after removing markers, the cell is empty, treat it as blank
                     if not temp_text.strip():
@@ -109,6 +119,8 @@ def apply_lineage_colors(doc):
                     # Remove marker wrappers for robust matching
                     for marker in ["LINEAGE_START", "LINEAGE_END", "PRODUCTSTRAIN_START", "PRODUCTSTRAIN_END", "PRODUCTBRAND_CENTER_START", "PRODUCTBRAND_CENTER_END"]:
                         original_text = original_text.replace(marker, "")
+                    if lineage_hint_token:
+                        original_text = original_text.replace(lineage_hint_token, "")
                     text = original_text.strip()
                     
                     # Remove ProductStrain content from text to prevent it from triggering lineage colors
@@ -130,17 +142,11 @@ def apply_lineage_colors(doc):
                         color_hex = COLORS['PARA']
                         lineage_matched = "PARAPHERNALIA"
                     elif "HYBRID/INDICA" in text or "HYBRID INDICA" in text:
-                        color_hex = COLORS['INDICA']
+                        color_hex = COLORS['HYBRID_INDICA']
                         lineage_matched = "HYBRID/INDICA"
                     elif "HYBRID/SATIVA" in text or "HYBRID SATIVA" in text:
-                        color_hex = COLORS['SATIVA']
+                        color_hex = COLORS['HYBRID_SATIVA']
                         lineage_matched = "HYBRID/SATIVA"
-                    elif "HYBRID" in text and "SATIVA" in text:
-                        color_hex = COLORS['SATIVA']
-                        lineage_matched = "HYBRID+SATIVA"
-                    elif "HYBRID" in text and "INDICA" in text:
-                        color_hex = COLORS['INDICA']
-                        lineage_matched = "HYBRID+INDICA"
                     elif "SATIVA" in text:
                         color_hex = COLORS['SATIVA']
                         lineage_matched = "SATIVA"
@@ -168,6 +174,12 @@ def apply_lineage_colors(doc):
                         # For non-classic types with CBD strain, use yellow color
                         color_hex = COLORS['CBD']
                         lineage_matched = "CBD (non-classic)"
+                    elif lineage_hint_value:
+                        hint_key = lineage_hint_value.replace(" ", "_")
+                        color_candidate = COLORS.get(lineage_hint_value) or COLORS.get(hint_key)
+                        if color_candidate:
+                            color_hex = color_candidate
+                            lineage_matched = f"{lineage_hint_value} (hint)"
                     elif not is_classic_type and text.strip():
                         # For non-classic types without specific strain, use blue color (MIXED)
                         # BUT ONLY if there's actual content (not empty after marker removal)
@@ -222,6 +234,13 @@ def apply_lineage_colors(doc):
                         shd.set(qn('w:color'), 'auto')
                         shd.set(qn('w:fill'), 'FFFFFF')  # White background
                         tcPr.append(shd)
+                    
+                    # Remove lineage hint token from actual cell content if present
+                    if lineage_hint_token:
+                        for paragraph in cell.paragraphs:
+                            for run in paragraph.runs:
+                                if lineage_hint_token in run.text.upper():
+                                    run.text = run.text.replace(lineage_hint_token, "")
         # FINAL LINEAGE CLEANUP: Remove any leading spaces from lineage content after coloring
         _final_lineage_cleanup_after_coloring(doc)
         

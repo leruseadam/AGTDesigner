@@ -1,5 +1,5 @@
 // Detect Windows platform for optimizations
-const isWindows = navigator.platform.toLowerCase().includes('win') || 
+const isWindows = navigator.platform.toLowerCase().includes('win') ||
                  navigator.userAgent.toLowerCase().includes('windows');
 
 // Centralized debug logging toggle
@@ -182,6 +182,25 @@ function normalizeProductType(productType) {
   if (!productType) return productType;
   const normalized = PRODUCT_TYPE_OVERRIDES[productType.toLowerCase()];
   return normalized || productType;
+}
+
+function formatProductTypeLabel(value) {
+  if (!value) return value;
+  if (value === 'rso/co2 tankers') {
+    return 'RSO/CO2 Tanker';
+  }
+  return value.split(' ').map(word => {
+    if (word.includes('/')) {
+      return word.toUpperCase();
+    }
+    if (word.includes('-')) {
+      return word.split('-').map(segment => segment ? segment.charAt(0).toUpperCase() + segment.slice(1) : segment).join('-');
+    }
+    if (word === word.toUpperCase()) {
+      return word;
+    }
+    return word.charAt(0).toUpperCase() + word.slice(1);
+  }).join(' ');
 }
 
 // Global function to restore body scroll after modal closes
@@ -917,6 +936,69 @@ const TagManager = {
         }, delay);
     },
 
+    refreshAfterStoreChange(storeValue) {
+        verboseLog(`[STORE] Refreshing UI for store ${storeValue}`);
+        try {
+            this.state.selectedTags = new Set();
+            this.state.persistentSelectedTags = [];
+            this.state.tags = [];
+            this.state.originalTags = [];
+            this.state.isProcessingDeselection = false;
+            this.state.loading = true;
+            this.state.initialized = false;
+            this.state.filterCache = null;
+
+            const availableContainer = document.getElementById('availableTags');
+            const selectedContainer = document.getElementById('selectedTags');
+            if (availableContainer) availableContainer.innerHTML = '';
+            if (selectedContainer) selectedContainer.innerHTML = '';
+
+            if (typeof this.showActionSplash === 'function') {
+                this.showActionSplash(`Loading ${storeValue.replace(/_/g, ' ')} tags...`);
+            }
+
+            this.clearInitialDataRetry();
+            this.state.initialDataAttempts = 0;
+
+            let loadPromise;
+            if (typeof this.checkForExistingData === 'function') {
+                loadPromise = this.checkForExistingData();
+            } else {
+                loadPromise = Promise.allSettled([
+                    this.fetchAndUpdateAvailableTags(),
+                    this.fetchAndUpdateSelectedTags(),
+                    this.fetchAndPopulateFilters()
+                ]);
+            }
+
+            return Promise.resolve(loadPromise)
+                .catch(error => {
+                    console.error('refreshAfterStoreChange failed', error);
+                    verboseLog('refreshAfterStoreChange error:', error);
+                    if (typeof this.checkForExistingData === 'function') {
+                        return this.checkForExistingData();
+                    }
+                    return false;
+                })
+                .finally(() => {
+                    if (typeof this.hideActionSplash === 'function') {
+                        this.hideActionSplash();
+                    }
+                    if (typeof this.hideEnhancedGenerationSplash === 'function') {
+                        this.hideEnhancedGenerationSplash();
+                    }
+                    this.state.loading = false;
+                });
+        } catch (err) {
+            console.error('refreshAfterStoreChange encountered an exception', err);
+            if (typeof this.hideActionSplash === 'function') {
+                this.hideActionSplash();
+            }
+            this.state.loading = false;
+            return Promise.resolve(false);
+        }
+    },
+
     // Function to update brand filter label based on product type
     updateBrandFilterLabel() {
         const brandFilterLabel = document.querySelector('label[for="brandFilter"]');
@@ -1244,8 +1326,26 @@ const TagManager = {
                 }
                 
                 // Always add lineage options (show all lineages)
-                if (tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage) {
-                    availableOptions.lineage.add((tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '').toString().trim());
+                const rawLineage = (tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '').toString().trim();
+                if (rawLineage) {
+                    availableOptions.lineage.add(rawLineage);
+                }
+                const nameLower = (tag['Product Name*'] || tag.ProductName || '').toString().toLowerCase();
+                const descLower = (tag.Description || '').toString().toLowerCase();
+                const brandLower = (tag['Product Brand'] || tag.productBrand || '').toString().toLowerCase();
+                const ratioLower = (tag.Ratio || tag['Ratio_or_THC_CBD'] || '').toString().toLowerCase();
+                const typeLower = (tag['Product Type*'] || tag.productType || '').toString().toLowerCase();
+                const hasCbdFlag = ['cbd', 'cbg', 'cbn', 'cbc'].some(token =>
+                    (rawLineage && rawLineage.toLowerCase().includes(token)) ||
+                    nameLower.includes(token) ||
+                    descLower.includes(token) ||
+                    brandLower.includes(token) ||
+                    ratioLower.includes(token) ||
+                    typeLower.includes('high cbd') ||
+                    typeLower.includes('cbd')
+                );
+                if (hasCbdFlag) {
+                    availableOptions.lineage.add('CBD_BLEND');
                 }
                 
                 // Always add DOH options (show all)
@@ -1318,11 +1418,11 @@ const TagManager = {
                     const optionsHtml = `
                         <option value="">All</option>
                         ${sortedOptions.map(value => {
-                            // Apply special font formatting for RSO/CO2 Tanker
-                            if (value === 'rso/co2 tankers') {
-                                return `<option value="${value}" style="font-weight: bold; font-style: italic; color: #a084e8;">RSO/CO2 Tanker</option>`;
+                            const displayValue = filterType === 'productType' ? formatProductTypeLabel(value) : value;
+                            if (filterType === 'productType' && value === 'rso/co2 tankers') {
+                                return `<option value="${value}" style="font-weight: bold; font-style: italic; color: #a084e8;">${displayValue}</option>`;
                             }
-                            return `<option value="${value}">${value}</option>`;
+                            return `<option value="${value}">${displayValue}</option>`;
                         }).join('')}
                     `;
                     
@@ -1340,7 +1440,7 @@ const TagManager = {
                             // Add the current value back if it's not empty and user has selected it
                             const option = document.createElement('option');
                             option.value = currentValue;
-                            option.textContent = currentValue;
+                            option.textContent = filterType === 'productType' ? formatProductTypeLabel(currentValue) : currentValue;
                             option.style.color = '#666'; // Gray out to indicate it's not currently available
                             filterElement.appendChild(option);
                             filterElement.value = currentValue;
@@ -2816,9 +2916,27 @@ const TagManager = {
         }
         
         let displayLineage = lineage;
+        const productType = tag['Product Type*'] || tag.productType || tag.ProductType || '';
+        const nameStr = (tag['Product Name*'] || tag.ProductName || tag.productName || displayName || '').toString().toLowerCase();
+        const descStr = (tag.Description || tag.description || '').toString().toLowerCase();
+        const brandStr = (tag['Product Brand'] || tag.productBrand || tag.brand || '').toString().toLowerCase();
+        const ratioStr = (tag.Ratio || tag['Ratio_or_THC_CBD'] || '').toString().toLowerCase();
+        const lineageStr = (lineage || '').toString().toLowerCase();
+        const lowerProductType = productType.toLowerCase();
+
+        const hasCbdIndicator = () => {
+            const tokens = ['cbd', 'cbg', 'cbn', 'cbc'];
+            const sources = [nameStr, descStr, brandStr, ratioStr, lineageStr];
+            if (tokens.some(token => sources.some(text => text && text.includes(token)))) {
+                return true;
+            }
+            if (lowerProductType.includes('high cbd') || lowerProductType.includes('cbd')) {
+                return true;
+            }
+            return false;
+        };
         
         // Apply nonclassic product type logic to ensure correct lineage colors
-        const productType = tag['Product Type*'] || tag.productType || tag.ProductType || '';
         const classicTypes = ['flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'];
         const isNonclassic = !classicTypes.map(ct => ct.toLowerCase()).includes(productType.toLowerCase());
         
@@ -2832,12 +2950,20 @@ const TagManager = {
                 // CBD family products display as CBD Blend lineage (yellow color)
                 displayLineage = 'CBD_BLEND';
                 verboseLog(`🎨 NON-CLASSIC CBD FAMILY: "${displayName}" → CBD_BLEND (yellow)`);
+            } else if (hasCbdIndicator()) {
+                displayLineage = 'CBD_BLEND';
+                verboseLog(`🎨 NON-CLASSIC CBD SIGNAL: "${displayName}" → CBD_BLEND (yellow)`);
             } else if (strainStr.includes('paraphernalia')) {
                 displayLineage = 'PARAPHERNALIA'; // Pink color
                 verboseLog(`🎨 NON-CLASSIC PARA: "${displayName}" → PARAPHERNALIA (pink)`);
             } else if (strainStr.includes('mixed') || !productStrain) {
-                displayLineage = 'MIXED'; // Blue color
-                verboseLog(`🎨 NON-CLASSIC MIXED: "${displayName}" → MIXED (blue)`);
+                if (hasCbdIndicator()) {
+                    displayLineage = 'CBD_BLEND';
+                    verboseLog(`🎨 NON-CLASSIC CBD SIGNAL (no strain): "${displayName}" → CBD_BLEND (yellow)`);
+                } else {
+                    displayLineage = 'MIXED'; // Blue color
+                    verboseLog(`🎨 NON-CLASSIC MIXED: "${displayName}" → MIXED (blue)`);
+                }
             } else {
                 // Check lineage field as fallback
                 if (lineage && (lineage.toUpperCase() === 'CBD' || lineage.toUpperCase() === 'CBD_BLEND')) {
@@ -2856,6 +2982,7 @@ const TagManager = {
         // Paraphernalia = pink (PARAPHERNALIA lineage)
         
         if (displayLineage) {
+          tag.currentLineage = displayLineage;
           tagElement.dataset.lineage = displayLineage.toUpperCase();
           row.dataset.lineage = displayLineage.toUpperCase();  // Add lineage to row element too
           verboseLog(`🎨 Set data-lineage for ${displayName}: ${displayLineage.toUpperCase()}`);

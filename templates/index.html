@@ -90,6 +90,9 @@
       console.log('Store value:', storeValue);
       console.log('About to send fetch request to /api/set-store');
 
+      // Get reference to main content
+      const mainContent = document.getElementById('mainContent');
+
       // Don't check if it's the same store - just always proceed
       // This ensures the selection always works even if there's a mismatch
       console.log('Processing store selection:', storeValue);
@@ -118,31 +121,52 @@
         console.log('data.success =', data.success);
         if (data.success) {
           console.log('✅ Store set successfully:', storeValue);
-          
-          // Set timestamp to prevent modal from re-appearing immediately after reload
-          // This timestamp is checked on page load - if within 3 seconds, backend won't be cleared
+
+          // Persist context so the modal stays hidden after reload
           sessionStorage.setItem('store_selected_timestamp', Date.now().toString());
           sessionStorage.setItem('store_just_selected', 'true');
           sessionStorage.setItem('selected_store', storeValue);
-          
-          // CRITICAL: Clear blocking flag so TagManager can initialize after reload
+
+          // Make sure any blocking flag is cleared before the reload kicks in
           if (window.STORE_MODAL_BLOCKING) {
             console.log('✅ Clearing STORE_MODAL_BLOCKING flag');
             window.STORE_MODAL_BLOCKING = false;
           }
-          
-          // Show success message
+          window.checkingStoreRequired = false;
+
+          // Give the user quick visual feedback while we prep the reload
           if (window.Toast && typeof window.Toast.show === 'function') {
             window.Toast.show('success', `Switching to ${storeValue.replace(/_/g, ' ')}...`);
           }
-          
-          // CRITICAL: Reload page after brief delay to sync session
-          // This ensures template variables (user_has_store) are updated
-          console.log('🔄 Reloading page to sync session...');
+
+          // Briefly remove the modal so we don't flash it on reload
+          const modalElement = document.getElementById('storeSelectionModal');
+          if (modalElement) {
+            try {
+              const modalInstance = (typeof bootstrap !== 'undefined')
+                ? bootstrap.Modal.getInstance(modalElement)
+                : null;
+              if (modalInstance) {
+                modalInstance.hide();
+              }
+            } catch (hideError) {
+              console.warn('⚠️ Failed to hide modal via Bootstrap before reload', hideError);
+            }
+            modalElement.classList.remove('show');
+            modalElement.style.display = 'none';
+            document.body.classList.remove('modal-open');
+            document.body.style.overflow = '';
+            const backdrop = document.getElementById('storeModalBackdrop') || document.querySelector('.modal-backdrop');
+            if (backdrop) {
+              backdrop.remove();
+            }
+          }
+
+          // CRITICAL FIX: Reload the page so backend + frontend state stay in sync
+          console.log('🔄 Reloading page to apply store change...');
           setTimeout(() => {
-            console.log('Executing page reload NOW');
             window.location.reload();
-          }, 500); // Increased to 500ms to ensure session cookie is saved
+          }, 500);
         } else {
           console.error('❌ Error setting store:', data.error || 'Unknown error');
           alert('Error setting store: ' + (data.error || 'Please try again.'));
@@ -530,8 +554,10 @@
       }
       
       console.log('Fetching store status from backend...');
-      fetch('/api/check-store-required', {
-        credentials: 'same-origin'
+      const cacheBust = `ts=${Date.now()}`;
+      fetch(`/api/check-store-required?${cacheBust}`, {
+        credentials: 'same-origin',
+        cache: 'no-store'
       })
         .then(response => {
           if (!response.ok) {
@@ -2696,37 +2722,45 @@
     }
     
     /* Store Selection Modal Styles */
+    #storeSelectionModal .modal-dialog {
+      max-width: 720px;
+    }
+    
+    #storeSelectionModal .modal-content {
+      border-radius: 18px;
+    }
+    
     .store-options-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-      gap: 1.2rem;
-      margin-top: 1.5rem;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1rem;
+      margin-top: 1.25rem;
       width: 100%;
     }
     
     .btn-store-option {
       background: linear-gradient(135deg, rgba(45, 34, 58, 0.9), rgba(60, 45, 75, 0.9));
-      border: 2px solid rgba(160, 132, 232, 0.3);
-      border-radius: 12px;
+      border: 1px solid rgba(160, 132, 232, 0.25);
+      border-radius: 10px;
       color: #e0e0e0;
-      padding: 1.8rem 2rem;
-      transition: all 0.3s ease;
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
+      padding: 1.1rem 1.4rem;
+      transition: all 0.25s ease;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
       text-align: center;
-      min-height: 90px;
+      min-height: 72px;
       display: flex;
       align-items: center;
       justify-content: center;
       width: 100%;
-      font-size: 1.1rem;
+      font-size: 1rem;
     }
     
     .btn-store-option:hover {
       background: linear-gradient(135deg, rgba(45, 34, 58, 0.95), rgba(60, 45, 75, 0.95));
-      border-color: rgba(160, 132, 232, 0.8);
-      box-shadow: 0 4px 15px rgba(160, 132, 232, 0.3);
-      transform: translateY(-2px);
+      border-color: rgba(160, 132, 232, 0.6);
+      box-shadow: 0 3px 12px rgba(160, 132, 232, 0.25);
+      transform: translateY(-1px);
       color: #ffffff;
     }
     
@@ -2738,18 +2772,18 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 0.5rem;
+      gap: 0.35rem;
     }
     
     .store-name {
       font-weight: 700;
-      font-size: 1.4rem;
+      font-size: 1.2rem;
       color: #ffffff;
-      letter-spacing: 0.5px;
+      letter-spacing: 0.4px;
     }
     
     .store-location {
-      font-size: 1.1rem;
+      font-size: 1rem;
       color: #b0b0b0;
       font-weight: 400;
     }
@@ -5281,19 +5315,19 @@
   
   <!-- Store Selection Modal - JavaScript controls visibility after checking session -->
   <div class="modal fade" id="storeSelectionModal" tabindex="-1" aria-labelledby="storeSelectionModalLabel" data-bs-backdrop="static" data-bs-keyboard="false" style="display: none; z-index: 9999 !important;">
-    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-xl">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
       <div class="modal-content glass-card">
-        <div class="modal-header border-0" style="padding: 2.5rem 2.5rem 1.5rem;">
-          <h5 class="modal-title" id="storeSelectionModalLabel" style="font-size: 2.8rem; font-weight: 800; display: flex; align-items: center; color: #ffffff; letter-spacing: 1px; text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);">
-            <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="me-3 text-primary" style="filter: drop-shadow(0 2px 4px rgba(160, 132, 232, 0.4));">
+        <div class="modal-header border-0" style="padding: 1.6rem 1.8rem 1rem;">
+          <h5 class="modal-title" id="storeSelectionModalLabel" style="font-size: 2.2rem; font-weight: 700; display: flex; align-items: center; color: #ffffff; letter-spacing: 0.8px; text-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);">
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" class="me-3 text-primary" style="filter: drop-shadow(0 2px 4px rgba(160, 132, 232, 0.35));">
               <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
               <polyline points="9 22 9 12 15 12 15 22"></polyline>
             </svg>
             Select Your Store
           </h5>
         </div>
-        <div class="modal-body text-center" style="padding: 1.5rem 2.5rem 2.5rem; max-height: 70vh; overflow-y: auto;">
-          <p class="mb-4 text-light" style="font-size: 1.2rem; font-weight: 500; color: rgba(255, 255, 255, 0.9);">Please select your store location to continue. This selection will be saved and remembered for future visits.</p>
+        <div class="modal-body text-center" style="padding: 1.1rem 1.6rem 1.8rem; max-height: 70vh; overflow-y: auto;">
+          <p class="mb-4 text-light" style="font-size: 1rem; font-weight: 500; color: rgba(255, 255, 255, 0.88);">Please select your store location to continue. This selection will be saved and remembered for future visits.</p>
           
           <div class="store-options-grid">
             <button class="btn btn-store-option" onclick="selectStore('AGT_Bothell')">
@@ -5365,9 +5399,11 @@
       }
       
       // Always check backend for store selection (don't rely on sessionStorage)
-      fetch('/api/check-store-required', {
+      const cacheBust = `ts=${Date.now()}`;
+      fetch(`/api/check-store-required?${cacheBust}`, {
         method: 'GET',
-        credentials: 'same-origin'
+        credentials: 'same-origin',
+        cache: 'no-store'
       })
       .then(response => response.json())
       .then(data => {

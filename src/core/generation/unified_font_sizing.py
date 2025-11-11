@@ -30,7 +30,7 @@ def _load_font_sizing_config():
             'standard': {
                 'mini': {
                     'description': [(5, 18), (20, 17), (30, 16), (35, 15), (40, 14), (50, 13), (60, 12), (80, 10), (120, 9), (float('inf'), 8)],
-                    'brand': [(5, 12), (20, 10), (40, 7), (float('inf'), 6.5)],
+                    'brand': [(5, 12), (20, 10), (30, 7), (float('inf'), 6.5)],
                     'price': [(1, 18), (2, 16), (float('inf'), 14)],
                     'lineage': [(5, 12), (10, 11), (15, 10), (20, 9), (float('inf'), 8)],
                     'ratio': [(3, 12), (6, 11), (9, 10), (12, 9), (float('inf'), 8)],
@@ -43,8 +43,8 @@ def _load_font_sizing_config():
                     'default': [(10, 12), (20, 11), (float('inf'), 10)]
                 },
                 'double': {
-                    'description': [(10, 28), (20, 26), (30, 23), (40, 22), (50, 20), (60, 18), (70, 17), (80, 16), (90, 15), (100, 14), (110, 12), (float('inf'), 10)],
-                    'brand': [(5, 16), (10, 15), (15, 14), (20, 8), (float('inf'), 7)],
+                    'description': [(10, 28), (20, 26), (30, 23), (40, 22), (50, 20), (60, 19), (70, 18), (80, 17), (90, 16), (100, 15), (110, 14), (120, 13), (130, 12), (float('inf'), 10)],
+                    'brand': [(5, 14), (10, 12), (15, 10), (20, 8), (25, 7.5), (float('inf'), 7)],
                     'price': [(10, 26), (15, 20), (float('inf'), 14)],
                     'lineage': [(15, 13), (25, 12), (35, 10), (45, 9), (float('inf'), 9)],
                     'ratio': [(10, 9), (20, 8), (30, 7), (float('inf'), 6.5)],
@@ -85,6 +85,17 @@ def _load_font_sizing_config():
 
 FONT_SIZING_CONFIG = _load_font_sizing_config()
 
+def _brand_letter_count(text) -> int:
+    """Calculate brand complexity based on letter count."""
+    if text is None:
+        return 0
+    text = str(text)
+    letter_count = sum(1 for ch in text if ch.isalpha())
+    if letter_count > 0:
+        return letter_count
+    # Fallback to non-space characters if no letters are present
+    return len(text.replace(" ", ""))
+
 def get_font_size(text: str, field_type: str = 'default', orientation: str = 'vertical', 
                  scale_factor: float = 1.0, complexity_type: str = 'standard') -> Pt:
     """
@@ -115,6 +126,26 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
         else:  # Three or more digits (e.g., $100, $1000+) - use 15pt font
             final_size = 15 * scale_factor
             logger.debug(f"Mini template price rule: '{text}' has {num_digits} digits, using 15pt font")
+            return Pt(final_size)
+    
+    # Special rule: Mini template long brand names forced to minimum readable size
+    if field_type.lower() == 'brand' and orientation.lower() == 'mini':
+        text_length = _brand_letter_count(text)
+        if text_length >= 20:
+            final_size = 6.5 * scale_factor
+            logger.debug(
+                f"Mini template brand length rule: text='{text}' (length={text_length}) exceeds threshold, forcing {final_size}pt"
+            )
+            return Pt(final_size)
+    
+    # Special rule: Double template long brand names forced to 8pt minimum for readability
+    if field_type.lower() == 'brand' and orientation.lower() == 'double':
+        text_length = _brand_letter_count(text)
+        if text_length >= 16:
+            final_size = 8 * scale_factor
+            logger.debug(
+                f"Double template brand length rule: text='{text}' (length={text_length}) exceeds threshold, forcing {final_size}pt"
+            )
             return Pt(final_size)
     
     # Special rule: Double template prices based on number of digits
@@ -185,7 +216,7 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
     if field_type.lower() == 'brand' and orientation.lower() == 'double':
         # CRITICAL FIX: Use consistent font sizing for double template brands based on character count only
         # This prevents inconsistent sizing due to special characters and complexity penalties
-        text_length = len(str(text).strip())
+        text_length = _brand_letter_count(text)
         
         # Use simplified font sizing based on character count for consistency
         # Special rules for very long brands to ensure they fit in 1.75" width cells
@@ -237,7 +268,11 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
         return Pt(fallback_size)
     
     # Calculate text complexity
-    comp = calculate_text_complexity(text)
+    if field_type.lower() == 'brand' and orientation.lower() in ('mini', 'double'):
+        comp = _brand_letter_count(text)
+        logger.debug(f"Brand complexity override (letter count): text='{text}', letters={comp}, orientation={orientation}")
+    else:
+        comp = calculate_text_complexity(text)
     
     # Special debugging for price field
     if field_type.lower() == 'price':
@@ -394,10 +429,36 @@ def get_font_size_by_marker(text, marker_type, template_type='vertical', scale_f
     # Determine base field type
     field_type = marker_to_field.get(base_marker, 'default')
 
-    # CRITICAL FIX: Always use 'lineage' field type for LINEAGE markers to get proper font sizes
-    # Previous logic incorrectly used 'brand' for double/mini/vertical which made lineage too small
+    # Normalize context for downstream checks
+    template_orientation = (template_type or '').lower()
+    normalized_text = str(text or '')
+    text_upper = normalized_text.upper()
+
+    # Precompute non-classic context when product type provided
+    is_nonclassic_context = False
+    if product_type:
+        try:
+            from src.core.constants import CLASSIC_TYPES
+            is_nonclassic_context = str(product_type).lower() not in CLASSIC_TYPES
+        except Exception:
+            # Fallback silently if CLASSIC_TYPES import fails for any reason
+            is_nonclassic_context = False
+
+    # CRITICAL FIX: Always use 'lineage' field type for LINEAGE markers by default,
+    # but treat PRODUCTBRAND_CENTER content (double template brand center) as brand sizing.
     if base_marker in ('LINEAGE', 'LINEAGE_CENTER'):
-        field_type = 'lineage'  # Use lineage font sizing for all templates
+        field_type = 'lineage'
+
+        contains_brand_markers = (
+            'PRODUCTBRAND_CENTER_START' in text_upper or
+            'PRODUCTBRAND_CENTER_END' in text_upper
+        )
+
+        if contains_brand_markers:
+            field_type = 'brand'
+        elif template_orientation == 'double' and is_nonclassic_context:
+            # Double template displays non-classic product brand content in the lineage field.
+            field_type = 'brand'
     
     return get_font_size(text, field_type, template_type, scale_factor, 'standard')
 

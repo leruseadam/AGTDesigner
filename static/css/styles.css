@@ -3209,6 +3209,49 @@ canvas#lava-lamp-canvas {
     font-weight: bold !important;
   }
 
+  /* ULTRA-CRITICAL: Force lineage colors with maximum specificity - override everything */
+  div.tag-item[data-lineage="SATIVA"].tag-item {
+    background: rgba(237, 65, 35, 0.6) !important;
+    border-color: rgba(237, 65, 35, 0.3) !important;
+  }
+
+  div.tag-item[data-lineage="INDICA"].tag-item {
+    background: rgba(153, 0, 255, 0.6) !important;
+    border-color: rgba(153, 0, 255, 0.3) !important;
+  }
+
+  div.tag-item[data-lineage="HYBRID"].tag-item {
+    background: rgba(0, 153, 0, 0.6) !important;
+    border-color: rgba(0, 153, 0, 0.3) !important;
+  }
+
+  div.tag-item[data-lineage="HYBRID/SATIVA"].tag-item {
+    background: rgba(237, 65, 35, 0.6) !important;
+    border-color: rgba(237, 65, 35, 0.3) !important;
+  }
+
+  div.tag-item[data-lineage="HYBRID/INDICA"].tag-item {
+    background: rgba(153, 0, 255, 0.6) !important;
+    border-color: rgba(153, 0, 255, 0.3) !important;
+  }
+
+  div.tag-item[data-lineage="CBD"].tag-item,
+  div.tag-item[data-lineage="CBD_BLEND"].tag-item {
+    background: rgba(241, 194, 50, 0.6) !important;
+    border-color: rgba(241, 194, 50, 0.3) !important;
+  }
+
+  div.tag-item[data-lineage="MIXED"].tag-item {
+    background: rgba(0, 33, 245, 0.6) !important;
+    border-color: rgba(0, 33, 245, 0.3) !important;
+  }
+
+  div.tag-item[data-lineage="PARA"].tag-item,
+  div.tag-item[data-lineage="PARAPHERNALIA"].tag-item {
+    background: rgba(255, 192, 203, 0.6) !important;
+    border-color: rgba(255, 192, 203, 0.3) !important;
+  }
+
   /* JSON matched tag styling - subtle indicator without overriding lineage colors */
   .json-matched-tag {
     position: relative;

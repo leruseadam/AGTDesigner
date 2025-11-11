@@ -3,7 +3,8 @@ import re
 import logging
 import traceback
 import time
-from typing import List, Optional, Dict, Any
+import math
+from typing import List, Optional, Dict, Any, Tuple
 from pathlib import Path
 import pandas as pd
 import datetime
@@ -796,6 +797,8 @@ class ExcelProcessor:
         self._product_db_enabled = True
         self._debug_count = 0
         self._store_name = store_name
+        self._weight_mode_cache: Dict[str, Optional[Tuple[float, str, float]]] = {}
+        self._weight_group_column_ready: bool = False
         
         # Memory optimization
         self._memory_limit_mb = MAX_MEMORY_MB
@@ -934,6 +937,8 @@ class ExcelProcessor:
         if file_mtime is not None:
             self._last_loaded_mtime = file_mtime
         self._invalidate_caches()
+        self._weight_mode_cache.clear()
+        self._weight_group_column_ready = False
 
     def clear_file_cache(self):
         """Clear the file cache to free memory."""
@@ -3410,7 +3415,11 @@ class ExcelProcessor:
         logger.info(f"   🔄 Duplicates removed: {duplicates_removed}")
         logger.info(f"   📈 Deduplication rate: {(duplicates_removed/len(filtered_df)*100):.1f}%")
         
-        return _return_with_cache(sorted_tags)
+        # Store in cache and return a cloned result to keep downstream mutations safe
+        cached_copy = self._clone_tag_results(sorted_tags)
+        cache_key_local = self._build_cache_key('available_tags', filters or {})
+        self._store_cache_value(self._available_tags_cache, cache_key_local, cached_copy)
+        return self._clone_tag_results(cached_copy)
 
     def select_tags(self, tags):
         """Add tags to the selected set, preserving order and avoiding duplicates."""
@@ -4317,24 +4326,187 @@ class ExcelProcessor:
         # Default fallback
         return common_oz_weights['default'][0]  # Return '1oz' as default
 
+    def _strip_trailing_weight_suffix(self, name: str) -> str:
+        if not isinstance(name, str):
+            return ""
+        pattern = r'\s*[-–—]?\s*\d+(?:\.\d+)?\s*(?:oz|ounce|ounces|g|gram|grams)\s*$'
+        return re.sub(pattern, '', name, flags=re.IGNORECASE).strip()
+
+    def _normalize_weight_group_basename(self, base_name: str) -> str:
+        """
+        Normalize a product base name so that related products (e.g., Moonshot flavors)
+        collapse into the same weight normalization bucket.
+        """
+        if not base_name:
+            return ""
+
+        lowered = base_name.lower()
+
+        # Special handling for Moonshot products – strip leading flavor text so
+        # all Moonshot variants share the same grouping key.
+        if "moonshot" in lowered:
+            moonshot_index = lowered.index("moonshot")
+            trimmed = base_name[moonshot_index:].strip()
+            if trimmed:
+                return trimmed
+
+        # Fallback: if the name contains " by ", drop the flavor prefix but keep brand context.
+        if " by " in lowered:
+            by_index = lowered.index(" by ")
+            trimmed = base_name[by_index:].strip()
+            if trimmed:
+                return trimmed
+
+        return base_name
+
+    def _build_weight_group_key(self, product_name: str, product_brand: str, product_type: str) -> Optional[str]:
+        base_name = self._strip_trailing_weight_suffix(product_name or "")
+        base_name = self._normalize_weight_group_basename(base_name)
+        base_name_norm = normalize_name(base_name)
+        brand_norm = normalize_name(product_brand or "")
+        type_norm = normalize_name(product_type or "")
+        if not base_name_norm or not brand_norm or not type_norm:
+            return None
+        return f"{brand_norm}|{type_norm}|{base_name_norm}"
+
+    def _ensure_weight_group_column(self):
+        if self.df is None or getattr(self.df, 'empty', True):
+            return
+        if getattr(self, '_weight_group_column_ready', False) and '_weight_group_key' in self.df.columns:
+            return
+
+        def compute_key(row):
+            product_name = row.get('Product Name*', '') or row.get('ProductName', '')
+            product_brand = row.get('Product Brand', '') or row.get('ProductBrand', '')
+            product_type = row.get('Product Type*', '') or row.get('ProductType', '')
+            return self._build_weight_group_key(product_name, product_brand, product_type)
+
+        self.df['_weight_group_key'] = self.df.apply(compute_key, axis=1)
+        self._weight_group_column_ready = True
+
+    @staticmethod
+    def _parse_weight_to_float(weight_value) -> Optional[float]:
+        if weight_value is None:
+            return None
+        if isinstance(weight_value, float) and math.isnan(weight_value):
+            return None
+        if isinstance(weight_value, (int, float)):
+            return float(weight_value)
+        weight_str = str(weight_value).strip()
+        if not weight_str or weight_str.lower() in {'nan', 'none'}:
+            return None
+        match = re.search(r'\d+(?:\.\d+)?', weight_str)
+        if not match:
+            return None
+        try:
+            return float(match.group(0))
+        except ValueError:
+            return None
+
+    def _get_weight_mode_info(self, group_key: str) -> Optional[Tuple[float, str, float]]:
+        if not group_key or self.df is None or getattr(self.df, 'empty', True):
+            return None
+        if group_key in self._weight_mode_cache:
+            return self._weight_mode_cache[group_key]
+
+        self._ensure_weight_group_column()
+        if '_weight_group_key' not in self.df.columns:
+            self._weight_mode_cache[group_key] = None
+            return None
+
+        group_df = self.df[self.df['_weight_group_key'] == group_key]
+        if group_df.empty:
+            self._weight_mode_cache[group_key] = None
+            return None
+
+        weight_column = 'Weight*' if 'Weight*' in group_df.columns else 'Weight'
+        weights = pd.to_numeric(group_df[weight_column], errors='coerce') if weight_column in group_df.columns else pd.Series(dtype=float)
+        weights = weights.dropna()
+        if weights.empty or len(weights) < 3:
+            self._weight_mode_cache[group_key] = None
+            return None
+
+        rounded_weights = weights.round(3)
+        counts = rounded_weights.value_counts()
+        if counts.empty:
+            self._weight_mode_cache[group_key] = None
+            return None
+
+        mode_weight = float(counts.index[0])
+        mode_count = counts.iloc[0]
+        total_count = counts.sum()
+        dominance_ratio = float(mode_count) / float(total_count) if total_count else 0.0
+
+        mode_unit = ""
+        unit_columns = [
+            'Weight Unit* (grams/gm or ounces/oz)',
+            'Units',
+            'Unit',
+        ]
+        for unit_col in unit_columns:
+            if unit_col in group_df.columns:
+                units_series = group_df[unit_col].astype(str).str.lower().str.strip()
+                mode_candidates = units_series[~units_series.isin({'', 'nan', 'none', 'n/a'})]
+                if not mode_candidates.empty:
+                    mode_unit = mode_candidates.mode(dropna=True)
+                    if isinstance(mode_unit, pd.Series):
+                        mode_unit = mode_unit.iloc[0] if not mode_unit.empty else ""
+                    break
+
+        self._weight_mode_cache[group_key] = (mode_weight, mode_unit, dominance_ratio)
+        return self._weight_mode_cache[group_key]
+
+    def _normalize_weight_outlier(self, record, weight_val: str, units_val: str) -> Tuple[str, str]:
+        if not weight_val or self.df is None or getattr(self.df, 'empty', True):
+            return weight_val, units_val
+
+        current_weight = self._parse_weight_to_float(weight_val)
+        if current_weight is None:
+            return weight_val, units_val
+
+        original_units_value = record.get('Units') or record.get('Weight Unit* (grams/gm or ounces/oz)', '')
+        if original_units_value and str(original_units_value).strip().lower() in {'oz', 'ounce', 'ounces'}:
+            return weight_val, units_val
+
+        product_name = record.get('Product Name*', '') or record.get('ProductName', '')
+        product_brand = record.get('Product Brand', '') or record.get('ProductBrand', '')
+        product_type = record.get('Product Type*', '') or record.get('ProductType', '')
+
+        group_key = self._build_weight_group_key(product_name, product_brand, product_type)
+        if not group_key:
+            return weight_val, units_val
+
+        mode_info = self._get_weight_mode_info(group_key)
+        if not mode_info:
+            return weight_val, units_val
+
+        mode_weight, mode_unit, dominance_ratio = mode_info
+        if dominance_ratio < 0.5:
+            return weight_val, units_val
+
+        if abs(mode_weight - current_weight) <= 0.1:
+            return weight_val, units_val
+
+        preferred_unit = units_val or mode_unit or ''
+        preferred_unit = preferred_unit.lower().strip()
+        if preferred_unit in {'ounces', 'ounce'}:
+            preferred_unit = 'oz'
+        elif preferred_unit in {'grams', 'gram'}:
+            preferred_unit = 'g'
+
+        if mode_weight.is_integer():
+            normalized_weight_str = f"{int(mode_weight)}"
+        else:
+            normalized_weight_str = f"{mode_weight:.2f}".rstrip("0").rstrip(".")
+
+        self.logger.info(
+            f"WEIGHT NORMALIZATION: '{product_name}' outlier {current_weight}{units_val or ''} "
+            f"-> {normalized_weight_str}{preferred_unit} (dominance {dominance_ratio:.0%})"
+        )
+
+        return normalized_weight_str, preferred_unit
+
     def _format_weight_units(self, record, excel_priority=True):
-        # --- Outlier Fix Logic ---
-        # If self.df exists, find similar products and their weights
-        product_brand = record.get('ProductBrand', '')
-        most_common_weight = None
-        if hasattr(self, 'df') and self.df is not None and product_brand:
-            # Find similar products by type and brand
-            sim_df = self.df[(self.df['Product Type*'].str.lower() == product_type) & (self.df['ProductBrand'] == product_brand)]
-            weights = sim_df['Weight*'].dropna().astype(str)
-            weights = [w for w in weights if w not in ['', 'nan', 'NaN']]
-            if weights:
-                # Find most common weight
-                from collections import Counter
-                most_common_weight, _ = Counter(weights).most_common(1)[0]
-                # If current weight is not the most common, treat as outlier
-                if weight_val not in weights or Counter(weights)[weight_val] == 1:
-                    self.logger.info(f"OUTLIER FIX: '{product_name}' weight '{weight_val}' replaced with most common '{most_common_weight}' for type '{product_type}' and brand '{product_brand}'")
-                    weight_val = most_common_weight
         # Handle pandas Series and NA values properly
         def safe_get_value(value, default=''):
             if value is None or pd.isna(value):
@@ -4370,6 +4542,8 @@ class ExcelProcessor:
             weight_val = db_weight if db_weight and db_weight not in ['', 'nan', 'NaN'] else ''
             units_val = db_units if db_units and db_units not in ['', 'nan', 'NaN'] else ''
             self.logger.debug(f"WEIGHT FALLBACK: Using database weight '{db_weight}' for '{product_name}' (Excel data missing)")
+
+        weight_val, units_val = self._normalize_weight_outlier(record, weight_val, units_val)
         
         # Debug: Log first few records
         if hasattr(self, '_debug_count'):

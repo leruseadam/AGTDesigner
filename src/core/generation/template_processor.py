@@ -1009,11 +1009,8 @@ class TemplateProcessor:
             
             return final_doc
         except Exception as e:
-            self.logger.error(f"Error processing records: {e}")
-            return None
-        except Exception as e:
-            self.logger.error(f"Error processing records: {e}")
-            return None
+            self.logger.error(f"Error processing records: {e}\n{traceback.format_exc()}")
+            raise
 
     def _process_chunk(self, chunk):
         """Process a chunk of records with timeout protection."""
@@ -1141,7 +1138,6 @@ class TemplateProcessor:
             
             # FINAL MARKER CLEANUP: Remove any lingering *_START and *_END markers AFTER font sizing has been applied
             # This cleanup should only remove markers that weren't processed by the font sizing system
-            import re
             marker_pattern = re.compile(r'\b\w+_(START|END)\b')
             prefix_pattern = re.compile(r'^(?:[A-Z0-9_]+_)+')
             
@@ -1276,6 +1272,62 @@ class TemplateProcessor:
         
         # Fast dictionary copy
         label_context = dict(record)
+        has_cbd_blend_strain = False
+        cbd_signal_tokens = ['CBD', 'CBG', 'CBN', 'CBC']
+
+        def _contains_cbd_signal(value):
+            if not value:
+                return False
+            text_upper = str(value).upper()
+            return any(token in text_upper for token in cbd_signal_tokens)
+
+        cbd_signal_candidates = [
+            label_context.get('ProductStrain') or record.get('ProductStrain') or record.get('Product Strain'),
+            label_context.get('ProductName') or record.get('ProductName') or record.get('Product Name*'),
+            label_context.get('Description') or record.get('Description'),
+            label_context.get('Product Brand') or record.get('Product Brand') or record.get('ProductBrand'),
+            label_context.get('Ratio_or_THC_CBD') or record.get('Ratio_or_THC_CBD') or record.get('Ratio'),
+            label_context.get('Lineage') or record.get('Lineage'),
+            record.get('Product Type*'),
+            record.get('ProductType')
+        ]
+        if any(_contains_cbd_signal(candidate) for candidate in cbd_signal_candidates):
+            has_cbd_blend_strain = True
+        else:
+            ratio_pattern = re.compile(r'\b\d+\s*:\s*\d+(?:\s*:\s*\d+)?\b')
+            ratio_sources = [
+                record.get('ProductName') or record.get('Product Name*'),
+                record.get('Description'),
+                record.get('Ratio_or_THC_CBD'),
+                record.get('Ratio'),
+                record.get('JointRatio'),
+                record.get('Joint Ratio')
+            ]
+            if any(ratio_pattern.search(str(source)) for source in ratio_sources if source):
+                has_cbd_blend_strain = True
+        
+        if has_cbd_blend_strain:
+            current_strain_value = (
+                label_context.get('ProductStrain')
+                or record.get('ProductStrain')
+                or record.get('Product Strain')
+                or ''
+            )
+            current_strain_clean = str(current_strain_value).strip()
+            if not current_strain_clean or current_strain_clean.upper() in {'MIXED', 'CBD', 'CBD BLEND', 'N/A', 'NONE', 'NULL'}:
+                cbd_blend_value = 'CBD Blend'
+                label_context['ProductStrain'] = cbd_blend_value
+                label_context['Product Strain'] = cbd_blend_value
+                record['ProductStrain'] = cbd_blend_value
+                record['Product Strain'] = cbd_blend_value
+                self.logger.info(f"CBD BLEND STRAIN ENFORCEMENT: Set ProductStrain to '{cbd_blend_value}' for '{product_name}'")
+            elif current_strain_clean.upper() == 'CBD BLEND':
+                # Normalize capitalization
+                cbd_blend_value = 'CBD Blend'
+                label_context['ProductStrain'] = cbd_blend_value
+                label_context['Product Strain'] = cbd_blend_value
+                record['ProductStrain'] = cbd_blend_value
+                record['Product Strain'] = cbd_blend_value
         
         # CRITICAL FIX: Double-check lineage from database to ensure it's up-to-date
         # This is a safety net to catch any cases where the record lineage wasn't updated
@@ -1496,8 +1548,6 @@ class TemplateProcessor:
                     clean_weight = weight_units.strip()
                     
                     # CRITICAL FIX: Clean weight duplication patterns directly in template processor
-                    import re
-                    
                     # Pattern 1: Decimal duplication like "0.50.5oz" -> "0.5oz"
                     decimal_dup_pattern = r'^(\d+\.\d{1,2})\1(oz|g|mg|kg|lb|lbs)$'
                     match1 = re.match(decimal_dup_pattern, clean_weight, re.IGNORECASE)
@@ -1853,7 +1903,6 @@ class TemplateProcessor:
                     clean_brand_text = str(brand_center_text).strip().upper()
                     
                     # Only remove corrupted patterns if they exist, but preserve the actual brand name
-                    import re
                     # CRITICAL FIX: Add debugging to see what's happening to brand text
                     self.logger.info(f"🔍 BRAND CLEANING DEBUG: Original brand text: '{clean_brand_text}'")
                     
@@ -1965,10 +2014,34 @@ class TemplateProcessor:
                     # CRITICAL FIX: Add debugging to see final brand text
                     self.logger.info(f"🔍 BRAND CLEANING DEBUG: Final brand text: '{final_brand_text}' (length: {len(final_brand_text)})")
                     
-                    label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{final_brand_text}PRODUCTBRAND_CENTER_END"
-                    # Also populate ProductBrand fields for templates that reference ProductBrand instead of Lineage
+                    # Preserve the original lineage value (if any) so we can drive color assignment later
+                    lineage_for_color_source = (
+                        label_context.get('Lineage') or
+                        record.get('Lineage') or
+                        ''
+                    )
+                    if is_already_wrapped(lineage_for_color_source, 'LINEAGE'):
+                        lineage_for_color_source = unwrap_marker(lineage_for_color_source, 'LINEAGE')
+                    lineage_for_color = str(lineage_for_color_source).strip().upper()
+                    
+                    if not lineage_for_color:
+                        # Fall back to CBD lineage when we have CBD signal, otherwise treat as MIXED (blue)
+                        lineage_for_color = 'CBD' if has_cbd_blend_strain else 'MIXED'
+                    
+                    lineage_hint_token = f"__LINEAGE_HINT_{lineage_for_color}__"
+                    lineage_content = (
+                        f"{lineage_hint_token}PRODUCTBRAND_CENTER_START{final_brand_text}PRODUCTBRAND_CENTER_END"
+                    )
+                    
+                    label_context['Lineage'] = lineage_content
                     label_context['ProductBrand'] = ""
-                    label_context['ProductBrand_Center'] = ""
+                    label_context['ProductBrand_Center'] = (
+                        f"PRODUCTBRAND_CENTER_START{final_brand_text}PRODUCTBRAND_CENTER_END"
+                    )
+                    self.logger.debug(
+                        f"DOUBLE TEMPLATE LINEAGE COLOR: Brand '{final_brand_text}' -> lineage '{lineage_for_color}' "
+                        f"(product_type='{product_type}')"
+                    )
                     
                     self.logger.info(f"🎯 DOUBLE TEMPLATE BRAND FIX: Set Lineage to '{final_brand_text}' for double template (with markers)")
                 else:
@@ -1976,7 +2049,6 @@ class TemplateProcessor:
                     # CRITICAL FIX: Clean brand_center_text to prevent corruption
                     clean_brand_text = str(brand_center_text).strip().upper()
                     # Remove any corrupted marker patterns that might already be present
-                    import re
                     clean_brand_text = re.sub(r'PRODUCTSTRR_STARTCONSTELL.*', '', clean_brand_text)
                     clean_brand_text = re.sub(r'PRODUCTBRAND_CENTER_START.*', '', clean_brand_text)
                     clean_brand_text = re.sub(r'CONSTELLATION\$.*', '', clean_brand_text)
@@ -2115,6 +2187,9 @@ class TemplateProcessor:
         
         if should_process_strain:
             product_strain = record.get('ProductStrain') or record.get('Product Strain', '')
+            product_strain_upper = str(product_strain).upper()
+            if any(token in product_strain_upper for token in ['CBD', 'CBG', 'CBN', 'CBC']):
+                has_cbd_blend_strain = True
             
             self.logger.debug(f"STRAIN OVERRIDE DEBUG: Entering strain handling for {self.template_type}")
             self.logger.debug(f"STRAIN OVERRIDE DEBUG: Current ProductStrain in context: '{label_context.get('ProductStrain', 'NOT_SET')}'")
@@ -2132,7 +2207,8 @@ class TemplateProcessor:
 
         # Double template should never display ProductStrain text (prevent 12pt strain labels)
         if self.template_type == 'double':
-            label_context['ProductStrain'] = ''
+            if not has_cbd_blend_strain:
+                label_context['ProductStrain'] = ''
 
         # Lineage logic is now handled earlier in the method for both classic and non-classic types
 
@@ -2617,7 +2693,6 @@ class TemplateProcessor:
         """CREATIVE FIX: Aggressively force bold formatting on DescAndWeight content."""
         from docx.oxml import OxmlElement
         from docx.oxml.ns import qn
-        import re
         
         # Pattern to identify DescAndWeight content (product name with weight)
         descandweight_pattern = r'^[^-]+ - \d+\.?\d*(oz|g|mg|kg|lb|lbs)$'
@@ -3062,8 +3137,6 @@ class TemplateProcessor:
         This method runs after all other processing to catch any remaining markers.
         """
         try:
-            import re
-            
             # Enhanced patterns to catch all marker variations
             marker_patterns = [
                 r'\b\w+_(START|END)\b',           # Standard markers like PRODUCTBRAND_START
@@ -4534,7 +4607,6 @@ class TemplateProcessor:
     def _clear_empty_cells(self, doc, num_products):
         """Remove extra cells beyond the number of products by clearing unmerged placeholders."""
         try:
-            import re
             from docx.oxml import OxmlElement
             from docx.oxml.ns import qn
             
@@ -4622,8 +4694,6 @@ class TemplateProcessor:
     def _remove_unmerged_placeholders(self, doc, num_products):
         """Remove unmerged placeholders from cells beyond the number of products."""
         try:
-            import re
-            
             # CRITICAL FIX: Multiple tables represent multiple pages - DO NOT REMOVE THEM!
             tables = doc.tables
             if len(tables) > 1:
