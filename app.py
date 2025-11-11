@@ -61,20 +61,20 @@ if PYTHONANYWHERE_OPTIMIZATION:
     SEND_FILE_MAX_AGE_DEFAULT = 180  # 3 minutes instead of 5 minutes
     PERMANENT_SESSION_LIFETIME = 900  # 15 minutes instead of 30 minutes
     
-    # Memory optimization settings
-    MAX_MEMORY_MB = 150  # Maximum memory usage
-    CACHE_SIZE_LIMIT = 50  # Reduced cache size
-    BATCH_SIZE_LIMIT = 250  # Smaller batch sizes
+    # Memory optimization settings (allow environment overrides for hosted deployments)
+    MAX_MEMORY_MB = int(os.environ.get('MAX_MEMORY_MB', '425'))  # Allow up to ~425MB unless overridden
+    CACHE_SIZE_LIMIT = int(os.environ.get('CACHE_SIZE_LIMIT', '50'))  # Reduced cache size
+    BATCH_SIZE_LIMIT = int(os.environ.get('BATCH_SIZE_LIMIT', '250'))  # Smaller batch sizes
 else:
     # Local development settings
     MAX_CONTENT_LENGTH = 25 * 1024 * 1024  # 25MB for local development
     SEND_FILE_MAX_AGE_DEFAULT = 300
     PERMANENT_SESSION_LIFETIME = 1800
     
-    # More generous memory settings for local
-    MAX_MEMORY_MB = 500
-    CACHE_SIZE_LIMIT = 100
-    BATCH_SIZE_LIMIT = 500
+    # More generous memory settings for local (still overridable)
+    MAX_MEMORY_MB = int(os.environ.get('MAX_MEMORY_MB', '500'))
+    CACHE_SIZE_LIMIT = int(os.environ.get('CACHE_SIZE_LIMIT', '100'))
+    BATCH_SIZE_LIMIT = int(os.environ.get('BATCH_SIZE_LIMIT', '500'))
 
 # Memory monitoring and optimization
 def get_memory_usage():
