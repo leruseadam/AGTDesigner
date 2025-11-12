@@ -2,6 +2,10 @@
  * Performance optimization utilities for the frontend
  */
 
+// Wrap in IIFE to prevent duplicate declarations if script loads multiple times
+(function() {
+  'use strict';
+
 // Prevent duplicate class declaration
 if (typeof window.PerformanceOptimizer === 'undefined') {
   window.PerformanceOptimizer = class PerformanceOptimizer {
@@ -494,3 +498,5 @@ document.head.appendChild(performanceStyle);
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = PerformanceOptimizer;
 }
+
+})(); // End IIFE

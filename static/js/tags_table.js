@@ -6,7 +6,8 @@ if (typeof window.CLASSIC_TYPES === 'undefined') {
   ];
 }
 // Use window.CLASSIC_TYPES directly to avoid duplicate const declaration
-const CLASSIC_TYPES = window.CLASSIC_TYPES;
+// Reference window.CLASSIC_TYPES directly instead of creating a const
+// This prevents "Identifier 'CLASSIC_TYPES' has already been declared" errors
 
 // Lineage abbreviation mapping (matching Python version)
 const ABBREVIATED_LINEAGE = {
@@ -100,7 +101,7 @@ class TagsTable {
     }
     
     const selectedProductType = productTypeFilter.value.toLowerCase().trim();
-    const isClassicType = CLASSIC_TYPES.includes(selectedProductType);
+    const isClassicType = window.CLASSIC_TYPES.includes(selectedProductType);
     
     if (isClassicType) {
       brandHeader.textContent = 'Lineage';
@@ -523,7 +524,7 @@ class TagsTable {
       // Determine the header text based on current product type
       const productTypeFilter = document.getElementById('productTypeFilter');
       const selectedProductType = productTypeFilter?.value?.toLowerCase().trim() || '';
-      const isClassicType = CLASSIC_TYPES.includes(selectedProductType);
+      const isClassicType = window.CLASSIC_TYPES.includes(selectedProductType);
       const brandHeaderText = isClassicType ? 'Lineage' : 'Brand';
 
       const tableHtml = `
