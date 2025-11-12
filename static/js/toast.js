@@ -28,4 +28,25 @@ class Toast {
             toast.remove();
         }, 3000);
     }
+    
+    static error(message, options = {}) {
+        return Toast.show('error', message);
+    }
+    
+    static success(message, options = {}) {
+        return Toast.show('success', message);
+    }
+    
+    static info(message, options = {}) {
+        return Toast.show('info', message);
+    }
+    
+    static warning(message, options = {}) {
+        return Toast.show('warning', message);
+    }
+}
+
+// Make Toast available globally
+if (typeof window !== 'undefined') {
+    window.Toast = Toast;
 }

@@ -133,6 +133,18 @@ if (typeof Toast === 'undefined') {
         // Don't show alerts for success/info messages to prevent popups
         verboseLog(`Toast (${type}): ${msg}`);
       }
+    },
+    error: (msg, options) => {
+      alert('Error: ' + msg);
+    },
+    success: (msg, options) => {
+      verboseLog(`Toast (success): ${msg}`);
+    },
+    info: (msg, options) => {
+      verboseLog(`Toast (info): ${msg}`);
+    },
+    warning: (msg, options) => {
+      alert('Warning: ' + msg);
     }
   };
 }
