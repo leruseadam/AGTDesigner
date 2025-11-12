@@ -7747,8 +7747,8 @@ def get_available_tags():
                             ray_count = sum(1 for tag in database_tags if 'Ray' in tag.get('Product Name*', ''))
                             hustler_count = sum(1 for tag in database_tags if 'Hustler' in tag.get('Product Name*', ''))
                             logging.info(f"Database products - Ray: {ray_count}, Hustler: {hustler_count}")
-                    else:
-                        logging.error(f"Database file does not exist: {product_db.db_path}")
+                else:
+                    logging.error(f"Database file does not exist: {product_db.db_path}")
             else:
                 logging.error(f"product_db is None or False - cannot query database")
         except Exception as e:
