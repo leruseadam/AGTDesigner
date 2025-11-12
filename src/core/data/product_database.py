@@ -897,8 +897,10 @@ class ProductDatabase:
                     strain_id, existing_lineage, occurrences, confidence, existing_sovereign = existing
                     new_occurrences = occurrences + 1
                     
-                    # CRITICAL: If sovereign lineage is set, DON'T update canonical lineage from Excel
-                    if existing_sovereign:
+                    # Manual overrides (sovereign=True) should ALWAYS update canonical + sovereign lineage
+                    sovereign_override = bool(sovereign and lineage)
+                    
+                    if existing_sovereign and not sovereign_override:
                         logger.info(f"🔒 SOVEREIGN PROTECTION: Strain '{strain_name}' has sovereign lineage '{existing_sovereign}' - ignoring Excel lineage update")
                         # Just update occurrence count, don't touch lineage
                         cursor.execute('''
@@ -907,12 +909,12 @@ class ProductDatabase:
                             WHERE id = ?
                         ''', (new_occurrences, current_date, current_date, strain_id))
                     else:
-                        # No sovereign lineage - update canonical lineage from Excel as normal
+                        # Either no sovereign lineage yet, or we're intentionally overriding it
                         if lineage and lineage != existing_lineage:
                             cursor.execute('''
                                 INSERT INTO lineage_history (strain_id, old_lineage, new_lineage, change_date, change_reason)
                                 VALUES (?, ?, ?, ?, ?)
-                            ''', (strain_id, existing_lineage, lineage, current_date, 'New data upload'))
+                            ''', (strain_id, existing_lineage, lineage, current_date, 'Manual lineage update' if sovereign_override else 'New data upload'))
                             cursor.execute('''
                                 UPDATE strains 
                                 SET canonical_lineage = ?, total_occurrences = ?, last_seen_date = ?, updated_at = ?
@@ -935,8 +937,9 @@ class ProductDatabase:
                     # Sovereign lineage update (always applies if sovereign=True)
                     if sovereign and lineage:
                         cursor.execute('''
-                            UPDATE strains SET sovereign_lineage = ? WHERE id = ?
-                        ''', (lineage, strain_id))
+                            UPDATE strains SET sovereign_lineage = ?, canonical_lineage = COALESCE(?, canonical_lineage), updated_at = ?
+                            WHERE id = ?
+                        ''', (lineage, lineage, current_date, strain_id))
                         
                         # Notify all sessions of the sovereign lineage update (non-blocking)
                         try:
