@@ -450,8 +450,8 @@ if (typeof window.PerformanceOptimizer !== 'undefined') {
 }
 
 // Add CSS for loading spinner
-const style = document.createElement('style');
-style.textContent = `
+const performanceStyle = document.createElement('style');
+performanceStyle.textContent = `
     .loading-spinner .spinner {
         border: 4px solid #f3f3f3;
         border-top: 4px solid #3498db;
@@ -488,7 +488,7 @@ style.textContent = `
         color: #dc3545;
     }
 `;
-document.head.appendChild(style);
+document.head.appendChild(performanceStyle);
 
 // Export for use in other scripts
 if (typeof module !== 'undefined' && module.exports) {

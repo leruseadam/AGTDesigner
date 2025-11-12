@@ -798,11 +798,14 @@ document.addEventListener('DOMContentLoaded', () => {
     };
   }
 
-  document.getElementById('addSelectedTagsBtn').addEventListener('click', function() {
-    const checked = document.querySelectorAll('#availableTags .tag-checkbox:checked');
-    const tagsToMove = Array.from(checked).map(cb => cb.value);
-    TagManager.moveToSelected(tagsToMove);
-  });
+  const addSelectedTagsBtn = document.getElementById('addSelectedTagsBtn');
+  if (addSelectedTagsBtn) {
+    addSelectedTagsBtn.addEventListener('click', function() {
+      const checked = document.querySelectorAll('#availableTags .tag-checkbox:checked');
+      const tagsToMove = Array.from(checked).map(cb => cb.value);
+      TagManager.moveToSelected(tagsToMove);
+    });
+  }
 
   document.querySelectorAll('select').forEach(sel => {
     // REMOVE all JS that sets style.width, style.minWidth, style.maxWidth, style.fontSize, style.paddingLeft, style.paddingRight for lineage dropdowns

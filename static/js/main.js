@@ -2317,9 +2317,9 @@ const TagManager = {
         // Keep loading indicator visible while building tags - don't clear yet
         // We'll replace it with actual tags once they're built
         // Only clear if there's no loading indicator
-        const currentContent = availableTagsContainer.innerHTML.trim();
-        const hasLoadingIndicator = currentContent.includes('spinner-border') || currentContent.includes('Loading');
-        if (!hasLoadingIndicator) {
+        const currentContent2 = availableTagsContainer.innerHTML.trim();
+        const hasLoadingIndicator2 = currentContent2.includes('spinner-border') || currentContent2.includes('Loading');
+        if (!hasLoadingIndicator2) {
             // Show loading indicator if not already showing
             availableTagsContainer.innerHTML = `
                 <div class="text-center py-4">
