@@ -934,16 +934,29 @@ def get_excel_processor():
                     logging.info(f"🔄 FORCE RELOAD: Session has different file ({session_file_path}) than loaded ({current_file})")
                     _excel_processor = None  # Force recreation with new file
             
+            # Determine the active store for this request (if any)
+            selected_store = None
+            try:
+                selected_store = get_current_store_name()
+            except Exception as store_err:
+                logging.debug(f"Could not determine current store: {store_err}")
+            if not selected_store:
+                selected_store = 'AGT_Bothell'
+            
+            processor_store = selected_store or 'AGT_Bothell'
+            
             if _excel_processor is None:
-                # Get the current store name from session, with fallback for startup
-                from flask import session
-                try:
-                    # Store context removed - using single database
-                    pass
-                except RuntimeError:
-                    # No active request context during startup, use default
-                    pass
-                _excel_processor = ExcelProcessor()
+                # Create processor with store-aware configuration so lineage updates persist per store
+                _excel_processor = ExcelProcessor(store_name=processor_store)
+            else:
+                # If the active store changed, update the processor's store context
+                current_processor_store = getattr(_excel_processor, '_store_name', None)
+                if current_processor_store != processor_store:
+                    logging.info(f"🔄 ExcelProcessor store context update: '{current_processor_store}' → '{processor_store}'")
+                    _excel_processor._store_name = processor_store
+                    # Clear caches tied to previous store to avoid mixing data
+                    if hasattr(_excel_processor, '_invalidate_caches'):
+                        _excel_processor._invalidate_caches()
                 
                 # Enable product database integration by default
                 if hasattr(_excel_processor, 'enable_product_db_integration'):
@@ -1856,6 +1869,19 @@ def get_session_excel_processor():
             # Disable product database integration for better performance
             if hasattr(g.excel_processor, 'enable_product_db_integration'):
                 g.excel_processor.enable_product_db_integration(False)
+            
+            # Ensure processor store context matches the active store selection
+            try:
+                active_store = get_current_store_name()
+            except Exception:
+                active_store = None
+            if active_store:
+                current_store = getattr(g.excel_processor, '_store_name', None)
+                if current_store != active_store:
+                    logging.info(f"🔄 Session ExcelProcessor store context update: '{current_store}' → '{active_store}'")
+                    g.excel_processor._store_name = active_store
+                    if hasattr(g.excel_processor, '_invalidate_caches'):
+                        g.excel_processor._invalidate_caches()
             
             # CRITICAL FIX: Check if we have an uploaded file in session
             session_file_path = session.get('file_path')
