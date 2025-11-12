@@ -7884,6 +7884,34 @@ def get_available_tags():
         logging.error(f"❌ Error getting available tags after {elapsed:.1f}ms: {str(e)}")
         logging.error(traceback.format_exc())
         
+        # EMERGENCY FALLBACK: Try database directly
+        try:
+            store_name = get_current_store_name()
+            product_db = get_product_database(store_name)
+            if product_db:
+                logging.info("🔄 EMERGENCY: Attempting direct database query after error...")
+                database_tags = product_db.get_all_products()
+                if database_tags and len(database_tags) > 0:
+                    all_tags = []
+                    for db_tag in database_tags[:5000]:  # Limit for emergency
+                        try:
+                            processed_db_tag = process_database_product_for_api(db_tag)
+                            all_tags.append(processed_db_tag)
+                        except:
+                            all_tags.append(db_tag)
+                    logging.info(f"✅ EMERGENCY FALLBACK: Returning {len(all_tags)} tags from database")
+                    resp = jsonify({
+                        'tags': all_tags,
+                        'total_count': len(all_tags),
+                        'source': 'error-fallback',
+                        'warning': f'Primary method failed, using database fallback: {str(e)}'
+                    })
+                    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+                    resp.headers['Pragma'] = 'no-cache'
+                    return resp
+        except Exception as fallback_error:
+            logging.error(f"❌ Emergency fallback also failed: {fallback_error}")
+        
         # Try to return a basic fallback response to prevent total failure
         try:
             excel_processor = get_excel_processor()
