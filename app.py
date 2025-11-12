@@ -7652,8 +7652,8 @@ def get_available_tags():
                     import os
                     if os.path.exists(product_db.db_path):
                         logging.info(f"Database file exists, size: {os.path.getsize(product_db.db_path)} bytes")
-                    with sqlite3.connect(product_db.db_path) as conn:
-                        cursor = conn.cursor()
+                        with sqlite3.connect(product_db.db_path) as conn:
+                            cursor = conn.cursor()
                         
                         # First check if products table exists
                         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
