@@ -3216,18 +3216,26 @@ class ProductDatabase:
             
             # Update the product with new data
             # CRITICAL FIX: Check for sovereign_lineage FIRST - it takes absolute priority
-            cursor.execute('SELECT strain_id FROM products WHERE id = ?', (product_id,))
-            strain_id_result = cursor.fetchone()
-            strain_id = strain_id_result[0] if strain_id_result else None
-            
+            # Only check strain_id if the column exists in the database
+            strain_id = None
             sovereign_lineage = None
-            if strain_id:
-                # Check if this strain has a manually-set sovereign_lineage
-                cursor.execute('SELECT sovereign_lineage FROM strains WHERE id = ?', (strain_id,))
-                sovereign_result = cursor.fetchone()
-                if sovereign_result and sovereign_result[0]:
-                    sovereign_lineage = str(sovereign_result[0]).strip()
-                    logger.info(f"🔒 SOVEREIGN LINEAGE: Found manually-set lineage '{sovereign_lineage}' for product ID {product_id}")
+            
+            if self._products_has_column('strain_id'):
+                try:
+                    cursor.execute('SELECT strain_id FROM products WHERE id = ?', (product_id,))
+                    strain_id_result = cursor.fetchone()
+                    strain_id = strain_id_result[0] if strain_id_result else None
+                    
+                    if strain_id:
+                        # Check if this strain has a manually-set sovereign_lineage
+                        cursor.execute('SELECT sovereign_lineage FROM strains WHERE id = ?', (strain_id,))
+                        sovereign_result = cursor.fetchone()
+                        if sovereign_result and sovereign_result[0]:
+                            sovereign_lineage = str(sovereign_result[0]).strip()
+                            logger.info(f"🔒 SOVEREIGN LINEAGE: Found manually-set lineage '{sovereign_lineage}' for product ID {product_id}")
+                except Exception as strain_error:
+                    logger.warning(f"Could not check strain_id for product {product_id}: {strain_error}")
+                    strain_id = None
             
             # If sovereign lineage exists, USE IT and ignore Excel lineage
             if sovereign_lineage:

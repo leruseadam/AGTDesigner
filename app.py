@@ -1424,7 +1424,7 @@ def create_app():
     def handle_500_error(e):
         """Handle 500 errors and return JSON for API routes."""
         import traceback
-        from flask import Response
+        from flask import Response, request, has_request_context
         
         # Always try to return JSON for API routes
         try:
@@ -1440,30 +1440,41 @@ def create_app():
                 pass  # Don't fail if logging fails
             
             # Check if this is an API route - default to True if we can't determine
-            is_api_route = True  # Default to JSON response
+            is_api_route = True  # Default to JSON response for safety
+            request_path = 'unknown'
             try:
-                if hasattr(request, 'path') and request.path:
+                if has_request_context() and hasattr(request, 'path') and request.path:
+                    request_path = request.path
                     is_api_route = request.path.startswith('/api/')
-            except:
-                pass  # If we can't determine, assume it's an API route
+                # Also check URL rule if available
+                elif has_request_context() and hasattr(request, 'url_rule') and request.url_rule:
+                    request_path = str(request.url_rule)
+                    is_api_route = '/api/' in request_path
+            except Exception as path_error:
+                # If we can't determine, assume it's an API route to be safe
+                logging.debug(f"Could not determine if API route: {path_error}")
+                is_api_route = True
             
-            # Always return JSON for API routes, or if we can't determine
+            # Always return JSON for API routes, or if we can't determine (default to JSON)
             if is_api_route:
                 try:
+                    # Escape error message to prevent JSON injection
+                    safe_error_msg = error_msg.replace('"', '\\"').replace('\n', '\\n').replace('\r', '\\r')
                     return jsonify({
                         'success': False,
-                        'error': error_msg,
+                        'error': safe_error_msg,
                         'error_type': error_type,
-                        'path': request.path if hasattr(request, 'path') and request.path else 'unknown'
+                        'path': request_path
                     }), 500
-                except:
+                except Exception as jsonify_error:
                     # If jsonify fails, return plain JSON string
                     try:
-                        error_json = f'{{"success": false, "error": "{error_msg}", "error_type": "{error_type}"}}'
+                        safe_error_msg = error_msg.replace('"', '\\"').replace('\n', '\\n').replace('\r', '\\r')
+                        error_json = f'{{"success": false, "error": "{safe_error_msg}", "error_type": "{error_type}", "path": "{request_path}"}}'
                         return Response(error_json, status=500, mimetype='application/json')
-                    except:
+                    except Exception as json_error:
                         # Last resort: return minimal JSON
-                        return Response('{"success": false, "error": "Internal server error"}', status=500, mimetype='application/json')
+                        return Response('{"success": false, "error": "Internal server error", "error_type": "HandlerError"}', status=500, mimetype='application/json')
             
             # For non-API routes, re-raise to use Flask's default handler
             raise e
@@ -1472,13 +1483,15 @@ def create_app():
             # If error handler itself fails, return minimal JSON
             try:
                 logging.error(f"❌ CRITICAL: Error handler failed: {handler_error}")
+                import traceback
+                logging.error(f"Error handler traceback: {traceback.format_exc()}")
             except:
                 pass
             try:
-                return Response('{"success": false, "error": "Critical error occurred"}', status=500, mimetype='application/json')
+                return Response('{"success": false, "error": "Critical error occurred", "error_type": "HandlerError"}', status=500, mimetype='application/json')
             except:
                 # Ultimate fallback - this should never happen
-                return Response('{}', status=500, mimetype='application/json')
+                return Response('{"success": false, "error": "Unknown error"}', status=500, mimetype='application/json')
     
     
     # Check if we're in development mode
@@ -8244,8 +8257,19 @@ def update_lineage():
                 return jsonify({
                     'success': False,
                     'error': f'Database not available for store {store_name}',
-                    'store_name': store_name
+                    'store_name': store_name,
+                    'error_type': 'DatabaseNotFoundError'
                 }), 500
+        except FileNotFoundError as file_error:
+            logging.error(f"❌ LINEAGE UPDATE: Database file not found for store '{store_name}': {file_error}")
+            import traceback
+            logging.error(f"FileNotFoundError traceback: {traceback.format_exc()}")
+            return jsonify({
+                'success': False,
+                'error': f'Database file not found for store {store_name}. Please upload the database file.',
+                'error_type': 'FileNotFoundError',
+                'store_name': store_name
+            }), 500
         except Exception as db_init_error:
             logging.error(f"❌ LINEAGE UPDATE: Failed to initialize database for store '{store_name}': {db_init_error}")
             import traceback
@@ -8253,6 +8277,7 @@ def update_lineage():
             return jsonify({
                 'success': False,
                 'error': f'Failed to initialize database: {str(db_init_error)}',
+                'error_type': type(db_init_error).__name__,
                 'store_name': store_name
             }), 500
         
@@ -8318,6 +8343,7 @@ def update_lineage():
         
         try:
             import sqlite3
+            import time as time_module
             
             # CRITICAL FIX: Safely get strain name with error handling
             strain_name = None
@@ -8332,8 +8358,53 @@ def update_lineage():
                 logging.warning(f"⚠️  Could not get strain name for product '{tag_name}': {strain_error}")
                 strain_name = None
             
-            conn = product_db._get_connection()
-            cursor = conn.cursor()
+            # CRITICAL FIX: Retry logic for database locks with exponential backoff
+            max_retries = 5
+            retry_delay = 0.1
+            conn = None
+            cursor = None
+            
+            for attempt in range(max_retries):
+                try:
+                    conn = product_db._get_connection()
+                    # Set timeout to prevent indefinite waiting
+                    conn.execute("PRAGMA busy_timeout = 5000")  # 5 second timeout
+                    cursor = conn.cursor()
+                    
+                    # Use BEGIN IMMEDIATE to get an immediate lock
+                    try:
+                        cursor.execute("BEGIN IMMEDIATE")
+                    except sqlite3.OperationalError as begin_error:
+                        if "cannot start a transaction within a transaction" in str(begin_error).lower():
+                            # Already in a transaction, continue
+                            pass
+                        else:
+                            raise
+                    
+                    # Break out of retry loop if we got the connection and lock
+                    break
+                    
+                except sqlite3.OperationalError as lock_error:
+                    if "database is locked" in str(lock_error).lower() and attempt < max_retries - 1:
+                        logging.warning(f"⚠️  Database locked (attempt {attempt + 1}/{max_retries}), retrying in {retry_delay}s...")
+                        if conn:
+                            try:
+                                conn.close()
+                            except:
+                                pass
+                        time_module.sleep(retry_delay)
+                        retry_delay *= 2  # Exponential backoff
+                        continue
+                    else:
+                        # Last attempt or different error - raise it
+                        logging.error(f"❌ Database lock error after {attempt + 1} attempts: {lock_error}")
+                        raise
+                except Exception as conn_error:
+                    logging.error(f"❌ Error getting database connection: {conn_error}")
+                    raise
+            
+            if not conn or not cursor:
+                raise Exception("Failed to get database connection after retries")
             
             # CRITICAL FIX: Always update by exact product name FIRST to ensure specific product is updated
             # Then update by vendor+strain to propagate to similar products
@@ -8449,8 +8520,37 @@ def update_lineage():
                     logging.error(f"Strain update error traceback: {traceback.format_exc()}")
             
             # SINGLE COMMIT for all updates - this should be fast
-            conn.commit()
-            logging.info(f"✅ Transaction committed: {products_updated} products, strain_updated={strain_updated}")
+            # CRITICAL FIX: Retry commit on lock errors
+            commit_success = False
+            for commit_attempt in range(3):
+                try:
+                    conn.commit()
+                    commit_success = True
+                    logging.info(f"✅ Transaction committed: {products_updated} products, strain_updated={strain_updated}")
+                    break
+                except sqlite3.OperationalError as commit_lock_error:
+                    if "database is locked" in str(commit_lock_error).lower() and commit_attempt < 2:
+                        logging.warning(f"⚠️  Commit locked (attempt {commit_attempt + 1}/3), retrying...")
+                        time_module.sleep(0.1 * (commit_attempt + 1))
+                        continue
+                    else:
+                        logging.error(f"❌ Commit failed after retries: {commit_lock_error}")
+                        try:
+                            conn.rollback()
+                        except:
+                            pass
+                        raise
+                except Exception as commit_error:
+                    logging.error(f"❌ Commit error: {commit_error}")
+                    try:
+                        conn.rollback()
+                    except:
+                        pass
+                    raise
+            
+            if not commit_success:
+                raise Exception("Failed to commit transaction after retries")
+            
             cursor.close()
             
             # AFTER COMMIT: If strain doesn't exist, create it (this uses its own transaction)
@@ -8464,30 +8564,28 @@ def update_lineage():
                     logging.warning(f"Could not create strain after commit: {create_error}")
             
         except sqlite3.OperationalError as lock_error:
+            # This should rarely happen now since we retry earlier, but handle it gracefully
             if "database is locked" in str(lock_error).lower():
-                logging.error(f"❌ Database locked during lineage update: {lock_error}")
-                # Retry once after a short delay
-                try:
-                    import time
-                    time.sleep(0.1)
-                    conn = product_db._get_connection()
-                    cursor = conn.cursor()
-                    cursor.execute('''
-                        UPDATE products SET "Lineage" = ? WHERE "Product Name*" = ?
-                    ''', (new_lineage, tag_name))
-                    products_updated = cursor.rowcount
-                    conn.commit()
-                    cursor.close()
-                    logging.info(f"✅ Retry succeeded: Updated {products_updated} products")
-                except Exception as retry_error:
-                    logging.error(f"❌ Retry also failed: {retry_error}")
-                    import traceback
-                    logging.error(f"Retry error traceback: {traceback.format_exc()}")
-                    products_updated = 0
+                logging.error(f"❌ Database locked during lineage update after all retries: {lock_error}")
+                import traceback
+                logging.error(f"Database lock error traceback: {traceback.format_exc()}")
+                # Try to rollback if we have a connection
+                if 'conn' in locals() and conn:
+                    try:
+                        conn.rollback()
+                    except:
+                        pass
+                products_updated = 0
             else:
                 logging.error(f"❌ Database error during lineage update: {lock_error}")
                 import traceback
                 logging.error(f"Database error traceback: {traceback.format_exc()}")
+                # Try to rollback if we have a connection
+                if 'conn' in locals() and conn:
+                    try:
+                        conn.rollback()
+                    except:
+                        pass
                 products_updated = 0
         except sqlite3.Error as db_error:
             # Catch all SQLite errors
