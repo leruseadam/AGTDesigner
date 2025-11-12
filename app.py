@@ -2372,14 +2372,30 @@ def index():
                              uploaded_filename=uploaded_filename)
         
     except Exception as e:
-        logging.error(f"Error in index route: {str(e)}")
+        logging.error(f"❌ CRITICAL ERROR in index route: {str(e)}")
         logging.error(f"Index route traceback: {traceback.format_exc()}")
         # Ensure cache_bust and store variables are always available
-        cache_bust = "v2.0.3"  # Use static version for caching
-        user_has_store = False
-        current_store = None
-        uploaded_filename = ''
-        return render_template('index.html', error=str(e), cache_bust=cache_bust, user_has_store=user_has_store, current_store=current_store, uploaded_filename=uploaded_filename)
+        try:
+            cache_bust = "v2.0.3"  # Use static version for caching
+            user_has_store = False
+            current_store = None
+            uploaded_filename = ''
+            # Try to render template with error message
+            return render_template('index.html', error=str(e), cache_bust=cache_bust, user_has_store=user_has_store, current_store=current_store, uploaded_filename=uploaded_filename)
+        except Exception as template_error:
+            # If template rendering also fails, return a simple error page
+            logging.error(f"❌ Template rendering also failed: {template_error}")
+            return f"""
+            <html>
+            <head><title>Error</title></head>
+            <body>
+                <h1>Application Error</h1>
+                <p>An error occurred while loading the page.</p>
+                <p>Error: {str(e)}</p>
+                <p>Please check the server logs for more details.</p>
+            </body>
+            </html>
+            """, 500
 
 @app.route('/splash')
 def splash():
