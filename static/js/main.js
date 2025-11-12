@@ -2048,10 +2048,8 @@ const TagManager = {
             }
         }
         
-        // Use requestAnimationFrame to ensure smooth DOM updates
-        requestAnimationFrame(() => {
-            this._updateAvailableTags(originalTags, filteredTags);
-        });
+        // Call immediately - no requestAnimationFrame delay for faster rendering
+        this._updateAvailableTags(originalTags, filteredTags);
     }, 300),
 
     // Helpers to preserve scroll position of the available list across re-renders
@@ -2219,19 +2217,17 @@ const TagManager = {
         });
 
         // Atomically replace container content with built tags (this replaces any loading indicator)
-        // Use requestAnimationFrame to ensure smooth transition
-        requestAnimationFrame(() => {
-            availableTagsContainer.innerHTML = '';
-            availableTagsContainer.appendChild(tagList);
-            
-            // After tags are in DOM, restore scroll and initialize
-            this._restoreAvailableScrollPosition(savedScroll);
-            this.updateSelectAllCheckboxes();
-            this.initializeSelectAllCheckbox();
-            
-            // Hide loading splash only after tags actually appear in DOM
-            this._waitForTagsToAppear();
-        });
+        // Replace immediately - no requestAnimationFrame delay
+        availableTagsContainer.innerHTML = '';
+        availableTagsContainer.appendChild(tagList);
+        
+        // After tags are in DOM, restore scroll and initialize
+        this._restoreAvailableScrollPosition(savedScroll);
+        this.updateSelectAllCheckboxes();
+        this.initializeSelectAllCheckbox();
+        
+        // Hide loading splash only after tags actually appear in DOM
+        this._waitForTagsToAppear();
         
         verboseLog('✅ Rendered', tags.length, 'JSON matched tags with HIERARCHY (same as Selected Tags)');
     },
@@ -2447,18 +2443,17 @@ const TagManager = {
             tagList.appendChild(tagElement);
         });
                     // Atomically replace container content with built tags
-                    requestAnimationFrame(() => {
-                        availableTagsContainer.innerHTML = '';
-                        availableTagsContainer.appendChild(tagList);
-                        
-                        // After tags are in DOM, restore scroll and initialize
-                        this._restoreAvailableScrollPosition(savedScroll);
-                        this.updateSelectAllCheckboxes();
-                        this.initializeSelectAllCheckbox();
-                        
-                        // Hide loading splash only after tags actually appear in DOM
-                        this._waitForTagsToAppear();
-                    });
+                    // Replace immediately - no requestAnimationFrame delay
+                    availableTagsContainer.innerHTML = '';
+                    availableTagsContainer.appendChild(tagList);
+                    
+                    // After tags are in DOM, restore scroll and initialize
+                    this._restoreAvailableScrollPosition(savedScroll);
+                    this.updateSelectAllCheckboxes();
+                    this.initializeSelectAllCheckbox();
+                    
+                    // Hide loading splash only after tags actually appear in DOM
+                    this._waitForTagsToAppear();
             return;
         }
         
@@ -2864,8 +2859,20 @@ const TagManager = {
             return;
         }
         
+        // Check immediately first (tags should already be in DOM)
+        const tagItems = availableTagsContainer.querySelectorAll('.tag-item');
+        if (tagItems.length > 0) {
+            // Tags are already visible, hide splash immediately
+            verboseLog(`Tags already in DOM (${tagItems.length} items), hiding splash immediately`);
+            if (this.hideActionSplash) {
+                this.hideActionSplash();
+            }
+            return;
+        }
+        
+        // If not found immediately, check again with minimal delay
         let attempts = 0;
-        const maxAttempts = 50; // 5 seconds max (50 * 100ms)
+        const maxAttempts = 20; // 1 second max (20 * 50ms)
         
         const checkForTags = () => {
             attempts++;
@@ -2884,13 +2891,13 @@ const TagManager = {
                     this.hideActionSplash();
                 }
             } else {
-                // Tags not yet visible, check again
-                setTimeout(checkForTags, 100);
+                // Tags not yet visible, check again with shorter delay
+                setTimeout(checkForTags, 50);
             }
         };
         
-        // Start checking after a brief delay to allow DOM to update
-        setTimeout(checkForTags, 50);
+        // Start checking immediately (no initial delay)
+        checkForTags();
     },
 
     createTagElement(tag, isForSelectedTags = false) {
@@ -5846,7 +5853,22 @@ const TagManager = {
                     
                     // Update available tags
                     AppLoadingSplash.updateProgress(75, 'Processing tags...');
-                    this.debouncedUpdateAvailableTags(data.available_tags, null);
+                    
+                    // Show loading indicator immediately before updating tags
+                    const availableTagsContainer = document.getElementById('availableTags');
+                    if (availableTagsContainer) {
+                        availableTagsContainer.innerHTML = `
+                            <div class="text-center py-4">
+                                <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <p class="mt-2 text-white">Loading tags...</p>
+                            </div>
+                        `;
+                    }
+                    
+                    // For initial load, call directly without debounce for faster rendering
+                    this._updateAvailableTags(data.available_tags, null);
                     
                     // Restore previously selected tags from backend
                     AppLoadingSplash.updateProgress(85, 'Restoring selections...');

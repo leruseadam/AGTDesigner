@@ -1424,37 +1424,62 @@ def create_app():
     def handle_500_error(e):
         """Handle 500 errors and return JSON for API routes."""
         import traceback
-        error_traceback = traceback.format_exc()
-        error_msg = str(e) if e else 'Internal server error'
-        error_type = type(e).__name__ if hasattr(e, '__class__') else 'UnknownError'
+        from flask import Response
         
-        # Log the error
-        logging.error(f"❌ 500 ERROR: {error_type}: {error_msg}")
-        logging.error(f"Full traceback:\n{error_traceback}")
-        
-        # Check if this is an API route
-        if request.path.startswith('/api/'):
-            # Return JSON for API routes
+        # Always try to return JSON for API routes
+        try:
+            error_traceback = traceback.format_exc()
+            error_msg = str(e) if e else 'Internal server error'
+            error_type = type(e).__name__ if hasattr(e, '__class__') else 'UnknownError'
+            
+            # Log the error
             try:
-                return jsonify({
-                    'success': False,
-                    'error': error_msg,
-                    'error_type': error_type,
-                    'path': request.path
-                }), 500
-            except Exception as json_error:
-                # If JSON response fails, return plain text JSON
-                from flask import Response
-                return Response(
-                    f'{{"success": false, "error": "{error_msg}", "error_type": "{error_type}"}}',
-                    status=500,
-                    mimetype='application/json'
-                )
-        else:
-            # For non-API routes, use Flask's default error handling
-            # But we still log it
-            logging.error(f"500 error for non-API route: {request.path}")
-            raise e  # Re-raise to use Flask's default handler
+                logging.error(f"❌ 500 ERROR: {error_type}: {error_msg}")
+                logging.error(f"Full traceback:\n{error_traceback}")
+            except:
+                pass  # Don't fail if logging fails
+            
+            # Check if this is an API route - default to True if we can't determine
+            is_api_route = True  # Default to JSON response
+            try:
+                if hasattr(request, 'path') and request.path:
+                    is_api_route = request.path.startswith('/api/')
+            except:
+                pass  # If we can't determine, assume it's an API route
+            
+            # Always return JSON for API routes, or if we can't determine
+            if is_api_route:
+                try:
+                    return jsonify({
+                        'success': False,
+                        'error': error_msg,
+                        'error_type': error_type,
+                        'path': request.path if hasattr(request, 'path') and request.path else 'unknown'
+                    }), 500
+                except:
+                    # If jsonify fails, return plain JSON string
+                    try:
+                        error_json = f'{{"success": false, "error": "{error_msg}", "error_type": "{error_type}"}}'
+                        return Response(error_json, status=500, mimetype='application/json')
+                    except:
+                        # Last resort: return minimal JSON
+                        return Response('{"success": false, "error": "Internal server error"}', status=500, mimetype='application/json')
+            
+            # For non-API routes, re-raise to use Flask's default handler
+            raise e
+            
+        except Exception as handler_error:
+            # If error handler itself fails, return minimal JSON
+            try:
+                logging.error(f"❌ CRITICAL: Error handler failed: {handler_error}")
+            except:
+                pass
+            try:
+                return Response('{"success": false, "error": "Critical error occurred"}', status=500, mimetype='application/json')
+            except:
+                # Ultimate fallback - this should never happen
+                return Response('{}', status=500, mimetype='application/json')
+    
     
     # Check if we're in development mode
     development_mode = app.config.get('DEVELOPMENT_MODE', False)
@@ -8130,34 +8155,87 @@ def download_processed_excel():
 @app.route('/api/update-lineage', methods=['POST'])
 def update_lineage():
     """Update lineage for a specific product."""
+    # CRITICAL FIX: Wrap entire function to ensure JSON response even on unexpected errors
     request_start_time = time.time()
     try:
         logging.info(f"🔄 LINEAGE UPDATE REQUEST START: {request_start_time}")
-        data = request.get_json()
-        tag_name = data.get('tag_name') or data.get('Product Name*') or data.get('product_name')
-        new_lineage = data.get('lineage')
+        
+        # CRITICAL: Safely parse JSON request with error handling
+        try:
+            if request.is_json:
+                data = request.get_json()
+            else:
+                # Try to get JSON anyway (might be sent as application/json but not detected)
+                try:
+                    data = request.get_json(force=True, silent=True)
+                except:
+                    data = None
+                if not data:
+                    # Fallback to form data
+                    data = request.form.to_dict() if request.form else {}
+        except Exception as json_error:
+            logging.error(f"❌ LINEAGE UPDATE: Failed to parse JSON: {json_error}")
+            import traceback
+            logging.error(f"JSON parse error traceback: {traceback.format_exc()}")
+            return jsonify({
+                'success': False,
+                'error': f'Failed to parse request data: {str(json_error)}',
+                'error_type': 'JsonParseError'
+            }), 400
+        
+        tag_name = data.get('tag_name') or data.get('Product Name*') or data.get('product_name') if data else None
+        new_lineage = data.get('lineage') if data else None
         
         logging.info(f"📝 LINEAGE UPDATE: tag_name='{tag_name}', new_lineage='{new_lineage}'")
         
         if not tag_name or not new_lineage:
             logging.error(f"❌ LINEAGE UPDATE: Missing tag_name or lineage (tag_name={tag_name}, lineage={new_lineage})")
-            return jsonify({'error': 'Missing tag_name or lineage'}), 400
+            return jsonify({
+                'success': False,
+                'error': 'Missing tag_name or lineage',
+                'tag_name': tag_name,
+                'lineage': new_lineage
+            }), 400
         
         # Get the excel processor from session
-        excel_processor = get_excel_processor()
-        if not excel_processor or excel_processor.df is None:
-            return jsonify({'error': 'No data loaded'}), 400
+        try:
+            excel_processor = get_excel_processor()
+            if not excel_processor or excel_processor.df is None:
+                return jsonify({
+                    'success': False,
+                    'error': 'No data loaded',
+                    'error_type': 'NoDataError'
+                }), 400
+        except Exception as excel_error:
+            logging.error(f"❌ LINEAGE UPDATE: Failed to get Excel processor: {excel_error}")
+            import traceback
+            logging.error(f"Excel processor error traceback: {traceback.format_exc()}")
+            return jsonify({
+                'success': False,
+                'error': f'Failed to get Excel processor: {str(excel_error)}',
+                'error_type': 'ExcelProcessorError'
+            }), 500
         
         # CRITICAL FIX: Update database FIRST, then update Excel processor from database
         # This ensures database is the source of truth
-        store_name = get_current_store_name()
-        if not store_name:
-            logging.error("❌ LINEAGE UPDATE: No store selected - cannot update database")
+        try:
+            store_name = get_current_store_name()
+            if not store_name:
+                logging.error("❌ LINEAGE UPDATE: No store selected - cannot update database")
+                return jsonify({
+                    'success': False,
+                    'error': 'No store selected. Please select a store before updating lineage.',
+                    'store_name': None
+                }), 400
+        except Exception as store_error:
+            logging.error(f"❌ LINEAGE UPDATE: Failed to get store name: {store_error}")
+            import traceback
+            logging.error(f"Store name error traceback: {traceback.format_exc()}")
             return jsonify({
                 'success': False,
-                'error': 'No store selected. Please select a store before updating lineage.',
-                'store_name': None
-            }), 400
+                'error': f'Failed to get store name: {str(store_error)}',
+                'error_type': 'StoreError'
+            }), 500
         
         try:
             product_db = get_product_database(store_name)
