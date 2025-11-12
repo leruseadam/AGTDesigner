@@ -7630,24 +7630,9 @@ def get_available_tags():
                 logging.info(f"📦 FRESH DB QUERY: path={product_db.db_path} store={getattr(product_db, '_store_name', 'unknown')}")
                 
                 # SIMPLIFIED: Use the existing get_all_products() method instead of raw SQL
-                try:
-                    database_tags = product_db.get_all_products()
-                    logging.info(f"✅ get_all_products() returned {len(database_tags)} products")
-                    
-                    # Process each tag to add lineage fields
-                    for tag in database_tags:
-                        # Ensure lineage fields are set
-                        lin = str(tag.get('Lineage', '')).strip().upper()
-                        if lin:
-                            tag['currentLineage'] = lin
-                            tag['canonical_lineage'] = lin
-                    
-                    logging.info(f"✅ Processed {len(database_tags)} database tags with lineage")
-                except Exception as get_all_error:
-                    logging.error(f"❌ get_all_products() failed: {get_all_error}")
-                    import traceback
-                    logging.error(traceback.format_exc())
-                    # Fall back to raw SQL query
+                # But skip it for now and use raw SQL directly - get_all_products() may be too slow
+                logging.info("🔄 Using direct SQL query (skipping get_all_products() for performance)")
+                # Fall back to raw SQL query directly
                     import sqlite3
                     import os
                     if os.path.exists(product_db.db_path):
@@ -7722,55 +7707,41 @@ def get_available_tags():
                             cursor.execute('SELECT COUNT(*) FROM products')
                             total_count = cursor.fetchone()[0]
                             logging.info(f"Total products in database: {total_count}")
-                        
+                            
                             # Get available columns dynamically to avoid SQL errors
+                            logging.info("Getting column info...")
                             cursor.execute("PRAGMA table_info(products)")
                             available_columns = [row[1] for row in cursor.fetchall()]
+                            logging.info(f"Found {len(available_columns)} columns in products table")
                             
                             # Filter to only columns we want, excluding internal ones
                             columns_to_query = [col for col in available_columns if col not in ['id', 'normalized_name', 'strain_id']]
+                            logging.info(f"Querying {len(columns_to_query)} columns")
                             
-                            # Build dynamic query - join with strains to get canonical lineage
+                            # SIMPLIFIED: Query without strain join first (faster)
                             quoted_columns = ', '.join([f'p."{col}"' for col in columns_to_query])
-                            # Also try to get canonical_lineage from strains if available
-                            query = f'''
-                                SELECT {quoted_columns}, COALESCE(s.canonical_lineage, p."Lineage") AS preferred_lineage
-                                FROM products p
-                                LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
-                                ORDER BY p.id DESC
-                                LIMIT 20000
-                            '''
-                            try:
-                                cursor.execute(query)
-                                rows = cursor.fetchall()
-                                # Add preferred_lineage to columns list
-                                columns = columns_to_query + ['preferred_lineage']
-                                logging.info(f"Database query with strain join returned {len(rows)} rows")
-                            except Exception as join_err:
-                                # Fallback: query without strain join
-                                logging.warning(f"Strain join failed, using fallback query: {join_err}")
-                                query = f'SELECT {quoted_columns}, p."Lineage" AS preferred_lineage FROM products p ORDER BY p.id DESC LIMIT 20000'
-                                cursor.execute(query)
-                                rows = cursor.fetchall()
-                                columns = columns_to_query + ['preferred_lineage']
-                                logging.info(f"Database query (fallback) returned {len(rows)} rows")
-                        
-                            for row in rows:
+                            query = f'SELECT {quoted_columns} FROM products p ORDER BY p.id DESC LIMIT 20000'
+                            
+                            logging.info("Executing query...")
+                            cursor.execute(query)
+                            rows = cursor.fetchall()
+                            columns = columns_to_query
+                            logging.info(f"✅ Query returned {len(rows)} rows")
+                            
+                            logging.info(f"Processing {len(rows)} rows into product dicts...")
+                            for i, row in enumerate(rows):
+                                if i % 1000 == 0:
+                                    logging.info(f"  Processed {i}/{len(rows)} rows...")
                                 product_dict = dict(zip(columns, row))
-                                # Set preferred lineage fields for UI
-                                pref_lin = str(product_dict.get('preferred_lineage', '')).strip().upper()
-                                if pref_lin:
-                                    product_dict['currentLineage'] = pref_lin
-                                    product_dict['canonical_lineage'] = pref_lin
-                                    # Ensure Lineage field matches
-                                    if not product_dict.get('Lineage') or str(product_dict.get('Lineage', '')).strip().upper() != pref_lin:
-                                        product_dict['Lineage'] = pref_lin
-                                # Remove the temporary preferred_lineage field
-                                product_dict.pop('preferred_lineage', None)
+                                # Set lineage fields from Lineage column
+                                lin = str(product_dict.get('Lineage', '')).strip().upper()
+                                if lin:
+                                    product_dict['currentLineage'] = lin
+                                    product_dict['canonical_lineage'] = lin
                                 # Convert to the format expected by the frontend
                                 database_tags.append(product_dict)
                             
-                            logging.info(f"Database returned {len(database_tags)} products")
+                            logging.info(f"✅ Database returned {len(database_tags)} products after processing")
                             
                             # Debug: Check if we have products with specific indicators
                             ray_count = sum(1 for tag in database_tags if 'Ray' in tag.get('Product Name*', ''))
