@@ -2029,17 +2029,15 @@ const TagManager = {
         //     filteredTags: filteredTags ? filteredTags.slice(0, 2) : null
         // });
         
-        // Show action splash for tag population - DISABLED to prevent distraction while typing
-        // this.showActionSplash('Populating tags...');
+        // Show loading splash for tag population
+        const tagsToShow = filteredTags || originalTags;
+        if (tagsToShow && tagsToShow.length > 0) {
+            this.showActionSplash('Loading tags...');
+        }
         
         // Use requestAnimationFrame to ensure smooth DOM updates
         requestAnimationFrame(() => {
             this._updateAvailableTags(originalTags, filteredTags);
-            
-            // No splash to hide since we disabled it
-            // setTimeout(() => {
-            //     this.hideActionSplash();
-            // }, 100);
         });
     }, 300),
 
@@ -2213,6 +2211,9 @@ const TagManager = {
         this.updateSelectAllCheckboxes();
         this.initializeSelectAllCheckbox();
         
+        // Hide loading splash only after tags actually appear in DOM
+        this._waitForTagsToAppear();
+        
         verboseLog('✅ Rendered', tags.length, 'JSON matched tags with HIERARCHY (same as Selected Tags)');
     },
 
@@ -2248,6 +2249,10 @@ const TagManager = {
         if (!tags || tags.length === 0) {
             verboseLog('No tags provided, showing empty state');
             availableTagsContainer.innerHTML = '<div class="tag-entry">No tags available</div>';
+            // Hide splash if showing
+            if (this.hideActionSplash) {
+                this.hideActionSplash();
+            }
             return;
         }
         
@@ -2397,6 +2402,9 @@ const TagManager = {
         this.initializeSelectAllCheckbox();
             // Restore previous scroll position
             this._restoreAvailableScrollPosition(savedScroll);
+            
+            // Hide loading splash only after tags actually appear in DOM
+            this._waitForTagsToAppear();
             return;
         }
         
@@ -2784,6 +2792,49 @@ const TagManager = {
         // Add event listeners
         this.updateSelectAllCheckboxes();
         this.initializeSelectAllCheckbox();
+        
+        // Hide loading splash only after tags actually appear in DOM
+        this._waitForTagsToAppear();
+    },
+    
+    // Wait for tags to actually appear in DOM before hiding splash
+    _waitForTagsToAppear() {
+        const availableTagsContainer = document.getElementById('availableTags');
+        if (!availableTagsContainer) {
+            // Container not found, hide splash immediately
+            if (this.hideActionSplash) {
+                this.hideActionSplash();
+            }
+            return;
+        }
+        
+        let attempts = 0;
+        const maxAttempts = 50; // 5 seconds max (50 * 100ms)
+        
+        const checkForTags = () => {
+            attempts++;
+            const tagItems = availableTagsContainer.querySelectorAll('.tag-item');
+            
+            if (tagItems.length > 0) {
+                // Tags are visible, hide splash
+                verboseLog(`Tags appeared in DOM (${tagItems.length} items), hiding splash`);
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
+                }
+            } else if (attempts >= maxAttempts) {
+                // Timeout reached, hide splash anyway
+                verboseLog('Timeout waiting for tags, hiding splash');
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
+                }
+            } else {
+                // Tags not yet visible, check again
+                setTimeout(checkForTags, 100);
+            }
+        };
+        
+        // Start checking after a brief delay to allow DOM to update
+        setTimeout(checkForTags, 50);
     },
 
     createTagElement(tag, isForSelectedTags = false) {
@@ -3644,20 +3695,42 @@ const TagManager = {
     },
 
     async updateLineageOnBackend(tagName, newLineage) {
+        const requestStartTime = Date.now();
+        let timeoutId = null;
+        let abortController = null;
+        
         try {
-            verboseLog(`🔄 Updating lineage for ${tagName} to ${newLineage}`);
+            verboseLog(`🔄 Updating lineage for ${tagName} to ${newLineage}...`);
             
             const payload = {
                 tag_name: tagName,
                 "Product Name*": tagName,
                 lineage: newLineage
             };
+            
+            // CRITICAL FIX: Add timeout to prevent hanging
+            abortController = new AbortController();
+            timeoutId = setTimeout(() => {
+                abortController.abort();
+                console.error(`❌ LINEAGE UPDATE TIMEOUT: Request took longer than 10 seconds`);
+            }, 10000); // 10 second timeout
+            
             const response = await fetch('/api/update-lineage', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+                body: JSON.stringify(payload),
+                signal: abortController.signal
             });
 
+            // Clear timeout if request succeeded
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+                timeoutId = null;
+            }
+            
+            const requestDuration = Date.now() - requestStartTime;
+            verboseLog(`📡 Response received in ${requestDuration}ms`);
+            
             const responseData = await response.json();
             
             if (!response.ok || !responseData.success) {
@@ -3765,51 +3838,94 @@ const TagManager = {
             verboseLog('✅ Lineage updated successfully - skipping full refresh to preserve available tags');
 
         } catch (error) {
-            console.error('❌ Error updating lineage:', error);
-            
-            // CRITICAL FIX: Revert local state if update failed
-            // This prevents showing incorrect lineage in the UI
-            try {
-                const originalTag = this.state.originalTags.find(t => t['Product Name*'] === tagName);
-                const currentTag = this.state.tags.find(t => t['Product Name*'] === tagName);
-                
-                // Restore original lineage from backend
-                verboseLog('🔄 Reverting local lineage change after failed update...');
-                const freshTagsResponse = await fetch('/api/available-tags?nocache=1&prefer_db=1&t=' + Date.now());
-                if (freshTagsResponse.ok) {
-                    const freshData = await freshTagsResponse.json();
-                    const freshTag = freshData.tags?.find(t => t['Product Name*'] === tagName);
-                    if (freshTag) {
-                        const actualLineage = freshTag.Lineage || freshTag.lineage || freshTag.currentLineage || freshTag.canonical_lineage;
-                        if (originalTag) {
-                            originalTag.lineage = actualLineage;
-                            originalTag.Lineage = actualLineage;
-                            originalTag.currentLineage = actualLineage;
-                            originalTag.canonical_lineage = actualLineage;
-                        }
-                        if (currentTag) {
-                            currentTag.lineage = actualLineage;
-                            currentTag.Lineage = actualLineage;
-                            currentTag.currentLineage = actualLineage;
-                            currentTag.canonical_lineage = actualLineage;
-                        }
-                        // Update UI to show actual lineage
-                        this.updateTagLineageInUI(tagName, actualLineage);
-                        verboseLog(`✅ Reverted to actual lineage from database: ${actualLineage}`);
-                    }
-                }
-            } catch (revertError) {
-                console.warn('Could not revert lineage after failed update:', revertError);
+            // Clear timeout if it's still set
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+                timeoutId = null;
             }
             
-            // Show user-friendly error message
-            if (window.Toast) {
-                window.Toast.error(`Failed to update lineage: ${error.message}`, {
-                    duration: 5000,
-                    position: 'top-right'
-                });
+            const requestDuration = Date.now() - requestStartTime;
+            const isTimeout = error.name === 'AbortError' || error.message.includes('timeout') || requestDuration > 10000;
+            
+            if (isTimeout) {
+                console.error(`❌ LINEAGE UPDATE TIMEOUT after ${requestDuration}ms: ${error.message}`);
+                // Show timeout-specific error
+                if (window.Toast) {
+                    window.Toast.error(`Update timed out after ${(requestDuration/1000).toFixed(1)}s. The update may still be processing. Please refresh the page.`, {
+                        duration: 8000,
+                        position: 'top-right'
+                    });
+                } else {
+                    alert(`Update timed out. The update may still be processing. Please check the server logs.`);
+                }
             } else {
-                alert(`Failed to update lineage: ${error.message}`);
+                console.error(`❌ Error updating lineage after ${requestDuration}ms:`, error);
+                
+                // CRITICAL FIX: Revert local state if update failed (but not for timeout)
+                // This prevents showing incorrect lineage in the UI
+                try {
+                    const originalTag = this.state.originalTags.find(t => t['Product Name*'] === tagName);
+                    const currentTag = this.state.tags.find(t => t['Product Name*'] === tagName);
+                    
+                    // Restore original lineage from backend
+                    verboseLog('🔄 Reverting local lineage change after failed update...');
+                    
+                    // Use a timeout for the revert request too
+                    const revertAbortController = new AbortController();
+                    const revertTimeout = setTimeout(() => revertAbortController.abort(), 5000);
+                    
+                    try {
+                        const freshTagsResponse = await fetch('/api/available-tags?nocache=1&prefer_db=1&t=' + Date.now(), {
+                            signal: revertAbortController.signal
+                        });
+                        clearTimeout(revertTimeout);
+                        
+                        if (freshTagsResponse.ok) {
+                            const freshData = await freshTagsResponse.json();
+                            const freshTag = freshData.tags?.find(t => t['Product Name*'] === tagName);
+                            if (freshTag) {
+                                const actualLineage = freshTag.Lineage || freshTag.lineage || freshTag.currentLineage || freshTag.canonical_lineage;
+                                if (originalTag) {
+                                    originalTag.lineage = actualLineage;
+                                    originalTag.Lineage = actualLineage;
+                                    originalTag.currentLineage = actualLineage;
+                                    originalTag.canonical_lineage = actualLineage;
+                                }
+                                if (currentTag) {
+                                    currentTag.lineage = actualLineage;
+                                    currentTag.Lineage = actualLineage;
+                                    currentTag.currentLineage = actualLineage;
+                                    currentTag.canonical_lineage = actualLineage;
+                                }
+                                // Update UI to show actual lineage
+                                this.updateTagLineageInUI(tagName, actualLineage);
+                                verboseLog(`✅ Reverted to actual lineage from database: ${actualLineage}`);
+                            }
+                        }
+                    } catch (revertError) {
+                        clearTimeout(revertTimeout);
+                        if (revertError.name !== 'AbortError') {
+                            console.warn('Could not revert lineage after failed update:', revertError);
+                        }
+                    }
+                } catch (revertError) {
+                    console.warn('Could not revert lineage after failed update:', revertError);
+                }
+                
+                // Show user-friendly error message
+                if (window.Toast) {
+                    window.Toast.error(`Failed to update lineage: ${error.message}`, {
+                        duration: 5000,
+                        position: 'top-right'
+                    });
+                } else {
+                    alert(`Failed to update lineage: ${error.message}`);
+                }
+            }
+        } finally {
+            // Ensure timeout is cleared
+            if (timeoutId) {
+                clearTimeout(timeoutId);
             }
         }
     },
@@ -5074,6 +5190,9 @@ const TagManager = {
     async fetchAndUpdateAvailableTags() {
         try {
             verboseLog('=== fetchAndUpdateAvailableTags START ===');
+            // Show loading splash when fetching tags
+            this.showActionSplash('Loading tags...');
+            
             // Preserve current scroll/anchor so refreshes don't jump the list
             const savedScroll = this._saveAvailableScrollPosition();
             
@@ -5081,6 +5200,10 @@ const TagManager = {
             const now = Date.now();
             if (this._lastFetchTime && (now - this._lastFetchTime) < 2000) {
                 verboseLog('Rate limiting: skipping fetch (too soon after last fetch)');
+                // Hide splash if we're skipping
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
+                }
                 return false;
             }
             this._lastFetchTime = now;
@@ -5144,6 +5267,10 @@ const TagManager = {
                 this.state.originalTags = [];
                 this._updateAvailableTags([]);
                 this._restoreAvailableScrollPosition(savedScroll);
+                // Hide splash on error
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
+                }
                 return false;
             }
             
@@ -5153,6 +5280,10 @@ const TagManager = {
                 this.state.originalTags = [];
                 this._updateAvailableTags([]);
                 this._restoreAvailableScrollPosition(savedScroll);
+                // Hide splash when no tags
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
+                }
                 return false;
             }
             
@@ -5210,10 +5341,15 @@ const TagManager = {
             
             verboseLog(`Successfully updated available tags: ${tags.length} tags`);
             verboseLog('=== fetchAndUpdateAvailableTags END ===');
+            // Note: Splash will be hidden by _waitForTagsToAppear() when tags appear
             return true;
         } catch (error) {
             console.error('Error fetching available tags:', error);
             verboseLog('=== fetchAndUpdateAvailableTags ERROR ===');
+            // Hide splash on error
+            if (this.hideActionSplash) {
+                this.hideActionSplash();
+            }
             return false;
         }
     },

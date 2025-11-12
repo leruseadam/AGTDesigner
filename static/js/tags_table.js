@@ -5,10 +5,8 @@ if (typeof window.CLASSIC_TYPES === 'undefined') {
     "solventless concentrate", "vape cartridge", "rso/co2 tankers"
   ];
 }
-const CLASSIC_TYPES = window.CLASSIC_TYPES || [
-    "flower", "pre-roll", "concentrate", "infused pre-roll", 
-    "solventless concentrate", "vape cartridge", "rso/co2 tankers"
-];
+// Use window.CLASSIC_TYPES directly to avoid duplicate const declaration
+const CLASSIC_TYPES = window.CLASSIC_TYPES;
 
 // Lineage abbreviation mapping (matching Python version)
 const ABBREVIATED_LINEAGE = {

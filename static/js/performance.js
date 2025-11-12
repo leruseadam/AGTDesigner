@@ -2,7 +2,9 @@
  * Performance optimization utilities for the frontend
  */
 
-class PerformanceOptimizer {
+// Prevent duplicate class declaration
+if (typeof window.PerformanceOptimizer === 'undefined') {
+  window.PerformanceOptimizer = class PerformanceOptimizer {
     constructor() {
         this.debounceTimers = new Map();
         this.throttleTimers = new Map();
@@ -439,10 +441,13 @@ class PerformanceOptimizer {
             return null;
         }
     }
+  };
 }
 
-// Global performance optimizer instance
-window.performanceOptimizer = new PerformanceOptimizer();
+// Global performance optimizer instance - only create if class was defined
+if (typeof window.PerformanceOptimizer !== 'undefined') {
+  window.performanceOptimizer = new window.PerformanceOptimizer();
+}
 
 // Add CSS for loading spinner
 const style = document.createElement('style');
