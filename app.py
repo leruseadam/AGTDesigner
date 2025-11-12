@@ -7735,29 +7735,40 @@ def get_available_tags():
                             logging.info(f"Querying {len(columns_to_query)} columns")
                             
                             # SIMPLIFIED: Query without strain join first (faster)
+                            # LIMIT to 10000 for performance - can increase later if needed
                             quoted_columns = ', '.join([f'p."{col}"' for col in columns_to_query])
-                            query = f'SELECT {quoted_columns} FROM products p ORDER BY p.id DESC LIMIT 20000'
+                            query = f'SELECT {quoted_columns} FROM products p ORDER BY p.id DESC LIMIT 10000'
                             
                             logging.info("Executing query...")
+                            import time
+                            query_start = time.time()
                             cursor.execute(query)
                             rows = cursor.fetchall()
+                            query_time = time.time() - query_start
                             columns = columns_to_query
-                            logging.info(f"✅ Query returned {len(rows)} rows")
+                            logging.info(f"✅ Query returned {len(rows)} rows in {query_time:.2f}s")
                             
                             logging.info(f"Processing {len(rows)} rows into product dicts...")
+                            process_start = time.time()
                             for i, row in enumerate(rows):
-                                if i % 1000 == 0:
-                                    logging.info(f"  Processed {i}/{len(rows)} rows...")
-                                product_dict = dict(zip(columns, row))
-                                # Set lineage fields from Lineage column
-                                lin = str(product_dict.get('Lineage', '')).strip().upper()
-                                if lin:
-                                    product_dict['currentLineage'] = lin
-                                    product_dict['canonical_lineage'] = lin
-                                # Convert to the format expected by the frontend
-                                database_tags.append(product_dict)
+                                if i % 1000 == 0 and i > 0:
+                                    elapsed = time.time() - process_start
+                                    logging.info(f"  Processed {i}/{len(rows)} rows in {elapsed:.2f}s...")
+                                try:
+                                    product_dict = dict(zip(columns, row))
+                                    # Set lineage fields from Lineage column
+                                    lin = str(product_dict.get('Lineage', '')).strip().upper()
+                                    if lin:
+                                        product_dict['currentLineage'] = lin
+                                        product_dict['canonical_lineage'] = lin
+                                    # Convert to the format expected by the frontend
+                                    database_tags.append(product_dict)
+                                except Exception as row_error:
+                                    logging.warning(f"Error processing row {i}: {row_error}")
+                                    continue
                             
-                            logging.info(f"✅ Database returned {len(database_tags)} products after processing")
+                            process_time = time.time() - process_start
+                            logging.info(f"✅ Database returned {len(database_tags)} products after processing ({process_time:.2f}s total)")
                             
                             # Debug: Check if we have products with specific indicators
                             ray_count = sum(1 for tag in database_tags if 'Ray' in tag.get('Product Name*', ''))
