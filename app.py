@@ -7761,22 +7761,37 @@ def get_available_tags():
                             logging.info(f"Database products - Ray: {ray_count}, Hustler: {hustler_count}")
                 else:
                     logging.error(f"Database file does not exist: {product_db.db_path}")
+            else:
+                logging.error(f"product_db is None or False - cannot query database")
         except Exception as e:
             logging.error(f"Error getting database products: {e}")
             import traceback
             logging.error(traceback.format_exc())
             database_tags = []
         
+        # CRITICAL: If prefer_db is True but database_tags is empty, log a warning
+        if prefer_db and len(database_tags) == 0:
+            logging.error(f"⚠️ CRITICAL: prefer_db=True but database_tags is empty! Store: {store_name if 'store_name' in locals() else 'unknown'}")
+        
         # 3. Combine and deduplicate products
         if prefer_db:
             # When prefer_db=1, use ONLY database tags
             logging.info(f"PREFER_DB mode: Using {len(database_tags)} database tags exclusively")
             if len(database_tags) == 0:
-                logging.warning("⚠️ PREFER_DB mode but database_tags is empty! Check database query above.")
+                logging.error("❌ CRITICAL ERROR: PREFER_DB mode but database_tags is empty! Check database query above.")
+                logging.error(f"   Store name: {store_name if 'store_name' in locals() else 'unknown'}")
+                logging.error(f"   Product DB: {product_db if 'product_db' in locals() else 'unknown'}")
+            else:
+                logging.info(f"✅ Processing {len(database_tags)} database tags...")
             for db_tag in database_tags:
-                # Process database product to ensure it has proper weight formatting
-                processed_db_tag = process_database_product_for_api(db_tag)
-                all_tags.append(processed_db_tag)
+                try:
+                    # Process database product to ensure it has proper weight formatting
+                    processed_db_tag = process_database_product_for_api(db_tag)
+                    all_tags.append(processed_db_tag)
+                except Exception as process_error:
+                    logging.warning(f"Error processing database tag {db_tag.get('Product Name*', 'unknown')}: {process_error}")
+                    # Still add the tag even if processing fails
+                    all_tags.append(db_tag)
             logging.info(f"PREFER_DB: Added {len(all_tags)} products from database (database_tags had {len(database_tags)} items)")
         else:
             # Normal mode: Use Excel processor products as primary (they have processed fields)
