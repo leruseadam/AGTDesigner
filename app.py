@@ -7482,6 +7482,7 @@ def get_available_tags():
                 logging.info("⚠️ No Excel data loaded - falling back to database products")
                 # Don't return empty - continue to database query below
                 prefer_db = True  # Force database query when Excel is empty
+                logging.info(f"✅ Set prefer_db=True to force database query")
         
         # If we have tags from Excel, prefer them but align lineage with database values
         if all_tags and not prefer_db:
@@ -7596,12 +7597,17 @@ def get_available_tags():
             })
         
         # Database path (either because prefer_db is set, or Excel had no data)
-        logging.info("🔄 Building available tags from database...")
+        logging.info(f"🔄 Building available tags from database... (prefer_db={prefer_db}, all_tags_count={len(all_tags)})")
         
         # Store validation removed - using single database for all stores
         
         # Get products from both Excel processor and database
-        all_tags = []
+        # Note: all_tags may already have Excel tags, or be empty if prefer_db is True
+        # Ensure all_tags is initialized for database query path
+        if prefer_db:
+            all_tags = []  # Reset for prefer_db mode (will use only database tags)
+        elif not all_tags:
+            all_tags = []  # Also reset if empty (normal mode, will combine Excel + DB)
         
         # 1. Optionally get products from Excel (only if not prefer_db)
         excel_processor = None
@@ -7765,11 +7771,13 @@ def get_available_tags():
         if prefer_db:
             # When prefer_db=1, use ONLY database tags
             logging.info(f"PREFER_DB mode: Using {len(database_tags)} database tags exclusively")
+            if len(database_tags) == 0:
+                logging.warning("⚠️ PREFER_DB mode but database_tags is empty! Check database query above.")
             for db_tag in database_tags:
                 # Process database product to ensure it has proper weight formatting
                 processed_db_tag = process_database_product_for_api(db_tag)
                 all_tags.append(processed_db_tag)
-            logging.info(f"PREFER_DB: Added {len(all_tags)} products from database")
+            logging.info(f"PREFER_DB: Added {len(all_tags)} products from database (database_tags had {len(database_tags)} items)")
         else:
             # Normal mode: Use Excel processor products as primary (they have processed fields)
             # Add database products that aren't already in Excel processor
