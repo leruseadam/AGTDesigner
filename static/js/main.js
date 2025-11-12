@@ -3658,34 +3658,58 @@ const TagManager = {
                 body: JSON.stringify(payload)
             });
 
-            if (!response.ok) {
-                const errorData = await response.json();
-                console.error(`❌ API Error: ${errorData.error || 'Failed to update lineage'}`);
-                throw new Error(errorData.error || 'Failed to update lineage');
+            const responseData = await response.json();
+            
+            if (!response.ok || !responseData.success) {
+                const errorMsg = responseData.error || responseData.message || 'Failed to update lineage';
+                console.error(`❌ API Error: ${errorMsg}`);
+                throw new Error(errorMsg);
             }
+            
+            // CRITICAL FIX: Verify the response confirms the update succeeded
+            if (!responseData.verification_passed && responseData.db_updated === 0) {
+                console.error(`❌ LINEAGE UPDATE FAILED: Backend did not confirm update for '${tagName}'`);
+                throw new Error(`Failed to update lineage: ${responseData.message || 'Update not verified'}`);
+            }
+            
+            verboseLog(`✅ Backend confirmed lineage update: ${responseData.message || 'Success'}`);
+            verboseLog(`   - DB updated: ${responseData.db_updated || 0} products`);
+            verboseLog(`   - Excel updated: ${responseData.excel_updated || 0} products`);
+            verboseLog(`   - Verification: ${responseData.verification_passed ? 'PASSED' : 'FAILED'}`);
 
-            // Update the tag in original tags as well
+            // CRITICAL FIX: Use verified lineage from response (may be normalized differently)
+            const verifiedLineage = responseData.new_lineage || newLineage;
+            
+            // Update the tag in original tags as well - update ALL lineage-related fields
             const originalTag = this.state.originalTags.find(t => t['Product Name*'] === tagName);
             if (originalTag) {
-                originalTag.lineage = newLineage;
-                verboseLog(`📝 Updated tag in originalTags`);
+                originalTag.lineage = verifiedLineage;
+                originalTag.Lineage = verifiedLineage;
+                originalTag.currentLineage = verifiedLineage;
+                originalTag.canonical_lineage = verifiedLineage;
+                verboseLog(`📝 Updated tag in originalTags with verified lineage: ${verifiedLineage}`);
             }
 
-            // Update the tag in current tags list
+            // Update the tag in current tags list - update ALL lineage-related fields
             const currentTag = this.state.tags.find(t => t['Product Name*'] === tagName);
             if (currentTag) {
-                currentTag.lineage = newLineage;
-                verboseLog(`📝 Updated tag in current tags`);
+                currentTag.lineage = verifiedLineage;
+                currentTag.Lineage = verifiedLineage;
+                currentTag.currentLineage = verifiedLineage;
+                currentTag.canonical_lineage = verifiedLineage;
+                verboseLog(`📝 Updated tag in current tags with verified lineage: ${verifiedLineage}`);
             }
 
             // Optimized: Only update the specific tag elements instead of rebuilding everything
-            this.updateTagLineageInUI(tagName, newLineage);
-            verboseLog(`🎨 Updated UI elements for ${tagName}`);
+            // Use verified lineage from backend response
+            this.updateTagLineageInUI(tagName, verifiedLineage);
+            verboseLog(`🎨 Updated UI elements for ${tagName} with verified lineage: ${verifiedLineage}`);
 
             // NEW: Instantly update all similar (same vendor + strain) across lists
+            // Use verified lineage from backend response
             try {
-                this.updateSimilarLineages(tagName, newLineage);
-                verboseLog('✅ Propagated lineage to similar items (vendor + strain)');
+                this.updateSimilarLineages(tagName, verifiedLineage);
+                verboseLog(`✅ Propagated verified lineage '${verifiedLineage}' to similar items (vendor + strain)`);
             } catch (e) {
                 console.warn('Failed to update similar lineages locally:', e);
             }
@@ -3711,6 +3735,7 @@ const TagManager = {
 
             // CRITICAL FIX: Update selected tags locally without backend fetch
             // This ensures the selected tags dropdowns reflect the current lineage values
+            // Use verified lineage from backend response
             if (this.state.selectedTags.has(tagName)) {
                 // Find the tag in the selected tags list and update its lineage
                 const selectedTagsList = document.querySelectorAll('#selectedTags .tag-item');
@@ -3720,9 +3745,17 @@ const TagManager = {
                         // Update the lineage in the tag element
                         const lineageSelect = tagElement.querySelector('.lineage-dropdown');
                         if (lineageSelect) {
-                            lineageSelect.value = newLineage;
+                            lineageSelect.value = verifiedLineage;
                         }
-                        verboseLog(`✅ Updated lineage in selected tag UI for ${tagName}`);
+                        // Also update the tag data object if it exists
+                        const tagObj = this.state.tags.find(t => t['Product Name*'] === tagName);
+                        if (tagObj) {
+                            tagObj.lineage = verifiedLineage;
+                            tagObj.Lineage = verifiedLineage;
+                            tagObj.currentLineage = verifiedLineage;
+                            tagObj.canonical_lineage = verifiedLineage;
+                        }
+                        verboseLog(`✅ Updated lineage in selected tag UI for ${tagName} to verified lineage: ${verifiedLineage}`);
                     }
                 });
             }
@@ -3732,9 +3765,51 @@ const TagManager = {
             verboseLog('✅ Lineage updated successfully - skipping full refresh to preserve available tags');
 
         } catch (error) {
-            console.error('Error updating lineage:', error);
+            console.error('❌ Error updating lineage:', error);
+            
+            // CRITICAL FIX: Revert local state if update failed
+            // This prevents showing incorrect lineage in the UI
+            try {
+                const originalTag = this.state.originalTags.find(t => t['Product Name*'] === tagName);
+                const currentTag = this.state.tags.find(t => t['Product Name*'] === tagName);
+                
+                // Restore original lineage from backend
+                verboseLog('🔄 Reverting local lineage change after failed update...');
+                const freshTagsResponse = await fetch('/api/available-tags?nocache=1&prefer_db=1&t=' + Date.now());
+                if (freshTagsResponse.ok) {
+                    const freshData = await freshTagsResponse.json();
+                    const freshTag = freshData.tags?.find(t => t['Product Name*'] === tagName);
+                    if (freshTag) {
+                        const actualLineage = freshTag.Lineage || freshTag.lineage || freshTag.currentLineage || freshTag.canonical_lineage;
+                        if (originalTag) {
+                            originalTag.lineage = actualLineage;
+                            originalTag.Lineage = actualLineage;
+                            originalTag.currentLineage = actualLineage;
+                            originalTag.canonical_lineage = actualLineage;
+                        }
+                        if (currentTag) {
+                            currentTag.lineage = actualLineage;
+                            currentTag.Lineage = actualLineage;
+                            currentTag.currentLineage = actualLineage;
+                            currentTag.canonical_lineage = actualLineage;
+                        }
+                        // Update UI to show actual lineage
+                        this.updateTagLineageInUI(tagName, actualLineage);
+                        verboseLog(`✅ Reverted to actual lineage from database: ${actualLineage}`);
+                    }
+                }
+            } catch (revertError) {
+                console.warn('Could not revert lineage after failed update:', revertError);
+            }
+            
+            // Show user-friendly error message
             if (window.Toast) {
-                console.error('Failed to update lineage:', error.message);
+                window.Toast.error(`Failed to update lineage: ${error.message}`, {
+                    duration: 5000,
+                    position: 'top-right'
+                });
+            } else {
+                alert(`Failed to update lineage: ${error.message}`);
             }
         }
     },

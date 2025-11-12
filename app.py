@@ -8109,13 +8109,40 @@ def update_lineage():
         # CRITICAL FIX: Update database FIRST, then update Excel processor from database
         # This ensures database is the source of truth
         store_name = get_current_store_name()
-        product_db = get_product_database(store_name)
-        if not product_db:
-            return jsonify({'error': 'Database not available'}), 500
+        if not store_name:
+            logging.error("❌ LINEAGE UPDATE: No store selected - cannot update database")
+            return jsonify({
+                'success': False,
+                'error': 'No store selected. Please select a store before updating lineage.',
+                'store_name': None
+            }), 400
+        
+        try:
+            product_db = get_product_database(store_name)
+            if not product_db:
+                logging.error(f"❌ LINEAGE UPDATE: Database not available for store '{store_name}'")
+                return jsonify({
+                    'success': False,
+                    'error': f'Database not available for store {store_name}',
+                    'store_name': store_name
+                }), 500
+        except Exception as db_init_error:
+            logging.error(f"❌ LINEAGE UPDATE: Failed to initialize database for store '{store_name}': {db_init_error}")
+            import traceback
+            logging.error(f"Database initialization error traceback: {traceback.format_exc()}")
+            return jsonify({
+                'success': False,
+                'error': f'Failed to initialize database: {str(db_init_error)}',
+                'store_name': store_name
+            }), 500
         
         # Log which database is being used for update
         db_path = getattr(product_db, 'db_path', 'Unknown')
-        logging.info(f"🔄 LINEAGE UPDATE: Using database at {db_path}")
+        db_store = getattr(product_db, '_store_name', 'Unknown')
+        logging.info(f"🔄 LINEAGE UPDATE: Using database at {db_path} for store '{db_store}' (requested: '{store_name}')")
+        
+        if db_store != store_name:
+            logging.warning(f"⚠️  LINEAGE UPDATE: Store mismatch - requested '{store_name}' but database is for '{db_store}'")
         
         # NEW: Get the vendor for this product to update all products from same vendor
         vendor = None
@@ -8184,17 +8211,22 @@ def update_lineage():
                     products_updated = cursor.rowcount
                     logging.info(f"✅ Updated {products_updated} products for vendor '{vendor}' and strain '{strain_name}' to lineage '{new_lineage}'")
 
-                    # Also set sovereign lineage at the strain level to keep UI/DOCX consistent
+                    # CRITICAL FIX: Update both sovereign_lineage AND canonical_lineage at strain level
+                    # This ensures UI displays the updated lineage immediately
                     try:
                         cursor.execute('''
                             UPDATE strains
-                            SET sovereign_lineage = ?, updated_at = CURRENT_TIMESTAMP
+                            SET sovereign_lineage = ?, 
+                                canonical_lineage = ?,
+                                updated_at = CURRENT_TIMESTAMP
                             WHERE TRIM(LOWER(strain_name)) = TRIM(LOWER(?))
-                        ''', (new_lineage, str(strain_name).strip()))
+                        ''', (new_lineage, new_lineage, str(strain_name).strip()))
                         conn.commit()
-                        logging.info(f"🌿 Set sovereign lineage for strain '{strain_name}' to '{new_lineage}'")
+                        logging.info(f"🌿 Set sovereign AND canonical lineage for strain '{strain_name}' to '{new_lineage}'")
                     except Exception as se:
-                        logging.warning(f"Could not set sovereign lineage for '{strain_name}': {se}")
+                        logging.warning(f"Could not set strain lineage for '{strain_name}': {se}")
+                        import traceback
+                        logging.error(f"Strain update error traceback: {traceback.format_exc()}")
                     # Do not close shared connection; just close cursor
                     cursor.close()
                 else:
@@ -8308,15 +8340,22 @@ def update_lineage():
                     # The lineage update might still work in the Excel processor
                     products_updated = 0
                 
-            # Also update strain if available
+            # CRITICAL FIX: Also update strain using ProductDatabase directly to ensure both canonical and sovereign are updated
+            # This is a backup to ensure strain-level lineage is persisted even if product update didn't find strain
             try:
                 strain_name = excel_processor.get_strain_name_for_product(tag_name) if excel_processor else None
                 if strain_name and str(strain_name).strip():
-                    success = excel_processor.update_lineage_in_database_enhanced(strain_name, new_lineage, is_strain=True)
-                    if success:
-                        logging.info(f"✅ Updated strain lineage in database: '{strain_name}' → '{new_lineage}'")
+                    # Use ProductDatabase directly to ensure proper update with sovereign=True
+                    # This ensures both canonical_lineage and sovereign_lineage are updated
+                    strain_id = product_db.add_or_update_strain(strain_name, new_lineage, sovereign=True)
+                    if strain_id:
+                        logging.info(f"✅ Updated strain lineage via ProductDatabase: '{strain_name}' → '{new_lineage}' (strain_id: {strain_id})")
+                    else:
+                        logging.warning(f"⚠️  Strain update returned None for '{strain_name}' - lineage may not be persisted")
             except Exception as strain_error:
-                logging.warning(f"Could not update strain lineage: {strain_error}")
+                logging.error(f"❌ Could not update strain lineage: {strain_error}", exc_info=True)
+                import traceback
+                logging.error(f"Strain update error traceback: {traceback.format_exc()}")
                         
         except Exception as db_error:
             logging.error(f"Error updating lineage in database: {db_error}", exc_info=True)
@@ -8523,6 +8562,27 @@ def update_lineage():
             except Exception as verify_error:
                 logging.warning(f"Could not verify lineage update: {verify_error}")
             
+        # CRITICAL FIX: Verify the update actually persisted to database
+        verification_passed = False
+        try:
+            conn = product_db._get_connection()
+            cursor = conn.cursor()
+            # Check if product lineage was updated
+            cursor.execute('''
+                SELECT "Lineage" FROM products 
+                WHERE "Product Name*" = ? OR "ProductName" = ?
+                LIMIT 1
+            ''', (tag_name, tag_name))
+            result = cursor.fetchone()
+            if result and result[0] == new_lineage:
+                verification_passed = True
+                logging.info(f"✅ LINEAGE VERIFICATION: Database confirmed lineage '{new_lineage}' for '{tag_name}'")
+            else:
+                logging.warning(f"⚠️  LINEAGE VERIFICATION: Database lineage is '{result[0] if result else 'NOT_FOUND'}' (expected '{new_lineage}')")
+            cursor.close()
+        except Exception as verify_error:
+            logging.warning(f"Could not verify lineage update in database: {verify_error}")
+        
         # Report success if either database or Excel processor was updated
         total_updated = products_updated + updated_count
         
@@ -8532,11 +8592,24 @@ def update_lineage():
         if updated_count > 0:
             logging.info(f"✅ LINEAGE UPDATE SUMMARY: Excel DataFrame updated {updated_count} product(s)")
         
+        if not verification_passed and products_updated == 0:
+            logging.error(f"❌ LINEAGE UPDATE FAILED: No products updated and verification failed for '{tag_name}'")
+            return jsonify({
+                'success': False,
+                'error': f'Failed to update lineage for {tag_name}. Product may not exist in database.',
+                'products_updated': 0,
+                'verification_passed': False
+            }), 400
+        
         return jsonify({
             'success': True, 
             'message': f'Lineage updated to {new_lineage} for {total_updated} product(s) (DB: {products_updated}, Excel: {updated_count})',
             'products_updated': total_updated,
-            'vendor': vendor if vendor else None
+            'db_updated': products_updated,
+            'excel_updated': updated_count,
+            'verification_passed': verification_passed,
+            'vendor': vendor if vendor else None,
+            'new_lineage': new_lineage
         })
             
     except Exception as e:
