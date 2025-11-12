@@ -7811,7 +7811,12 @@ def get_available_tags():
                 logging.error(f"   Product DB: {product_db if 'product_db' in locals() else 'unknown'}")
             else:
                 logging.info(f"✅ Processing {len(database_tags)} database tags...")
-            for db_tag in database_tags:
+            import time
+            process_start = time.time()
+            for i, db_tag in enumerate(database_tags):
+                if i % 1000 == 0 and i > 0:
+                    elapsed = time.time() - process_start
+                    logging.info(f"  Processed {i}/{len(database_tags)} tags in {elapsed:.2f}s...")
                 try:
                     # Process database product to ensure it has proper weight formatting
                     processed_db_tag = process_database_product_for_api(db_tag)
@@ -7820,7 +7825,8 @@ def get_available_tags():
                     logging.warning(f"Error processing database tag {db_tag.get('Product Name*', 'unknown')}: {process_error}")
                     # Still add the tag even if processing fails
                     all_tags.append(db_tag)
-            logging.info(f"PREFER_DB: Added {len(all_tags)} products from database (database_tags had {len(database_tags)} items)")
+            process_time = time.time() - process_start
+            logging.info(f"PREFER_DB: Added {len(all_tags)} products from database in {process_time:.2f}s (database_tags had {len(database_tags)} items)")
         else:
             # Normal mode: Use Excel processor products as primary (they have processed fields)
             # Add database products that aren't already in Excel processor
