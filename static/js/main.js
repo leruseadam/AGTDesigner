@@ -3194,6 +3194,7 @@ const TagManager = {
         const availableTagsContainer = document.getElementById('availableTags');
         if (!availableTagsContainer) {
             // Container not found, hide splash immediately
+            console.warn('Available tags container not found');
             if (this.hideActionSplash) {
                 this.hideActionSplash();
             }
@@ -3213,7 +3214,7 @@ const TagManager = {
         
         // If not found immediately, check again with minimal delay
         let attempts = 0;
-        const maxAttempts = 20; // 1 second max (20 * 50ms)
+        const maxAttempts = 100; // 5 seconds max (100 * 50ms) - increased for slow networks
         
         const checkForTags = () => {
             attempts++;
@@ -3226,8 +3227,8 @@ const TagManager = {
                     this.hideActionSplash();
                 }
             } else if (attempts >= maxAttempts) {
-                // Timeout reached, hide splash anyway
-                verboseLog('Timeout waiting for tags, hiding splash');
+                // Timeout reached, hide splash anyway and show warning
+                console.warn(`Timeout waiting for tags after ${maxAttempts * 50}ms. Tags may not have loaded.`);
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
@@ -5661,12 +5662,42 @@ const TagManager = {
             
             verboseLog('Fetching available tags...');
             const timestamp = Date.now();
-            const response = await fetch(`/api/available-tags?t=${timestamp}&nocache=1&prefer_db=1`);
+            
+            // Add timeout to prevent hanging
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+            
+            let response;
+            try {
+                response = await fetch(`/api/available-tags?t=${timestamp}&nocache=1&prefer_db=1`, {
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+            } catch (fetchError) {
+                clearTimeout(timeoutId);
+                if (fetchError.name === 'AbortError') {
+                    throw new Error('Request timeout: Tags took too long to load. Please refresh the page.');
+                }
+                throw fetchError;
+            }
+            
             verboseLog('Available tags response status:', response.status);
             if (!response.ok) {
+                const errorText = await response.text().catch(() => 'Unknown error');
+                console.error(`API error (${response.status}):`, errorText);
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
-            const responseData = await response.json();
+            
+            let responseData;
+            try {
+                responseData = await response.json();
+            } catch (jsonError) {
+                console.error('Failed to parse JSON response:', jsonError);
+                const textResponse = await response.text();
+                console.error('Response text:', textResponse.substring(0, 500));
+                throw new Error('Invalid JSON response from server');
+            }
+            
             verboseLog('Available tags response data:', responseData);
             
             // Handle both old array format and new object format
@@ -5774,6 +5805,29 @@ const TagManager = {
         } catch (error) {
             console.error('Error fetching available tags:', error);
             verboseLog('=== fetchAndUpdateAvailableTags ERROR ===');
+            
+            // Show user-friendly error message
+            const errorMsg = error.message || 'Failed to load tags. Please refresh the page.';
+            console.error('Tag loading error:', errorMsg);
+            
+            // Try to show error in UI if possible
+            try {
+                const availableTagsContainer = document.getElementById('availableTags');
+                if (availableTagsContainer) {
+                    availableTagsContainer.innerHTML = `
+                        <div style="padding: 2rem; text-align: center; color: #ff6b6b;">
+                            <h3>Failed to Load Tags</h3>
+                            <p>${errorMsg}</p>
+                            <button onclick="location.reload()" style="margin-top: 1rem; padding: 0.5rem 1rem; background: #4a90e2; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                                Refresh Page
+                            </button>
+                        </div>
+                    `;
+                }
+            } catch (uiError) {
+                console.error('Failed to show error UI:', uiError);
+            }
+            
             // Hide splash on error
             if (this.hideActionSplash) {
                 this.hideActionSplash();
