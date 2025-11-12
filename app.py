@@ -7461,7 +7461,7 @@ def get_available_tags():
                 'source': 'cache+db-lineage'
             })
         
-        logging.info("🔄 Building tag list... (prefer_db={})".format(prefer_db))
+        logging.info("🔄 Building tag list... (prefer_db={}, request_args={})".format(prefer_db, dict(request.args)))
         
         # When prefer_db is set, skip Excel entirely and go straight to database
         all_tags = []
