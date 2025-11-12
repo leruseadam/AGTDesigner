@@ -7651,7 +7651,7 @@ def get_available_tags():
                     import sqlite3
                     import os
                     if os.path.exists(product_db.db_path):
-                    logging.info(f"Database file exists, size: {os.path.getsize(product_db.db_path)} bytes")
+                        logging.info(f"Database file exists, size: {os.path.getsize(product_db.db_path)} bytes")
                     with sqlite3.connect(product_db.db_path) as conn:
                         cursor = conn.cursor()
                         
