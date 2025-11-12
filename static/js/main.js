@@ -2048,8 +2048,10 @@ const TagManager = {
             }
         }
         
-        // Call immediately - no requestAnimationFrame delay for faster rendering
-        this._updateAvailableTags(originalTags, filteredTags);
+        // Use requestAnimationFrame to ensure smooth DOM updates
+        requestAnimationFrame(() => {
+            this._updateAvailableTags(originalTags, filteredTags);
+        });
     }, 300),
 
     // Helpers to preserve scroll position of the available list across re-renders
@@ -2122,10 +2124,10 @@ const TagManager = {
         }, 150);
     },
 
-    // CRITICAL FIX: Render JSON matched tags with EXACT SAME STRUCTURE as regular Excel tags
-    // Uses Vendor > Brand > Product Type > Weight organization with checkboxes and collapse functionality
+    // CRITICAL FIX: Render JSON matched tags with SAME HIERARCHY as Selected Tags
+    // Uses Vendor > Brand > Product Type > Weight organization
     renderJsonMatchedTags(tags) {
-        verboseLog('✅ RENDERING JSON MATCHED TAGS WITH SAME STRUCTURE AS EXCEL TAGS, count:', tags.length);
+        verboseLog('✅ RENDERING JSON MATCHED TAGS WITH HIERARCHY, count:', tags.length);
         
         const availableTagsContainer = document.getElementById('availableTags');
         if (!availableTagsContainer) {
@@ -2135,64 +2137,17 @@ const TagManager = {
         // Preserve scroll position during re-render
         const savedScroll = this._saveAvailableScrollPosition();
 
-        // FIXED: Use hierarchical organization (SAME AS REGULAR TAGS)
+        // Clear existing content
+        availableTagsContainer.innerHTML = '';
+
+        // FIXED: Use hierarchical organization (SAME AS SELECTED TAGS)
         verboseLog('Organizing JSON matched tags hierarchically...');
         const groupedTags = this.organizeBrandCategories(tags);
         verboseLog('✅ JSON matched tags organized into hierarchy, vendor count:', groupedTags.size);
 
-        // Create hierarchical structure (EXACT SAME AS REGULAR TAGS)
+        // Create hierarchical structure (same as regular available tags)
         const tagList = document.createElement('div');
         tagList.className = 'tag-list';
-
-        // Add "Select All" checkbox (SAME AS REGULAR TAGS)
-        const selectAllContainer = document.createElement('div');
-        selectAllContainer.className = 'd-flex align-items-center gap-3 mb-2 px-3';
-        selectAllContainer.innerHTML = `
-            <label class="d-flex align-items-center gap-2 cursor-pointer mb-0 select-all-container">
-                <input type="checkbox" id="selectAllAvailable" class="custom-checkbox">
-                <span class="text-secondary fw-semibold">SELECT ALL</span>
-            </label>
-        `;
-        tagList.appendChild(selectAllContainer);
-
-        // Add event listener for available tags select all checkbox (SAME AS REGULAR TAGS)
-        const selectAllAvailable = document.getElementById('selectAllAvailable');
-        if (selectAllAvailable && !selectAllAvailable.hasAttribute('data-listener-added')) {
-            selectAllAvailable.setAttribute('data-listener-added', 'true');
-            selectAllAvailable.addEventListener('change', (e) => {
-                this.saveSelectionState('select_all_checkbox');
-                verboseLog('Select All Available checkbox changed:', e.target.checked);
-                const isChecked = e.target.checked;
-                const availableCheckboxes = document.querySelectorAll('#availableTags .tag-checkbox');
-                verboseLog('Found available tag checkboxes:', availableCheckboxes.length);
-                
-                availableCheckboxes.forEach(checkbox => {
-                    checkbox.checked = isChecked;
-                    const tag = this.state.tags.find(t => t['Product Name*'] === checkbox.value);
-                    if (tag) {
-                        if (isChecked) {
-                            if (!this.state.persistentSelectedTags.includes(tag['Product Name*'])) {
-                                this.state.persistentSelectedTags.push(tag['Product Name*']);
-                            }
-                        } else {
-                            const index = this.state.persistentSelectedTags.indexOf(tag['Product Name*']);
-                            if (index > -1) {
-                                this.state.persistentSelectedTags.splice(index, 1);
-                            }
-                        }
-                    }
-                });
-                
-                this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
-                    this.state.tags.find(t => t['Product Name*'] === name)
-                ).filter(Boolean);
-                
-                this.updateSelectedTags(selectedTagObjects);
-                this.efficientlyUpdateAvailableTagsDisplay();
-                this.updateSelectAllCheckboxes();
-            });
-        }
 
         const sortedVendors = Array.from(groupedTags.entries())
             .sort(([a], [b]) => (a || '').localeCompare(b || ''));
@@ -2201,89 +2156,14 @@ const TagManager = {
             const vendorSection = document.createElement('div');
             vendorSection.className = 'vendor-section mb-3';
             
-            // Create vendor header with checkbox and collapse functionality (SAME AS REGULAR TAGS)
             const vendorHeader = document.createElement('h5');
-            vendorHeader.className = 'vendor-header mb-2 d-flex align-items-center cursor-pointer';
-            vendorHeader.addEventListener('click', (e) => {
-                if (e.target.type === 'checkbox') return;
-                if (this.state.isSearching) return;
-                const vendorContent = vendorSection.querySelector('.vendor-content');
-                const isCollapsed = vendorContent.classList.contains('collapsed');
-                vendorContent.classList.toggle('collapsed', !isCollapsed);
-                vendorHeader.querySelector('.collapse-icon').textContent = isCollapsed ? '▼' : '▶';
-                this.removeDropdownInstructionBlurb();
-            });
-            
-            const vendorCheckbox = document.createElement('input');
-            vendorCheckbox.type = 'checkbox';
-            vendorCheckbox.className = 'select-all-checkbox me-2';
-            vendorCheckbox.addEventListener('change', (e) => {
-                const savedScroll = this._saveAvailableScrollPosition();
-                const isChecked = e.target.checked;
-                const checkboxes = vendorSection.querySelectorAll('input[type="checkbox"]');
-                checkboxes.forEach(checkbox => {
-                    if (!checkbox.classList.contains('tag-checkbox')) {
-                        checkbox.checked = isChecked;
-                        return;
-                    }
-                    
-                    const tagName = checkbox.value;
-                    const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
-                    if (!tag) {
-                        checkbox.checked = isChecked;
-                        return;
-                    }
-
-                    checkbox.checked = isChecked;
-
-                    if (isChecked) {
-                        if (!this.state.persistentSelectedTags.includes(tagName)) {
-                            this.state.persistentSelectedTags.push(tagName);
-                        }
-                    } else {
-                        if (!e.target.checked) {
-                            const index = this.state.persistentSelectedTags.indexOf(tagName);
-                            if (index > -1) {
-                                this.state.persistentSelectedTags.splice(index, 1);
-                            }
-                        }
-                    }
-                });
-                this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
-                    this.state.tags.find(t => t['Product Name*'] === name)
-                ).filter(Boolean);
-                this.updateSelectedTags(selectedTagObjects);
-                this.efficientlyUpdateAvailableTagsDisplay();
-                requestAnimationFrame(() => {
-                    requestAnimationFrame(() => {
-                        this._restoreAvailableScrollPosition(savedScroll);
-                    });
-                });
-            });
-            
-            vendorHeader.appendChild(vendorCheckbox);
-            vendorHeader.appendChild(document.createTextNode(vendor));
-            const collapseIcon = document.createElement('span');
-            collapseIcon.className = 'collapse-icon ms-auto';
-            vendorHeader.appendChild(collapseIcon);
-            
-            const hasActiveFilters = this.hasActiveFilters();
-            const shouldStartCollapsed = this.state.isSearching ? false : !hasActiveFilters;
-            
-            collapseIcon.textContent = shouldStartCollapsed ? '▶' : '▼';
+            vendorHeader.className = 'vendor-header mb-2';
+            vendorHeader.textContent = vendor;
             vendorSection.appendChild(vendorHeader);
-            tagList.appendChild(vendorSection);
 
-            // Create vendor content container
             const vendorContent = document.createElement('div');
             vendorContent.className = 'vendor-content';
-            if (shouldStartCollapsed) {
-                vendorContent.classList.add('collapsed');
-            }
-            vendorSection.appendChild(vendorContent);
-
-            // Create brand sections (SAME STRUCTURE AS REGULAR TAGS)
+            
             const sortedBrands = Array.from(brandGroups.entries())
                 .sort(([a], [b]) => (a || '').localeCompare(b || ''));
 
@@ -2291,87 +2171,11 @@ const TagManager = {
                 const brandSection = document.createElement('div');
                 brandSection.className = 'brand-section ms-3 mb-2';
                 
-                // Create brand header with checkbox and collapse functionality
                 const brandHeader = document.createElement('h6');
-                brandHeader.className = 'brand-header mb-2 d-flex align-items-center cursor-pointer';
-                brandHeader.addEventListener('click', (e) => {
-                    if (e.target.type === 'checkbox') return;
-                    if (this.state.isSearching) return;
-                    const brandContent = brandSection.querySelector('.brand-content');
-                    const isCollapsed = brandContent.classList.contains('collapsed');
-                    brandContent.classList.toggle('collapsed', !isCollapsed);
-                    brandHeader.querySelector('.collapse-icon').textContent = isCollapsed ? '▼' : '▶';
-                    this.removeDropdownInstructionBlurb();
-                });
-                
-                const brandCheckbox = document.createElement('input');
-                brandCheckbox.type = 'checkbox';
-                brandCheckbox.className = 'select-all-checkbox me-2';
-                brandCheckbox.addEventListener('change', (e) => {
-                    const savedScroll = this._saveAvailableScrollPosition();
-                    const isChecked = e.target.checked;
-                    const checkboxes = brandSection.querySelectorAll('input[type="checkbox"]');
-                    checkboxes.forEach(checkbox => {
-                        if (!checkbox.classList.contains('tag-checkbox')) {
-                            checkbox.checked = isChecked;
-                            return;
-                        }
-
-                        const tagName = checkbox.value;
-                        const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
-                        if (!tag) {
-                            checkbox.checked = isChecked;
-                            return;
-                        }
-
-                        checkbox.checked = isChecked;
-
-                        if (isChecked) {
-                            if (!this.state.persistentSelectedTags.includes(tagName)) {
-                                this.state.persistentSelectedTags.push(tagName);
-                            }
-                        } else {
-                            if (!e.target.checked) {
-                                const index = this.state.persistentSelectedTags.indexOf(tagName);
-                                if (index > -1) {
-                                    this.state.persistentSelectedTags.splice(index, 1);
-                                }
-                            }
-                        }
-                    });
-                    this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                    const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
-                        this.state.tags.find(t => t['Product Name*'] === name)
-                    ).filter(Boolean);
-                    this.updateSelectedTags(selectedTagObjects);
-                    this.efficientlyUpdateAvailableTagsDisplay();
-                    requestAnimationFrame(() => {
-                        this._restoreAvailableScrollPosition(savedScroll);
-                    });
-                });
-                
-                brandHeader.appendChild(brandCheckbox);
-                brandHeader.appendChild(document.createTextNode(brand));
-                const brandCollapseIcon = document.createElement('span');
-                brandCollapseIcon.className = 'collapse-icon ms-auto';
-                brandHeader.appendChild(brandCollapseIcon);
-                
-                const hasActiveFilters = this.hasActiveFilters();
-                const shouldStartCollapsed = this.state.isSearching ? false : !hasActiveFilters;
-                
-                brandCollapseIcon.textContent = shouldStartCollapsed ? '▶' : '▼';
-                vendorContent.appendChild(brandSection);
+                brandHeader.className = 'brand-header mb-2';
+                brandHeader.textContent = brand;
                 brandSection.appendChild(brandHeader);
 
-                // Create brand content container
-                const brandContent = document.createElement('div');
-                brandContent.className = 'brand-content';
-                if (shouldStartCollapsed) {
-                    brandContent.classList.add('collapsed');
-                }
-                brandSection.appendChild(brandContent);
-
-                // Create product type sections
                 const sortedProductTypes = Array.from(productTypeGroups.entries())
                     .sort(([a], [b]) => (a || '').localeCompare(b || ''));
 
@@ -2379,198 +2183,57 @@ const TagManager = {
                     const productTypeSection = document.createElement('div');
                     productTypeSection.className = 'product-type-section ms-3 mb-2';
                     
-                    // Create product type header with checkbox and collapse functionality
-                    const typeHeader = document.createElement('div');
-                    typeHeader.className = 'product-type-header mb-2 d-flex align-items-center cursor-pointer';
-                    typeHeader.addEventListener('click', (e) => {
-                        if (e.target.type === 'checkbox') return;
-                        if (this.state.isSearching) return;
-                        const productTypeContent = productTypeSection.querySelector('.product-type-content');
-                        const isCollapsed = productTypeContent.classList.contains('collapsed');
-                        productTypeContent.classList.toggle('collapsed', !isCollapsed);
-                        typeHeader.querySelector('.collapse-icon').textContent = isCollapsed ? '▼' : '▶';
-                        this.removeDropdownInstructionBlurb();
-                    });
-                    
-                    const productTypeCheckbox = document.createElement('input');
-                    productTypeCheckbox.type = 'checkbox';
-                    productTypeCheckbox.className = 'select-all-checkbox me-2';
-                    productTypeCheckbox.addEventListener('change', (e) => {
-                        const savedScroll = this._saveAvailableScrollPosition();
-                        const isChecked = e.target.checked;
-                        const checkboxes = productTypeSection.querySelectorAll('input[type="checkbox"]');
-                        checkboxes.forEach(checkbox => {
-                            if (!checkbox.classList.contains('tag-checkbox')) {
-                                checkbox.checked = isChecked;
-                                return;
-                            }
+                    const productTypeHeader = document.createElement('div');
+                    productTypeHeader.className = 'product-type-header mb-2';
+                    productTypeHeader.textContent = productType;
+                    productTypeSection.appendChild(productTypeHeader);
 
-                            const tagName = checkbox.value;
-                            const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
-                            if (!tag) {
-                                checkbox.checked = isChecked;
-                                return;
-                            }
-
-                            checkbox.checked = isChecked;
-
-                            if (isChecked) {
-                                if (!this.state.persistentSelectedTags.includes(tagName)) {
-                                    this.state.persistentSelectedTags.push(tagName);
-                                }
-                            } else {
-                                if (!e.target.checked) {
-                                    const index = this.state.persistentSelectedTags.indexOf(tagName);
-                                    if (index > -1) {
-                                        this.state.persistentSelectedTags.splice(index, 1);
-                                    }
-                                }
-                            }
-                        });
-                        this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                        const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
-                            this.state.tags.find(t => t['Product Name*'] === name)
-                        ).filter(Boolean);
-                        this.updateSelectedTags(selectedTagObjects);
-                        this.efficientlyUpdateAvailableTagsDisplay();
-                        requestAnimationFrame(() => {
-                            this._restoreAvailableScrollPosition(savedScroll);
-                        });
-                    });
-                    
-                    typeHeader.appendChild(productTypeCheckbox);
-                    typeHeader.appendChild(document.createTextNode(productType));
-                    const typeCollapseIcon = document.createElement('span');
-                    typeCollapseIcon.className = 'collapse-icon ms-auto';
-                    typeHeader.appendChild(typeCollapseIcon);
-                    
-                    const hasActiveFilters = this.hasActiveFilters();
-                    const shouldStartCollapsed = this.state.isSearching ? false : !hasActiveFilters;
-                    
-                    typeCollapseIcon.textContent = shouldStartCollapsed ? '▶' : '▼';
-                    brandContent.appendChild(productTypeSection);
-                    productTypeSection.appendChild(typeHeader);
-
-                    // Create product type content container
-                    const productTypeContent = document.createElement('div');
-                    productTypeContent.className = 'product-type-content';
-                    if (shouldStartCollapsed) {
-                        productTypeContent.classList.add('collapsed');
-                    }
-                    productTypeSection.appendChild(productTypeContent);
-
-                    // Create weight sections
                     const sortedWeights = Array.from(weightGroups.entries())
                         .sort(([a], [b]) => (a || '').localeCompare(b || ''));
 
                     sortedWeights.forEach(([weight, tagArray]) => {
                         const weightSection = document.createElement('div');
-                        weightSection.className = 'weight-section ms-3 mb-1';
+                        weightSection.className = 'weight-section ms-3 mb-2';
                         
-                        // Create weight header with checkbox and collapse functionality
                         const weightHeader = document.createElement('div');
-                        weightHeader.className = 'weight-header mb-1 d-flex align-items-center cursor-pointer';
-                        weightHeader.addEventListener('click', (e) => {
-                            if (e.target.type === 'checkbox') return;
-                            if (this.state.isSearching) return;
-                            const weightContent = weightSection.querySelector('.weight-content');
-                            const isCollapsed = weightContent.classList.contains('collapsed');
-                            weightContent.classList.toggle('collapsed', !isCollapsed);
-                            weightHeader.querySelector('.collapse-icon').textContent = isCollapsed ? '▼' : '▶';
-                            this.removeDropdownInstructionBlurb();
-                        });
-                        
-                        const weightCheckbox = document.createElement('input');
-                        weightCheckbox.type = 'checkbox';
-                        weightCheckbox.className = 'select-all-checkbox me-2';
-                        weightCheckbox.addEventListener('change', (e) => {
-                            const savedScroll = this._saveAvailableScrollPosition();
-                            const isChecked = e.target.checked;
-                            const checkboxes = weightSection.querySelectorAll('input[type="checkbox"]');
-                            checkboxes.forEach(checkbox => {
-                                if (!checkbox.classList.contains('tag-checkbox')) {
-                                    checkbox.checked = isChecked;
-                                    return;
-                                }
-
-                                const tagName = checkbox.value;
-                                const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
-                                if (!tag) {
-                                    checkbox.checked = isChecked;
-                                    return;
-                                }
-
-                                checkbox.checked = isChecked;
-
-                                if (isChecked) {
-                                    if (!this.state.persistentSelectedTags.includes(tagName)) {
-                                        this.state.persistentSelectedTags.push(tagName);
-                                    }
-                                } else {
-                                    if (!e.target.checked) {
-                                        const index = this.state.persistentSelectedTags.indexOf(tagName);
-                                        if (index > -1) {
-                                            this.state.persistentSelectedTags.splice(index, 1);
-                                        }
-                                    }
-                                }
-                            });
-                            this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                            const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
-                                this.state.tags.find(t => t['Product Name*'] === name)
-                            ).filter(Boolean);
-                            this.updateSelectedTags(selectedTagObjects);
-                            this.efficientlyUpdateAvailableTagsDisplay();
-                            requestAnimationFrame(() => {
-                                this._restoreAvailableScrollPosition(savedScroll);
-                            });
-                        });
-                        
-                        weightHeader.appendChild(weightCheckbox);
-                        weightHeader.appendChild(document.createTextNode(weight));
-                        const weightCollapseIcon = document.createElement('span');
-                        weightCollapseIcon.className = 'collapse-icon ms-auto';
-                        weightHeader.appendChild(weightCollapseIcon);
-                        
-                        // Weight sections should always start expanded
-                        const shouldStartCollapsed = false;
-                        
-                        weightCollapseIcon.textContent = shouldStartCollapsed ? '▶' : '▼';
-                        productTypeContent.appendChild(weightSection);
+                        weightHeader.className = 'weight-header mb-1';
+                        weightHeader.textContent = weight;
                         weightSection.appendChild(weightHeader);
 
-                        // Create weight content container
-                        const weightContent = document.createElement('div');
-                        weightContent.className = 'weight-content';
-                        if (shouldStartCollapsed) {
-                            weightContent.classList.add('collapsed');
-                        }
-                        weightSection.appendChild(weightContent);
-
-                        // Add individual tags (sorted by likeness if a reference name is present)
-                        const tagsToRender = this._sortByLikenessIfRef(tagArray);
-                        tagsToRender.forEach(tag => {
+                        tagArray.forEach(tag => {
                             const tagElement = this.createTagElement(tag, false);
-                            weightContent.appendChild(tagElement);
+                            weightSection.appendChild(tagElement);
                         });
+
+                        productTypeSection.appendChild(weightSection);
                     });
+
+                    brandSection.appendChild(productTypeSection);
                 });
+
+                vendorContent.appendChild(brandSection);
             });
+
+            vendorSection.appendChild(vendorContent);
+            tagList.appendChild(vendorSection);
         });
 
         // Atomically replace container content with built tags (this replaces any loading indicator)
-        availableTagsContainer.innerHTML = '';
-        availableTagsContainer.appendChild(tagList);
+        // Use requestAnimationFrame to ensure smooth transition
+        requestAnimationFrame(() => {
+            availableTagsContainer.innerHTML = '';
+            availableTagsContainer.appendChild(tagList);
+            
+            // After tags are in DOM, restore scroll and initialize
+            this._restoreAvailableScrollPosition(savedScroll);
+            this.updateSelectAllCheckboxes();
+            this.initializeSelectAllCheckbox();
+            
+            // Hide loading splash only after tags actually appear in DOM
+            this._waitForTagsToAppear();
+        });
         
-        // After tags are in DOM, restore scroll and initialize
-        this._restoreAvailableScrollPosition(savedScroll);
-        this.updateSelectAllCheckboxes();
-        this.initializeSelectAllCheckbox();
-        
-        // Hide loading splash only after tags actually appear in DOM
-        this._waitForTagsToAppear();
-        
-        verboseLog('✅ Rendered', tags.length, 'JSON matched tags with EXACT SAME STRUCTURE as Excel tags');
+        verboseLog('✅ Rendered', tags.length, 'JSON matched tags with HIERARCHY (same as Selected Tags)');
     },
 
     // Internal function that actually updates the available tags
@@ -2658,9 +2321,9 @@ const TagManager = {
         // Keep loading indicator visible while building tags - don't clear yet
         // We'll replace it with actual tags once they're built
         // Only clear if there's no loading indicator
-        const currentContent2 = availableTagsContainer.innerHTML.trim();
-        const hasLoadingIndicator2 = currentContent2.includes('spinner-border') || currentContent2.includes('Loading');
-        if (!hasLoadingIndicator2) {
+        const currentContent = availableTagsContainer.innerHTML.trim();
+        const hasLoadingIndicator = currentContent.includes('spinner-border') || currentContent.includes('Loading');
+        if (!hasLoadingIndicator) {
             // Show loading indicator if not already showing
             availableTagsContainer.innerHTML = `
                 <div class="text-center py-4">
@@ -2784,17 +2447,18 @@ const TagManager = {
             tagList.appendChild(tagElement);
         });
                     // Atomically replace container content with built tags
-                    // Replace immediately - no requestAnimationFrame delay
-                    availableTagsContainer.innerHTML = '';
-                    availableTagsContainer.appendChild(tagList);
-                    
-                    // After tags are in DOM, restore scroll and initialize
-                    this._restoreAvailableScrollPosition(savedScroll);
-                    this.updateSelectAllCheckboxes();
-                    this.initializeSelectAllCheckbox();
-                    
-                    // Hide loading splash only after tags actually appear in DOM
-                    this._waitForTagsToAppear();
+                    requestAnimationFrame(() => {
+                        availableTagsContainer.innerHTML = '';
+                        availableTagsContainer.appendChild(tagList);
+                        
+                        // After tags are in DOM, restore scroll and initialize
+                        this._restoreAvailableScrollPosition(savedScroll);
+                        this.updateSelectAllCheckboxes();
+                        this.initializeSelectAllCheckbox();
+                        
+                        // Hide loading splash only after tags actually appear in DOM
+                        this._waitForTagsToAppear();
+                    });
             return;
         }
         
@@ -3194,27 +2858,14 @@ const TagManager = {
         const availableTagsContainer = document.getElementById('availableTags');
         if (!availableTagsContainer) {
             // Container not found, hide splash immediately
-            console.warn('Available tags container not found');
             if (this.hideActionSplash) {
                 this.hideActionSplash();
             }
             return;
         }
         
-        // Check immediately first (tags should already be in DOM)
-        const tagItems = availableTagsContainer.querySelectorAll('.tag-item');
-        if (tagItems.length > 0) {
-            // Tags are already visible, hide splash immediately
-            verboseLog(`Tags already in DOM (${tagItems.length} items), hiding splash immediately`);
-            if (this.hideActionSplash) {
-                this.hideActionSplash();
-            }
-            return;
-        }
-        
-        // If not found immediately, check again with minimal delay
         let attempts = 0;
-        const maxAttempts = 100; // 5 seconds max (100 * 50ms) - increased for slow networks
+        const maxAttempts = 50; // 5 seconds max (50 * 100ms)
         
         const checkForTags = () => {
             attempts++;
@@ -3227,30 +2878,29 @@ const TagManager = {
                     this.hideActionSplash();
                 }
             } else if (attempts >= maxAttempts) {
-                // Timeout reached, hide splash anyway and show warning
-                console.warn(`Timeout waiting for tags after ${maxAttempts * 50}ms. Tags may not have loaded.`);
+                // Timeout reached, hide splash anyway
+                verboseLog('Timeout waiting for tags, hiding splash');
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
             } else {
-                // Tags not yet visible, check again with shorter delay
-                setTimeout(checkForTags, 50);
+                // Tags not yet visible, check again
+                setTimeout(checkForTags, 100);
             }
         };
         
-        // Start checking immediately (no initial delay)
-        checkForTags();
+        // Start checking after a brief delay to allow DOM to update
+        setTimeout(checkForTags, 50);
     },
 
     createTagElement(tag, isForSelectedTags = false) {
-        // CRITICAL FIX: For JSON matched tags, use "Product Name*" for UI (same as Excel tags)
-        // This ensures JSON matched tags have the same structure as Excel current inventory list
+        // For JSON matched tags and educated guess tags, prioritize the matched database display information
         let displayName;
         const isJsonMatched = (tag.Source && (tag.Source === 'JSON Match' || tag.Source.includes('Educated Guess'))) ||
                               (tag.JSON_Source && (tag.JSON_Source === 'JSON Match' || tag.JSON_Source.includes('Educated Guess')));
         if (isJsonMatched) {
-            // JSON matched tags: use "Product Name*" field (same as Excel tags) for UI consistency
-            displayName = tag['Product Name*'] || tag.ProductName || tag.displayName || tag.Description || 'Unnamed Product';
+            // JSON matched tags and educated guess tags: use matched database product name
+            displayName = tag.displayName || tag['Product Name*'] || tag.ProductName || tag.Description || 'Unnamed Product';
         } else {
             // Regular tags: use standard fallback chain
             displayName = tag.displayName || tag['Product Name*'] || tag.ProductName || tag.Description || 'Unnamed Product';
@@ -5662,42 +5312,12 @@ const TagManager = {
             
             verboseLog('Fetching available tags...');
             const timestamp = Date.now();
-            
-            // Add timeout to prevent hanging
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
-            
-            let response;
-            try {
-                response = await fetch(`/api/available-tags?t=${timestamp}&nocache=1&prefer_db=1`, {
-                    signal: controller.signal
-                });
-                clearTimeout(timeoutId);
-            } catch (fetchError) {
-                clearTimeout(timeoutId);
-                if (fetchError.name === 'AbortError') {
-                    throw new Error('Request timeout: Tags took too long to load. Please refresh the page.');
-                }
-                throw fetchError;
-            }
-            
+            const response = await fetch(`/api/available-tags?t=${timestamp}&nocache=1&prefer_db=1`);
             verboseLog('Available tags response status:', response.status);
             if (!response.ok) {
-                const errorText = await response.text().catch(() => 'Unknown error');
-                console.error(`API error (${response.status}):`, errorText);
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
-            
-            let responseData;
-            try {
-                responseData = await response.json();
-            } catch (jsonError) {
-                console.error('Failed to parse JSON response:', jsonError);
-                const textResponse = await response.text();
-                console.error('Response text:', textResponse.substring(0, 500));
-                throw new Error('Invalid JSON response from server');
-            }
-            
+            const responseData = await response.json();
             verboseLog('Available tags response data:', responseData);
             
             // Handle both old array format and new object format
@@ -5790,44 +5410,11 @@ const TagManager = {
             
             verboseLog(`Successfully updated available tags: ${tags.length} tags`);
             verboseLog('=== fetchAndUpdateAvailableTags END ===');
-            // Wait for tags to appear in DOM, then hide splash
-            this._waitForTagsToAppear();
-            // Add safety timeout to hide splash if tags don't appear within 10 seconds
-            setTimeout(() => {
-                const availableTagsContainer = document.getElementById('availableTags');
-                const hasTags = availableTagsContainer && availableTagsContainer.querySelectorAll('.tag-item').length > 0;
-                if (!hasTags && this.hideActionSplash) {
-                    console.warn('Tags did not appear within 10 seconds, hiding splash as fallback');
-                    this.hideActionSplash();
-                }
-            }, 10000);
+            // Note: Splash will be hidden by _waitForTagsToAppear() when tags appear
             return true;
         } catch (error) {
             console.error('Error fetching available tags:', error);
             verboseLog('=== fetchAndUpdateAvailableTags ERROR ===');
-            
-            // Show user-friendly error message
-            const errorMsg = error.message || 'Failed to load tags. Please refresh the page.';
-            console.error('Tag loading error:', errorMsg);
-            
-            // Try to show error in UI if possible
-            try {
-                const availableTagsContainer = document.getElementById('availableTags');
-                if (availableTagsContainer) {
-                    availableTagsContainer.innerHTML = `
-                        <div style="padding: 2rem; text-align: center; color: #ff6b6b;">
-                            <h3>Failed to Load Tags</h3>
-                            <p>${errorMsg}</p>
-                            <button onclick="location.reload()" style="margin-top: 1rem; padding: 0.5rem 1rem; background: #4a90e2; color: white; border: none; border-radius: 4px; cursor: pointer;">
-                                Refresh Page
-                            </button>
-                        </div>
-                    `;
-                }
-            } catch (uiError) {
-                console.error('Failed to show error UI:', uiError);
-            }
-            
             // Hide splash on error
             if (this.hideActionSplash) {
                 this.hideActionSplash();
@@ -6003,19 +5590,6 @@ const TagManager = {
         if (availableTagsContainer) {
             verboseLog('Container innerHTML:', availableTagsContainer.innerHTML);
         }
-        
-        // Show loading indicator IMMEDIATELY before any other operations
-        if (availableTagsContainer) {
-            availableTagsContainer.innerHTML = `
-                <div class="text-center py-4">
-                    <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
-                        <span class="visually-hidden">Loading...</span>
-                    </div>
-                    <p class="mt-2 text-white">Loading tags...</p>
-                </div>
-            `;
-        }
-        this.showActionSplash('Loading tags...');
         
         // Skip platform detection for Mac-like speed
         // this.detectPlatform();
@@ -6272,22 +5846,7 @@ const TagManager = {
                     
                     // Update available tags
                     AppLoadingSplash.updateProgress(75, 'Processing tags...');
-                    
-                    // Show loading indicator immediately before updating tags
-                    const availableTagsContainer = document.getElementById('availableTags');
-                    if (availableTagsContainer) {
-                        availableTagsContainer.innerHTML = `
-                            <div class="text-center py-4">
-                                <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
-                                    <span class="visually-hidden">Loading...</span>
-                                </div>
-                                <p class="mt-2 text-white">Loading tags...</p>
-                            </div>
-                        `;
-                    }
-                    
-                    // For initial load, call directly without debounce for faster rendering
-                    this._updateAvailableTags(data.available_tags, null);
+                    this.debouncedUpdateAvailableTags(data.available_tags, null);
                     
                     // Restore previously selected tags from backend
                     AppLoadingSplash.updateProgress(85, 'Restoring selections...');

@@ -14651,12 +14651,26 @@ def get_strain_product_count():
             
             conn = product_db._get_connection()
             cursor = conn.cursor()
-            cursor.execute('''
-                SELECT COUNT(*) as product_count
-                FROM products p
-                JOIN strains s ON p.strain_id = s.id
-                WHERE s.strain_name = ?
-            ''', (strain_name,))
+            
+            # Check if strain_id column exists
+            has_strain_id = product_db._products_has_column('strain_id')
+            
+            if has_strain_id:
+                # Use strain_id join if column exists, also count products with matching Product Strain
+                cursor.execute('''
+                    SELECT COUNT(DISTINCT p.id) as product_count
+                    FROM products p
+                    LEFT JOIN strains s ON p.strain_id = s.id
+                    WHERE s.strain_name = ? 
+                       OR (p.strain_id IS NULL AND TRIM(LOWER(p."Product Strain")) = TRIM(LOWER(?)))
+                ''', (strain_name, strain_name))
+            else:
+                # Fallback to Product Strain column if strain_id doesn't exist
+                cursor.execute('''
+                    SELECT COUNT(*) as product_count
+                    FROM products p
+                    WHERE TRIM(LOWER(p."Product Strain")) = TRIM(LOWER(?))
+                ''', (strain_name,))
             
             result = cursor.fetchone()
             product_count = result[0] if result else 0
@@ -14759,21 +14773,48 @@ def set_strain_lineage():
                 WHERE id = ?
             ''', (lineage, strain_id))
             
-            # Also update all products that use this strain
-            cursor.execute('''
-                UPDATE products 
-                SET lineage = ?,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE strain_id = ?
-            ''', (lineage, strain_id))
+            # Check if strain_id column exists in products table
+            has_strain_id = product_db._products_has_column('strain_id')
+            
+            if has_strain_id:
+                # Update products using strain_id if column exists
+                # Also update products with matching Product Strain for products without strain_id set
+                cursor.execute('''
+                    UPDATE products 
+                    SET lineage = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE strain_id = ? 
+                       OR (strain_id IS NULL AND TRIM(LOWER("Product Strain")) = TRIM(LOWER(?)))
+                ''', (lineage, strain_id, strain_name))
+                
+                # Get the count of updated products
+                cursor.execute('''
+                    SELECT COUNT(*) 
+                    FROM products 
+                    WHERE strain_id = ? 
+                       OR (strain_id IS NULL AND TRIM(LOWER("Product Strain")) = TRIM(LOWER(?)))
+                ''', (strain_id, strain_name))
+                product_count = cursor.fetchone()[0]
+            else:
+                # Fallback: Update products using Product Strain column if strain_id doesn't exist
+                cursor.execute('''
+                    UPDATE products 
+                    SET lineage = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE TRIM(LOWER("Product Strain")) = TRIM(LOWER(?))
+                ''', (lineage, strain_name))
+                
+                # Get the count of updated products
+                cursor.execute('''
+                    SELECT COUNT(*) 
+                    FROM products 
+                    WHERE TRIM(LOWER("Product Strain")) = TRIM(LOWER(?))
+                ''', (strain_name,))
+                product_count = cursor.fetchone()[0]
             
             conn.commit()
             
-            # Get the count of updated products
-            cursor.execute('SELECT COUNT(*) FROM products WHERE strain_id = ?', (strain_id,))
-            product_count = cursor.fetchone()[0]
-            
-            logging.info(f"Updated lineage for strain '{strain_name}' to '{lineage}'. Affected {product_count} products.")
+            logging.info(f"Updated lineage for strain '{strain_name}' to '{lineage}'. Affected {product_count} products (using {'strain_id' if has_strain_id else 'Product Strain'}).")
             
             return jsonify({
                 'success': True,
@@ -14785,10 +14826,12 @@ def set_strain_lineage():
             
         except Exception as db_error:
             logging.error(f"Failed to set strain lineage: {db_error}")
+            logging.error(f"Database error details: {traceback.format_exc()}")
             return jsonify({'error': f'Database operation failed: {str(db_error)}'}), 500
             
     except Exception as e:
         logging.error(f"Error setting strain lineage: {e}")
+        logging.error(f"Error details: {traceback.format_exc()}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/vendor-strain-browser', methods=['GET'])
