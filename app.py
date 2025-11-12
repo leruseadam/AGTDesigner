@@ -7633,9 +7633,9 @@ def get_available_tags():
                 # But skip it for now and use raw SQL directly - get_all_products() may be too slow
                 logging.info("🔄 Using direct SQL query (skipping get_all_products() for performance)")
                 # Fall back to raw SQL query directly
-                    import sqlite3
-                    import os
-                    if os.path.exists(product_db.db_path):
+                import sqlite3
+                import os
+                if os.path.exists(product_db.db_path):
                         logging.info(f"Database file exists, size: {os.path.getsize(product_db.db_path)} bytes")
                         with sqlite3.connect(product_db.db_path) as conn:
                             cursor = conn.cursor()
