@@ -7772,11 +7772,20 @@ def get_available_tags():
         # CRITICAL: If prefer_db is True but database_tags is empty, log a warning
         if prefer_db and len(database_tags) == 0:
             logging.error(f"⚠️ CRITICAL: prefer_db=True but database_tags is empty! Store: {store_name if 'store_name' in locals() else 'unknown'}")
+            # Try to get store_name and product_db for debugging
+            try:
+                debug_store = get_current_store_name()
+                debug_db = get_product_database(debug_store) if debug_store else None
+                logging.error(f"   Debug - Store: {debug_store}, DB exists: {debug_db is not None}, DB path: {debug_db.db_path if debug_db else 'N/A'}")
+            except:
+                pass
         
         # 3. Combine and deduplicate products
-        if prefer_db:
-            # When prefer_db=1, use ONLY database tags
-            logging.info(f"PREFER_DB mode: Using {len(database_tags)} database tags exclusively")
+        # CRITICAL FIX: Always use database if we have no Excel tags, regardless of prefer_db flag
+        use_database_only = prefer_db or (len(all_tags) == 0 and len(database_tags) > 0)
+        if use_database_only:
+            # When prefer_db=1 or no Excel tags, use ONLY database tags
+            logging.info(f"Using database tags exclusively (prefer_db={prefer_db}, all_tags={len(all_tags)}, database_tags={len(database_tags)})")
             if len(database_tags) == 0:
                 logging.error("❌ CRITICAL ERROR: PREFER_DB mode but database_tags is empty! Check database query above.")
                 logging.error(f"   Store name: {store_name if 'store_name' in locals() else 'unknown'}")
