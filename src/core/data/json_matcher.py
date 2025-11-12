@@ -2360,6 +2360,8 @@ class JSONMatcher:
                 raw_date = payload.get("est_arrival_at", "").split("T")[0]
                 
             matched_products = []
+            per_item_vendor_filters_logged = set()
+            vendor_override_logged = set()
             
             # SIMPLIFIED APPROACH: Process each JSON item with basic matching for maximum results
             print(f"🔍 DEBUG: SIMPLIFIED MATCHING - Processing {len(unique_items)} items for maximum matches")
@@ -2394,7 +2396,22 @@ class JSONMatcher:
                         item["product_name"] = f"JSON Product {i+1}"
                     
                 raw_product_name = str(item.get("product_name", ""))
-                vendor = global_vendor if global_vendor else str(item.get("vendor", ""))
+                vendor_field_value = str(item.get("vendor", "")).strip()
+                current_vendor_filter = json_vendor_filter
+
+                if vendor_field_value:
+                    normalized_vendor_field = vendor_field_value.lower()
+                    if current_vendor_filter and not self._is_vendor_match(current_vendor_filter, vendor_field_value):
+                        override_key = (current_vendor_filter.lower(), normalized_vendor_field)
+                        if override_key not in vendor_override_logged:
+                            logging.info(f"🔁 Vendor override: metadata vendor '{current_vendor_filter}' replaced with item vendor '{vendor_field_value}' for '{raw_product_name}'")
+                            vendor_override_logged.add(override_key)
+                    elif not current_vendor_filter and normalized_vendor_field not in per_item_vendor_filters_logged:
+                        logging.info(f"🔒 Using item vendor '{vendor_field_value}' for vendor isolation (no global vendor metadata)")
+                        per_item_vendor_filters_logged.add(normalized_vendor_field)
+                    current_vendor_filter = vendor_field_value
+
+                effective_vendor = current_vendor_filter or global_vendor
                 brand = str(item.get("brand", "")).strip()
                 inventory_type = str(item.get("inventory_type", "")).strip()
                 inventory_category = str(item.get("inventory_category", "")).strip()
@@ -2429,20 +2446,20 @@ class JSONMatcher:
                             # 0. VENDOR FILTER: STRICT vendor isolation - reject non-matching vendors
                             excel_vendor = cache_item.get('vendor', '').strip()
                             vendor_match_bonus = 0.0
-                            if json_vendor_filter and excel_vendor:
+                            if current_vendor_filter and excel_vendor:
                                 # CRITICAL: Use the vendor matching function to check if vendors match
-                                json_vendor_normalized = self._normalize_vendor_name(json_vendor_filter.lower())
+                                json_vendor_normalized = self._normalize_vendor_name(current_vendor_filter.lower())
                                 excel_vendor_normalized = self._normalize_vendor_name(excel_vendor.lower())
                                 
                                 # Check if vendors match (exact, substring, or flexible match)
-                                vendor_matches = self._is_vendor_match(json_vendor_filter, excel_vendor)
+                                vendor_matches = self._is_vendor_match(current_vendor_filter, excel_vendor)
                                 
                                 if vendor_matches:
                                     vendor_match_bonus = 50.0  # Strong bonus for vendor match
-                                    logging.debug(f"✓ Vendor match: '{json_vendor_filter}' matches '{excel_vendor}'")
+                                    logging.debug(f"✓ Vendor match: '{current_vendor_filter}' matches '{excel_vendor}'")
                                 else:
                                     # REJECT non-matching vendors to prevent cross-brand contamination
-                                    logging.debug(f"🚫 REJECTED: Vendor mismatch - JSON vendor '{json_vendor_filter}' ≠ Excel vendor '{excel_vendor}'")
+                                    logging.debug(f"🚫 REJECTED: Vendor mismatch - JSON vendor '{current_vendor_filter}' ≠ Excel vendor '{excel_vendor}'")
                                     continue  # Skip this candidate entirely
                             
                             # 1. Exact name match (highest priority)
@@ -2644,7 +2661,7 @@ class JSONMatcher:
                 
                 if best_match is not None and validated:  # Only use validated matches
                     try:
-                        product = self._create_product_from_excel_match(best_match, item, global_vendor)
+                        product = self._create_product_from_excel_match(best_match, item, effective_vendor)
                         if product:
                             matched_products.append(product)
                             items_matched += 1
@@ -2659,7 +2676,7 @@ class JSONMatcher:
                         items_failed += 1
                         # DON'T continue - try fallback instead
                         try:
-                            fallback_product = self._create_product_from_json_item(item, global_vendor)
+                            fallback_product = self._create_product_from_json_item(item, effective_vendor or global_vendor)
                             if fallback_product and fallback_product.get('Product Name*'):
                                 matched_products.append(fallback_product)
                                 items_fallback += 1
@@ -2671,7 +2688,7 @@ class JSONMatcher:
                     # FALLBACK: Create product from JSON data directly if no Excel/DB match
                     # This ensures EVERY JSON item gets a valid tag - NO EXCEPTIONS
                     try:
-                        product = self._create_product_from_json_item(item, global_vendor)
+                        product = self._create_product_from_json_item(item, effective_vendor or global_vendor)
                         if product and product.get('Product Name*'):  # Ensure it's valid
                             matched_products.append(product)
                             items_fallback += 1
@@ -2891,7 +2908,8 @@ class JSONMatcher:
         try:
             # ===== STEP 1: Extract all raw data from JSON =====
             raw_product_name = str(item.get("product_name", "")).strip()
-            vendor = global_vendor if global_vendor else str(item.get("vendor", "")).strip()
+            json_vendor_value = str(item.get("vendor", "")).strip()
+            vendor = json_vendor_value or (global_vendor if global_vendor else "")
             brand = str(item.get("brand", "")).strip()
             inventory_type = str(item.get("inventory_type", "")).strip()
             inventory_category = str(item.get("inventory_category", "")).strip()
@@ -2899,6 +2917,8 @@ class JSONMatcher:
             raw_units = str(item.get("unit_weight_uom", item.get("uom", "g"))).strip()
             raw_price = str(item.get("line_price", item.get("price", ""))).strip()
             strain = str(item.get("strain_name", item.get("strain", ""))).strip()
+            if json_vendor_value and global_vendor and not self._is_vendor_match(global_vendor, json_vendor_value):
+                logging.debug(f"🔁 Vendor override for JSON fallback: using item vendor '{json_vendor_value}' instead of metadata vendor '{global_vendor}'")
             vendor = self._normalize_vendor_display_name(vendor)
             if brand:
                 brand = self._normalize_vendor_display_name(brand)
@@ -3176,6 +3196,17 @@ class JSONMatcher:
             
             # Get vendor with fallback logic
             vendor = safe_row_get(excel_row, 'Vendor/Supplier*') or safe_row_get(excel_row, 'Vendor/Supplier') or safe_row_get(excel_row, 'Vendor') or global_vendor
+            json_vendor_value = str(json_item.get("vendor", "")).strip() if json_item else ""
+            if json_vendor_value:
+                if not vendor or not self._is_vendor_match(vendor, json_vendor_value):
+                    logging.debug(f"🔁 Vendor override for Excel match: using JSON vendor '{json_vendor_value}' instead of '{vendor}'")
+                    vendor = json_vendor_value
+            if vendor:
+                try:
+                    vendor = self._normalize_vendor_display_name(vendor)
+                except AttributeError:
+                    # _normalize_vendor_display_name may not exist in some contexts; ignore if unavailable
+                    pass
             
             # CRITICAL FIX: Ensure brand, price, and weight are always populated
             # Get brand with multiple fallbacks

@@ -44,7 +44,7 @@ def _load_font_sizing_config():
                 },
                 'double': {
                     'description': [(10, 28), (20, 26), (30, 23), (40, 22), (50, 20), (60, 19), (70, 18), (80, 17), (90, 16), (100, 15), (110, 14), (120, 13), (130, 12), (float('inf'), 10)],
-                    'brand': [(5, 14), (10, 12), (15, 10), (20, 8), (25, 7.5), (float('inf'), 7)],
+                    'brand': [(5, 12), (15, 10), (20, 8), (30, 7.5), (40, 7), (float('inf'), 6.5)],
                     'price': [(10, 26), (15, 20), (float('inf'), 14)],
                     'lineage': [(15, 13), (25, 12), (35, 10), (45, 9), (float('inf'), 9)],
                     'ratio': [(10, 9), (20, 8), (30, 7), (float('inf'), 6.5)],
@@ -212,38 +212,16 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
                 return Pt(final_size)
     
     
-    # Special rule: Handle double template brand consistency with special rules for long brands
+    # Special guard: extremely long double-template brands cap at 6.5pt
     if field_type.lower() == 'brand' and orientation.lower() == 'double':
-        # CRITICAL FIX: Use consistent font sizing for double template brands based on character count only
-        # This prevents inconsistent sizing due to special characters and complexity penalties
         text_length = _brand_letter_count(text)
-        
-        # Use simplified font sizing based on character count for consistency
-        # Special rules for very long brands to ensure they fit in 1.75" width cells
-        if text_length <= 5:
-            final_size = 16 * scale_factor
-        elif text_length <= 10:
-            final_size = 15 * scale_factor
-        elif text_length <= 15:
-            final_size = 14 * scale_factor
-        elif text_length <= 20:
-            final_size = 13 * scale_factor
-        elif text_length <= 25:
-            final_size = 8 * scale_factor
-        elif text_length <= 30:
-            final_size = 8 * scale_factor
-        elif text_length <= 35:
-            final_size = 10 * scale_factor
-        elif text_length <= 40:
-            final_size = 9 * scale_factor
-        elif text_length <= 45:
-            final_size = 8 * scale_factor
-        else:
-            # For extremely long brands (45+ characters), use minimum readable size
-            final_size = 7 * scale_factor
-        
-        logger.debug(f"Double template brand rule: text='{text}' (length={text_length}) -> {final_size}pt font for consistency")
-        return Pt(final_size)
+        if text_length >= 40:
+            final_size = 6.5 * scale_factor
+            logger.debug(
+                f"Double template brand length guard: text='{text}' (length={text_length}) "
+                f"exceeds threshold, capping at {final_size}pt"
+            )
+            return Pt(final_size)
     
     # Special rule: If double template description has multiple words with 9+ characters each, automatically reduce to 18pt
     if orientation.lower() == 'double' and field_type.lower() == 'description':

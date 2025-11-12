@@ -119,6 +119,7 @@ def apply_lineage_colors(doc):
                     # Remove marker wrappers for robust matching
                     for marker in ["LINEAGE_START", "LINEAGE_END", "PRODUCTSTRAIN_START", "PRODUCTSTRAIN_END", "PRODUCTBRAND_CENTER_START", "PRODUCTBRAND_CENTER_END"]:
                         original_text = original_text.replace(marker, "")
+                    # Remove hint token only after extracting value
                     if lineage_hint_token:
                         original_text = original_text.replace(lineage_hint_token, "")
                     text = original_text.strip()

@@ -131,6 +131,17 @@ select option {
     will-change: auto !important;
 }
 
+/* Center template dropdown text specifically on PC */
+#templateSelect,
+#templateSelect option {
+    text-align: center !important;
+}
+
+/* Ensure the selected value is centered in the collapsed state */
+#templateSelect {
+    text-align-last: center !important;
+}
+
 /* Disable all transitions globally for smooth performance on PC */
 * {
     animation-duration: 0s !important;

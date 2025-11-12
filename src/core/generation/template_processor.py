@@ -1879,12 +1879,103 @@ class TemplateProcessor:
                 # Center brand should always be ALL CAPS
                 brand_center_text = str(product_brand).upper()
                 if self.template_type == 'vertical':
-                    # For vertical template, use marker-based formatting like horizontal for proper font sizing
-                    # CRITICAL FIX: Use markers instead of plain text to enable proper font sizing
-                    label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{brand_center_text}PRODUCTBRAND_CENTER_END"
-                    label_context['ProductBrand'] = ""
+                    # Mirror double-template handling: treat brand content as lineage with hint markers for color logic
+                    final_brand_text = str(brand_center_text).strip().upper()
+
+                    product_strain_value = (product_strain or record.get('ProductStrain') or record.get('Product Strain', ''))
+                    if product_strain_value:
+                        strain_token = str(product_strain_value).strip().upper()
+                        strain_token = strain_token.replace('PRODUCTSTRAIN_START', '').replace('PRODUCTSTRAIN_END', '').strip()
+                        if strain_token:
+                            original_brand = final_brand_text
+                            strain_components = {strain_token}
+                            strain_components.update(
+                                token.strip()
+                                for token in re.split(r'[\s\-\/,|]+', strain_token)
+                                if token.strip()
+                            )
+                            final_brand_text = re.sub(
+                                rf"\s*[-–\/]+\s*{re.escape(strain_token)}\s*$",
+                                "",
+                                final_brand_text,
+                                flags=re.IGNORECASE,
+                            )
+                            final_brand_text = re.sub(
+                                rf"{re.escape(strain_token)}\s*$",
+                                "",
+                                final_brand_text,
+                                flags=re.IGNORECASE,
+                            )
+                            final_brand_text = re.sub(
+                                rf"\s*[\(\[\{{]\s*{re.escape(strain_token)}\s*[\)\]\}}]\s*$",
+                                "",
+                                final_brand_text,
+                                flags=re.IGNORECASE,
+                            )
+                            for component in list(strain_components):
+                                if component:
+                                    final_brand_text = re.sub(
+                                        rf"[\s\(\[\{{\-–\/]*{re.escape(component)}[\s\)\]\}}\-–\/]*",
+                                        " ",
+                                        final_brand_text,
+                                        flags=re.IGNORECASE,
+                                    )
+                            lineage_tokens = ["SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", "CBD", "MIXED"]
+                            for lineage_token in lineage_tokens:
+                                if lineage_token:
+                                    final_brand_text = re.sub(
+                                        rf"[\s\(\[\{{\-–\/]*{re.escape(lineage_token)}[\s\)\]\}}\-–\/]*",
+                                        " ",
+                                        final_brand_text,
+                                        flags=re.IGNORECASE,
+                                    )
+                                final_brand_text = re.sub(
+                                    rf"\s*[\(\[\{{]*\s*{re.escape(lineage_token)}\s*[\)\]\}}]*\s*$",
+                                    "",
+                                    final_brand_text,
+                                    flags=re.IGNORECASE,
+                                )
+                                final_brand_text = re.sub(
+                                    rf"\s*[-–\/]*\s*{re.escape(lineage_token)}\s*$",
+                                    "",
+                                    final_brand_text,
+                                    flags=re.IGNORECASE,
+                                )
+                            final_brand_text = re.sub(r"\s{2,}", " ", final_brand_text).strip()
+                            final_brand_text = final_brand_text.rstrip("-–/").rstrip()
+                            if final_brand_text != original_brand:
+                                self.logger.info(
+                                    f"🎯 VERTICAL TEMPLATE STRAIN SPLIT: Removed strain/lineage token from brand -> '{final_brand_text}'"
+                                )
+                    if not final_brand_text:
+                        final_brand_text = str(brand_center_text).strip().upper()
+
+                    self.logger.info(f"🔍 VERTICAL BRAND DEBUG: Final brand text: '{final_brand_text}' (length: {len(final_brand_text)})")
+
+                    lineage_for_color_source = (
+                        label_context.get('Lineage') or
+                        record.get('Lineage') or
+                        ''
+                    )
+                    if is_already_wrapped(lineage_for_color_source, 'LINEAGE'):
+                        lineage_for_color_source = unwrap_marker(lineage_for_color_source, 'LINEAGE')
+                    lineage_for_color = str(lineage_for_color_source).strip().upper()
+
+                    if not lineage_for_color:
+                        lineage_for_color = 'CBD' if has_cbd_blend_strain else 'MIXED'
+
+                    lineage_hint_token = f"__LINEAGE_HINT_{lineage_for_color}__"
+
+                    # Use lineage hint for color logic while leaving actual brand in ProductBrand field
+                    label_context['Lineage'] = lineage_hint_token
+
+                    # Populate ProductBrand with hint + brand markers for display (single source of truth)
+                    label_context['ProductBrand'] = (
+                        f"{lineage_hint_token}PRODUCTBRAND_CENTER_START{final_brand_text}PRODUCTBRAND_CENTER_END"
+                    )
                     label_context['ProductBrand_Center'] = ""
-                    self.logger.info(f"🎯 VERTICAL BRAND FIX: Set Lineage to '{brand_center_text}' with markers for proper font sizing")
+
+                    self.logger.info(f"🎯 VERTICAL TEMPLATE BRAND FIX: Set ProductBrand to '{final_brand_text}' with lineage hint '{lineage_for_color}'")
                 elif self.template_type == 'mini':
                     # For mini template, set both Lineage and ProductBrand for maximum compatibility
                     # Mini templates need brand information in multiple fields
@@ -1898,40 +1989,9 @@ class TemplateProcessor:
                     label_context['ProductBrand_Center'] = wrap_with_marker(plain_brand, 'PRODUCTBRAND_CENTER')
                     self.logger.info(f"🎯 MINI TEMPLATE BRAND FIX: Set Lineage, ProductBrand, and ProductBrand_Center to '{brand_center_text}' for mini template")
                 elif self.template_type == 'double':
-                    # For double template, use marker-based formatting like other templates for proper font sizing
-                    # CRITICAL FIX: Clean brand_center_text to prevent corruption while preserving the brand
-                    clean_brand_text = str(brand_center_text).strip().upper()
+                    # For double template, use brand text as-is with markers for downstream formatting
+                    final_brand_text = str(brand_center_text).strip().upper()
                     
-                    # Only remove corrupted patterns if they exist, but preserve the actual brand name
-                    # CRITICAL FIX: Add debugging to see what's happening to brand text
-                    self.logger.info(f"🔍 BRAND CLEANING DEBUG: Original brand text: '{clean_brand_text}'")
-                    
-                    # Remove corrupted patterns but keep the actual brand content
-                    if 'PRODUCTSTRR_STARTCONSTELL' in clean_brand_text:
-                        clean_brand_text = re.sub(r'PRODUCTSTRR_STARTCONSTELL.*?', '', clean_brand_text)
-                        self.logger.info(f"🔍 BRAND CLEANING DEBUG: Removed PRODUCTSTRR_STARTCONSTELL, result: '{clean_brand_text}'")
-                    if 'PRODUCTBRAND_CENTER_START' in clean_brand_text:
-                        clean_brand_text = re.sub(r'PRODUCTBRAND_CENTER_START.*?PRODUCTBRAND_CENTER_END', '', clean_brand_text)
-                        self.logger.info(f"🔍 BRAND CLEANING DEBUG: Removed PRODUCTBRAND_CENTER markers, result: '{clean_brand_text}'")
-                    if 'CONSTELLATION\$' in clean_brand_text:
-                        clean_brand_text = re.sub(r'CONSTELLATION\$.*', '', clean_brand_text)
-                        self.logger.info(f"🔍 BRAND CLEANING DEBUG: Removed CONSTELLATION\$, result: '{clean_brand_text}'")
-                    
-                    # CRITICAL FIX: Remove any remaining $ symbols that might be marker remnants
-                    # This handles cases like "VICE$Star" where $ is a corrupted marker remnant
-                    if '$' in clean_brand_text:
-                        clean_brand_text = re.sub(r'\$.*', '', clean_brand_text)
-                        self.logger.info(f"🔍 BRAND CLEANING DEBUG: Removed $ remnant, result: '{clean_brand_text}'")
-                    
-                    clean_brand_text = clean_brand_text.strip()
-                    
-                    # CRITICAL FIX: Always use the brand text, even if it's short
-                    # This prevents brands from disappearing due to over-aggressive cleaning
-                    if clean_brand_text:
-                        final_brand_text = clean_brand_text
-                    else:
-                        # Fallback to original brand text if cleaning removed everything
-                        final_brand_text = str(brand_center_text).strip().upper()
                     # Remove trailing strain content if it was concatenated with the brand text
                     product_strain_value = (product_strain or record.get('ProductStrain') or record.get('Product Strain', ''))
                     if product_strain_value:
@@ -2670,6 +2730,13 @@ class TemplateProcessor:
         except Exception as e:
             self.logger.warning(f"Final DOH centering pass failed: {e}")
         
+        # FINAL ROW HEIGHT ENFORCEMENT: Absolutely ensure all rows use EXACT height rule
+        try:
+            self._force_exact_row_heights(doc)
+            self.logger.debug("Applied final exact row-height enforcement to all tables")
+        except Exception as e:
+            self.logger.warning(f"Exact row height enforcement failed: {e}")
+
         # CREATIVE FIX: Force bold formatting on DescAndWeight content specifically
         try:
             self._force_descandweight_bold(doc)
@@ -3441,20 +3508,129 @@ class TemplateProcessor:
                     for cell in row.cells:
                         for paragraph in cell.paragraphs:
                             for run in paragraph.runs:
-                                if run.text and run.text.strip():
-                                    # Determine field type based on text content and position
-                                    field_type = self._determine_field_type_for_template(run.text, paragraph, cell)
-                                    
-                                    # Apply unified font sizing
-                                    font_size = get_font_size(run.text, field_type, template_orientation, self.scale_factor)
-                                    # Apply at run and XML level to prevent Word from overriding
-                                    from src.core.generation.unified_font_sizing import set_run_font_size
-                                    set_run_font_size(run, font_size)
-                                    
-                                    self.logger.debug(f"Applied unified font sizing to {self.template_type} template text: '{run.text}' -> {field_type} -> {font_size}")
+                                run_text = run.text or ''
+                                if not run_text.strip():
+                                    continue
+                                
+                                existing_size = getattr(run.font, "size", None)
+                                if existing_size is not None:
+                                    try:
+                                        if existing_size.pt <= 1.1:
+                                            # Preserve already-minimized runs (e.g., ProductStrain at 1pt)
+                                            continue
+                                    except AttributeError:
+                                        pass
+                                
+                                # Determine field type based on text content and position
+                                field_type = self._determine_field_type_for_template(run_text, paragraph, cell)
+                                
+                                # Apply unified font sizing
+                                font_size = get_font_size(run_text, field_type, template_orientation, self.scale_factor)
+                                # Apply at run and XML level to prevent Word from overriding
+                                from src.core.generation.unified_font_sizing import set_run_font_size
+                                set_run_font_size(run, font_size)
+                                
+                                self.logger.debug(f"Applied unified font sizing to {self.template_type} template text: '{run_text}' -> {field_type} -> {font_size}")
                                     
         except Exception as e:
             self.logger.warning(f"Failed to apply unified font sizing to vertical template text: {e}")
+
+    def _set_paragraph_cell_vertical_alignment(self, paragraph, alignment):
+        """
+        Ensure the table cell containing the paragraph has the desired vertical alignment.
+        """
+        try:
+            if paragraph is None or alignment is None:
+                return
+            
+            # Try high-level python-docx API first
+            try:
+                from docx.table import _Cell  # type: ignore
+                cell_obj = getattr(paragraph, "_parent", None)
+                while cell_obj is not None and not isinstance(cell_obj, _Cell):
+                    cell_obj = getattr(cell_obj, "_parent", None)
+                if cell_obj is not None:
+                    cell_obj.vertical_alignment = alignment
+                    return
+            except Exception:
+                pass
+            
+            target_tag = qn('w:tc')
+            cell_element = paragraph._element
+            while cell_element is not None and cell_element.tag != target_tag:
+                cell_element = cell_element.getparent()
+
+            if cell_element is None:
+                return
+
+            tc_pr = cell_element.find(qn('w:tcPr'))
+            if tc_pr is None:
+                tc_pr = OxmlElement('w:tcPr')
+                cell_element.insert(0, tc_pr)
+
+            v_align = tc_pr.find(qn('w:vAlign'))
+            if v_align is None:
+                v_align = OxmlElement('w:vAlign')
+                tc_pr.append(v_align)
+
+            align_map = {
+                WD_CELL_VERTICAL_ALIGNMENT.TOP: 'top',
+                WD_CELL_VERTICAL_ALIGNMENT.CENTER: 'center',
+                WD_CELL_VERTICAL_ALIGNMENT.BOTTOM: 'bottom'
+            }
+            v_align.set(qn('w:val'), align_map.get(alignment, 'center'))
+        except Exception as e:
+            self.logger.warning(f"Failed to set cell vertical alignment: {e}")
+
+    def _force_exact_row_heights(self, doc):
+        """
+        Ensure every row in every table uses an EXACT height rule (no 'At least').
+        Applies recursively to inner tables while preserving existing height values.
+        """
+        try:
+            from docx.enum.table import WD_ROW_HEIGHT_RULE
+            from docx.oxml.ns import qn
+            from docx.oxml import OxmlElement
+
+            def ensure_exact_row(row):
+                try:
+                    row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+                except Exception:
+                    pass
+
+                try:
+                    tr = row._tr
+                    trPr = tr.get_or_add_trPr()
+                    trHeight = trPr.find(qn('w:trHeight'))
+                    if trHeight is None:
+                        trHeight = OxmlElement('w:trHeight')
+                        trPr.append(trHeight)
+
+                    # Preserve existing height value; if missing, populate from current row.height if available
+                    val = trHeight.get(qn('w:val'))
+                    if (not val or val == '0') and getattr(row, 'height', None):
+                        try:
+                            val = str(int(row.height))
+                            trHeight.set(qn('w:val'), val)
+                        except Exception:
+                            pass
+
+                    trHeight.set(qn('w:hRule'), 'exact')
+                except Exception as e:
+                    self.logger.debug(f"Failed to set exact height on row: {e}")
+
+            def process_table(table):
+                for row in getattr(table, 'rows', []):
+                    ensure_exact_row(row)
+                    for cell in row.cells:
+                        for inner_table in getattr(cell, 'tables', []):
+                            process_table(inner_table)
+
+            for table in getattr(doc, 'tables', []):
+                process_table(table)
+
+        except Exception as e:
+            self.logger.warning(f"Failed to force exact row heights: {e}")
 
     def _determine_field_type_for_template(self, text, paragraph, cell):
         if self.template_type == 'double':
@@ -3469,7 +3645,16 @@ class TemplateProcessor:
         text_lower = text.lower().strip()
         text_stripped = text.strip()
         is_all_caps = (text_stripped.isupper() and any(c.isalpha() for c in text_stripped))
-        is_short_wordy = (len(text_stripped) <= 14 and all(ch.isalpha() or ch.isspace() or ch in ['&','-','/'] for ch in text_stripped))
+        is_short_wordy = all(ch.isalpha() or ch.isspace() or ch in ['&','-','/'] for ch in text_stripped)
+
+        # Marker-based overrides
+        if any(marker in text for marker in ['PRODUCTBRAND_CENTER_START', 'PRODUCTBRAND_CENTER_END', 'PRODUCTBRAND_START', 'PRODUCTBRAND_END']):
+            self.logger.debug(f"🎯 BRAND MARKER DETECTED: '{text_stripped}' classified as brand (marker-based)")
+            return 'brand'
+
+        if '__LINEAGE_HINT_' in text:
+            self.logger.debug(f"🎯 LINEAGE HINT DETECTED: '{text_stripped}' classified as lineage (marker-based)")
+            return 'lineage'
 
         # Check for prices (contain $ symbol)
         if '$' in text:
@@ -3499,7 +3684,7 @@ class TemplateProcessor:
         # Heuristic: Non-classic vertical brands are typically ALL CAPS, short, letters-only
         # Classify these as brand so they render visibly (not 1pt).
         # CRITICAL FIX: Allow brand names as short as 1 character to be visible
-        if is_all_caps and is_short_wordy and len(text_stripped.split()) <= 3 and 1 <= len(text_stripped) <= 14:
+        if is_all_caps and is_short_wordy and len(text_stripped.split()) <= 3:
             self.logger.debug(f"🎯 SHORT BRAND CLASSIFIED: '{text_stripped}' (len={len(text_stripped)}) classified as brand")
             return 'brand'
         
@@ -3766,18 +3951,33 @@ class TemplateProcessor:
             # Convert |BR| markers to actual line breaks after marker processing
             self._convert_br_markers_to_line_breaks(paragraph)
             
+            # Precompute strain contents to protect their sizing during brand adjustments
+            strain_contents_casefold = {
+                (data.get('content') or '').strip().casefold()
+                for key, data in processed_content.items()
+                if key in ('PRODUCTSTRAIN', 'STRAIN')
+            }
+
             # Apply special formatting for specific markers
             for marker_name, marker_data in processed_content.items():
                 # Always center ProductBrand markers for ALL templates
                 if ('PRODUCTBRAND' in marker_name):
                     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    for run in paragraph.runs:
+                    self._set_paragraph_cell_vertical_alignment(paragraph, WD_CELL_VERTICAL_ALIGNMENT.CENTER)
+                    for idx, run in enumerate(paragraph.runs):
                         # Get product type for font sizing
                         product_type = None
                         if hasattr(self, 'current_product_type'):
                             product_type = self.current_product_type
                         elif hasattr(self, 'label_context') and 'ProductType' in self.label_context:
                             product_type = self.label_context['ProductType']
+                        run_text_normalized = (run.text or '').strip().casefold()
+                        if run_text_normalized and run_text_normalized in strain_contents_casefold:
+                            # Preserve ProductStrain runs that share the paragraph
+                            continue
+                        # Only apply ProductBrand sizing to the run that actually contains the brand content
+                        if marker_name in ('PRODUCTBRAND', 'PRODUCTBRAND_CENTER') and idx != 0:
+                            continue
                         set_run_font_size(run, get_font_size_by_marker(marker_data['content'], marker_name, self.template_type, self.scale_factor, product_type))
                     continue
                 if marker_name == 'DOH':
@@ -3803,19 +4003,42 @@ class TemplateProcessor:
                     elif hasattr(self, 'label_context') and 'ProductType' in self.label_context:
                         product_type = self.label_context['ProductType']
                     
-                    # Use unified LINEAGE font sizing for all templates including double
+                    from src.core.constants import CLASSIC_TYPES
+                    product_type_normalized = (product_type or '').lower()
+                    is_classic_product = product_type_normalized in CLASSIC_TYPES if product_type_normalized else False
+                    
+                    if (not is_classic_product) and ('PRODUCTBRAND_CENTER' in content):
+                        brand_text = re.sub(
+                            r'PRODUCTBRAND_CENTER_(START|END)',
+                            '',
+                            content,
+                            flags=re.IGNORECASE
+                        ).strip()
+                        font_size = get_font_size_by_marker(
+                            brand_text,
+                            'PRODUCTBRAND_CENTER',
+                            self.template_type,
+                            self.scale_factor,
+                            product_type_normalized
+                        )
+                        brand_clean_regex = re.compile(r'PRODUCTBRAND_CENTER_(START|END)', re.IGNORECASE)
+                    else:
+                        font_size = get_font_size_by_marker(
+                            content,
+                            'LINEAGE',
+                            self.template_type,
+                            self.scale_factor,
+                            product_type_normalized
+                        )
+                        brand_clean_regex = None
+                    
                     for run in paragraph.runs:
-                        # Use get_font_size_by_marker for proper LINEAGE sizing, passing product_type for nonclassic rule
-                        product_type = None
-                        if hasattr(self, 'current_product_type') and self.current_product_type:
-                            product_type = self.current_product_type
-                        elif hasattr(self, 'label_context') and 'ProductType' in self.label_context:
-                            product_type = self.label_context['ProductType']
-                        font_size = get_font_size_by_marker(run.text, 'LINEAGE', self.template_type, self.scale_factor, product_type)
+                        original_text = run.text or ''
                         set_run_font_size(run, font_size)
+                        if brand_clean_regex:
+                            run.text = brand_clean_regex.sub('', original_text).strip()
                     
                     # Handle alignment based on PRODUCT TYPE, not just lineage content
-                    from src.core.constants import CLASSIC_TYPES
                     is_classic_product = product_type and product_type.lower() in CLASSIC_TYPES
                     
                     # Debug logging for vape cartridge lineage alignment
@@ -3884,13 +4107,24 @@ class TemplateProcessor:
                 
                 # Special handling for ProductStrain marker - use unified font sizing system
                 if marker_name in ('PRODUCTSTRAIN', 'STRAIN'):
+                    strain_content = str(marker_data.get('content') or '').strip()
                     for run in paragraph.runs:
-                        # Only apply strain font sizing to runs that contain strain content AND are actually ProductStrain markers
-                        # This prevents ProductStrain font sizing from affecting other fields like ProductBrand
-                        if (marker_data['content'] in run.text and 
-                            any(marker in run.text for marker in ['PRODUCTSTRAIN_START', 'STRAIN_START'])):
+                        run_text = run.text or ''
+                        run_text_stripped = run_text.strip()
+                        has_marker_wrappers = any(
+                            marker in run_text
+                            for marker in [
+                                'PRODUCTSTRAIN_START',
+                                'PRODUCTSTRAIN_END',
+                                'STRAIN_START',
+                                'STRAIN_END'
+                            ]
+                        )
+                        is_exact_match = strain_content and run_text_stripped.casefold() == strain_content.casefold()
+
+                        if strain_content and (has_marker_wrappers or is_exact_match):
                             # Use unified font sizing system for ProductStrain markers (1pt font size)
-                            strain_font_size = get_font_size_by_marker(marker_data['content'], 'PRODUCTSTRAIN', self.template_type, self.scale_factor)
+                            strain_font_size = get_font_size_by_marker(strain_content, 'PRODUCTSTRAIN', self.template_type, self.scale_factor)
                             set_run_font_size(run, strain_font_size)
                     continue
                 
@@ -4009,6 +4243,8 @@ class TemplateProcessor:
                     # Also ensure all runs in this paragraph are properly sized
                     for run in paragraph.runs:
                         set_run_font_size(run, font_size)
+                    # Center the cell vertically so brand text sits mid-cell (e.g., CONSTELLATION CANNABIS)
+                    self._set_paragraph_cell_vertical_alignment(paragraph, WD_CELL_VERTICAL_ALIGNMENT.CENTER)
                 elif marker_name in ['THC_CBD', 'RATIO', 'THC_CBD_LABEL']:
                     # Ensure THC_CBD and RATIO values are bold
                     for run in paragraph.runs:

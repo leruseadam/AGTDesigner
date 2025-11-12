@@ -7179,7 +7179,26 @@ def process_database_product_for_api(db_product):
         processed_product['DescAndWeight'] = description
     else:
         processed_product['DescAndWeight'] = 'N/A'
-    
+
+    # Ensure Product Name* and ProductName fields exist for frontend compatibility
+    product_name_value = (
+        processed_product.get('Product Name*') or
+        processed_product.get('ProductName') or
+        processed_product.get('Product Name') or
+        processed_product.get('product_name') or
+        processed_product.get('Description') or
+        processed_product.get('DescAndWeight') or
+        ''
+    )
+    product_name_value = str(product_name_value).strip()
+    if product_name_value:
+        if not processed_product.get('Product Name*'):
+            processed_product['Product Name*'] = product_name_value
+        if not processed_product.get('ProductName'):
+            processed_product['ProductName'] = product_name_value
+        if not processed_product.get('displayName'):
+            processed_product['displayName'] = product_name_value
+
     return processed_product
 @app.route('/api/available-tags', methods=['GET'])
 def get_available_tags():

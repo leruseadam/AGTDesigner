@@ -32,6 +32,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Cache resolved default file paths to avoid repeated filesystem scans
+DEFAULT_FILE_CACHE: Dict[str, str] = {}
+
 # Add at the top of the file (after imports)
 VALID_LINEAGES = [
     "SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", "CBD", "MIXED", "PARAPHERNALIA"
@@ -450,11 +453,28 @@ def get_default_upload_file(store_name: Optional[str] = None) -> Optional[str]:
     if store_name:
         logger.info(f"🔍 Looking for default file matching store: {store_name}")
     
-    # Get the current working directory and home directory
-    current_dir = os.getcwd()
-    home_dir = os.path.expanduser('~')
+    # Establish consistent base directories using absolute paths
+    current_dir = Path(os.getcwd())
+    home_dir = Path(os.path.expanduser('~'))
+    project_root = Path(__file__).resolve().parents[3]
     logger.debug(f"Current working directory: {current_dir}")
     logger.debug(f"Home directory: {home_dir}")
+    logger.debug(f"Project root (from excel_processor): {project_root}")
+    
+    # Try to detect the Flask app root to handle PythonAnywhere WSGI cwd differences
+    app_root = None
+    try:
+        import app as app_module  # type: ignore
+        if hasattr(app_module, '__file__'):
+            app_root = Path(app_module.__file__).resolve().parent
+            logger.debug(f"Detected app root from app.__file__: {app_root}")
+    except Exception as app_root_error:
+        logger.debug(f"Could not determine app root from app module: {app_root_error}")
+    
+    # Allow environment override for custom upload directory paths
+    env_upload_dir = os.environ.get('DEFAULT_UPLOAD_DIR')
+    if env_upload_dir:
+        logger.info(f"Environment override for default upload dir detected: {env_upload_dir}")
     
     # STANDARDIZED environment detection for both local and PythonAnywhere
     is_pythonanywhere = (
@@ -463,28 +483,65 @@ def get_default_upload_file(store_name: Optional[str] = None) -> Optional[str]:
         'PYTHONANYWHERE_DOMAIN' in os.environ or
         os.path.exists('/var/log/pythonanywhere') or
         'pythonanywhere.com' in os.environ.get('HTTP_HOST', '') or
-        "pythonanywhere" in current_dir.lower() or
-        "/home/adamcordova" in current_dir
+        "pythonanywhere" in str(current_dir).lower() or
+        "/home/adamcordova" in str(current_dir)
     )
     
     logger.debug(f"Running on PythonAnywhere: {is_pythonanywhere}")
     
-    # STANDARDIZED search locations - check both uploads and Downloads for both environments
-    search_locations = []
+    # STANDARDIZED search locations - prefer absolute project paths, then fallbacks
+    candidate_locations: List[Path] = []
     
-    # Both environments: Check uploads folder first, then Downloads
-    standard_paths = [
-        os.path.join(current_dir, "uploads"),  # Uploads folder first
-        os.path.join(home_dir, "Downloads"),  # Downloads folder as backup
-    ]
-    search_locations.extend(standard_paths)
-    logger.debug("STANDARDIZED: Searching uploads folder first, then Downloads for both environments")
+    cache_key = store_name or "__default__"
+
+    # Check cached path first for reliability
+    cached_path = DEFAULT_FILE_CACHE.get(cache_key)
+    if cached_path:
+        cached_file = Path(cached_path)
+        if cached_file.is_file() and cached_file.stat().st_size > 1000:
+            if store_name:
+                logger.debug(f"Using cached default file for {store_name}: {cached_file}")
+            else:
+                logger.debug(f"Using cached default file (no store): {cached_file}")
+            return str(cached_file)
+        else:
+            logger.warning(f"Cached default file missing or invalid, refreshing cache: {cached_path}")
+            DEFAULT_FILE_CACHE.pop(cache_key, None)
+
+    if env_upload_dir:
+        candidate_locations.append(Path(env_upload_dir))
+    
+    # Core project uploads directory
+    candidate_locations.append(project_root / "uploads")
+    
+    # If app root differs from project root, include its uploads directory
+    if app_root:
+        candidate_locations.append(app_root / "uploads")
+    
+    # Include cwd/uploads in case the process starts elsewhere
+    candidate_locations.append(current_dir / "uploads")
+    
+    # Downloads as a last resort (matches legacy behaviour)
+    candidate_locations.append(home_dir / "Downloads")
+    
+    # Remove duplicates while preserving order
+    seen_locations = set()
+    search_locations = []
+    for location in candidate_locations:
+        normalized = location.resolve()
+        if normalized not in seen_locations:
+            seen_locations.add(normalized)
+            search_locations.append(normalized)
+    
+    logger.debug("STANDARDIZED: Searching directories in order:")
+    for path in search_locations:
+        logger.debug(f"  • {path}")
     
     # Find all Excel files (not just "A Greener Today")
     excel_files = []
     
     for location in search_locations:
-        if os.path.exists(location):
+        if location.exists():
             logger.debug(f"Searching in: {location}")
             try:
                 for filename in os.listdir(location):
@@ -521,10 +578,10 @@ def get_default_upload_file(store_name: Optional[str] = None) -> Optional[str]:
                                 logger.debug(f"Skipping file (doesn't match store {store_name}): {filename}")
                                 continue
                         
-                        file_path = os.path.join(location, filename)
-                        if os.path.isfile(file_path):
-                            mod_time = os.path.getmtime(file_path)
-                            file_size = os.path.getsize(file_path)
+                        file_path = location / filename
+                        if file_path.is_file():
+                            mod_time = file_path.stat().st_mtime
+                            file_size = file_path.stat().st_size
                             
                             # Give priority to "A Greener Today" files
                             priority = 0
@@ -533,14 +590,14 @@ def get_default_upload_file(store_name: Optional[str] = None) -> Optional[str]:
                             
                             # Skip files that are too small (likely corrupted)
                             if file_size > 1000:  # Minimum 1KB
-                                excel_files.append((file_path, filename, mod_time, file_size, priority))
+                                excel_files.append((str(file_path), filename, mod_time, file_size, priority))
                                 logger.debug(f"Found Excel file: {filename} (modified: {mod_time}, size: {file_size:,} bytes, priority: {priority})")
                             else:
                                 logger.debug(f"Skipping small file (likely corrupted): {filename} (size: {file_size:,} bytes)")
             except Exception as e:
                 logger.error(f"Error searching {location}: {e}")
         else:
-            logger.warning(f"Location does not exist: {location}")
+            logger.debug(f"Location does not exist or not accessible: {location}")
     
     if not excel_files:
         if store_name:
@@ -557,6 +614,7 @@ def get_default_upload_file(store_name: Optional[str] = None) -> Optional[str]:
     # Return the highest priority, most recent file
     best_file_path, best_filename, best_mod_time, best_file_size, best_priority = excel_files[0]
     logger.info(f"Found best Excel file: {best_filename} (modified: {best_mod_time}, size: {best_file_size:,} bytes, priority: {best_priority})")
+    DEFAULT_FILE_CACHE[cache_key] = best_file_path
     return best_file_path
 
 def _complexity(text):
@@ -2670,10 +2728,14 @@ class ExcelProcessor:
                         return str(x)
                 
                 self.df["Weight*"] = self.df["Weight*"].apply(format_weight_value)
-            if "Weight*" in self.df.columns and "Units" in self.df.columns:
-                # Fill null values before converting to categorical
-                combined_weight = (self.df["Weight*"] + self.df["Units"]).fillna("Unknown")
-                self.df["CombinedWeight"] = combined_weight.astype("category")
+            if "Weight*" in self.df.columns:
+                # Generate CombinedWeight using the same formatting logic used by the renderer
+                formatted_combined_weight = self.df.apply(
+                    lambda row: self._format_weight_units(row, excel_priority=True),
+                    axis=1
+                )
+                # Ensure the CombinedWeight column is a string column with clean values
+                self.df["CombinedWeight"] = formatted_combined_weight.fillna("").astype("string")
 
             # 12) Format Price
             if "Price" in self.df.columns:
@@ -4517,7 +4579,40 @@ class ExcelProcessor:
                 value = value.iloc[0] if len(value) > 0 else default
             return str(value).strip()
         
+        # Helper to normalize unit strings consistently
+        def normalize_units(unit_value: str) -> str:
+            if not unit_value:
+                return ''
+            unit = str(unit_value).strip()
+            if not unit:
+                return ''
+            lower_unit = unit.lower()
+            direct_map = {
+                'g': 'g', 'gram': 'g', 'grams': 'g', 'gm': 'g', 'gms': 'g',
+                'oz': 'oz', 'ounce': 'oz', 'ounces': 'oz',
+                'mg': 'mg', 'milligram': 'mg', 'milligrams': 'mg',
+                'ml': 'ml', 'milliliter': 'ml', 'milliliters': 'ml',
+                'each': 'each', 'unit': 'each', 'piece': 'each',
+                'pack': 'pack'
+            }
+            if lower_unit in direct_map:
+                return direct_map[lower_unit]
+            if 'gram' in lower_unit or 'gm' in lower_unit:
+                return 'g'
+            if 'ounce' in lower_unit or lower_unit.endswith('oz'):
+                return 'oz'
+            if 'milligram' in lower_unit or lower_unit.endswith('mg'):
+                return 'mg'
+            if 'milliliter' in lower_unit or lower_unit.endswith('ml'):
+                return 'ml'
+            if 'pack' in lower_unit:
+                return 'pack'
+            if 'each' in lower_unit:
+                return 'each'
+            return unit
+
         # Get weight and units from Excel data first (priority)
+        excel_weight_used = False
         excel_weight = safe_get_value(record.get('Weight*', None))
         excel_units = safe_get_value(record.get('Units', ''))
         product_type = safe_get_value(record.get('Product Type*', ''))
@@ -4536,6 +4631,7 @@ class ExcelProcessor:
         if excel_weight and excel_weight not in ['', 'nan', 'NaN']:
             weight_val = excel_weight
             units_val = excel_units if excel_units and excel_units not in ['', 'nan', 'NaN'] else db_units
+            excel_weight_used = True
             self.logger.debug(f"WEIGHT PRIORITY: Using Excel weight '{excel_weight}' for '{product_name}'")
         else:
             # Fallback to database only if Excel data is missing
@@ -4543,7 +4639,13 @@ class ExcelProcessor:
             units_val = db_units if db_units and db_units not in ['', 'nan', 'NaN'] else ''
             self.logger.debug(f"WEIGHT FALLBACK: Using database weight '{db_weight}' for '{product_name}' (Excel data missing)")
 
-        weight_val, units_val = self._normalize_weight_outlier(record, weight_val, units_val)
+        units_val = normalize_units(units_val)
+
+        allow_outlier_normalization = not (excel_priority and excel_weight_used)
+        if allow_outlier_normalization:
+            weight_val, units_val = self._normalize_weight_outlier(record, weight_val, units_val)
+            units_val = normalize_units(units_val)
+        allow_nonclassic_conversion = not (excel_priority and excel_weight_used)
         
         # Debug: Log first few records
         if hasattr(self, '_debug_count'):
@@ -4565,7 +4667,7 @@ class ExcelProcessor:
         # FIRST: Check if Weight* already contains units (like "1g", "3.5oz", etc.)
         if weight_val and any(unit in weight_val.lower() for unit in ['g', 'oz', 'gram', 'ounce']):
             # Special override for Moonshot products - force to 2.5oz
-            if 'moonshot' in product_name.lower() and 'g' in weight_val.lower():
+            if allow_nonclassic_conversion and 'moonshot' in product_name.lower() and 'g' in weight_val.lower():
                 self.logger.info(f"FORCING Moonshot conversion: {product_name} {weight_val} -> 2.5oz")
                 return "2.5oz"
             # Weight* already has units embedded, return as-is
@@ -4601,9 +4703,10 @@ class ExcelProcessor:
                 weight_float = None
 
             # Apply unit conversion for ALL nonclassic product types
-            if (weight_float is not None and units_val and 
+            if (allow_nonclassic_conversion and
+                weight_float is not None and units_val and 
                 is_nonclassic and 
-                units_val.lower() in ['g', 'grams', 'gram']):
+                units_val.lower() in ['g', 'grams', 'gram', 'gms', 'gm']):
                 
                 # FIRST: Check if there are identical products with existing ounce weights
                 if product_name:
@@ -4643,11 +4746,11 @@ class ExcelProcessor:
                 else:
                     # Round to 2 decimal places and remove trailing zeros
                     weight_str = f"{weight_float:.2f}".rstrip("0").rstrip(".")
-                result = f"{weight_str}{units_val}"
+                result = f"{weight_str}{normalize_units(units_val)}"
             elif weight_float is not None:
                 result = str(int(weight_float) if weight_float.is_integer() else weight_float)
             elif units_val:
-                result = str(units_val)
+                result = normalize_units(units_val)
             else:
                 result = ""
         
