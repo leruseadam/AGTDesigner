@@ -7628,10 +7628,29 @@ def get_available_tags():
             logging.info(f"Got product database: {product_db}")
             if product_db:
                 logging.info(f"📦 FRESH DB QUERY: path={product_db.db_path} store={getattr(product_db, '_store_name', 'unknown')}")
-                # Get all products from database
-                import sqlite3
-                import os
-                if os.path.exists(product_db.db_path):
+                
+                # SIMPLIFIED: Use the existing get_all_products() method instead of raw SQL
+                try:
+                    database_tags = product_db.get_all_products()
+                    logging.info(f"✅ get_all_products() returned {len(database_tags)} products")
+                    
+                    # Process each tag to add lineage fields
+                    for tag in database_tags:
+                        # Ensure lineage fields are set
+                        lin = str(tag.get('Lineage', '')).strip().upper()
+                        if lin:
+                            tag['currentLineage'] = lin
+                            tag['canonical_lineage'] = lin
+                    
+                    logging.info(f"✅ Processed {len(database_tags)} database tags with lineage")
+                except Exception as get_all_error:
+                    logging.error(f"❌ get_all_products() failed: {get_all_error}")
+                    import traceback
+                    logging.error(traceback.format_exc())
+                    # Fall back to raw SQL query
+                    import sqlite3
+                    import os
+                    if os.path.exists(product_db.db_path):
                     logging.info(f"Database file exists, size: {os.path.getsize(product_db.db_path)} bytes")
                     with sqlite3.connect(product_db.db_path) as conn:
                         cursor = conn.cursor()
@@ -7757,8 +7776,8 @@ def get_available_tags():
                             ray_count = sum(1 for tag in database_tags if 'Ray' in tag.get('Product Name*', ''))
                             hustler_count = sum(1 for tag in database_tags if 'Hustler' in tag.get('Product Name*', ''))
                             logging.info(f"Database products - Ray: {ray_count}, Hustler: {hustler_count}")
-                else:
-                    logging.error(f"Database file does not exist: {product_db.db_path}")
+                    else:
+                        logging.error(f"Database file does not exist: {product_db.db_path}")
             else:
                 logging.error(f"product_db is None or False - cannot query database")
         except Exception as e:
