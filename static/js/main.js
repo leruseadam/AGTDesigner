@@ -2033,6 +2033,19 @@ const TagManager = {
         const tagsToShow = filteredTags || originalTags;
         if (tagsToShow && tagsToShow.length > 0) {
             this.showActionSplash('Loading tags...');
+            
+            // Show loading indicator in container IMMEDIATELY to prevent blank screen
+            const availableTagsContainer = document.getElementById('availableTags');
+            if (availableTagsContainer) {
+                availableTagsContainer.innerHTML = `
+                    <div class="text-center py-4">
+                        <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2 text-white">Loading tags...</p>
+                    </div>
+                `;
+            }
         }
         
         // Use requestAnimationFrame to ensure smooth DOM updates
@@ -2254,6 +2267,23 @@ const TagManager = {
                 this.hideActionSplash();
             }
             return;
+        }
+        
+        // Show loading indicator immediately if container is empty or only has loading indicator
+        const currentContent = availableTagsContainer.innerHTML.trim();
+        const hasLoadingIndicator = currentContent.includes('spinner-border') || currentContent.includes('Loading');
+        const isEmpty = !currentContent || currentContent === '' || currentContent === '<div class="tag-entry">No tags available</div>';
+        
+        if (isEmpty || hasLoadingIndicator) {
+            // Keep showing loading indicator until tags are rendered
+            availableTagsContainer.innerHTML = `
+                <div class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2 text-white">Loading tags...</p>
+                </div>
+            `;
         }
         
         verboseLog('Tags received, showing simple test first');
@@ -5193,6 +5223,19 @@ const TagManager = {
             // Show loading splash when fetching tags
             this.showActionSplash('Loading tags...');
             
+            // Show loading indicator in container IMMEDIATELY to prevent blank screen
+            const availableTagsContainer = document.getElementById('availableTags');
+            if (availableTagsContainer) {
+                availableTagsContainer.innerHTML = `
+                    <div class="text-center py-4">
+                        <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2 text-white">Loading tags...</p>
+                    </div>
+                `;
+            }
+            
             // Preserve current scroll/anchor so refreshes don't jump the list
             const savedScroll = this._saveAvailableScrollPosition();
             
@@ -5705,6 +5748,22 @@ const TagManager = {
     async checkForExistingData() {
         verboseLog('=== CHECK FOR EXISTING DATA FUNCTION CALLED ===');
         verboseLog('Checking for existing data...');
+        
+        // Show loading splash IMMEDIATELY before any async operations
+        this.showActionSplash('Loading tags...');
+        
+        // Show loading indicator in container IMMEDIATELY to prevent blank screen
+        const availableTagsContainer = document.getElementById('availableTags');
+        if (availableTagsContainer) {
+            availableTagsContainer.innerHTML = `
+                <div class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2 text-white">Loading tags...</p>
+                </div>
+            `;
+        }
 
         const retryDelays = Array.isArray(this.initialDataRetryDelays) && this.initialDataRetryDelays.length > 0
             ? this.initialDataRetryDelays
@@ -5715,6 +5774,10 @@ const TagManager = {
         verboseLog(`[InitialData] Attempt ${attemptNumber}/${maxAttempts}`);
         if (attemptNumber > maxAttempts) {
             console.warn(`[InitialData] Attempt limit exceeded (${maxAttempts}); aborting further retries.`);
+            // Hide splash if we're aborting
+            if (this.hideActionSplash) {
+                this.hideActionSplash();
+            }
             return;
         }
         
@@ -5722,7 +5785,7 @@ const TagManager = {
         const timeoutPromise = new Promise((_, reject) => {
             setTimeout(() => reject(new Error('Initialization timeout')), 30000); // 30 second timeout
         });
-
+        
         // Safety net: ensure loading overlay never blocks interaction for long
         const splashSafetyTimeout = setTimeout(() => {
             console.warn('⏳ Safety timeout triggered - force hiding loading splash');
@@ -5749,8 +5812,11 @@ const TagManager = {
                     // Update splash progress for data loading
                     AppLoadingSplash.updateProgress(60, 'Loading product data...');
                     
-                    // Show action splash for initial tag population
-                    this.showActionSplash('Loading product tags...');
+                    // Splash already shown at start of function, just update message
+                    const splashMessage = document.querySelector('#actionSplash .action-splash-message');
+                    if (splashMessage) {
+                        splashMessage.textContent = 'Loading product tags...';
+                    }
                     
                     // Update available tags
                     AppLoadingSplash.updateProgress(75, 'Processing tags...');

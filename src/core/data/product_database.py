@@ -3980,30 +3980,73 @@ class ProductDatabase:
             return False 
 
     def get_product_lineage(self, product_name: str) -> Optional[str]:
-        """Get the lineage for a specific product by name."""
+        """Get the lineage for a specific product by name.
+        
+        Uses case-insensitive and whitespace-insensitive matching to ensure
+        updates are found even if there are minor differences in formatting.
+        """
         try:
             self.init_database()
             conn = self._get_connection()
             cursor = conn.cursor()
             
-            # Try to get lineage by product name
+            # CRITICAL FIX: Use case-insensitive and whitespace-insensitive matching
+            # This ensures updates are found even with minor formatting differences
+            product_name_norm = str(product_name).strip() if product_name else ""
+            if not product_name_norm:
+                logger.debug(f"No product name provided for lineage lookup")
+                return None
+            
+            # Try exact match first (fastest)
             cursor.execute('''
                 SELECT "Lineage" FROM products 
                 WHERE "Product Name*" = ? OR "ProductName" = ?
                 ORDER BY id DESC
                 LIMIT 1
-            ''', (product_name, product_name))
+            ''', (product_name_norm, product_name_norm))
             
             result = cursor.fetchone()
-            if result and result[0]:
-                logger.debug(f"Found product lineage for '{product_name}': {result[0]}")
-                return result[0]
+            if result and result[0] and str(result[0]).strip():
+                lineage = str(result[0]).strip()
+                logger.debug(f"✅ Found product lineage (exact match) for '{product_name}': '{lineage}'")
+                return lineage
             
-            logger.debug(f"No lineage found for product '{product_name}'")
+            # Fallback: Case-insensitive and whitespace-insensitive match
+            cursor.execute('''
+                SELECT "Lineage" FROM products 
+                WHERE TRIM(LOWER("Product Name*")) = TRIM(LOWER(?))
+                   OR TRIM(LOWER("ProductName")) = TRIM(LOWER(?))
+                ORDER BY id DESC
+                LIMIT 1
+            ''', (product_name_norm, product_name_norm))
+            
+            result = cursor.fetchone()
+            if result and result[0] and str(result[0]).strip():
+                lineage = str(result[0]).strip()
+                logger.debug(f"✅ Found product lineage (case-insensitive match) for '{product_name}': '{lineage}'")
+                return lineage
+            
+            # Last resort: Partial match (in case product name has extra characters)
+            cursor.execute('''
+                SELECT "Lineage" FROM products 
+                WHERE "Product Name*" LIKE ? OR "ProductName" LIKE ?
+                ORDER BY id DESC
+                LIMIT 1
+            ''', (f'%{product_name_norm}%', f'%{product_name_norm}%'))
+            
+            result = cursor.fetchone()
+            if result and result[0] and str(result[0]).strip():
+                lineage = str(result[0]).strip()
+                logger.debug(f"✅ Found product lineage (partial match) for '{product_name}': '{lineage}'")
+                return lineage
+            
+            logger.debug(f"⚠️  No lineage found for product '{product_name}' (tried exact, case-insensitive, and partial match)")
             return None
             
         except Exception as e:
-            logger.error(f"Error getting product lineage for '{product_name}': {e}")
+            logger.error(f"❌ Error getting product lineage for '{product_name}': {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return None
 
     def get_vendor_strain_lineage(self, strain_name: str, vendor: str = None, brand: str = None) -> Optional[str]:

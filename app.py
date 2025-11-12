@@ -8207,46 +8207,74 @@ def update_lineage():
             conn = product_db._get_connection()
             cursor = conn.cursor()
             
-            # Update products table
+            # CRITICAL FIX: Always update by exact product name FIRST to ensure specific product is updated
+            # Then update by vendor+strain to propagate to similar products
+            products_updated_by_name = 0
+            products_updated_by_strain = 0
+            
+            # FIRST: Update by exact product name (most specific)
+            cursor.execute('''
+                UPDATE products
+                SET "Lineage" = ?
+                WHERE "Product Name*" = ? OR "ProductName" = ?
+            ''', (new_lineage, tag_name, tag_name))
+            products_updated_by_name = cursor.rowcount
+            
+            # If exact match didn't work, try case-insensitive match
+            if products_updated_by_name == 0:
+                cursor.execute('''
+                    UPDATE products
+                    SET "Lineage" = ?
+                    WHERE TRIM(LOWER("Product Name*")) = TRIM(LOWER(?))
+                       OR TRIM(LOWER("ProductName")) = TRIM(LOWER(?))
+                ''', (new_lineage, tag_name, tag_name))
+                products_updated_by_name = cursor.rowcount
+            
+            if products_updated_by_name > 0:
+                logging.info(f"✅ Updated {products_updated_by_name} product(s) by exact name to lineage '{new_lineage}'")
+            
+            # SECOND: Update by vendor+strain to propagate to similar products (if we have vendor and strain)
+            # Only update products that don't already have this exact lineage (avoid unnecessary updates)
             if vendor and strain_name and str(strain_name).strip():
-                # Best case: vendor + strain match
                 cursor.execute('''
                     UPDATE products
                     SET "Lineage" = ?
                     WHERE TRIM(LOWER("Vendor/Supplier*")) = TRIM(LOWER(?))
                       AND TRIM(LOWER("Product Strain")) = TRIM(LOWER(?))
-                ''', (new_lineage, vendor, str(strain_name).strip()))
-                products_updated = cursor.rowcount
-                logging.info(f"✅ Updated {products_updated} products (vendor+strain) to lineage '{new_lineage}'")
-                
-            elif vendor:
-                # Fallback: vendor only
+                      AND (TRIM(COALESCE("Lineage", '')) != TRIM(?))
+                ''', (new_lineage, vendor, str(strain_name).strip(), new_lineage))
+                products_updated_by_strain = cursor.rowcount
+                if products_updated_by_strain > 0:
+                    logging.info(f"✅ Updated {products_updated_by_strain} additional products (vendor+strain) to lineage '{new_lineage}'")
+            
+            # Total products updated
+            products_updated = products_updated_by_name + products_updated_by_strain
+            
+            # If still no products updated, try vendor-only fallback
+            if products_updated == 0 and vendor:
                 cursor.execute('''
                     UPDATE products
                     SET "Lineage" = ?
                     WHERE TRIM(LOWER("Vendor/Supplier*")) = TRIM(LOWER(?))
-                      AND ("Product Name*" = ? OR "ProductName" = ?)
+                      AND (TRIM(LOWER("Product Name*")) = TRIM(LOWER(?)) OR TRIM(LOWER("ProductName")) = TRIM(LOWER(?)))
                 ''', (new_lineage, vendor, tag_name, tag_name))
                 products_updated = cursor.rowcount
-                logging.info(f"✅ Updated {products_updated} products (vendor only) to lineage '{new_lineage}'")
-                
-            else:
-                # Last resort: product name only
+                if products_updated > 0:
+                    logging.info(f"✅ Updated {products_updated} products (vendor+name) to lineage '{new_lineage}'")
+            
+            # Last resort: Partial match by product name
+            if products_updated == 0:
                 cursor.execute('''
                     UPDATE products
                     SET "Lineage" = ?
-                    WHERE "Product Name*" = ? OR "ProductName" = ?
-                ''', (new_lineage, tag_name, tag_name))
+                    WHERE "Product Name*" LIKE ? OR "ProductName" LIKE ?
+                ''', (new_lineage, f'%{tag_name}%', f'%{tag_name}%'))
                 products_updated = cursor.rowcount
-                if products_updated == 0:
-                    # Try partial match
-                    cursor.execute('''
-                        UPDATE products
-                        SET "Lineage" = ?
-                        WHERE "Product Name*" LIKE ? OR "ProductName" LIKE ?
-                    ''', (new_lineage, f'%{tag_name}%', f'%{tag_name}%'))
-                    products_updated = cursor.rowcount
-                logging.info(f"✅ Updated {products_updated} products (name match) to lineage '{new_lineage}'")
+                if products_updated > 0:
+                    logging.info(f"✅ Updated {products_updated} products (partial name match) to lineage '{new_lineage}'")
+            
+            if products_updated == 0:
+                logging.warning(f"⚠️  No products updated for '{tag_name}' - product may not exist in database")
             
             # Update strains table if we have a strain name
             if strain_name and str(strain_name).strip():
