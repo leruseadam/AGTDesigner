@@ -2297,7 +2297,7 @@ def index():
         # --- LIGHTWEIGHT PAGE LOAD (minimal work) ---
         # PERFORMANCE FIX: Use static version for cache busting instead of timestamp
         # This allows browser caching while still being able to force cache clear when needed
-        cache_bust = "v2.0.2"  # Only increment when files actually change
+        cache_bust = "v2.0.3"  # Only increment when files actually change
         
         # CRITICAL FIX: Don't clear uploaded file from session on page refresh
         # This was causing uploads to disappear when users refreshed the page
@@ -2375,7 +2375,7 @@ def index():
         logging.error(f"Error in index route: {str(e)}")
         logging.error(f"Index route traceback: {traceback.format_exc()}")
         # Ensure cache_bust and store variables are always available
-        cache_bust = "v2.0.2"  # Use static version for caching
+        cache_bust = "v2.0.3"  # Use static version for caching
         user_has_store = False
         current_store = None
         uploaded_filename = ''
