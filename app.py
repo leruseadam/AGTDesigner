@@ -7602,12 +7602,9 @@ def get_available_tags():
         # Store validation removed - using single database for all stores
         
         # Get products from both Excel processor and database
-        # Note: all_tags may already have Excel tags, or be empty if prefer_db is True
-        # Ensure all_tags is initialized for database query path
-        if prefer_db:
-            all_tags = []  # Reset for prefer_db mode (will use only database tags)
-        elif not all_tags:
-            all_tags = []  # Also reset if empty (normal mode, will combine Excel + DB)
+        # CRITICAL: Always query database if we have no Excel tags
+        # Reset all_tags for database query path
+        all_tags = []
         
         # 1. Optionally get products from Excel (only if not prefer_db)
         excel_processor = None
@@ -7618,11 +7615,12 @@ def get_available_tags():
                 try:
                     excel_tags = excel_processor.get_available_tags()
                     logging.info(f"Excel processor returned {len(excel_tags)} tags")
+                    all_tags.extend(excel_tags)
                 except Exception as e:
                     logging.warning(f"Error getting Excel processor tags: {e}")
                     excel_tags = []
         
-        # 2. Get products from database
+        # 2. Get products from database - ALWAYS run this if we have no Excel tags
         database_tags = []
         try:
             store_name = get_current_store_name()
@@ -7782,7 +7780,11 @@ def get_available_tags():
         
         # 3. Combine and deduplicate products
         # CRITICAL FIX: Always use database if we have no Excel tags, regardless of prefer_db flag
+        # If we have database tags and no Excel tags, use database
         use_database_only = prefer_db or (len(all_tags) == 0 and len(database_tags) > 0)
+        
+        logging.info(f"Tag combination decision: prefer_db={prefer_db}, all_tags={len(all_tags)}, database_tags={len(database_tags)}, use_database_only={use_database_only}")
+        
         if use_database_only:
             # When prefer_db=1 or no Excel tags, use ONLY database tags
             logging.info(f"Using database tags exclusively (prefer_db={prefer_db}, all_tags={len(all_tags)}, database_tags={len(database_tags)})")
