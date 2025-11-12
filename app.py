@@ -7833,7 +7833,12 @@ def get_available_tags():
 
         # Return the combined tags in the format expected by frontend
         elapsed = (time.time() - start_time) * 1000
-        logging.info(f"✅ Available tags request completed ({elapsed:.1f}ms)")
+        logging.info(f"✅ Available tags request completed ({elapsed:.1f}ms) - returning {len(all_tags)} tags")
+        
+        if len(all_tags) == 0:
+            logging.warning("⚠️ WARNING: Returning empty tags array! prefer_db={}, database_tags_count={}".format(
+                prefer_db, len(database_tags) if 'database_tags' in locals() else 'unknown'
+            ))
         
         resp = jsonify({
             'tags': all_tags,  # Frontend expects 'tags' property
