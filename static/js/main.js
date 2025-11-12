@@ -5598,6 +5598,19 @@ const TagManager = {
             verboseLog('Container innerHTML:', availableTagsContainer.innerHTML);
         }
         
+        // Show loading indicator IMMEDIATELY before any other operations
+        if (availableTagsContainer) {
+            availableTagsContainer.innerHTML = `
+                <div class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2 text-white">Loading tags...</p>
+                </div>
+            `;
+        }
+        this.showActionSplash('Loading tags...');
+        
         // Skip platform detection for Mac-like speed
         // this.detectPlatform();
         
