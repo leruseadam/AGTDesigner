@@ -2218,14 +2218,20 @@ const TagManager = {
             tagList.appendChild(vendorSection);
         });
 
-        availableTagsContainer.appendChild(tagList);
-        this._restoreAvailableScrollPosition(savedScroll);
-        
-        this.updateSelectAllCheckboxes();
-        this.initializeSelectAllCheckbox();
-        
-        // Hide loading splash only after tags actually appear in DOM
-        this._waitForTagsToAppear();
+        // Atomically replace container content with built tags (this replaces any loading indicator)
+        // Use requestAnimationFrame to ensure smooth transition
+        requestAnimationFrame(() => {
+            availableTagsContainer.innerHTML = '';
+            availableTagsContainer.appendChild(tagList);
+            
+            // After tags are in DOM, restore scroll and initialize
+            this._restoreAvailableScrollPosition(savedScroll);
+            this.updateSelectAllCheckboxes();
+            this.initializeSelectAllCheckbox();
+            
+            // Hide loading splash only after tags actually appear in DOM
+            this._waitForTagsToAppear();
+        });
         
         verboseLog('✅ Rendered', tags.length, 'JSON matched tags with HIERARCHY (same as Selected Tags)');
     },
@@ -2312,8 +2318,23 @@ const TagManager = {
         verboseLog('After update - this.state.tags length:', this.state.tags.length);
         verboseLog('After update - this.state.originalTags length:', this.state.originalTags.length);
         
-        // Clear existing content
-        availableTagsContainer.innerHTML = '';
+        // Keep loading indicator visible while building tags - don't clear yet
+        // We'll replace it with actual tags once they're built
+        // Only clear if there's no loading indicator
+        const currentContent = availableTagsContainer.innerHTML.trim();
+        const hasLoadingIndicator = currentContent.includes('spinner-border') || currentContent.includes('Loading');
+        if (!hasLoadingIndicator) {
+            // Show loading indicator if not already showing
+            availableTagsContainer.innerHTML = `
+                <div class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2 text-white">Loading tags...</p>
+                </div>
+            `;
+        }
+        
         // Schedule scroll restoration after rebuild
         const restoreScrollAfterBuild = () => this._restoreAvailableScrollPosition(savedScroll);
         setTimeout(restoreScrollAfterBuild, 0);
@@ -2425,16 +2446,19 @@ const TagManager = {
             verboseLog('Tag element created:', tagElement);
             tagList.appendChild(tagElement);
         });
-                    availableTagsContainer.appendChild(tagList);
-        this.updateSelectAllCheckboxes();
-        
-        // Ensure Select All checkbox is properly initialized
-        this.initializeSelectAllCheckbox();
-            // Restore previous scroll position
-            this._restoreAvailableScrollPosition(savedScroll);
-            
-            // Hide loading splash only after tags actually appear in DOM
-            this._waitForTagsToAppear();
+                    // Atomically replace container content with built tags
+                    requestAnimationFrame(() => {
+                        availableTagsContainer.innerHTML = '';
+                        availableTagsContainer.appendChild(tagList);
+                        
+                        // After tags are in DOM, restore scroll and initialize
+                        this._restoreAvailableScrollPosition(savedScroll);
+                        this.updateSelectAllCheckboxes();
+                        this.initializeSelectAllCheckbox();
+                        
+                        // Hide loading splash only after tags actually appear in DOM
+                        this._waitForTagsToAppear();
+                    });
             return;
         }
         
@@ -2814,6 +2838,8 @@ const TagManager = {
             });
         });
 
+        // Replace container content with built tags (this replaces any loading indicator)
+        availableTagsContainer.innerHTML = '';
         availableTagsContainer.appendChild(tagList);
 
         // Restore previous scroll position after full rebuild

@@ -1419,6 +1419,43 @@ def create_app():
         r"/*": {"origins": allowed_origins}
     })
     
+    # CRITICAL FIX: Add error handler to ensure API routes always return JSON, not HTML
+    @app.errorhandler(500)
+    def handle_500_error(e):
+        """Handle 500 errors and return JSON for API routes."""
+        import traceback
+        error_traceback = traceback.format_exc()
+        error_msg = str(e) if e else 'Internal server error'
+        error_type = type(e).__name__ if hasattr(e, '__class__') else 'UnknownError'
+        
+        # Log the error
+        logging.error(f"❌ 500 ERROR: {error_type}: {error_msg}")
+        logging.error(f"Full traceback:\n{error_traceback}")
+        
+        # Check if this is an API route
+        if request.path.startswith('/api/'):
+            # Return JSON for API routes
+            try:
+                return jsonify({
+                    'success': False,
+                    'error': error_msg,
+                    'error_type': error_type,
+                    'path': request.path
+                }), 500
+            except Exception as json_error:
+                # If JSON response fails, return plain text JSON
+                from flask import Response
+                return Response(
+                    f'{{"success": false, "error": "{error_msg}", "error_type": "{error_type}"}}',
+                    status=500,
+                    mimetype='application/json'
+                )
+        else:
+            # For non-API routes, use Flask's default error handling
+            # But we still log it
+            logging.error(f"500 error for non-API route: {request.path}")
+            raise e  # Re-raise to use Flask's default handler
+    
     # Check if we're in development mode
     development_mode = app.config.get('DEVELOPMENT_MODE', False)
 
@@ -8203,7 +8240,20 @@ def update_lineage():
         
         try:
             import sqlite3
-            strain_name = excel_processor.get_strain_name_for_product(tag_name) if excel_processor else None
+            
+            # CRITICAL FIX: Safely get strain name with error handling
+            strain_name = None
+            try:
+                if excel_processor and hasattr(excel_processor, 'get_strain_name_for_product'):
+                    strain_name = excel_processor.get_strain_name_for_product(tag_name)
+                    if strain_name:
+                        strain_name = str(strain_name).strip()
+                        if not strain_name or strain_name.lower() in ['nan', 'none', 'null', '']:
+                            strain_name = None
+            except Exception as strain_error:
+                logging.warning(f"⚠️  Could not get strain name for product '{tag_name}': {strain_error}")
+                strain_name = None
+            
             conn = product_db._get_connection()
             cursor = conn.cursor()
             
@@ -8222,13 +8272,19 @@ def update_lineage():
             
             # If exact match didn't work, try case-insensitive match
             if products_updated_by_name == 0:
-                cursor.execute('''
-                    UPDATE products
-                    SET "Lineage" = ?
-                    WHERE TRIM(LOWER("Product Name*")) = TRIM(LOWER(?))
-                       OR TRIM(LOWER("ProductName")) = TRIM(LOWER(?))
-                ''', (new_lineage, tag_name, tag_name))
-                products_updated_by_name = cursor.rowcount
+                try:
+                    # Use simpler SQL syntax for better SQLite compatibility
+                    tag_name_lower = str(tag_name).strip().lower()
+                    cursor.execute('''
+                        UPDATE products
+                        SET "Lineage" = ?
+                        WHERE LOWER("Product Name*") = ?
+                           OR LOWER("ProductName") = ?
+                    ''', (new_lineage, tag_name_lower, tag_name_lower))
+                    products_updated_by_name = cursor.rowcount
+                except Exception as case_match_error:
+                    logging.warning(f"⚠️  Case-insensitive match failed: {case_match_error}")
+                    # Continue with next fallback
             
             if products_updated_by_name > 0:
                 logging.info(f"✅ Updated {products_updated_by_name} product(s) by exact name to lineage '{new_lineage}'")
@@ -8236,42 +8292,60 @@ def update_lineage():
             # SECOND: Update by vendor+strain to propagate to similar products (if we have vendor and strain)
             # Only update products that don't already have this exact lineage (avoid unnecessary updates)
             if vendor and strain_name and str(strain_name).strip():
-                cursor.execute('''
-                    UPDATE products
-                    SET "Lineage" = ?
-                    WHERE TRIM(LOWER("Vendor/Supplier*")) = TRIM(LOWER(?))
-                      AND TRIM(LOWER("Product Strain")) = TRIM(LOWER(?))
-                      AND (TRIM(COALESCE("Lineage", '')) != TRIM(?))
-                ''', (new_lineage, vendor, str(strain_name).strip(), new_lineage))
-                products_updated_by_strain = cursor.rowcount
-                if products_updated_by_strain > 0:
-                    logging.info(f"✅ Updated {products_updated_by_strain} additional products (vendor+strain) to lineage '{new_lineage}'")
+                try:
+                    # Simplified query with pre-normalized values for better SQLite compatibility
+                    vendor_lower = str(vendor).strip().lower()
+                    strain_lower = str(strain_name).strip().lower()
+                    cursor.execute('''
+                        UPDATE products
+                        SET "Lineage" = ?
+                        WHERE LOWER("Vendor/Supplier*") = ?
+                          AND LOWER("Product Strain") = ?
+                          AND ("Lineage" IS NULL OR "Lineage" != ?)
+                    ''', (new_lineage, vendor_lower, strain_lower, new_lineage))
+                    products_updated_by_strain = cursor.rowcount
+                    if products_updated_by_strain > 0:
+                        logging.info(f"✅ Updated {products_updated_by_strain} additional products (vendor+strain) to lineage '{new_lineage}'")
+                except Exception as vendor_strain_error:
+                    logging.warning(f"⚠️  Could not update vendor+strain products: {vendor_strain_error}")
+                    import traceback
+                    logging.error(f"Vendor+strain update error traceback: {traceback.format_exc()}")
+                    # Don't fail the entire request if vendor+strain update fails
+                    products_updated_by_strain = 0
             
             # Total products updated
             products_updated = products_updated_by_name + products_updated_by_strain
             
             # If still no products updated, try vendor-only fallback
             if products_updated == 0 and vendor:
-                cursor.execute('''
-                    UPDATE products
-                    SET "Lineage" = ?
-                    WHERE TRIM(LOWER("Vendor/Supplier*")) = TRIM(LOWER(?))
-                      AND (TRIM(LOWER("Product Name*")) = TRIM(LOWER(?)) OR TRIM(LOWER("ProductName")) = TRIM(LOWER(?)))
-                ''', (new_lineage, vendor, tag_name, tag_name))
-                products_updated = cursor.rowcount
-                if products_updated > 0:
-                    logging.info(f"✅ Updated {products_updated} products (vendor+name) to lineage '{new_lineage}'")
+                try:
+                    vendor_lower = str(vendor).strip().lower()
+                    tag_name_lower = str(tag_name).strip().lower()
+                    cursor.execute('''
+                        UPDATE products
+                        SET "Lineage" = ?
+                        WHERE LOWER("Vendor/Supplier*") = ?
+                          AND (LOWER("Product Name*") = ? OR LOWER("ProductName") = ?)
+                    ''', (new_lineage, vendor_lower, tag_name_lower, tag_name_lower))
+                    products_updated = cursor.rowcount
+                    if products_updated > 0:
+                        logging.info(f"✅ Updated {products_updated} products (vendor+name) to lineage '{new_lineage}'")
+                except Exception as vendor_fallback_error:
+                    logging.warning(f"⚠️  Vendor fallback update failed: {vendor_fallback_error}")
             
             # Last resort: Partial match by product name
             if products_updated == 0:
-                cursor.execute('''
-                    UPDATE products
-                    SET "Lineage" = ?
-                    WHERE "Product Name*" LIKE ? OR "ProductName" LIKE ?
-                ''', (new_lineage, f'%{tag_name}%', f'%{tag_name}%'))
-                products_updated = cursor.rowcount
-                if products_updated > 0:
-                    logging.info(f"✅ Updated {products_updated} products (partial name match) to lineage '{new_lineage}'")
+                try:
+                    cursor.execute('''
+                        UPDATE products
+                        SET "Lineage" = ?
+                        WHERE "Product Name*" LIKE ? OR "ProductName" LIKE ?
+                    ''', (new_lineage, f'%{tag_name}%', f'%{tag_name}%'))
+                    products_updated = cursor.rowcount
+                    if products_updated > 0:
+                        logging.info(f"✅ Updated {products_updated} products (partial name match) to lineage '{new_lineage}'")
+                except Exception as partial_match_error:
+                    logging.warning(f"⚠️  Partial match update failed: {partial_match_error}")
             
             if products_updated == 0:
                 logging.warning(f"⚠️  No products updated for '{tag_name}' - product may not exist in database")
@@ -8279,19 +8353,22 @@ def update_lineage():
             # Update strains table if we have a strain name
             if strain_name and str(strain_name).strip():
                 try:
+                    strain_name_lower = str(strain_name).strip().lower()
                     cursor.execute('''
                         UPDATE strains
                         SET sovereign_lineage = ?,
                             canonical_lineage = ?,
                             updated_at = CURRENT_TIMESTAMP
-                        WHERE TRIM(LOWER(strain_name)) = TRIM(LOWER(?))
-                    ''', (new_lineage, new_lineage, str(strain_name).strip()))
+                        WHERE LOWER(strain_name) = ?
+                    ''', (new_lineage, new_lineage, strain_name_lower))
                     strain_rows = cursor.rowcount
                     if strain_rows > 0:
                         strain_updated = True
                         logging.info(f"🌿 Updated {strain_rows} strain(s) to lineage '{new_lineage}'")
                 except Exception as strain_update_error:
-                    logging.warning(f"Could not update strain in transaction: {strain_update_error}")
+                    logging.warning(f"⚠️  Could not update strain in transaction: {strain_update_error}")
+                    import traceback
+                    logging.error(f"Strain update error traceback: {traceback.format_exc()}")
             
             # SINGLE COMMIT for all updates - this should be fast
             conn.commit()
@@ -8326,16 +8403,33 @@ def update_lineage():
                     logging.info(f"✅ Retry succeeded: Updated {products_updated} products")
                 except Exception as retry_error:
                     logging.error(f"❌ Retry also failed: {retry_error}")
+                    import traceback
+                    logging.error(f"Retry error traceback: {traceback.format_exc()}")
                     products_updated = 0
             else:
                 logging.error(f"❌ Database error during lineage update: {lock_error}")
+                import traceback
+                logging.error(f"Database error traceback: {traceback.format_exc()}")
                 products_updated = 0
+        except sqlite3.Error as db_error:
+            # Catch all SQLite errors
+            logging.error(f"❌ SQLite error during lineage update: {db_error}")
+            import traceback
+            logging.error(f"SQLite error traceback: {traceback.format_exc()}")
+            try:
+                if 'conn' in locals():
+                    conn.rollback()
+            except:
+                pass
+            products_updated = 0
         except Exception as db_error:
+            # Catch any other database-related errors
             logging.error(f"❌ Error updating lineage in database: {db_error}", exc_info=True)
             import traceback
-            logging.error(f"Traceback: {traceback.format_exc()}")
+            logging.error(f"Database update error traceback: {traceback.format_exc()}")
             try:
-                conn.rollback()
+                if 'conn' in locals():
+                    conn.rollback()
             except:
                 pass
             products_updated = 0
@@ -8459,14 +8553,39 @@ def update_lineage():
         return jsonify(response_data)
             
     except Exception as e:
-        request_duration = time.time() - request_start_time
-        logging.error(f"❌ LINEAGE UPDATE ERROR after {request_duration:.3f}s: {e}")
-        import traceback
-        logging.error(f"Traceback: {traceback.format_exc()}")
-        return jsonify({
-            'error': str(e),
-            'request_duration_ms': round(request_duration * 1000, 2)
-        }), 500
+        try:
+            request_duration = time.time() - request_start_time if 'request_start_time' in locals() else 0
+            error_msg = str(e) if e else 'Unknown error'
+            error_type = type(e).__name__
+            logging.error(f"❌ LINEAGE UPDATE ERROR after {request_duration:.3f}s: {error_type}: {error_msg}")
+            import traceback
+            full_traceback = traceback.format_exc()
+            logging.error(f"Full traceback:\n{full_traceback}")
+            
+            # Always return JSON, even if there's an error
+            return jsonify({
+                'success': False,
+                'error': error_msg,
+                'error_type': error_type,
+                'request_duration_ms': round(request_duration * 1000, 2) if request_duration > 0 else 0
+            }), 500
+        except Exception as handler_error:
+            # If even the error handler fails, return a basic JSON response
+            logging.error(f"❌ CRITICAL: Error handler also failed: {handler_error}")
+            try:
+                return jsonify({
+                    'success': False,
+                    'error': 'An unexpected error occurred while updating lineage',
+                    'error_type': 'HandlerError'
+                }), 500
+            except:
+                # Last resort - return a simple text response
+                from flask import Response
+                return Response(
+                    '{"success": false, "error": "Critical error occurred"}',
+                    status=500,
+                    mimetype='application/json'
+                )
 @app.route('/api/update-strain-lineage', methods=['POST'])
 def update_strain_lineage():
     """Update lineage for a strain in the master database."""
