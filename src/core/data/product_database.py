@@ -4035,11 +4035,26 @@ class ProductDatabase:
         
         Uses case-insensitive and whitespace-insensitive matching to ensure
         updates are found even if there are minor differences in formatting.
+        Also applies sativa hybrid override for known sativa hybrid strains.
         """
         try:
             self.init_database()
             conn = self._get_connection()
             cursor = conn.cursor()
+            
+            # Known sativa hybrid strains - override database lineage if it's just "HYBRID"
+            KNOWN_SATIVA_HYBRIDS = {
+                'blue dream', 'blue dream haze', 'blueberry dream', 'dream', 'dream star',
+                'sour diesel', 'sour d', 'green crack', 'green crack haze',
+                'jack herer', 'jack', 'super silver haze', 'silver haze',
+                'durban poison', 'durban', 'trainwreck', 'train wreck',
+                'amnesia haze', 'amnesia', 'strawberry cough', 'strawberry',
+                'white widow', 'white', 'ak-47', 'ak47', 'ak 47',
+                'purple haze', 'haze', 'lemon haze', 'lemon',
+                'pineapple express', 'pineapple', 'maui wowie', 'maui',
+                'chocolope', 'chocolate', 'tangie', 'tangerine dream',
+                'cannatonic', 'harlequin', 'acdc', 'ac/dc', 'pennywise'
+            }
             
             # CRITICAL FIX: Use case-insensitive and whitespace-insensitive matching
             # This ensures updates are found even with minor formatting differences
@@ -4048,9 +4063,9 @@ class ProductDatabase:
                 logger.debug(f"No product name provided for lineage lookup")
                 return None
             
-            # Try exact match first (fastest)
+            # Try exact match first (fastest) - also get strain for sativa hybrid check
             cursor.execute('''
-                SELECT "Lineage" FROM products 
+                SELECT "Lineage", "Product Strain" FROM products 
                 WHERE "Product Name*" = ? OR "ProductName" = ?
                 ORDER BY id DESC
                 LIMIT 1
@@ -4059,12 +4074,32 @@ class ProductDatabase:
             result = cursor.fetchone()
             if result and result[0] and str(result[0]).strip():
                 lineage = str(result[0]).strip()
+                product_strain = result[1] if len(result) > 1 and result[1] else None
+                
+                # CRITICAL FIX: Apply sativa hybrid override if product has a known sativa hybrid strain or name
+                is_known_sativa_hybrid = False
+                if product_strain and str(product_strain).strip():
+                    normalized_strain = self._normalize_strain_name(str(product_strain).strip())
+                    is_known_sativa_hybrid = normalized_strain in KNOWN_SATIVA_HYBRIDS or any(
+                        known in normalized_strain for known in KNOWN_SATIVA_HYBRIDS
+                    )
+                # Also check product name itself (e.g., "Blue Dream Super Sale")
+                if not is_known_sativa_hybrid:
+                    normalized_product_name = self._normalize_strain_name(product_name_norm)
+                    is_known_sativa_hybrid = normalized_product_name in KNOWN_SATIVA_HYBRIDS or any(
+                        known in normalized_product_name for known in KNOWN_SATIVA_HYBRIDS
+                    )
+                
+                if is_known_sativa_hybrid and str(lineage).strip().upper() == 'HYBRID':
+                    logger.info(f"🌿 SATIVA HYBRID OVERRIDE (product): '{product_name}' (strain: '{product_strain or \"N/A\"}') - Overriding 'HYBRID' to 'HYBRID/SATIVA'")
+                    return 'HYBRID/SATIVA'
+                
                 logger.debug(f"✅ Found product lineage (exact match) for '{product_name}': '{lineage}'")
                 return lineage
             
             # Fallback: Case-insensitive and whitespace-insensitive match
             cursor.execute('''
-                SELECT "Lineage" FROM products 
+                SELECT "Lineage", "Product Strain" FROM products 
                 WHERE TRIM(LOWER("Product Name*")) = TRIM(LOWER(?))
                    OR TRIM(LOWER("ProductName")) = TRIM(LOWER(?))
                 ORDER BY id DESC
@@ -4074,12 +4109,24 @@ class ProductDatabase:
             result = cursor.fetchone()
             if result and result[0] and str(result[0]).strip():
                 lineage = str(result[0]).strip()
+                product_strain = result[1] if len(result) > 1 and result[1] else None
+                
+                # CRITICAL FIX: Apply sativa hybrid override
+                if product_strain and str(product_strain).strip():
+                    normalized_strain = self._normalize_strain_name(str(product_strain).strip())
+                    is_known_sativa_hybrid = normalized_strain in KNOWN_SATIVA_HYBRIDS or any(
+                        known in normalized_strain for known in KNOWN_SATIVA_HYBRIDS
+                    )
+                    if is_known_sativa_hybrid and str(lineage).strip().upper() == 'HYBRID':
+                        logger.info(f"🌿 SATIVA HYBRID OVERRIDE (product): '{product_name}' (strain: '{product_strain}') - Overriding 'HYBRID' to 'HYBRID/SATIVA'")
+                        return 'HYBRID/SATIVA'
+                
                 logger.debug(f"✅ Found product lineage (case-insensitive match) for '{product_name}': '{lineage}'")
                 return lineage
             
             # Last resort: Partial match (in case product name has extra characters)
             cursor.execute('''
-                SELECT "Lineage" FROM products 
+                SELECT "Lineage", "Product Strain" FROM products 
                 WHERE "Product Name*" LIKE ? OR "ProductName" LIKE ?
                 ORDER BY id DESC
                 LIMIT 1
@@ -4088,6 +4135,18 @@ class ProductDatabase:
             result = cursor.fetchone()
             if result and result[0] and str(result[0]).strip():
                 lineage = str(result[0]).strip()
+                product_strain = result[1] if len(result) > 1 and result[1] else None
+                
+                # CRITICAL FIX: Apply sativa hybrid override
+                if product_strain and str(product_strain).strip():
+                    normalized_strain = self._normalize_strain_name(str(product_strain).strip())
+                    is_known_sativa_hybrid = normalized_strain in KNOWN_SATIVA_HYBRIDS or any(
+                        known in normalized_strain for known in KNOWN_SATIVA_HYBRIDS
+                    )
+                    if is_known_sativa_hybrid and str(lineage).strip().upper() == 'HYBRID':
+                        logger.info(f"🌿 SATIVA HYBRID OVERRIDE (product): '{product_name}' (strain: '{product_strain}') - Overriding 'HYBRID' to 'HYBRID/SATIVA'")
+                        return 'HYBRID/SATIVA'
+                
                 logger.debug(f"✅ Found product lineage (partial match) for '{product_name}': '{lineage}'")
                 return lineage
             
