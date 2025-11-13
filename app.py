@@ -4040,6 +4040,54 @@ def upload_status():
         # Never return HTML; always JSON for the polling loop
         return jsonify({'error': str(e), 'trace': tb, 'status': 'processing'}), 500
 
+@app.route('/api/current-file', methods=['GET'])
+def get_current_file():
+    """Get the current uploaded file information from session"""
+    try:
+        file_path = session.get('file_path')
+        uploaded_filename = session.get('uploaded_filename', '')
+        upload_timestamp = session.get('upload_timestamp', 0)
+        
+        # Check if file exists
+        file_exists = False
+        if file_path:
+            file_exists = os.path.exists(file_path)
+            if not file_exists:
+                # File doesn't exist, clear session
+                session.pop('file_path', None)
+                session.pop('uploaded_filename', None)
+                session.pop('upload_timestamp', None)
+                logging.info(f"File from session no longer exists: {file_path}")
+        
+        # Check if processor has data
+        has_data = False
+        row_count = 0
+        if file_exists:
+            try:
+                processor = get_excel_processor()
+                if processor and hasattr(processor, 'df') and processor.df is not None and not processor.df.empty:
+                    has_data = True
+                    row_count = len(processor.df)
+            except Exception as e:
+                logging.warning(f"Error checking processor data: {e}")
+        
+        return jsonify({
+            'success': True,
+            'has_file': file_exists,
+            'filename': uploaded_filename,
+            'file_path': file_path if file_exists else None,
+            'upload_timestamp': upload_timestamp,
+            'has_data': has_data,
+            'row_count': row_count
+        })
+    except Exception as e:
+        logging.error(f"Error getting current file: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'has_file': False
+        }), 500
+
 @app.route('/upload-lightning', methods=['POST'])
 def upload_lightning():
     """Ultra-fast file upload - saves file immediately, processes later"""

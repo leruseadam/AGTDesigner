@@ -5789,6 +5789,30 @@ const TagManager = {
         verboseLog('=== CHECK FOR EXISTING DATA FUNCTION CALLED ===');
         verboseLog('Checking for existing data...');
         
+        // Check for current uploaded file from session
+        try {
+            const fileResponse = await fetch('/api/current-file');
+            if (fileResponse.ok) {
+                const fileData = await fileResponse.json();
+                if (fileData.success && fileData.has_file && fileData.filename) {
+                    verboseLog(`Found uploaded file in session: ${fileData.filename}`);
+                    // Update file info display
+                    const fileInfoText = document.getElementById('fileInfoText');
+                    if (fileInfoText) {
+                        fileInfoText.textContent = fileData.filename;
+                    }
+                    // Update current file info if element exists
+                    const currentFileInfo = document.getElementById('currentFileInfo');
+                    if (currentFileInfo) {
+                        currentFileInfo.textContent = fileData.filename;
+                    }
+                    verboseLog(`File info updated: ${fileData.filename} (${fileData.row_count || 0} rows)`);
+                }
+            }
+        } catch (error) {
+            verboseLog('Error checking for current file:', error);
+        }
+        
         // Show loading splash IMMEDIATELY before any async operations
         this.showActionSplash('Loading tags...');
         
