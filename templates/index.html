@@ -648,8 +648,7 @@
         mainContent.classList.add('store-selection-disabled');
       }
       
-      // If no explicit confirmation, clear backend store FIRST, then check
-      // This ensures we don't get a stale store from backend
+      // Define performCheck function to check backend
       const performCheck = () => {
         console.log('Fetching store status from backend...');
         const cacheBust = `ts=${Date.now()}`;
@@ -942,25 +941,16 @@
           });
       };
       
-      // If no explicit confirmation, clear backend store FIRST, then check
-      if (!userConfirmedStore || !confirmedTimestamp) {
-        console.log('⚠️ No explicit store confirmation found, clearing session store first...');
-        // Clear session store to force fresh selection, THEN check
-        fetch('/api/clear-store', {
-          method: 'POST',
-          credentials: 'same-origin'
-        }).then(() => {
-          console.log('✅ Session store cleared, now checking backend...');
-          // Wait a moment for backend to update, then check
-          setTimeout(performCheck, 100);
-        }).catch(err => {
-          console.warn('⚠️ Error clearing session store, proceeding anyway:', err);
-          // Still proceed with check even if clear failed
-          performCheck();
-        });
-      } else {
+      // Only call performCheck if we have localStorage confirmation
+      // If no confirmation, the code above already showed the modal and returned
+      if (userConfirmedStore && confirmedTimestamp) {
         console.log('✅ Found explicit store confirmation in localStorage:', lastConfirmedStore);
-        // User has confirmed store, proceed with normal check
+        // User has confirmed store, proceed with backend check
+        performCheck();
+      } else {
+        // No confirmation - modal should already be shown by code above
+        // But if we somehow got here, ensure performCheck runs to verify
+        console.log('⚠️ No explicit store confirmation - modal should be shown, but verifying with backend...');
         performCheck();
       }
     }
