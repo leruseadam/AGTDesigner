@@ -6212,22 +6212,32 @@ def generate_labels():
                     logging.info("Attempting to validate selected tags against database...")
                     
                     # VALIDATION DEBUG: Track what happens to JSON matches
-                    logging.info(f"🔍 VALIDATION DEBUG: About to validate {len(normalized_tags)} normalized tags")
-                    logging.info(f"🔍 VALIDATION DEBUG: First 10 tags: {normalized_tags[:10]}")
+                    logging.debug(f"🔍 VALIDATION DEBUG: About to validate {len(normalized_tags)} normalized tags")
+                    logging.debug(f"🔍 VALIDATION DEBUG: First 10 tags: {normalized_tags[:10]}")
                     
-                    # ⚠️ DIRECT DATABASE QUERIES (batching disabled for troubleshooting)
-                    # from src.core.generation.fast_generation import BatchedDatabaseQuerier
-                    # batched_querier = BatchedDatabaseQuerier(product_db)
+                    # Use batched queries for better performance
+                    from src.core.generation.fast_generation import BatchedDatabaseQuerier
+                    batched_querier = BatchedDatabaseQuerier(product_db)
                     
                     # Use fuzzy matching for JSON matched sessions
                     if is_json_matched_session:
-                        logging.info(f"🔍 JSON SESSION: Using fuzzy matching for better JSON abbreviation handling")
-                        db_records = product_db.get_products_by_names_with_fuzzy(normalized_tags)
+                        logging.debug(f"🔍 JSON SESSION: Using fuzzy matching for better JSON abbreviation handling")
+                        # For fuzzy matching, still use direct query but with batching if possible
+                        if len(normalized_tags) > 20:
+                            # Split into batches for fuzzy matching too
+                            db_records = []
+                            batch_size = 50
+                            for i in range(0, len(normalized_tags), batch_size):
+                                batch = normalized_tags[i:i + batch_size]
+                                batch_records = product_db.get_products_by_names_with_fuzzy(batch)
+                                db_records.extend(batch_records)
+                        else:
+                            db_records = product_db.get_products_by_names_with_fuzzy(normalized_tags)
                     else:
-                        # Direct database query
-                        db_records = product_db.get_products_by_names(normalized_tags)
+                        # Use batched queries for better performance
+                        db_records = batched_querier.get_products_batch(normalized_tags, batch_size=50)
                     
-                    logging.info(f"🔍 VALIDATION DEBUG: Database lookup returned {len(db_records)} records")
+                    logging.debug(f"🔍 VALIDATION DEBUG: Database lookup returned {len(db_records)} records")
                     
                     # Count valid vs placeholder records
                     valid_count = 0
@@ -6239,14 +6249,14 @@ def generate_labels():
                         
                         if has_id:
                             valid_count += 1
-                            if i < 5:  # Log first 5 valid matches
-                                logging.info(f"🔍 VALIDATION DEBUG: Valid match {valid_count}: '{product_name}' (Vendor: {vendor})")
+                            if i < 3:  # Log first 3 valid matches only
+                                logging.debug(f"🔍 VALIDATION DEBUG: Valid match {valid_count}: '{product_name}' (Vendor: {vendor})")
                         else:
                             placeholder_count += 1
-                            if i < 5:  # Log first 5 placeholders
-                                logging.info(f"🔍 VALIDATION DEBUG: Placeholder {placeholder_count}: '{product_name}' (NOT FOUND IN DB)")
+                            if i < 3:  # Log first 3 placeholders only
+                                logging.debug(f"🔍 VALIDATION DEBUG: Placeholder {placeholder_count}: '{product_name}' (NOT FOUND IN DB)")
                     
-                    logging.info(f"🔍 VALIDATION DEBUG: Found {valid_count} valid records, {placeholder_count} placeholders")
+                    logging.debug(f"🔍 VALIDATION DEBUG: Found {valid_count} valid records, {placeholder_count} placeholders")
                     
                     if db_records:
                         # Some or all tags were found in database
@@ -6280,14 +6290,14 @@ def generate_labels():
                             valid_selected_tags = normalized_tags
                             invalid_selected_tags = []
                         
-                        logging.info(f"🔍 VALIDATION SUCCESS: Found {len(valid_selected_tags)} valid products in database")
-                        logging.info(f"🔍 VALIDATION INFO: {len(invalid_selected_tags)} original tags had no valid database match")
-                        if matched_pairs[:5]:
-                            logging.info(f"🔍 VALIDATION INFO: Sample abbreviation→product matches: {matched_pairs[:5]}")
-                        if invalid_selected_tags[:5]:  # Show first 5 unmatched
-                            logging.info(f"🔍 VALIDATION INFO: Sample unmatched tags: {invalid_selected_tags[:5]}")
-                        if found_names[:5]:  # Show first 5 matches
-                            logging.info(f"🔍 VALIDATION INFO: Sample matched products: {[name[:50] + '...' if len(name) > 50 else name for name in found_names[:5]]}")
+                        logging.debug(f"🔍 VALIDATION SUCCESS: Found {len(valid_selected_tags)} valid products in database")
+                        logging.debug(f"🔍 VALIDATION INFO: {len(invalid_selected_tags)} original tags had no valid database match")
+                        if matched_pairs[:3]:
+                            logging.debug(f"🔍 VALIDATION INFO: Sample abbreviation→product matches: {matched_pairs[:3]}")
+                        if invalid_selected_tags[:3]:  # Show first 3 unmatched
+                            logging.debug(f"🔍 VALIDATION INFO: Sample unmatched tags: {invalid_selected_tags[:3]}")
+                        if found_names[:3]:  # Show first 3 matches
+                            logging.debug(f"🔍 VALIDATION INFO: Sample matched products: {[name[:50] + '...' if len(name) > 50 else name for name in found_names[:3]]}")
                     else:
                         logging.warning("No database records found for selected tags, falling back to Excel validation")
                         # Fall back to Excel validation
@@ -7534,45 +7544,95 @@ def get_available_tags():
                     '''
                     logging.info(f"📦 LINEAGE-CACHE ALIGNMENT: path={getattr(product_db, 'db_path', 'unknown')} store={getattr(product_db, '_store_name', 'unknown')}")
                     updated = 0
+                    
+                    # OPTIMIZATION: Batch load all lineage data in a single query instead of per-tag queries
+                    product_names = []
+                    normalized_names = []
+                    name_to_tag = {}
+                    
+                    for tag in cached_tags:
+                        name = tag.get('Product Name*') or tag.get('ProductName') or ''
+                        if not name:
+                            continue
+                        product_names.append(name)
+                        try:
+                            normalized = product_db._normalize_product_name(name)
+                        except Exception:
+                            normalized = name.strip().lower()
+                        normalized_names.append(normalized)
+                        name_to_tag[name] = tag
+                    
+                    # Batch query: fetch all lineage data at once
+                    if product_names:
+                        try:
+                            all_search_names = list(set(product_names + normalized_names))
+                            placeholders = ','.join(['?'] * len(all_search_names))
+                            batch_query = f'''
+                                SELECT DISTINCT
+                                    COALESCE(p."Lineage", s.canonical_lineage) AS current_lineage,
+                                    COALESCE(s.strain_name, p."Product Strain") AS current_strain,
+                                    p."Product Name*" AS product_name,
+                                    p.normalized_name AS normalized_name
+                                FROM products p
+                                LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
+                                WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
+                                ORDER BY p.id DESC
+                            '''
+                            cur.execute(batch_query, all_search_names + all_search_names)
+                            batch_results = cur.fetchall()
+                            
+                            # Build lookup map from results
+                            for row in batch_results:
+                                db_lin = row[0]
+                                db_strain = row[1] if len(row) > 1 else None
+                                result_product_name = row[2] if len(row) > 2 else None
+                                result_normalized = row[3] if len(row) > 3 else None
+                                
+                                if result_product_name and result_product_name in name_to_tag:
+                                    if result_product_name not in lineage_cache:
+                                        lineage_cache[result_product_name] = (db_lin, db_strain)
+                                if result_normalized:
+                                    for name, normalized in zip(product_names, normalized_names):
+                                        if normalized == result_normalized and name not in lineage_cache:
+                                            lineage_cache[name] = (db_lin, db_strain)
+                                            break
+                        except Exception as batch_err:
+                            logging.warning(f"Batch lineage query (cache) failed, using fallback: {batch_err}")
+                            # Fallback to individual queries
+                            for name in product_names:
+                                if name not in lineage_cache:
+                                    try:
+                                        normalized = normalized_names[product_names.index(name)]
+                                        try:
+                                            cur.execute(lineage_query_join_by_name, (name, normalized))
+                                            row = cur.fetchone()
+                                        except Exception:
+                                            cur.execute(lineage_query_fallback, (name, normalized))
+                                            row = cur.fetchone()
+                                        if row:
+                                            lineage_cache[name] = (row[0], row[1] if len(row) > 1 else None)
+                                        else:
+                                            lineage_cache[name] = (None, None)
+                                    except Exception:
+                                        lineage_cache[name] = (None, None)
+                    
+                    # Now apply lineage data to tags (fast - just dictionary lookups)
                     for tag in cached_tags:
                         try:
                             name = tag.get('Product Name*') or tag.get('ProductName') or ''
-                            if not name:
+                            if not name or name not in name_to_tag:
                                 continue
-                            if name in lineage_cache:
-                                db_lin, db_strain = lineage_cache[name]
-                            else:
-                                db_lin = None
-                                db_strain = None
-                                # CRITICAL FIX: Prefer product-level lineage (products.Lineage) which matches output generation
-                                # Match by exact product name or normalized name to avoid missing column errors
-                                try:
-                                    normalized = product_db._normalize_product_name(name)
-                                except Exception:
-                                    normalized = name.strip().lower()
-                                try:
-                                    cur.execute(lineage_query_join_by_name, (name, normalized))
-                                    row = cur.fetchone()
-                                except Exception as query_err:
-                                    # Join failed (e.g., missing columns) - fallback to product lineage
-                                    logging.debug(f"Lineage join query failed for '{name}': {query_err}, using fallback")
-                                    try:
-                                        cur.execute(lineage_query_fallback, (name, normalized))
-                                        row = cur.fetchone()
-                                    except Exception as fallback_err:
-                                        logging.warning(f"Both lineage queries failed for '{name}': {fallback_err}")
-                                        row = None
-                                if row:
-                                    db_lin = row[0]
-                                    if len(row) > 1:
-                                        db_strain = row[1]
-                                lineage_cache[name] = (db_lin, db_strain)
+                            
+                            db_lin, db_strain = lineage_cache.get(name, (None, None))
+                            
                             if db_lin:
                                 db_lin_clean = str(db_lin).strip().upper()
                                 # Always expose DB lineage on stable fields the UI can prefer
                                 tag['currentLineage'] = db_lin_clean
                                 tag['canonical_lineage'] = db_lin_clean
-                                tag['Lineage'] = db_lin_clean
+                                if str(tag.get('Lineage','')).strip().upper() != db_lin_clean:
+                                    tag['Lineage'] = db_lin_clean
+                                    updated += 1
                             clean_strain = str(db_strain).strip() if db_strain else ''
                             if db_lin:
                                 db_lin_clean = str(db_lin).strip().upper()
@@ -7672,38 +7732,95 @@ def get_available_tags():
                         LIMIT 1
                         '''
                         logging.info(f"📦 LINEAGE-BUILD ALIGNMENT: path={getattr(product_db, 'db_path', 'unknown')} store={getattr(product_db, '_store_name', 'unknown')}")
+                        
+                        # OPTIMIZATION: Batch load all lineage data in a single query instead of per-tag queries
+                        # This reduces 1000+ queries to just 1-2 queries, dramatically improving performance
+                        product_names = []
+                        normalized_names = []
+                        name_to_tag = {}
+                        
+                        for tag in all_tags:
+                            name = tag.get('Product Name*') or tag.get('ProductName') or ''
+                            if not name:
+                                continue
+                            product_names.append(name)
+                            try:
+                                normalized = product_db._normalize_product_name(name)
+                            except Exception:
+                                normalized = name.strip().lower()
+                            normalized_names.append(normalized)
+                            name_to_tag[name] = tag
+                        
+                        # Batch query: fetch all lineage data at once
+                        if product_names:
+                            try:
+                                # Build batch query with IN clause - match by either product name or normalized name
+                                # Combine both lists for the IN clause
+                                all_search_names = list(set(product_names + normalized_names))
+                                placeholders = ','.join(['?'] * len(all_search_names))
+                                batch_query = f'''
+                                    SELECT DISTINCT
+                                        COALESCE(p."Lineage", s.canonical_lineage) AS current_lineage,
+                                        COALESCE(s.strain_name, p."Product Strain") AS current_strain,
+                                        p."Product Name*" AS product_name,
+                                        p.normalized_name AS normalized_name
+                                    FROM products p
+                                    LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
+                                    WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
+                                    ORDER BY p.id DESC
+                                '''
+                                # Execute with all search names (product names + normalized names, deduplicated)
+                                cur.execute(batch_query, all_search_names + all_search_names)
+                                batch_results = cur.fetchall()
+                                
+                                # Build lookup map from results - match by product name or normalized name
+                                for row in batch_results:
+                                    db_lin = row[0]
+                                    db_strain = row[1] if len(row) > 1 else None
+                                    result_product_name = row[2] if len(row) > 2 else None
+                                    result_normalized = row[3] if len(row) > 3 else None
+                                    
+                                    # Match by product name first (exact match)
+                                    if result_product_name and result_product_name in name_to_tag:
+                                        if result_product_name not in lineage_cache:
+                                            lineage_cache[result_product_name] = (db_lin, db_strain)
+                                    # Also match by normalized name
+                                    if result_normalized:
+                                        for name, normalized in zip(product_names, normalized_names):
+                                            if normalized == result_normalized and name not in lineage_cache:
+                                                lineage_cache[name] = (db_lin, db_strain)
+                                                break
+                                
+                            except Exception as batch_err:
+                                # If batch query fails, fall back to individual queries (but log the error)
+                                logging.warning(f"Batch lineage query failed, using fallback: {batch_err}")
+                                # Fallback: use individual queries for remaining tags
+                                for name in product_names:
+                                    if name not in lineage_cache:
+                                        try:
+                                            normalized = normalized_names[product_names.index(name)]
+                                            try:
+                                                cur.execute(lineage_query_join_by_name, (name, normalized))
+                                                row = cur.fetchone()
+                                            except Exception:
+                                                cur.execute(lineage_query_fallback, (name, normalized))
+                                                row = cur.fetchone()
+                                            if row:
+                                                lineage_cache[name] = (row[0], row[1] if len(row) > 1 else None)
+                                            else:
+                                                lineage_cache[name] = (None, None)
+                                        except Exception:
+                                            lineage_cache[name] = (None, None)
+                        
+                        # Now apply lineage data to tags (fast - just dictionary lookups)
                         for tag in all_tags:
                             try:
                                 name = tag.get('Product Name*') or tag.get('ProductName') or ''
-                                if not name:
+                                if not name or name not in name_to_tag:
                                     continue
-                                if name in lineage_cache:
-                                    db_lin, db_strain = lineage_cache[name]
-                                else:
-                                    db_lin = None
-                                    db_strain = None
-                                    # Prefer strain-level lineage used by DOCX (sovereign -> canonical)
-                                    try:
-                                        normalized = product_db._normalize_product_name(name)
-                                    except Exception:
-                                        normalized = name.strip().lower()
-                                    try:
-                                        cur.execute(lineage_query_join_by_name, (name, normalized))
-                                        row = cur.fetchone()
-                                    except Exception as query_err:
-                                        # Join failed (e.g., missing columns) - fallback to product lineage
-                                        logging.debug(f"Lineage join query failed for '{name}': {query_err}, using fallback")
-                                        try:
-                                            cur.execute(lineage_query_fallback, (name, normalized))
-                                            row = cur.fetchone()
-                                        except Exception as fallback_err:
-                                            logging.warning(f"Both lineage queries failed for '{name}': {fallback_err}")
-                                            row = None
-                                    if row:
-                                        db_lin = row[0]
-                                        if len(row) > 1:
-                                            db_strain = row[1]
-                                    lineage_cache[name] = (db_lin, db_strain)
+                                
+                                db_lin, db_strain = lineage_cache.get(name, (None, None))
+                                
                                 if db_lin:
                                     db_lin_clean = str(db_lin).strip().upper()
                                     # Always expose DB lineage on stable fields the UI can prefer

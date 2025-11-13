@@ -978,11 +978,44 @@ class TemplateProcessor:
                     return None
 
                 chunk_size = max(1, self.chunk_size)
+                chunks = []
                 for start in range(0, len(records), chunk_size):
                     chunk = records[start:start + chunk_size]
-                    self.chunk_count += 1
-                    self.logger.info(f"🔍 LABEL RENDER: Processing chunk {self.chunk_count} containing {len(chunk)} record(s)")
-                    documents.append(self._process_chunk(chunk))
+                    chunks.append(chunk)
+                
+                # Process chunks in parallel for better performance
+                if len(chunks) > 1:
+                    from concurrent.futures import ThreadPoolExecutor, as_completed
+                    
+                    self.logger.info(f"⚡ PARALLEL PROCESSING: Processing {len(chunks)} chunks concurrently")
+                    chunk_docs = [None] * len(chunks)  # Preserve order
+                    
+                    with ThreadPoolExecutor(max_workers=min(4, len(chunks))) as executor:
+                        # Submit all chunks for parallel processing
+                        future_to_index = {
+                            executor.submit(self._process_chunk, chunk): idx 
+                            for idx, chunk in enumerate(chunks)
+                        }
+                        
+                        # Collect results as they complete
+                        for future in as_completed(future_to_index):
+                            idx = future_to_index[future]
+                            try:
+                                chunk_doc = future.result()
+                                chunk_docs[idx] = chunk_doc
+                                self.chunk_count += 1
+                                self.logger.info(f"⚡ PARALLEL: Chunk {idx + 1}/{len(chunks)} completed")
+                            except Exception as e:
+                                self.logger.error(f"Error processing chunk {idx + 1}: {e}")
+                                chunk_docs[idx] = None
+                    
+                    # Filter out None results and preserve order
+                    documents.extend([doc for doc in chunk_docs if doc is not None])
+                else:
+                    # Single chunk - process normally
+                    self.chunk_count = 1
+                    self.logger.info(f"🔍 LABEL RENDER: Processing single chunk containing {len(records)} record(s)")
+                    documents.append(self._process_chunk(records))
             
             if not documents: 
                 return None
