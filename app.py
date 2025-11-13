@@ -7634,11 +7634,13 @@ def get_available_tags():
                     raise ValueError("No store selected")
                 product_db = get_product_database(store_name)
                 if product_db:
-                    # Build a small cache to reduce duplicate lookups in this batch
-                    lineage_cache = {}
-                    updated = 0
-                    conn = product_db._get_connection()
-                    cur = conn.cursor()
+                    # CRITICAL: If database connection fails, still return Excel tags
+                    try:
+                        # Build a small cache to reduce duplicate lookups in this batch
+                        lineage_cache = {}
+                        updated = 0
+                        conn = product_db._get_connection()
+                        cur = conn.cursor()
                     # Skip alignment entirely if products table doesn't exist
                     try:
                         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
@@ -7726,10 +7728,15 @@ def get_available_tags():
                             raise
                         except Exception as _loop_err:
                             logging.debug(f"UI lineage alignment error for a tag: {_loop_err}")
-                    if updated:
-                        logging.info(f"🔄 UI LINEAGE ALIGNMENT: Applied {updated} database lineage overrides to Excel tags")
+                        if updated:
+                            logging.info(f"🔄 UI LINEAGE ALIGNMENT: Applied {updated} database lineage overrides to Excel tags")
+                    except Exception as db_conn_err:
+                        logging.warning(f"Database connection failed during lineage alignment: {db_conn_err}")
+                        # Continue without lineage alignment - Excel tags are still valid
             except Exception as e:
                 logging.warning(f"UI lineage alignment skipped due to error: {e}")
+                # CRITICAL: Don't fail the entire request - Excel tags are still valid
+                # Continue to return Excel tags even if lineage alignment fails
 
             # Cache the results for faster subsequent requests (unless nocache requested)
             if not nocache:
