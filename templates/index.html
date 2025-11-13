@@ -575,6 +575,72 @@
       const lastConfirmedStore = localStorage.getItem('last_confirmed_store');
       const confirmedTimestamp = localStorage.getItem('store_confirmed_timestamp');
       
+      console.log('🔍 localStorage check:', {
+        userConfirmedStore: userConfirmedStore,
+        lastConfirmedStore: lastConfirmedStore,
+        confirmedTimestamp: confirmedTimestamp,
+        hasConfirmation: !!(userConfirmedStore && confirmedTimestamp)
+      });
+      
+      // CRITICAL: If no localStorage confirmation, show modal IMMEDIATELY without checking backend
+      if (!userConfirmedStore || !confirmedTimestamp) {
+        console.log('🚨🚨🚨 NO LOCALSTORAGE CONFIRMATION - SHOWING MODAL IMMEDIATELY 🚨🚨🚨');
+        window.STORE_MODAL_BLOCKING = true;
+        
+        // Clear backend store first
+        fetch('/api/clear-store', {
+          method: 'POST',
+          credentials: 'same-origin'
+        }).catch(err => {
+          console.warn('⚠️ Error clearing session store:', err);
+        });
+        
+        // Show modal immediately
+        if (typeof bootstrap !== 'undefined') {
+          try {
+            const existingModal = bootstrap.Modal.getInstance(modalElement);
+            if (existingModal) {
+              existingModal.dispose();
+            }
+            const modal = new bootstrap.Modal(modalElement, {
+              backdrop: 'static',
+              keyboard: false
+            });
+            modal.show();
+          } catch (e) {
+            console.error('Error with Bootstrap modal:', e);
+          }
+        }
+        
+        // Force show manually
+        modalElement.style.cssText = 'display: block !important; z-index: 9999 !important; opacity: 1 !important; visibility: visible !important;';
+        modalElement.classList.add('show');
+        modalElement.setAttribute('aria-hidden', 'false');
+        modalElement.setAttribute('aria-modal', 'true');
+        document.body.classList.add('modal-open');
+        document.body.style.overflow = 'hidden';
+        
+        // Add backdrop
+        let backdrop = document.querySelector('.modal-backdrop, #storeModalBackdrop');
+        if (!backdrop) {
+          backdrop = document.createElement('div');
+          backdrop.id = 'storeModalBackdrop';
+          backdrop.className = 'modal-backdrop fade show';
+          backdrop.style.cssText = 'z-index: 9998 !important; display: block !important; position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background-color: rgba(0, 0, 0, 0.5) !important;';
+          document.body.appendChild(backdrop);
+        }
+        
+        if (mainContent) {
+          mainContent.style.pointerEvents = 'none';
+          mainContent.classList.add('store-selection-disabled');
+          mainContent.style.display = 'none';
+        }
+        
+        console.log('✅ Modal shown immediately - no localStorage confirmation');
+        window.checkingStoreRequired = false;
+        return;
+      }
+      
       // Keep main content hidden while checking backend, but DON'T hide modal yet
       // The modal will be shown if no store is found
       if (mainContent) {
@@ -614,27 +680,30 @@
           // CRITICAL FIX: Check if user has explicitly confirmed this store
           const userConfirmedStore = localStorage.getItem('store_confirmed');
           const lastConfirmedStore = localStorage.getItem('last_confirmed_store');
-          const storeIsConfirmed = userConfirmedStore && lastConfirmedStore === data.store;
+          const storeIsConfirmed = userConfirmedStore === 'true' && lastConfirmedStore && lastConfirmedStore === data.store;
           
-          console.log('Store confirmation check:', {
-            userConfirmedStore: !!userConfirmedStore,
+          console.log('🔍 Store confirmation check:', {
+            userConfirmedStore: userConfirmedStore,
             lastConfirmedStore: lastConfirmedStore,
             backendStore: data.store,
-            storeIsConfirmed: storeIsConfirmed
+            storeIsConfirmed: storeIsConfirmed,
+            requires_store: data.requires_store
           });
           
-          // Determine if we should show the modal
+          // CRITICAL: Default to showing modal unless store is explicitly confirmed
           // Show modal if: requires_store=true, OR no store, OR store not confirmed by user
           const shouldShowModal = data.requires_store === true || !data.store || !storeIsConfirmed;
           
-          console.log('SHOULD SHOW MODAL?', shouldShowModal);
-          console.log('Reasons:', {
+          console.log('🚨 SHOULD SHOW MODAL?', shouldShowModal);
+          console.log('🚨 Reasons:', {
             requires_store: data.requires_store === true,
             noStore: !data.store,
-            notConfirmed: !storeIsConfirmed
+            notConfirmed: !storeIsConfirmed,
+            hasConfirmed: storeIsConfirmed
           });
           
-          if (!shouldShowModal && storeIsConfirmed && data.store) {
+          // ONLY hide modal if store is explicitly confirmed by user
+          if (storeIsConfirmed && data.store && !data.requires_store) {
             // USER HAS CONFIRMED STORE - Show content, hide modal
             console.log('🎉 CONFIRMED STORE FOUND:', data.store);
             window.storeCheckCompleted = true;
@@ -699,10 +768,11 @@
           
           // If we get here, we MUST show the modal
           // NO CONFIRMED STORE - FORCE SHOW MODAL
-          console.log('⚠️ NO CONFIRMED STORE - FORCING MODAL TO SHOW');
+          console.log('🚨🚨🚨 FORCING MODAL TO SHOW 🚨🚨🚨');
           console.log('Backend says requires_store:', data.requires_store);
           console.log('Backend says store:', data.store);
           console.log('localStorage confirmed:', storeIsConfirmed);
+          console.log('shouldShowModal:', shouldShowModal);
           window.STORE_MODAL_BLOCKING = true; // Block TagManager until store selected
             
             if (modalElement) {
