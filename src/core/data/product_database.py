@@ -4091,7 +4091,8 @@ class ProductDatabase:
                     )
                 
                 if is_known_sativa_hybrid and str(lineage).strip().upper() == 'HYBRID':
-                    logger.info(f"🌿 SATIVA HYBRID OVERRIDE (product): '{product_name}' (strain: '{product_strain or \"N/A\"}') - Overriding 'HYBRID' to 'HYBRID/SATIVA'")
+                    strain_display = product_strain or 'N/A'
+                    logger.info(f"🌿 SATIVA HYBRID OVERRIDE (product): '{product_name}' (strain: '{strain_display}') - Overriding 'HYBRID' to 'HYBRID/SATIVA'")
                     return 'HYBRID/SATIVA'
                 
                 logger.debug(f"✅ Found product lineage (exact match) for '{product_name}': '{lineage}'")
