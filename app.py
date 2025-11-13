@@ -7510,10 +7510,11 @@ def get_available_tags():
                     # Prepare connection once
                     conn = product_db._get_connection()
                     cur = conn.cursor()
-                    # Prefer joining strains by strain_name to avoid missing p.strain_id column
+                    # CRITICAL FIX: Prefer products.Lineage (product-level, user-editable) over strains.canonical_lineage
+                    # This ensures UI matches output generation which uses get_product_lineage() (reads products.Lineage)
                     lineage_query_join_by_name = '''
                         SELECT 
-                            s.canonical_lineage AS current_lineage,
+                            COALESCE(p."Lineage", s.canonical_lineage) AS current_lineage,
                             COALESCE(s.strain_name, p."Product Strain") AS current_strain
                         FROM products p
                         LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
@@ -7543,7 +7544,7 @@ def get_available_tags():
                             else:
                                 db_lin = None
                                 db_strain = None
-                                # Prefer strain-level lineage used by DOCX (sovereign -> canonical)
+                                # CRITICAL FIX: Prefer product-level lineage (products.Lineage) which matches output generation
                                 # Match by exact product name or normalized name to avoid missing column errors
                                 try:
                                     normalized = product_db._normalize_product_name(name)
@@ -7641,10 +7642,11 @@ def get_available_tags():
                             raise RuntimeError("no-products-table")
                     except RuntimeError:
                         raise
-                    # Prefer joining strains by strain_name to avoid missing p.strain_id column
+                    # CRITICAL FIX: Prefer products.Lineage (product-level, user-editable) over strains.canonical_lineage
+                    # This ensures UI matches output generation which uses get_product_lineage() (reads products.Lineage)
                     lineage_query_join_by_name = '''
                         SELECT 
-                            s.canonical_lineage AS current_lineage,
+                            COALESCE(p."Lineage", s.canonical_lineage) AS current_lineage,
                             COALESCE(s.strain_name, p."Product Strain") AS current_strain
                         FROM products p
                         LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
@@ -7799,10 +7801,11 @@ def get_available_tags():
                                     # Filter to only columns we want, excluding internal ones
                                     columns_to_query = [col for col in available_columns if col not in ['id', 'normalized_name', 'strain_id']]
                                     
-                                    # Build dynamic query - join with strains to get canonical lineage (same pipeline)
+                                    # CRITICAL FIX: Prefer products.Lineage (product-level, user-editable) over strains.canonical_lineage
+                                    # This ensures UI matches output generation which uses get_product_lineage() (reads products.Lineage)
                                     quoted_columns = ', '.join([f'p."{col}"' for col in columns_to_query])
                                     query = f'''
-                                        SELECT {quoted_columns}, COALESCE(s.canonical_lineage, p."Lineage") AS preferred_lineage
+                                        SELECT {quoted_columns}, COALESCE(p."Lineage", s.canonical_lineage) AS preferred_lineage
                                         FROM products p
                                         LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
                                         ORDER BY p.id DESC
@@ -7859,14 +7862,14 @@ def get_available_tags():
                             columns_to_query = [col for col in available_columns if col not in ['id', 'normalized_name', 'strain_id']]
                             logging.info(f"Querying {len(columns_to_query)} columns")
                             
-                            # CRITICAL: Use same pipeline as Excel alignment - join with strains to get canonical_lineage
-                            # This ensures UI lineages match database (strains.canonical_lineage is source of truth)
+                            # CRITICAL FIX: Prefer products.Lineage (product-level, user-editable) over strains.canonical_lineage
+                            # This ensures UI matches output generation which uses get_product_lineage() (reads products.Lineage)
                             quoted_columns = ', '.join([f'p."{col}"' for col in columns_to_query])
                             
-                            # Try to join with strains table to get canonical_lineage (same as Excel alignment query)
+                            # Try to join with strains table, but prefer products.Lineage over strains.canonical_lineage
                             lineage_query_join_by_name = f'''
                                 SELECT {quoted_columns}, 
-                                       COALESCE(s.canonical_lineage, p."Lineage") AS preferred_lineage
+                                       COALESCE(p."Lineage", s.canonical_lineage) AS preferred_lineage
                                 FROM products p
                                 LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
                                 ORDER BY p.id DESC
