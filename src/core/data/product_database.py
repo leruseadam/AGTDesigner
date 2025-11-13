@@ -1975,6 +1975,26 @@ class ProductDatabase:
             cached_result = self._get_from_cache(cache_key)
             if cached_result is not None:
                 return cached_result
+            
+            # Known sativa hybrid strains - override database lineage if it's just "HYBRID"
+            KNOWN_SATIVA_HYBRIDS = {
+                'blue dream', 'blue dream haze', 'blueberry dream', 'dream', 'dream star',
+                'sour diesel', 'sour d', 'green crack', 'green crack haze',
+                'jack herer', 'jack', 'super silver haze', 'silver haze',
+                'durban poison', 'durban', 'trainwreck', 'train wreck',
+                'amnesia haze', 'amnesia', 'strawberry cough', 'strawberry',
+                'white widow', 'white', 'ak-47', 'ak47', 'ak 47',
+                'purple haze', 'haze', 'lemon haze', 'lemon',
+                'pineapple express', 'pineapple', 'maui wowie', 'maui',
+                'chocolope', 'chocolate', 'tangie', 'tangerine dream',
+                'cannatonic', 'harlequin', 'acdc', 'ac/dc', 'pennywise'
+            }
+            
+            # Check if this is a known sativa hybrid
+            is_known_sativa_hybrid = normalized_name in KNOWN_SATIVA_HYBRIDS or any(
+                known in normalized_name for known in KNOWN_SATIVA_HYBRIDS
+            )
+            
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute('''
@@ -1997,6 +2017,15 @@ class ProductDatabase:
                         display_lineage = mode_lineage
                     else:
                         display_lineage = canonical_lineage
+                
+                # CRITICAL FIX: Override lineage for known sativa hybrids if database has just "HYBRID"
+                if is_known_sativa_hybrid and display_lineage and str(display_lineage).strip().upper() == 'HYBRID':
+                    logger.info(f"🌿 SATIVA HYBRID OVERRIDE: '{strain_name}' - Overriding 'HYBRID' to 'HYBRID/SATIVA'")
+                    display_lineage = 'HYBRID/SATIVA'
+                    # Also update canonical_lineage for consistency
+                    if not canonical_lineage or str(canonical_lineage).strip().upper() == 'HYBRID':
+                        canonical_lineage = 'HYBRID/SATIVA'
+                
                 strain_info = {
                     'id': result[0],
                     'strain_name': result[1],
@@ -2010,6 +2039,20 @@ class ProductDatabase:
                 }
                 self._set_cache(cache_key, strain_info, ttl=300)
                 return strain_info
+            # If strain not in database but is a known sativa hybrid, return default info
+            elif is_known_sativa_hybrid:
+                logger.info(f"🌿 SATIVA HYBRID DEFAULT: '{strain_name}' - Not in database, using default 'HYBRID/SATIVA'")
+                return {
+                    'id': None,
+                    'strain_name': strain_name,
+                    'canonical_lineage': 'HYBRID/SATIVA',
+                    'total_occurrences': 0,
+                    'lineage_confidence': 0.0,
+                    'first_seen_date': '',
+                    'last_seen_date': '',
+                    'sovereign_lineage': None,
+                    'display_lineage': 'HYBRID/SATIVA'
+                }
             return None
         except Exception as e:
             logger.error(f"Error getting strain info for '{strain_name}': {e}")
