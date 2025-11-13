@@ -2033,6 +2033,13 @@ const TagManager = {
             return;
         }
         
+        // CRITICAL FIX: Don't clear the list if we're actively refreshing after lineage updates
+        // Only skip if there's a pending refresh timeout (active lineage update operation)
+        if (this._pendingLineageRefresh) {
+            verboseLog('🚫 SKIPPING debouncedUpdateAvailableTags - lineage refresh in progress');
+            return;
+        }
+        
         // Reduced logging to prevent console spam
         // verboseLog('debouncedUpdateAvailableTags called with:', {
         //     originalTagsLength: originalTags ? originalTags.length : 0,
@@ -3872,23 +3879,58 @@ const TagManager = {
                 console.warn('Failed to update similar lineages locally:', e);
             }
             
-            // CRITICAL: Force backend cache refresh after lineage update
-            try {
-                // Fetch fresh data from backend to ensure lineage changes persist
-                verboseLog('🔄 Fetching fresh tag data after lineage update...');
-                const freshTagsResponse = await fetch('/api/available-tags?nocache=1&prefer_db=1&t=' + Date.now());
-                if (freshTagsResponse.ok) {
-                    const freshData = await freshTagsResponse.json();
-                    verboseLog(`✅ Refreshed ${freshData.tags?.length || 0} tags from backend after lineage update`);
-                    
-                    // Update state with fresh data to ensure persistence
-                    if (freshData.tags && freshData.tags.length > 0) {
-                        this.state.originalTags = freshData.tags;
-                        verboseLog('✅ Backend cache refreshed with new lineage data');
+            // CRITICAL FIX: Debounce backend refresh to prevent race conditions when multiple updates happen
+            // Only update the specific tag in originalTags instead of refreshing all tags
+            // This prevents the list from glitching/clearing when multiple lineage changes happen
+            if (!this._pendingLineageRefresh) {
+                this._pendingLineageRefresh = setTimeout(async () => {
+                    try {
+                        // Only refresh if we haven't had another update in the last 500ms
+                        verboseLog('🔄 Debounced backend refresh after lineage update(s)...');
+                        const freshTagsResponse = await fetch('/api/available-tags?nocache=1&prefer_db=1&t=' + Date.now());
+                        if (freshTagsResponse.ok) {
+                            const freshData = await freshTagsResponse.json();
+                            verboseLog(`✅ Refreshed ${freshData.tags?.length || 0} tags from backend after lineage update(s)`);
+                            
+                            // CRITICAL FIX: Only update tags that were actually changed, don't replace entire list
+                            // This prevents the list from glitching when multiple updates happen
+                            if (freshData.tags && freshData.tags.length > 0) {
+                                // Update only the changed tags in originalTags, preserve the rest
+                                const updatedTagNames = new Set(this._recentlyUpdatedLineages || []);
+                                let updatedCount = 0;
+                                
+                                freshData.tags.forEach(freshTag => {
+                                    const tagName = freshTag['Product Name*'];
+                                    if (updatedTagNames.has(tagName)) {
+                                        const existingIndex = this.state.originalTags.findIndex(t => t['Product Name*'] === tagName);
+                                        if (existingIndex >= 0) {
+                                            // Update the existing tag with fresh lineage data
+                                            Object.assign(this.state.originalTags[existingIndex], freshTag);
+                                            updatedCount++;
+                                        }
+                                    }
+                                });
+                                
+                                verboseLog(`✅ Updated ${updatedCount} tags in originalTags with fresh lineage data (preserved ${this.state.originalTags.length - updatedCount} unchanged tags)`);
+                                
+                                // Clear the recently updated list
+                                this._recentlyUpdatedLineages = [];
+                            }
+                        }
+                    } catch (refreshError) {
+                        console.warn('Could not refresh backend cache:', refreshError);
+                    } finally {
+                        this._pendingLineageRefresh = null;
                     }
-                }
-            } catch (refreshError) {
-                console.warn('Could not refresh backend cache:', refreshError);
+                }, 500); // Debounce for 500ms to batch multiple updates
+            }
+            
+            // Track which tags were recently updated
+            if (!this._recentlyUpdatedLineages) {
+                this._recentlyUpdatedLineages = [];
+            }
+            if (!this._recentlyUpdatedLineages.includes(tagName)) {
+                this._recentlyUpdatedLineages.push(tagName);
             }
 
             // CRITICAL FIX: Update selected tags locally without backend fetch
