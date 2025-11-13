@@ -7512,155 +7512,163 @@ def get_available_tags():
         cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
         cached_tags = cache.get(cache_key) if not prefer_db else None
         if cached_tags and not nocache:
-            # Ensure cached tags' lineage matches database (prefer strain sovereign/canonical over product lineage)
-            try:
-                store_name = get_current_store_name()
-                product_db = get_product_database(store_name)
-                if product_db:
-                    lineage_cache = {}
-                    # Prepare connection once
-                    conn = product_db._get_connection()
-                    cur = conn.cursor()
-                    # CRITICAL FIX: Prefer products.Lineage (product-level, user-editable) over strains.canonical_lineage
-                    # This ensures UI matches output generation which uses get_product_lineage() (reads products.Lineage)
-                    lineage_query_join_by_name = '''
-                        SELECT 
-                            COALESCE(p."Lineage", s.canonical_lineage) AS current_lineage,
-                            COALESCE(s.strain_name, p."Product Strain") AS current_strain
-                        FROM products p
-                        LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
-                        WHERE p."Product Name*" = ? OR p.normalized_name = ?
-                        ORDER BY p.id DESC
-                        LIMIT 1
-                    '''
-                    # Fallback: use product's own Lineage if strains table/column not available
-                    lineage_query_fallback = '''
-                        SELECT 
-                            p."Lineage" AS current_lineage,
-                            p."Product Strain" AS current_strain
-                        FROM products p
-                        WHERE p."Product Name*" = ? OR p.normalized_name = ?
-                        ORDER BY p.id DESC
-                        LIMIT 1
-                    '''
-                    logging.info(f"📦 LINEAGE-CACHE ALIGNMENT: path={getattr(product_db, 'db_path', 'unknown')} store={getattr(product_db, '_store_name', 'unknown')}")
-                    updated = 0
-                    
-                    # OPTIMIZATION: Batch load all lineage data in a single query instead of per-tag queries
-                    product_names = []
-                    normalized_names = []
-                    name_to_tag = {}
-                    
-                    for tag in cached_tags:
-                        name = tag.get('Product Name*') or tag.get('ProductName') or ''
-                        if not name:
-                            continue
-                        product_names.append(name)
-                        try:
-                            normalized = product_db._normalize_product_name(name)
-                        except Exception:
-                            normalized = name.strip().lower()
-                        normalized_names.append(normalized)
-                        name_to_tag[name] = tag
-                    
-                    # Batch query: fetch all lineage data at once
-                    if product_names:
-                        try:
-                            all_search_names = list(set(product_names + normalized_names))
-                            placeholders = ','.join(['?'] * len(all_search_names))
-                            batch_query = f'''
-                                SELECT DISTINCT
-                                    COALESCE(p."Lineage", s.canonical_lineage) AS current_lineage,
-                                    COALESCE(s.strain_name, p."Product Strain") AS current_strain,
-                                    p."Product Name*" AS product_name,
-                                    p.normalized_name AS normalized_name
-                                FROM products p
-                                LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
-                                WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
-                                ORDER BY p.id DESC
-                            '''
-                            cur.execute(batch_query, all_search_names + all_search_names)
-                            batch_results = cur.fetchall()
-                            
-                            # Build lookup map from results
-                            for row in batch_results:
-                                db_lin = row[0]
-                                db_strain = row[1] if len(row) > 1 else None
-                                result_product_name = row[2] if len(row) > 2 else None
-                                result_normalized = row[3] if len(row) > 3 else None
-                                
-                                if result_product_name and result_product_name in name_to_tag:
-                                    if result_product_name not in lineage_cache:
-                                        lineage_cache[result_product_name] = (db_lin, db_strain)
-                                if result_normalized:
-                                    for name, normalized in zip(product_names, normalized_names):
-                                        if normalized == result_normalized and name not in lineage_cache:
-                                            lineage_cache[name] = (db_lin, db_strain)
-                                            break
-                        except Exception as batch_err:
-                            logging.warning(f"Batch lineage query (cache) failed, using fallback: {batch_err}")
-                            # Fallback to individual queries
-                            for name in product_names:
-                                if name not in lineage_cache:
-                                    try:
-                                        normalized = normalized_names[product_names.index(name)]
-                                        try:
-                                            cur.execute(lineage_query_join_by_name, (name, normalized))
-                                            row = cur.fetchone()
-                                        except Exception:
-                                            cur.execute(lineage_query_fallback, (name, normalized))
-                                            row = cur.fetchone()
-                                        if row:
-                                            lineage_cache[name] = (row[0], row[1] if len(row) > 1 else None)
-                                        else:
-                                            lineage_cache[name] = (None, None)
-                                    except Exception:
-                                        lineage_cache[name] = (None, None)
-                    
-                    # Now apply lineage data to tags (fast - just dictionary lookups)
-                    for tag in cached_tags:
-                        try:
+            # Always do lineage alignment to ensure database lineage is applied
+            # This ensures tags always have the latest lineage from the database
+            lineage_alignment_needed = True
+            
+            # Perform lineage alignment to assign/update lineage from database
+            if lineage_alignment_needed:
+                # Quick lineage alignment with timeout to prevent blocking
+                try:
+                    store_name = get_current_store_name()
+                    product_db = get_product_database(store_name)
+                    if product_db:
+                        lineage_cache = {}
+                        # Prepare connection once
+                        conn = product_db._get_connection()
+                        cur = conn.cursor()
+                        # CRITICAL FIX: Prefer products.Lineage (product-level, user-editable) over strains.canonical_lineage
+                        # This ensures UI matches output generation which uses get_product_lineage() (reads products.Lineage)
+                        lineage_query_join_by_name = '''
+                            SELECT 
+                                COALESCE(p."Lineage", s.canonical_lineage) AS current_lineage,
+                                COALESCE(s.strain_name, p."Product Strain") AS current_strain
+                            FROM products p
+                            LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
+                            WHERE p."Product Name*" = ? OR p.normalized_name = ?
+                            ORDER BY p.id DESC
+                            LIMIT 1
+                        '''
+                        # Fallback: use product's own Lineage if strains table/column not available
+                        lineage_query_fallback = '''
+                            SELECT 
+                                p."Lineage" AS current_lineage,
+                                p."Product Strain" AS current_strain
+                            FROM products p
+                            WHERE p."Product Name*" = ? OR p.normalized_name = ?
+                            ORDER BY p.id DESC
+                            LIMIT 1
+                        '''
+                        logging.info(f"📦 LINEAGE-CACHE ALIGNMENT: path={getattr(product_db, 'db_path', 'unknown')} store={getattr(product_db, '_store_name', 'unknown')}")
+                        updated = 0
+                        
+                        # OPTIMIZATION: Batch load all lineage data in a single query instead of per-tag queries
+                        product_names = []
+                        normalized_names = []
+                        name_to_tag = {}
+                        
+                        for tag in cached_tags:
                             name = tag.get('Product Name*') or tag.get('ProductName') or ''
-                            if not name or name not in name_to_tag:
+                            if not name:
                                 continue
-                            
-                            db_lin, db_strain = lineage_cache.get(name, (None, None))
-                            
-                            if db_lin:
-                                db_lin_clean = str(db_lin).strip().upper()
-                                # Always expose DB lineage on stable fields the UI can prefer
-                                tag['currentLineage'] = db_lin_clean
-                                tag['canonical_lineage'] = db_lin_clean
-                                if str(tag.get('Lineage','')).strip().upper() != db_lin_clean:
-                                    tag['Lineage'] = db_lin_clean
-                                    updated += 1
-                            clean_strain = str(db_strain).strip() if db_strain else ''
-                            if db_lin:
-                                db_lin_clean = str(db_lin).strip().upper()
-                                if db_lin_clean in ('CBD', 'CBD_BLEND'):
-                                    clean_strain = 'CBD Blend'
-                            if not clean_strain:
-                                existing_strain = str(tag.get('Product Strain') or tag.get('ProductStrain') or '').strip()
-                                clean_strain = existing_strain
-                            if clean_strain:
-                                tag['Product Strain'] = clean_strain
-                                tag['ProductStrain'] = clean_strain
-                                tag['productStrain'] = clean_strain
-                        except Exception as _loop_err:
-                            logging.debug(f"UI lineage alignment (cache) error for a tag: {_loop_err}")
-                    if updated:
-                        # Refresh cache with aligned data
-                        cache.set(cache_key, cached_tags, timeout=300)
-                        logging.info(f"🔄 UI LINEAGE ALIGNMENT (cache): Applied {updated} lineage overrides to cached tags")
-            except Exception as e:
-                logging.warning(f"UI lineage alignment (cache) skipped due to error: {e}")
+                            product_names.append(name)
+                            try:
+                                normalized = product_db._normalize_product_name(name)
+                            except Exception:
+                                normalized = name.strip().lower()
+                            normalized_names.append(normalized)
+                            name_to_tag[name] = tag
+                        
+                        # Batch query: fetch all lineage data at once
+                        if product_names:
+                            try:
+                                all_search_names = list(set(product_names + normalized_names))
+                                placeholders = ','.join(['?'] * len(all_search_names))
+                                batch_query = f'''
+                                    SELECT DISTINCT
+                                        COALESCE(p."Lineage", s.canonical_lineage) AS current_lineage,
+                                        COALESCE(s.strain_name, p."Product Strain") AS current_strain,
+                                        p."Product Name*" AS product_name,
+                                        p.normalized_name AS normalized_name
+                                    FROM products p
+                                    LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
+                                    WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
+                                    ORDER BY p.id DESC
+                                '''
+                                cur.execute(batch_query, all_search_names + all_search_names)
+                                batch_results = cur.fetchall()
+                                
+                                # Build lookup map from results
+                                for row in batch_results:
+                                    db_lin = row[0]
+                                    db_strain = row[1] if len(row) > 1 else None
+                                    result_product_name = row[2] if len(row) > 2 else None
+                                    result_normalized = row[3] if len(row) > 3 else None
+                                    
+                                    if result_product_name and result_product_name in name_to_tag:
+                                        if result_product_name not in lineage_cache:
+                                            lineage_cache[result_product_name] = (db_lin, db_strain)
+                                    if result_normalized:
+                                        for name, normalized in zip(product_names, normalized_names):
+                                            if normalized == result_normalized and name not in lineage_cache:
+                                                lineage_cache[name] = (db_lin, db_strain)
+                                                break
+                            except Exception as batch_err:
+                                logging.warning(f"Batch lineage query (cache) failed, using fallback: {batch_err}")
+                                # Fallback to individual queries
+                                for name in product_names:
+                                    if name not in lineage_cache:
+                                        try:
+                                            normalized = normalized_names[product_names.index(name)]
+                                            try:
+                                                cur.execute(lineage_query_join_by_name, (name, normalized))
+                                                row = cur.fetchone()
+                                            except Exception:
+                                                cur.execute(lineage_query_fallback, (name, normalized))
+                                                row = cur.fetchone()
+                                            if row:
+                                                lineage_cache[name] = (row[0], row[1] if len(row) > 1 else None)
+                                            else:
+                                                lineage_cache[name] = (None, None)
+                                        except Exception:
+                                            lineage_cache[name] = (None, None)
+                        
+                        # Now apply lineage data to tags (fast - just dictionary lookups)
+                        for tag in cached_tags:
+                            try:
+                                name = tag.get('Product Name*') or tag.get('ProductName') or ''
+                                if not name or name not in name_to_tag:
+                                    continue
+                                
+                                db_lin, db_strain = lineage_cache.get(name, (None, None))
+                                
+                                if db_lin:
+                                    db_lin_clean = str(db_lin).strip().upper()
+                                    # Always expose DB lineage on stable fields the UI can prefer
+                                    tag['currentLineage'] = db_lin_clean
+                                    tag['canonical_lineage'] = db_lin_clean
+                                    if str(tag.get('Lineage','')).strip().upper() != db_lin_clean:
+                                        tag['Lineage'] = db_lin_clean
+                                        updated += 1
+                                clean_strain = str(db_strain).strip() if db_strain else ''
+                                if db_lin:
+                                    db_lin_clean = str(db_lin).strip().upper()
+                                    if db_lin_clean in ('CBD', 'CBD_BLEND'):
+                                        clean_strain = 'CBD Blend'
+                                if not clean_strain:
+                                    existing_strain = str(tag.get('Product Strain') or tag.get('ProductStrain') or '').strip()
+                                    clean_strain = existing_strain
+                                if clean_strain:
+                                    tag['Product Strain'] = clean_strain
+                                    tag['ProductStrain'] = clean_strain
+                                    tag['productStrain'] = clean_strain
+                            except Exception as _loop_err:
+                                logging.debug(f"UI lineage alignment (cache) error for a tag: {_loop_err}")
+                        if updated:
+                            # Refresh cache with aligned data
+                            cache.set(cache_key, cached_tags, timeout=300)
+                            logging.info(f"🔄 UI LINEAGE ALIGNMENT (cache): Applied {updated} lineage overrides to cached tags")
+                        else:
+                            logging.debug(f"✅ Lineage alignment completed - all tags already have database lineage")
+                except Exception as e:
+                    logging.warning(f"UI lineage alignment (cache) skipped due to error: {e}")
 
             elapsed = (time.time() - start_time) * 1000
             logging.info(f"✅ Using {len(cached_tags)} cached available tags ({elapsed:.1f}ms)")
             return jsonify({
                 'tags': cached_tags,  # Frontend expects 'tags', not 'available_tags'
                 'total_count': len(cached_tags),
-                'source': 'cache+db-lineage'
+                'source': 'cache+db-lineage' if lineage_alignment_needed else 'cache'
             })
         
         logging.info("🔄 Building tag list... (prefer_db={}, request_args={})".format(prefer_db, dict(request.args)))

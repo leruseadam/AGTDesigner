@@ -3490,11 +3490,16 @@ class ExcelProcessor:
         logger.info(f"   🔄 Duplicates removed: {duplicates_removed}")
         logger.info(f"   📈 Deduplication rate: {(duplicates_removed/len(filtered_df)*100):.1f}%")
         
-        # Store in cache and return a cloned result to keep downstream mutations safe
+        # CRITICAL FIX: Enrich tags with current database values (always, even from cache)
+        sorted_tags = self._enrich_tags_with_database_values(sorted_tags)
+        
+        # Store enriched tags in cache for future use
         cached_copy = self._clone_tag_results(sorted_tags)
         cache_key_local = self._build_cache_key('available_tags', filters or {})
         self._store_cache_value(self._available_tags_cache, cache_key_local, cached_copy)
-        return self._clone_tag_results(cached_copy)
+        
+        # Always return enriched tags (database values take precedence)
+        return self._clone_tag_results(sorted_tags)
 
     def select_tags(self, tags):
         """Add tags to the selected set, preserving order and avoiding duplicates."""
@@ -3514,6 +3519,99 @@ class ExcelProcessor:
         self.selected_tags = deduplicated_tags
         
         logger.debug(f"Selected tags after selection: {self.selected_tags}")
+    
+    def _enrich_tags_with_database_values(self, tags: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Enrich tags with current database values (lineage, DOH, etc.) to reflect latest updates."""
+        try:
+            # Try to get the product database using lazy import to avoid circular dependencies
+            product_db = None
+            store_name = None
+            
+            try:
+                # Use a function that may or may not exist (lazy import pattern)
+                import sys
+                if 'app' in sys.modules:
+                    app_module = sys.modules['app']
+                    if hasattr(app_module, 'get_product_database') and hasattr(app_module, 'get_current_store_name'):
+                        store_name = app_module.get_current_store_name()
+                        product_db = app_module.get_product_database(store_name) if store_name else None
+            except (ImportError, AttributeError, Exception) as e:
+                # If app module is not available or doesn't have the functions, skip enrichment
+                logger.debug(f"Could not get product database for tag enrichment: {e}")
+                return tags
+            
+            if not product_db:
+                logger.debug("No product database available for tag enrichment")
+                return tags
+            
+            # Batch lookup products from database
+            product_names = [tag.get('Product Name*', tag.get('ProductName', '')) for tag in tags if tag.get('Product Name*') or tag.get('ProductName')]
+            if not product_names:
+                return tags
+            
+            # Get database records in batch
+            db_records = product_db.get_products_by_names(product_names)
+            if not db_records:
+                logger.debug("No database records found for tag enrichment")
+                return tags
+            
+            # Create a lookup map by normalized product name
+            db_lookup = {}
+            for db_record in db_records:
+                product_name = db_record.get('Product Name*', '')
+                if product_name:
+                    normalized_name = product_db._normalize_product_name(product_name)
+                    db_lookup[normalized_name] = db_record
+            
+            # Enrich each tag with database values
+            enriched_tags = []
+            for tag in tags:
+                product_name = tag.get('Product Name*', tag.get('ProductName', ''))
+                if not product_name:
+                    enriched_tags.append(tag)
+                    continue
+                
+                normalized_name = product_db._normalize_product_name(product_name)
+                db_record = db_lookup.get(normalized_name)
+                
+                if db_record:
+                    # Update tag with database values (database takes precedence)
+                    # Only update fields that are commonly changed in database (lineage, DOH, etc.)
+                    if db_record.get('Lineage'):
+                        db_lineage = str(db_record.get('Lineage', '')).strip().upper()
+                        tag['Lineage'] = db_lineage
+                        tag['lineage'] = db_lineage
+                        tag['canonical_lineage'] = db_lineage
+                        tag['currentLineage'] = db_lineage
+                    
+                    if db_record.get('DOH') or db_record.get('DOH Compliant (Yes/No)'):
+                        db_doh = db_record.get('DOH') or db_record.get('DOH Compliant (Yes/No)', '')
+                        tag['DOH'] = db_doh
+                        tag['DOH Compliant (Yes/No)'] = db_doh
+                    
+                    # Update price if available in database (database is authoritative)
+                    if db_record.get('Price'):
+                        tag['Price'] = db_record.get('Price')
+                    
+                    # Update THC/CBD values if available
+                    if db_record.get('THC test result'):
+                        tag['THC test result'] = db_record.get('THC test result')
+                        tag['THC'] = db_record.get('THC test result')
+                    if db_record.get('CBD test result'):
+                        tag['CBD test result'] = db_record.get('CBD test result')
+                        tag['CBD'] = db_record.get('CBD test result')
+                
+                enriched_tags.append(tag)
+            
+            logger.debug(f"Enriched {len(enriched_tags)} tags with database values")
+            return enriched_tags
+            
+        except Exception as e:
+            logger.warning(f"Error enriching tags with database values: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+            # Return original tags if enrichment fails
+            return tags
 
     def unselect_tags(self, tags):
         """Remove tags from the selected set."""
@@ -7207,7 +7305,9 @@ class ExcelProcessor:
         cache_key = self._build_cache_key('available_tags', filters or {})
         cached_tags = self._get_cached_value(self._available_tags_cache, cache_key)
         if cached_tags is not None:
-            return self._clone_tag_results(cached_tags)
+            # CRITICAL FIX: Always enrich cached tags with fresh database values
+            enriched_cached_tags = self._enrich_tags_with_database_values(cached_tags)
+            return self._clone_tag_results(enriched_cached_tags)
 
         def _return_with_cache(tag_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             cached_copy = self._clone_tag_results(tag_list)

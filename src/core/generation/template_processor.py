@@ -1083,6 +1083,37 @@ class TemplateProcessor:
             chunk_order = [record.get('ProductName', 'Unknown') for record in chunk]
             self.logger.info(f"Processing chunk with {len(chunk)} records in order: {chunk_order}")
             
+            # OPTIMIZATION: Pre-load all brand data in batch to avoid N+1 queries
+            # This reduces 100+ queries for 100 products to just 1 query total
+            product_brand_cache = {}
+            try:
+                from src.core.data.product_database import get_product_database
+                product_db = get_product_database()
+                if product_db:
+                    product_names = [r.get('ProductName', '') or r.get('Product Name*', '') for r in chunk]
+                    product_names = [n for n in product_names if n]
+                    if product_names:
+                        try:
+                            conn = product_db._get_connection()
+                            cursor = conn.cursor()
+                            placeholders = ','.join(['?'] * len(product_names))
+                            batch_brand_query = f'''
+                                SELECT "Product Name*", "Product Brand"
+                                FROM products
+                                WHERE "Product Name*" IN ({placeholders})
+                                AND "Product Brand" IS NOT NULL
+                                AND "Product Brand" != ""
+                            '''
+                            cursor.execute(batch_brand_query, product_names)
+                            for row_result in cursor.fetchall():
+                                pname, brand = row_result
+                                if brand and str(brand).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
+                                    product_brand_cache[pname] = str(brand).strip()
+                        except Exception as batch_brand_err:
+                            self.logger.warning(f"Batch brand query failed: {batch_brand_err}")
+            except Exception as e:
+                self.logger.warning(f"Failed to pre-load brand data: {e}")
+            
             # Build context for each record in the chunk
             context = {}
             for i, record in enumerate(chunk):
@@ -1094,7 +1125,8 @@ class TemplateProcessor:
                 if self.template_type == 'inventory':
                     label_context = self._build_inventory_context(record)
                 else:
-                    label_context = self._build_label_context(record, doc)
+                    # Pass brand cache to avoid N+1 queries
+                    label_context = self._build_label_context(record, doc, product_brand_cache)
                 context[f'Label{i+1}'] = label_context
                 # Debug logging to check field values and order
                 product_name = record.get('ProductName', 'Unknown')
@@ -1296,8 +1328,10 @@ class TemplateProcessor:
         
         return context
 
-    def _build_label_context(self, record, doc):
+    def _build_label_context(self, record, doc, product_brand_cache=None):
         """Ultra-optimized label context building for maximum performance."""
+        if product_brand_cache is None:
+            product_brand_cache = {}
         # CRITICAL FIX: Log lineage value received in template processor
         lineage_value = record.get('Lineage', 'NOT_FOUND')
         product_name = record.get('ProductName', 'Unknown')
@@ -1710,24 +1744,18 @@ class TemplateProcessor:
                 label_context['ProductBrand'] = enriched_brand
                 self.logger.info(f"🔧 IMMEDIATE BRAND FALLBACK: Set '{enriched_brand}' for '{product_name}' (no brand data)")
         
-        # BRAND ENRICHMENT: If brand is still missing, try to get it from database, then fallback to vendor
+        # BRAND ENRICHMENT: If brand is still missing, try to get it from database cache, then fallback to vendor
+        # OPTIMIZATION: Use pre-loaded cache instead of individual queries
         if not product_brand or product_brand.strip() in ['', 'None', 'NULL', 'null', 'nan']:
-            # Try to enrich brand from database first
+            # Try to enrich brand from pre-loaded cache first
             enriched_brand = ""
             try:
-                from src.core.data.product_database import get_product_database
-                product_db = get_product_database()
-                if product_db:
-                    # Try to find brand in database by product name
-                    conn = product_db._get_connection()
-                    cursor = conn.cursor()
-                    cursor.execute('SELECT "Product Brand" FROM products WHERE "Product Name*" = ? AND "Product Brand" IS NOT NULL AND "Product Brand" != ""', (product_name,))
-                    result = cursor.fetchone()
-                    if result and result[0] and result[0].strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                        enriched_brand = result[0].strip()
-                        self.logger.info(f"🔧 BRAND ENRICHED: Retrieved brand '{enriched_brand}' from database for '{product_name}'")
+                # Use cached brand data (loaded in batch before loop)
+                enriched_brand = product_brand_cache.get(product_name, "")
+                if enriched_brand:
+                    self.logger.info(f"🔧 BRAND ENRICHED: Retrieved brand '{enriched_brand}' from database cache for '{product_name}'")
             except Exception as e:
-                self.logger.warning(f"🔧 BRAND ENRICHMENT FAILED: Could not retrieve brand from database: {e}")
+                self.logger.warning(f"🔧 BRAND ENRICHMENT FAILED: Could not retrieve brand from cache: {e}")
             
             # If database enrichment failed, fallback to vendor
             if not enriched_brand:
