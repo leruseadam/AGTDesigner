@@ -725,10 +725,65 @@
           console.error('❌ Error checking store requirement:', error);
           // If there's an error, show modal as fallback to require store selection
           console.log('Showing modal as fallback due to error');
+          
+          // Ensure modal element exists before trying to show
+          const modalElement = document.getElementById('storeSelectionModal');
+          if (!modalElement) {
+            console.error('❌ Modal element not found in error handler, retrying in 500ms...');
+            setTimeout(() => {
+              const retryModal = document.getElementById('storeSelectionModal');
+              if (retryModal && typeof showStoreSelectionModal === 'function') {
+                showStoreSelectionModal();
+              } else {
+                // Last resort: try to show manually
+                if (retryModal) {
+                  retryModal.style.display = 'block';
+                  retryModal.classList.add('show');
+                  document.body.classList.add('modal-open');
+                  const backdrop = document.createElement('div');
+                  backdrop.className = 'modal-backdrop fade show';
+                  document.body.appendChild(backdrop);
+                  console.log('✅ Modal shown manually as last resort');
+                }
+              }
+            }, 500);
+            return;
+          }
+          
           if (typeof bootstrap === 'undefined') {
-            setTimeout(() => showStoreSelectionModal(), 500);
+            setTimeout(() => {
+              if (typeof showStoreSelectionModal === 'function') {
+                showStoreSelectionModal();
+              } else {
+                // Manual fallback
+                modalElement.style.display = 'block';
+                modalElement.classList.add('show');
+                document.body.classList.add('modal-open');
+                const backdrop = document.createElement('div');
+                backdrop.className = 'modal-backdrop fade show';
+                document.body.appendChild(backdrop);
+              }
+            }, 500);
           } else {
-            showStoreSelectionModal();
+            if (typeof showStoreSelectionModal === 'function') {
+              showStoreSelectionModal();
+            } else {
+              // Manual fallback
+              try {
+                const modal = new bootstrap.Modal(modalElement, {
+                  backdrop: 'static',
+                  keyboard: false
+                });
+                modal.show();
+              } catch (e) {
+                modalElement.style.display = 'block';
+                modalElement.classList.add('show');
+                document.body.classList.add('modal-open');
+                const backdrop = document.createElement('div');
+                backdrop.className = 'modal-backdrop fade show';
+                document.body.appendChild(backdrop);
+              }
+            }
           }
         })
         .finally(() => {
@@ -7112,32 +7167,78 @@
     // CRITICAL: Check store requirement IMMEDIATELY on page load/refresh
     // This ensures modal shows even if TagManager hasn't loaded yet
     function checkStoreOnPageLoad() {
-      console.log('🔍 Checking store requirement on page load...');
+      console.log('🔍 checkStoreOnPageLoad called, readyState:', document.readyState);
       
-      // Wait for DOM to be ready
-      if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', function() {
-          // Wait a bit for modal element to be available
-          setTimeout(() => {
+      // Always wait for DOM to be fully ready
+      function executeCheck() {
+        // Wait for modal element to exist with retries
+        let attempts = 0;
+        const maxAttempts = 20; // 2 seconds max (20 * 100ms)
+        
+        function tryCheck() {
+          attempts++;
+          const modalElement = document.getElementById('storeSelectionModal');
+          
+          if (modalElement) {
+            console.log('✅ Modal element found, calling checkStoreRequired...');
             checkStoreRequired(function() {
               // Store is confirmed, proceed with TagManager init
               console.log('✅ Store confirmed on page load, proceeding with TagManager initialization...');
             });
-          }, 100);
-        });
+          } else if (attempts < maxAttempts) {
+            console.log(`⏳ Modal element not found yet (attempt ${attempts}/${maxAttempts}), retrying...`);
+            setTimeout(tryCheck, 100);
+          } else {
+            console.error('❌ Modal element not found after', maxAttempts, 'attempts. Modal may not render.');
+          }
+        }
+        
+        tryCheck();
+      }
+      
+      // Wait for DOM to be ready
+      if (document.readyState === 'loading') {
+        console.log('DOM is loading, waiting for DOMContentLoaded...');
+        document.addEventListener('DOMContentLoaded', executeCheck);
       } else {
-        // DOM already loaded, check immediately
-        setTimeout(() => {
-          checkStoreRequired(function() {
-            // Store is confirmed, proceed with TagManager init
-            console.log('✅ Store confirmed on page load, proceeding with TagManager initialization...');
-          });
-        }, 100);
+        console.log('DOM already loaded, executing check...');
+        // DOM already loaded, but wait a tick to ensure all elements are rendered
+        setTimeout(executeCheck, 50);
       }
     }
     
-    // Start checking store immediately
-    checkStoreOnPageLoad();
+    // CRITICAL: Always wait for DOMContentLoaded to ensure modal HTML exists
+    // The modal HTML is in the body, so we must wait for DOM to be parsed
+    console.log('Setting up store check on page load, current readyState:', document.readyState);
+    
+    if (document.readyState === 'loading') {
+      // DOM still loading, wait for it
+      console.log('DOM loading, waiting for DOMContentLoaded before checking store...');
+      document.addEventListener('DOMContentLoaded', function() {
+        console.log('DOMContentLoaded fired, calling checkStoreOnPageLoad...');
+        checkStoreOnPageLoad();
+      });
+    } else if (document.readyState === 'interactive') {
+      // DOM loaded but scripts/images still loading
+      console.log('DOM interactive, calling checkStoreOnPageLoad immediately...');
+      // Use setTimeout to ensure body is fully parsed
+      setTimeout(checkStoreOnPageLoad, 0);
+    } else {
+      // DOM complete, safe to proceed
+      console.log('DOM complete, calling checkStoreOnPageLoad immediately...');
+      // Still use setTimeout to be safe
+      setTimeout(checkStoreOnPageLoad, 0);
+    }
+    
+    // Also set up a window.load fallback in case DOMContentLoaded already fired
+    window.addEventListener('load', function() {
+      console.log('Window load event fired');
+      // Double-check if modal check was already done
+      if (!window.storeCheckCompleted && !window.checkingStoreRequired) {
+        console.log('Store check not completed yet, running checkStoreOnPageLoad on window.load...');
+        checkStoreOnPageLoad();
+      }
+    });
     
     // Start waiting for TagManager to load
     waitForTagManagerAndInit();
