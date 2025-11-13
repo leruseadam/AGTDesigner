@@ -3349,16 +3349,35 @@ const TagManager = {
                 
                 // Remove saving option
                 lineageSelect.removeChild(savingOption);
+                
+                // Show success notification
+                if (window.Toast && window.Toast.success) {
+                    window.Toast.success(`Lineage updated to ${newLineage}`, {
+                        duration: 2000,
+                        position: 'top-right'
+                    });
+                }
+                verboseLog(`✅ Lineage successfully updated to ${newLineage} for ${tag['Product Name*']}`);
             } catch (error) {
                 console.error('Failed to update lineage:', error);
                 // On failure, revert to previous value
                 lineageSelect.value = prevValue;
-                // Show error message
-                alert('Failed to update lineage: ' + error.message);
+                // Show error message using Toast if available, otherwise alert
+                const errorMsg = error.message || 'Failed to update lineage';
+                if (window.Toast && window.Toast.error) {
+                    window.Toast.error(`Failed to update lineage: ${errorMsg}`, {
+                        duration: 5000,
+                        position: 'top-right'
+                    });
+                } else {
+                    alert('Failed to update lineage: ' + errorMsg);
+                }
                 // Remove saving option
                 if (savingOption.parentNode) {
                     lineageSelect.removeChild(savingOption);
                 }
+                // Log detailed error for debugging
+                verboseLog(`❌ Lineage update failed for ${tag['Product Name*']}:`, error);
             } finally {
                 lineageSelect.disabled = false;
             }
@@ -3805,10 +3824,16 @@ const TagManager = {
                 throw new Error(errorMsg);
             }
             
-            // CRITICAL FIX: Verify the response confirms the update succeeded
-            if (!responseData.verification_passed && responseData.db_updated === 0) {
-                console.error(`❌ LINEAGE UPDATE FAILED: Backend did not confirm update for '${tagName}'`);
-                throw new Error(`Failed to update lineage: ${responseData.message || 'Update not verified'}`);
+            // CRITICAL FIX: Only fail if database update actually failed (db_updated === 0)
+            // Don't fail just because verification_passed is false - verification might fail even if update succeeded
+            if (responseData.db_updated === 0 && responseData.excel_updated === 0) {
+                console.error(`❌ LINEAGE UPDATE FAILED: No products updated for '${tagName}'`);
+                throw new Error(`Failed to update lineage: ${responseData.message || responseData.error || 'No products were updated'}`);
+            }
+            
+            // Log warning if verification failed but update succeeded
+            if (!responseData.verification_passed && responseData.db_updated > 0) {
+                console.warn(`⚠️  Lineage update succeeded but verification failed: ${responseData.message || 'Verification check failed'}`);
             }
             
             verboseLog(`✅ Backend confirmed lineage update: ${responseData.message || 'Success'}`);
