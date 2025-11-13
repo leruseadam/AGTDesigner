@@ -151,7 +151,7 @@ class TagsTable {
         } else if (cleanText.includes("HYBRID/INDICA") || cleanText.includes("HYBRID INDICA")) {
             return 'var(--lineage-indica)';
         } else if (cleanText.includes("HYBRID/SATIVA") || cleanText.includes("HYBRID SATIVA")) {
-            return 'var(--lineage-hybrid-sativa)';
+            return 'var(--lineage-sativa)';  // Sativa hybrids use sativa color
         } else if (cleanText.includes("SATIVA")) {
             return 'var(--lineage-sativa)';
         } else if (cleanText.includes("INDICA")) {

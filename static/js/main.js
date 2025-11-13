@@ -890,7 +890,7 @@ const TagManager = {
             'SATIVA': 'var(--lineage-sativa)',
             'INDICA': 'var(--lineage-indica)',
             'HYBRID': 'var(--lineage-hybrid)',
-            'HYBRID/SATIVA': 'var(--lineage-hybrid-sativa)',
+            'HYBRID/SATIVA': 'var(--lineage-sativa)',  // Changed to sativa color
             'HYBRID/INDICA': 'var(--lineage-indica)',
             'CBD': 'var(--lineage-cbd)',
             'PARA': 'var(--lineage-para)',
@@ -6343,13 +6343,19 @@ const TagManager = {
     getLineageColorFromOptimizedRules(inputLineage) {
         // Prefer explicit lineage provided by backend (DB/UI) when valid
         const normalizedInput = (inputLineage || '').toString().trim().toUpperCase();
+        
+        // Handle sativa hybrid variations - should be sativa-colored
+        if (normalizedInput.includes('SATIVA') && normalizedInput.includes('HYBRID')) {
+            return 'var(--lineage-sativa)';  // Sativa hybrids use sativa color
+        }
+        
         const explicitValues = new Set(['SATIVA','INDICA','HYBRID','HYBRID/SATIVA','HYBRID/INDICA','CBD','MIXED']);
         if (explicitValues.has(normalizedInput)) {
             const lineageColors = {
                 'SATIVA': 'var(--lineage-sativa)',
                 'INDICA': 'var(--lineage-indica)',
                 'HYBRID': 'var(--lineage-hybrid)',
-                'HYBRID/SATIVA': 'var(--lineage-hybrid-sativa)',
+                'HYBRID/SATIVA': 'var(--lineage-sativa)',  // Changed to sativa color
                 'HYBRID/INDICA': 'var(--lineage-indica)',
                 'CBD': 'var(--lineage-cbd)',
                 'MIXED': 'var(--lineage-mixed)'
@@ -6368,11 +6374,16 @@ const TagManager = {
         }
         
         // Apply color mapping based on final determined lineage
+        // Handle sativa hybrid variations - should be sativa-colored
+        if (finalLineage.includes('SATIVA') && finalLineage.includes('HYBRID')) {
+            return 'var(--lineage-sativa)';  // Sativa hybrids use sativa color
+        }
+        
         const lineageColors = {
             'SATIVA': 'var(--lineage-sativa)',
             'INDICA': 'var(--lineage-indica)',
             'HYBRID': 'var(--lineage-hybrid)',
-            'HYBRID/SATIVA': 'var(--lineage-hybrid-sativa)',
+            'HYBRID/SATIVA': 'var(--lineage-sativa)',  // Changed to sativa color
             'HYBRID/INDICA': 'var(--lineage-indica)',
             'CBD': 'var(--lineage-cbd)',
             'CBD_BLEND': 'var(--lineage-cbd)',
