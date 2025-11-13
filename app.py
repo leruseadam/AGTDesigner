@@ -7553,10 +7553,15 @@ def get_available_tags():
                                 try:
                                     cur.execute(lineage_query_join_by_name, (name, normalized))
                                     row = cur.fetchone()
-                                except Exception:
+                                except Exception as query_err:
                                     # Join failed (e.g., missing columns) - fallback to product lineage
-                                    cur.execute(lineage_query_fallback, (name, normalized))
-                                    row = cur.fetchone()
+                                    logging.debug(f"Lineage join query failed for '{name}': {query_err}, using fallback")
+                                    try:
+                                        cur.execute(lineage_query_fallback, (name, normalized))
+                                        row = cur.fetchone()
+                                    except Exception as fallback_err:
+                                        logging.warning(f"Both lineage queries failed for '{name}': {fallback_err}")
+                                        row = None
                                 if row:
                                     db_lin = row[0]
                                     if len(row) > 1:
@@ -7683,10 +7688,15 @@ def get_available_tags():
                                 try:
                                     cur.execute(lineage_query_join_by_name, (name, normalized))
                                     row = cur.fetchone()
-                                except Exception:
+                                except Exception as query_err:
                                     # Join failed (e.g., missing columns) - fallback to product lineage
-                                    cur.execute(lineage_query_fallback, (name, normalized))
-                                    row = cur.fetchone()
+                                    logging.debug(f"Lineage join query failed for '{name}': {query_err}, using fallback")
+                                    try:
+                                        cur.execute(lineage_query_fallback, (name, normalized))
+                                        row = cur.fetchone()
+                                    except Exception as fallback_err:
+                                        logging.warning(f"Both lineage queries failed for '{name}': {fallback_err}")
+                                        row = None
                                 if row:
                                     db_lin = row[0]
                                     if len(row) > 1:

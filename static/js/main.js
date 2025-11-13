@@ -5541,12 +5541,63 @@ const TagManager = {
             
             verboseLog('Fetching available tags...');
             const timestamp = Date.now();
-            const response = await fetch(`/api/available-tags?t=${timestamp}&nocache=1&prefer_db=1`);
-            verboseLog('Available tags response status:', response.status);
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            
+            // Add retry logic for failed requests
+            let response;
+            let responseData;
+            const maxRetries = 3;
+            let retryCount = 0;
+            let lastError;
+            
+            while (retryCount < maxRetries) {
+                try {
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+                    
+                    response = await fetch(`/api/available-tags?t=${timestamp}&nocache=1&prefer_db=1`, {
+                        signal: controller.signal
+                    });
+                    clearTimeout(timeoutId);
+                    
+                    verboseLog(`Available tags response status (attempt ${retryCount + 1}/${maxRetries}):`, response.status);
+                    
+                    if (!response.ok) {
+                        if (response.status >= 500 && retryCount < maxRetries - 1) {
+                            // Server error - retry
+                            retryCount++;
+                            const delay = Math.min(1000 * retryCount, 3000); // Exponential backoff, max 3s
+                            verboseLog(`Server error ${response.status}, retrying in ${delay}ms...`);
+                            await new Promise(resolve => setTimeout(resolve, delay));
+                            continue;
+                        }
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    
+                    responseData = await response.json();
+                    break; // Success - exit retry loop
+                    
+                } catch (error) {
+                    lastError = error;
+                    if (error.name === 'AbortError') {
+                        verboseLog(`Request timeout (attempt ${retryCount + 1}/${maxRetries})`);
+                    } else {
+                        verboseLog(`Request error (attempt ${retryCount + 1}/${maxRetries}):`, error);
+                    }
+                    
+                    if (retryCount < maxRetries - 1) {
+                        retryCount++;
+                        const delay = Math.min(1000 * retryCount, 3000);
+                        verboseLog(`Retrying in ${delay}ms...`);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                    } else {
+                        throw error;
+                    }
+                }
             }
-            const responseData = await response.json();
+            
+            if (!responseData) {
+                throw lastError || new Error('Failed to fetch tags after retries');
+            }
             verboseLog('Available tags response data:', responseData);
             
             // Handle both old array format and new object format
