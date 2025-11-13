@@ -5022,10 +5022,14 @@ const TagManager = {
                         weightContent.className = 'collapsible-content';
                         weightSection.appendChild(weightContent);
                         
-                        // Always render tags as leaf nodes - maintain the same order as available list
+                        // Always render tags as leaf nodes - sort alphabetically by product name
                         if (tags && tags.length > 0) {
-                            // Keep tags in the same order as the available list for consistency
-                            const orderedTags = [...tags];
+                            // Sort tags alphabetically by product name
+                            const orderedTags = [...tags].sort((a, b) => {
+                                const nameA = (a['Product Name*'] || '').toLowerCase();
+                                const nameB = (b['Product Name*'] || '').toLowerCase();
+                                return nameA.localeCompare(nameB);
+                            });
                             
                             orderedTags.forEach(tag => {
                                 const tagElement = this.createTagElement(tag, true); // true = isForSelectedTags
