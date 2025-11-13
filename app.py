@@ -33,22 +33,32 @@ from src.core.generation.fast_generation import (
     update_generation_stats
 )
 
-# Performance optimizations - Import only if available
+# Performance optimizations - Import response caching utilities
+# These decorators provide response caching, compression, and cache invalidation
 try:
     from src.core.utils.response_cache import cached_route, compress_response, invalidate_cache_on_change
     RESPONSE_CACHE_AVAILABLE = True
-except ImportError:
+    logging.debug("Response cache utilities loaded successfully")
+except ImportError as e:
+    # Fallback: Create no-op decorators if cache module is unavailable
+    # This ensures the app continues to work even without caching
     RESPONSE_CACHE_AVAILABLE = False
-    # Create dummy decorators if not available
+    logging.warning(f"Response cache module not available: {e}. Using no-op decorators.")
+    
     def cached_route(*args, **kwargs):
+        """No-op decorator when response caching is unavailable"""
         def decorator(f):
-            return f
+            return f  # Return function unchanged (no caching)
         return decorator
+    
     def compress_response(response):
-        return response
+        """No-op function when compression is unavailable"""
+        return response  # Return response unchanged (no compression)
+    
     def invalidate_cache_on_change(*args, **kwargs):
+        """No-op decorator when cache invalidation is unavailable"""
         def decorator(f):
-            return f
+            return f  # Return function unchanged (no invalidation)
         return decorator
 # Startup Performance Optimization
 # DISABLE_STARTUP_FILE_LOADING = True  # Disable startup file loading to prevent hangs
@@ -1329,6 +1339,13 @@ def create_app():
     app = flask.Flask(__name__, static_url_path='/static', static_folder='static')
     app.config.from_object('config.Config')
     
+    # CRITICAL FIX: Ensure proper URL generation for reverse proxy setups
+    # Set SERVER_NAME only if explicitly provided (don't set it to avoid URL generation issues)
+    if os.environ.get('SERVER_NAME'):
+        app.config['SERVER_NAME'] = os.environ.get('SERVER_NAME')
+    # Ensure PREFERRED_URL_SCHEME is set correctly for HTTPS
+    app.config['PREFERRED_URL_SCHEME'] = 'https' if os.environ.get('HTTPS', '').lower() in ('on', 'true', '1') else 'http'
+    
     # Enable development mode for auto-reload and debug features
     # ENABLED: Allow easy restart by enabling development mode by default
     app.config['DEVELOPMENT_MODE'] = os.environ.get('DEVELOPMENT_MODE', 'true').lower() == 'true'
@@ -2282,6 +2299,11 @@ def test():
 @app.route('/')
 def index():
     try:
+        # CRITICAL FIX: Ensure request.url_root is valid (fix for "https://true" error)
+        # This can happen with reverse proxy misconfigurations
+        if hasattr(request, 'url_root') and (str(request.url_root) == 'true' or request.url_root is True):
+            logging.warning(f"⚠️ Invalid request.url_root detected: {request.url_root}, template will use fallback")
+        
         # Reduced logging to prevent excessive log spam
         logging.info(f"Page load at {datetime.now().strftime('%H:%M:%S')}")
         
