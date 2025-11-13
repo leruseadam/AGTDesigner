@@ -5379,6 +5379,7 @@ def post_process_document(doc, font_scheme, orientation, scale_factor):
         _autosize_recursive_template_specific(doc, marker_name, orientation, scale_factor)
 
     # Apply final conditional formatting for colors, etc.
+    from src.core.generation.docx_formatting import apply_lineage_colors
     apply_lineage_colors(doc)
     return doc
 def _autosize_recursive_template_specific(element, marker_name, orientation, scale_factor):
@@ -17673,9 +17674,8 @@ def enforce_fixed_cell_dimensions():
     """Placeholder for enforce_fixed_cell_dimensions function."""
     pass
 
-def apply_lineage_colors():
-    """Placeholder for apply_lineage_colors function."""
-    pass
+# NOTE: apply_lineage_colors is imported from src.core.generation.docx_formatting where needed
+# Do NOT override it with a placeholder here
 
 @app.route('/api/backfill-missing-values', methods=['POST'])
 def backfill_missing_values():

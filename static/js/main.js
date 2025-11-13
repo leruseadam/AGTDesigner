@@ -5552,9 +5552,12 @@ const TagManager = {
             while (retryCount < maxRetries) {
                 try {
                     const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+                    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout - faster failure detection
                     
-                    response = await fetch(`/api/available-tags?t=${timestamp}&nocache=1&prefer_db=1`, {
+                    // Use cache if available - only bypass cache on explicit refresh or error recovery
+                    const useCache = retryCount === 0; // Use cache on first attempt
+                    const cacheParam = useCache ? '' : '&nocache=1';
+                    response = await fetch(`/api/available-tags?t=${timestamp}${cacheParam}`, {
                         signal: controller.signal
                     });
                     clearTimeout(timeoutId);
