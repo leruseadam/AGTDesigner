@@ -3350,13 +3350,7 @@ const TagManager = {
                 // Remove saving option
                 lineageSelect.removeChild(savingOption);
                 
-                // Show success notification
-                if (window.Toast && window.Toast.success) {
-                    window.Toast.success(`Lineage updated to ${newLineage}`, {
-                        duration: 2000,
-                        position: 'top-right'
-                    });
-                }
+                // Log success (no notification to avoid clutter)
                 verboseLog(`✅ Lineage successfully updated to ${newLineage} for ${tag['Product Name*']}`);
             } catch (error) {
                 console.error('Failed to update lineage:', error);
