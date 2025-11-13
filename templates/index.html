@@ -570,25 +570,10 @@
         return;
       }
       
-      // CRITICAL: Clear any stale session store on page load to force fresh selection
-      // Check if user has explicitly confirmed store selection (stored in localStorage)
+      // CRITICAL: Check if user has explicitly confirmed store selection (stored in localStorage)
       const userConfirmedStore = localStorage.getItem('store_confirmed');
       const lastConfirmedStore = localStorage.getItem('last_confirmed_store');
       const confirmedTimestamp = localStorage.getItem('store_confirmed_timestamp');
-      
-      // If no explicit confirmation or it's from a different session, clear backend store
-      if (!userConfirmedStore || !confirmedTimestamp) {
-        console.log('⚠️ No explicit store confirmation found, clearing session store...');
-        // Clear session store to force fresh selection
-        fetch('/api/clear-store', {
-          method: 'POST',
-          credentials: 'same-origin'
-        }).then(() => {
-          console.log('✅ Session store cleared, proceeding with fresh check...');
-        }).catch(err => {
-          console.warn('⚠️ Error clearing session store:', err);
-        });
-      }
       
       // Keep main content hidden while checking backend, but DON'T hide modal yet
       // The modal will be shown if no store is found
@@ -597,9 +582,12 @@
         mainContent.classList.add('store-selection-disabled');
       }
       
-      console.log('Fetching store status from backend...');
-      const cacheBust = `ts=${Date.now()}`;
-      fetch(`/api/check-store-required?${cacheBust}`, {
+      // If no explicit confirmation, clear backend store FIRST, then check
+      // This ensures we don't get a stale store from backend
+      const performCheck = () => {
+        console.log('Fetching store status from backend...');
+        const cacheBust = `ts=${Date.now()}`;
+        fetch(`/api/check-store-required?${cacheBust}`, {
         credentials: 'same-origin',
         cache: 'no-store'
       })
@@ -623,27 +611,36 @@
           console.log('SHOW MODAL?', showModal);
           console.log('Backend says requires_store:', data.requires_store);
           
-          // CRITICAL FIX: Always check requires_store FIRST - if true, show modal no matter what
-          if (data.requires_store === true || !data.store) {
-            // Backend explicitly requires store selection OR no store found
-            console.log('⚠️ BACKEND REQUIRES STORE SELECTION OR NO STORE FOUND - SHOWING MODAL');
-            // Fall through to show modal code below
-          } else if (userHasStore && data.store) {
-            // USER HAS STORE - but check if it was explicitly confirmed
-            const userConfirmedStore = localStorage.getItem('store_confirmed');
-            const lastConfirmedStore = localStorage.getItem('last_confirmed_store');
+          // CRITICAL FIX: Check if user has explicitly confirmed this store
+          const userConfirmedStore = localStorage.getItem('store_confirmed');
+          const lastConfirmedStore = localStorage.getItem('last_confirmed_store');
+          const storeIsConfirmed = userConfirmedStore && lastConfirmedStore === data.store;
+          
+          console.log('Store confirmation check:', {
+            userConfirmedStore: !!userConfirmedStore,
+            lastConfirmedStore: lastConfirmedStore,
+            backendStore: data.store,
+            storeIsConfirmed: storeIsConfirmed
+          });
+          
+          // Determine if we should show the modal
+          // Show modal if: requires_store=true, OR no store, OR store not confirmed by user
+          const shouldShowModal = data.requires_store === true || !data.store || !storeIsConfirmed;
+          
+          console.log('SHOULD SHOW MODAL?', shouldShowModal);
+          console.log('Reasons:', {
+            requires_store: data.requires_store === true,
+            noStore: !data.store,
+            notConfirmed: !storeIsConfirmed
+          });
+          
+          if (!shouldShowModal && storeIsConfirmed && data.store) {
+            // USER HAS CONFIRMED STORE - Show content, hide modal
+            console.log('🎉 CONFIRMED STORE FOUND:', data.store);
+            window.storeCheckCompleted = true;
             
-            // If store exists but wasn't explicitly confirmed by user, show modal anyway
-            if (!userConfirmedStore || lastConfirmedStore !== data.store) {
-              console.log('⚠️ Store found in backend but not explicitly confirmed by user - showing modal');
-              // Fall through to show modal code below
-            } else {
-              // USER HAS CONFIRMED STORE - Show content, hide modal
-              console.log('🎉 CONFIRMED STORE FOUND:', data.store);
-              window.storeCheckCompleted = true;
-              
-              updateCurrentStoreDisplay(data.store);
-              updateStoreStatus(`Store: ${data.store.replace(/_/g, ' ')}`, 'active');
+            updateCurrentStoreDisplay(data.store);
+            updateStoreStatus(`Store: ${data.store.replace(/_/g, ' ')}`, 'active');
             
             // Hide modal using Bootstrap if available
             if (modalElement) {
@@ -687,25 +684,26 @@
               window.STORE_MODAL_BLOCKING = false;
             }
             
-              console.log('✅ Content shown, modal hidden');
-              
-              // CRITICAL FIX: Call callback to initialize TagManager ONLY when store is confirmed
-              if (typeof onStoreConfirmed === 'function') {
-                console.log('🔄 Store confirmed, calling initialization callback...');
-                setTimeout(() => onStoreConfirmed(), 100);
-              }
-              
-              // Exit early - store is confirmed and content is shown
-              window.checkingStoreRequired = false;
-              return;
+            console.log('✅ Content shown, modal hidden');
+            
+            // CRITICAL FIX: Call callback to initialize TagManager ONLY when store is confirmed
+            if (typeof onStoreConfirmed === 'function') {
+              console.log('🔄 Store confirmed, calling initialization callback...');
+              setTimeout(() => onStoreConfirmed(), 100);
             }
+            
+            // Exit early - store is confirmed and content is shown
+            window.checkingStoreRequired = false;
+            return;
           }
           
-          // If we get here, we need to show the modal
-          // Either requires_store=true, or no store, or store not confirmed by user
-            // NO STORE - FORCE SHOW MODAL
-            console.log('⚠️ NO STORE - FORCING MODAL TO SHOW');
-            window.STORE_MODAL_BLOCKING = true; // Block TagManager until store selected
+          // If we get here, we MUST show the modal
+          // NO CONFIRMED STORE - FORCE SHOW MODAL
+          console.log('⚠️ NO CONFIRMED STORE - FORCING MODAL TO SHOW');
+          console.log('Backend says requires_store:', data.requires_store);
+          console.log('Backend says store:', data.store);
+          console.log('localStorage confirmed:', storeIsConfirmed);
+          window.STORE_MODAL_BLOCKING = true; // Block TagManager until store selected
             
             if (modalElement) {
               // Force show with multiple methods to ensure it appears
@@ -867,11 +865,34 @@
               }
             }
           }
-        })
-        .finally(() => {
-          // Always reset the flag
-          window.checkingStoreRequired = false;
+          })
+          .finally(() => {
+            // Always reset the flag
+            window.checkingStoreRequired = false;
+          });
+      };
+      
+      // If no explicit confirmation, clear backend store FIRST, then check
+      if (!userConfirmedStore || !confirmedTimestamp) {
+        console.log('⚠️ No explicit store confirmation found, clearing session store first...');
+        // Clear session store to force fresh selection, THEN check
+        fetch('/api/clear-store', {
+          method: 'POST',
+          credentials: 'same-origin'
+        }).then(() => {
+          console.log('✅ Session store cleared, now checking backend...');
+          // Wait a moment for backend to update, then check
+          setTimeout(performCheck, 100);
+        }).catch(err => {
+          console.warn('⚠️ Error clearing session store, proceeding anyway:', err);
+          // Still proceed with check even if clear failed
+          performCheck();
         });
+      } else {
+        console.log('✅ Found explicit store confirmation in localStorage:', lastConfirmedStore);
+        // User has confirmed store, proceed with normal check
+        performCheck();
+      }
     }
     
     function generateJsonInventory() {
