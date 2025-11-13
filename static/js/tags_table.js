@@ -101,7 +101,9 @@ class TagsTable {
   // Function to update table header based on product type
   static updateTableHeader() {
     const productTypeFilter = document.getElementById('productTypeFilter');
-    const brandHeader = document.querySelector('th:contains("Brand")');
+    // Fix: Use native JavaScript instead of jQuery :contains() selector
+    const allHeaders = Array.from(document.querySelectorAll('th'));
+    const brandHeader = allHeaders.find(th => th.textContent.includes('Brand') || th.textContent.includes('Lineage'));
     
     if (!productTypeFilter || !brandHeader) {
       return;
