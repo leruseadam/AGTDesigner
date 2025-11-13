@@ -8421,6 +8421,7 @@ def update_lineage():
         strain_updated = False
         vendor = None
         strain_name = None
+        verified_lineage_after_commit = None  # Will be set after commit verification
         
         try:
             import sqlite3
@@ -8705,7 +8706,33 @@ def update_lineage():
             if not commit_success:
                 raise Exception("Failed to commit transaction after retries")
             
+            # CRITICAL FIX: Close cursor and ensure connection is properly closed
             cursor.close()
+            # Don't close the connection here - it's managed by ProductDatabase
+            # But ensure the transaction is fully committed by doing a final check
+            try:
+                # Verify the commit was successful by checking if we can read the data
+                verify_cursor = conn.cursor()
+                verify_cursor.execute('''
+                    SELECT "Lineage" FROM products 
+                    WHERE ("Product Name*" = ? OR "ProductName" = ?)
+                    LIMIT 1
+                ''', (tag_name, tag_name))
+                verify_result = verify_cursor.fetchone()
+                verify_cursor.close()
+                if verify_result:
+                    actual_lineage = str(verify_result[0]).strip().upper() if verify_result[0] else None
+                    expected_lineage = str(new_lineage).strip().upper()
+                    if actual_lineage == expected_lineage:
+                        logging.info(f"✅ IMMEDIATE VERIFICATION: Lineage '{actual_lineage}' confirmed in database after commit")
+                        # Store verified lineage for response
+                        verified_lineage_after_commit = actual_lineage
+                    else:
+                        logging.warning(f"⚠️  IMMEDIATE VERIFICATION: Lineage mismatch - got '{actual_lineage}', expected '{expected_lineage}'")
+                        verified_lineage_after_commit = actual_lineage  # Use what's actually in DB
+            except Exception as immediate_verify_error:
+                logging.warning(f"Immediate verification check failed (non-critical): {immediate_verify_error}")
+                verified_lineage_after_commit = None
             
             # AFTER COMMIT: If strain doesn't exist, create it (this uses its own transaction)
             if strain_name and str(strain_name).strip() and not strain_updated:
@@ -8800,9 +8827,24 @@ def update_lineage():
             # Clear only essential caches - fast and non-blocking
             cache_key = get_session_cache_key('available_tags')
             cache.delete(cache_key)
+            # Also clear web cache
+            web_cache_key = get_session_cache_key('web_available_tags')
+            cache.delete(web_cache_key)
             session['lineage_update_timestamp'] = time.time()
             session.modified = True
             logging.info(f"✅ LINEAGE UPDATE: Cleared cache and updated timestamp")
+            
+            # CRITICAL FIX: Force WAL checkpoint to ensure changes are persisted to disk
+            try:
+                # Use a new connection to force checkpoint
+                checkpoint_conn = product_db._get_connection()
+                checkpoint_cursor = checkpoint_conn.cursor()
+                # Force WAL checkpoint to ensure all changes are written to database file
+                checkpoint_cursor.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                checkpoint_cursor.close()
+                logging.info(f"✅ LINEAGE UPDATE: Forced WAL checkpoint to ensure persistence")
+            except Exception as checkpoint_error:
+                logging.warning(f"WAL checkpoint failed (non-critical): {checkpoint_error}")
             
             # Invalidate Excel processor caches (non-blocking)
             if excel_processor and hasattr(excel_processor, '_invalidate_caches'):
@@ -8887,15 +8929,19 @@ def update_lineage():
         request_duration = time.time() - request_start_time
         logging.info(f"✅ LINEAGE UPDATE REQUEST COMPLETE: {request_duration:.3f}s (DB: {products_updated}, Excel: {updated_count})")
         
+        # Use verified lineage if available, otherwise use new_lineage
+        final_lineage = verified_lineage_after_commit if verified_lineage_after_commit else new_lineage
+        
         response_data = {
             'success': True, 
-            'message': f'Lineage updated to {new_lineage} for {total_updated} product(s) (DB: {products_updated}, Excel: {updated_count})',
+            'message': f'Lineage updated to {final_lineage} for {total_updated} product(s) (DB: {products_updated}, Excel: {updated_count})',
             'products_updated': total_updated,
             'db_updated': products_updated,
             'excel_updated': updated_count,
             'verification_passed': verification_passed,
             'vendor': vendor if vendor else None,
-            'new_lineage': new_lineage,
+            'new_lineage': final_lineage,  # Use verified lineage if available
+            'verified_lineage': verified_lineage_after_commit,  # The actual lineage in database after commit
             'request_duration_ms': round(request_duration * 1000, 2)
         }
         
