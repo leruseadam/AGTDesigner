@@ -7641,17 +7641,17 @@ def get_available_tags():
                         updated = 0
                         conn = product_db._get_connection()
                         cur = conn.cursor()
-                    # Skip alignment entirely if products table doesn't exist
-                    try:
-                        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
-                        if not cur.fetchone():
-                            logging.warning("UI lineage alignment skipped: no 'products' table in DB")
-                            raise RuntimeError("no-products-table")
-                    except RuntimeError:
-                        raise
-                    # CRITICAL FIX: Prefer products.Lineage (product-level, user-editable) over strains.canonical_lineage
-                    # This ensures UI matches output generation which uses get_product_lineage() (reads products.Lineage)
-                    lineage_query_join_by_name = '''
+                        # Skip alignment entirely if products table doesn't exist
+                        try:
+                            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+                            if not cur.fetchone():
+                                logging.warning("UI lineage alignment skipped: no 'products' table in DB")
+                                raise RuntimeError("no-products-table")
+                        except RuntimeError:
+                            raise
+                        # CRITICAL FIX: Prefer products.Lineage (product-level, user-editable) over strains.canonical_lineage
+                        # This ensures UI matches output generation which uses get_product_lineage() (reads products.Lineage)
+                        lineage_query_join_by_name = '''
                         SELECT 
                             COALESCE(p."Lineage", s.canonical_lineage) AS current_lineage,
                             COALESCE(s.strain_name, p."Product Strain") AS current_strain
@@ -7660,9 +7660,9 @@ def get_available_tags():
                         WHERE p."Product Name*" = ? OR p.normalized_name = ?
                         ORDER BY p.id DESC
                         LIMIT 1
-                    '''
-                    # Fallback: use product's own Lineage if strains table/column not available
-                    lineage_query_fallback = '''
+                        '''
+                        # Fallback: use product's own Lineage if strains table/column not available
+                        lineage_query_fallback = '''
                         SELECT 
                             p."Lineage" AS current_lineage,
                             p."Product Strain" AS current_strain
@@ -7670,64 +7670,64 @@ def get_available_tags():
                         WHERE p."Product Name*" = ? OR p.normalized_name = ?
                         ORDER BY p.id DESC
                         LIMIT 1
-                    '''
-                    logging.info(f"📦 LINEAGE-BUILD ALIGNMENT: path={getattr(product_db, 'db_path', 'unknown')} store={getattr(product_db, '_store_name', 'unknown')}")
-                    for tag in all_tags:
-                        try:
-                            name = tag.get('Product Name*') or tag.get('ProductName') or ''
-                            if not name:
-                                continue
-                            if name in lineage_cache:
-                                db_lin, db_strain = lineage_cache[name]
-                            else:
-                                db_lin = None
-                                db_strain = None
-                                # Prefer strain-level lineage used by DOCX (sovereign -> canonical)
-                                try:
-                                    normalized = product_db._normalize_product_name(name)
-                                except Exception:
-                                    normalized = name.strip().lower()
-                                try:
-                                    cur.execute(lineage_query_join_by_name, (name, normalized))
-                                    row = cur.fetchone()
-                                except Exception as query_err:
-                                    # Join failed (e.g., missing columns) - fallback to product lineage
-                                    logging.debug(f"Lineage join query failed for '{name}': {query_err}, using fallback")
+                        '''
+                        logging.info(f"📦 LINEAGE-BUILD ALIGNMENT: path={getattr(product_db, 'db_path', 'unknown')} store={getattr(product_db, '_store_name', 'unknown')}")
+                        for tag in all_tags:
+                            try:
+                                name = tag.get('Product Name*') or tag.get('ProductName') or ''
+                                if not name:
+                                    continue
+                                if name in lineage_cache:
+                                    db_lin, db_strain = lineage_cache[name]
+                                else:
+                                    db_lin = None
+                                    db_strain = None
+                                    # Prefer strain-level lineage used by DOCX (sovereign -> canonical)
                                     try:
-                                        cur.execute(lineage_query_fallback, (name, normalized))
+                                        normalized = product_db._normalize_product_name(name)
+                                    except Exception:
+                                        normalized = name.strip().lower()
+                                    try:
+                                        cur.execute(lineage_query_join_by_name, (name, normalized))
                                         row = cur.fetchone()
-                                    except Exception as fallback_err:
-                                        logging.warning(f"Both lineage queries failed for '{name}': {fallback_err}")
-                                        row = None
-                                if row:
-                                    db_lin = row[0]
-                                    if len(row) > 1:
-                                        db_strain = row[1]
-                                lineage_cache[name] = (db_lin, db_strain)
-                            if db_lin:
-                                db_lin_clean = str(db_lin).strip().upper()
-                                # Always expose DB lineage on stable fields the UI can prefer
-                                tag['currentLineage'] = db_lin_clean
-                                tag['canonical_lineage'] = db_lin_clean
-                                if str(tag.get('Lineage','')).strip().upper() != db_lin_clean:
-                                    tag['Lineage'] = db_lin_clean
-                                    updated += 1
-                            clean_strain = str(db_strain).strip() if db_strain else ''
-                            if db_lin:
-                                if db_lin_clean in ('CBD', 'CBD_BLEND'):
-                                    clean_strain = 'CBD Blend'
-                            if not clean_strain:
-                                existing_strain = str(tag.get('Product Strain') or tag.get('ProductStrain') or '').strip()
-                                clean_strain = existing_strain
-                            if clean_strain:
-                                tag['Product Strain'] = clean_strain
-                                tag['ProductStrain'] = clean_strain
-                                tag['productStrain'] = clean_strain
-                        except RuntimeError:
-                            # Bubble out to outer except to skip alignment
-                            raise
-                        except Exception as _loop_err:
-                            logging.debug(f"UI lineage alignment error for a tag: {_loop_err}")
+                                    except Exception as query_err:
+                                        # Join failed (e.g., missing columns) - fallback to product lineage
+                                        logging.debug(f"Lineage join query failed for '{name}': {query_err}, using fallback")
+                                        try:
+                                            cur.execute(lineage_query_fallback, (name, normalized))
+                                            row = cur.fetchone()
+                                        except Exception as fallback_err:
+                                            logging.warning(f"Both lineage queries failed for '{name}': {fallback_err}")
+                                            row = None
+                                    if row:
+                                        db_lin = row[0]
+                                        if len(row) > 1:
+                                            db_strain = row[1]
+                                    lineage_cache[name] = (db_lin, db_strain)
+                                if db_lin:
+                                    db_lin_clean = str(db_lin).strip().upper()
+                                    # Always expose DB lineage on stable fields the UI can prefer
+                                    tag['currentLineage'] = db_lin_clean
+                                    tag['canonical_lineage'] = db_lin_clean
+                                    if str(tag.get('Lineage','')).strip().upper() != db_lin_clean:
+                                        tag['Lineage'] = db_lin_clean
+                                        updated += 1
+                                clean_strain = str(db_strain).strip() if db_strain else ''
+                                if db_lin:
+                                    if db_lin_clean in ('CBD', 'CBD_BLEND'):
+                                        clean_strain = 'CBD Blend'
+                                if not clean_strain:
+                                    existing_strain = str(tag.get('Product Strain') or tag.get('ProductStrain') or '').strip()
+                                    clean_strain = existing_strain
+                                if clean_strain:
+                                    tag['Product Strain'] = clean_strain
+                                    tag['ProductStrain'] = clean_strain
+                                    tag['productStrain'] = clean_strain
+                            except RuntimeError:
+                                # Bubble out to outer except to skip alignment
+                                raise
+                            except Exception as _loop_err:
+                                logging.debug(f"UI lineage alignment error for a tag: {_loop_err}")
                         if updated:
                             logging.info(f"🔄 UI LINEAGE ALIGNMENT: Applied {updated} database lineage overrides to Excel tags")
                     except Exception as db_conn_err:
