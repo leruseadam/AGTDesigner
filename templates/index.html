@@ -596,14 +596,30 @@
           if (userHasStore) {
             // USER HAS STORE - Show content, hide modal
             console.log('🎉 STORE FOUND:', data.store);
+            window.storeCheckCompleted = true;
             
             updateCurrentStoreDisplay(data.store);
             updateStoreStatus(`Store: ${data.store.replace(/_/g, ' ')}`, 'active');
             
-            // Hide modal
+            // Hide modal using Bootstrap if available
             if (modalElement) {
-              modalElement.style.display = 'none';
-              modalElement.classList.remove('show');
+              if (typeof bootstrap !== 'undefined') {
+                try {
+                  const modal = bootstrap.Modal.getInstance(modalElement);
+                  if (modal) {
+                    modal.hide();
+                  } else {
+                    modalElement.style.display = 'none';
+                    modalElement.classList.remove('show');
+                  }
+                } catch (e) {
+                  modalElement.style.display = 'none';
+                  modalElement.classList.remove('show');
+                }
+              } else {
+                modalElement.style.display = 'none';
+                modalElement.classList.remove('show');
+              }
             }
             
             // Remove all backdrops
@@ -7064,12 +7080,24 @@
       proceedWithStoreCheck();
       
       function proceedWithStoreCheck() {
+        // Check if store was already checked (to avoid duplicate checks)
+        if (window.storeCheckCompleted) {
+          console.log('✅ Store already checked on page load, proceeding with TagManager initialization...');
+          if (window.TagManager && typeof window.TagManager.init === 'function') {
+            TagManager.init();
+          } else {
+            console.error('❌ TagManager.init is not available');
+          }
+          return;
+        }
+        
         // Check store FIRST before initializing tags
         setTimeout(() => {
           console.log('🔄 Checking store requirement BEFORE initializing TagManager...');
           checkStoreRequired(function() {
             // This callback only runs when store is confirmed
             console.log('✅ Store confirmed! Initializing TagManager...');
+            window.storeCheckCompleted = true;
             
             if (window.TagManager && typeof window.TagManager.init === 'function') {
               TagManager.init();
@@ -7080,6 +7108,36 @@
         }, 100);
       }
     }
+    
+    // CRITICAL: Check store requirement IMMEDIATELY on page load/refresh
+    // This ensures modal shows even if TagManager hasn't loaded yet
+    function checkStoreOnPageLoad() {
+      console.log('🔍 Checking store requirement on page load...');
+      
+      // Wait for DOM to be ready
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function() {
+          // Wait a bit for modal element to be available
+          setTimeout(() => {
+            checkStoreRequired(function() {
+              // Store is confirmed, proceed with TagManager init
+              console.log('✅ Store confirmed on page load, proceeding with TagManager initialization...');
+            });
+          }, 100);
+        });
+      } else {
+        // DOM already loaded, check immediately
+        setTimeout(() => {
+          checkStoreRequired(function() {
+            // Store is confirmed, proceed with TagManager init
+            console.log('✅ Store confirmed on page load, proceeding with TagManager initialization...');
+          });
+        }, 100);
+      }
+    }
+    
+    // Start checking store immediately
+    checkStoreOnPageLoad();
     
     // Start waiting for TagManager to load
     waitForTagManagerAndInit();
