@@ -3002,32 +3002,69 @@ const TagManager = {
         }
         
         let attempts = 0;
-        const maxAttempts = 50; // 5 seconds max (50 * 100ms)
+        const maxAttempts = 100; // 10 seconds max (100 * 100ms) - increased for large tag lists
+        let lastTagCount = 0;
+        let stableCount = 0; // Count how many times tag count has been stable
         
         const checkForTags = () => {
             attempts++;
             const tagItems = availableTagsContainer.querySelectorAll('.tag-item');
+            const currentTagCount = tagItems.length;
             
-            if (tagItems.length > 0) {
-                // Tags are visible, hide splash
-                verboseLog(`Tags appeared in DOM (${tagItems.length} items), hiding splash`);
+            // Check if tags are actually visible (not just in DOM but rendered)
+            const visibleTags = Array.from(tagItems).filter(item => {
+                const rect = item.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0;
+            });
+            
+            // Check if tag count is stable (not still increasing)
+            if (currentTagCount === lastTagCount && currentTagCount > 0) {
+                stableCount++;
+            } else {
+                stableCount = 0; // Reset if count changed
+            }
+            lastTagCount = currentTagCount;
+            
+            // Tags are fully loaded if:
+            // 1. We have tags in the DOM
+            // 2. Tags are visible (rendered)
+            // 3. Tag count has been stable for at least 3 checks (300ms) - ensures rendering is complete
+            if (currentTagCount > 0 && visibleTags.length > 0 && stableCount >= 3) {
+                // Tags are fully rendered, hide splash
+                verboseLog(`Tags fully loaded and rendered (${currentTagCount} items, ${visibleTags.length} visible), hiding splash`);
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
+                }
+                // Also complete AppLoadingSplash if it's still showing
+                if (AppLoadingSplash && AppLoadingSplash.isVisible) {
+                    AppLoadingSplash.stopAutoAdvance();
+                    AppLoadingSplash.complete();
                 }
             } else if (attempts >= maxAttempts) {
-                // Timeout reached, hide splash anyway
-                verboseLog('Timeout waiting for tags, hiding splash');
+                // Timeout reached, hide splash anyway (but log warning)
+                if (currentTagCount > 0) {
+                    verboseLog(`Timeout waiting for tags to stabilize, but found ${currentTagCount} tags - hiding splash`);
+                } else {
+                    verboseLog('Timeout waiting for tags, no tags found - hiding splash');
+                }
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
+                if (AppLoadingSplash && AppLoadingSplash.isVisible) {
+                    AppLoadingSplash.stopAutoAdvance();
+                    AppLoadingSplash.complete();
+                }
             } else {
-                // Tags not yet visible, check again
+                // Tags not yet fully rendered, check again
+                if (currentTagCount > 0) {
+                    verboseLog(`Waiting for tags to stabilize: ${currentTagCount} tags found, stable for ${stableCount} checks`);
+                }
                 setTimeout(checkForTags, 100);
             }
         };
         
         // Start checking after a brief delay to allow DOM to update
-        setTimeout(checkForTags, 50);
+        setTimeout(checkForTags, 100);
     },
 
     createTagElement(tag, isForSelectedTags = false) {
@@ -6056,14 +6093,22 @@ const TagManager = {
         });
         
         // Safety net: ensure loading overlay never blocks interaction for long
+        // CRITICAL FIX: Increased timeout to allow tags to fully load before forcing hide
         const splashSafetyTimeout = setTimeout(() => {
-            console.warn('⏳ Safety timeout triggered - force hiding loading splash');
-            if (typeof this.hideActionSplash === 'function') {
-                this.hideActionSplash();
+            // Only force hide if tags haven't appeared yet
+            const availableTagsContainer = document.getElementById('availableTags');
+            const tagItems = availableTagsContainer ? availableTagsContainer.querySelectorAll('.tag-item') : [];
+            if (tagItems.length === 0) {
+                console.warn('⏳ Safety timeout triggered - no tags found, force hiding loading splash');
+                if (typeof this.hideActionSplash === 'function') {
+                    this.hideActionSplash();
+                }
+                AppLoadingSplash.stopAutoAdvance();
+                AppLoadingSplash.complete();
+            } else {
+                verboseLog(`⏳ Safety timeout triggered but ${tagItems.length} tags found - letting _waitForTagsToAppear handle it`);
             }
-            AppLoadingSplash.stopAutoAdvance();
-            AppLoadingSplash.complete();
-        }, 1000); // Reduced from 1500ms to 1000ms for faster recovery
+        }, 5000); // Increased to 5 seconds to allow tags to fully load
         
         try {
             // Use the new initial-data endpoint for faster loading with timeout
@@ -6091,6 +6136,8 @@ const TagManager = {
                     AppLoadingSplash.updateProgress(75, 'Processing tags...');
                     setTimeout(() => {
                         this.debouncedUpdateAvailableTags(data.available_tags, null);
+                        // CRITICAL: Don't hide splash here - _waitForTagsToAppear() will handle it
+                        // when tags are actually fully rendered
                     }, 0);
                     
                     // Restore previously selected tags from backend
@@ -6120,14 +6167,10 @@ const TagManager = {
                         }
                     }
                     
-                    // Complete splash loading
-                    AppLoadingSplash.stopAutoAdvance();
-                    AppLoadingSplash.complete();
-                    
-                    // Hide action splash after a short delay to ensure smooth transition
-                    setTimeout(() => {
-                        this.hideActionSplash();
-                    }, 200);
+                    // CRITICAL FIX: Don't hide splash here - wait for tags to be fully rendered
+                    // The _waitForTagsToAppear() function will hide the splash when tags are actually loaded
+                    // This ensures the splash stays visible until tags are fully rendered
+                    AppLoadingSplash.updateProgress(95, 'Finalizing...');
                     clearTimeout(splashSafetyTimeout);
                     
                     this.clearInitialDataRetry();
