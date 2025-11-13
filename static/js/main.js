@@ -5786,35 +5786,50 @@ const TagManager = {
 
     // Check if there's existing data and load it
     async checkForExistingData() {
+        // Prevent multiple simultaneous calls
+        if (this._checkingExistingData) {
+            verboseLog('checkForExistingData already in progress, skipping...');
+            return;
+        }
+        this._checkingExistingData = true;
+        
         verboseLog('=== CHECK FOR EXISTING DATA FUNCTION CALLED ===');
         verboseLog('Checking for existing data...');
         
-        // Check for current uploaded file from session
-        try {
-            const fileResponse = await fetch('/api/current-file');
-            if (fileResponse.ok) {
-                const fileData = await fileResponse.json();
-                if (fileData.success && fileData.has_file && fileData.filename) {
-                    verboseLog(`Found uploaded file in session: ${fileData.filename}`);
-                    // Update file info display
-                    const fileInfoText = document.getElementById('fileInfoText');
-                    if (fileInfoText) {
-                        fileInfoText.textContent = fileData.filename;
-                    }
-                    // Update current file info if element exists
-                    const currentFileInfo = document.getElementById('currentFileInfo');
-                    if (currentFileInfo) {
-                        currentFileInfo.textContent = fileData.filename;
-                    }
-                    verboseLog(`File info updated: ${fileData.filename} (${fileData.row_count || 0} rows)`);
-                }
-            }
-        } catch (error) {
-            verboseLog('Error checking for current file:', error);
-        }
-        
         // Show loading splash IMMEDIATELY before any async operations
         this.showActionSplash('Loading tags...');
+        
+        // Check for current uploaded file from session (non-blocking, runs in parallel)
+        // Use requestAnimationFrame to ensure it doesn't block the main thread
+        requestAnimationFrame(() => {
+            fetch('/api/current-file')
+                .then(fileResponse => {
+                    if (fileResponse.ok) {
+                        return fileResponse.json();
+                    }
+                    return null;
+                })
+                .then(fileData => {
+                    if (fileData && fileData.success && fileData.has_file && fileData.filename) {
+                        verboseLog(`Found uploaded file in session: ${fileData.filename}`);
+                        // Use requestAnimationFrame for DOM updates to avoid blocking
+                        requestAnimationFrame(() => {
+                            const fileInfoText = document.getElementById('fileInfoText');
+                            if (fileInfoText) {
+                                fileInfoText.textContent = fileData.filename;
+                            }
+                            const currentFileInfo = document.getElementById('currentFileInfo');
+                            if (currentFileInfo) {
+                                currentFileInfo.textContent = fileData.filename;
+                            }
+                        });
+                        verboseLog(`File info updated: ${fileData.filename} (${fileData.row_count || 0} rows)`);
+                    }
+                })
+                .catch(error => {
+                    verboseLog('Error checking for current file:', error);
+                });
+        });
         
         // Show loading indicator in container IMMEDIATELY to prevent blank screen
         const availableTagsContainer = document.getElementById('availableTags');
@@ -5845,9 +5860,9 @@ const TagManager = {
             return;
         }
         
-        // Add timeout protection - increased to 30 seconds for large Excel files
+        // Add timeout protection - reduced to 15 seconds to prevent hanging
         const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('Initialization timeout')), 30000); // 30 second timeout
+            setTimeout(() => reject(new Error('Initialization timeout')), 15000); // 15 second timeout
         });
         
         // Safety net: ensure loading overlay never blocks interaction for long
@@ -5858,7 +5873,7 @@ const TagManager = {
             }
             AppLoadingSplash.stopAutoAdvance();
             AppLoadingSplash.complete();
-        }, 1500);
+        }, 1000); // Reduced from 1500ms to 1000ms for faster recovery
         
         try {
             // Use the new initial-data endpoint for faster loading with timeout
@@ -5882,9 +5897,11 @@ const TagManager = {
                         splashMessage.textContent = 'Loading product tags...';
                     }
                     
-                    // Update available tags
+                    // Update available tags (use setTimeout to yield to browser)
                     AppLoadingSplash.updateProgress(75, 'Processing tags...');
-                    this.debouncedUpdateAvailableTags(data.available_tags, null);
+                    setTimeout(() => {
+                        this.debouncedUpdateAvailableTags(data.available_tags, null);
+                    }, 0);
                     
                     // Restore previously selected tags from backend
                     AppLoadingSplash.updateProgress(85, 'Restoring selections...');
@@ -5893,15 +5910,17 @@ const TagManager = {
                     verboseLog('fetchAndUpdateSelectedTags result:', selectedTagsResult);
                     verboseLog('persistentSelectedTags after restore:', this.state.persistentSelectedTags);
                     
-                    // Update filters
+                    // Update filters (use setTimeout to yield to browser)
                     AppLoadingSplash.updateProgress(90, 'Setting up filters...');
-                    this.updateFilters(data.filters || {
-                        vendor: [],
-                        brand: [],
-                        productType: [],
-                        lineage: [],
-                        weight: []
-                    }, true); // Preserve existing values when loading initial data
+                    setTimeout(() => {
+                        this.updateFilters(data.filters || {
+                            vendor: [],
+                            brand: [],
+                            productType: [],
+                            lineage: [],
+                            weight: []
+                        }, true); // Preserve existing values when loading initial data
+                    }, 0);
                     
                     // Update file info text to show the loaded filename
                     if (data.filename) {
@@ -5922,6 +5941,7 @@ const TagManager = {
                     clearTimeout(splashSafetyTimeout);
                     
                     this.clearInitialDataRetry();
+                    this._checkingExistingData = false;
                     verboseLog('Initial data loaded successfully');
                     return;
                 } else {
@@ -5933,6 +5953,7 @@ const TagManager = {
                     
                     // FIXED: Initialize empty state instead of loading test data
                     this.initializeEmptyState();
+                    this._checkingExistingData = false;
                     this.scheduleInitialDataRetry('Empty initial data response');
                     return;
                 }
@@ -5945,6 +5966,7 @@ const TagManager = {
                 
                 // FIXED: Initialize empty state instead of loading test data
                 this.initializeEmptyState();
+                this._checkingExistingData = false;
                 this.scheduleInitialDataRetry(`HTTP ${response.status}`);
                 return;
             }
@@ -5964,6 +5986,7 @@ const TagManager = {
             
             // FIXED: Initialize empty state instead of loading test data
             this.initializeEmptyState();
+            this._checkingExistingData = false;
             this.scheduleInitialDataRetry(error.message || 'initial data fetch error');
             return;
         }
