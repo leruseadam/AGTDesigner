@@ -8210,38 +8210,49 @@ const TagManager = {
 
     // Enhanced function to clear all filters and perform full app reset
     async clearAllFilters() {
-        verboseLog('🔄 Clearing all filters and performing full app reset...');
+        verboseLog('🔄 Clearing all filters...');
         
         try {
-            // Perform full app reset
-            await performFullAppReset();
+            // CRITICAL FIX: Prevent infinite recursion - don't call performFullAppReset which calls this again
+            // Instead, do the filter clearing directly
             
-            // Additional filter-specific clearing
+            // Clear all filter dropdowns (don't trigger events yet to avoid multiple applyFilters calls)
             const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
             
-            // Clear each filter dropdown
             filterIds.forEach(filterId => {
                 const filterElement = document.getElementById(filterId);
                 if (filterElement) {
                     filterElement.value = '';
-                    // Trigger change event to update listeners
-                    filterElement.dispatchEvent(new Event('change', { bubbles: true }));
+                    verboseLog(`Cleared ${filterId}`);
                 }
             });
             
-            // Apply the cleared filters
+            // Clear all search fields
+            const searchInputs = document.querySelectorAll('#availableTagsSearch, #selectedTagsSearch');
+            searchInputs.forEach(input => {
+                if (input) {
+                    input.value = '';
+                }
+            });
+            
+            // Clear filter cache
+            this.state.filterCache = null;
+            
+            // Apply the cleared filters to show all tags (single call after all filters are cleared)
             if (this.applyFilters) {
                 this.applyFilters();
             }
-            if (this.renderActiveFilters) {
-                this.renderActiveFilters();
-            }
             
-            // Also update the filter dropdowns to reflect the cleared state
+            // Update filter dropdowns to show all options
             if (this.state.originalFilterOptions && this.state.originalFilterOptions.vendor) {
                 if (this.updateFilters) {
                     this.updateFilters(this.state.originalFilterOptions, false); // Don't preserve values when clearing
                 }
+            }
+            
+            // Render active filters (should be empty now)
+            if (this.renderActiveFilters) {
+                this.renderActiveFilters();
             }
             
             // Add visual feedback to the button
@@ -8253,10 +8264,17 @@ const TagManager = {
                 }, 150);
             }
             
-            verboseLog('✅ All filters cleared and app reset completed successfully');
+            verboseLog('✅ All filters cleared successfully');
             
         } catch (error) {
             console.error('❌ Error during clear all filters:', error);
+            // Show error notification
+            if (window.Toast && window.Toast.error) {
+                window.Toast.error('Failed to clear filters: ' + error.message, {
+                    duration: 5000,
+                    position: 'top-right'
+                });
+            }
         }
     },
 
@@ -9273,10 +9291,15 @@ async function performFullAppReset() {
     verboseLog('🔄 Performing full app reset...');
     
     try {
-        // 1. Clear all filters first
-        if (window.TagManager && TagManager.clearAllFilters) {
-            TagManager.clearAllFilters();
-        }
+        // 1. Clear all filters directly (don't call clearAllFilters to avoid recursion)
+        const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
+        filterIds.forEach(filterId => {
+            const filterElement = document.getElementById(filterId);
+            if (filterElement) {
+                filterElement.value = '';
+                filterElement.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        });
         
         // 2. Clear all selected tags (handled locally to avoid recursion)
         if (window.TagManager) {
