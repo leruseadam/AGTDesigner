@@ -582,8 +582,33 @@
         hasConfirmation: !!(userConfirmedStore && confirmedTimestamp)
       });
       
-      // CRITICAL: If no localStorage confirmation, show modal IMMEDIATELY without checking backend
-      if (!userConfirmedStore || !confirmedTimestamp) {
+      // Check if localStorage confirmation is stale (older than 24 hours)
+      let isConfirmationStale = false;
+      if (confirmedTimestamp) {
+        const timestamp = parseInt(confirmedTimestamp, 10);
+        const now = Date.now();
+        const hoursSinceConfirmation = (now - timestamp) / (1000 * 60 * 60);
+        const MAX_CONFIRMATION_AGE_HOURS = 24; // Require re-confirmation after 24 hours
+        isConfirmationStale = hoursSinceConfirmation > MAX_CONFIRMATION_AGE_HOURS;
+        
+        console.log('🔍 Confirmation age check:', {
+          timestamp: timestamp,
+          now: now,
+          hoursSinceConfirmation: hoursSinceConfirmation.toFixed(2),
+          isStale: isConfirmationStale
+        });
+        
+        // If stale, clear localStorage
+        if (isConfirmationStale) {
+          console.log('⚠️ Confirmation is stale (older than 24 hours), clearing localStorage...');
+          localStorage.removeItem('store_confirmed');
+          localStorage.removeItem('last_confirmed_store');
+          localStorage.removeItem('store_confirmed_timestamp');
+        }
+      }
+      
+      // CRITICAL: If no localStorage confirmation OR confirmation is stale, show modal IMMEDIATELY without checking backend
+      if (!userConfirmedStore || !confirmedTimestamp || isConfirmationStale) {
         console.log('🚨🚨🚨 NO LOCALSTORAGE CONFIRMATION - SHOWING MODAL IMMEDIATELY 🚨🚨🚨');
         window.STORE_MODAL_BLOCKING = true;
         
@@ -677,19 +702,43 @@
           console.log('Backend says requires_store:', data.requires_store);
           
           // CRITICAL FIX: Check if user has explicitly confirmed this store
+          // Re-check localStorage (in case it was cleared by stale check above)
           const userConfirmedStore = localStorage.getItem('store_confirmed');
           const lastConfirmedStore = localStorage.getItem('last_confirmed_store');
-          const storeIsConfirmed = userConfirmedStore === 'true' && lastConfirmedStore && lastConfirmedStore === data.store;
+          const confirmedTimestamp = localStorage.getItem('store_confirmed_timestamp');
+          
+          // Check if confirmation matches backend store AND is not stale
+          let storeIsConfirmed = false;
+          if (userConfirmedStore === 'true' && lastConfirmedStore && confirmedTimestamp && data.store) {
+            // Store must match AND timestamp must be valid
+            const timestamp = parseInt(confirmedTimestamp, 10);
+            const now = Date.now();
+            const hoursSinceConfirmation = (now - timestamp) / (1000 * 60 * 60);
+            const isStale = hoursSinceConfirmation > 24;
+            
+            storeIsConfirmed = (lastConfirmedStore === data.store) && !isStale;
+            
+            if (lastConfirmedStore !== data.store) {
+              console.log('⚠️ Backend store does not match localStorage store:', {
+                localStorage: lastConfirmedStore,
+                backend: data.store
+              });
+            }
+            if (isStale) {
+              console.log('⚠️ Confirmation timestamp is stale');
+            }
+          }
           
           console.log('🔍 Store confirmation check:', {
             userConfirmedStore: userConfirmedStore,
             lastConfirmedStore: lastConfirmedStore,
             backendStore: data.store,
             storeIsConfirmed: storeIsConfirmed,
-            requires_store: data.requires_store
+            requires_store: data.requires_store,
+            storesMatch: lastConfirmedStore === data.store
           });
           
-          // CRITICAL: Default to showing modal unless store is explicitly confirmed
+          // CRITICAL: Default to showing modal unless store is explicitly confirmed by user
           // Show modal if: requires_store=true, OR no store, OR store not confirmed by user
           const shouldShowModal = data.requires_store === true || !data.store || !storeIsConfirmed;
           
