@@ -564,10 +564,8 @@
         return;
       }
       
-      // Keep both hidden while checking backend
-      if (modalElement) {
-        modalElement.style.display = 'none';
-      }
+      // Keep main content hidden while checking backend, but DON'T hide modal yet
+      // The modal will be shown if no store is found
       if (mainContent) {
         mainContent.style.pointerEvents = 'none';
         mainContent.classList.add('store-selection-disabled');
@@ -651,74 +649,104 @@
               setTimeout(() => onStoreConfirmed(), 100);
             }
           } else {
-            // NO STORE - Show modal
-            console.log('⚠️ NO STORE - Showing modal');
+            // NO STORE - FORCE SHOW MODAL
+            console.log('⚠️ NO STORE - FORCING MODAL TO SHOW');
+            window.STORE_MODAL_BLOCKING = true; // Block TagManager until store selected
             
             if (modalElement) {
-              // Use Bootstrap modal if available, otherwise fall back to manual show
+              // Force show with multiple methods to ensure it appears
+              let modalShown = false;
+              
+              // Method 1: Try Bootstrap modal API
               if (typeof bootstrap !== 'undefined') {
                 try {
-                  // Try to get existing instance first
-                  let modal = bootstrap.Modal.getInstance(modalElement);
-                  
-                  // If no instance exists, create a new one
-                  if (!modal) {
-                    console.log('Creating new Bootstrap modal instance for store selection...');
-                    modal = new bootstrap.Modal(modalElement, {
-                      backdrop: 'static',
-                      keyboard: false
-                    });
+                  // Dispose any existing instance first
+                  const existingModal = bootstrap.Modal.getInstance(modalElement);
+                  if (existingModal) {
+                    existingModal.dispose();
                   }
+                  
+                  console.log('Creating new Bootstrap modal instance for store selection...');
+                  const modal = new bootstrap.Modal(modalElement, {
+                    backdrop: 'static',
+                    keyboard: false
+                  });
                   
                   console.log('Showing store selection modal via Bootstrap...');
                   modal.show();
-                  console.log('✅ Modal shown via Bootstrap');
-                } catch (bootstrapError) {
-                  console.error('❌ Error showing modal via Bootstrap, using fallback:', bootstrapError);
-                  // Fallback to manual show
-                  modalElement.style.display = 'block';
+                  
+                  // Force visibility immediately
+                  modalElement.style.cssText += 'display: block !important; z-index: 9999 !important;';
                   modalElement.classList.add('show');
                   modalElement.setAttribute('aria-hidden', 'false');
                   modalElement.setAttribute('aria-modal', 'true');
+                  
                   document.body.classList.add('modal-open');
                   document.body.style.overflow = 'hidden';
+                  document.body.style.paddingRight = '0px';
                   
-                  // Add backdrop
-                  if (!document.querySelector('.modal-backdrop')) {
-                    const backdrop = document.createElement('div');
-                    backdrop.id = 'storeModalBackdrop';
+                  // Ensure backdrop
+                  let backdrop = document.querySelector('.modal-backdrop');
+                  if (!backdrop) {
+                    backdrop = document.createElement('div');
                     backdrop.className = 'modal-backdrop fade show';
-                    backdrop.style.zIndex = '9998';
+                    backdrop.style.cssText = 'z-index: 9998 !important; display: block !important;';
                     document.body.appendChild(backdrop);
+                  } else {
+                    backdrop.style.cssText += 'display: block !important; z-index: 9998 !important;';
                   }
-                }
-              } else {
-                // Bootstrap not available, use manual show
-                console.log('Bootstrap not available, using manual modal show...');
-                modalElement.style.display = 'block';
-                modalElement.classList.add('show');
-                modalElement.setAttribute('aria-hidden', 'false');
-                modalElement.setAttribute('aria-modal', 'true');
-                document.body.classList.add('modal-open');
-                document.body.style.overflow = 'hidden';
-                
-                // Add backdrop
-                if (!document.querySelector('.modal-backdrop')) {
-                  const backdrop = document.createElement('div');
-                  backdrop.id = 'storeModalBackdrop';
-                  backdrop.className = 'modal-backdrop fade show';
-                  backdrop.style.zIndex = '9998';
-                  document.body.appendChild(backdrop);
+                  
+                  modalShown = true;
+                  console.log('✅ Modal shown via Bootstrap (forced)');
+                } catch (bootstrapError) {
+                  console.error('❌ Error showing modal via Bootstrap:', bootstrapError);
                 }
               }
+              
+              // Method 2: Manual show (always do this as well to ensure visibility)
+              console.log('Forcing modal display manually...');
+              modalElement.style.cssText += 'display: block !important; z-index: 9999 !important; opacity: 1 !important; visibility: visible !important;';
+              modalElement.classList.add('show');
+              modalElement.setAttribute('aria-hidden', 'false');
+              modalElement.setAttribute('aria-modal', 'true');
+              
+              document.body.classList.add('modal-open');
+              document.body.style.overflow = 'hidden';
+              document.body.style.paddingRight = '0px';
+              
+              // Ensure backdrop exists and is visible
+              let backdrop = document.querySelector('.modal-backdrop, #storeModalBackdrop');
+              if (!backdrop) {
+                backdrop = document.createElement('div');
+                backdrop.id = 'storeModalBackdrop';
+                backdrop.className = 'modal-backdrop fade show';
+                backdrop.style.cssText = 'z-index: 9998 !important; display: block !important; position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background-color: rgba(0, 0, 0, 0.5) !important;';
+                document.body.appendChild(backdrop);
+              } else {
+                backdrop.style.cssText += 'display: block !important; z-index: 9998 !important;';
+              }
+              
+              console.log('✅ Modal forced to display manually');
+              
+              // Double-check it's visible after a short delay
+              setTimeout(() => {
+                if (modalElement.style.display !== 'block' && !modalElement.classList.contains('show')) {
+                  console.warn('⚠️ Modal may not be visible, forcing again...');
+                  modalElement.style.cssText += 'display: block !important; z-index: 9999 !important;';
+                  modalElement.classList.add('show');
+                }
+              }, 100);
+            } else {
+              console.error('❌ Modal element not found when trying to show!');
             }
             
             if (mainContent) {
               mainContent.style.pointerEvents = 'none';
               mainContent.classList.add('store-selection-disabled');
+              mainContent.style.display = 'none';
             }
             
-            console.log('✅ Modal shown, content hidden');
+            console.log('✅ Modal should now be visible, content hidden');
           }
         })
         .catch(error => {
