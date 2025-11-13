@@ -1363,7 +1363,7 @@ def create_app():
     if PYTHONANYWHERE_OPTIMIZATION:
         app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 10MB for PythonAnywhere
         app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 300  # 5 minutes for PythonAnywhere
-        app.config['PERMANENT_SESSION_LIFETIME'] = 1800  # 30 minutes for PythonAnywhere
+        app.config['PERMANENT_SESSION_LIFETIME'] = 7200  # 2 hours for PythonAnywhere (increased for file persistence)
         # Reduce logging verbosity for PythonAnywhere
         logging.getLogger('werkzeug').setLevel(logging.WARNING)
         logging.getLogger('urllib3').setLevel(logging.WARNING)
@@ -2347,10 +2347,11 @@ def index():
                     status = processing_status.get(filename, 'unknown')
                     
                     # Only remove if file is old OR processing failed
+                    # CRITICAL FIX: Increase retention to 2 hours to match session lifetime
                     should_remove = (
-                        file_age > 3600 or  # More than 1 hour old
+                        file_age > 7200 or  # More than 2 hours old (matches session lifetime)
                         status.startswith('error:') or  # Processing failed
-                        (upload_timestamp > 0 and time.time() - upload_timestamp > 3600)  # Upload session expired
+                        (upload_timestamp > 0 and time.time() - upload_timestamp > 7200)  # Upload session expired (2 hours)
                     )
                     
                     if should_remove:
@@ -4075,11 +4076,57 @@ def get_current_file():
         if file_path:
             file_exists = os.path.exists(file_path)
             if not file_exists:
-                # File doesn't exist, clear session
-                session.pop('file_path', None)
-                session.pop('uploaded_filename', None)
-                session.pop('upload_timestamp', None)
-                logging.info(f"File from session no longer exists: {file_path}")
+                # File doesn't exist, try to recover from uploads directory
+                # Look for the most recent file that matches the filename pattern
+                if uploaded_filename:
+                    try:
+                        uploads_dir = os.path.join(os.getcwd(), 'uploads')
+                        if os.path.exists(uploads_dir):
+                            # Find files matching the uploaded filename pattern
+                            import glob
+                            pattern = os.path.join(uploads_dir, f'*_{uploaded_filename}')
+                            matching_files = glob.glob(pattern)
+                            if matching_files:
+                                # Get the most recent file
+                                matching_files.sort(key=os.path.getmtime, reverse=True)
+                                recovered_file = matching_files[0]
+                                file_age = time.time() - os.path.getmtime(recovered_file)
+                                # Only recover if file is less than 2 hours old
+                                if file_age < 7200:
+                                    file_path = recovered_file
+                                    file_exists = True
+                                    # Restore session data
+                                    session['file_path'] = file_path
+                                    session['uploaded_filename'] = uploaded_filename
+                                    session['upload_timestamp'] = int(os.path.getmtime(recovered_file))
+                                    session.modified = True
+                                    logging.info(f"✅ RECOVERED file from disk: {file_path} (age: {file_age:.0f}s)")
+                                    
+                                    # CRITICAL: Force reload of the recovered file into processor
+                                    try:
+                                        processor = get_excel_processor()
+                                        if processor:
+                                            # Force reload by clearing the last loaded file
+                                            processor._last_loaded_file = None
+                                            success = processor.load_file(file_path)
+                                            if success:
+                                                processor._last_loaded_file = file_path
+                                                logging.info(f"✅ Successfully loaded recovered file into processor")
+                                            else:
+                                                logging.warning(f"⚠️  Failed to load recovered file into processor")
+                                    except Exception as load_error:
+                                        logging.warning(f"Error loading recovered file: {load_error}")
+                                else:
+                                    logging.info(f"File too old to recover: {recovered_file} (age: {file_age:.0f}s)")
+                    except Exception as recover_error:
+                        logging.warning(f"Error recovering file: {recover_error}")
+                
+                if not file_exists:
+                    # File doesn't exist and couldn't be recovered, clear session
+                    session.pop('file_path', None)
+                    session.pop('uploaded_filename', None)
+                    session.pop('upload_timestamp', None)
+                    logging.info(f"File from session no longer exists: {file_path}")
         
         # Check if processor has data
         has_data = False
@@ -7752,7 +7799,7 @@ def get_available_tags():
                                     # Filter to only columns we want, excluding internal ones
                                     columns_to_query = [col for col in available_columns if col not in ['id', 'normalized_name', 'strain_id']]
                                     
-                                    # Build dynamic query - join with strains to get canonical lineage
+                                    # Build dynamic query - join with strains to get canonical lineage (same pipeline)
                                     quoted_columns = ', '.join([f'p."{col}"' for col in columns_to_query])
                                     query = f'''
                                         SELECT {quoted_columns}, COALESCE(s.canonical_lineage, p."Lineage") AS preferred_lineage
@@ -7776,14 +7823,20 @@ def get_available_tags():
                                     
                                     for row in rows:
                                         product_dict = dict(zip(columns, row))
-                                        # Set preferred lineage fields for UI
-                                        pref_lin = str(product_dict.get('preferred_lineage', '')).strip().upper()
+                                        # CRITICAL: Use preferred_lineage (same pipeline as other queries)
+                                        # Set all lineage fields to the same DB value for consistency
+                                        pref_lin = product_dict.pop('preferred_lineage', None)
                                         if pref_lin:
-                                            product_dict['currentLineage'] = pref_lin
-                                            product_dict['canonical_lineage'] = pref_lin
-                                            if not product_dict.get('Lineage') or str(product_dict.get('Lineage', '')).strip().upper() != pref_lin:
-                                                product_dict['Lineage'] = pref_lin
-                                        product_dict.pop('preferred_lineage', None)
+                                            db_lin_clean = str(pref_lin).strip().upper()
+                                            product_dict['currentLineage'] = db_lin_clean
+                                            product_dict['canonical_lineage'] = db_lin_clean
+                                            product_dict['Lineage'] = db_lin_clean
+                                        else:
+                                            # Fallback to product's Lineage if no preferred_lineage
+                                            lin = str(product_dict.get('Lineage', '')).strip().upper()
+                                            if lin:
+                                                product_dict['currentLineage'] = lin
+                                                product_dict['canonical_lineage'] = lin
                                         # Convert to the format expected by the frontend
                                         database_tags.append(product_dict)
                                     
@@ -7806,18 +7859,46 @@ def get_available_tags():
                             columns_to_query = [col for col in available_columns if col not in ['id', 'normalized_name', 'strain_id']]
                             logging.info(f"Querying {len(columns_to_query)} columns")
                             
-                            # SIMPLIFIED: Query without strain join first (faster)
-                            # LIMIT to 10000 for performance - can increase later if needed
+                            # CRITICAL: Use same pipeline as Excel alignment - join with strains to get canonical_lineage
+                            # This ensures UI lineages match database (strains.canonical_lineage is source of truth)
                             quoted_columns = ', '.join([f'p."{col}"' for col in columns_to_query])
-                            query = f'SELECT {quoted_columns} FROM products p ORDER BY p.id DESC LIMIT 10000'
                             
-                            logging.info("Executing query...")
+                            # Try to join with strains table to get canonical_lineage (same as Excel alignment query)
+                            lineage_query_join_by_name = f'''
+                                SELECT {quoted_columns}, 
+                                       COALESCE(s.canonical_lineage, p."Lineage") AS preferred_lineage
+                                FROM products p
+                                LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
+                                ORDER BY p.id DESC
+                                LIMIT 10000
+                            '''
+                            
+                            # Fallback query if strains table/join fails
+                            lineage_query_fallback = f'''
+                                SELECT {quoted_columns}, 
+                                       p."Lineage" AS preferred_lineage
+                                FROM products p
+                                ORDER BY p.id DESC
+                                LIMIT 10000
+                            '''
+                            
+                            logging.info("Executing query with strain join (same pipeline as Excel alignment)...")
                             import time
                             query_start = time.time()
-                            cursor.execute(query)
-                            rows = cursor.fetchall()
+                            
+                            try:
+                                cursor.execute(lineage_query_join_by_name)
+                                rows = cursor.fetchall()
+                                columns = columns_to_query + ['preferred_lineage']
+                                logging.info(f"✅ Query with strain join returned {len(rows)} rows")
+                            except Exception as join_err:
+                                logging.warning(f"Strain join failed, using fallback: {join_err}")
+                                cursor.execute(lineage_query_fallback)
+                                rows = cursor.fetchall()
+                                columns = columns_to_query + ['preferred_lineage']
+                                logging.info(f"✅ Query (fallback) returned {len(rows)} rows")
+                            
                             query_time = time.time() - query_start
-                            columns = columns_to_query
                             logging.info(f"✅ Query returned {len(rows)} rows in {query_time:.2f}s")
                             
                             logging.info(f"Processing {len(rows)} rows into product dicts...")
@@ -7828,11 +7909,23 @@ def get_available_tags():
                                     logging.info(f"  Processed {i}/{len(rows)} rows in {elapsed:.2f}s...")
                                 try:
                                     product_dict = dict(zip(columns, row))
-                                    # Set lineage fields from Lineage column
-                                    lin = str(product_dict.get('Lineage', '')).strip().upper()
-                                    if lin:
-                                        product_dict['currentLineage'] = lin
-                                        product_dict['canonical_lineage'] = lin
+                                    
+                                    # CRITICAL: Use preferred_lineage (from strains.canonical_lineage or products.Lineage)
+                                    # This ensures UI lineages match database - same pipeline as Excel alignment
+                                    preferred_lin = product_dict.pop('preferred_lineage', None)
+                                    if preferred_lin:
+                                        db_lin_clean = str(preferred_lin).strip().upper()
+                                        # Set all lineage fields to the same DB value (consistent pipeline)
+                                        product_dict['currentLineage'] = db_lin_clean
+                                        product_dict['canonical_lineage'] = db_lin_clean
+                                        product_dict['Lineage'] = db_lin_clean
+                                    else:
+                                        # Fallback to product's Lineage if no preferred_lineage
+                                        lin = str(product_dict.get('Lineage', '')).strip().upper()
+                                        if lin:
+                                            product_dict['currentLineage'] = lin
+                                            product_dict['canonical_lineage'] = lin
+                                    
                                     # Convert to the format expected by the frontend
                                     database_tags.append(product_dict)
                                 except Exception as row_error:
