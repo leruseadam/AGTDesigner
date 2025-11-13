@@ -5632,15 +5632,33 @@ class ProductDatabase:
             # Search for products with similar key terms
             for term in key_terms:
                 if len(term) > 3:  # Only use meaningful terms
-                    cursor.execute('''
-                        SELECT p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Weight*", p."Weight Unit* (grams/gm or ounces/oz)", p."Price* (Tier Name for Bulk)",
-                               p."Lineage", s.strain_name, p."Description"
-                        FROM products p
-                        LEFT JOIN strains s ON p."Product Strain" = s.strain_name
-                        WHERE p."Product Name*" LIKE ? OR p."Product Name*" LIKE ?
-                        ORDER BY p.id DESC
-                        LIMIT 20
-                    ''', (f'%{term}%', f'%{term}%'))
+                    # Try to use Weight Unit column, fallback to Units if it doesn't exist
+                    try:
+                        cursor.execute('''
+                            SELECT p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Weight*", 
+                                   COALESCE(p."Weight Unit* (grams/gm or ounces/oz)", p."Units") AS "WeightUnit", 
+                                   p."Price* (Tier Name for Bulk)",
+                                   p."Lineage", s.strain_name, p."Description"
+                            FROM products p
+                            LEFT JOIN strains s ON p."Product Strain" = s.strain_name
+                            WHERE p."Product Name*" LIKE ? OR p."Product Name*" LIKE ?
+                            ORDER BY p.id DESC
+                            LIMIT 20
+                        ''', (f'%{term}%', f'%{term}%'))
+                    except Exception as col_error:
+                        # Fallback if Weight Unit column doesn't exist
+                        logger.warning(f"Weight Unit column not found, using Units: {col_error}")
+                        cursor.execute('''
+                            SELECT p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Weight*", 
+                                   p."Units" AS "WeightUnit", 
+                                   p."Price* (Tier Name for Bulk)",
+                                   p."Lineage", s.strain_name, p."Description"
+                            FROM products p
+                            LEFT JOIN strains s ON p."Product Strain" = s.strain_name
+                            WHERE p."Product Name*" LIKE ? OR p."Product Name*" LIKE ?
+                            ORDER BY p.id DESC
+                            LIMIT 20
+                        ''', (f'%{term}%', f'%{term}%'))
                     
                     results = cursor.fetchall()
                     for result in results:
@@ -5661,15 +5679,32 @@ class ProductDatabase:
             # Strategy 2: Find products with similar product types
             product_type = self._infer_product_type_from_name(product_name)
             if product_type:
-                cursor.execute('''
-                    SELECT p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Weight*", p."Weight Unit* (grams/gm or ounces/oz)", p."Price* (Tier Name for Bulk)",
-                           p."Lineage", s.strain_name, p."Description"
-                    FROM products p
-                    LEFT JOIN strains s ON p."Product Strain" = s.strain_name
-                    WHERE p."Product Type*" = ?
-                    ORDER BY p.id DESC
-                    LIMIT 10
-                ''', (product_type,))
+                try:
+                    cursor.execute('''
+                        SELECT p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Weight*", 
+                               COALESCE(p."Weight Unit* (grams/gm or ounces/oz)", p."Units") AS "WeightUnit", 
+                               p."Price* (Tier Name for Bulk)",
+                               p."Lineage", s.strain_name, p."Description"
+                        FROM products p
+                        LEFT JOIN strains s ON p."Product Strain" = s.strain_name
+                        WHERE p."Product Type*" = ?
+                        ORDER BY p.id DESC
+                        LIMIT 10
+                    ''', (product_type,))
+                except Exception as col_error:
+                    # Fallback if Weight Unit column doesn't exist
+                    logger.warning(f"Weight Unit column not found, using Units: {col_error}")
+                    cursor.execute('''
+                        SELECT p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Weight*", 
+                               p."Units" AS "WeightUnit", 
+                               p."Price* (Tier Name for Bulk)",
+                               p."Lineage", s.strain_name, p."Description"
+                        FROM products p
+                        LEFT JOIN strains s ON p."Product Strain" = s.strain_name
+                        WHERE p."Product Type*" = ?
+                        ORDER BY p.id DESC
+                        LIMIT 10
+                    ''', (product_type,))
                 
                 results = cursor.fetchall()
                 for result in results:
@@ -5690,15 +5725,32 @@ class ProductDatabase:
             # Strategy 3: Find products with similar strains
             strain_name = self._extract_strain_from_name(product_name)
             if strain_name:
-                cursor.execute('''
-                    SELECT p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Weight*", p."Weight Unit* (grams/gm or ounces/oz)", p."Price* (Tier Name for Bulk)",
-                           p."Lineage", s.strain_name, p."Description"
-                    FROM products p
-                    LEFT JOIN strains s ON p."Product Strain" = s.strain_name
-                    WHERE s.strain_name LIKE ? OR p."Product Strain" LIKE ?
-                    ORDER BY p.id DESC
-                    LIMIT 10
-                ''', (f'%{strain_name}%', f'%{strain_name}%'))
+                try:
+                    cursor.execute('''
+                        SELECT p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Weight*", 
+                               COALESCE(p."Weight Unit* (grams/gm or ounces/oz)", p."Units") AS "WeightUnit", 
+                               p."Price* (Tier Name for Bulk)",
+                               p."Lineage", s.strain_name, p."Description"
+                        FROM products p
+                        LEFT JOIN strains s ON p."Product Strain" = s.strain_name
+                        WHERE s.strain_name LIKE ? OR p."Product Strain" LIKE ?
+                        ORDER BY p.id DESC
+                        LIMIT 10
+                    ''', (f'%{strain_name}%', f'%{strain_name}%'))
+                except Exception as col_error:
+                    # Fallback if Weight Unit column doesn't exist
+                    logger.warning(f"Weight Unit column not found, using Units: {col_error}")
+                    cursor.execute('''
+                        SELECT p."Product Name*", p."Product Type*", p."Vendor/Supplier*", p."Product Brand", p."Weight*", 
+                               p."Units" AS "WeightUnit", 
+                               p."Price* (Tier Name for Bulk)",
+                               p."Lineage", s.strain_name, p."Description"
+                        FROM products p
+                        LEFT JOIN strains s ON p."Product Strain" = s.strain_name
+                        WHERE s.strain_name LIKE ? OR p."Product Strain" LIKE ?
+                        ORDER BY p.id DESC
+                        LIMIT 10
+                    ''', (f'%{strain_name}%', f'%{strain_name}%'))
                 
                 results = cursor.fetchall()
                 for result in results:

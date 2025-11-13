@@ -168,7 +168,16 @@ def cached_route(ttl: int = 300, cache_type: str = 'normal', vary_by: list = Non
                     response.headers['ETag'] = cached_etag
                     return response
                 
-                # Return cached response
+                # Check if cached response is a Flask Response object (file download, etc.)
+                from flask import Response as FlaskResponse
+                if isinstance(cached_response, FlaskResponse):
+                    # Can't cache file responses - return the response directly
+                    cached_response.headers['ETag'] = cached_etag
+                    cached_response.headers['X-Cache'] = 'HIT'
+                    cached_response.headers['Cache-Control'] = f'max-age={ttl}'
+                    return cached_response
+                
+                # Return cached JSON response
                 response = make_response(jsonify(cached_response))
                 response.headers['ETag'] = cached_etag
                 response.headers['X-Cache'] = 'HIT'
@@ -185,6 +194,13 @@ def cached_route(ttl: int = 300, cache_type: str = 'normal', vary_by: list = Non
             result = func(*args, **kwargs)
             elapsed = time.time() - start_time
             
+            # Check if result is a Flask Response object (file download, etc.)
+            from flask import Response as FlaskResponse
+            if isinstance(result, FlaskResponse):
+                # Don't cache file responses - return immediately
+                result.headers['X-Response-Time'] = f"{elapsed*1000:.1f}ms"
+                return result
+            
             # Extract response data
             if isinstance(result, tuple):
                 response_data, status_code = result[0], result[1] if len(result) > 1 else 200
@@ -192,22 +208,39 @@ def cached_route(ttl: int = 300, cache_type: str = 'normal', vary_by: list = Non
                 response_data = result
                 status_code = 200
             
-            # Only cache successful responses
+            # Check if response_data is a Flask Response object
+            if isinstance(response_data, FlaskResponse):
+                # Don't cache file responses - return immediately
+                response_data.headers['X-Response-Time'] = f"{elapsed*1000:.1f}ms"
+                return response_data
+            
+            # Only cache successful JSON responses
             if status_code == 200:
-                # Generate ETag
-                etag = cache._generate_etag(response_data)
-                
-                # Cache the response
-                cache.set(cache_key, response_data, etag, ttl)
-                
-                # Create response
-                response = make_response(jsonify(response_data))
-                response.headers['ETag'] = etag
-                response.headers['X-Cache'] = 'MISS'
-                response.headers['X-Response-Time'] = f"{elapsed*1000:.1f}ms"
-                response.headers['Cache-Control'] = f'max-age={ttl}'
-                
-                return response
+                try:
+                    # Generate ETag
+                    etag = cache._generate_etag(response_data)
+                    
+                    # Cache the response (only if it's JSON-serializable)
+                    cache.set(cache_key, response_data, etag, ttl)
+                    
+                    # Create response
+                    response = make_response(jsonify(response_data))
+                    response.headers['ETag'] = etag
+                    response.headers['X-Cache'] = 'MISS'
+                    response.headers['X-Response-Time'] = f"{elapsed*1000:.1f}ms"
+                    response.headers['Cache-Control'] = f'max-age={ttl}'
+                    
+                    return response
+                except (TypeError, ValueError) as cache_error:
+                    # If response can't be cached (e.g., contains non-serializable objects), skip caching
+                    logger.warning(f"Response not cacheable: {cache_error}. Returning without cache.")
+                    if isinstance(response_data, dict):
+                        response = make_response(jsonify(response_data))
+                    else:
+                        response = make_response(str(response_data), status_code)
+                    response.headers['X-Cache'] = 'SKIP'
+                    response.headers['X-Response-Time'] = f"{elapsed*1000:.1f}ms"
+                    return response
             else:
                 # Don't cache errors
                 return result

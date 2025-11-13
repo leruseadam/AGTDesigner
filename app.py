@@ -8591,14 +8591,71 @@ def update_lineage():
             products_updated_by_name = 0
             products_updated_by_strain = 0
             
-            # FIRST: Update by exact product name (most specific)
-            # Try multiple variations for better matching
+            # FIRST: Check if product exists before trying to update (for better error messages)
             tag_name_clean = str(tag_name).strip()
             try:
                 normalized_name = product_db._normalize_product_name(tag_name_clean) if hasattr(product_db, '_normalize_product_name') else tag_name_clean.lower().strip()
             except:
                 normalized_name = tag_name_clean.lower().strip()
             
+            # Check if product exists in database (for diagnostic logging)
+            logging.info(f"🔍 Searching for product: '{tag_name_clean}' (normalized: '{normalized_name}')")
+            cursor.execute('''
+                SELECT "Product Name*", "ProductName", normalized_name, "Lineage"
+                FROM products
+                WHERE "Product Name*" = ? OR "ProductName" = ? OR normalized_name = ?
+                LIMIT 5
+            ''', (tag_name_clean, tag_name_clean, normalized_name))
+            existing_products = cursor.fetchall()
+            
+            if existing_products:
+                logging.info(f"✅ Found {len(existing_products)} exact match(es) for '{tag_name_clean}'")
+            else:
+                # Try case-insensitive search
+                tag_name_lower = tag_name_clean.lower()
+                logging.info(f"🔍 Trying case-insensitive search for: '{tag_name_lower}'")
+                cursor.execute('''
+                    SELECT "Product Name*", "ProductName", normalized_name, "Lineage"
+                    FROM products
+                    WHERE LOWER(TRIM("Product Name*")) = ? 
+                       OR LOWER(TRIM("ProductName")) = ?
+                    LIMIT 5
+                ''', (tag_name_lower, tag_name_lower))
+                existing_products = cursor.fetchall()
+                
+                if existing_products:
+                    logging.info(f"✅ Found {len(existing_products)} case-insensitive match(es) for '{tag_name_clean}'")
+                else:
+                    # Try partial match
+                    logging.info(f"🔍 Trying partial match search for: '%{tag_name_clean}%'")
+                    cursor.execute('''
+                        SELECT "Product Name*", "ProductName", normalized_name, "Lineage"
+                        FROM products
+                        WHERE "Product Name*" LIKE ? OR "ProductName" LIKE ?
+                        LIMIT 5
+                    ''', (f'%{tag_name_clean}%', f'%{tag_name_clean}%'))
+                    existing_products = cursor.fetchall()
+                    
+                    if existing_products:
+                        logging.warning(f"⚠️  Found {len(existing_products)} similar products for '{tag_name_clean}': {[p[0] or p[1] for p in existing_products[:3]]}")
+                    else:
+                        logging.error(f"❌ Product '{tag_name_clean}' not found in database after all search strategies.")
+                        # List some sample product names from database for debugging
+                        cursor.execute('SELECT "Product Name*" FROM products WHERE "Product Name*" IS NOT NULL AND "Product Name*" != "" LIMIT 10')
+                        sample_products = cursor.fetchall()
+                        if sample_products:
+                            sample_names = [p[0] for p in sample_products if p[0]]
+                            logging.info(f"📋 Sample product names in database: {sample_names}")
+                            # Check if any sample names are similar
+                            tag_words = set(tag_name_clean.lower().split())
+                            for sample in sample_names[:5]:
+                                sample_words = set(str(sample).lower().split())
+                                if tag_words.intersection(sample_words):
+                                    logging.info(f"💡 Found potentially related product: '{sample}' (shares words: {tag_words.intersection(sample_words)})")
+                        else:
+                            logging.warning(f"⚠️  Database appears to be empty or has no product names")
+            
+            # FIRST: Update by exact product name (most specific)
             # Try exact match first (including normalized_name)
             cursor.execute('''
                 UPDATE products
@@ -8926,28 +8983,81 @@ def update_lineage():
         # Log summary
         logging.info(f"✅ LINEAGE UPDATE COMPLETE: {products_updated} DB, {updated_count} Excel, verified={verification_passed}")
         
-        # Only fail if nothing was updated AND verification failed
-        # CRITICAL FIX: Allow success even if verification didn't run (e.g., if database was updated)
+        # CRITICAL FIX: Return error if no products were updated
         if products_updated == 0:
-            # Try to verify if product exists in database
+            # Try to verify if product exists in database using multiple search strategies
             verification_passed = False
+            product_found = False
+            similar_products = []
+            
             try:
                 verify_conn = product_db._get_connection()
                 verify_cursor = verify_conn.cursor()
+                
+                # Try exact match
+                tag_name_clean = str(tag_name).strip()
+                try:
+                    normalized_name = product_db._normalize_product_name(tag_name_clean) if hasattr(product_db, '_normalize_product_name') else tag_name_clean.lower().strip()
+                except:
+                    normalized_name = tag_name_clean.lower().strip()
+                
                 verify_cursor.execute('''
-                    SELECT COUNT(*) FROM products 
+                    SELECT "Product Name*", "ProductName" FROM products 
                     WHERE "Product Name*" = ? OR "ProductName" = ? OR normalized_name = ?
-                ''', (tag_name, tag_name, product_db._normalize_product_name(tag_name) if hasattr(product_db, '_normalize_product_name') else tag_name.lower().strip()))
-                count = verify_cursor.fetchone()[0]
-                if count == 0:
+                    LIMIT 5
+                ''', (tag_name_clean, tag_name_clean, normalized_name))
+                results = verify_cursor.fetchall()
+                
+                if results:
+                    product_found = True
+                    similar_products = [r[0] or r[1] for r in results if r[0] or r[1]]
+                else:
+                    # Try case-insensitive match
+                    tag_name_lower = tag_name_clean.lower()
+                    verify_cursor.execute('''
+                        SELECT "Product Name*", "ProductName" FROM products 
+                        WHERE LOWER(TRIM("Product Name*")) = ? 
+                           OR LOWER(TRIM("ProductName")) = ?
+                        LIMIT 5
+                    ''', (tag_name_lower, tag_name_lower))
+                    results = verify_cursor.fetchall()
+                    
+                    if results:
+                        product_found = True
+                        similar_products = [r[0] or r[1] for r in results if r[0] or r[1]]
+                    else:
+                        # Try partial match
+                        verify_cursor.execute('''
+                            SELECT "Product Name*", "ProductName" FROM products 
+                            WHERE "Product Name*" LIKE ? OR "ProductName" LIKE ?
+                            LIMIT 5
+                        ''', (f'%{tag_name_clean}%', f'%{tag_name_clean}%'))
+                        results = verify_cursor.fetchall()
+                        
+                        if results:
+                            similar_products = [r[0] or r[1] for r in results if r[0] or r[1]]
+                
+                verify_cursor.close()
+                
+                if not product_found:
+                    error_msg = f'Product "{tag_name}" not found in database.'
+                    if similar_products:
+                        error_msg += f' Similar products found: {", ".join(similar_products[:3])}'
+                    else:
+                        error_msg += ' Please check the product name and ensure the product exists in the database.'
+                    
                     logging.error(f"❌ LINEAGE UPDATE FAILED: Product '{tag_name}' not found in database")
+                    if similar_products:
+                        logging.info(f"💡 Found similar products: {similar_products[:3]}")
+                    
                     return jsonify({
                         'success': False,
-                        'error': f'Product "{tag_name}" not found in database. Please check the product name.',
+                        'error': error_msg,
                         'products_updated': 0,
                         'verification_passed': False,
                         'tag_name': tag_name,
-                        'new_lineage': new_lineage
+                        'new_lineage': new_lineage,
+                        'similar_products': similar_products[:5] if similar_products else []
                     }), 400
                 else:
                     logging.warning(f"⚠️  Product exists but update returned 0 rows. This might be a database issue.")
