@@ -2370,6 +2370,11 @@ class ExcelProcessor:
                 self.df.reset_index(drop=True, inplace=True)
                 self.logger.debug(f"Ratio_or_THC_CBD values: {self.df['Ratio_or_THC_CBD'].head()}")
 
+                # Guard: Ensure self.df is not None and not empty before proceeding
+                if self.df is None or self.df.empty:
+                    self.logger.error("Cannot process Product Strain: self.df is None or empty")
+                    return False
+                
                 # Ensure Product Strain exists and is categorical
                 if "Product Strain" not in self.df.columns:
                     self.df["Product Strain"] = ""
@@ -2438,31 +2443,39 @@ class ExcelProcessor:
                 )
                 
                 # Check if description, product name, or ratio contains cannabinoids or ":"
-                description_cannabinoid_mask = (
-                    self.df["Description"].str.contains(r"\b(?:CBD|CBC|CBN|CBG)\b", case=False, na=False) |
-                    self.df["Description"].str.contains(":", na=False)
-                )
-                # Check if Product Name column exists (it might have different naming)
-                product_name_cannabinoid_mask = pd.Series([False] * len(self.df), index=self.df.index)
-                if "Product Name*" in self.df.columns:
-                    product_name_cannabinoid_mask = (
-                        self.df["Product Name*"].str.contains(r"\b(?:CBD|CBC|CBN|CBG)\b", case=False, na=False) |
-                        self.df["Product Name*"].str.contains(":", na=False)
+                # Guard: Ensure self.df is valid before proceeding
+                if self.df is None or self.df.empty:
+                    self.logger.error("Cannot process cannabinoid masks: self.df is None or empty")
+                    # Skip this section if df is invalid
+                    description_cannabinoid_mask = pd.Series([False], dtype=bool)
+                    product_name_cannabinoid_mask = pd.Series([False], dtype=bool)
+                    ratio_cannabinoid_mask = pd.Series([False], dtype=bool)
+                else:
+                    description_cannabinoid_mask = (
+                        self.df["Description"].str.contains(r"\b(?:CBD|CBC|CBN|CBG)\b", case=False, na=False) |
+                        self.df["Description"].str.contains(":", na=False)
                     )
-                elif "Product Name" in self.df.columns:
-                    product_name_cannabinoid_mask = (
-                        self.df["Product Name"].str.contains(r"\b(?:CBD|CBC|CBN|CBG)\b", case=False, na=False) |
-                        self.df["Product Name"].str.contains(":", na=False)
+                    # Check if Product Name column exists (it might have different naming)
+                    product_name_cannabinoid_mask = pd.Series([False] * len(self.df), index=self.df.index)
+                    if "Product Name*" in self.df.columns:
+                        product_name_cannabinoid_mask = (
+                            self.df["Product Name*"].str.contains(r"\b(?:CBD|CBC|CBN|CBG)\b", case=False, na=False) |
+                            self.df["Product Name*"].str.contains(":", na=False)
+                        )
+                    elif "Product Name" in self.df.columns:
+                        product_name_cannabinoid_mask = (
+                            self.df["Product Name"].str.contains(r"\b(?:CBD|CBC|CBN|CBG)\b", case=False, na=False) |
+                            self.df["Product Name"].str.contains(":", na=False)
+                        )
+                    elif "Product_Name" in self.df.columns:
+                        product_name_cannabinoid_mask = (
+                            self.df["Product_Name"].str.contains(r"\b(?:CBD|CBC|CBN|CBG)\b", case=False, na=False) |
+                            self.df["Product_Name"].str.contains(":", na=False)
+                        )
+                    ratio_cannabinoid_mask = (
+                        self.df["Ratio"].str.contains(r"\b(?:CBD|CBC|CBN|CBG)\b", case=False, na=False) |
+                        self.df["Ratio"].str.contains(":", na=False)
                     )
-                elif "Product_Name" in self.df.columns:
-                    product_name_cannabinoid_mask = (
-                        self.df["Product_Name"].str.contains(r"\b(?:CBD|CBC|CBN|CBG)\b", case=False, na=False) |
-                        self.df["Product_Name"].str.contains(":", na=False)
-                    )
-                ratio_cannabinoid_mask = (
-                    self.df["Ratio"].str.contains(r"\b(?:CBD|CBC|CBN|CBG)\b", case=False, na=False) |
-                    self.df["Ratio"].str.contains(":", na=False)
-                )
                 cannabinoid_mask = description_cannabinoid_mask | product_name_cannabinoid_mask | ratio_cannabinoid_mask
                 
                 # Apply CBD Blend to non-edible products (including tinctures) with no strain that contain cannabinoids or ":"
