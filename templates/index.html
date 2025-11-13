@@ -586,25 +586,43 @@
       let isConfirmationStale = false;
       if (confirmedTimestamp) {
         const timestamp = parseInt(confirmedTimestamp, 10);
-        const now = Date.now();
-        const hoursSinceConfirmation = (now - timestamp) / (1000 * 60 * 60);
-        const MAX_CONFIRMATION_AGE_HOURS = 24; // Require re-confirmation after 24 hours
-        isConfirmationStale = hoursSinceConfirmation > MAX_CONFIRMATION_AGE_HOURS;
-        
-        console.log('🔍 Confirmation age check:', {
-          timestamp: timestamp,
-          now: now,
-          hoursSinceConfirmation: hoursSinceConfirmation.toFixed(2),
-          isStale: isConfirmationStale
-        });
-        
-        // If stale, clear localStorage
-        if (isConfirmationStale) {
-          console.log('⚠️ Confirmation is stale (older than 24 hours), clearing localStorage...');
+        if (isNaN(timestamp)) {
+          // Invalid timestamp, clear everything
+          console.log('⚠️ Invalid timestamp in localStorage, clearing...');
           localStorage.removeItem('store_confirmed');
           localStorage.removeItem('last_confirmed_store');
           localStorage.removeItem('store_confirmed_timestamp');
+          isConfirmationStale = true;
+        } else {
+          const now = Date.now();
+          const hoursSinceConfirmation = (now - timestamp) / (1000 * 60 * 60);
+          const MAX_CONFIRMATION_AGE_HOURS = 24; // Require re-confirmation after 24 hours
+          isConfirmationStale = hoursSinceConfirmation > MAX_CONFIRMATION_AGE_HOURS;
+          
+          console.log('🔍 Confirmation age check:', {
+            timestamp: timestamp,
+            now: now,
+            hoursSinceConfirmation: hoursSinceConfirmation.toFixed(2),
+            isStale: isConfirmationStale
+          });
+          
+          // If stale, clear localStorage
+          if (isConfirmationStale) {
+            console.log('⚠️ Confirmation is stale (older than 24 hours), clearing localStorage...');
+            localStorage.removeItem('store_confirmed');
+            localStorage.removeItem('last_confirmed_store');
+            localStorage.removeItem('store_confirmed_timestamp');
+          }
         }
+      }
+      
+      // AGGRESSIVE FIX: If localStorage has a value but userConfirmedStore is not exactly 'true', clear it
+      if (userConfirmedStore && userConfirmedStore !== 'true') {
+        console.log('⚠️ Invalid store_confirmed value (not "true"), clearing localStorage...');
+        localStorage.removeItem('store_confirmed');
+        localStorage.removeItem('last_confirmed_store');
+        localStorage.removeItem('store_confirmed_timestamp');
+        isConfirmationStale = true;
       }
       
       // CRITICAL: If no localStorage confirmation OR confirmation is stale, show modal IMMEDIATELY without checking backend
@@ -990,17 +1008,18 @@
           });
       };
       
-      // Only call performCheck if we have localStorage confirmation
-      // If no confirmation, the code above already showed the modal and returned
-      if (userConfirmedStore && confirmedTimestamp) {
-        console.log('✅ Found explicit store confirmation in localStorage:', lastConfirmedStore);
-        // User has confirmed store, proceed with backend check
+      // Only call performCheck if we have fresh localStorage confirmation
+      // If no confirmation or stale, the code above already showed the modal and returned
+      if (userConfirmedStore === 'true' && confirmedTimestamp && lastConfirmedStore && !isConfirmationStale) {
+        console.log('✅ Found fresh, explicit store confirmation in localStorage:', lastConfirmedStore);
+        // User has confirmed store, proceed with backend check to validate it matches
         performCheck();
       } else {
-        // No confirmation - modal should already be shown by code above
-        // But if we somehow got here, ensure performCheck runs to verify
-        console.log('⚠️ No explicit store confirmation - modal should be shown, but verifying with backend...');
-        performCheck();
+        // No confirmation or stale - modal should already be shown by code above
+        // Don't call performCheck here - modal is already shown and we should wait for user selection
+        console.log('⚠️ No valid store confirmation - modal is shown, waiting for user selection...');
+        // Do NOT call performCheck() - user must select store via modal first
+        return;
       }
     }
     
