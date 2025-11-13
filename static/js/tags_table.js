@@ -34,8 +34,9 @@ const getUniqueLineages = () => {
 };
 
 function createTagRow(tag) {
-  // Always use normalized 'Lineage' field from backend if present
-  const lineage = tag.Lineage || tag.lineage || tag.currentLineage || tag.canonical_lineage || 'MIXED';
+  // CRITICAL: Use same pipeline as backend - prefer canonical_lineage/currentLineage (from DB) over Lineage
+  // This ensures UI lineages match database (strains.canonical_lineage is source of truth)
+  const lineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || 'MIXED';
     const dohStatus = tag.DOH || tag['DOH Compliant (Yes/No)'] || 'No';
     
     // For JSON matched tags and educated guess tags, prioritize the original display information over derived product names
@@ -118,8 +119,9 @@ class TagsTable {
 
   // Render a tag row as a div with an inline dropdown for lineage and DOH
   static createTagRow(tag, isSelected = false) {
-  // Always use normalized 'Lineage' field from backend if present
-  const lineage = tag.Lineage || tag.lineage || tag.currentLineage || tag.canonical_lineage || 'MIXED';
+  // CRITICAL: Use same pipeline as backend - prefer canonical_lineage/currentLineage (from DB) over Lineage
+  // This ensures UI lineages match database (strains.canonical_lineage is source of truth)
+  const lineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || 'MIXED';
     const dohStatus = tag.DOH || tag['DOH Compliant (Yes/No)'] || 'No';
     console.log('DOH Status for tag:', tag['Product Name*'] || tag.ProductName, '=', dohStatus); // Debug log
     

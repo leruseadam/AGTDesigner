@@ -909,6 +909,31 @@ const TagManager = {
     initialDataRetryDelays: [1500, 3500, 6000, 10000],
     isGenerating: false, // Add generation lock flag
 
+    // Helper function to find tags in selected tags list, preserving tags from multiple filters
+    // CRITICAL FIX: Use originalTags first to find ALL selected tags, not just filtered ones
+    getSelectedTagObjects() {
+        return this.state.persistentSelectedTags.map(name => {
+            // First try to find in originalTags (all tags regardless of filters)
+            let tag = this.state.originalTags.find(t => t['Product Name*'] === name);
+            // If not found in originalTags, try current tags (filtered view)
+            if (!tag) {
+                tag = this.state.tags.find(t => t['Product Name*'] === name);
+            }
+            // If still not found, create minimal tag object to preserve selection
+            if (!tag) {
+                verboseLog(`Warning: Selected tag '${name}' not found in state, creating minimal object`);
+                tag = {
+                    'Product Name*': name,
+                    'Product Brand': 'Unknown',
+                    'Vendor': 'Unknown',
+                    'Product Type*': 'Unknown',
+                    'Lineage': 'MIXED'
+                };
+            }
+            return tag;
+        }).filter(Boolean);
+    },
+
     clearInitialDataRetry() {
         if (this.state.initialDataRetryTimer) {
             clearTimeout(this.state.initialDataRetryTimer);
@@ -1323,81 +1348,150 @@ const TagManager = {
             // Use ORIGINAL tags for most filters (not filtered tags)
             const tagsForOptions = tagsToFilter; // Use full tag list
             
-            tagsForOptions.forEach(tag => {
+            // PERFORMANCE: Process tags efficiently - optimize CBD detection
+            for (let i = 0; i < tagsForOptions.length; i++) {
+                const tag = tagsForOptions[i];
+                
                 // Always add vendor options (show all vendors)
-                if (tag.Vendor || tag.vendor) availableOptions.vendor.add((tag.Vendor || tag.vendor || '').toString().trim());
+                const vendor = (tag.Vendor || tag.vendor || '').toString().trim();
+                if (vendor) availableOptions.vendor.add(vendor);
                 
                 // Always add brand options (show all brands)
-                if (tag['Product Brand'] || tag.productBrand) availableOptions.brand.add((tag['Product Brand'] || tag.productBrand || '').toString().trim());
+                const brand = (tag['Product Brand'] || tag.productBrand || '').toString().trim();
+                if (brand) availableOptions.brand.add(brand);
                 
                 // Always add product type options (show all types)
-                if (tag['Product Type*'] || tag.productType) {
-                    const productType = (tag['Product Type*'] || tag.productType || '').toString().trim();
+                const productType = (tag['Product Type*'] || tag.productType || '').toString().trim();
+                if (productType) {
                     const normalizedType = normalizeProductType(productType);
                     if (normalizedType) availableOptions.productType.add(normalizedType);
                 }
                 
                 // Always add lineage options (show all lineages)
-                const rawLineage = (tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '').toString().trim();
+                const rawLineage = (tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || '').toString().trim();
                 if (rawLineage) {
                     availableOptions.lineage.add(rawLineage);
                 }
+                
+                // PERFORMANCE: Optimize CBD flag detection - single pass with early exit
                 const nameLower = (tag['Product Name*'] || tag.ProductName || '').toString().toLowerCase();
-                const descLower = (tag.Description || '').toString().toLowerCase();
-                const brandLower = (tag['Product Brand'] || tag.productBrand || '').toString().toLowerCase();
-                const ratioLower = (tag.Ratio || tag['Ratio_or_THC_CBD'] || '').toString().toLowerCase();
                 const typeLower = (tag['Product Type*'] || tag.productType || '').toString().toLowerCase();
-                const hasCbdFlag = ['cbd', 'cbg', 'cbn', 'cbc'].some(token =>
-                    (rawLineage && rawLineage.toLowerCase().includes(token)) ||
-                    nameLower.includes(token) ||
-                    descLower.includes(token) ||
-                    brandLower.includes(token) ||
-                    ratioLower.includes(token) ||
-                    typeLower.includes('high cbd') ||
-                    typeLower.includes('cbd')
-                );
+                const hasCbdFlag = (rawLineage && (rawLineage.toLowerCase().includes('cbd') || rawLineage.toLowerCase().includes('cbg') || rawLineage.toLowerCase().includes('cbn') || rawLineage.toLowerCase().includes('cbc'))) ||
+                    nameLower.includes('cbd') || nameLower.includes('cbg') || nameLower.includes('cbn') || nameLower.includes('cbc') ||
+                    typeLower.includes('high cbd') || typeLower.includes('cbd');
                 if (hasCbdFlag) {
                     availableOptions.lineage.add('CBD_BLEND');
                 }
                 
                 // Always add DOH options (show all)
-                if (tag.DOH || tag.doh) availableOptions.doh.add((tag.DOH || tag.doh || '').toString().trim());
+                const doh = (tag.DOH || tag.doh || '').toString().trim();
+                if (doh) availableOptions.doh.add(doh);
                 
                 // Always add high CBD options (show all)
-                const tagProductType = (tag['Product Type*'] || tag.productType || '').toString().trim().toLowerCase();
-                const isHighCbd = tagProductType.startsWith('high cbd');
-                if (isHighCbd) {
+                if (typeLower.startsWith('high cbd')) {
                     availableOptions.highCbd.add('High CBD Products');
-                } else if (tagProductType) {
+                } else if (typeLower) {
                     availableOptions.highCbd.add('Non-High CBD Products');
                 }
-                
-            });
+            }
             
             // WEIGHT FILTER: Use filtered tags (user preference - weight should be context-aware)
             // Only show weights that are available given current filter selections
-            filteredTags.forEach(tag => {
+            for (let i = 0; i < filteredTags.length; i++) {
+                const tag = filteredTags[i];
                 // CRITICAL FIX: Check all possible weight field variations for options generation
-                if (tag['Weight*'] || tag.weight || tag.weightWithUnits || tag.WeightWithUnits || tag.WeightUnits || tag.CombinedWeight) {
-                    // Always use the combined value for display and filtering - check all possible sources
-                    const combined = (tag.weightWithUnits || tag.WeightWithUnits || tag.WeightUnits || 
-                                    tag.CombinedWeight || tag['Weight*'] || tag.weight).toString().trim();
-                    if (combined) availableOptions.weight.add(combined);
+                const combined = (tag.weightWithUnits || tag.WeightWithUnits || tag.WeightUnits || 
+                                tag.CombinedWeight || tag['Weight*'] || tag.weight);
+                if (combined) {
+                    const combinedStr = combined.toString().trim();
+                    if (combinedStr) availableOptions.weight.add(combinedStr);
                 }
+            }
+            
+            // PERFORMANCE: Cache the extracted options for future use
+            this._cachedFilterOptions = availableOptions;
+            this._cachedFilterOptionsHash = tagsHash;
+            this._cachedFilterOptionsTagsLength = tagsToFilter.length;
+
+            // PERFORMANCE: Defer DOM updates to next frame to avoid blocking
+            requestAnimationFrame(() => {
+                this._updateFilterDropdowns(availableOptions, currentFilters);
             });
+        } catch (error) {
+            console.error('Error updating filter options:', error);
+        }
+    },
 
-            // Update each filter dropdown with available options
-            const filterFieldMap = {
-                vendor: 'vendorFilter',
-                brand: 'brandFilter',
-                productType: 'productTypeFilter',
-                lineage: 'lineageFilter',
-                weight: 'weightFilter',
-                doh: 'dohFilter',
-                highCbd: 'highCbdFilter'
-            };
+    _applyCachedFilterOptions() {
+        // Get current filter values
+        const currentFilters = {
+            vendor: document.getElementById('vendorFilter')?.value || '',
+            brand: document.getElementById('brandFilter')?.value || '',
+            productType: document.getElementById('productTypeFilter')?.value || '',
+            lineage: document.getElementById('lineageFilter')?.value || '',
+            weight: document.getElementById('weightFilter')?.value || '',
+            doh: document.getElementById('dohFilter')?.value || '',
+            highCbd: document.getElementById('highCbdFilter')?.value || ''
+        };
+        
+        // Get filtered tags for weight filter
+        const tagsToFilter = this.state.originalTags.length > 0 ? this.state.originalTags : this.state.tags;
+        const hasVendorFilter = currentFilters.vendor && currentFilters.vendor.trim() !== '' && currentFilters.vendor.toLowerCase() !== 'all';
+        const hasOtherFilters = Object.entries(currentFilters).some(([key, value]) => 
+            key !== 'vendor' && value && value.trim() !== '' && value.toLowerCase() !== 'all'
+        );
+        const shouldLimitOptions = hasOtherFilters || !hasVendorFilter;
+        
+        // Apply filters to get weight options
+        const filteredTags = shouldLimitOptions ? tagsToFilter.filter(tag => {
+            if (currentFilters.vendor && currentFilters.vendor.trim() !== '' && currentFilters.vendor.toLowerCase() !== 'all') {
+                const tagVendor = (tag.Vendor || tag.vendor || '').toString().trim();
+                if (tagVendor.toLowerCase() !== currentFilters.vendor.toLowerCase()) return false;
+            }
+            if (currentFilters.brand && currentFilters.brand.trim() !== '' && currentFilters.brand.toLowerCase() !== 'all') {
+                const tagBrand = (tag['Product Brand'] || tag.productBrand || '').toString().trim();
+                if (tagBrand.toLowerCase() !== currentFilters.brand.toLowerCase()) return false;
+            }
+            if (currentFilters.productType && currentFilters.productType.trim() !== '' && currentFilters.productType.toLowerCase() !== 'all') {
+                const tagProductType = (tag['Product Type*'] || tag.productType || '').toString().trim();
+                const normalizedTagProductType = normalizeProductType(tagProductType);
+                if (normalizedTagProductType.toLowerCase() !== currentFilters.productType.toLowerCase()) return false;
+            }
+            if (currentFilters.lineage && currentFilters.lineage.trim() !== '' && currentFilters.lineage.toLowerCase() !== 'all') {
+                const tagLineage = (tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || '').toString().trim();
+                if (tagLineage.toLowerCase() !== currentFilters.lineage.toLowerCase()) return false;
+            }
+            return true;
+        }) : tagsToFilter;
+        
+        // Extract weight options from filtered tags
+        const weightOptions = new Set();
+        for (let i = 0; i < filteredTags.length; i++) {
+            const tag = filteredTags[i];
+            const combined = (tag.weightWithUnits || tag.WeightWithUnits || tag.WeightUnits || 
+                            tag.CombinedWeight || tag['Weight*'] || tag.weight);
+            if (combined) {
+                const combinedStr = combined.toString().trim();
+                if (combinedStr) weightOptions.add(combinedStr);
+            }
+        }
+        
+        const availableOptions = { ...this._cachedFilterOptions, weight: weightOptions };
+        this._updateFilterDropdowns(availableOptions, currentFilters);
+    },
 
-            Object.entries(filterFieldMap).forEach(([filterType, filterId]) => {
+    _updateFilterDropdowns(availableOptions, currentFilters) {
+        const filterFieldMap = {
+            vendor: 'vendorFilter',
+            brand: 'brandFilter',
+            productType: 'productTypeFilter',
+            lineage: 'lineageFilter',
+            weight: 'weightFilter',
+            doh: 'dohFilter',
+            highCbd: 'highCbdFilter'
+        };
+
+        Object.entries(filterFieldMap).forEach(([filterType, filterId]) => {
                 const filterElement = document.getElementById(filterId);
                 if (!filterElement) {
                     return;
@@ -1462,15 +1556,10 @@ const TagManager = {
                     }
                 }
             });
-
-        } catch (error) {
-            console.error('Error updating filter options:', error);
-        }
     },
 
-    applyFilters() {
-        verboseLog('🔍 applyFilters() called');
-        console.trace('Call stack for applyFilters');
+    applyFilters(immediate = false) {
+        verboseLog(`🔍 applyFilters() called (immediate: ${immediate})`);
         // USER PREFERENCE: Scroll to top when filter is applied (don't preserve position)
         // Fast path: show all if no filters (Mac-like speed)
         const vendorFilter = document.getElementById('vendorFilter')?.value || '';
@@ -1492,7 +1581,12 @@ const TagManager = {
         if (allFiltersAll) {
             verboseLog('🔍 All filters empty - showing all tags');
             this.state.filterCache = null;
-            this.debouncedUpdateAvailableTags(this.state.originalTags, null);
+            // Use immediate update if requested, otherwise debounced
+            if (immediate) {
+                this._updateAvailableTags(this.state.originalTags, null);
+            } else {
+                this.debouncedUpdateAvailableTags(this.state.originalTags, null);
+            }
             this.renderActiveFilters();
             // USER PREFERENCE: Scroll to top after clearing filters
             requestAnimationFrame(() => {
@@ -1515,7 +1609,12 @@ const TagManager = {
         // Check if we have cached results for this exact filter combination
         if (this.state.filterCache && this.state.filterCache.key === filterKey) {
             // Always pass original tags to preserve persistent selections
-            this.debouncedUpdateAvailableTags(this.state.originalTags, this.state.filterCache.result);
+            // Use immediate update if requested, otherwise debounced
+            if (immediate) {
+                this._updateAvailableTags(this.state.originalTags, this.state.filterCache.result);
+            } else {
+                this.debouncedUpdateAvailableTags(this.state.originalTags, this.state.filterCache.result);
+            }
             this.renderActiveFilters();
             // USER PREFERENCE: Scroll to top after applying cached filter
             requestAnimationFrame(() => {
@@ -1657,9 +1756,14 @@ const TagManager = {
         };
         
         // Always pass original tags to preserve persistent selections, with filtered tags for display
-        // Reduced logging to prevent console spam
-        // verboseLog('applyFilters - calling debouncedUpdateAvailableTags with filteredTags length:', filteredTags.length);
-        this.debouncedUpdateAvailableTags(this.state.originalTags, filteredTags);
+        // Use immediate update if requested (for filter changes), otherwise debounced (for search)
+        if (immediate) {
+            // Immediate update for instant filter response
+            this._updateAvailableTags(this.state.originalTags, filteredTags);
+        } else {
+            // Debounced update for search and other operations
+            this.debouncedUpdateAvailableTags(this.state.originalTags, filteredTags);
+        }
         
         // Update selected tags to also respect the current filters
         const selectedTagObjects = this.state.persistentSelectedTags.map(name => {
@@ -2394,7 +2498,12 @@ const TagManager = {
                 
                 availableCheckboxes.forEach(checkbox => {
                     checkbox.checked = isChecked;
-                    const tag = this.state.tags.find(t => t['Product Name*'] === checkbox.value);
+                    // CRITICAL FIX: Look in originalTags first to find tags regardless of filters
+                    let tag = this.state.originalTags.find(t => t['Product Name*'] === checkbox.value);
+                    // If not found in originalTags, try current tags (filtered view)
+                    if (!tag) {
+                        tag = this.state.tags.find(t => t['Product Name*'] === checkbox.value);
+                    }
                     if (tag) {
                         if (isChecked) {
                             if (!this.state.persistentSelectedTags.includes(tag['Product Name*'])) {
@@ -2413,10 +2522,8 @@ const TagManager = {
                 this.state.selectedTags = new Set(this.state.persistentSelectedTags);
                 
                 // Update selected tags display
-                const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
-                    this.state.tags.find(t => t['Product Name*'] === name)
-                ).filter(Boolean);
-                
+                // CRITICAL FIX: Use helper function to find ALL selected tags, preserving tags from multiple filters
+                const selectedTagObjects = this.getSelectedTagObjects();
                 this.updateSelectedTags(selectedTagObjects);
                 
                 // Update available tags display to reflect selection changes
@@ -2642,9 +2749,8 @@ const TagManager = {
                     }
                 });
                 this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
-                    this.state.tags.find(t => t['Product Name*'] === name)
-                ).filter(Boolean);
+                // CRITICAL FIX: Use helper function to find ALL selected tags, preserving tags from multiple filters
+                const selectedTagObjects = this.getSelectedTagObjects();
                 this.updateSelectedTags(selectedTagObjects);
                 this.efficientlyUpdateAvailableTagsDisplay();
                 // Restore scroll after all DOM updates complete
@@ -3036,8 +3142,9 @@ const TagManager = {
         // Set data-lineage attribute for CSS coloring on both row and tagElement
         // CRITICAL FIX: For JSON matched tags, prioritize the Lineage field from the matched database data
         let lineage;
-        // Always prefer processed lineage provided by backend alignment
-        lineage = tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || tag['Lineage*'] || 'MIXED';
+        // CRITICAL: Use same pipeline as backend - prefer canonical_lineage/currentLineage (from DB) over Lineage
+        // This ensures UI lineages match database (strains.canonical_lineage is source of truth)
+        lineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || tag['Lineage*'] || 'MIXED';
         
         // DEBUG: Log lineage resolution for selected tags
         if (isForSelectedTags) {
@@ -4645,10 +4752,8 @@ const TagManager = {
                 this.state.selectedTags = new Set(this.state.persistentSelectedTags);
                 
                 // Update selected tags display
-                const selectedTagObjects = Array.from(this.state.persistentSelectedTags).map(name =>
-                    this.state.tags.find(t => t['Product Name*'] === name)
-                ).filter(Boolean);
-                
+                // CRITICAL FIX: Use helper function to find ALL selected tags, preserving tags from multiple filters
+                const selectedTagObjects = this.getSelectedTagObjects();
                 this.updateSelectedTags(selectedTagObjects);
                 
                 // Efficiently update available tags visibility without full rebuild
@@ -4750,10 +4855,8 @@ const TagManager = {
                 this.state.selectedTags = new Set(this.state.persistentSelectedTags);
                 
                 // Update selected tags display
-                const selectedTagObjects = Array.from(this.state.persistentSelectedTags).map(name =>
-                    this.state.tags.find(t => t['Product Name*'] === name)
-                ).filter(Boolean);
-                
+                // CRITICAL FIX: Use helper function to find ALL selected tags, preserving tags from multiple filters
+                const selectedTagObjects = this.getSelectedTagObjects();
                 this.updateSelectedTags(selectedTagObjects);
                 
                 // FIXED: Use efficient update instead of full rebuild to preserve filters and scroll
@@ -5447,14 +5550,17 @@ const TagManager = {
             
             verboseLog(`Fetched ${tags.length} available tags`);
 
-            // Normalize lineage fields so UI consistently prefers processed lineage
+            // Normalize lineage fields so UI consistently prefers database lineage (same pipeline as backend)
+            // CRITICAL: Prefer canonical_lineage/currentLineage (from DB) over Lineage to ensure UI matches database
             const normalizeLineageFields = (tag) => {
                 try {
-                    const lin = (tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '').toString().trim();
+                    // Use same order as backend pipeline - canonical_lineage/currentLineage first (from DB)
+                    const lin = (tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || '').toString().trim();
                     if (lin) {
-                        if (!tag.currentLineage) tag.currentLineage = lin;
-                        if (!tag.canonical_lineage) tag.canonical_lineage = lin;
-                        if (!tag.Lineage) tag.Lineage = lin;
+                        // Set all fields to the same value for consistency (DB value is source of truth)
+                        tag.canonical_lineage = lin;
+                        tag.currentLineage = lin;
+                        tag.Lineage = lin;
                     }
                 } catch (e) { /* noop */ }
                 return tag;
@@ -5470,6 +5576,11 @@ const TagManager = {
             // Clear existing state and set new data
             this.state.tags = [...tags];
             this.state.originalTags = [...tags]; // Store original tags for validation
+            
+            // PERFORMANCE: Clear filter cache when tags change
+            this._cachedFilterOptions = null;
+            this._cachedFilterOptionsHash = null;
+            this._cachedFilterOptionsTagsLength = null;
             
             // Preserve selected tags if they exist and are valid (optimized)
             const currentSelectedTags = [...this.state.persistentSelectedTags];
@@ -5712,12 +5823,16 @@ const TagManager = {
         // Don't apply filters immediately - let checkForExistingData handle it
         // this.applyFilters();
         
-        // Add filter change event listeners for cascading filters after filters are populated
+        // Add filter change event listeners immediately (no delay for better UX)
+        verboseLog('=== SETTING UP FILTER EVENT LISTENERS ===');
+        this.setupFilterEventListeners();
+        verboseLog('=== FILTER EVENT LISTENERS SETUP COMPLETE ===');
+        
+        // Also set up listeners after a short delay as backup (in case filters aren't ready yet)
         setTimeout(() => {
-            verboseLog('=== SETTING UP FILTER EVENT LISTENERS ===');
+            verboseLog('=== BACKUP: RE-CHECKING FILTER EVENT LISTENERS ===');
             this.setupFilterEventListeners();
-            verboseLog('=== FILTER EVENT LISTENERS SETUP COMPLETE ===');
-        }, 1000);
+        }, 100);
         
         // Add search event listeners
         this.setupSearchEventListeners();
@@ -7527,7 +7642,12 @@ const TagManager = {
                 
                 availableCheckboxes.forEach(checkbox => {
                     checkbox.checked = isChecked;
-                    const tag = this.state.tags.find(t => t['Product Name*'] === checkbox.value);
+                    // CRITICAL FIX: Look in originalTags first to find tags regardless of filters
+                    let tag = this.state.originalTags.find(t => t['Product Name*'] === checkbox.value);
+                    // If not found in originalTags, try current tags (filtered view)
+                    if (!tag) {
+                        tag = this.state.tags.find(t => t['Product Name*'] === checkbox.value);
+                    }
                     if (tag) {
                         if (isChecked) {
                             if (!this.state.persistentSelectedTags.includes(tag['Product Name*'])) {
@@ -7546,10 +7666,8 @@ const TagManager = {
                 this.state.selectedTags = new Set(this.state.persistentSelectedTags);
                 
                 // Update selected tags display
-                const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
-                    this.state.tags.find(t => t['Product Name*'] === name)
-                ).filter(Boolean);
-                
+                // CRITICAL FIX: Use helper function to find ALL selected tags, preserving tags from multiple filters
+                const selectedTagObjects = this.getSelectedTagObjects();
                 this.updateSelectedTags(selectedTagObjects);
                 
                 // Update available tags display to reflect selection changes
@@ -7853,45 +7971,74 @@ const TagManager = {
                          navigator.userAgent.toLowerCase().includes('windows');
         
         // Ultra-fast debounced filter update (Mac-like speed)
-        const fastFilterUpdate = debounce(async (filterType, value) => {
-            verboseLog(`🔥 fastFilterUpdate called for ${filterType}: ${value} (Windows: ${isWindows})`);
-            console.trace('Call stack for fastFilterUpdate');
+        // Immediate filter update function (no debounce for instant response)
+        const immediateFilterUpdate = async (filterType, value) => {
+            verboseLog(`🔥 immediateFilterUpdate called for ${filterType}: ${value}`);
             
             // CRITICAL FIX: Don't update filters during deselection
             if (this.state.isProcessingDeselection) {
-                verboseLog('🚫 SKIPPING fastFilterUpdate - currently processing deselection');
+                verboseLog('🚫 SKIPPING immediateFilterUpdate - currently processing deselection');
                 return;
             }
             
-            // Windows: Skip rendering active filters for speed
-            if (isWindows) {
-                await this.updateFilterOptions();
-                this.applyFilters();
-                // Skip renderActiveFilters() for Windows to improve performance
-            } else {
-                // Mac: Full rendering
-                await this.updateFilterOptions();
-                this.applyFilters();
-                this.renderActiveFilters();
+            // Update filter state immediately
+            const filterTypeMap = {
+                'vendor': 'vendor',
+                'brand': 'brand',
+                'productType': 'productType',
+                'lineage': 'lineage',
+                'weight': 'weight',
+                'doh': 'doh',
+                'highCbd': 'highCbd'
+            };
+            
+            const stateKey = filterTypeMap[filterType];
+            if (stateKey) {
+                this.state.filters[stateKey] = value || 'All';
             }
             
-            // Special case: DOH filter used as a bulk setter to persist "No"
-            try {
-                if (filterType === 'doh') {
-                    const dohValueUpper = (value || '').toString().trim().toUpperCase();
-                    // Treat "No"/empty/NONE as removing the DOH image and persisting 'No'
-                    if (dohValueUpper === 'NONE' || dohValueUpper === 'NO' || dohValueUpper === '') {
-                        await this.bulkUpdateDohForSelected('NONE');
-                    } else if (dohValueUpper === 'DOH' || dohValueUpper === 'THC' || dohValueUpper === 'CBD') {
-                        await this.bulkUpdateDohForSelected(dohValueUpper);
-                    }
+            // Apply filters immediately with immediate UI update (bypass debounce)
+            // Cancel any pending debounced updates to prevent delays
+            if (this.debouncedUpdateAvailableTags.cancel) {
+                this.debouncedUpdateAvailableTags.cancel();
+            }
+            
+            // Call applyFilters with immediate flag to skip debounce
+            this.applyFilters(true); // Pass true to indicate immediate update
+            
+            // Update filter options asynchronously (non-blocking) after UI update
+            Promise.resolve().then(async () => {
+                if (!isWindows) {
+                    // Mac: Update filter options and render active filters
+                    await this.updateFilterOptions();
+                    this.renderActiveFilters();
+                } else {
+                    // Windows: Just update filter options (skip renderActiveFilters for speed)
+                    await this.updateFilterOptions();
                 }
-            } catch (bulkErr) {
-                console.warn('Bulk DOH update from filter failed:', bulkErr);
+            }).catch(err => {
+                console.warn('Filter options update failed (non-critical):', err);
+            });
+            
+            // Special case: DOH filter used as a bulk setter to persist "No" (async, non-blocking)
+            if (filterType === 'doh') {
+                Promise.resolve().then(async () => {
+                    try {
+                        const dohValueUpper = (value || '').toString().trim().toUpperCase();
+                        // Treat "No"/empty/NONE as removing the DOH image and persisting 'No'
+                        if (dohValueUpper === 'NONE' || dohValueUpper === 'NO' || dohValueUpper === '') {
+                            await this.bulkUpdateDohForSelected('NONE');
+                        } else if (dohValueUpper === 'DOH' || dohValueUpper === 'THC' || dohValueUpper === 'CBD') {
+                            await this.bulkUpdateDohForSelected(dohValueUpper);
+                        }
+                    } catch (bulkErr) {
+                        console.warn('Bulk DOH update from filter failed:', bulkErr);
+                    }
+                });
             }
 
-            verboseLog(`🔥 fastFilterUpdate completed for ${filterType}`);
-        }, isWindows ? 10 : 50); // Ultra-fast debounce on Windows (10ms vs 50ms)
+            verboseLog(`🔥 immediateFilterUpdate completed for ${filterType}`);
+        };
         
         filterIds.forEach(filterId => {
             const filterElement = document.getElementById(filterId);
@@ -7914,9 +8061,9 @@ const TagManager = {
                         self.resetAllOtherFilters();
                     }
                     
-                    // Ultra-fast filter update
-                    verboseLog(`🔥 Calling fastFilterUpdate for ${filterType}: ${value}`);
-                    fastFilterUpdate(filterType, value);
+                    // Immediate filter update (no debounce for instant response)
+                    verboseLog(`🔥 Calling immediateFilterUpdate for ${filterType}: ${value}`);
+                    immediateFilterUpdate(filterType, value);
                 };
                 
                 // Only use change event for Mac-like behavior
