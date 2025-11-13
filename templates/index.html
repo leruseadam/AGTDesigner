@@ -639,18 +639,61 @@
             console.log('⚠️ NO STORE - Showing modal');
             
             if (modalElement) {
-              modalElement.style.display = 'block';
-              modalElement.classList.add('show');
-              document.body.classList.add('modal-open');
-              document.body.style.overflow = 'hidden';
-              
-              // Add backdrop
-              if (!document.querySelector('.modal-backdrop')) {
-                const backdrop = document.createElement('div');
-                backdrop.id = 'storeModalBackdrop';
-                backdrop.className = 'modal-backdrop fade show';
-                backdrop.style.zIndex = '1040';
-                document.body.appendChild(backdrop);
+              // Use Bootstrap modal if available, otherwise fall back to manual show
+              if (typeof bootstrap !== 'undefined') {
+                try {
+                  // Try to get existing instance first
+                  let modal = bootstrap.Modal.getInstance(modalElement);
+                  
+                  // If no instance exists, create a new one
+                  if (!modal) {
+                    console.log('Creating new Bootstrap modal instance for store selection...');
+                    modal = new bootstrap.Modal(modalElement, {
+                      backdrop: 'static',
+                      keyboard: false
+                    });
+                  }
+                  
+                  console.log('Showing store selection modal via Bootstrap...');
+                  modal.show();
+                  console.log('✅ Modal shown via Bootstrap');
+                } catch (bootstrapError) {
+                  console.error('❌ Error showing modal via Bootstrap, using fallback:', bootstrapError);
+                  // Fallback to manual show
+                  modalElement.style.display = 'block';
+                  modalElement.classList.add('show');
+                  modalElement.setAttribute('aria-hidden', 'false');
+                  modalElement.setAttribute('aria-modal', 'true');
+                  document.body.classList.add('modal-open');
+                  document.body.style.overflow = 'hidden';
+                  
+                  // Add backdrop
+                  if (!document.querySelector('.modal-backdrop')) {
+                    const backdrop = document.createElement('div');
+                    backdrop.id = 'storeModalBackdrop';
+                    backdrop.className = 'modal-backdrop fade show';
+                    backdrop.style.zIndex = '9998';
+                    document.body.appendChild(backdrop);
+                  }
+                }
+              } else {
+                // Bootstrap not available, use manual show
+                console.log('Bootstrap not available, using manual modal show...');
+                modalElement.style.display = 'block';
+                modalElement.classList.add('show');
+                modalElement.setAttribute('aria-hidden', 'false');
+                modalElement.setAttribute('aria-modal', 'true');
+                document.body.classList.add('modal-open');
+                document.body.style.overflow = 'hidden';
+                
+                // Add backdrop
+                if (!document.querySelector('.modal-backdrop')) {
+                  const backdrop = document.createElement('div');
+                  backdrop.id = 'storeModalBackdrop';
+                  backdrop.className = 'modal-backdrop fade show';
+                  backdrop.style.zIndex = '9998';
+                  document.body.appendChild(backdrop);
+                }
               }
             }
             
@@ -5335,7 +5378,7 @@
   <!-- Modals -->
   
   <!-- Store Selection Modal - JavaScript controls visibility after checking session -->
-  <div class="modal fade" id="storeSelectionModal" tabindex="-1" aria-labelledby="storeSelectionModalLabel" data-bs-backdrop="static" data-bs-keyboard="false" style="display: none; z-index: 9999 !important;">
+  <div class="modal fade" id="storeSelectionModal" tabindex="-1" aria-labelledby="storeSelectionModalLabel" data-bs-backdrop="static" data-bs-keyboard="false" style="z-index: 9999 !important;">
     <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
       <div class="modal-content glass-card">
         <div class="modal-header border-0" style="padding: 1.6rem 1.8rem 1rem;">
