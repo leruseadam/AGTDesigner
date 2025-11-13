@@ -2219,7 +2219,13 @@ const TagManager = {
                         weightHeader.textContent = weight;
                         weightSection.appendChild(weightHeader);
 
-                        tagArray.forEach(tag => {
+                        // Sort tags alphabetically by product name
+                        const sortedTags = [...tagArray].sort((a, b) => {
+                            const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
+                            const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
+                            return aName.localeCompare(bName);
+                        });
+                        sortedTags.forEach(tag => {
                             const tagElement = this.createTagElement(tag, false);
                             weightSection.appendChild(tagElement);
                         });
@@ -2453,8 +2459,12 @@ const TagManager = {
         // Create vendor sections
         if (!organizedTags || organizedTags.size === 0) {
             verboseLog('No organized tags, showing simple list');
-            // Fallback to simple list
-            const sortedSimple = this._sortByLikenessIfRef(tags);
+            // Fallback to simple list (sorted alphabetically by product name)
+            const sortedSimple = [...tags].sort((a, b) => {
+                const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
+                const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
+                return aName.localeCompare(bName);
+            });
             sortedSimple.forEach(tag => {
             // Use cleaned displayName for logging consistency
             const displayName = tag.displayName || tag['Product Name*'] || tag.ProductName || tag.Description || 'Unnamed Product';
@@ -2844,8 +2854,12 @@ const TagManager = {
                         }
                         weightSection.appendChild(weightContent);
 
-                        // Add individual tags (sorted by likeness if a reference name is present)
-                        const tagsToRender = this._sortByLikenessIfRef(tags);
+                        // Add individual tags (sorted alphabetically by product name)
+                        const tagsToRender = [...tags].sort((a, b) => {
+                            const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
+                            const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
+                            return aName.localeCompare(bName);
+                        });
                         tagsToRender.forEach(tag => {
                             const tagElement = this.createTagElement(tag, false);
                             weightContent.appendChild(tagElement);
@@ -3794,12 +3808,12 @@ const TagManager = {
                 lineage: newLineage
             };
             
-            // CRITICAL FIX: Add timeout to prevent hanging
+            // CRITICAL FIX: Add timeout to prevent hanging (increased to 15s to account for database operations)
             abortController = new AbortController();
             timeoutId = setTimeout(() => {
                 abortController.abort();
-                console.error(`❌ LINEAGE UPDATE TIMEOUT: Request took longer than 10 seconds`);
-            }, 10000); // 10 second timeout
+                console.error(`❌ LINEAGE UPDATE TIMEOUT: Request took longer than 15 seconds`);
+            }, 15000); // 15 second timeout (increased from 10s)
             
             const response = await fetch('/api/update-lineage', {
                 method: 'POST',

@@ -4974,11 +4974,11 @@ def get_store():
         session_server_id = session.get('store_server_id')
         if session_store and session_server_id == SERVER_INSTANCE_ID:
             logging.info("Returning store from session for get_store endpoint")
-            return {
+            return jsonify({
                 'success': True,
                 'store': session_store,
                 'source': 'session'
-            }
+            })
         
         # Check if there's a stored selection for this IP
         with _ip_store_lock:
@@ -4988,11 +4988,11 @@ def get_store():
                 if (datetime.now() - datetime.fromisoformat(store_data['timestamp']) < timedelta(hours=12) and
                     store_data.get('server_id') == SERVER_INSTANCE_ID):
                     logging.info(f"Found valid store selection: {store_data['store']}")
-                    return {
+                    return jsonify({
                         'success': True,
                         'store': store_data['store'],
                         'expires_at': (datetime.fromisoformat(store_data['timestamp']) + timedelta(hours=12)).isoformat()
-                    }
+                    })
                 else:
                     reason = "expired"
                     if store_data.get('server_id') != SERVER_INSTANCE_ID:
@@ -5002,14 +5002,16 @@ def get_store():
         
         # No valid selection found, return no store
         logging.info(f"No store found for IP {ip_address}")
-        return {
+        return jsonify({
             'success': True,
             'store': None
-        }
+        })
         
     except Exception as e:
         logging.error(f"Error getting store: {str(e)}")
-        return {'success': False, 'error': str(e)}, 500
+        import traceback
+        logging.error(f"Get store error traceback: {traceback.format_exc()}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/clear-store', methods=['POST'])
 @invalidate_cache_on_change([
@@ -8427,17 +8429,24 @@ def update_lineage():
             import sqlite3
             import time as time_module
             
-            # CRITICAL FIX: Retry logic for database locks with exponential backoff
-            max_retries = 5
-            retry_delay = 0.1
+            # CRITICAL FIX: Optimized retry logic for database locks with faster timeouts
+            max_retries = 3  # Reduced from 5 to 3 for faster failure
+            retry_delay = 0.05  # Reduced initial delay from 0.1 to 0.05
             conn = None
             cursor = None
+            connection_start_time = time_module.time()
+            connection_timeout = 3.0  # Maximum 3 seconds to get connection
             
             for attempt in range(max_retries):
+                # Check if we've exceeded connection timeout
+                if time_module.time() - connection_start_time > connection_timeout:
+                    logging.error(f"❌ Connection timeout after {time_module.time() - connection_start_time:.2f}s")
+                    raise Exception(f"Database connection timeout after {connection_timeout}s")
+                
                 try:
                     conn = product_db._get_connection()
-                    # Set timeout to prevent indefinite waiting
-                    conn.execute("PRAGMA busy_timeout = 5000")  # 5 second timeout
+                    # Set shorter timeout to prevent indefinite waiting
+                    conn.execute("PRAGMA busy_timeout = 2000")  # Reduced from 5s to 2s
                     cursor = conn.cursor()
                     
                     # Use BEGIN IMMEDIATE to get an immediate lock
@@ -8461,8 +8470,10 @@ def update_lineage():
                                 conn.close()
                             except:
                                 pass
+                        conn = None
+                        cursor = None
                         time_module.sleep(retry_delay)
-                        retry_delay *= 2  # Exponential backoff
+                        retry_delay = min(retry_delay * 1.5, 0.3)  # Slower exponential backoff, max 0.3s
                         continue
                     else:
                         # Last attempt or different error - raise it

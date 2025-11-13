@@ -502,11 +502,28 @@
     
     function updateStoreStatusFromBackend() {
       fetch('/api/get-store', {
-        credentials: 'same-origin'
+        credentials: 'same-origin',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        }
       })
-        .then(response => response.json())
+        .then(response => {
+          // Check if response is OK
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+          // Check content type
+          const contentType = response.headers.get('content-type');
+          if (!contentType || !contentType.includes('application/json')) {
+            console.warn('⚠️ Expected JSON response but got:', contentType);
+            // Return null to indicate no store (fail gracefully)
+            return null;
+          }
+          return response.json();
+        })
         .then(data => {
-          if (data.success && data.store) {
+          if (data && data.success && data.store) {
             // Update the display
             updateCurrentStoreDisplay(data.store);
             updateStoreStatus(`Store: ${data.store.replace(/_/g, ' ')}`, 'active');
@@ -517,7 +534,10 @@
           }
         })
         .catch(error => {
-          console.log('Error checking backend for store:', error);
+          // Silently handle errors - don't spam console with expected errors
+          if (error.name !== 'AbortError' && !error.message.includes('Failed to fetch')) {
+            console.log('Error checking backend for store:', error.message);
+          }
           // Don't auto-set Bothell, let checkStoreRequired handle it
         });
     }

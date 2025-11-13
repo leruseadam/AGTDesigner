@@ -10,17 +10,23 @@ if (typeof window.CLASSIC_TYPES === 'undefined') {
 // This prevents "Identifier 'CLASSIC_TYPES' has already been declared" errors
 
 // Lineage abbreviation mapping (matching Python version)
-const ABBREVIATED_LINEAGE = {
-    "SATIVA": "S",
-    "INDICA": "I", 
-    "HYBRID": "H",
-    "HYBRID/SATIVA": "H/S",
-    "HYBRID/INDICA": "H/I",
-    "CBD": "CBD",
-    "CBD_BLEND": "CBD",
-    "MIXED": "THC",
-    "PARA": "P"
-};
+// Use global ABBREVIATED_LINEAGE from main.js to avoid duplicate declaration
+// If not defined, create it as a fallback
+if (typeof window.ABBREVIATED_LINEAGE === 'undefined') {
+    window.ABBREVIATED_LINEAGE = {
+        "SATIVA": "S",
+        "INDICA": "I", 
+        "HYBRID": "H",
+        "HYBRID/SATIVA": "H/S",
+        "HYBRID/INDICA": "H/I",
+        "CBD": "CBD",
+        "CBD_BLEND": "CBD",
+        "MIXED": "THC",
+        "PARA": "P"
+    };
+}
+// Use window.ABBREVIATED_LINEAGE directly to avoid const redeclaration
+// This will reference the one from main.js if it exists, or our fallback
 
 // Use full lineage names for all dropdowns
 const getUniqueLineages = () => {
@@ -189,7 +195,7 @@ class TagsTable {
     const uniqueLineages = getUniqueLineages();
     const dropdownOptions = uniqueLineages.map(lin => {
       const selected = (lineage === lin || (lin === 'CBD' && lineage === 'CBD_BLEND')) ? 'selected' : '';
-      const displayName = ABBREVIATED_LINEAGE[lin] || lin;
+      const displayName = window.ABBREVIATED_LINEAGE[lin] || lin;
       return `<option value="${lin}" ${selected}>${displayName}</option>`;
     }).join('');
 
@@ -256,7 +262,7 @@ class TagsTable {
     const uniqueLineages = getUniqueLineages();
     const options = uniqueLineages.map(lin => {
       const selected = (currentLineage === lin || (lin === 'CBD' && currentLineage === 'CBD_BLEND')) ? 'selected' : '';
-      const displayName = ABBREVIATED_LINEAGE[lin] || lin;
+      const displayName = window.ABBREVIATED_LINEAGE[lin] || lin;
       return `<option value="${lin}" ${selected}>${displayName}</option>`;
     }).join('');
     return `
@@ -439,7 +445,7 @@ class TagsTable {
     uniqueLineages.forEach(lin => {
       const option = document.createElement('option');
       option.value = lin;
-      const displayName = ABBREVIATED_LINEAGE[lin] || lin;
+      const displayName = window.ABBREVIATED_LINEAGE[lin] || lin;
       option.textContent = displayName;
       if ((currentLineage === lin) || (lin === 'CBD' && currentLineage === 'CBD_BLEND')) {
         option.selected = true;
@@ -555,14 +561,62 @@ class TagsTable {
     // Clear existing content
     container.innerHTML = '';
     
-    // Add new tags
-    tags.forEach(tag => {
-      const tagHtml = this.createTagRow(tag, isSelected);
-      container.insertAdjacentHTML('beforeend', tagHtml);
-    });
-
-    // Add event listeners to new elements
-    this.addEventListeners(container);
+    // Performance optimization: Render tags in batches to keep UI responsive
+    // For small lists (< 200), render all at once for better performance
+    // For larger lists, use progressive rendering
+    const batchSize = tags.length > 200 ? 100 : tags.length;
+    
+    if (tags.length <= batchSize) {
+      // Small list: render all at once using DocumentFragment for efficiency
+      const fragment = document.createDocumentFragment();
+      const tempDiv = document.createElement('div');
+      
+      tags.forEach(tag => {
+        const tagHtml = this.createTagRow(tag, isSelected);
+        tempDiv.insertAdjacentHTML('beforeend', tagHtml);
+      });
+      
+      // Move all nodes from tempDiv to fragment
+      while (tempDiv.firstChild) {
+        fragment.appendChild(tempDiv.firstChild);
+      }
+      
+      container.appendChild(fragment);
+      this.addEventListeners(container);
+    } else {
+      // Large list: progressive rendering
+      let index = 0;
+      const processBatch = () => {
+        const endIndex = Math.min(index + batchSize, tags.length);
+        const fragment = document.createDocumentFragment();
+        const tempDiv = document.createElement('div');
+        
+        for (let i = index; i < endIndex; i++) {
+          const tagHtml = this.createTagRow(tags[i], isSelected);
+          tempDiv.insertAdjacentHTML('beforeend', tagHtml);
+        }
+        
+        // Move nodes to fragment and append to container
+        while (tempDiv.firstChild) {
+          fragment.appendChild(tempDiv.firstChild);
+        }
+        container.appendChild(fragment);
+        
+        // Add event listeners for this batch
+        this.addEventListeners(container);
+        
+        index = endIndex;
+        
+        // If more tags to process, schedule next batch
+        if (index < tags.length) {
+          // Use requestAnimationFrame for smooth rendering
+          requestAnimationFrame(processBatch);
+        }
+      };
+      
+      // Start processing
+      processBatch();
+    }
   }
 
   static addEventListeners(container) {
