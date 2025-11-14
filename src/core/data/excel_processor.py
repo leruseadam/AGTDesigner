@@ -88,7 +88,9 @@ def normalize_lineage(lineage: str) -> str:
         '': 'HYBRID'  # Default empty to hybrid
     }
     
-    return lineage_mapping.get(lineage_lower, 'HYBRID')
+    # If lineage text already contains something like HYBRID/INDICA, preserve it
+    normalized_default = lineage_str.upper()
+    return lineage_mapping.get(lineage_lower, normalized_default if normalized_default else 'HYBRID')
 
 
 def _generate_product_name_variants(raw_name: Any) -> List[str]:
