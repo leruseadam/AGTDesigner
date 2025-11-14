@@ -3058,27 +3058,56 @@ class ProductDatabase:
         return fuzzy_results
     
     def _normalize_lineage(self, lineage: str) -> str:
-        """Normalize lineage to proper ALL CAPS format."""
-        if not lineage:
-            return "HYBRID"  # Default to HYBRID
+        """Normalize lineage to proper ALL CAPS format without losing hybrid details."""
+        if lineage is None:
+            return "HYBRID"
         
-        lineage = str(lineage).strip().lower()
+        raw_value = str(lineage).strip()
+        if not raw_value:
+            return "HYBRID"
         
-        # Map common variations to standard ALL CAPS format
+        import re
+        
+        lowered = raw_value.lower()
+        # Normalize separators to underscores so we can match variations consistently
+        normalized = re.sub(r'[\s\-\\/]+', '_', lowered)
+        normalized = re.sub(r'_+', '_', normalized).strip('_')
+        
+        # Direct mappings for the most common lineage strings
         lineage_mapping = {
             'hybrid': 'HYBRID',
-            'indica_hybrid': 'HYBRID/INDICA',
             'indica': 'INDICA',
             'sativa': 'SATIVA',
-            'sativa_hybrid': 'HYBRID/SATIVA',
             'cbd': 'CBD',
-            'mixed': 'HYBRID',  # Default mixed to hybrid
-            'unknown': 'HYBRID',  # Default unknown to hybrid
-            'none': 'HYBRID',  # Default none to hybrid
-            '': 'HYBRID'  # Default empty to hybrid
+            'mixed': 'MIXED',
+            'unknown': 'HYBRID',
+            'none': 'HYBRID',
+            'hybrid_indica': 'HYBRID/INDICA',
+            'indica_hybrid': 'HYBRID/INDICA',
+            'indica_dominant_hybrid': 'HYBRID/INDICA',
+            'indica_dominant': 'HYBRID/INDICA',
+            'hybrid_sativa': 'HYBRID/SATIVA',
+            'sativa_hybrid': 'HYBRID/SATIVA',
+            'sativa_dominant_hybrid': 'HYBRID/SATIVA',
+            'sativa_dominant': 'HYBRID/SATIVA',
+            'hybrid_cbd': 'CBD',
+            'cbd_hybrid': 'CBD'
         }
         
-        return lineage_mapping.get(lineage, 'HYBRID')
+        if normalized in lineage_mapping:
+            return lineage_mapping[normalized]
+        
+        # Heuristic fallbacks when direct mapping failed
+        if 'indica' in normalized and 'sativa' not in normalized:
+            return 'HYBRID/INDICA'
+        if 'sativa' in normalized and 'indica' not in normalized:
+            return 'HYBRID/SATIVA'
+        if 'cbd' in normalized:
+            return 'CBD'
+        
+        # As a final fallback, return the upper-cased raw value so we keep user-provided info
+        cleaned = raw_value.upper()
+        return cleaned if cleaned else "HYBRID"
     
     def _ensure_crucial_value(self, value, fallback, field_name):
         """Ensure crucial values are not empty, providing intelligent fallbacks."""
