@@ -221,6 +221,15 @@ class ProductDatabase:
                     count = cursor.fetchone()[0]
                     if count > 0:
                         logger.info(f"Database already initialized with {count} products")
+                        try:
+                            # Even with existing data, ensure new columns are present
+                            self._add_missing_columns_safe(cursor, conn)
+                        except Exception as column_error:
+                            logger.warning(f"Could not add missing columns on existing DB: {column_error}")
+                        try:
+                            self._ensure_essential_columns_exist(cursor, conn)
+                        except Exception as essential_error:
+                            logger.warning(f"Could not ensure essential columns on existing DB: {essential_error}")
                         self._initialized = True
                         return
                 
