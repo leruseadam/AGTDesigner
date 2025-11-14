@@ -910,6 +910,73 @@ def process_chunk(args):
     # CRITICAL FIX: Only create labels for the products we have, not empty slots
     actual_num_labels = min(len(chunk), num_labels)
     
+    # OPTIMIZATION: Pre-load all lineage and strain data in batch to avoid N+1 queries
+    # This reduces 200+ queries for 100 products to just 2-3 queries total
+    product_lineage_cache = {}
+    strain_info_cache = {}
+    try:
+        from app import get_product_database, get_current_store_name
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
+        if product_db:
+            # Collect all product names and strain names from chunk
+            product_names = []
+            strain_names = set()
+            for row in chunk:
+                product_name = row.get('Product Name*', '') or row.get('ProductName', '')
+                if product_name:
+                    product_names.append(product_name)
+                strain = row.get('Product Strain', '')
+                if strain:
+                    strain_names.add(strain)
+            
+            # Batch query for product lineage
+            if product_names:
+                try:
+                    conn = product_db._get_connection()
+                    cur = conn.cursor()
+                    placeholders = ','.join(['?'] * len(product_names))
+                    batch_lineage_query = f'''
+                        SELECT "Product Name*", "Lineage"
+                        FROM products
+                        WHERE "Product Name*" IN ({placeholders})
+                        ORDER BY id DESC
+                    '''
+                    cur.execute(batch_lineage_query, product_names)
+                    for row_result in cur.fetchall():
+                        pname, lineage = row_result
+                        if lineage and str(lineage).strip() not in ['', 'None', 'nan']:
+                            product_lineage_cache[pname] = str(lineage).strip().upper()
+                except Exception as batch_err:
+                    logger.warning(f"Batch product lineage query failed: {batch_err}")
+            
+            # Batch query for strain info
+            if strain_names:
+                try:
+                    conn = product_db._get_connection()
+                    cur = conn.cursor()
+                    strain_list = list(strain_names)
+                    placeholders = ','.join(['?'] * len(strain_list))
+                    batch_strain_query = f'''
+                        SELECT strain_name, display_lineage, sovereign_lineage, canonical_lineage
+                        FROM strains
+                        WHERE strain_name IN ({placeholders})
+                    '''
+                    cur.execute(batch_strain_query, strain_list)
+                    for row_result in cur.fetchall():
+                        sname = row_result[0]
+                        preferred = row_result[1] or row_result[2] or row_result[3]
+                        if preferred:
+                            strain_info_cache[sname] = {
+                                'display_lineage': row_result[1],
+                                'sovereign_lineage': row_result[2],
+                                'canonical_lineage': row_result[3]
+                            }
+                except Exception as batch_strain_err:
+                    logger.warning(f"Batch strain info query failed: {batch_strain_err}")
+    except Exception as e:
+        logger.warning(f"Failed to pre-load lineage/strain data: {e}")
+    
     for i in range(actual_num_labels):
         label_data = {}
         if i < len(chunk):
@@ -1121,24 +1188,21 @@ def process_chunk(args):
             is_horizontal_or_double_or_vertical = orientation in {"horizontal", "double", "vertical"}
             
             # For classic types, try to get lineage from database (product-level FIRST, then strain-level)
+            # OPTIMIZATION: Use pre-loaded cache instead of individual queries
             if is_classic_type:
                 try:
-                    # CRITICAL: Use store-specific database and check product-level lineage first
-                    from app import get_product_database, get_current_store_name
-                    store_name = get_current_store_name()
-                    product_db = get_product_database(store_name)
-                    
                     # FIRST: Check for product-level lineage (preserves user changes to specific products)
                     product_name = row.get('Product Name*', '') or row.get('ProductName', '')
                     excel_lineage = str(row.get("Lineage", "")).strip()
                     if product_name:
-                        db_product_lineage = product_db.get_product_lineage(product_name)
+                        # Use cached product lineage (loaded in batch before loop)
+                        db_product_lineage = product_lineage_cache.get(product_name)
                         if db_product_lineage and str(db_product_lineage).strip() not in ['', 'None', 'nan']:
                             lineage_val = str(db_product_lineage).strip().upper()
                             logger.info(f"✅ DOCX LINEAGE: Using database lineage '{lineage_val}' for '{product_name}' (Excel had: '{excel_lineage}')")
                         elif product_strain:
-                            # FALLBACK: Check strain-level lineage
-                            strain_info = product_db.get_strain_info(product_strain)
+                            # FALLBACK: Check strain-level lineage from cache
+                            strain_info = strain_info_cache.get(product_strain)
                             if strain_info:
                                 preferred = (
                                     strain_info.get('display_lineage') or
@@ -1167,9 +1231,9 @@ def process_chunk(args):
                             else:
                                 logger.warning(f"⚠️ DOCX LINEAGE: No lineage found for '{product_name}' (no strain, Excel lineage also empty)")
                     else:
-                        # No product name, try strain-level only
+                        # No product name, try strain-level only from cache
                         if product_strain:
-                            strain_info = product_db.get_strain_info(product_strain)
+                            strain_info = strain_info_cache.get(product_strain)
                             if strain_info:
                                 preferred = (
                                     strain_info.get('display_lineage') or

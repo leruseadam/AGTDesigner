@@ -122,12 +122,6 @@
         if (data.success) {
           console.log('✅ Store set successfully:', storeValue);
 
-          // CRITICAL: Mark store as explicitly confirmed by user in localStorage
-          localStorage.setItem('store_confirmed', 'true');
-          localStorage.setItem('last_confirmed_store', storeValue);
-          localStorage.setItem('store_confirmed_timestamp', Date.now().toString());
-          console.log('✅ Store selection confirmed by user and saved to localStorage');
-
           // Persist context so the modal stays hidden after reload
           sessionStorage.setItem('store_selected_timestamp', Date.now().toString());
           sessionStorage.setItem('store_just_selected', 'true');
@@ -570,132 +564,18 @@
         return;
       }
       
-      // CRITICAL: Check if user has explicitly confirmed store selection (stored in localStorage)
-      const userConfirmedStore = localStorage.getItem('store_confirmed');
-      const lastConfirmedStore = localStorage.getItem('last_confirmed_store');
-      const confirmedTimestamp = localStorage.getItem('store_confirmed_timestamp');
-      
-      console.log('🔍 localStorage check:', {
-        userConfirmedStore: userConfirmedStore,
-        lastConfirmedStore: lastConfirmedStore,
-        confirmedTimestamp: confirmedTimestamp,
-        hasConfirmation: !!(userConfirmedStore && confirmedTimestamp)
-      });
-      
-      // Check if localStorage confirmation is stale (older than 24 hours)
-      let isConfirmationStale = false;
-      if (confirmedTimestamp) {
-        const timestamp = parseInt(confirmedTimestamp, 10);
-        if (isNaN(timestamp)) {
-          // Invalid timestamp, clear everything
-          console.log('⚠️ Invalid timestamp in localStorage, clearing...');
-          localStorage.removeItem('store_confirmed');
-          localStorage.removeItem('last_confirmed_store');
-          localStorage.removeItem('store_confirmed_timestamp');
-          isConfirmationStale = true;
-        } else {
-          const now = Date.now();
-          const hoursSinceConfirmation = (now - timestamp) / (1000 * 60 * 60);
-          const MAX_CONFIRMATION_AGE_HOURS = 24; // Require re-confirmation after 24 hours
-          isConfirmationStale = hoursSinceConfirmation > MAX_CONFIRMATION_AGE_HOURS;
-          
-          console.log('🔍 Confirmation age check:', {
-            timestamp: timestamp,
-            now: now,
-            hoursSinceConfirmation: hoursSinceConfirmation.toFixed(2),
-            isStale: isConfirmationStale
-          });
-          
-          // If stale, clear localStorage
-          if (isConfirmationStale) {
-            console.log('⚠️ Confirmation is stale (older than 24 hours), clearing localStorage...');
-            localStorage.removeItem('store_confirmed');
-            localStorage.removeItem('last_confirmed_store');
-            localStorage.removeItem('store_confirmed_timestamp');
-          }
-        }
+      // Keep both hidden while checking backend
+      if (modalElement) {
+        modalElement.style.display = 'none';
       }
-      
-      // AGGRESSIVE FIX: If localStorage has a value but userConfirmedStore is not exactly 'true', clear it
-      if (userConfirmedStore && userConfirmedStore !== 'true') {
-        console.log('⚠️ Invalid store_confirmed value (not "true"), clearing localStorage...');
-        localStorage.removeItem('store_confirmed');
-        localStorage.removeItem('last_confirmed_store');
-        localStorage.removeItem('store_confirmed_timestamp');
-        isConfirmationStale = true;
-      }
-      
-      // CRITICAL: If no localStorage confirmation OR confirmation is stale, show modal IMMEDIATELY without checking backend
-      if (!userConfirmedStore || !confirmedTimestamp || isConfirmationStale) {
-        console.log('🚨🚨🚨 NO LOCALSTORAGE CONFIRMATION - SHOWING MODAL IMMEDIATELY 🚨🚨🚨');
-        window.STORE_MODAL_BLOCKING = true;
-        
-        // Clear backend store first
-        fetch('/api/clear-store', {
-          method: 'POST',
-          credentials: 'same-origin'
-        }).catch(err => {
-          console.warn('⚠️ Error clearing session store:', err);
-        });
-        
-        // Show modal immediately
-        if (typeof bootstrap !== 'undefined') {
-          try {
-            const existingModal = bootstrap.Modal.getInstance(modalElement);
-            if (existingModal) {
-              existingModal.dispose();
-            }
-            const modal = new bootstrap.Modal(modalElement, {
-              backdrop: 'static',
-              keyboard: false
-            });
-            modal.show();
-          } catch (e) {
-            console.error('Error with Bootstrap modal:', e);
-          }
-        }
-        
-        // Force show manually
-        modalElement.style.cssText = 'display: block !important; z-index: 9999 !important; opacity: 1 !important; visibility: visible !important;';
-        modalElement.classList.add('show');
-        modalElement.setAttribute('aria-hidden', 'false');
-        modalElement.setAttribute('aria-modal', 'true');
-        document.body.classList.add('modal-open');
-        document.body.style.overflow = 'hidden';
-        
-        // Add backdrop
-        let backdrop = document.querySelector('.modal-backdrop, #storeModalBackdrop');
-        if (!backdrop) {
-          backdrop = document.createElement('div');
-          backdrop.id = 'storeModalBackdrop';
-          backdrop.className = 'modal-backdrop fade show';
-          backdrop.style.cssText = 'z-index: 9998 !important; display: block !important; position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background-color: rgba(0, 0, 0, 0.5) !important;';
-          document.body.appendChild(backdrop);
-        }
-        
-        if (mainContent) {
-          mainContent.style.pointerEvents = 'none';
-          mainContent.classList.add('store-selection-disabled');
-          mainContent.style.display = 'none';
-        }
-        
-        console.log('✅ Modal shown immediately - no localStorage confirmation');
-        window.checkingStoreRequired = false;
-        return;
-      }
-      
-      // Keep main content hidden while checking backend, but DON'T hide modal yet
-      // The modal will be shown if no store is found
       if (mainContent) {
         mainContent.style.pointerEvents = 'none';
         mainContent.classList.add('store-selection-disabled');
       }
       
-      // Define performCheck function to check backend
-      const performCheck = () => {
-        console.log('Fetching store status from backend...');
-        const cacheBust = `ts=${Date.now()}`;
-        fetch(`/api/check-store-required?${cacheBust}`, {
+      console.log('Fetching store status from backend...');
+      const cacheBust = `ts=${Date.now()}`;
+      fetch(`/api/check-store-required?${cacheBust}`, {
         credentials: 'same-origin',
         cache: 'no-store'
       })
@@ -709,93 +589,21 @@
           console.log('✅ BACKEND RESPONSE:', JSON.stringify(data));
           console.log('Conditions: success=' + data.success + ', requires_store=' + data.requires_store + ', store=' + data.store);
           
-          // CRITICAL: Check if user has explicitly selected a store (not just one from session fallback)
-          // If requires_store is true OR store is null/undefined, we need to show the modal
-          // Even if there's a store in the response, if requires_store is true, show modal
+          // Clear logic: show content if user has a store, otherwise show modal
           const userHasStore = (data.success && !data.requires_store && data.store);
-          const showModal = !userHasStore || data.requires_store || !data.store;
-          
           console.log('USER HAS STORE?', userHasStore);
-          console.log('SHOW MODAL?', showModal);
-          console.log('Backend says requires_store:', data.requires_store);
           
-          // CRITICAL FIX: Check if user has explicitly confirmed this store
-          // Re-check localStorage (in case it was cleared by stale check above)
-          const userConfirmedStore = localStorage.getItem('store_confirmed');
-          const lastConfirmedStore = localStorage.getItem('last_confirmed_store');
-          const confirmedTimestamp = localStorage.getItem('store_confirmed_timestamp');
-          
-          // Check if confirmation matches backend store AND is not stale
-          let storeIsConfirmed = false;
-          if (userConfirmedStore === 'true' && lastConfirmedStore && confirmedTimestamp && data.store) {
-            // Store must match AND timestamp must be valid
-            const timestamp = parseInt(confirmedTimestamp, 10);
-            const now = Date.now();
-            const hoursSinceConfirmation = (now - timestamp) / (1000 * 60 * 60);
-            const isStale = hoursSinceConfirmation > 24;
-            
-            storeIsConfirmed = (lastConfirmedStore === data.store) && !isStale;
-            
-            if (lastConfirmedStore !== data.store) {
-              console.log('⚠️ Backend store does not match localStorage store:', {
-                localStorage: lastConfirmedStore,
-                backend: data.store
-              });
-            }
-            if (isStale) {
-              console.log('⚠️ Confirmation timestamp is stale');
-            }
-          }
-          
-          console.log('🔍 Store confirmation check:', {
-            userConfirmedStore: userConfirmedStore,
-            lastConfirmedStore: lastConfirmedStore,
-            backendStore: data.store,
-            storeIsConfirmed: storeIsConfirmed,
-            requires_store: data.requires_store,
-            storesMatch: lastConfirmedStore === data.store
-          });
-          
-          // CRITICAL: Default to showing modal unless store is explicitly confirmed by user
-          // Show modal if: requires_store=true, OR no store, OR store not confirmed by user
-          const shouldShowModal = data.requires_store === true || !data.store || !storeIsConfirmed;
-          
-          console.log('🚨 SHOULD SHOW MODAL?', shouldShowModal);
-          console.log('🚨 Reasons:', {
-            requires_store: data.requires_store === true,
-            noStore: !data.store,
-            notConfirmed: !storeIsConfirmed,
-            hasConfirmed: storeIsConfirmed
-          });
-          
-          // ONLY hide modal if store is explicitly confirmed by user
-          if (storeIsConfirmed && data.store && !data.requires_store) {
-            // USER HAS CONFIRMED STORE - Show content, hide modal
-            console.log('🎉 CONFIRMED STORE FOUND:', data.store);
-            window.storeCheckCompleted = true;
+          if (userHasStore) {
+            // USER HAS STORE - Show content, hide modal
+            console.log('🎉 STORE FOUND:', data.store);
             
             updateCurrentStoreDisplay(data.store);
             updateStoreStatus(`Store: ${data.store.replace(/_/g, ' ')}`, 'active');
             
-            // Hide modal using Bootstrap if available
+            // Hide modal
             if (modalElement) {
-              if (typeof bootstrap !== 'undefined') {
-                try {
-                  const modal = bootstrap.Modal.getInstance(modalElement);
-                  if (modal) {
-                    modal.hide();
-                  } else {
-                    modalElement.style.display = 'none';
-                    modalElement.classList.remove('show');
-                  }
-                } catch (e) {
-                  modalElement.style.display = 'none';
-                  modalElement.classList.remove('show');
-                }
-              } else {
-                modalElement.style.display = 'none';
-                modalElement.classList.remove('show');
-              }
+              modalElement.style.display = 'none';
+              modalElement.classList.remove('show');
             }
             
             // Remove all backdrops
@@ -826,201 +634,48 @@
               console.log('🔄 Store confirmed, calling initialization callback...');
               setTimeout(() => onStoreConfirmed(), 100);
             }
-            
-            // Exit early - store is confirmed and content is shown
-            window.checkingStoreRequired = false;
-            return;
-          }
-          
-          // If we get here, we MUST show the modal
-          // NO CONFIRMED STORE - FORCE SHOW MODAL
-          console.log('🚨🚨🚨 FORCING MODAL TO SHOW 🚨🚨🚨');
-          console.log('Backend says requires_store:', data.requires_store);
-          console.log('Backend says store:', data.store);
-          console.log('localStorage confirmed:', storeIsConfirmed);
-          console.log('shouldShowModal:', shouldShowModal);
-          window.STORE_MODAL_BLOCKING = true; // Block TagManager until store selected
+          } else {
+            // NO STORE - Show modal
+            console.log('⚠️ NO STORE - Showing modal');
             
             if (modalElement) {
-              // Force show with multiple methods to ensure it appears
-              let modalShown = false;
-              
-              // Method 1: Try Bootstrap modal API
-              if (typeof bootstrap !== 'undefined') {
-                try {
-                  // Dispose any existing instance first
-                  const existingModal = bootstrap.Modal.getInstance(modalElement);
-                  if (existingModal) {
-                    existingModal.dispose();
-                  }
-                  
-                  console.log('Creating new Bootstrap modal instance for store selection...');
-                  const modal = new bootstrap.Modal(modalElement, {
-                    backdrop: 'static',
-                    keyboard: false
-                  });
-                  
-                  console.log('Showing store selection modal via Bootstrap...');
-                  modal.show();
-                  
-                  // Force visibility immediately
-                  modalElement.style.cssText += 'display: block !important; z-index: 9999 !important;';
-                  modalElement.classList.add('show');
-                  modalElement.setAttribute('aria-hidden', 'false');
-                  modalElement.setAttribute('aria-modal', 'true');
-                  
-                  document.body.classList.add('modal-open');
-                  document.body.style.overflow = 'hidden';
-                  document.body.style.paddingRight = '0px';
-                  
-                  // Ensure backdrop
-                  let backdrop = document.querySelector('.modal-backdrop');
-                  if (!backdrop) {
-                    backdrop = document.createElement('div');
-                    backdrop.className = 'modal-backdrop fade show';
-                    backdrop.style.cssText = 'z-index: 9998 !important; display: block !important;';
-                    document.body.appendChild(backdrop);
-                  } else {
-                    backdrop.style.cssText += 'display: block !important; z-index: 9998 !important;';
-                  }
-                  
-                  modalShown = true;
-                  console.log('✅ Modal shown via Bootstrap (forced)');
-                } catch (bootstrapError) {
-                  console.error('❌ Error showing modal via Bootstrap:', bootstrapError);
-                }
-              }
-              
-              // Method 2: Manual show (always do this as well to ensure visibility)
-              console.log('Forcing modal display manually...');
-              modalElement.style.cssText += 'display: block !important; z-index: 9999 !important; opacity: 1 !important; visibility: visible !important;';
+              modalElement.style.display = 'block';
               modalElement.classList.add('show');
-              modalElement.setAttribute('aria-hidden', 'false');
-              modalElement.setAttribute('aria-modal', 'true');
-              
               document.body.classList.add('modal-open');
               document.body.style.overflow = 'hidden';
-              document.body.style.paddingRight = '0px';
               
-              // Ensure backdrop exists and is visible
-              let backdrop = document.querySelector('.modal-backdrop, #storeModalBackdrop');
-              if (!backdrop) {
-                backdrop = document.createElement('div');
+              // Add backdrop
+              if (!document.querySelector('.modal-backdrop')) {
+                const backdrop = document.createElement('div');
                 backdrop.id = 'storeModalBackdrop';
                 backdrop.className = 'modal-backdrop fade show';
-                backdrop.style.cssText = 'z-index: 9998 !important; display: block !important; position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background-color: rgba(0, 0, 0, 0.5) !important;';
+                backdrop.style.zIndex = '1040';
                 document.body.appendChild(backdrop);
-              } else {
-                backdrop.style.cssText += 'display: block !important; z-index: 9998 !important;';
               }
-              
-              console.log('✅ Modal forced to display manually');
-              
-              // Double-check it's visible after a short delay
-              setTimeout(() => {
-                if (modalElement.style.display !== 'block' && !modalElement.classList.contains('show')) {
-                  console.warn('⚠️ Modal may not be visible, forcing again...');
-                  modalElement.style.cssText += 'display: block !important; z-index: 9999 !important;';
-                  modalElement.classList.add('show');
-                }
-              }, 100);
-            } else {
-              console.error('❌ Modal element not found when trying to show!');
             }
             
             if (mainContent) {
               mainContent.style.pointerEvents = 'none';
               mainContent.classList.add('store-selection-disabled');
-              mainContent.style.display = 'none';
             }
             
-            console.log('✅ Modal should now be visible, content hidden');
+            console.log('✅ Modal shown, content hidden');
           }
         })
         .catch(error => {
           console.error('❌ Error checking store requirement:', error);
           // If there's an error, show modal as fallback to require store selection
           console.log('Showing modal as fallback due to error');
-          
-          // Ensure modal element exists before trying to show
-          const modalElement = document.getElementById('storeSelectionModal');
-          if (!modalElement) {
-            console.error('❌ Modal element not found in error handler, retrying in 500ms...');
-            setTimeout(() => {
-              const retryModal = document.getElementById('storeSelectionModal');
-              if (retryModal && typeof showStoreSelectionModal === 'function') {
-                showStoreSelectionModal();
-              } else {
-                // Last resort: try to show manually
-                if (retryModal) {
-                  retryModal.style.display = 'block';
-                  retryModal.classList.add('show');
-                  document.body.classList.add('modal-open');
-                  const backdrop = document.createElement('div');
-                  backdrop.className = 'modal-backdrop fade show';
-                  document.body.appendChild(backdrop);
-                  console.log('✅ Modal shown manually as last resort');
-                }
-              }
-            }, 500);
-            return;
-          }
-          
           if (typeof bootstrap === 'undefined') {
-            setTimeout(() => {
-              if (typeof showStoreSelectionModal === 'function') {
-                showStoreSelectionModal();
-              } else {
-                // Manual fallback
-                modalElement.style.display = 'block';
-                modalElement.classList.add('show');
-                document.body.classList.add('modal-open');
-                const backdrop = document.createElement('div');
-                backdrop.className = 'modal-backdrop fade show';
-                document.body.appendChild(backdrop);
-              }
-            }, 500);
+            setTimeout(() => showStoreSelectionModal(), 500);
           } else {
-            if (typeof showStoreSelectionModal === 'function') {
-              showStoreSelectionModal();
-            } else {
-              // Manual fallback
-              try {
-                const modal = new bootstrap.Modal(modalElement, {
-                  backdrop: 'static',
-                  keyboard: false
-                });
-                modal.show();
-              } catch (e) {
-                modalElement.style.display = 'block';
-                modalElement.classList.add('show');
-                document.body.classList.add('modal-open');
-                const backdrop = document.createElement('div');
-                backdrop.className = 'modal-backdrop fade show';
-                document.body.appendChild(backdrop);
-              }
-            }
+            showStoreSelectionModal();
           }
-          })
-          .finally(() => {
-            // Always reset the flag
-            window.checkingStoreRequired = false;
-          });
-      };
-      
-      // Only call performCheck if we have fresh localStorage confirmation
-      // If no confirmation or stale, the code above already showed the modal and returned
-      if (userConfirmedStore === 'true' && confirmedTimestamp && lastConfirmedStore && !isConfirmationStale) {
-        console.log('✅ Found fresh, explicit store confirmation in localStorage:', lastConfirmedStore);
-        // User has confirmed store, proceed with backend check to validate it matches
-        performCheck();
-      } else {
-        // No confirmation or stale - modal should already be shown by code above
-        // Don't call performCheck here - modal is already shown and we should wait for user selection
-        console.log('⚠️ No valid store confirmation - modal is shown, waiting for user selection...');
-        // Do NOT call performCheck() - user must select store via modal first
-        return;
-      }
+        })
+        .finally(() => {
+          // Always reset the flag
+          window.checkingStoreRequired = false;
+        });
     }
     
     function generateJsonInventory() {
@@ -5397,7 +5052,7 @@
                     <div class="buttons-row d-flex align-items-center gap-2">
                       <!-- Upload Button -->
                       <input type="file" id="fileInput" accept=".xlsx" style="display:none;">
-                      <button type="button" class="btn px-2 py-2" id="uploadTriggerBtn" onclick="if(window.openExcelFilePicker) { window.openExcelFilePicker(); } else { var input = document.getElementById('fileInput'); if(input) input.click(); }" aria-label="Upload Excel file" style="font-weight: 700; box-shadow: 0 4px 12px rgba(0,0,0,0.3); white-space: nowrap; font-size: 13px; border-radius: 8px; min-width: 140px; min-height: 40px; background: linear-gradient(135deg, #a084e8 0%, #8b5cf6 100%); border: 2px solid #a084e8; color: white;">
+                      <button type="button" class="btn px-2 py-2" id="uploadTriggerBtn" onclick="var input = document.getElementById('fileInput'); if(input) input.click();" aria-label="Upload Excel file" style="font-weight: 700; box-shadow: 0 4px 12px rgba(0,0,0,0.3); white-space: nowrap; font-size: 13px; border-radius: 8px; min-width: 140px; min-height: 40px; background: linear-gradient(135deg, #a084e8 0%, #8b5cf6 100%); border: 2px solid #a084e8; color: white;">
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2">
                           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                           <polyline points="7 10 12 15 17 10"></polyline>
@@ -5680,7 +5335,7 @@
   <!-- Modals -->
   
   <!-- Store Selection Modal - JavaScript controls visibility after checking session -->
-  <div class="modal fade" id="storeSelectionModal" tabindex="-1" aria-labelledby="storeSelectionModalLabel" data-bs-backdrop="static" data-bs-keyboard="false" style="z-index: 9999 !important;">
+  <div class="modal fade" id="storeSelectionModal" tabindex="-1" aria-labelledby="storeSelectionModalLabel" data-bs-backdrop="static" data-bs-keyboard="false" style="display: none; z-index: 9999 !important;">
     <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
       <div class="modal-content glass-card">
         <div class="modal-header border-0" style="padding: 1.6rem 1.8rem 1rem;">
@@ -7366,24 +7021,12 @@
       proceedWithStoreCheck();
       
       function proceedWithStoreCheck() {
-        // Check if store was already checked (to avoid duplicate checks)
-        if (window.storeCheckCompleted) {
-          console.log('✅ Store already checked on page load, proceeding with TagManager initialization...');
-          if (window.TagManager && typeof window.TagManager.init === 'function') {
-            TagManager.init();
-          } else {
-            console.error('❌ TagManager.init is not available');
-          }
-          return;
-        }
-        
         // Check store FIRST before initializing tags
         setTimeout(() => {
           console.log('🔄 Checking store requirement BEFORE initializing TagManager...');
           checkStoreRequired(function() {
             // This callback only runs when store is confirmed
             console.log('✅ Store confirmed! Initializing TagManager...');
-            window.storeCheckCompleted = true;
             
             if (window.TagManager && typeof window.TagManager.init === 'function') {
               TagManager.init();
@@ -7394,82 +7037,6 @@
         }, 100);
       }
     }
-    
-    // CRITICAL: Check store requirement IMMEDIATELY on page load/refresh
-    // This ensures modal shows even if TagManager hasn't loaded yet
-    function checkStoreOnPageLoad() {
-      console.log('🔍 checkStoreOnPageLoad called, readyState:', document.readyState);
-      
-      // Always wait for DOM to be fully ready
-      function executeCheck() {
-        // Wait for modal element to exist with retries
-        let attempts = 0;
-        const maxAttempts = 20; // 2 seconds max (20 * 100ms)
-        
-        function tryCheck() {
-          attempts++;
-          const modalElement = document.getElementById('storeSelectionModal');
-          
-          if (modalElement) {
-            console.log('✅ Modal element found, calling checkStoreRequired...');
-            checkStoreRequired(function() {
-              // Store is confirmed, proceed with TagManager init
-              console.log('✅ Store confirmed on page load, proceeding with TagManager initialization...');
-            });
-          } else if (attempts < maxAttempts) {
-            console.log(`⏳ Modal element not found yet (attempt ${attempts}/${maxAttempts}), retrying...`);
-            setTimeout(tryCheck, 100);
-          } else {
-            console.error('❌ Modal element not found after', maxAttempts, 'attempts. Modal may not render.');
-          }
-        }
-        
-        tryCheck();
-      }
-      
-      // Wait for DOM to be ready
-      if (document.readyState === 'loading') {
-        console.log('DOM is loading, waiting for DOMContentLoaded...');
-        document.addEventListener('DOMContentLoaded', executeCheck);
-      } else {
-        console.log('DOM already loaded, executing check...');
-        // DOM already loaded, but wait a tick to ensure all elements are rendered
-        setTimeout(executeCheck, 50);
-      }
-    }
-    
-    // CRITICAL: Always wait for DOMContentLoaded to ensure modal HTML exists
-    // The modal HTML is in the body, so we must wait for DOM to be parsed
-    console.log('Setting up store check on page load, current readyState:', document.readyState);
-    
-    if (document.readyState === 'loading') {
-      // DOM still loading, wait for it
-      console.log('DOM loading, waiting for DOMContentLoaded before checking store...');
-      document.addEventListener('DOMContentLoaded', function() {
-        console.log('DOMContentLoaded fired, calling checkStoreOnPageLoad...');
-        checkStoreOnPageLoad();
-      });
-    } else if (document.readyState === 'interactive') {
-      // DOM loaded but scripts/images still loading
-      console.log('DOM interactive, calling checkStoreOnPageLoad immediately...');
-      // Use setTimeout to ensure body is fully parsed
-      setTimeout(checkStoreOnPageLoad, 0);
-    } else {
-      // DOM complete, safe to proceed
-      console.log('DOM complete, calling checkStoreOnPageLoad immediately...');
-      // Still use setTimeout to be safe
-      setTimeout(checkStoreOnPageLoad, 0);
-    }
-    
-    // Also set up a window.load fallback in case DOMContentLoaded already fired
-    window.addEventListener('load', function() {
-      console.log('Window load event fired');
-      // Double-check if modal check was already done
-      if (!window.storeCheckCompleted && !window.checkingStoreRequired) {
-        console.log('Store check not completed yet, running checkStoreOnPageLoad on window.load...');
-        checkStoreOnPageLoad();
-      }
-    });
     
     // Start waiting for TagManager to load
     waitForTagManagerAndInit();
@@ -12000,58 +11567,6 @@
       // Refresh metrics every 30 seconds
       setInterval(refreshPerformanceMetrics, 30000);
     }
-  </script>
-
-  <!-- Function to open file picker with Downloads folder default on PC/Windows -->
-  <script>
-  // Function to open file picker with Downloads folder default on PC/Windows
-  // Defined early to ensure it's available when button is clicked
-  window.openExcelFilePicker = async function() {
-    const fileInput = document.getElementById('fileInput');
-    if (!fileInput) {
-      console.error('fileInput not found');
-      return;
-    }
-
-    // Check if File System Access API is available (works better on Windows/PC)
-    if ('showOpenFilePicker' in window) {
-      try {
-        // Use File System Access API - defaults to Downloads on Windows
-        const [fileHandle] = await window.showOpenFilePicker({
-          types: [{
-            description: 'Excel Files',
-            accept: {
-              'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx']
-            }
-          }],
-          excludeAcceptAllOption: false,
-          multiple: false
-        });
-
-        const file = await fileHandle.getFile();
-        
-        // Create a FileList-like object and trigger change event
-        const dataTransfer = new DataTransfer();
-        dataTransfer.items.add(file);
-        fileInput.files = dataTransfer.files;
-        
-        // Trigger change event
-        const event = new Event('change', { bubbles: true });
-        fileInput.dispatchEvent(event);
-        
-        return;
-      } catch (error) {
-        // User cancelled or error occurred, fall back to regular input
-        if (error.name !== 'AbortError') {
-          console.log('File System Access API not available, using fallback:', error);
-        }
-        // Fall through to regular file input
-      }
-    }
-
-    // Fallback to regular file input
-    fileInput.click();
-  };
   </script>
 
   <!-- EMERGENCY UPLOAD FIX - Inline handler to bypass cache issues -->

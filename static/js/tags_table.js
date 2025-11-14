@@ -49,16 +49,14 @@ function createTagRow(tag) {
     
     const brand = tag['Product Brand'] || tag.Brand || '';
     const type = tag['Product Type*'] || tag.Type || '';
-    const safeTagName = tagName.replace(/"/g, '&quot;');
 
     return `
-        <tr class="tag-row" data-tag-name="${safeTagName}" data-lineage="${lineage}" data-doh="${dohStatus}">
+        <tr class="tag-row" data-tag-name="${tagName}" data-lineage="${lineage}" data-doh="${dohStatus}">
             <td class="align-middle">${tagName}</td>
             <td class="align-middle">
                 <div class="d-flex align-items-center">
                     <select class="form-select form-select-sm lineage-dropdown lineage-dropdown-mini" 
-                            data-tag-name="${safeTagName}"
-                            data-lineage-action="update">
+                            onchange="TagsTable.handleLineageChange(this, '${tagName}')">
                         <option value="SATIVA" ${lineage === 'SATIVA' ? 'selected' : ''}>S</option>
                         <option value="INDICA" ${lineage === 'INDICA' ? 'selected' : ''}>I</option>
                         <option value="HYBRID" ${lineage === 'HYBRID' ? 'selected' : ''}>H</option>
@@ -73,8 +71,7 @@ function createTagRow(tag) {
             <td class="align-middle">
                 <div class="d-flex align-items-center">
                     <select class="form-select form-select-sm doh-dropdown doh-dropdown-mini" 
-                            data-tag-name="${safeTagName}"
-                            data-doh-action="update">
+                            onchange="TagsTable.handleDohChange(this, '${tagName}')">
                         <option value="NONE" ${(!dohStatus || dohStatus === 'No' || dohStatus === 'NONE') ? 'selected' : ''}>None</option>
                         <option value="DOH" ${dohStatus === 'DOH' || dohStatus === 'Yes' ? 'selected' : ''}>DOH</option>
                         <option value="THC" ${dohStatus === 'THC' ? 'selected' : ''}>THC</option>
@@ -250,13 +247,11 @@ class TagsTable {
           <div class="d-flex align-items-center">
             <label class="tag-name me-3" for="${safeId}">${tagName}${dohImageHtml}</label>
             <select class="form-select form-select-sm lineage-dropdown lineage-dropdown-mini" 
-                    data-tag-name="${safeTagName}"
-                    data-lineage-action="update">
+                    onchange="TagsTable.handleLineageChange(this, '${safeTagName}')">
               ${dropdownOptions}
             </select>
             <select class="form-select form-select-sm doh-dropdown doh-dropdown-mini ms-2" 
-                    data-tag-name="${safeTagName}"
-                    data-doh-action="update"
+                    onchange="TagsTable.handleDohChange(this, '${safeTagName}')"
                     title="DOH Status">
               ${dohDropdownOptions}
             </select>
@@ -269,7 +264,6 @@ class TagsTable {
 
   static createLineageSelect(currentLineage, tagName) {
     const uniqueLineages = getUniqueLineages();
-    const safeTagName = tagName.replace(/"/g, '&quot;');
     const options = uniqueLineages.map(lin => {
       const selected = (currentLineage === lin || (lin === 'CBD' && currentLineage === 'CBD_BLEND')) ? 'selected' : '';
       const displayName = window.ABBREVIATED_LINEAGE[lin] || lin;
@@ -277,8 +271,7 @@ class TagsTable {
     }).join('');
     return `
       <select class="form-select form-select-sm lineage-dropdown lineage-dropdown-mini" 
-              data-tag-name="${safeTagName}"
-              data-lineage-action="update">
+              onchange="TagsTable.handleLineageChange(this, '${tagName}')">
         ${options}
       </select>
     `;
@@ -394,17 +387,7 @@ class TagsTable {
 
       // Show success message
       const result = await response.json();
-      
-      // CRITICAL FIX: Check if any products were actually updated
-      const totalUpdated = result.products_updated || result.db_updated || 0;
-      if (totalUpdated === 0 && result.success) {
-        // Success response but 0 products updated - treat as error
-        const errorMsg = result.error || result.message || `Failed to update lineage: No products found matching "${tagName}"`;
-        console.error(`❌ Lineage update returned 0 products: ${errorMsg}`);
-        throw new Error(errorMsg);
-      }
-      
-      console.log(`✅ Successfully updated lineage for ${tagName} (${oldLineage} → ${newLineage}) - ${totalUpdated} product(s) updated`);
+      console.log(`✅ Successfully updated lineage for ${tagName} (${oldLineage} → ${newLineage})`);
 
       // Update UI elements directly without full refresh (prevents hanging)
       if (typeof TagManager !== 'undefined' && typeof TagManager.updateTagLineageInUI === 'function') {
@@ -806,9 +789,6 @@ class TagsTable {
       });
     });
 
-    // Note: Lineage and DOH dropdown event delegation is handled globally 
-    // in DOMContentLoaded to work with all dynamically added elements
-
     // Add move button listeners
     container.querySelectorAll('.move-tag-btn').forEach(button => {
       button.addEventListener('click', function() {
@@ -864,31 +844,6 @@ class TagsTable {
       }
   }
 }
-
-// Global event delegation for lineage and DOH dropdowns
-// Set up immediately so it works with all dynamically added elements
-// This ensures lineage changes work even for elements added after page load
-document.addEventListener('change', function(e) {
-  // Handle lineage dropdown changes
-  if (e.target.classList.contains('lineage-dropdown') && e.target.dataset.lineageAction === 'update') {
-    const tagName = e.target.dataset.tagName;
-    if (tagName && typeof TagsTable !== 'undefined' && typeof TagsTable.handleLineageChange === 'function') {
-      // Decode HTML entities back to original tag name
-      const decodedTagName = tagName.replace(/&quot;/g, '"');
-      TagsTable.handleLineageChange(e.target, decodedTagName);
-    }
-  }
-  
-  // Handle DOH dropdown changes
-  if (e.target.classList.contains('doh-dropdown') && e.target.dataset.dohAction === 'update') {
-    const tagName = e.target.dataset.tagName;
-    if (tagName && typeof TagsTable !== 'undefined' && typeof TagsTable.handleDohChange === 'function') {
-      // Decode HTML entities back to original tag name
-      const decodedTagName = tagName.replace(/&quot;/g, '"');
-      TagsTable.handleDohChange(e.target, decodedTagName);
-    }
-  }
-});
 
 // Initialize event listeners when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
