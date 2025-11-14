@@ -7532,7 +7532,12 @@ def get_available_tags():
                         # This ensures UI matches output generation which uses get_product_lineage() (reads products.Lineage)
                         lineage_query_join_by_name = '''
                             SELECT 
-                                COALESCE(p."Lineage", s.canonical_lineage) AS current_lineage,
+                                -- CRITICAL FIX: Always prefer product-level lineage over strain-level lineage
+                                -- Use product lineage if it exists (even if HYBRID/INDICA), only fallback to strain if product lineage is NULL/empty
+                                CASE 
+                                    WHEN p."Lineage" IS NOT NULL AND TRIM(p."Lineage") != '' THEN p."Lineage"
+                                    ELSE s.canonical_lineage
+                                END AS current_lineage,
                                 COALESCE(s.strain_name, p."Product Strain") AS current_strain
                             FROM products p
                             LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
@@ -7586,6 +7591,14 @@ def get_available_tags():
                                     WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
                                     ORDER BY p.id DESC
                                 '''
+                                # CRITICAL FIX: Replace COALESCE with CASE to properly handle empty strings, not just NULL
+                                batch_query = batch_query.replace(
+                                    'COALESCE(p."Lineage", s.canonical_lineage) AS current_lineage,',
+                                    '''CASE 
+                                            WHEN p."Lineage" IS NOT NULL AND TRIM(p."Lineage") != '' THEN p."Lineage"
+                                            ELSE s.canonical_lineage
+                                        END AS current_lineage,'''
+                                )
                                 cur.execute(batch_query, all_search_names + all_search_names)
                                 batch_results = cur.fetchall()
                                 
@@ -7723,7 +7736,12 @@ def get_available_tags():
                         # This ensures UI matches output generation which uses get_product_lineage() (reads products.Lineage)
                         lineage_query_join_by_name = '''
                         SELECT 
-                            COALESCE(p."Lineage", s.canonical_lineage) AS current_lineage,
+                            -- CRITICAL FIX: Always prefer product-level lineage over strain-level lineage
+                            -- Use product lineage if it exists (even if HYBRID/INDICA), only fallback to strain if product lineage is NULL/empty
+                            CASE 
+                                WHEN p."Lineage" IS NOT NULL AND TRIM(p."Lineage") != '' THEN p."Lineage"
+                                ELSE s.canonical_lineage
+                            END AS current_lineage,
                             COALESCE(s.strain_name, p."Product Strain") AS current_strain
                         FROM products p
                         LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
@@ -7779,6 +7797,15 @@ def get_available_tags():
                                     WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
                                     ORDER BY p.id DESC
                                 '''
+                                # CRITICAL FIX: Replace COALESCE with CASE to properly handle empty strings, not just NULL
+                                # This ensures product-specific lineages like HYBRID/INDICA are preserved
+                                batch_query = batch_query.replace(
+                                    'COALESCE(p."Lineage", s.canonical_lineage) AS current_lineage,',
+                                    '''CASE 
+                                            WHEN p."Lineage" IS NOT NULL AND TRIM(p."Lineage") != '' THEN p."Lineage"
+                                            ELSE s.canonical_lineage
+                                        END AS current_lineage,'''
+                                )
                                 # Execute with all search names (product names + normalized names, deduplicated)
                                 cur.execute(batch_query, all_search_names + all_search_names)
                                 batch_results = cur.fetchall()
@@ -7949,7 +7976,13 @@ def get_available_tags():
                                     # This ensures UI matches output generation which uses get_product_lineage() (reads products.Lineage)
                                     quoted_columns = ', '.join([f'p."{col}"' for col in columns_to_query])
                                     query = f'''
-                                        SELECT {quoted_columns}, COALESCE(p."Lineage", s.canonical_lineage) AS preferred_lineage
+                                        SELECT {quoted_columns}, 
+                                        -- CRITICAL FIX: Always prefer product-level lineage over strain-level lineage
+                                        -- Use product lineage if it exists (even if HYBRID/INDICA), only fallback to strain if product lineage is NULL/empty
+                                        CASE 
+                                            WHEN p."Lineage" IS NOT NULL AND TRIM(p."Lineage") != '' THEN p."Lineage"
+                                            ELSE s.canonical_lineage
+                                        END AS preferred_lineage
                                         FROM products p
                                         LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
                                         ORDER BY p.id DESC
@@ -8013,7 +8046,12 @@ def get_available_tags():
                             # Try to join with strains table, but prefer products.Lineage over strains.canonical_lineage
                             lineage_query_join_by_name = f'''
                                 SELECT {quoted_columns}, 
-                                       COALESCE(p."Lineage", s.canonical_lineage) AS preferred_lineage
+                                       -- CRITICAL FIX: Always prefer product-level lineage over strain-level lineage
+                                       -- Use product lineage if it exists (even if HYBRID/INDICA), only fallback to strain if product lineage is NULL/empty
+                                       CASE 
+                                           WHEN p."Lineage" IS NOT NULL AND TRIM(p."Lineage") != '' THEN p."Lineage"
+                                           ELSE s.canonical_lineage
+                                       END AS preferred_lineage
                                 FROM products p
                                 LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
                                 ORDER BY p.id DESC
@@ -8030,7 +8068,6 @@ def get_available_tags():
                             '''
                             
                             logging.info("Executing query with strain join (same pipeline as Excel alignment)...")
-                            import time
                             query_start = time.time()
                             
                             try:
@@ -8123,7 +8160,6 @@ def get_available_tags():
                 logging.error(f"   Product DB: {product_db if 'product_db' in locals() else 'unknown'}")
             else:
                 logging.info(f"✅ Processing {len(database_tags)} database tags...")
-            import time
             process_start = time.time()
             for i, db_tag in enumerate(database_tags):
                 if i % 1000 == 0 and i > 0:
@@ -8896,13 +8932,45 @@ def update_lineage():
                             logging.warning(f"⚠️  Database appears to be empty or has no product names")
             
             # FIRST: Update by exact product name (most specific)
-            # Try exact match first (including normalized_name)
-            cursor.execute('''
-                UPDATE products
-                SET "Lineage" = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE "Product Name*" = ? OR "ProductName" = ? OR normalized_name = ?
-            ''', (new_lineage, tag_name_clean, tag_name_clean, normalized_name))
-            products_updated_by_name = cursor.rowcount
+            # Use the actual product names found in diagnostic search for UPDATE
+            if existing_products:
+                # Use the exact product names found in the search for more reliable updates
+                found_product_names = set()
+                for row in existing_products:
+                    if row[0]:  # "Product Name*"
+                        found_product_names.add(row[0])
+                    if row[1]:  # "ProductName"
+                        found_product_names.add(row[1])
+                    if row[2]:  # normalized_name
+                        found_product_names.add(row[2])
+                
+                if found_product_names:
+                    # Use IN clause with the exact names found
+                    placeholders = ','.join(['?'] * len(found_product_names))
+                    try:
+                        cursor.execute(f'''
+                            UPDATE products
+                            SET "Lineage" = ?, updated_at = CURRENT_TIMESTAMP
+                            WHERE "Product Name*" IN ({placeholders})
+                               OR "ProductName" IN ({placeholders})
+                               OR normalized_name IN ({placeholders})
+                        ''', (new_lineage, *found_product_names, *found_product_names, *found_product_names))
+                        products_updated_by_name = cursor.rowcount
+                        if products_updated_by_name > 0:
+                            logging.info(f"✅ Updated {products_updated_by_name} product(s) using found product names")
+                    except Exception as in_clause_error:
+                        logging.warning(f"⚠️  IN clause update failed, trying direct match: {in_clause_error}")
+                        # Fall through to direct match below
+                        products_updated_by_name = 0
+            
+            # If update didn't work with found names, try exact match (including normalized_name)
+            if products_updated_by_name == 0:
+                cursor.execute('''
+                    UPDATE products
+                    SET "Lineage" = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE "Product Name*" = ? OR "ProductName" = ? OR normalized_name = ?
+                ''', (new_lineage, tag_name_clean, tag_name_clean, normalized_name))
+                products_updated_by_name = cursor.rowcount
             
             # If exact match didn't work, try case-insensitive match with TRIM
             if products_updated_by_name == 0:
@@ -8984,25 +9052,38 @@ def update_lineage():
             if products_updated == 0:
                 logging.warning(f"⚠️  No products updated for '{tag_name}' - product may not exist in database")
             
-            # Update strains table if we have a strain name
+            # CRITICAL FIX: Only update strain lineage if new_lineage is a generic lineage (HYBRID, SATIVA, INDICA, CBD)
+            # Do NOT update strain lineage for product-specific lineages like HYBRID/INDICA or HYBRID/SATIVA
+            # This prevents product-specific lineages from being overwritten by strain-level lineage
             if strain_name and str(strain_name).strip():
-                try:
-                    strain_name_lower = str(strain_name).strip().lower()
-                    cursor.execute('''
-                        UPDATE strains
-                        SET sovereign_lineage = ?,
-                            canonical_lineage = ?,
-                            updated_at = CURRENT_TIMESTAMP
-                        WHERE LOWER(strain_name) = ?
-                    ''', (new_lineage, new_lineage, strain_name_lower))
-                    strain_rows = cursor.rowcount
-                    if strain_rows > 0:
-                        strain_updated = True
-                        logging.info(f"🌿 Updated {strain_rows} strain(s) to lineage '{new_lineage}'")
-                except Exception as strain_update_error:
-                    logging.warning(f"⚠️  Could not update strain in transaction: {strain_update_error}")
-                    import traceback
-                    logging.error(f"Strain update error traceback: {traceback.format_exc()}")
+                # Check if this is a product-specific lineage (HYBRID/INDICA, HYBRID/SATIVA) or generic
+                generic_lineages = {'HYBRID', 'SATIVA', 'INDICA', 'CBD', 'MIXED', 'PARAPHERNALIA', 'PARA'}
+                is_generic_lineage = str(new_lineage).strip().upper() in generic_lineages
+                
+                # Only update strain lineage if it's a generic lineage
+                # Product-specific lineages (HYBRID/INDICA, HYBRID/SATIVA) should NOT update strain-level lineage
+                # because different products with the same strain might have different specific lineages
+                if is_generic_lineage:
+                    try:
+                        strain_name_lower = str(strain_name).strip().lower()
+                        cursor.execute('''
+                            UPDATE strains
+                            SET sovereign_lineage = ?,
+                                canonical_lineage = ?,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE LOWER(strain_name) = ?
+                        ''', (new_lineage, new_lineage, strain_name_lower))
+                        strain_rows = cursor.rowcount
+                        if strain_rows > 0:
+                            strain_updated = True
+                            logging.info(f"🌿 Updated {strain_rows} strain(s) to generic lineage '{new_lineage}'")
+                    except Exception as strain_update_error:
+                        logging.warning(f"⚠️  Could not update strain in transaction: {strain_update_error}")
+                        import traceback
+                        logging.error(f"Strain update error traceback: {traceback.format_exc()}")
+                else:
+                    # Product-specific lineage - don't update strain-level lineage
+                    logging.info(f"🔒 Skipping strain-level update for product-specific lineage '{new_lineage}' (preserves HYBRID/INDICA vs HYBRID/SATIVA distinction)")
             
             # SINGLE COMMIT for all updates - this should be fast
             # CRITICAL FIX: Retry commit on lock errors
@@ -9065,14 +9146,23 @@ def update_lineage():
                 verified_lineage_after_commit = None
             
             # AFTER COMMIT: If strain doesn't exist, create it (this uses its own transaction)
+            # CRITICAL FIX: Only create/update strain with generic lineages (not product-specific like HYBRID/INDICA)
             if strain_name and str(strain_name).strip() and not strain_updated:
-                try:
-                    strain_id = product_db.add_or_update_strain(strain_name, new_lineage, sovereign=True)
-                    if strain_id:
-                        strain_updated = True
-                        logging.info(f"🌿 Created strain '{strain_name}' with lineage '{new_lineage}' (strain_id: {strain_id})")
-                except Exception as create_error:
-                    logging.warning(f"Could not create strain after commit: {create_error}")
+                # Check if this is a generic lineage before creating/updating strain
+                generic_lineages = {'HYBRID', 'SATIVA', 'INDICA', 'CBD', 'MIXED', 'PARAPHERNALIA', 'PARA'}
+                is_generic_lineage = str(new_lineage).strip().upper() in generic_lineages
+                
+                if is_generic_lineage:
+                    try:
+                        strain_id = product_db.add_or_update_strain(strain_name, new_lineage, sovereign=True)
+                        if strain_id:
+                            strain_updated = True
+                            logging.info(f"🌿 Created strain '{strain_name}' with generic lineage '{new_lineage}' (strain_id: {strain_id})")
+                    except Exception as create_error:
+                        logging.warning(f"Could not create strain after commit: {create_error}")
+                else:
+                    # Product-specific lineage - don't create/update strain with product-specific lineage
+                    logging.info(f"🔒 Skipping strain creation for product-specific lineage '{new_lineage}' (preserves product-level specificity)")
             
         except sqlite3.OperationalError as lock_error:
             # This should rarely happen now since we retry earlier, but handle it gracefully
@@ -10590,7 +10680,6 @@ def database_vendor_stats():
     """Get detailed vendor and brand statistics from the product database."""
     try:
         import sqlite3
-        import time
         
         start_time = time.time()
         logging.info("🔍 Database vendor stats request started")
@@ -11153,7 +11242,6 @@ def database_analytics():
     """Get advanced analytics data for the database."""
     try:
         import sqlite3
-        import time
         from datetime import datetime, timedelta
         
         start_time = time.time()
@@ -12513,7 +12601,6 @@ def performance_stats_old():
     """Get performance statistics."""
     try:
         import psutil
-        import time
         
         # Get system stats
         cpu_percent = psutil.cpu_percent(interval=0.1)
@@ -14007,7 +14094,6 @@ def cleanup_old_files():
     """
     try:
         import glob
-        import time
         from datetime import datetime, timedelta
         
         current_time = time.time()
@@ -14551,11 +14637,9 @@ def get_initial_data():
                             'message': f'Failed to load default file: {str(e)}'
                         })
                 else:
-                    logging.warning("No default file found")
-                    return jsonify({
-                        'success': False,
-                        'message': 'No default file found and no data currently loaded'
-                    })
+                    logging.warning("No default file found - will attempt database fallback")
+                    # Don't return here - let database fallback logic below handle it
+                    # This ensures tags can load from database even when no Excel file exists
         
         if hasattr(excel_processor, 'df') and excel_processor.df is not None and not excel_processor.df.empty:
             logging.info(f"Data loaded - DataFrame shape: {excel_processor.df.shape}")
@@ -18522,7 +18606,6 @@ if FAST_DOCX_AVAILABLE and create_fast_docx_routes:
 @app.route('/api/performance/stats')
 def performance_stats():
     """Get performance statistics - DISABLED."""
-    import time
     return jsonify({
         'message': 'Performance monitoring disabled to prevent high CPU usage',
         'status': 'disabled',
@@ -18532,7 +18615,6 @@ def performance_stats():
 @app.route('/api/performance/cache/stats')
 def cache_stats_route():
     """Get cache statistics - DISABLED."""
-    import time
     return jsonify({
         'message': 'Cache monitoring disabled to prevent high CPU usage',
         'status': 'disabled',

@@ -6571,10 +6571,32 @@ const TagManager = {
                     return;
                 } else {
                     verboseLog('No initial data available:', data.message || 'No data found');
-                    // Don't complete splash yet - wait for tags to load or empty state to be confirmed
                     clearTimeout(splashSafetyTimeout);
                     
-                    // FIXED: Initialize empty state instead of loading test data
+                    // CRITICAL FIX: Try to load tags from database even if no Excel file is loaded
+                    // This ensures tags load after page reload when database has products
+                    verboseLog('Attempting to load tags from database as fallback...');
+                    try {
+                        const tagsLoaded = await this.fetchAndUpdateAvailableTags();
+                        if (tagsLoaded && this.state.tags && this.state.tags.length > 0) {
+                            verboseLog(`✅ Successfully loaded ${this.state.tags.length} tags from database`);
+                            
+                            // Also load filters and selected tags
+                            await Promise.allSettled([
+                                this.fetchAndPopulateFilters(),
+                                this.fetchAndUpdateSelectedTags()
+                            ]);
+                            
+                            this.clearInitialDataRetry();
+                            this._checkingExistingData = false;
+                            verboseLog('Tags loaded from database successfully');
+                            return;
+                        }
+                    } catch (dbError) {
+                        verboseLog('Failed to load tags from database:', dbError);
+                    }
+                    
+                    // If database load also failed, initialize empty state
                     this.initializeEmptyState();
                     this._checkingExistingData = false;
                     this.scheduleInitialDataRetry('Empty initial data response');
@@ -6583,10 +6605,32 @@ const TagManager = {
                 }
             } else {
                 verboseLog('Initial data endpoint returned error:', response.status);
-                // Don't complete splash yet - wait for tags to load or empty state to be confirmed
                 clearTimeout(splashSafetyTimeout);
                 
-                // FIXED: Initialize empty state instead of loading test data
+                // CRITICAL FIX: Try to load tags from database even if initial-data endpoint fails
+                // This ensures tags load after page reload when database has products
+                verboseLog('Attempting to load tags from database as fallback...');
+                try {
+                    const tagsLoaded = await this.fetchAndUpdateAvailableTags();
+                    if (tagsLoaded && this.state.tags && this.state.tags.length > 0) {
+                        verboseLog(`✅ Successfully loaded ${this.state.tags.length} tags from database`);
+                        
+                        // Also load filters and selected tags
+                        await Promise.allSettled([
+                            this.fetchAndPopulateFilters(),
+                            this.fetchAndUpdateSelectedTags()
+                        ]);
+                        
+                        this.clearInitialDataRetry();
+                        this._checkingExistingData = false;
+                        verboseLog('Tags loaded from database successfully');
+                        return;
+                    }
+                } catch (dbError) {
+                    verboseLog('Failed to load tags from database:', dbError);
+                }
+                
+                // If database load also failed, initialize empty state
                 this.initializeEmptyState();
                 this._checkingExistingData = false;
                 this.scheduleInitialDataRetry(`HTTP ${response.status}`);
@@ -6598,14 +6642,39 @@ const TagManager = {
             
             // Handle timeout specifically
             if (error.message === 'Initialization timeout') {
-                verboseLog('Initialization timed out, proceeding with empty state');
-                AppLoadingSplash.updateProgress(100, 'Ready to upload files');
+                verboseLog('Initialization timed out, trying database fallback...');
+                AppLoadingSplash.updateProgress(80, 'Loading from database...');
             }
             
-            // Don't complete splash yet - wait for tags to load or empty state to be confirmed
             clearTimeout(splashSafetyTimeout);
             
-            // FIXED: Initialize empty state instead of loading test data
+            // CRITICAL FIX: Try to load tags from database even if initial-data endpoint throws error
+            // This ensures tags load after page reload when database has products
+            verboseLog('Attempting to load tags from database as fallback...');
+            try {
+                const tagsLoaded = await this.fetchAndUpdateAvailableTags();
+                if (tagsLoaded && this.state.tags && this.state.tags.length > 0) {
+                    verboseLog(`✅ Successfully loaded ${this.state.tags.length} tags from database`);
+                    
+                    // Also load filters and selected tags
+                    await Promise.allSettled([
+                        this.fetchAndPopulateFilters(),
+                        this.fetchAndUpdateSelectedTags()
+                    ]);
+                    
+                    this.clearInitialDataRetry();
+                    this._checkingExistingData = false;
+                    verboseLog('Tags loaded from database successfully');
+                    return;
+                }
+            } catch (dbError) {
+                verboseLog('Failed to load tags from database:', dbError);
+                if (error.message === 'Initialization timeout') {
+                    AppLoadingSplash.updateProgress(100, 'Ready to upload files');
+                }
+            }
+            
+            // If database load also failed, initialize empty state
             this.initializeEmptyState();
             this._checkingExistingData = false;
             this.scheduleInitialDataRetry(error.message || 'initial data fetch error');
