@@ -2342,13 +2342,67 @@ const TagManager = {
             const vendorSection = document.createElement('div');
             vendorSection.className = 'vendor-section mb-3';
             
+            // Create vendor header with checkbox
             const vendorHeader = document.createElement('h5');
-            vendorHeader.className = 'vendor-header mb-2';
-            vendorHeader.textContent = vendor;
+            vendorHeader.className = 'vendor-header mb-2 d-flex align-items-center cursor-pointer';
+            vendorHeader.addEventListener('click', (e) => {
+                if (e.target.type === 'checkbox') return;
+                const vendorContent = vendorSection.querySelector('.vendor-content');
+                const isCollapsed = vendorContent.classList.contains('collapsed');
+                vendorContent.classList.toggle('collapsed', !isCollapsed);
+                vendorHeader.querySelector('.collapse-icon').textContent = isCollapsed ? '▼' : '▶';
+            });
+            
+            const vendorCheckbox = document.createElement('input');
+            vendorCheckbox.type = 'checkbox';
+            vendorCheckbox.className = 'select-all-checkbox me-2';
+            vendorCheckbox.addEventListener('change', (e) => {
+                const savedScroll = this._saveAvailableScrollPosition();
+                const isChecked = e.target.checked;
+                const checkboxes = vendorSection.querySelectorAll('input[type="checkbox"]');
+                checkboxes.forEach(checkbox => {
+                    if (!checkbox.classList.contains('tag-checkbox')) {
+                        checkbox.checked = isChecked;
+                        return;
+                    }
+                    const tagName = checkbox.value;
+                    const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
+                    if (tag) {
+                        checkbox.checked = isChecked;
+                        if (isChecked) {
+                            if (!this.state.persistentSelectedTags.includes(tagName)) {
+                                this.state.persistentSelectedTags.push(tagName);
+                            }
+                        } else {
+                            const index = this.state.persistentSelectedTags.indexOf(tagName);
+                            if (index > -1) {
+                                this.state.persistentSelectedTags.splice(index, 1);
+                            }
+                        }
+                    }
+                });
+                this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+                const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
+                    this.state.tags.find(t => t['Product Name*'] === name)
+                ).filter(Boolean);
+                this.updateSelectedTags(selectedTagObjects);
+                this.efficientlyUpdateAvailableTagsDisplay();
+                requestAnimationFrame(() => {
+                    this._restoreAvailableScrollPosition(savedScroll);
+                });
+            });
+            
+            vendorHeader.appendChild(vendorCheckbox);
+            vendorHeader.appendChild(document.createTextNode(vendor));
+            const vendorCollapseIcon = document.createElement('span');
+            vendorCollapseIcon.className = 'collapse-icon ms-auto';
+            vendorCollapseIcon.textContent = '▼';
+            vendorHeader.appendChild(vendorCollapseIcon);
             vendorSection.appendChild(vendorHeader);
 
             const vendorContent = document.createElement('div');
             vendorContent.className = 'vendor-content';
+            vendorSection.appendChild(vendorContent);
             
             const sortedBrands = Array.from(brandGroups.entries())
                 .sort(([a], [b]) => (a || '').localeCompare(b || ''));
@@ -2357,10 +2411,67 @@ const TagManager = {
                 const brandSection = document.createElement('div');
                 brandSection.className = 'brand-section ms-3 mb-2';
                 
+                // Create brand header with checkbox
                 const brandHeader = document.createElement('h6');
-                brandHeader.className = 'brand-header mb-2';
-                brandHeader.textContent = brand;
+                brandHeader.className = 'brand-header mb-2 d-flex align-items-center cursor-pointer';
+                brandHeader.addEventListener('click', (e) => {
+                    if (e.target.type === 'checkbox') return;
+                    const brandContent = brandSection.querySelector('.brand-content');
+                    const isCollapsed = brandContent.classList.contains('collapsed');
+                    brandContent.classList.toggle('collapsed', !isCollapsed);
+                    brandHeader.querySelector('.collapse-icon').textContent = isCollapsed ? '▼' : '▶';
+                });
+                
+                const brandCheckbox = document.createElement('input');
+                brandCheckbox.type = 'checkbox';
+                brandCheckbox.className = 'select-all-checkbox me-2';
+                brandCheckbox.addEventListener('change', (e) => {
+                    const savedScroll = this._saveAvailableScrollPosition();
+                    const isChecked = e.target.checked;
+                    const checkboxes = brandSection.querySelectorAll('input[type="checkbox"]');
+                    checkboxes.forEach(checkbox => {
+                        if (!checkbox.classList.contains('tag-checkbox')) {
+                            checkbox.checked = isChecked;
+                            return;
+                        }
+                        const tagName = checkbox.value;
+                        const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
+                        if (tag) {
+                            checkbox.checked = isChecked;
+                            if (isChecked) {
+                                if (!this.state.persistentSelectedTags.includes(tagName)) {
+                                    this.state.persistentSelectedTags.push(tagName);
+                                }
+                            } else {
+                                const index = this.state.persistentSelectedTags.indexOf(tagName);
+                                if (index > -1) {
+                                    this.state.persistentSelectedTags.splice(index, 1);
+                                }
+                            }
+                        }
+                    });
+                    this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+                    const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
+                        this.state.tags.find(t => t['Product Name*'] === name)
+                    ).filter(Boolean);
+                    this.updateSelectedTags(selectedTagObjects);
+                    this.efficientlyUpdateAvailableTagsDisplay();
+                    requestAnimationFrame(() => {
+                        this._restoreAvailableScrollPosition(savedScroll);
+                    });
+                });
+                
+                brandHeader.appendChild(brandCheckbox);
+                brandHeader.appendChild(document.createTextNode(brand));
+                const brandCollapseIcon = document.createElement('span');
+                brandCollapseIcon.className = 'collapse-icon ms-auto';
+                brandCollapseIcon.textContent = '▼';
+                brandHeader.appendChild(brandCollapseIcon);
                 brandSection.appendChild(brandHeader);
+                
+                const brandContent = document.createElement('div');
+                brandContent.className = 'brand-content';
+                brandSection.appendChild(brandContent);
 
                 const sortedProductTypes = Array.from(productTypeGroups.entries())
                     .sort(([a], [b]) => (a || '').localeCompare(b || ''));
@@ -2369,10 +2480,67 @@ const TagManager = {
                     const productTypeSection = document.createElement('div');
                     productTypeSection.className = 'product-type-section ms-3 mb-2';
                     
+                    // Create product type header with checkbox
                     const productTypeHeader = document.createElement('div');
-                    productTypeHeader.className = 'product-type-header mb-2';
-                    productTypeHeader.textContent = productType;
+                    productTypeHeader.className = 'product-type-header mb-2 d-flex align-items-center cursor-pointer';
+                    productTypeHeader.addEventListener('click', (e) => {
+                        if (e.target.type === 'checkbox') return;
+                        const productTypeContent = productTypeSection.querySelector('.product-type-content');
+                        const isCollapsed = productTypeContent.classList.contains('collapsed');
+                        productTypeContent.classList.toggle('collapsed', !isCollapsed);
+                        productTypeHeader.querySelector('.collapse-icon').textContent = isCollapsed ? '▼' : '▶';
+                    });
+                    
+                    const productTypeCheckbox = document.createElement('input');
+                    productTypeCheckbox.type = 'checkbox';
+                    productTypeCheckbox.className = 'select-all-checkbox me-2';
+                    productTypeCheckbox.addEventListener('change', (e) => {
+                        const savedScroll = this._saveAvailableScrollPosition();
+                        const isChecked = e.target.checked;
+                        const checkboxes = productTypeSection.querySelectorAll('input[type="checkbox"]');
+                        checkboxes.forEach(checkbox => {
+                            if (!checkbox.classList.contains('tag-checkbox')) {
+                                checkbox.checked = isChecked;
+                                return;
+                            }
+                            const tagName = checkbox.value;
+                            const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
+                            if (tag) {
+                                checkbox.checked = isChecked;
+                                if (isChecked) {
+                                    if (!this.state.persistentSelectedTags.includes(tagName)) {
+                                        this.state.persistentSelectedTags.push(tagName);
+                                    }
+                                } else {
+                                    const index = this.state.persistentSelectedTags.indexOf(tagName);
+                                    if (index > -1) {
+                                        this.state.persistentSelectedTags.splice(index, 1);
+                                    }
+                                }
+                            }
+                        });
+                        this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+                        const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
+                            this.state.tags.find(t => t['Product Name*'] === name)
+                        ).filter(Boolean);
+                        this.updateSelectedTags(selectedTagObjects);
+                        this.efficientlyUpdateAvailableTagsDisplay();
+                        requestAnimationFrame(() => {
+                            this._restoreAvailableScrollPosition(savedScroll);
+                        });
+                    });
+                    
+                    productTypeHeader.appendChild(productTypeCheckbox);
+                    productTypeHeader.appendChild(document.createTextNode(productType));
+                    const typeCollapseIcon = document.createElement('span');
+                    typeCollapseIcon.className = 'collapse-icon ms-auto';
+                    typeCollapseIcon.textContent = '▼';
+                    productTypeHeader.appendChild(typeCollapseIcon);
                     productTypeSection.appendChild(productTypeHeader);
+                    
+                    const productTypeContent = document.createElement('div');
+                    productTypeContent.className = 'product-type-content';
+                    productTypeSection.appendChild(productTypeContent);
 
                     // Check if this product type has subcategories (vape products with 510/Disposable)
                     const hasSubcategories = weightGroupsOrSubcategories instanceof Map && 
@@ -2441,10 +2609,63 @@ const TagManager = {
                                 const weightSection = document.createElement('div');
                                 weightSection.className = 'weight-section ms-3 mb-2';
                                 
+                                // Create weight header with checkbox
                                 const weightHeader = document.createElement('div');
-                                weightHeader.className = 'weight-header mb-1';
-                                weightHeader.textContent = weight;
+                                weightHeader.className = 'weight-header mb-1 d-flex align-items-center cursor-pointer';
+                                weightHeader.addEventListener('click', (e) => {
+                                    if (e.target.type === 'checkbox') return;
+                                    const weightContent = weightSection.querySelector('.weight-content');
+                                    const isCollapsed = weightContent.classList.contains('collapsed');
+                                    weightContent.classList.toggle('collapsed', !isCollapsed);
+                                    weightHeader.querySelector('.collapse-icon').textContent = isCollapsed ? '▼' : '▶';
+                                });
+                                
+                                const weightCheckbox = document.createElement('input');
+                                weightCheckbox.type = 'checkbox';
+                                weightCheckbox.className = 'select-all-checkbox me-2';
+                                weightCheckbox.addEventListener('change', (e) => {
+                                    const savedScroll = this._saveAvailableScrollPosition();
+                                    const isChecked = e.target.checked;
+                                    const checkboxes = weightSection.querySelectorAll('input.tag-checkbox');
+                                    checkboxes.forEach(checkbox => {
+                                        checkbox.checked = isChecked;
+                                        const tagName = checkbox.value;
+                                        const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
+                                        if (tag) {
+                                            if (isChecked) {
+                                                if (!this.state.persistentSelectedTags.includes(tagName)) {
+                                                    this.state.persistentSelectedTags.push(tagName);
+                                                }
+                                            } else {
+                                                const index = this.state.persistentSelectedTags.indexOf(tagName);
+                                                if (index > -1) {
+                                                    this.state.persistentSelectedTags.splice(index, 1);
+                                                }
+                                            }
+                                        }
+                                    });
+                                    this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+                                    const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
+                                        this.state.tags.find(t => t['Product Name*'] === name)
+                                    ).filter(Boolean);
+                                    this.updateSelectedTags(selectedTagObjects);
+                                    this.efficientlyUpdateAvailableTagsDisplay();
+                                    requestAnimationFrame(() => {
+                                        this._restoreAvailableScrollPosition(savedScroll);
+                                    });
+                                });
+                                
+                                weightHeader.appendChild(weightCheckbox);
+                                weightHeader.appendChild(document.createTextNode(weight));
+                                const weightCollapseIcon = document.createElement('span');
+                                weightCollapseIcon.className = 'collapse-icon ms-auto';
+                                weightCollapseIcon.textContent = '▼';
+                                weightHeader.appendChild(weightCollapseIcon);
                                 weightSection.appendChild(weightHeader);
+                                
+                                const weightContent = document.createElement('div');
+                                weightContent.className = 'weight-content';
+                                weightSection.appendChild(weightContent);
 
                                 // Sort tags alphabetically by product name
                                 const sortedTags = [...tagArray].sort((a, b) => {
@@ -2454,7 +2675,7 @@ const TagManager = {
                                 });
                                 sortedTags.forEach(tag => {
                                     const tagElement = this.createTagElement(tag, false);
-                                    weightSection.appendChild(tagElement);
+                                    weightContent.appendChild(tagElement);
                                 });
 
                                 subcategorySection.appendChild(weightSection);
@@ -2471,10 +2692,63 @@ const TagManager = {
                             const weightSection = document.createElement('div');
                             weightSection.className = 'weight-section ms-3 mb-2';
                             
+                            // Create weight header with checkbox
                             const weightHeader = document.createElement('div');
-                            weightHeader.className = 'weight-header mb-1';
-                            weightHeader.textContent = weight;
+                            weightHeader.className = 'weight-header mb-1 d-flex align-items-center cursor-pointer';
+                            weightHeader.addEventListener('click', (e) => {
+                                if (e.target.type === 'checkbox') return;
+                                const weightContent = weightSection.querySelector('.weight-content');
+                                const isCollapsed = weightContent.classList.contains('collapsed');
+                                weightContent.classList.toggle('collapsed', !isCollapsed);
+                                weightHeader.querySelector('.collapse-icon').textContent = isCollapsed ? '▼' : '▶';
+                            });
+                            
+                            const weightCheckbox = document.createElement('input');
+                            weightCheckbox.type = 'checkbox';
+                            weightCheckbox.className = 'select-all-checkbox me-2';
+                            weightCheckbox.addEventListener('change', (e) => {
+                                const savedScroll = this._saveAvailableScrollPosition();
+                                const isChecked = e.target.checked;
+                                const checkboxes = weightSection.querySelectorAll('input.tag-checkbox');
+                                checkboxes.forEach(checkbox => {
+                                    checkbox.checked = isChecked;
+                                    const tagName = checkbox.value;
+                                    const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
+                                    if (tag) {
+                                        if (isChecked) {
+                                            if (!this.state.persistentSelectedTags.includes(tagName)) {
+                                                this.state.persistentSelectedTags.push(tagName);
+                                            }
+                                        } else {
+                                            const index = this.state.persistentSelectedTags.indexOf(tagName);
+                                            if (index > -1) {
+                                                this.state.persistentSelectedTags.splice(index, 1);
+                                            }
+                                        }
+                                    }
+                                });
+                                this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+                                const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
+                                    this.state.tags.find(t => t['Product Name*'] === name)
+                                ).filter(Boolean);
+                                this.updateSelectedTags(selectedTagObjects);
+                                this.efficientlyUpdateAvailableTagsDisplay();
+                                requestAnimationFrame(() => {
+                                    this._restoreAvailableScrollPosition(savedScroll);
+                                });
+                            });
+                            
+                            weightHeader.appendChild(weightCheckbox);
+                            weightHeader.appendChild(document.createTextNode(weight));
+                            const weightCollapseIcon = document.createElement('span');
+                            weightCollapseIcon.className = 'collapse-icon ms-auto';
+                            weightCollapseIcon.textContent = '▼';
+                            weightHeader.appendChild(weightCollapseIcon);
                             weightSection.appendChild(weightHeader);
+                            
+                            const weightContent = document.createElement('div');
+                            weightContent.className = 'weight-content';
+                            weightSection.appendChild(weightContent);
 
                             // Sort tags alphabetically by product name
                             const sortedTags = [...tagArray].sort((a, b) => {
@@ -2484,14 +2758,14 @@ const TagManager = {
                             });
                             sortedTags.forEach(tag => {
                                 const tagElement = this.createTagElement(tag, false);
-                                weightSection.appendChild(tagElement);
+                                weightContent.appendChild(tagElement);
                             });
 
-                            productTypeSection.appendChild(weightSection);
+                            productTypeContent.appendChild(weightSection);
                         });
                     }
 
-                    brandSection.appendChild(productTypeSection);
+                    brandContent.appendChild(productTypeSection);
                 });
 
                 vendorContent.appendChild(brandSection);
@@ -2511,6 +2785,34 @@ const TagManager = {
             this._restoreAvailableScrollPosition(savedScroll);
             this.updateSelectAllCheckboxes();
             this.initializeSelectAllCheckbox();
+            
+            // Update all group-level select all checkboxes
+            const container = availableTagsContainer;
+            function updateSelectAllCheckboxState(section) {
+                const selectAll = section.querySelector('.select-all-checkbox');
+                if (!selectAll) return;
+                const tagCheckboxes = section.querySelectorAll('.tag-checkbox');
+                if (tagCheckboxes.length === 0) {
+                    selectAll.checked = false;
+                    selectAll.indeterminate = false;
+                    return;
+                }
+                const checkedCount = Array.from(tagCheckboxes).filter(cb => cb.checked).length;
+                if (checkedCount === tagCheckboxes.length) {
+                    selectAll.checked = true;
+                    selectAll.indeterminate = false;
+                } else if (checkedCount === 0) {
+                    selectAll.checked = false;
+                    selectAll.indeterminate = false;
+                } else {
+                    selectAll.checked = false;
+                    selectAll.indeterminate = true;
+                }
+            }
+            // Update all group-level select all checkboxes
+            container.querySelectorAll('.vendor-section, .brand-section, .product-type-section, .subcategory-section, .weight-section').forEach(section => {
+                updateSelectAllCheckboxState(section);
+            });
             
             // Hide loading splash only after tags actually appear in DOM
             this._waitForTagsToAppear();
@@ -6105,7 +6407,16 @@ const TagManager = {
                         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                     }
                     
-                    responseData = await response.json();
+                    const responseText = await response.text();
+                    try {
+                        responseData = responseText ? JSON.parse(responseText) : null;
+                    } catch (parseError) {
+                        console.error('Failed to parse available tags JSON response:', {
+                            parseError,
+                            snippet: responseText ? responseText.slice(0, 500) : ''
+                        });
+                        throw parseError;
+                    }
                     break; // Success - exit retry loop
                     
                 } catch (error) {
@@ -6130,7 +6441,7 @@ const TagManager = {
             if (!responseData) {
                 throw lastError || new Error('Failed to fetch tags after retries');
             }
-            verboseLog('Available tags response data:', responseData);
+            verboseLog('Available tags response data:', responseData ? { source: responseData.source, totalCount: responseData.total_count } : null);
             
             // Handle both old array format and new object format
             let tags;
@@ -6172,20 +6483,7 @@ const TagManager = {
 
             // Normalize lineage fields so UI consistently prefers database lineage (same pipeline as backend)
             // CRITICAL: Prefer canonical_lineage/currentLineage (from DB) over Lineage to ensure UI matches database
-            const normalizeLineageFields = (tag) => {
-                try {
-                    // Use same order as backend pipeline - canonical_lineage/currentLineage first (from DB)
-                    const lin = (tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || '').toString().trim();
-                    if (lin) {
-                        // Set all fields to the same value for consistency (DB value is source of truth)
-                        tag.canonical_lineage = lin;
-                        tag.currentLineage = lin;
-                        tag.Lineage = lin;
-                    }
-                } catch (e) { /* noop */ }
-                return tag;
-            };
-            tags = tags.map(normalizeLineageFields);
+            tags = tags.map(tag => this._normalizeLineageFields(tag));
             
             // Debug: Check lineage data for first few tags
             verboseLog('Sample lineage data:');
@@ -6295,11 +6593,97 @@ const TagManager = {
         } catch (error) {
             console.error('Error fetching available tags:', error);
             verboseLog('=== fetchAndUpdateAvailableTags ERROR ===');
+            const fallbackLoaded = await this._fallbackToLiteAvailableTags(error, savedScroll);
+            if (fallbackLoaded) {
+                verboseLog('✅ Fallback lite tags loaded successfully');
+                return true;
+            }
             // Hide splash on error
             if (this.hideActionSplash) {
                 this.hideActionSplash();
             }
             return false;
+        }
+    },
+    
+    _normalizeLineageFields(tag) {
+        try {
+            const lin = (tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || '').toString().trim();
+            if (lin) {
+                const normalized = lin.toUpperCase();
+                tag.canonical_lineage = normalized;
+                tag.currentLineage = normalized;
+                tag.Lineage = normalized;
+            }
+        } catch (e) { /* noop */ }
+        return tag;
+    },
+    
+    async _fallbackToLiteAvailableTags(originalError, savedScrollPosition) {
+        try {
+            verboseLog('Attempting fallback to /api/available-tags-lite due to error:', originalError?.message || originalError);
+            const response = await fetch(`/api/available-tags-lite?t=${Date.now()}`);
+            if (!response.ok) {
+                throw new Error(`Lite endpoint HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            const responseText = await response.text();
+            let fallbackData = null;
+            if (responseText) {
+                try {
+                    fallbackData = JSON.parse(responseText);
+                } catch (parseError) {
+                    console.error('Failed to parse /api/available-tags-lite response:', {
+                        parseError,
+                        snippet: responseText.slice(0, 500)
+                    });
+                    throw parseError;
+                }
+            }
+            
+            if (!fallbackData || !Array.isArray(fallbackData.tags) || fallbackData.tags.length === 0) {
+                verboseLog('Fallback lite endpoint returned no tags');
+                return false;
+            }
+            
+            const tags = fallbackData.tags.map(tag => this._normalizeLineageFields(tag));
+            this.state.tags = [...tags];
+            this.state.originalTags = [...tags];
+            this._cachedFilterOptions = null;
+            this._cachedFilterOptionsHash = null;
+            this._cachedFilterOptionsTagsLength = null;
+            
+            const currentSelectedTags = [...this.state.persistentSelectedTags];
+            this.state.persistentSelectedTags = [];
+            this.state.selectedTags = new Set();
+            
+            if (currentSelectedTags.length > 0) {
+                const tagNameSet = new Set(tags.map(t => t['Product Name*']));
+                for (const tagName of currentSelectedTags) {
+                    if (tagNameSet.has(tagName)) {
+                        this.state.persistentSelectedTags.push(tagName);
+                        this.state.selectedTags.add(tagName);
+                    }
+                }
+            }
+            
+            this.validateSelectedTags();
+            this._updateAvailableTags(tags);
+            this._restoreAvailableScrollPosition(savedScrollPosition);
+            this.updateTagCount('available', tags.length);
+            this.updateTagCount('selected', this.state.persistentSelectedTags.length);
+            
+            if (window.Toast && typeof window.Toast.show === 'function') {
+                window.Toast.show('warning', 'Loaded limited tag list due to a server error. Some filters may be unavailable.', { duration: 6000 });
+            }
+            return true;
+        } catch (fallbackError) {
+            console.error('Fallback to /api/available-tags-lite failed:', fallbackError);
+            return false;
+        } finally {
+            if (this.hideActionSplash) {
+                this.hideActionSplash();
+            }
         }
     },
 
@@ -8381,6 +8765,19 @@ const TagManager = {
             if (productTypeSelectAll && productTypeTagCheckboxes.length > 0) {
                 productTypeSelectAll.checked = productTypeChecked.length === productTypeTagCheckboxes.length;
                 productTypeSelectAll.indeterminate = productTypeChecked.length > 0 && productTypeChecked.length < productTypeTagCheckboxes.length;
+            }
+        });
+        
+        // Update subcategory checkboxes
+        const subcategorySections = document.querySelectorAll('#availableTags .subcategory-section');
+        subcategorySections.forEach(subcategorySection => {
+            const subcategoryTagCheckboxes = subcategorySection.querySelectorAll('.tag-checkbox');
+            const subcategoryChecked = subcategorySection.querySelectorAll('.tag-checkbox:checked');
+            const subcategorySelectAll = subcategorySection.querySelector('.select-all-checkbox');
+            
+            if (subcategorySelectAll && subcategoryTagCheckboxes.length > 0) {
+                subcategorySelectAll.checked = subcategoryChecked.length === subcategoryTagCheckboxes.length;
+                subcategorySelectAll.indeterminate = subcategoryChecked.length > 0 && subcategoryChecked.length < subcategoryTagCheckboxes.length;
             }
         });
         

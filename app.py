@@ -86,6 +86,11 @@ else:
     CACHE_SIZE_LIMIT = int(os.environ.get('CACHE_SIZE_LIMIT', '100'))
     BATCH_SIZE_LIMIT = int(os.environ.get('BATCH_SIZE_LIMIT', '500'))
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOADS_DIR = os.path.join(BASE_DIR, 'uploads')
+CACHE_DIR = os.path.join(UPLOADS_DIR, 'cache')
+os.makedirs(CACHE_DIR, exist_ok=True)
+
 # Memory monitoring and optimization
 def get_memory_usage():
     """Get current memory usage in MB."""
@@ -152,6 +157,94 @@ def safe_load_file_with_timeout(processor, file_path, timeout_seconds=30):
 LAZY_LOADING_ENABLED = True  # Enable lazy loading for better performance
 
 # Browser-based store persistence (handled by frontend JavaScript)
+
+def json_safe_value(value):
+    """Convert values to JSON-serializable representations."""
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        try:
+            if value == value.to_integral_value():
+                return int(value)
+            return float(value)
+        except Exception:
+            return float(value)
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, time):
+        return value.isoformat()
+    if isinstance(value, bytes):
+        try:
+            return value.decode('utf-8')
+        except UnicodeDecodeError:
+            return value.decode('latin-1', errors='ignore')
+    if NUMPY_AVAILABLE and np is not None:
+        if isinstance(value, (np.integer,)):
+            return int(value)
+        if isinstance(value, (np.floating,)):
+            return float(value)
+        if isinstance(value, (np.bool_,)):
+            return bool(value)
+        if hasattr(value, 'tolist'):
+            try:
+                return json_safe_value(value.tolist())
+            except Exception:
+                pass
+    if isinstance(value, pd.Timestamp):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {k: json_safe_value(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [json_safe_value(v) for v in value]
+    if hasattr(value, 'item') and callable(getattr(value, 'item')):
+        try:
+            return json_safe_value(value.item())
+        except Exception:
+            pass
+    return value
+
+
+def make_json_safe(obj):
+    """Recursively ensure complex structures are JSON serializable."""
+    if isinstance(obj, dict):
+        return {k: make_json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [make_json_safe(item) for item in obj]
+    return json_safe_value(obj)
+
+
+def _normalize_store_key(store_name):
+    return store_name or 'global'
+
+
+def get_available_tags_cache_path(store_name):
+    normalized = _normalize_store_key(store_name)
+    filename = f'available_tags_{normalized}.json'
+    return os.path.join(CACHE_DIR, filename)
+
+
+def save_available_tags_cache(store_name, tags):
+    """Persist the latest successful available-tags payload for emergency fallbacks."""
+    try:
+        cache_path = get_available_tags_cache_path(store_name)
+        with open(cache_path, 'w', encoding='utf-8') as cache_file:
+            json.dump(tags, cache_file, ensure_ascii=False)
+    except Exception as e:
+        logging.warning(f"Failed to save available tags cache for {store_name}: {e}")
+
+
+def load_available_tags_cache(store_name):
+    """Load the most recent cached available-tags payload for a store."""
+    try:
+        cache_path = get_available_tags_cache_path(store_name)
+        if not os.path.exists(cache_path):
+            return None
+        with open(cache_path, 'r', encoding='utf-8') as cache_file:
+            return json.load(cache_file)
+    except Exception as e:
+        logging.warning(f"Failed to load available tags cache for {store_name}: {e}")
+        return None
+
 
 from pathlib import Path
 from werkzeug.utils import secure_filename
@@ -2167,6 +2260,55 @@ def get_session_product_database():
     except Exception as e:
         logging.error(f"Error getting session product database: {e}")
         return None
+
+
+def generate_product_name_variants(raw_name):
+    """
+    Generate a list of product name variants to improve matching against the database.
+    Handles vendor suffixes, trailing weights, non-breaking hyphens, and spacing differences.
+    """
+    import re
+
+    variants = []
+    if raw_name is None:
+        return variants
+
+    try:
+        name = str(raw_name).strip()
+    except Exception:
+        name = raw_name
+
+    if not name:
+        return variants
+
+    def add_variant(value):
+        if not value:
+            return
+        cleaned = re.sub(r'\s+', ' ', value.strip().replace('\u2011', '-'))
+        if cleaned and cleaned not in variants:
+            variants.append(cleaned)
+
+    add_variant(name)
+
+    # Remove common "by Vendor" suffixes (optionally before a weight)
+    vendor_removed = re.sub(r'\s+by\s+[^-]+(?=(\s*-\s*\d|\s*$))', '', name, flags=re.IGNORECASE)
+    vendor_removed = re.sub(r'\s+by\s+[^-]+$', '', vendor_removed, flags=re.IGNORECASE)
+    add_variant(vendor_removed)
+
+    # Remove trailing weight indicators like "- 1g", "- 10pk", "- 100mg"
+    weight_removed = re.sub(
+        r'\s*-\s*\d+(?:\.\d+)?\s*(?:g|gram|grams|gm|oz|ounce|ounces|ml|mg|ct|pack|pk|pcs|pc)?$',
+        '',
+        vendor_removed,
+        flags=re.IGNORECASE
+    )
+    add_variant(weight_removed)
+
+    # Add variant without hyphens (helps when DB stored spaces instead)
+    add_variant(weight_removed.replace('-', ' '))
+
+    # Deduplicate while preserving order
+    return variants
 
 def _enhance_json_with_excel_data(json_tag, excel_product):
     """
@@ -7449,6 +7591,8 @@ def process_database_product_for_api(db_product):
     return processed_product
 @app.route('/api/available-tags', methods=['GET'])
 def get_available_tags():
+    store_name = None
+    cache_store_name = 'global'
     try:
         # Optional: respect nocache flag to bypass cached results
         nocache = request.args.get('nocache') in ('1', 'true', 'True')
@@ -7496,6 +7640,7 @@ def get_available_tags():
         # Log current database for this request
         try:
             store_name = get_current_store_name()
+            cache_store_name = _normalize_store_key(store_name)
             if store_name:
                 _dbg_db = get_product_database(store_name)
                 if _dbg_db:
@@ -7671,7 +7816,7 @@ def get_available_tags():
                                 logging.debug(f"UI lineage alignment (cache) error for a tag: {_loop_err}")
                         if updated:
                             # Refresh cache with aligned data
-                            cache.set(cache_key, cached_tags, timeout=300)
+                            cache.set(cache_key, make_json_safe(cached_tags), timeout=300)
                             logging.info(f"🔄 UI LINEAGE ALIGNMENT (cache): Applied {updated} lineage overrides to cached tags")
                         else:
                             logging.debug(f"✅ Lineage alignment completed - all tags already have database lineage")
@@ -7680,9 +7825,10 @@ def get_available_tags():
 
             elapsed = (time.time() - start_time) * 1000
             logging.info(f"✅ Using {len(cached_tags)} cached available tags ({elapsed:.1f}ms)")
+            safe_cached_tags = make_json_safe(cached_tags)
             return jsonify({
-                'tags': cached_tags,  # Frontend expects 'tags', not 'available_tags'
-                'total_count': len(cached_tags),
+                'tags': safe_cached_tags,  # Frontend expects 'tags', not 'available_tags'
+                'total_count': len(safe_cached_tags),
                 'source': 'cache+db-lineage' if lineage_alignment_needed else 'cache'
             })
         
@@ -7879,15 +8025,21 @@ def get_available_tags():
                 # CRITICAL: Don't fail the entire request - Excel tags are still valid
                 # Continue to return Excel tags even if lineage alignment fails
 
+            safe_excel_tags = make_json_safe(all_tags)
             # Cache the results for faster subsequent requests (unless nocache requested)
             if not nocache:
-                cache.set(cache_key, all_tags, timeout=300)  # Cache for 5 minutes
+                cache.set(cache_key, safe_excel_tags, timeout=300)  # Cache for 5 minutes
+            try:
+                current_store_for_cache = get_current_store_name(allow_fallback=False) or store_name or cache_store_name
+                save_available_tags_cache(_normalize_store_key(current_store_for_cache), safe_excel_tags)
+            except Exception as cache_error:
+                logging.warning(f"Unable to persist Excel tag cache: {cache_error}")
             elapsed = (time.time() - start_time) * 1000
             logging.info(f"✅ Available tags (Excel-aligned-to-DB) completed ({elapsed:.1f}ms)")
             
             return jsonify({
-                'tags': all_tags,
-                'total_count': len(all_tags),
+                'tags': safe_excel_tags,
+                'total_count': len(safe_excel_tags),
                 'source': 'excel+db-lineage'
             })
         
@@ -8609,7 +8761,10 @@ def update_lineage():
         tag_name = data.get('tag_name') or data.get('Product Name*') or data.get('product_name') if data else None
         new_lineage = data.get('lineage') if data else None
         
-        logging.info(f"📝 LINEAGE UPDATE: tag_name='{tag_name}', new_lineage='{new_lineage}'")
+        name_variants = generate_product_name_variants(tag_name)
+        if not name_variants:
+            name_variants = [str(tag_name).strip()]
+        logging.info(f"📝 LINEAGE UPDATE: tag_name='{tag_name}', new_lineage='{new_lineage}' (variants: {name_variants})")
         
         if not tag_name or not new_lineage:
             logging.error(f"❌ LINEAGE UPDATE: Missing tag_name or lineage (tag_name={tag_name}, lineage={new_lineage})")
@@ -8681,6 +8836,17 @@ def update_lineage():
                 'error_type': type(db_init_error).__name__,
                 'store_name': store_name
             }), 500
+        
+        variant_pairs = []
+        for variant in name_variants:
+            try:
+                normalized = product_db._normalize_product_name(variant)
+            except Exception:
+                normalized = variant.strip().lower()
+            variant_pairs.append((variant, normalized))
+        
+        tag_name_clean = variant_pairs[0][0]
+        normalized_name = variant_pairs[0][1]
         
         # Log which database is being used for update
         db_path = getattr(product_db, 'db_path', 'Unknown')
@@ -8761,18 +8927,18 @@ def update_lineage():
             
             # CRITICAL FIX: Get vendor and strain from database (after connection is established)
             try:
-                # Get vendor from database
-                cursor.execute('''
-                    SELECT "Vendor/Supplier*" FROM products
-                    WHERE "Product Name*" = ? OR "ProductName" = ?
-                    LIMIT 1
-                ''', (tag_name, tag_name))
-                result = cursor.fetchone()
-                if result and result[0]:
-                    vendor = str(result[0]).strip()
-                    if vendor and vendor.lower() not in ['nan', 'none', 'null', '']:
-                        logging.info(f"Found vendor '{vendor}' for product '{tag_name}' from database")
-                    else:
+                for candidate, _ in variant_pairs:
+                    cursor.execute('''
+                        SELECT "Vendor/Supplier*" FROM products
+                        WHERE "Product Name*" = ? OR "ProductName" = ?
+                        LIMIT 1
+                    ''', (candidate, candidate))
+                    result = cursor.fetchone()
+                    if result and result[0]:
+                        vendor = str(result[0]).strip()
+                        if vendor and vendor.lower() not in ['nan', 'none', 'null', '']:
+                            logging.info(f"Found vendor '{vendor}' for product '{candidate}' from database")
+                            break
                         vendor = None
             except Exception as db_vendor_error:
                 logging.warning(f"Could not get vendor from database: {db_vendor_error}")
@@ -8788,9 +8954,20 @@ def update_lineage():
                         product_name_col = 'Product Name*'
                     
                     if product_name_col:
-                        mask = excel_processor.df[product_name_col] == tag_name
+                        names_series = excel_processor.df[product_name_col].astype(str).str.strip()
+                        names_upper = names_series.str.upper()
+                        variant_upper = [v.upper() for v in name_variants]
+                        mask = names_upper.isin(variant_upper)
                         if not mask.any():
-                            mask = excel_processor.df[product_name_col].str.contains(tag_name, case=False, na=False)
+                            for variant in variant_upper:
+                                try:
+                                    pattern = re.escape(variant)
+                                    contains_mask = names_upper.str.contains(pattern, na=False)
+                                except re.error:
+                                    continue
+                                if contains_mask.any():
+                                    mask = contains_mask
+                                    break
                         
                         if mask is not None and mask.any():
                             vendor_cols = [
@@ -8802,38 +8979,53 @@ def update_lineage():
                                 vendor_val = excel_processor.df.loc[mask, existing_vendor_cols[0]].iloc[0]
                                 if vendor_val and str(vendor_val).strip() and str(vendor_val).lower() not in ['nan', 'none', 'null', '']:
                                     vendor = str(vendor_val).strip()
-                                    logging.info(f"Found vendor '{vendor}' for product '{tag_name}' from Excel")
+                                    logging.info(f"Found vendor '{vendor}' for product '{tag_name}' from Excel using mask")
                 except Exception as excel_vendor_error:
                     logging.warning(f"Could not get vendor from Excel: {excel_vendor_error}")
             
             # Get strain from database
             try:
-                cursor.execute('''
-                    SELECT "Product Strain" FROM products
-                    WHERE "Product Name*" = ? OR "ProductName" = ?
-                    LIMIT 1
-                ''', (tag_name, tag_name))
-                result = cursor.fetchone()
-                if result and result[0]:
-                    strain_name = str(result[0]).strip()
-                    if strain_name and strain_name.lower() not in ['nan', 'none', 'null', '']:
-                        logging.info(f"Found strain '{strain_name}' for product '{tag_name}' from database")
-                    else:
+                for candidate, _ in variant_pairs:
+                    cursor.execute('''
+                        SELECT "Product Strain" FROM products
+                        WHERE "Product Name*" = ? OR "ProductName" = ?
+                        LIMIT 1
+                    ''', (candidate, candidate))
+                    result = cursor.fetchone()
+                    if result and result[0]:
+                        strain_name = str(result[0]).strip()
+                        if strain_name and strain_name.lower() not in ['nan', 'none', 'null', '']:
+                            logging.info(f"Found strain '{strain_name}' for product '{candidate}' from database")
+                            break
                         strain_name = None
             except Exception as db_strain_error:
                 logging.warning(f"Could not get strain from database: {db_strain_error}")
                 strain_name = None
             
             # Fallback to Excel if strain not found in database and Excel is available
-            if not strain_name and excel_processor and hasattr(excel_processor, 'get_strain_name_for_product'):
+            if not strain_name and excel_processor and hasattr(excel_processor, 'df') and excel_processor.df is not None:
                 try:
-                    strain_name = excel_processor.get_strain_name_for_product(tag_name)
-                    if strain_name:
-                        strain_name = str(strain_name).strip()
-                        if not strain_name or strain_name.lower() in ['nan', 'none', 'null', '']:
-                            strain_name = None
-                        else:
-                            logging.info(f"Found strain '{strain_name}' for product '{tag_name}' from Excel")
+                    df = excel_processor.df
+                    if 'Product Name*' in df.columns and 'Product Strain' in df.columns:
+                        names_series = df['Product Name*'].astype(str).str.strip()
+                        names_upper = names_series.str.upper()
+                        variant_upper = [v.upper() for v in name_variants]
+                        mask = names_upper.isin(variant_upper)
+                        if not mask.any():
+                            for variant in variant_upper:
+                                try:
+                                    pattern = re.escape(variant)
+                                    contains_mask = names_upper.str.contains(pattern, na=False)
+                                except re.error:
+                                    continue
+                                if contains_mask.any():
+                                    mask = contains_mask
+                                    break
+                        if mask is not None and mask.any():
+                            strain_val = df.loc[mask, 'Product Strain'].iloc[0]
+                            if strain_val and str(strain_val).strip() and str(strain_val).lower() not in ['nan', 'none', 'null', '']:
+                                strain_name = str(strain_val).strip()
+                                logging.info(f"Found strain '{strain_name}' for product '{tag_name}' from Excel using mask")
                 except Exception as excel_strain_error:
                     logging.warning(f"Could not get strain from Excel: {excel_strain_error}")
             
@@ -8843,68 +9035,69 @@ def update_lineage():
             products_updated_by_strain = 0
             
             # FIRST: Check if product exists before trying to update (for better error messages)
-            tag_name_clean = str(tag_name).strip()
-            try:
-                normalized_name = product_db._normalize_product_name(tag_name_clean) if hasattr(product_db, '_normalize_product_name') else tag_name_clean.lower().strip()
-            except:
-                normalized_name = tag_name_clean.lower().strip()
-            
-            # Check if product exists in database (for diagnostic logging)
-            logging.info(f"🔍 Searching for product: '{tag_name_clean}' (normalized: '{normalized_name}')")
-            cursor.execute('''
-                SELECT "Product Name*", "ProductName", normalized_name, "Lineage"
-                FROM products
-                WHERE "Product Name*" = ? OR "ProductName" = ? OR normalized_name = ?
-                LIMIT 5
-            ''', (tag_name_clean, tag_name_clean, normalized_name))
-            existing_products = cursor.fetchall()
-            
-            if existing_products:
-                logging.info(f"✅ Found {len(existing_products)} exact match(es) for '{tag_name_clean}'")
-            else:
-                # Try case-insensitive search
-                tag_name_lower = tag_name_clean.lower()
-                logging.info(f"🔍 Trying case-insensitive search for: '{tag_name_lower}'")
+            existing_products = []
+            for candidate, normalized_candidate in variant_pairs:
+                logging.info(f"🔍 Searching for product: '{candidate}' (normalized: '{normalized_candidate}')")
                 cursor.execute('''
                     SELECT "Product Name*", "ProductName", normalized_name, "Lineage"
                     FROM products
-                    WHERE LOWER(TRIM("Product Name*")) = ? 
-                       OR LOWER(TRIM("ProductName")) = ?
+                    WHERE "Product Name*" = ? OR "ProductName" = ? OR normalized_name = ?
                     LIMIT 5
-                ''', (tag_name_lower, tag_name_lower))
+                ''', (candidate, candidate, normalized_candidate))
                 existing_products = cursor.fetchall()
-                
                 if existing_products:
-                    logging.info(f"✅ Found {len(existing_products)} case-insensitive match(es) for '{tag_name_clean}'")
-                else:
-                    # Try partial match
-                    logging.info(f"🔍 Trying partial match search for: '%{tag_name_clean}%'")
+                    logging.info(f"✅ Found {len(existing_products)} exact match(es) for '{candidate}'")
+                    tag_name_clean = candidate
+                    normalized_name = normalized_candidate
+                    break
+            
+            if not existing_products:
+                for candidate, normalized_candidate in variant_pairs:
+                    tag_name_lower = candidate.lower()
+                    logging.info(f"🔍 Trying case-insensitive search for: '{tag_name_lower}'")
+                    cursor.execute('''
+                        SELECT "Product Name*", "ProductName", normalized_name, "Lineage"
+                        FROM products
+                        WHERE LOWER(TRIM("Product Name*")) = ? 
+                           OR LOWER(TRIM("ProductName")) = ?
+                        LIMIT 5
+                    ''', (tag_name_lower, tag_name_lower))
+                    existing_products = cursor.fetchall()
+                    if existing_products:
+                        logging.info(f"✅ Found {len(existing_products)} case-insensitive match(es) for '{candidate}'")
+                        tag_name_clean = candidate
+                        normalized_name = normalized_candidate
+                        break
+            
+            if not existing_products:
+                logging.info(f"🔍 Trying partial match search for variants: {name_variants}")
+                for candidate in name_variants:
                     cursor.execute('''
                         SELECT "Product Name*", "ProductName", normalized_name, "Lineage"
                         FROM products
                         WHERE "Product Name*" LIKE ? OR "ProductName" LIKE ?
                         LIMIT 5
-                    ''', (f'%{tag_name_clean}%', f'%{tag_name_clean}%'))
+                    ''', (f'%{candidate}%', f'%{candidate}%'))
                     existing_products = cursor.fetchall()
-                    
                     if existing_products:
-                        logging.warning(f"⚠️  Found {len(existing_products)} similar products for '{tag_name_clean}': {[p[0] or p[1] for p in existing_products[:3]]}")
+                        logging.warning(f"⚠️  Found {len(existing_products)} similar products for '{candidate}': {[p[0] or p[1] for p in existing_products[:3]]}")
+                        tag_name_clean = candidate
+                        normalized_name = product_db._normalize_product_name(candidate)
+                        break
+                if not existing_products:
+                    logging.error(f"❌ Product '{tag_name}' not found in database after all search strategies.")
+                    cursor.execute('SELECT "Product Name*" FROM products WHERE "Product Name*" IS NOT NULL AND "Product Name*" != "" LIMIT 10')
+                    sample_products = cursor.fetchall()
+                    if sample_products:
+                        sample_names = [p[0] for p in sample_products if p[0]]
+                        logging.info(f"📋 Sample product names in database: {sample_names}")
+                        tag_words = set(tag_name_clean.lower().split())
+                        for sample in sample_names[:5]:
+                            sample_words = set(str(sample).lower().split())
+                            if tag_words.intersection(sample_words):
+                                logging.info(f"💡 Found potentially related product: '{sample}' (shares words: {tag_words.intersection(sample_words)})")
                     else:
-                        logging.error(f"❌ Product '{tag_name_clean}' not found in database after all search strategies.")
-                        # List some sample product names from database for debugging
-                        cursor.execute('SELECT "Product Name*" FROM products WHERE "Product Name*" IS NOT NULL AND "Product Name*" != "" LIMIT 10')
-                        sample_products = cursor.fetchall()
-                        if sample_products:
-                            sample_names = [p[0] for p in sample_products if p[0]]
-                            logging.info(f"📋 Sample product names in database: {sample_names}")
-                            # Check if any sample names are similar
-                            tag_words = set(tag_name_clean.lower().split())
-                            for sample in sample_names[:5]:
-                                sample_words = set(str(sample).lower().split())
-                                if tag_words.intersection(sample_words):
-                                    logging.info(f"💡 Found potentially related product: '{sample}' (shares words: {tag_words.intersection(sample_words)})")
-                        else:
-                            logging.warning(f"⚠️  Database appears to be empty or has no product names")
+                        logging.warning(f"⚠️  Database appears to be empty or has no product names")
             
             # FIRST: Update by exact product name (most specific)
             # Try exact match first (including normalized_name)
@@ -9685,7 +9878,10 @@ def update_doh():
         tag_name = data.get('tag_name') or data.get('product_name') or data.get('Product Name*')
         new_doh = data.get('doh') or data.get('doh_status')
 
-        logging.info(f"🔍 DOH API PARSED: tag_name='{tag_name}', new_doh='{new_doh}'")
+        name_variants = generate_product_name_variants(tag_name)
+        if not name_variants:
+            name_variants = [str(tag_name).strip()]
+        logging.info(f"🔍 DOH API PARSED: tag_name='{tag_name}', new_doh='{new_doh}' (variants: {name_variants})")
 
         if not tag_name or new_doh is None:
             logging.error(f"❌ DOH API ERROR: Missing parameters - tag_name='{tag_name}', new_doh='{new_doh}'")
@@ -9726,38 +9922,61 @@ def update_doh():
         # Get vendor and brand from Excel data for more specific database update
         vendor = None
         brand = None
+        matched_excel_index = None
         try:
             if excel_processor and excel_processor.df is not None:
-                # Check if required columns exist
-                if 'Product Name*' not in excel_processor.df.columns:
+                df = excel_processor.df
+                if 'Product Name*' not in df.columns:
                     logging.warning("Could not get vendor/brand: 'Product Name*' column not found in DataFrame")
                 else:
-                    # Find the product in Excel data
-                    mask = (excel_processor.df['Product Name*'].str.strip().str.upper() == tag_name.strip().upper())
-                    if mask.any():
-                        vendor = excel_processor.df.loc[mask, 'Vendor/Supplier*'].iloc[0] if 'Vendor/Supplier*' in excel_processor.df.columns else None
-                        brand = excel_processor.df.loc[mask, 'Product Brand'].iloc[0] if 'Product Brand' in excel_processor.df.columns else None
-                        logging.info(f"Found product in Excel: vendor={vendor}, brand={brand}")
+                    names_series = df['Product Name*'].astype(str).str.strip()
+                    names_upper = names_series.str.upper()
+                    variant_upper = [v.upper() for v in name_variants]
+                    mask = names_upper.isin(variant_upper)
+                    if not mask.any():
+                        for variant in variant_upper:
+                            try:
+                                pattern = re.escape(variant)
+                                contains_mask = names_upper.str.contains(pattern, na=False)
+                            except re.error:
+                                continue
+                            if contains_mask.any():
+                                mask = contains_mask
+                                break
+                    if mask is not None and mask.any():
+                        matched_excel_index = names_series.index[mask][0]
+                        vendor = df.loc[matched_excel_index, 'Vendor/Supplier*'] if 'Vendor/Supplier*' in df.columns else None
+                        brand = df.loc[matched_excel_index, 'Product Brand'] if 'Product Brand' in df.columns else None
+                        logging.info(f"Found product in Excel: vendor={vendor}, brand={brand} (variant match)")
         except Exception as e:
             logging.warning(f"Could not get vendor/brand from Excel data: {str(e)}")
         
         # Update the product DOH directly in database using normalized value
         db_update_success = False
+        canonical_variant_used = None
         try:
-            product_success = product_db.update_product_doh(tag_name, doh_storage_value, vendor=vendor, brand=brand)
-            if product_success:
-                logging.info(f"✅ DOH API UPDATE: Updated product DOH in database: '{tag_name}' → '{doh_storage_value}' (frontend sent: '{new_doh}')")
-                logging.info(f"🔍 DOH API UPDATE: For DOCX generation, this product should {'INCLUDE' if doh_storage_value in ['DOH', 'THC', 'CBD', 'Yes'] else 'EXCLUDE'} DOH image")
-                db_update_success = True
-            else:
-                logging.warning(f"⚠️ DOH API UPDATE: Could not find product in database to update DOH for '{tag_name}' - will try Excel update")
-                        
+            for candidate in name_variants:
+                product_success = product_db.update_product_doh(candidate, doh_storage_value, vendor=vendor, brand=brand)
+                if product_success:
+                    logging.info(f"✅ DOH API UPDATE: Updated product DOH in database: '{candidate}' → '{doh_storage_value}' (frontend sent: '{new_doh}')")
+                    logging.info(f"🔍 DOH API UPDATE: For DOCX generation, this product should {'INCLUDE' if doh_storage_value in ['DOH', 'THC', 'CBD', 'Yes'] else 'EXCLUDE'} DOH image")
+                    db_update_success = True
+                    canonical_variant_used = candidate
+                    break
+            if not db_update_success:
+                logging.warning(f"⚠️ DOH API UPDATE: Could not find product in database to update DOH for variants {name_variants} - will try Excel update")
         except Exception as db_error:
             logging.error(f"Error updating DOH in database: {db_error}")
             # Don't fail the whole request - continue with Excel update
         
         # Now update the Excel processor DataFrame (this should always work)
-        excel_update_success = excel_processor.update_doh_in_current_data(tag_name, doh_storage_value) if excel_processor else False
+        excel_update_success = False
+        if excel_processor:
+            for candidate in name_variants:
+                if excel_processor.update_doh_in_current_data(candidate, doh_storage_value):
+                    excel_update_success = True
+                    canonical_variant_used = canonical_variant_used or candidate
+                    break
         if excel_update_success:
             logging.info(f"✅ Updated DOH in Excel processor DataFrame")
         else:
@@ -9767,18 +9986,17 @@ def update_doh():
         try:
             import re
             overrides = session.get('doh_overrides', {})
-            norm_key = product_db._normalize_product_name(tag_name)
-            # Also extract base name (remove " by Vendor - Weight" suffix) for flexible matching
-            base_name = re.sub(r'\s+by\s+[^-]+(\s*-\s*\d+\s*\w+)?$', '', str(tag_name), flags=re.IGNORECASE).strip()
-            base_name = re.sub(r'\s*-\s*\d+\s*\w+$', '', base_name).strip()
-            base_norm_key = product_db._normalize_product_name(base_name) if base_name != tag_name else norm_key
-            
-            overrides[norm_key] = doh_storage_value
-            if base_norm_key != norm_key:
-                overrides[base_norm_key] = doh_storage_value
+            for candidate in name_variants:
+                norm_key = product_db._normalize_product_name(candidate)
+                overrides[norm_key] = doh_storage_value
+                base_name = re.sub(r'\s+by\s+[^-]+(\s*-\s*\d+\s*\w+)?$', '', str(candidate), flags=re.IGNORECASE).strip()
+                base_name = re.sub(r'\s*-\s*\d+\s*\w+$', '', base_name).strip()
+                if base_name and base_name != candidate:
+                    base_norm_key = product_db._normalize_product_name(base_name)
+                    overrides[base_norm_key] = doh_storage_value
             session['doh_overrides'] = overrides
             session.modified = True
-            logging.info(f"✅ DOH API UPDATE: Saved session override for '{tag_name}' → '{doh_storage_value}' (keys: '{norm_key}', '{base_norm_key}')")
+            logging.info(f"✅ DOH API UPDATE: Saved session overrides for variants {name_variants} → '{doh_storage_value}'")
         except Exception as ov_err:
             logging.warning(f"Could not save DOH override in session: {ov_err}")
 
