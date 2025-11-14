@@ -21,6 +21,13 @@ import pandas as pd  # Add this import
 import time
 import re
 import json
+from decimal import Decimal
+try:
+    import numpy as np
+    NUMPY_AVAILABLE = True
+except Exception:
+    np = None
+    NUMPY_AVAILABLE = False
 try:
     import requests  # Optional dependency for internal HTTP calls
     REQUESTS_AVAILABLE = True
@@ -133,27 +140,38 @@ def timeout_handler(signum, frame):
     raise TimeoutError("File operation timed out")
 
 def safe_load_file_with_timeout(processor, file_path, timeout_seconds=30):
-    """Load file with timeout protection"""
+    """Load file with timeout protection (gracefully degrades when signals unavailable)."""
+    def _load_without_timeout():
+        try:
+            return processor.load_file(file_path)
+        except Exception as e:
+            logging.error(f"Error loading file without timeout: {e}")
+            return False
+    
+    # Signal-based alarms only work in the main thread on Unix. If unavailable, just load.
     try:
-        # Set up timeout
+        if threading.current_thread() is not threading.main_thread():
+            logging.debug("safe_load_file_with_timeout: non-main thread; skipping SIGALRM timeout")
+            return _load_without_timeout()
+        
         signal.signal(signal.SIGALRM, timeout_handler)
         signal.alarm(timeout_seconds)
-        
-        # Load file
-        result = processor.load_file(file_path)
-        
-        # Cancel timeout
-        signal.alarm(0)
-        return result
-        
-    except TimeoutError:
-        logging.error(f"File loading timed out after {timeout_seconds} seconds")
-        return False
-    except Exception as e:
-        logging.error(f"Error in safe file loading: {e}")
-        return False
-    finally:
-        signal.alarm(0)  # Ensure timeout is cancelled
+        try:
+            result = processor.load_file(file_path)
+            signal.alarm(0)
+            return result
+        except TimeoutError:
+            logging.error(f"File loading timed out after {timeout_seconds} seconds")
+            return False
+        except Exception as e:
+            logging.error(f"Error in safe file loading: {e}")
+            return False
+        finally:
+            signal.alarm(0)
+    except ValueError as ve:
+        # Raised when signal.signal or alarm not permitted (e.g., worker threads on hosting)
+        logging.warning(f"SIGALRM unavailable on this thread/environment ({ve}); loading file without timeout")
+        return _load_without_timeout()
 LAZY_LOADING_ENABLED = True  # Enable lazy loading for better performance
 
 # Browser-based store persistence (handled by frontend JavaScript)
@@ -169,9 +187,9 @@ def json_safe_value(value):
             return float(value)
         except Exception:
             return float(value)
-    if isinstance(value, (datetime, date)):
+    if isinstance(value, (datetime, dt_date)):
         return value.isoformat()
-    if isinstance(value, time):
+    if isinstance(value, dt_time):
         return value.isoformat()
     if isinstance(value, bytes):
         try:
@@ -354,7 +372,7 @@ except ImportError:
 from docx import Document
 from docxtpl import DocxTemplate, InlineImage
 from io import BytesIO
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date as dt_date, time as dt_time
 from functools import lru_cache
 import json  # Add this import
 from copy import deepcopy
@@ -8333,14 +8351,20 @@ def get_available_tags():
             logging.info(f"Database products: {added_db_count} added, {skipped_db_count} skipped as duplicates")
             logging.info(f"Combined total: {len(all_tags)} products ({len(excel_tags)} from Excel, {len(database_tags)} from database)")
         
+        safe_all_tags = make_json_safe(all_tags)
         # Cache the results for faster subsequent requests (unless nocache requested)
-        if all_tags and not nocache:
-            cache.set(cache_key, all_tags, timeout=300)  # Cache for 5 minutes
-            logging.info(f"✅ Cached {len(all_tags)} tags for future requests")
+        if safe_all_tags and not nocache:
+            cache.set(cache_key, safe_all_tags, timeout=300)  # Cache for 5 minutes
+            logging.info(f"✅ Cached {len(safe_all_tags)} tags for future requests")
+        try:
+            final_store_for_cache = get_current_store_name(allow_fallback=False) or store_name or cache_store_name
+            save_available_tags_cache(_normalize_store_key(final_store_for_cache), safe_all_tags)
+        except Exception as cache_error:
+            logging.warning(f"Unable to persist available tags cache: {cache_error}")
         
         # Debug summary: ensure DB-aligned fields present
         try:
-            sample = all_tags[:5]
+            sample = safe_all_tags[:5]
             dbg = [
                 {
                     'name': (t.get('Product Name*') or t.get('ProductName') or ''),
@@ -8350,23 +8374,23 @@ def get_available_tags():
                 } for t in sample
             ]
             logging.info(f"LINEAGE UI DEBUG (final): samples={dbg}")
-            aligned_count = sum(1 for t in all_tags if t.get('currentLineage'))
-            logging.info(f"LINEAGE UI DEBUG (final): aligned_count={aligned_count}/{len(all_tags)}")
+            aligned_count = sum(1 for t in safe_all_tags if t.get('currentLineage'))
+            logging.info(f"LINEAGE UI DEBUG (final): aligned_count={aligned_count}/{len(safe_all_tags)}")
         except Exception:
             pass
 
         # Return the combined tags in the format expected by frontend
         elapsed = (time.time() - start_time) * 1000
-        logging.info(f"✅ Available tags request completed ({elapsed:.1f}ms) - returning {len(all_tags)} tags")
+        logging.info(f"✅ Available tags request completed ({elapsed:.1f}ms) - returning {len(safe_all_tags)} tags")
         
-        if len(all_tags) == 0:
+        if len(safe_all_tags) == 0:
             logging.warning("⚠️ WARNING: Returning empty tags array! prefer_db={}, database_tags_count={}".format(
                 prefer_db, len(database_tags) if 'database_tags' in locals() else 'unknown'
             ))
         
         resp = jsonify({
-            'tags': all_tags,  # Frontend expects 'tags' property
-            'total_count': len(all_tags),
+            'tags': safe_all_tags,  # Frontend expects 'tags' property
+            'total_count': len(safe_all_tags),
             'source': 'fresh'
         })
         try:
@@ -8381,6 +8405,22 @@ def get_available_tags():
         elapsed = (time.time() - start_time) * 1000 if 'start_time' in locals() else 0
         logging.error(f"❌ Error getting available tags after {elapsed:.1f}ms: {str(e)}")
         logging.error(traceback.format_exc())
+        
+        try:
+            fallback_store_for_cache = get_current_store_name(allow_fallback=False) or store_name or cache_store_name
+            cached_tags = load_available_tags_cache(_normalize_store_key(fallback_store_for_cache))
+        except Exception as cache_error:
+            logging.warning(f"Failed to inspect cached available tags: {cache_error}")
+            cached_tags = None
+        
+        if cached_tags:
+            logging.info("Serving cached available tags due to error")
+            return jsonify({
+                'tags': cached_tags,
+                'total_count': len(cached_tags),
+                'source': 'cache-error-fallback',
+                'message': 'Served cached tags while recovering from an error.'
+            })
         
         # EMERGENCY FALLBACK: Try database directly
         try:
