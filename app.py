@@ -7512,11 +7512,12 @@ def get_available_tags():
         cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
         cached_tags = cache.get(cache_key) if not prefer_db else None
         if cached_tags and not nocache:
-            # Always do lineage alignment to ensure database lineage is applied
-            # This ensures tags always have the latest lineage from the database
-            lineage_alignment_needed = True
+            # OPTIMIZATION: Only do lineage alignment if explicitly requested or if cache is stale
+            # Skip expensive lineage alignment for cached tags unless nocache is set
+            lineage_alignment_needed = nocache or prefer_db
             
             # Perform lineage alignment to assign/update lineage from database
+            # OPTIMIZATION: Skip if not needed to improve performance
             if lineage_alignment_needed:
                 # Quick lineage alignment with timeout to prevent blocking
                 try:
