@@ -2967,7 +2967,7 @@ canvas#lava-lamp-canvas {
   .lineage-select {
     margin-left: 6px !important;
   }
-  .vendor-header, .brand-header, .product-type-header, .weight-header, .container-label {
+  .vendor-header, .brand-header, .product-type-header, .subcategory-header, .weight-header, .container-label {
       font-size: 0.9rem !important;
       font-weight: 700 !important;
       letter-spacing: 0.08em !important;
@@ -5116,6 +5116,7 @@ canvas#lava-lamp-canvas {
   .vendor-header,
   .brand-header,
   .product-type-header,
+  .subcategory-header,
   .weight-header {
       display: inline-flex;
       align-items: center;
@@ -5131,6 +5132,8 @@ canvas#lava-lamp-canvas {
       box-shadow: none !important;
       min-width: 80px;
       margin-right: 0.5rem;
+      text-align: left !important;
+      justify-content: flex-start !important;
   }
 
   /* Container for header + checkbox/value */
@@ -5165,7 +5168,7 @@ canvas#lava-lamp-canvas {
     padding: 3px 5px !important;
     margin-bottom: 1px !important;
   }
-  .vendor-header, .brand-header, .product-type-header, .weight-header,
+  .vendor-header, .brand-header, .product-type-header, .subcategory-header, .weight-header,
   .container-label, .filter-label {
     padding: 0 0.25rem 0 0 !important;
     margin-bottom: 0 !important;
@@ -5566,7 +5569,7 @@ canvas#lava-lamp-canvas {
   }
 
   /* Add vertical spacing between all group headers */
-  .vendor-header, .brand-header, .product-type-header, .weight-header {
+  .vendor-header, .brand-header, .product-type-header, .subcategory-header, .weight-header {
     margin-top: 0.5em;
     margin-bottom: 0.5em;
   }
@@ -5709,7 +5712,7 @@ canvas#lava-lamp-canvas {
     }
   }
 
-  .container-label, .vendor-header, .brand-header, .product-type-header, .weight-header {
+  .container-label, .vendor-header, .brand-header, .product-type-header, .subcategory-header, .weight-header {
     line-height: 1.7 !important;
   }
 
@@ -8419,6 +8422,11 @@ canvas#lava-lamp-canvas {
      color: var(--accent-color);
    }
    
+   /* Subcategory header specific collapse styling */
+   .subcategory-header .collapse-icon {
+     color: var(--accent-color);
+   }
+   
    /* Weight header specific collapse styling */
    .weight-header .collapse-icon {
      color: var(--text-muted);
@@ -8436,7 +8444,9 @@ canvas#lava-lamp-canvas {
   }
   /* Specific fix for product type checkboxes */
   .product-type-header .select-all-checkbox,
-  .product-type-header input[type="checkbox"] {
+  .product-type-header input[type="checkbox"],
+  .subcategory-header .select-all-checkbox,
+  .subcategory-header input[type="checkbox"] {
     pointer-events: auto !important;
     cursor: pointer !important;
     z-index: 10 !important;
@@ -8722,6 +8732,11 @@ canvas#lava-lamp-canvas {
     font-weight: 500 !important;
   }
   
+  .subcategory-header .text-container {
+    font-size: clamp(10px, 1.05rem, 18px) !important;
+    font-weight: 500 !important;
+  }
+  
   .weight-header .text-container {
     font-size: clamp(10px, 1.05rem, 18px) !important;
     font-weight: 500 !important;
@@ -8939,7 +8954,7 @@ canvas#lava-lamp-canvas {
   }
 
   /* Compact tag hierarchy headers */
-  .vendor-header, .brand-header, .product-type-header, .weight-header, .container-label {
+  .vendor-header, .brand-header, .product-type-header, .subcategory-header, .weight-header, .container-label {
     margin-bottom: 8px !important;
     padding: 6px 10px !important;
     border-radius: 6px !important;
@@ -8961,11 +8976,18 @@ canvas#lava-lamp-canvas {
     overflow-wrap: anywhere !important;
     hyphens: none !important;
   }
+  
+  /* Left-justify subcategory headers specifically */
+  .subcategory-header {
+    justify-content: flex-start !important;
+    text-align: left !important;
+  }
 
   /* Compact collapse icon */
   .vendor-header .collapse-icon,
   .brand-header .collapse-icon,
   .product-type-header .collapse-icon,
+  .subcategory-header .collapse-icon,
   .weight-header .collapse-icon {
     font-size: 0.85rem !important;
     padding: 0 4px !important;

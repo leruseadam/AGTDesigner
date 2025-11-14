@@ -36,6 +36,19 @@
     font-size: 0.9rem;
 }
 
+.subcategory-header {
+    color: var(--accent-color);
+    font-weight: 500;
+    margin-bottom: 0.25rem;
+    font-size: 0.88rem;
+    text-align: left !important;
+    justify-content: flex-start !important;
+}
+
+.subcategory-section {
+    margin-bottom: 0.25rem;
+}
+
 .lineage-section {
     margin-bottom: 0.75rem;
 }

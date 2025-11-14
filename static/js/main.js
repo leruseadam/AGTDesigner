@@ -2021,12 +2021,28 @@ const TagManager = {
                 vendor = 'Unknown Vendor';
             }
 
+            // Determine subcategory for vape products
+            const productName = (tag['Product Name*'] || tag.ProductName || tag.Description || '').toString().toLowerCase();
+            let subcategory = null;
+            
+            // Check if this is a vape product that should be categorized
+            const isVapeProduct = productType.toLowerCase().includes('vape') || productType.toLowerCase().includes('cartridge');
+            
+            if (isVapeProduct) {
+                if (productName.includes('cartridge')) {
+                    subcategory = '510';
+                } else if (productName.includes('disposable')) {
+                    subcategory = 'Disposable';
+                }
+            }
+
             // Normalize the tag data
             const normalizedTag = {
                 ...tag,
                 vendor: this.capitalizeVendorName((vendor || '').toString().trim()),
                 brand: this.capitalizeBrandName((brand || '').toString().trim()),
                 productType: productType,
+                subcategory: subcategory,
                 lineage: (lineage || '').toString().trim().toUpperCase(), // always uppercase for color
                 weight: weight,
                 weightWithUnits: weightWithUnits,
@@ -2049,13 +2065,59 @@ const TagManager = {
             if (!productTypeGroups.has(normalizedTag.productType)) {
                 productTypeGroups.set(normalizedTag.productType, new Map());
             }
-            const weightGroups = productTypeGroups.get(normalizedTag.productType);
+            
+            // For vape products with subcategory, add an intermediate subcategory level
+            let targetGroups;
+            if (normalizedTag.subcategory) {
+                let subcategoryGroups = productTypeGroups.get(normalizedTag.productType);
+                // Check if this is actually a Map (subcategory structure) or needs to be converted
+                if (!(subcategoryGroups instanceof Map) || (subcategoryGroups.size > 0 && Array.from(subcategoryGroups.values())[0] instanceof Array)) {
+                    // Need to restructure: convert existing weight groups to subcategory structure
+                    const existingWeightGroups = subcategoryGroups;
+                    subcategoryGroups = new Map();
+                    // Migrate existing items to a default subcategory
+                    if (existingWeightGroups instanceof Map && existingWeightGroups.size > 0) {
+                        existingWeightGroups.forEach((tags, weight) => {
+                            if (!subcategoryGroups.has('Other')) {
+                                subcategoryGroups.set('Other', new Map());
+                            }
+                            subcategoryGroups.get('Other').set(weight, tags);
+                        });
+                    }
+                    productTypeGroups.set(normalizedTag.productType, subcategoryGroups);
+                }
+                
+                // Create subcategory group if it doesn't exist
+                if (!subcategoryGroups.has(normalizedTag.subcategory)) {
+                    subcategoryGroups.set(normalizedTag.subcategory, new Map());
+                }
+                targetGroups = subcategoryGroups.get(normalizedTag.subcategory);
+            } else {
+                // For non-subcategory products, check if we need to handle mixed structure
+                let weightGroups = productTypeGroups.get(normalizedTag.productType);
+                if (weightGroups instanceof Map && weightGroups.size > 0) {
+                    // Check if first entry is a Map (subcategory structure) or Array (weight structure)
+                    const firstValue = Array.from(weightGroups.values())[0];
+                    if (firstValue instanceof Map) {
+                        // This product type already has subcategory structure, add to 'Other'
+                        if (!weightGroups.has('Other')) {
+                            weightGroups.set('Other', new Map());
+                        }
+                        targetGroups = weightGroups.get('Other');
+                    } else {
+                        // This is still weight structure
+                        targetGroups = weightGroups;
+                    }
+                } else {
+                    targetGroups = weightGroups;
+                }
+            }
 
             // Create weight group if it doesn't exist - use weightWithUnits as the key
-            if (!weightGroups.has(normalizedTag.weightWithUnits)) {
-                weightGroups.set(normalizedTag.weightWithUnits, []);
+            if (!targetGroups.has(normalizedTag.weightWithUnits)) {
+                targetGroups.set(normalizedTag.weightWithUnits, []);
             }
-            weightGroups.get(normalizedTag.weightWithUnits).push(normalizedTag);
+            targetGroups.get(normalizedTag.weightWithUnits).push(normalizedTag);
         });
 
         if (skippedTags > 0) {
@@ -2302,7 +2364,7 @@ const TagManager = {
                 const sortedProductTypes = Array.from(productTypeGroups.entries())
                     .sort(([a], [b]) => (a || '').localeCompare(b || ''));
 
-                sortedProductTypes.forEach(([productType, weightGroups]) => {
+                sortedProductTypes.forEach(([productType, weightGroupsOrSubcategories]) => {
                     const productTypeSection = document.createElement('div');
                     productTypeSection.className = 'product-type-section ms-3 mb-2';
                     
@@ -2311,31 +2373,122 @@ const TagManager = {
                     productTypeHeader.textContent = productType;
                     productTypeSection.appendChild(productTypeHeader);
 
-                    const sortedWeights = Array.from(weightGroups.entries())
-                        .sort(([a], [b]) => (a || '').localeCompare(b || ''));
+                    // Check if this product type has subcategories (vape products with 510/Disposable)
+                    const hasSubcategories = weightGroupsOrSubcategories instanceof Map && 
+                                           weightGroupsOrSubcategories.size > 0 &&
+                                           Array.from(weightGroupsOrSubcategories.values())[0] instanceof Map;
 
-                    sortedWeights.forEach(([weight, tagArray]) => {
-                        const weightSection = document.createElement('div');
-                        weightSection.className = 'weight-section ms-3 mb-2';
-                        
-                        const weightHeader = document.createElement('div');
-                        weightHeader.className = 'weight-header mb-1';
-                        weightHeader.textContent = weight;
-                        weightSection.appendChild(weightHeader);
+                    if (hasSubcategories) {
+                        // Render subcategories (510, Disposable, etc.)
+                        const sortedSubcategories = Array.from(weightGroupsOrSubcategories.entries())
+                            .sort(([a], [b]) => (a || '').localeCompare(b || ''));
 
-                        // Sort tags alphabetically by product name
-                        const sortedTags = [...tagArray].sort((a, b) => {
-                            const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
-                            const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
-                            return aName.localeCompare(bName);
+                        sortedSubcategories.forEach(([subcategory, weightGroups]) => {
+                            const subcategorySection = document.createElement('div');
+                            subcategorySection.className = 'subcategory-section ms-3 mb-2';
+                            
+                            // Create subcategory header with checkbox
+                            const subcategoryHeader = document.createElement('div');
+                            subcategoryHeader.className = 'subcategory-header mb-2 d-flex align-items-center cursor-pointer';
+                            
+                            const subcategoryCheckbox = document.createElement('input');
+                            subcategoryCheckbox.type = 'checkbox';
+                            subcategoryCheckbox.className = 'select-all-checkbox me-2';
+                            subcategoryCheckbox.addEventListener('change', (e) => {
+                                const savedScroll = this._saveAvailableScrollPosition();
+                                const isChecked = e.target.checked;
+                                const checkboxes = subcategorySection.querySelectorAll('input.tag-checkbox');
+                                checkboxes.forEach(checkbox => {
+                                    checkbox.checked = isChecked;
+                                    const tagName = checkbox.value;
+                                    const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
+                                    if (tag) {
+                                        if (isChecked) {
+                                            if (!this.state.persistentSelectedTags.includes(tagName)) {
+                                                this.state.persistentSelectedTags.push(tagName);
+                                            }
+                                        } else {
+                                            const index = this.state.persistentSelectedTags.indexOf(tagName);
+                                            if (index > -1) {
+                                                this.state.persistentSelectedTags.splice(index, 1);
+                                            }
+                                        }
+                                    }
+                                });
+                                this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+                                const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
+                                    this.state.tags.find(t => t['Product Name*'] === name)
+                                ).filter(Boolean);
+                                this.updateSelectedTags(selectedTagObjects);
+                                this.efficientlyUpdateAvailableTagsDisplay();
+                                requestAnimationFrame(() => {
+                                    this._restoreAvailableScrollPosition(savedScroll);
+                                });
+                            });
+                            
+                            subcategoryHeader.appendChild(subcategoryCheckbox);
+                            const subcategoryNameSpan = document.createElement('span');
+                            subcategoryNameSpan.textContent = subcategory;
+                            subcategoryHeader.appendChild(subcategoryNameSpan);
+                            subcategorySection.appendChild(subcategoryHeader);
+
+                            // Render weight groups under subcategory
+                            const sortedWeights = Array.from(weightGroups.entries())
+                                .sort(([a], [b]) => (a || '').localeCompare(b || ''));
+
+                            sortedWeights.forEach(([weight, tagArray]) => {
+                                const weightSection = document.createElement('div');
+                                weightSection.className = 'weight-section ms-3 mb-2';
+                                
+                                const weightHeader = document.createElement('div');
+                                weightHeader.className = 'weight-header mb-1';
+                                weightHeader.textContent = weight;
+                                weightSection.appendChild(weightHeader);
+
+                                // Sort tags alphabetically by product name
+                                const sortedTags = [...tagArray].sort((a, b) => {
+                                    const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
+                                    const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
+                                    return aName.localeCompare(bName);
+                                });
+                                sortedTags.forEach(tag => {
+                                    const tagElement = this.createTagElement(tag, false);
+                                    weightSection.appendChild(tagElement);
+                                });
+
+                                subcategorySection.appendChild(weightSection);
+                            });
+
+                            productTypeSection.appendChild(subcategorySection);
                         });
-                        sortedTags.forEach(tag => {
-                            const tagElement = this.createTagElement(tag, false);
-                            weightSection.appendChild(tagElement);
-                        });
+                    } else {
+                        // No subcategories - render weights directly
+                        const sortedWeights = Array.from(weightGroupsOrSubcategories.entries())
+                            .sort(([a], [b]) => (a || '').localeCompare(b || ''));
 
-                        productTypeSection.appendChild(weightSection);
-                    });
+                        sortedWeights.forEach(([weight, tagArray]) => {
+                            const weightSection = document.createElement('div');
+                            weightSection.className = 'weight-section ms-3 mb-2';
+                            
+                            const weightHeader = document.createElement('div');
+                            weightHeader.className = 'weight-header mb-1';
+                            weightHeader.textContent = weight;
+                            weightSection.appendChild(weightHeader);
+
+                            // Sort tags alphabetically by product name
+                            const sortedTags = [...tagArray].sort((a, b) => {
+                                const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
+                                const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
+                                return aName.localeCompare(bName);
+                            });
+                            sortedTags.forEach(tag => {
+                                const tagElement = this.createTagElement(tag, false);
+                                weightSection.appendChild(tagElement);
+                            });
+
+                            productTypeSection.appendChild(weightSection);
+                        });
+                    }
 
                     brandSection.appendChild(productTypeSection);
                 });
@@ -2783,9 +2936,14 @@ const TagManager = {
                 const sortedProductTypes = Array.from(productTypeGroups.entries())
                     .sort(([a], [b]) => (a || '').localeCompare(b || ''));
 
-                sortedProductTypes.forEach(([productType, weightGroups]) => {
+                sortedProductTypes.forEach(([productType, weightGroupsOrSubcategories]) => {
                     const productTypeSection = document.createElement('div');
                     productTypeSection.className = 'product-type-section ms-3 mb-2';
+                    
+                    // Check if this product type has subcategories (vape products with 510/Disposable)
+                    const hasSubcategories = weightGroupsOrSubcategories instanceof Map && 
+                                           weightGroupsOrSubcategories.size > 0 &&
+                                           Array.from(weightGroupsOrSubcategories.values())[0] instanceof Map;
                     
                     // Create product type header with checkbox and collapse functionality
                     const typeHeader = document.createElement('div');
@@ -2870,107 +3028,269 @@ const TagManager = {
                     }
                     productTypeSection.appendChild(productTypeContent);
 
-                    // Create weight sections
-                    const sortedWeights = Array.from(weightGroups.entries())
-                        .sort(([a], [b]) => (a || '').localeCompare(b || ''));
+                    if (hasSubcategories) {
+                        // Render subcategories (510, Disposable, etc.)
+                        const sortedSubcategories = Array.from(weightGroupsOrSubcategories.entries())
+                            .sort(([a], [b]) => (a || '').localeCompare(b || ''));
 
-                    sortedWeights.forEach(([weight, tags]) => {
-                        const weightSection = document.createElement('div');
-                        weightSection.className = 'weight-section ms-3 mb-1';
-                        
-                        // Create weight header with checkbox and collapse functionality
-                        const weightHeader = document.createElement('div');
-                        weightHeader.className = 'weight-header mb-1 d-flex align-items-center cursor-pointer';
-                        weightHeader.addEventListener('click', (e) => {
-                            if (e.target.type === 'checkbox') return; // Don't collapse if clicking checkbox
-                            if (this.state.isSearching) return; // Don't collapse while searching
-                            const weightContent = weightSection.querySelector('.weight-content');
-                            const isCollapsed = weightContent.classList.contains('collapsed');
-                            weightContent.classList.toggle('collapsed', !isCollapsed);
-                            weightHeader.querySelector('.collapse-icon').textContent = isCollapsed ? '▼' : '▶';
+                        sortedSubcategories.forEach(([subcategory, weightGroups]) => {
+                            const subcategorySection = document.createElement('div');
+                            subcategorySection.className = 'subcategory-section ms-3 mb-2';
                             
-                            // Remove the instructional blurb when any chevron is clicked
-                            this.removeDropdownInstructionBlurb();
-                        });
-                        
-                        const weightCheckbox = document.createElement('input');
-                        weightCheckbox.type = 'checkbox';
-                        weightCheckbox.className = 'select-all-checkbox me-2';
-                        weightCheckbox.addEventListener('change', (e) => {
-                            const savedScroll = this._saveAvailableScrollPosition();
-                            const isChecked = e.target.checked;
-                            // Select ALL checkboxes (both select-all checkboxes and tag checkboxes) within this section
-                            const checkboxes = weightSection.querySelectorAll('input[type="checkbox"]');
-                            checkboxes.forEach(checkbox => {
-                                if (!checkbox.classList.contains('tag-checkbox')) {
-                                checkbox.checked = isChecked;
-                                    return;
-                                }
-
-                                const tagName = checkbox.value;
-                                const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
-                                if (!tag) {
+                            // Create subcategory header with checkbox
+                            const subcategoryHeader = document.createElement('div');
+                            subcategoryHeader.className = 'subcategory-header mb-2 d-flex align-items-center cursor-pointer';
+                            
+                            const subcategoryCheckbox = document.createElement('input');
+                            subcategoryCheckbox.type = 'checkbox';
+                            subcategoryCheckbox.className = 'select-all-checkbox me-2';
+                            subcategoryCheckbox.addEventListener('change', (e) => {
+                                const savedScroll = this._saveAvailableScrollPosition();
+                                const isChecked = e.target.checked;
+                                const checkboxes = subcategorySection.querySelectorAll('input.tag-checkbox');
+                                checkboxes.forEach(checkbox => {
                                     checkbox.checked = isChecked;
-                                    return;
-                                }
-
-                                checkbox.checked = isChecked;
-
+                                    const tagName = checkbox.value;
+                                    const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
+                                    if (tag) {
                                         if (isChecked) {
-                                    if (!this.state.persistentSelectedTags.includes(tagName)) {
-                                        this.state.persistentSelectedTags.push(tagName);
+                                            if (!this.state.persistentSelectedTags.includes(tagName)) {
+                                                this.state.persistentSelectedTags.push(tagName);
                                             }
                                         } else {
-                                    if (!e.target.checked) {
-                                        const index = this.state.persistentSelectedTags.indexOf(tagName);
-                                            if (index > -1) {
-                                                this.state.persistentSelectedTags.splice(index, 1);
+                                            if (!e.target.checked) {
+                                                const index = this.state.persistentSelectedTags.indexOf(tagName);
+                                                if (index > -1) {
+                                                    this.state.persistentSelectedTags.splice(index, 1);
+                                                }
+                                            }
                                         }
                                     }
+                                });
+                                this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+                                const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
+                                    this.state.tags.find(t => t['Product Name*'] === name)
+                                ).filter(Boolean);
+                                this.updateSelectedTags(selectedTagObjects);
+                                this.efficientlyUpdateAvailableTagsDisplay();
+                                requestAnimationFrame(() => {
+                                    this._restoreAvailableScrollPosition(savedScroll);
+                                });
+                            });
+                            
+                            subcategoryHeader.appendChild(subcategoryCheckbox);
+                            const subcategoryNameSpan = document.createElement('span');
+                            subcategoryNameSpan.textContent = subcategory;
+                            subcategoryHeader.appendChild(subcategoryNameSpan);
+                            subcategorySection.appendChild(subcategoryHeader);
+
+                            // Create weight sections
+                            const sortedWeights = Array.from(weightGroups.entries())
+                                .sort(([a], [b]) => (a || '').localeCompare(b || ''));
+
+                            sortedWeights.forEach(([weight, tagArray]) => {
+                                const weightSection = document.createElement('div');
+                                weightSection.className = 'weight-section ms-3 mb-1';
+                                
+                                // Create weight header with checkbox and collapse functionality
+                                const weightHeader = document.createElement('div');
+                                weightHeader.className = 'weight-header mb-1 d-flex align-items-center cursor-pointer';
+                                weightHeader.addEventListener('click', (e) => {
+                                    if (e.target.type === 'checkbox') return; // Don't collapse if clicking checkbox
+                                    if (this.state.isSearching) return; // Don't collapse while searching
+                                    const weightContent = weightSection.querySelector('.weight-content');
+                                    const isCollapsed = weightContent.classList.contains('collapsed');
+                                    weightContent.classList.toggle('collapsed', !isCollapsed);
+                                    weightHeader.querySelector('.collapse-icon').textContent = isCollapsed ? '▼' : '▶';
+                                    
+                                    // Remove the instructional blurb when any chevron is clicked
+                                    this.removeDropdownInstructionBlurb();
+                                });
+                                
+                                const weightCheckbox = document.createElement('input');
+                                weightCheckbox.type = 'checkbox';
+                                weightCheckbox.className = 'select-all-checkbox me-2';
+                                weightCheckbox.addEventListener('change', (e) => {
+                                    const savedScroll = this._saveAvailableScrollPosition();
+                                    const isChecked = e.target.checked;
+                                    // Select ALL checkboxes (both select-all checkboxes and tag checkboxes) within this section
+                                    const checkboxes = weightSection.querySelectorAll('input[type="checkbox"]');
+                                    checkboxes.forEach(checkbox => {
+                                        if (!checkbox.classList.contains('tag-checkbox')) {
+                                        checkbox.checked = isChecked;
+                                            return;
+                                        }
+
+                                        const tagName = checkbox.value;
+                                        const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
+                                        if (!tag) {
+                                            checkbox.checked = isChecked;
+                                            return;
+                                        }
+
+                                        checkbox.checked = isChecked;
+
+                                                if (isChecked) {
+                                            if (!this.state.persistentSelectedTags.includes(tagName)) {
+                                                this.state.persistentSelectedTags.push(tagName);
+                                                    }
+                                                } else {
+                                            if (!e.target.checked) {
+                                                const index = this.state.persistentSelectedTags.indexOf(tagName);
+                                                    if (index > -1) {
+                                                        this.state.persistentSelectedTags.splice(index, 1);
+                                                }
+                                            }
+                                        }
+                                    });
+                                    this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+                                    const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
+                                        this.state.tags.find(t => t['Product Name*'] === name)
+                                    ).filter(Boolean);
+                                    this.updateSelectedTags(selectedTagObjects);
+                                    this.efficientlyUpdateAvailableTagsDisplay();
+                                    // Restore scroll after all DOM updates complete
+                                    requestAnimationFrame(() => {
+                                        this._restoreAvailableScrollPosition(savedScroll);
+                                    });
+                                });
+                                
+                                weightHeader.appendChild(weightCheckbox);
+                                weightHeader.appendChild(document.createTextNode(weight));
+                                weightHeader.appendChild(document.createElement('span')).className = 'collapse-icon ms-auto';
+                                
+                                // Weight sections should always start expanded
+                                const shouldStartCollapsed = false;
+                                
+                                weightHeader.querySelector('.collapse-icon').textContent = shouldStartCollapsed ? '▶' : '▼';
+                                subcategorySection.appendChild(weightSection);
+                                weightSection.appendChild(weightHeader);
+
+                                // Create weight content container
+                                const weightContent = document.createElement('div');
+                                weightContent.className = 'weight-content';
+                                if (shouldStartCollapsed) {
+                                    weightContent.classList.add('collapsed');
                                 }
-                            });
-                            this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                            const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
-                                this.state.tags.find(t => t['Product Name*'] === name)
-                            ).filter(Boolean);
-                            this.updateSelectedTags(selectedTagObjects);
-                            this.efficientlyUpdateAvailableTagsDisplay();
-                            // Restore scroll after all DOM updates complete
-                            requestAnimationFrame(() => {
-                                this._restoreAvailableScrollPosition(savedScroll);
-                            });
-                        });
-                        
-                        weightHeader.appendChild(weightCheckbox);
-                        weightHeader.appendChild(document.createTextNode(weight));
-                        weightHeader.appendChild(document.createElement('span')).className = 'collapse-icon ms-auto';
-                        
-                        // Weight sections should always start expanded
-                        const shouldStartCollapsed = false;
-                        
-                        weightHeader.querySelector('.collapse-icon').textContent = shouldStartCollapsed ? '▶' : '▼';
-                        productTypeContent.appendChild(weightSection);
-                        weightSection.appendChild(weightHeader);
+                                weightSection.appendChild(weightContent);
 
-                        // Create weight content container
-                        const weightContent = document.createElement('div');
-                        weightContent.className = 'weight-content';
-                        if (shouldStartCollapsed) {
-                            weightContent.classList.add('collapsed');
-                        }
-                        weightSection.appendChild(weightContent);
+                                // Add individual tags (sorted alphabetically by product name)
+                                const tagsToRender = [...tagArray].sort((a, b) => {
+                                    const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
+                                    const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
+                                    return aName.localeCompare(bName);
+                                });
+                                tagsToRender.forEach(tag => {
+                                    const tagElement = this.createTagElement(tag, false);
+                                    weightContent.appendChild(tagElement);
+                                });
+                            });
+                            
+                            productTypeContent.appendChild(subcategorySection);
+                        });
+                    } else {
+                        // No subcategories - render weights directly
+                        const sortedWeights = Array.from(weightGroupsOrSubcategories.entries())
+                            .sort(([a], [b]) => (a || '').localeCompare(b || ''));
 
-                        // Add individual tags (sorted alphabetically by product name)
-                        const tagsToRender = [...tags].sort((a, b) => {
-                            const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
-                            const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
-                            return aName.localeCompare(bName);
+                        sortedWeights.forEach(([weight, tagArray]) => {
+                            const weightSection = document.createElement('div');
+                            weightSection.className = 'weight-section ms-3 mb-1';
+                            
+                            // Create weight header with checkbox and collapse functionality
+                            const weightHeader = document.createElement('div');
+                            weightHeader.className = 'weight-header mb-1 d-flex align-items-center cursor-pointer';
+                            weightHeader.addEventListener('click', (e) => {
+                                if (e.target.type === 'checkbox') return; // Don't collapse if clicking checkbox
+                                if (this.state.isSearching) return; // Don't collapse while searching
+                                const weightContent = weightSection.querySelector('.weight-content');
+                                const isCollapsed = weightContent.classList.contains('collapsed');
+                                weightContent.classList.toggle('collapsed', !isCollapsed);
+                                weightHeader.querySelector('.collapse-icon').textContent = isCollapsed ? '▼' : '▶';
+                                
+                                // Remove the instructional blurb when any chevron is clicked
+                                this.removeDropdownInstructionBlurb();
+                            });
+                            
+                            const weightCheckbox = document.createElement('input');
+                            weightCheckbox.type = 'checkbox';
+                            weightCheckbox.className = 'select-all-checkbox me-2';
+                            weightCheckbox.addEventListener('change', (e) => {
+                                const savedScroll = this._saveAvailableScrollPosition();
+                                const isChecked = e.target.checked;
+                                // Select ALL checkboxes (both select-all checkboxes and tag checkboxes) within this section
+                                const checkboxes = weightSection.querySelectorAll('input[type="checkbox"]');
+                                checkboxes.forEach(checkbox => {
+                                    if (!checkbox.classList.contains('tag-checkbox')) {
+                                    checkbox.checked = isChecked;
+                                        return;
+                                    }
+
+                                    const tagName = checkbox.value;
+                                    const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
+                                    if (!tag) {
+                                        checkbox.checked = isChecked;
+                                        return;
+                                    }
+
+                                    checkbox.checked = isChecked;
+
+                                            if (isChecked) {
+                                        if (!this.state.persistentSelectedTags.includes(tagName)) {
+                                            this.state.persistentSelectedTags.push(tagName);
+                                                }
+                                            } else {
+                                        if (!e.target.checked) {
+                                            const index = this.state.persistentSelectedTags.indexOf(tagName);
+                                                if (index > -1) {
+                                                    this.state.persistentSelectedTags.splice(index, 1);
+                                            }
+                                        }
+                                    }
+                                });
+                                this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+                                const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
+                                    this.state.tags.find(t => t['Product Name*'] === name)
+                                ).filter(Boolean);
+                                this.updateSelectedTags(selectedTagObjects);
+                                this.efficientlyUpdateAvailableTagsDisplay();
+                                // Restore scroll after all DOM updates complete
+                                requestAnimationFrame(() => {
+                                    this._restoreAvailableScrollPosition(savedScroll);
+                                });
+                            });
+                            
+                            weightHeader.appendChild(weightCheckbox);
+                            weightHeader.appendChild(document.createTextNode(weight));
+                            weightHeader.appendChild(document.createElement('span')).className = 'collapse-icon ms-auto';
+                            
+                            // Weight sections should always start expanded
+                            const shouldStartCollapsed = false;
+                            
+                            weightHeader.querySelector('.collapse-icon').textContent = shouldStartCollapsed ? '▶' : '▼';
+                            productTypeContent.appendChild(weightSection);
+                            weightSection.appendChild(weightHeader);
+
+                            // Create weight content container
+                            const weightContent = document.createElement('div');
+                            weightContent.className = 'weight-content';
+                            if (shouldStartCollapsed) {
+                                weightContent.classList.add('collapsed');
+                            }
+                            weightSection.appendChild(weightContent);
+
+                            // Add individual tags (sorted alphabetically by product name)
+                            const tagsToRender = [...tagArray].sort((a, b) => {
+                                const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
+                                const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
+                                return aName.localeCompare(bName);
+                            });
+                            tagsToRender.forEach(tag => {
+                                const tagElement = this.createTagElement(tag, false);
+                                weightContent.appendChild(tagElement);
+                            });
                         });
-                        tagsToRender.forEach(tag => {
-                            const tagElement = this.createTagElement(tag, false);
-                            weightContent.appendChild(tagElement);
-                        });
-                    });
+                    }
                 });
             });
         });
@@ -5046,9 +5366,14 @@ const TagManager = {
                 const sortedProductTypes = Array.from(productTypeGroups.entries())
                     .sort(([a], [b]) => (a || '').localeCompare(b || ''));
 
-                sortedProductTypes.forEach(([productType, weightGroups]) => {
+                sortedProductTypes.forEach(([productType, weightGroupsOrSubcategories]) => {
                     const productTypeSection = document.createElement('div');
                     productTypeSection.className = 'product-type-section ms-3 mb-2';
+                    
+                    // Check if this product type has subcategories (vape products with 510/Disposable)
+                    const hasSubcategories = weightGroupsOrSubcategories instanceof Map && 
+                                           weightGroupsOrSubcategories.size > 0 &&
+                                           Array.from(weightGroupsOrSubcategories.values())[0] instanceof Map;
                     
                     // Create product type header with integrated checkbox and collapse functionality
                     const typeHeader = document.createElement('div');
@@ -5138,9 +5463,60 @@ const TagManager = {
                     productTypeContent.className = 'collapsible-content';
                     productTypeSection.appendChild(productTypeContent);
 
-                    // Create weight sections
-                    const sortedWeights = Array.from(weightGroups.entries())
-                        .sort(([a], [b]) => (a || '').localeCompare(b || ''));
+                    if (hasSubcategories) {
+                        // Render subcategories (510, Disposable, etc.)
+                        const sortedSubcategories = Array.from(weightGroupsOrSubcategories.entries())
+                            .sort(([a], [b]) => (a || '').localeCompare(b || ''));
+
+                        sortedSubcategories.forEach(([subcategory, weightGroups]) => {
+                            const subcategorySection = document.createElement('div');
+                            subcategorySection.className = 'subcategory-section ms-3 mb-2';
+                            
+                            // Create subcategory header with checkbox
+                            const subcategoryHeader = document.createElement('div');
+                            subcategoryHeader.className = 'subcategory-header mb-2 d-flex align-items-center collapsible-header';
+                            
+                            const subcategoryCheckbox = document.createElement('input');
+                            subcategoryCheckbox.type = 'checkbox';
+                            subcategoryCheckbox.className = 'select-all-checkbox me-2';
+                            subcategoryCheckbox.addEventListener('change', (e) => {
+                                const isChecked = e.target.checked;
+                                const checkboxes = subcategorySection.querySelectorAll('input.tag-checkbox');
+                                checkboxes.forEach(checkbox => {
+                                    checkbox.checked = isChecked;
+                                    const tagName = checkbox.value;
+                                    const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
+                                    if (tag) {
+                                        if (isChecked) {
+                                            if (!this.state.persistentSelectedTags.includes(tagName)) {
+                                                this.state.persistentSelectedTags.push(tagName);
+                                            }
+                                        } else {
+                                            const index = this.state.persistentSelectedTags.indexOf(tagName);
+                                            if (index > -1) {
+                                                this.state.persistentSelectedTags.splice(index, 1);
+                                            }
+                                        }
+                                    }
+                                });
+                                this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+                                const selectedTagObjects = Array.from(this.state.persistentSelectedTags).map(name =>
+                                    this.state.tags.find(t => t['Product Name*'] === name)
+                                ).filter(Boolean);
+                                this.updateSelectedTags(selectedTagObjects);
+                                this.efficientlyUpdateAvailableTagsDisplay();
+                            });
+                            
+                            subcategoryHeader.appendChild(subcategoryCheckbox);
+                            const subcategoryNameSpan = document.createElement('span');
+                            subcategoryNameSpan.className = 'subcategory-title flex-grow-1 text-truncate';
+                            subcategoryNameSpan.textContent = subcategory;
+                            subcategoryHeader.appendChild(subcategoryNameSpan);
+                            subcategorySection.appendChild(subcategoryHeader);
+
+                            // Create weight sections
+                            const sortedWeights = Array.from(weightGroups.entries())
+                                .sort(([a], [b]) => (a || '').toString().localeCompare((b || '').toString()));
 
                     sortedWeights.forEach(([weight, tags]) => {
                         const weightSection = document.createElement('div');
@@ -5276,8 +5652,153 @@ const TagManager = {
                             });
                         }
                         
-                        productTypeContent.appendChild(weightSection);
+                        subcategorySection.appendChild(weightSection);
                     });
+                    
+                            productTypeContent.appendChild(subcategorySection);
+                        });
+                    } else {
+                        // No subcategories - render weights directly
+                        const sortedWeights = Array.from(weightGroupsOrSubcategories.entries())
+                            .sort(([a], [b]) => (a || '').toString().localeCompare((b || '').toString()));
+
+                        sortedWeights.forEach(([weight, tags]) => {
+                            const weightSection = document.createElement('div');
+                            weightSection.className = 'weight-section ms-3 mb-1';
+                            
+                            // Create weight header with integrated checkbox and collapse functionality
+                            const weightHeader = document.createElement('div');
+                            weightHeader.className = 'weight-header mb-1 d-flex align-items-center collapsible-header';
+                            weightHeader.setAttribute('data-collapse-target', 'weight-' + weight.replace(/[^a-zA-Z0-9]/g, '_'));
+                            
+                            const weightCheckbox = document.createElement('input');
+                            weightCheckbox.type = 'checkbox';
+                            weightCheckbox.className = 'select-all-checkbox me-2';
+                            weightCheckbox.addEventListener('change', (e) => {
+                                const savedScroll = this._saveAvailableScrollPosition();
+                                const isChecked = e.target.checked;
+                                // Only iterate tag checkboxes for performance
+                                const checkboxes = weightSection.querySelectorAll('input.tag-checkbox');
+                                
+                                checkboxes.forEach(checkbox => {
+                                    checkbox.checked = isChecked;
+                                    // Only update persistentSelectedTags for tag-checkboxes
+                                    if (checkbox.classList.contains('tag-checkbox')) {
+                                        const tag = this.state.tags.find(t => t['Product Name*'] === checkbox.value);
+                                        if (tag) {
+                                            if (isChecked) {
+                                                if (!this.state.persistentSelectedTags.includes(tag['Product Name*'])) {
+                                                    this.state.persistentSelectedTags.push(tag['Product Name*']);
+                                                }
+                                            } else {
+                                                const index = this.state.persistentSelectedTags.indexOf(tag['Product Name*']);
+                                                if (index > -1) {
+                                                    this.state.persistentSelectedTags.splice(index, 1);
+                                                }
+                                            }
+                                        }
+                                    }
+                                });
+                                
+                                // Update the regular selectedTags set to match persistent ones
+                                this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+                                
+                                // Update the selected tags display
+                                const selectedTagObjects = Array.from(this.state.persistentSelectedTags).map(name =>
+                                    this.state.tags.find(t => t['Product Name*'] === name)
+                                ).filter(Boolean);
+                                this.updateSelectedTags(selectedTagObjects);
+                                
+                                // Use efficient update instead of rebuilding entire DOM
+                                this.efficientlyUpdateAvailableTagsDisplay();
+                                // Restore scroll after all DOM updates complete
+                                requestAnimationFrame(() => {
+                                    this._restoreAvailableScrollPosition(savedScroll);
+                                });
+                            });
+                            
+                            // Add collapse/expand icon (to the right of the weight)
+                            const weightCollapseIcon = document.createElement('span');
+                            weightCollapseIcon.className = 'collapse-icon ms-auto';
+                            weightCollapseIcon.textContent = '▼';
+                            weightCollapseIcon.style.transition = 'opacity 0.2s ease';
+
+                            weightHeader.appendChild(weightCheckbox);
+                            const weightNameSpan = document.createElement('span');
+                            weightNameSpan.className = 'weight-title flex-grow-1 text-truncate';
+                            weightNameSpan.textContent = weight;
+                            weightHeader.appendChild(weightNameSpan);
+                            weightHeader.appendChild(weightCollapseIcon);
+                            
+                            // Add click handler for collapse/expand
+                            weightHeader.addEventListener('click', (e) => {
+                                if (e.target.classList.contains('select-all-checkbox') || e.target.closest('.select-all-checkbox')) {
+                                    return; // Don't collapse if clicking checkbox
+                                }
+                                const targetSection = weightSection.querySelector('.collapsible-content');
+                                const isCollapsed = targetSection.classList.contains('collapsed');
+                                
+                                if (isCollapsed) {
+                                    targetSection.classList.remove('collapsed');
+                                    weightCollapseIcon.textContent = '▼';
+                                } else {
+                                    weightSection.classList.add('collapsed');
+                                    weightCollapseIcon.textContent = '▶';
+                                }
+                                
+                                // Remove the instructional blurb when any chevron is clicked
+                                this.removeDropdownInstructionBlurb();
+                            });
+                            
+                            weightSection.appendChild(weightHeader);
+                            
+                            // Create collapsible content container for weight
+                            const weightContent = document.createElement('div');
+                            weightContent.className = 'collapsible-content';
+                            weightSection.appendChild(weightContent);
+                            
+                            // Always render tags as leaf nodes - sort alphabetically by product name
+                            if (tags && tags.length > 0) {
+                                // Sort tags alphabetically by product name
+                                const orderedTags = [...tags].sort((a, b) => {
+                                    const nameA = (a['Product Name*'] || '').toLowerCase();
+                                    const nameB = (b['Product Name*'] || '').toLowerCase();
+                                    return nameA.localeCompare(nameB);
+                                });
+                                
+                                orderedTags.forEach(tag => {
+                                    const tagElement = this.createTagElement(tag, true); // true = isForSelectedTags
+                                    const checkbox = tagElement.querySelector('.tag-checkbox');
+                                    const shouldBeChecked = this.state.persistentSelectedTags.includes(tag['Product Name*']);
+                                    checkbox.checked = shouldBeChecked;
+                                    verboseLog(`Setting checkbox for "${tag['Product Name*']}" to checked: ${shouldBeChecked}`);
+                                    
+                                    // Ensure the checkbox is properly initialized
+                                    if (shouldBeChecked) {
+                                        checkbox.setAttribute('data-checked', 'true');
+                                    } else {
+                                        checkbox.removeAttribute('data-checked');
+                                    }
+                                    
+                                    // Add a small delay to ensure the checkbox is properly rendered
+                                    setTimeout(() => {
+                                        // Double-check the checkbox state
+                                        if (shouldBeChecked && !checkbox.checked) {
+                                            verboseLog(`Fixing checkbox state for "${tag['Product Name*']}" - should be checked but isn't`);
+                                            checkbox.checked = true;
+                                        } else if (!shouldBeChecked && checkbox.checked) {
+                                            verboseLog(`Fixing checkbox state for "${tag['Product Name*']}" - should not be checked but is`);
+                                            checkbox.checked = false;
+                                        }
+                                    }, 10);
+                                    
+                                    weightContent.appendChild(tagElement);
+                                });
+                            }
+                            
+                            productTypeContent.appendChild(weightSection);
+                        });
+                    }
                     
                     brandContent.appendChild(productTypeSection);
                 });
@@ -5338,7 +5859,7 @@ const TagManager = {
             }
         }
         // Update all group-level select all checkboxes
-        container.querySelectorAll('.vendor-section, .brand-section, .product-type-section, .weight-section').forEach(section => {
+        container.querySelectorAll('.vendor-section, .brand-section, .product-type-section, .subcategory-section, .weight-section').forEach(section => {
             updateSelectAllCheckboxState(section);
         });
         // Update the top-level select all
@@ -8784,7 +9305,7 @@ function attachSelectedTagsCheckboxListeners() {
             verboseLog('Parent checkbox clicked in selected tags', this);
             const isChecked = e.target.checked;
             // Find the closest section (vendor, brand, product type, or weight)
-            const parentSection = newCheckbox.closest('.vendor-section, .brand-section, .product-type-section, .weight-section');
+            const parentSection = newCheckbox.closest('.vendor-section, .brand-section, .product-type-section, .subcategory-section, .weight-section');
             if (!parentSection) {
                 console.warn('No parent section found for parent checkbox in selected tags', this);
                 return;
