@@ -90,6 +90,45 @@ def normalize_lineage(lineage: str) -> str:
     
     return lineage_mapping.get(lineage_lower, 'HYBRID')
 
+
+def _generate_product_name_variants(raw_name: Any) -> List[str]:
+    """Generate canonical product name variants for resilient matching."""
+    variants: List[str] = []
+    if raw_name is None:
+        return variants
+    
+    try:
+        name = str(raw_name).strip()
+    except Exception:
+        name = raw_name
+    
+    if not name:
+        return variants
+    
+    def add_variant(value: str):
+        if not value:
+            return
+        cleaned = re.sub(r'\s+', ' ', value.strip().replace('\u2011', '-'))
+        if cleaned and cleaned not in variants:
+            variants.append(cleaned)
+    
+    add_variant(name)
+    
+    vendor_removed = re.sub(r'\s+by\s+[^-]+(?=(\s*-\s*\d|\s*$))', '', name, flags=re.IGNORECASE)
+    vendor_removed = re.sub(r'\s+by\s+[^-]+$', '', vendor_removed, flags=re.IGNORECASE)
+    add_variant(vendor_removed)
+    
+    weight_removed = re.sub(
+        r'\s*-\s*\d+(?:\.\d+)?\s*(?:g|gram|grams|gm|kg|oz|ounce|ounces|ml|l|mg|ct|pack|pk|pcs|pc)?$',
+        '',
+        vendor_removed,
+        flags=re.IGNORECASE
+    )
+    add_variant(weight_removed)
+    add_variant(weight_removed.replace('-', ' '))
+    
+    return variants
+
 # Memory optimization flags - STANDARDIZED FOR BOTH LOCAL AND PYTHONANYWHERE
 ENABLE_STRAIN_SIMILARITY_PROCESSING = True  # ALWAYS ENABLED: Lineage persistence is critical
 ENABLE_FAST_LOADING = True
@@ -5206,17 +5245,32 @@ class ExcelProcessor:
                 self.logger.error("No data loaded")
                 return False
             
-            # Find the tag in the DataFrame and update its lineage
             self.logger.info(f"Looking for tag: '{tag_name}'")
-            
-            # Try different column names for product names
             product_name_columns = ['ProductName', 'Product Name*', 'Product Name']
             mask = None
+            matched_series = None
+            name_variants = _generate_product_name_variants(tag_name)
+            if not name_variants:
+                name_variants = [str(tag_name).strip()]
+            variant_upper = [v.upper() for v in name_variants if isinstance(v, str)]
             
             for col in product_name_columns:
                 if col in self.df.columns:
-                    mask = self.df[col] == tag_name
-                    if mask.any():
+                    series = self.df[col].astype(str).str.strip()
+                    names_upper = series.str.upper()
+                    mask = names_upper.isin(variant_upper)
+                    if not mask.any():
+                        for variant in variant_upper:
+                            try:
+                                pattern = re.escape(variant)
+                                contains_mask = names_upper.str.contains(pattern, na=False)
+                            except re.error:
+                                continue
+                            if contains_mask.any():
+                                mask = contains_mask
+                                break
+                    if mask is not None and mask.any():
+                        matched_series = series
                         break
             
             if mask is None or not mask.any():
@@ -5324,17 +5378,30 @@ class ExcelProcessor:
                 self.logger.error("No data loaded")
                 return False
             
-            # Find the tag in the DataFrame and update its DOH status
             self.logger.info(f"Looking for tag: '{tag_name}' to update DOH to: '{new_doh}'")
-            
-            # Try different column names for product names
             product_name_columns = ['ProductName', 'Product Name*', 'Product Name']
             mask = None
+            name_variants = _generate_product_name_variants(tag_name)
+            if not name_variants:
+                name_variants = [str(tag_name).strip()]
+            variant_upper = [v.upper() for v in name_variants if isinstance(v, str)]
             
             for col in product_name_columns:
                 if col in self.df.columns:
-                    mask = self.df[col] == tag_name
-                    if mask.any():
+                    series = self.df[col].astype(str).str.strip()
+                    names_upper = series.str.upper()
+                    mask = names_upper.isin(variant_upper)
+                    if not mask.any():
+                        for variant in variant_upper:
+                            try:
+                                pattern = re.escape(variant)
+                                contains_mask = names_upper.str.contains(pattern, na=False)
+                            except re.error:
+                                continue
+                            if contains_mask.any():
+                                mask = contains_mask
+                                break
+                    if mask is not None and mask.any():
                         break
             
             if mask is None or not mask.any():
