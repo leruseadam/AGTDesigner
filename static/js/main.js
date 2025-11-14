@@ -878,6 +878,7 @@ const TagManager = {
     state: {
         selectedTags: new Set(),
         isProcessingDeselection: false, // Flag to prevent filter updates during deselection
+        isClearing: false, // Flag to prevent multiple simultaneous clear operations
         persistentSelectedTags: [], // Array to maintain order
         initialized: false,
         filters: {},
@@ -6063,6 +6064,11 @@ const TagManager = {
             verboseLog('Fetching available tags...');
             const timestamp = Date.now();
             
+            // OPTIMIZATION: Use fast_load parameter for initial load to skip slow lineage alignment
+            // This dramatically speeds up tag loading when cached data is available
+            const isInitialLoad = !this.state.tags || this.state.tags.length === 0;
+            const fastLoadParam = isInitialLoad ? '&fast_load=1' : '';
+            
             // Add retry logic for failed requests
             let response;
             let responseData;
@@ -6078,7 +6084,9 @@ const TagManager = {
                     // Use cache if available - only bypass cache on explicit refresh or error recovery
                     const useCache = retryCount === 0; // Use cache on first attempt
                     const cacheParam = useCache ? '' : '&nocache=1';
-                    response = await fetch(`/api/available-tags?t=${timestamp}${cacheParam}`, {
+                    // Use fast_load on first attempt for initial loads
+                    const fastParam = (retryCount === 0 && isInitialLoad) ? fastLoadParam : '';
+                    response = await fetch(`/api/available-tags?t=${timestamp}${cacheParam}${fastParam}`, {
                         signal: controller.signal
                     });
                     clearTimeout(timeoutId);
@@ -6211,6 +6219,66 @@ const TagManager = {
             }
             
             this.validateSelectedTags();
+            
+            // OPTIMIZATION: If this was a fast load, optionally refresh with lineage alignment in background
+            // This allows tags to appear immediately while lineage is updated asynchronously
+            if (responseData && responseData.source === 'cache-fast' && tags.length > 0) {
+                verboseLog('Fast load completed - tags displayed immediately');
+                // Update UI immediately with fast-loaded tags
+                this._updateAvailableTags(tags);
+                this._restoreAvailableScrollPosition(savedScroll);
+                
+                // Update tag counts
+                this.updateTagCount('available', tags.length);
+                this.updateTagCount('selected', this.state.persistentSelectedTags.length);
+                
+                // Optionally refresh with lineage alignment in background (non-blocking)
+                // This ensures lineage is eventually aligned without blocking initial display
+                setTimeout(async () => {
+                    try {
+                        verboseLog('Background: Refreshing tags with lineage alignment...');
+                        const lineageResponse = await fetch(`/api/available-tags?t=${Date.now()}&fast_load=0`);
+                        if (lineageResponse.ok) {
+                            const lineageData = await lineageResponse.json();
+                            if (lineageData.tags && lineageData.tags.length > 0) {
+                                // Update tags with lineage-aligned data (source will be 'cache+db-lineage' or 'excel+db-lineage')
+                                if (lineageData.source && (lineageData.source.includes('lineage') || lineageData.source.includes('db-lineage'))) {
+                                    verboseLog(`Background: Updated ${lineageData.tags.length} tags with lineage alignment`);
+                                    this.state.tags = [...lineageData.tags];
+                                    this.state.originalTags = [...lineageData.tags];
+                                    // Only re-render if lineage data actually changed (to avoid flicker)
+                                    // Compare lineage values, not just tag names
+                                    let lineageChanged = false;
+                                    if (tags.length === lineageData.tags.length) {
+                                        for (let i = 0; i < tags.length; i++) {
+                                            const oldLin = (tags[i].Lineage || tags[i].canonical_lineage || '').toString().trim();
+                                            const newLin = (lineageData.tags[i].Lineage || lineageData.tags[i].canonical_lineage || '').toString().trim();
+                                            if (oldLin !== newLin) {
+                                                lineageChanged = true;
+                                                break;
+                                            }
+                                        }
+                                    } else {
+                                        lineageChanged = true;
+                                    }
+                                    
+                                    if (lineageChanged) {
+                                        // Update only the lineage fields in existing DOM without full re-render
+                                        // This is faster and avoids flicker
+                                        this._updateAvailableTags(lineageData.tags);
+                                    }
+                                }
+                            }
+                        }
+                    } catch (bgError) {
+                        verboseLog('Background lineage alignment failed (non-critical):', bgError);
+                    }
+                }, 500); // Small delay to let UI settle
+                
+                verboseLog(`Successfully updated available tags (fast): ${tags.length} tags`);
+                verboseLog('=== fetchAndUpdateAvailableTags END ===');
+                return true;
+            }
             
             // Update the UI with new tags
             this._updateAvailableTags(tags);
@@ -7586,71 +7654,157 @@ const TagManager = {
     },
 
     async clearSelected() {
+        // Prevent multiple simultaneous calls
+        if (this.state.isClearing) {
+            verboseLog('⚠️ Clear operation already in progress, ignoring duplicate call');
+            return;
+        }
+        
+        this.state.isClearing = true;
+        
         try {
             verboseLog('🔄 Clearing selected tags and performing full app reset...');
             
+            // Show loading feedback
+            this.showActionSplash('Clearing and resetting...');
+            
             // Perform full app reset first
-            await performFullAppReset();
+            try {
+                await performFullAppReset();
+            } catch (resetError) {
+                console.error('Error during app reset:', resetError);
+                // Continue anyway - reset might have partially worked
+            }
             
             // Call the backend API to clear selected tags
-            const response = await fetch('/api/clear-filters', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-            });
+            let response;
+            try {
+                response = await fetch('/api/clear-filters', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            } catch (fetchError) {
+                console.error('Network error clearing filters:', fetchError);
+                // Continue with local clearing even if API fails
+                response = null;
+            }
             
-            if (response.ok) {
-                const data = await response.json();
-                
-                // Clear persistent selected tags
-                this.state.persistentSelectedTags = [];
-                this.state.selectedTags.clear();
-                
-                // Update the selected tags display immediately
-                if (this.updateSelectedTags) {
-                    this.updateSelectedTags([]);
+            if (response && response.ok) {
+                try {
+                    const data = await response.json();
+                    verboseLog('Backend clear-filters response:', data);
+                } catch (jsonError) {
+                    console.error('Error parsing response:', jsonError);
                 }
-                
-                // Clear all checkboxes in available tags section
+            } else if (response) {
+                console.error('Failed to clear selected tags on server:', response.status, response.statusText);
+            }
+            
+            // Clear persistent selected tags
+            if (this.state) {
+                if (Array.isArray(this.state.persistentSelectedTags)) {
+                    this.state.persistentSelectedTags = [];
+                }
+                if (this.state.selectedTags && typeof this.state.selectedTags.clear === 'function') {
+                    this.state.selectedTags.clear();
+                }
+            }
+            
+            // Update the selected tags display immediately
+            if (this.updateSelectedTags) {
+                try {
+                    this.updateSelectedTags([]);
+                } catch (updateError) {
+                    console.error('Error updating selected tags display:', updateError);
+                }
+            }
+            
+            // Clear all checkboxes in available tags section
+            try {
                 const availableCheckboxes = document.querySelectorAll('#availableTags input[type="checkbox"]');
                 availableCheckboxes.forEach(checkbox => {
                     checkbox.checked = false;
                     // Trigger change event to update listeners
                     checkbox.dispatchEvent(new Event('change', { bubbles: true }));
                 });
-                
-                // Clear all checkboxes in selected tags section
+            } catch (checkboxError) {
+                console.error('Error clearing available checkboxes:', checkboxError);
+            }
+            
+            // Clear all checkboxes in selected tags section
+            try {
                 const selectedCheckboxes = document.querySelectorAll('#selectedTags input[type="checkbox"]');
                 selectedCheckboxes.forEach(checkbox => {
                     checkbox.checked = false;
                     // Trigger change event to update listeners
                     checkbox.dispatchEvent(new Event('change', { bubbles: true }));
                 });
-                
-                // Show all available tags (in case some were hidden)
+            } catch (checkboxError) {
+                console.error('Error clearing selected checkboxes:', checkboxError);
+            }
+            
+            // Show all available tags (in case some were hidden)
+            try {
                 const availableTagItems = document.querySelectorAll('#availableTags .tag-item');
                 availableTagItems.forEach(item => {
                     item.style.display = 'block';
                 });
-                
-                // Clear filter cache to ensure fresh data
-                this.state.filterCache = null;
-                
-                // Update available tags display to reflect cleared state
-                if (this.efficientlyUpdateAvailableTagsDisplay) {
-                    this.efficientlyUpdateAvailableTagsDisplay();
-                }
-                
-                // Update select all checkboxes to unchecked state
-                if (this.updateSelectAllCheckboxes) {
-                    this.updateSelectAllCheckboxes();
-                }
-                
-                verboseLog('✅ Selected tags cleared and app reset completed successfully');
-            } else {
-                console.error('Failed to clear selected tags on server');
+            } catch (displayError) {
+                console.error('Error showing available tags:', displayError);
             }
+            
+            // Clear filter cache to ensure fresh data
+            if (this.state) {
+                this.state.filterCache = null;
+            }
+            
+            // Update available tags display to reflect cleared state
+            if (this.efficientlyUpdateAvailableTagsDisplay) {
+                try {
+                    this.efficientlyUpdateAvailableTagsDisplay();
+                } catch (updateError) {
+                    console.error('Error updating available tags display:', updateError);
+                }
+            }
+            
+            // Update select all checkboxes to unchecked state
+            if (this.updateSelectAllCheckboxes) {
+                try {
+                    this.updateSelectAllCheckboxes();
+                } catch (updateError) {
+                    console.error('Error updating select all checkboxes:', updateError);
+                }
+            }
+            
+            // Also clear filters
+            if (this.clearAllFilters) {
+                try {
+                    await this.clearAllFilters();
+                } catch (filterError) {
+                    console.error('Error clearing filters:', filterError);
+                }
+            }
+            
+            verboseLog('✅ Selected tags cleared and app reset completed successfully');
+            
+            // Show success message
+            if (window.Toast && window.Toast.show) {
+                window.Toast.show('success', 'Cleared and reset successfully', { duration: 2000 });
+            }
+            
         } catch (error) {
-            console.error('Failed to clear selected tags:', error.message);
+            console.error('Failed to clear selected tags:', error);
+            // Show error message
+            if (window.Toast && window.Toast.show) {
+                window.Toast.show('error', `Failed to clear: ${error.message}`, { duration: 5000 });
+            } else {
+                alert(`Failed to clear and reset: ${error.message}`);
+            }
+        } finally {
+            // Hide loading splash
+            this.hideActionSplash();
+            // Reset the clearing flag
+            this.state.isClearing = false;
         }
     },
 
@@ -9624,17 +9778,51 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initialize sticky filter bar behavior
     initializeStickyFilterBar();
 
-    // Add event listener for the clear button
-    const clearButton = document.getElementById('clear-filters-btn');
-    if (clearButton) {
-        clearButton.addEventListener('click', function() {
-            if (window.TagManager && TagManager.clearSelected) {
-                TagManager.clearSelected();
+    // Add event listener for the clear button with retry mechanism
+    function attachClearButtonListener() {
+        const clearButton = document.getElementById('clear-filters-btn');
+        if (clearButton) {
+            // Remove any existing listeners to prevent duplicates
+            const newButton = clearButton.cloneNode(true);
+            clearButton.parentNode.replaceChild(newButton, clearButton);
+            
+            newButton.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                verboseLog('Clear & Reset button clicked');
+                if (window.TagManager && TagManager.clearSelected) {
+                    verboseLog('Calling TagManager.clearSelected()');
+                    TagManager.clearSelected();
+                } else {
+                    console.error('TagManager or clearSelected method not available');
+                    // Fallback: try clearAllFilters
+                    if (window.TagManager && TagManager.clearAllFilters) {
+                        verboseLog('Fallback: Calling TagManager.clearAllFilters()');
+                        TagManager.clearAllFilters();
+                    } else {
+                        alert('Clear functionality is not available. Please try refreshing the page.');
+                    }
+                }
+            });
+            verboseLog('Clear & Reset button event listener attached successfully');
+            return true;
+        } else {
+            console.error('Clear & Reset button not found in DOM');
+            return false;
+        }
+    }
+    
+    // Try to attach the listener immediately
+    if (!attachClearButtonListener()) {
+        // If not found, retry after a short delay
+        setTimeout(() => {
+            if (!attachClearButtonListener()) {
+                // Final retry after a longer delay
+                setTimeout(() => {
+                    attachClearButtonListener();
+                }, 500);
             }
-        });
-        verboseLog('Clear button event listener attached');
-    } else {
-        console.error('Clear button not found');
+        }, 100);
     }
 
     // Add Esc key event listener for clear filters shortcut

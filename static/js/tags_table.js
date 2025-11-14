@@ -566,9 +566,11 @@ class TagsTable {
     container.innerHTML = '';
     
     // Performance optimization: Render tags in batches to keep UI responsive
-    // For small lists (< 200), render all at once for better performance
-    // For larger lists, use progressive rendering
-    const batchSize = tags.length > 200 ? 100 : tags.length;
+    // OPTIMIZATION: Increased batch sizes and improved progressive rendering for faster initial display
+    // For small lists (< 500), render all at once for better performance
+    // For larger lists, use progressive rendering with larger initial batch
+    const batchSize = tags.length > 500 ? 200 : tags.length;
+    const initialBatchSize = tags.length > 500 ? 300 : tags.length; // Show more tags immediately
     
     if (tags.length <= batchSize) {
       // Small list: render all at once using DocumentFragment for efficiency
@@ -588,10 +590,14 @@ class TagsTable {
       container.appendChild(fragment);
       this.addEventListeners(container);
     } else {
-      // Large list: progressive rendering
+      // Large list: progressive rendering with faster initial batch
       let index = 0;
+      let isFirstBatch = true;
+      
       const processBatch = () => {
-        const endIndex = Math.min(index + batchSize, tags.length);
+        // Use larger batch size for first batch to show content faster
+        const currentBatchSize = isFirstBatch ? initialBatchSize : batchSize;
+        const endIndex = Math.min(index + currentBatchSize, tags.length);
         const fragment = document.createDocumentFragment();
         const tempDiv = document.createElement('div');
         
@@ -610,15 +616,17 @@ class TagsTable {
         this.addEventListeners(container);
         
         index = endIndex;
+        isFirstBatch = false;
         
         // If more tags to process, schedule next batch
         if (index < tags.length) {
-          // Use requestAnimationFrame for smooth rendering
-          requestAnimationFrame(processBatch);
+          // Use setTimeout with 0ms for faster subsequent batches (after initial display)
+          // This is faster than requestAnimationFrame for bulk rendering
+          setTimeout(processBatch, 0);
         }
       };
       
-      // Start processing
+      // Start processing immediately
       processBatch();
     }
   }

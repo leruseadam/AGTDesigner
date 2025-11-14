@@ -7511,8 +7511,23 @@ def get_available_tags():
         session_file_path = session.get('file_path', '')
         cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
         cached_tags = cache.get(cache_key) if not prefer_db else None
+        
+        # OPTIMIZATION: Allow fast loading by skipping lineage alignment on initial load
+        fast_load = request.args.get('fast_load') in ('1', 'true', 'True')
+        
         if cached_tags and not nocache:
-            # Always do lineage alignment to ensure database lineage is applied
+            # OPTIMIZATION: Skip lineage alignment for fast loads - return cached tags immediately
+            # Lineage can be aligned later via a separate request if needed
+            if fast_load:
+                elapsed = (time.time() - start_time) * 1000
+                logging.info(f"✅ Fast-load: Using {len(cached_tags)} cached available tags without lineage alignment ({elapsed:.1f}ms)")
+                return jsonify({
+                    'tags': cached_tags,
+                    'total_count': len(cached_tags),
+                    'source': 'cache-fast'
+                })
+            
+            # Always do lineage alignment to ensure database lineage is applied (when not fast_load)
             # This ensures tags always have the latest lineage from the database
             lineage_alignment_needed = True
             
@@ -8029,7 +8044,6 @@ def get_available_tags():
                             '''
                             
                             logging.info("Executing query with strain join (same pipeline as Excel alignment)...")
-                            import time
                             query_start = time.time()
                             
                             try:
@@ -8091,7 +8105,6 @@ def get_available_tags():
                 logging.error(f"product_db is None or False - cannot query database")
         except Exception as e:
             logging.error(f"Error getting database products: {e}")
-            import traceback
             logging.error(traceback.format_exc())
             database_tags = []
         
@@ -8122,7 +8135,6 @@ def get_available_tags():
                 logging.error(f"   Product DB: {product_db if 'product_db' in locals() else 'unknown'}")
             else:
                 logging.info(f"✅ Processing {len(database_tags)} database tags...")
-            import time
             process_start = time.time()
             for i, db_tag in enumerate(database_tags):
                 if i % 1000 == 0 and i > 0:
